@@ -1,5 +1,6 @@
 """Tests for Geonorge/Kartverket trail data loader."""
 
+import unittest.mock
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -700,6 +701,70 @@ class TestSource:
                     # Verify new data was returned
                     assert "new" in result.spatial_layers
                     assert "old" not in result.spatial_layers
+
+    def test_newer_version_triggers_redownload(self, tmp_path):
+        """Test that newer version in ATOM feed triggers re-download even if file is cached."""
+        source = Source(cache_dir=str(tmp_path))
+
+        # Step 1: Initial download with version "2025-01-01"
+        with patch.object(source, "_get_download_info") as mock_info:
+            mock_info.return_value = Mock(
+                url="http://test.com/data.zip",
+                title="Test Data",
+                updated="2025-01-01",  # Initial version
+            )
+
+            with patch.object(source.download_cache, "download") as mock_download:
+                from trails.io.cache import DownloadResult
+
+                # First call: Initial download
+                mock_download.return_value = DownloadResult(
+                    path=Path(tmp_path / "test.zip"), was_downloaded=True, version="2025-01-01"
+                )
+
+                with patch.object(source, "_load_fgdb_from_zip") as mock_load:
+                    mock_load.return_value = ({"layer_v1": create_test_geodataframe(1)}, {})
+
+                    result1 = source.load_turrutebasen()
+                    assert "layer_v1" in result1.spatial_layers
+                    assert result1.version == "2025-01-01"
+
+        # Step 2: ATOM feed now reports newer version
+        with patch.object(source, "_get_download_info") as mock_info:
+            mock_info.return_value = Mock(
+                url="http://test.com/data.zip",
+                title="Test Data",
+                updated="2025-02-01",  # NEWER version!
+            )
+
+            with patch.object(source.download_cache, "download") as mock_download:
+                from trails.io.cache import DownloadResult
+
+                # The download cache should be called with the new version
+                # and should return was_downloaded=True (re-downloaded)
+                mock_download.return_value = DownloadResult(
+                    path=Path(tmp_path / "test.zip"),
+                    was_downloaded=True,  # Should re-download due to version change
+                    version="2025-02-01",
+                )
+
+                with patch.object(source, "_load_fgdb_from_zip") as mock_load:
+                    mock_load.return_value = ({"layer_v2": create_test_geodataframe(2)}, {})
+
+                    result2 = source.load_turrutebasen()
+
+                    # Verify the download was called with the new version
+                    mock_download.assert_called_once_with(
+                        url="http://test.com/data.zip",
+                        filename=unittest.mock.ANY,
+                        version="2025-02-01",  # New version passed
+                        force=False,
+                    )
+
+                    # Verify new data was loaded
+                    assert "layer_v2" in result2.spatial_layers
+                    assert "layer_v1" not in result2.spatial_layers
+                    assert result2.version == "2025-02-01"
 
     @patch("trails.io.sources.geonorge.feedparser.parse")
     def test_get_download_info_with_feed_parse_error(self, mock_parse):
