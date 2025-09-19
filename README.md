@@ -90,9 +90,40 @@ from trails.visualization import maps  # Future module
 
 ### Testing
 
-Run tests with:
+Run unit tests (default, excludes integration tests):
 ```bash
 make test
+```
+
+Run all tests including integration tests:
+```bash
+make test-all
+```
+
+Run only integration tests (requires network access):
+```bash
+make test-integration
+# Note: This will download ~150MB from Geonorge and may take several minutes
+```
+
+#### Integration Tests
+
+Integration tests are marked with `@pytest.mark.integration` and are excluded by default to keep regular test runs fast. These tests:
+- Make real network calls to external APIs
+- Download actual data files from Geonorge (~150MB)
+- Test the complete end-to-end workflow
+- Verify real-world compatibility
+
+To run specific test markers:
+```bash
+# Run only integration tests
+pytest -m integration
+
+# Run all except integration tests
+pytest -m "not integration"
+
+# Run slow tests
+pytest -m slow
 ```
 
 ### Code Quality

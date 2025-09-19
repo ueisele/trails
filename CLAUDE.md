@@ -184,6 +184,11 @@ command make update               # Update dependencies (respecting version cons
 command make update-all           # Upgrade all dependencies to latest versions
 command make update-package PACKAGE=numpy  # Upgrade specific package
 
+# Test Fixtures
+command make fixtures             # Generate/update test fixtures from real data
+command make fixtures-info        # Show information about test fixtures
+command make fixtures-clean       # Remove all test fixtures
+
 # Utility
 command make clean                # Clean up cache files
 command make help                 # Show available commands

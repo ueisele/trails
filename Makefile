@@ -1,4 +1,4 @@
-.PHONY: help check format lint test type clean install install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean
+.PHONY: help check format lint test type clean install install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean
 
 # Default target
 help:
@@ -10,11 +10,16 @@ help:
 	@echo "  make format        Format code with ruff"
 	@echo "  make lint          Check code style with ruff"
 	@echo "  make lint-fix      Auto-fix lint issues with ruff"
-	@echo "  make test          Run tests with pytest"
+	@echo "  make test          Run tests with pytest (excludes integration tests)"
+	@echo "  make test-all      Run all tests including integration tests"
+	@echo "  make test-integration Run only integration tests (requires network)"
 	@echo "  make type          Run type checking with mypy"
 	@echo "  make clean         Clean up cache files"
 	@echo "  make notebook      Start JupyterLab"
 	@echo "  make notebook-clean Clear all notebook outputs"
+	@echo "  make fixtures      Generate/update test fixtures from real data"
+	@echo "  make fixtures-info Show information about test fixtures"
+	@echo "  make fixtures-clean Remove all test fixtures"
 	@echo "  make update        Update dependencies (respecting version constraints)"
 	@echo "  make update-all    Upgrade all dependencies to latest versions"
 	@echo "  make update-package PACKAGE=<name> Upgrade specific package to latest version"
@@ -57,13 +62,24 @@ lint-fix:
 	@echo "✅ Lint issues fixed"
 
 test:
-	@echo "🧪 Running tests..."
-	uv run pytest tests/ -v
+	@echo "🧪 Running tests (excluding integration)..."
+	uv run pytest tests/ -v -m "not integration"
 	@echo "✅ Tests passed"
+
+test-all:
+	@echo "🧪 Running all tests (including integration)..."
+	uv run pytest tests/ -v
+	@echo "✅ All tests passed"
+
+test-integration:
+	@echo "🌐 Running integration tests (requires network)..."
+	@echo "⚠️  This will download ~150MB from Geonorge and may take several minutes"
+	uv run pytest tests/ -v -m integration
+	@echo "✅ Integration tests passed"
 
 type:
 	@echo "🔎 Type checking..."
-	uv run mypy src/
+	uv run mypy src/ tests/fixture_generators/
 	uv run nbqa mypy notebooks/
 	@echo "✅ Type check passed"
 
@@ -127,6 +143,46 @@ hooks-uninstall:
 hooks-run:
 	@echo "🚀 Running pre-commit hooks..."
 	uv run pre-commit run --all-files
+
+# Test fixture management
+fixtures:  ## Generate/update test fixtures from real data sources
+	@echo "=================================="
+	@echo "Generating Test Fixtures"
+	@echo "=================================="
+	@# Run fixture generation modules
+	@echo "→ Generating Geonorge Turrutebasen fixtures..."
+	uv run python -m tests.fixture_generators.trails.io.sources.geonorge
+	@# Add more fixture generators here as they are created:
+	@# uv run python -m tests.fixture_generators.trails.io.sources.other_source
+	@echo ""
+	@echo "✓ All fixtures generated successfully!"
+
+fixtures-info:  ## Show information about test fixtures
+	@echo "Test Fixtures Status:"
+	@echo "===================="
+	@echo ""
+	@echo "Expected fixture files:"
+	@echo "  • tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip"
+	@echo "  • tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml"
+	@echo ""
+	@echo "Current status:"
+	@for file in \
+		tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip \
+		tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml; do \
+		if [ -f "$$file" ]; then \
+			size=$$(du -h "$$file" | cut -f1); \
+			echo "  ✓ $$file ($$size)"; \
+		else \
+			echo "  ✗ $$file (missing)"; \
+		fi \
+	done
+	@echo ""
+	@echo "Run 'make fixtures' to generate missing fixtures."
+
+fixtures-clean:  ## Remove all test fixtures
+	@echo "🗑️  Removing test fixtures..."
+	rm -rf tests/fixtures/trails/io/sources/geonorge/
+	@echo "✅ Test fixtures removed."
 
 # Quick commands for development
 fmt: format
