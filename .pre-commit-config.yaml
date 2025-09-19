@@ -1,0 +1,55 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  # Local hooks that run our make commands
+  - repo: local
+    hooks:
+      - id: make-format-check
+        name: Check code formatting with ruff
+        entry: bash -c 'command make format-check'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: make-lint
+        name: Check code style with ruff
+        entry: bash -c 'command make lint'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: make-type
+        name: Type checking with mypy
+        entry: bash -c 'command make type'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: make-test
+        name: Run tests with pytest
+        entry: bash -c 'command make test'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+
+  # Clear Jupyter notebook outputs before commit
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.8.1
+    hooks:
+      - id: nbstripout
+        name: Strip Jupyter notebook outputs
