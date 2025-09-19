@@ -168,6 +168,7 @@ command make install-all          # Install all dependencies
 
 # Development
 command make notebook             # Start JupyterLab
+command make notebook-clean       # Clear all notebook outputs
 
 # Testing & Quality
 command make check                # Run all checks (format check, lint, type, test)

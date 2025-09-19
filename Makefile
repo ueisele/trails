@@ -1,4 +1,4 @@
-.PHONY: help check format lint test type clean install install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package
+.PHONY: help check format lint test type clean install install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean
 
 # Default target
 help:
@@ -14,6 +14,7 @@ help:
 	@echo "  make type          Run type checking with mypy"
 	@echo "  make clean         Clean up cache files"
 	@echo "  make notebook      Start JupyterLab"
+	@echo "  make notebook-clean Clear all notebook outputs"
 	@echo "  make update        Update dependencies (respecting version constraints)"
 	@echo "  make update-all    Upgrade all dependencies to latest versions"
 	@echo "  make update-package PACKAGE=<name> Upgrade specific package to latest version"
@@ -82,6 +83,11 @@ clean:
 notebook:
 	@echo "🚀 Starting JupyterLab..."
 	uv run --with jupyter jupyter lab
+
+notebook-clean:
+	@echo "🧹 Clearing notebook outputs..."
+	@find notebooks -name "*.ipynb" -exec uv run nbstripout {} \;
+	@echo "✅ Notebook outputs cleared"
 
 # Dependency management
 update:
