@@ -13,7 +13,8 @@ def get_bounds(gdf: gpd.GeoDataFrame) -> tuple[float, float, float, float]:
     Returns:
         Tuple of (minx, miny, maxx, maxy)
     """
-    return tuple(gdf.total_bounds)
+    bounds = gdf.total_bounds
+    return float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])
 
 
 def calculate_length_meters(geometry: LineString, crs: str | None = None) -> float:
