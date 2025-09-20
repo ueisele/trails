@@ -116,6 +116,28 @@ Run specific test classes or functions:
 uv run pytest tests/trails/io/sources/test_geonorge.py::TestTrailData -v
 ```
 
+#### Test Coverage
+
+Run tests with coverage report:
+```bash
+make test-cov         # Tests with terminal coverage report (excludes integration)
+make test-cov-all     # All tests with coverage (includes integration)
+make test-cov-html    # Generate HTML coverage report in htmlcov/
+```
+
+Quick aliases:
+```bash
+make tc               # Alias for test-cov
+make tch              # Alias for test-cov-html
+```
+
+View HTML coverage report:
+```bash
+make test-cov-html
+open htmlcov/index.html  # macOS
+xdg-open htmlcov/index.html  # Linux
+```
+
 #### Integration Tests
 
 Integration tests are marked with `@pytest.mark.integration` and are excluded by default to keep regular test runs fast. These tests:

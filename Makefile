@@ -1,4 +1,4 @@
-.PHONY: help check format lint test type clean install install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean
 
 # Default target
 help:
@@ -13,8 +13,13 @@ help:
 	@echo "  make test          Run tests with pytest (excludes integration tests)"
 	@echo "  make test-all      Run all tests including integration tests"
 	@echo "  make test-integration Run only integration tests (requires network)"
+	@echo "  make test-cov      Run tests with coverage report (excludes integration)"
+	@echo "  make test-cov-all  Run all tests with coverage report"
+	@echo "  make test-cov-html Generate HTML coverage report"
 	@echo "  make type          Run type checking with mypy"
-	@echo "  make clean         Clean up cache files"
+	@echo "  make clean         Clean up cache files (build artifacts, temp files)"
+	@echo "  make cache-clean   Clean .cache directory contents (preserve directory)"
+	@echo "  make cache-clean-all Remove entire .cache directory"
 	@echo "  make notebook      Start JupyterLab"
 	@echo "  make notebook-clean Clear all notebook outputs"
 	@echo "  make fixtures      Generate/update test fixtures from real data"
@@ -77,6 +82,22 @@ test-integration:
 	uv run pytest tests/ -v -m integration
 	@echo "✅ Integration tests passed"
 
+test-cov:
+	@echo "📊 Running tests with coverage (excluding integration)..."
+	uv run pytest tests/ -v -m "not integration" --cov=trails --cov-report=term-missing
+	@echo "✅ Coverage report generated"
+
+test-cov-all:
+	@echo "📊 Running all tests with coverage (including integration)..."
+	uv run pytest tests/ -v --cov=trails --cov-report=term-missing
+	@echo "✅ Full coverage report generated"
+
+test-cov-html:
+	@echo "📊 Generating HTML coverage report..."
+	uv run pytest tests/ -v -m "not integration" --cov=trails --cov-report=html --cov-report=term
+	@echo "✅ HTML coverage report generated in htmlcov/"
+	@echo "   Open htmlcov/index.html in your browser to view"
+
 type:
 	@echo "🔎 Type checking..."
 	uv run mypy src/ tests/fixture_generators/
@@ -91,9 +112,11 @@ clean:
 	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	find . -type f -name "*.pyo" -delete 2>/dev/null || true
 	find . -type f -name ".coverage" -delete 2>/dev/null || true
+	find . -type f -name ".coverage.*" -delete 2>/dev/null || true
 	@echo "✨ Clean complete"
 
 notebook:
@@ -104,6 +127,24 @@ notebook-clean:
 	@echo "🧹 Clearing notebook outputs..."
 	@find notebooks -name "*.ipynb" -exec uv run nbstripout {} \;
 	@echo "✅ Notebook outputs cleared"
+
+cache-clean:
+	@echo "🗑️  Cleaning cache directory (.cache)..."
+	@if [ -d .cache ]; then \
+		rm -rf .cache/*; \
+		echo "✅ Cache cleaned (directory preserved)"; \
+	else \
+		echo "ℹ️  No cache directory found"; \
+	fi
+
+cache-clean-all:
+	@echo "🗑️  Removing entire cache directory..."
+	@if [ -d .cache ]; then \
+		rm -rf .cache; \
+		echo "✅ Cache directory removed"; \
+	else \
+		echo "ℹ️  No cache directory found"; \
+	fi
 
 # Dependency management
 update:
@@ -188,3 +229,5 @@ fixtures-clean:  ## Remove all test fixtures
 fmt: format
 t: test
 l: lint
+tc: test-cov
+tch: test-cov-html
