@@ -32,6 +32,14 @@ dev = [
     "types-requests>=2.32.4.20250913",
 ]
 
+[tool.uv]
+# Configure default dependency groups for uv sync
+# This ensures both dev and jupyter dependencies are installed by default,
+# which is necessary for PyCharm compatibility. PyCharm's uv integration
+# only syncs default groups, and without this configuration, jupyter
+# dependencies would be removed during PyCharm's automatic sync.
+default-groups = ["dev", "jupyter"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

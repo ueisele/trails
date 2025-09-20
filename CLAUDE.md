@@ -98,8 +98,8 @@ else:
 ```bash
 command make lint                 # Lint code
 command make format               # Format code
-command make test                 # Run tests
 command make type                 # Type checking
+command make test                 # Run tests
 command make check                # Run all checks at once
 ```
 
@@ -162,9 +162,10 @@ When the user asks to run "make", interpret it as "command make".
 
 ```bash
 # Installation
-command make install              # Install core dependencies
-command make install-dev          # Install development dependencies
-command make install-all          # Install all dependencies
+command make install              # Install default dependencies (core + dev + jupyter)
+command make install-core         # Install core dependencies (core)
+command make install-dev          # Install only with dev dependencies (core + dev)
+command make install-all          # Install all dependencies (core + dev + jupyter)
 
 # Development
 command make notebook             # Start JupyterLab

@@ -40,13 +40,16 @@ cd trails
 
 2. Install dependencies:
 ```bash
-# Install core dependencies
+# Install default dependencies which are core, dev tools and Jupyter support
 make install
 
-# Install with Jupyter support
+# Install core dependencies
+make install-core
+
+# Install core dependencies with dev tools
 make install-dev
 
-# Install all dependencies including dev tools
+# Install all dependencies which are core, dev tools and Jupyter support
 make install-all
 ```
 

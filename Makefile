@@ -1,10 +1,11 @@
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean
 
 # Default target
 help:
 	@echo "Available commands:"
-	@echo "  make install       Install core dependencies"
-	@echo "  make install-dev   Install development dependencies"
+	@echo "  make install       Install default dependencies"
+	@echo "  make install-core  Install core dependencies"
+	@echo "  make install-dev   Install core with development dependencies"
 	@echo "  make install-all   Install all dependencies"
 	@echo "  make check         Run all checks (lint, format check, type, test)"
 	@echo "  make format        Format code with ruff"
@@ -36,8 +37,11 @@ help:
 install:
 	uv sync
 
+install-core:
+	uv sync --no-default-groups
+
 install-dev:
-	uv sync --group dev
+	uv sync --only-dev
 
 install-all:
 	uv sync --all-groups
