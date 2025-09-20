@@ -106,6 +106,16 @@ make test-integration
 # Note: This will download ~150MB from Geonorge and may take several minutes
 ```
 
+Run a specific test module:
+```bash
+uv run pytest tests/trails/io/sources/test_geonorge.py -v
+```
+
+Run specific test classes or functions:
+```bash
+uv run pytest tests/trails/io/sources/test_geonorge.py::TestTrailData -v
+```
+
 #### Integration Tests
 
 Integration tests are marked with `@pytest.mark.integration` and are excluded by default to keep regular test runs fast. These tests:
@@ -117,13 +127,13 @@ Integration tests are marked with `@pytest.mark.integration` and are excluded by
 To run specific test markers:
 ```bash
 # Run only integration tests
-pytest -m integration
+uv run pytest -m integration
 
 # Run all except integration tests
-pytest -m "not integration"
+uv run pytest -m "not integration"
 
 # Run slow tests
-pytest -m slow
+uv run pytest -m slow
 ```
 
 ### Code Quality

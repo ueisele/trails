@@ -54,9 +54,23 @@ class TestGeonorgeIntegration:
             assert result.metadata.dataset_name == "Turrutebasen"
             assert result.metadata.provider == "Kartverket (Norwegian Mapping Authority)"
 
-            # Validate we have spatial layers
-            assert len(result.spatial_layers) > 0
+            # Validate we have the expected spatial layers
+            # Turrutebasen has 5 spatial layers (senterlinje + posisjon layers)
+            assert len(result.spatial_layers) >= 5, (
+                f"Expected at least 5 spatial layers, got {len(result.spatial_layers)}"
+            )
             assert "fotrute_senterlinje" in result.spatial_layers
+            # Check other expected layers (based on actual Turrutebasen data)
+            expected_spatial_layers = {
+                "fotrute_senterlinje",
+                "annenrute_senterlinje",
+                "skiloype_senterlinje",
+            }
+            actual_spatial_layers = set(result.spatial_layers.keys())
+            # At least the main layers should be present
+            assert expected_spatial_layers.issubset(actual_spatial_layers), (
+                f"Missing layers: {expected_spatial_layers - actual_spatial_layers}"
+            )
 
             # Validate spatial layer content
             fotrute = result.spatial_layers["fotrute_senterlinje"]
@@ -65,7 +79,10 @@ class TestGeonorgeIntegration:
             assert fotrute.crs is not None
 
             # Validate we have attribute tables
-            assert len(result.attribute_tables) > 0
+            # Turrutebasen has 4 attribute info tables
+            assert len(result.attribute_tables) >= 4, (
+                f"Expected at least 4 attribute tables, got {len(result.attribute_tables)}"
+            )
 
             # Check for expected attribute tables
             expected_tables = ["fotruteinfo_tabell", "annenruteinfo_tabell"]
@@ -73,7 +90,10 @@ class TestGeonorgeIntegration:
                 if table_name in result.attribute_tables:
                     table = result.attribute_tables[table_name]
                     assert isinstance(table, pd.DataFrame)
-                    assert len(table) > 0
+                    # Each table should have data
+                    assert len(table) >= 1, f"Table {table_name} is empty"
+                    # Validate table has expected columns (data quality check)
+                    assert len(table.columns) >= 1, f"Table {table_name} has no columns"
 
             # Validate CRS is detected
             assert result.crs.startswith("EPSG:")
@@ -122,10 +142,12 @@ class TestGeonorgeIntegration:
             # Cache files should exist
             cache_dir = Path(tmpdir)
             pkl_files = list(cache_dir.glob("**/*.pkl"))
-            assert len(pkl_files) > 0, "Processed data should be cached"
+            # Should have exactly 1 cached pickle file for the processed data
+            assert len(pkl_files) == 1, f"Expected 1 cached pickle file, found {len(pkl_files)}"
 
             zip_files = list(cache_dir.glob("**/*.zip"))
-            assert len(zip_files) > 0, "Downloaded ZIP should be cached"
+            # Should have exactly 1 downloaded ZIP file
+            assert len(zip_files) == 1, f"Expected 1 downloaded ZIP file, found {len(zip_files)}"
 
             print(f"✓ Cache contains {len(pkl_files)} processed files")
             print(f"✓ Cache contains {len(zip_files)} downloaded files")

@@ -1,6 +1,5 @@
 """Tests for Geonorge/Kartverket trail data loader."""
 
-import unittest.mock
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -296,9 +295,11 @@ class TestTrailData:
                 version="2025-01-01",
             )
 
-            # Should fallback to string representation
-            assert trail_data.crs is not None
+            # Should fallback to string representation when EPSG code not available
+            assert trail_data.crs == str(gdf.crs)  # Verify actual CRS string
             assert isinstance(trail_data.crs, str)
+            # CRS string should contain coordinate system info
+            assert "proj" in trail_data.crs.lower() or "epsg" in trail_data.crs.lower()
 
     def test_get_full_metadata_dynamic_values(self):
         """Correct counts, lists, and calculated values."""
@@ -756,7 +757,7 @@ class TestSource:
                     # Verify the download was called with the new version
                     mock_download.assert_called_once_with(
                         url="http://test.com/data.zip",
-                        filename=unittest.mock.ANY,
+                        filename="turrutebasen.zip",  # Turrutebasen specific filename
                         version="2025-02-01",  # New version passed
                         force=False,
                     )
