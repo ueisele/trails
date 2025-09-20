@@ -6,13 +6,220 @@ Norwegian government's official mapping authority data.
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TypeVar
 
 import feedparser
 import geopandas as gpd
 import pandas as pd
 
 from trails.io import cache
+from trails.io.sources import geonorge_codes
+from trails.io.sources.language import Language
+
+# TypeVar for DataFrame types
+T = TypeVar("T", gpd.GeoDataFrame, pd.DataFrame)
+
+# Translation dictionaries - structured for multi-language support
+LAYER_TRANSLATIONS = {
+    "fotrute_senterlinje": {
+        Language.EN: "hiking_trail_centerline",
+    },
+    "annenrute_senterlinje": {
+        Language.EN: "other_trail_centerline",
+    },
+    "skiloype_senterlinje": {
+        Language.EN: "ski_trail_centerline",
+    },
+    "sykkelrute_senterlinje": {
+        Language.EN: "bike_trail_centerline",
+    },
+    "ruteinfopunkt_posisjon": {
+        Language.EN: "trail_info_point_position",
+    },
+    "fotruteinfo_tabell": {
+        Language.EN: "hiking_trail_info_table",
+    },
+    "annenruteinfo_tabell": {
+        Language.EN: "other_trail_info_table",
+    },
+    "skiloypeinfo_tabell": {
+        Language.EN: "ski_trail_info_table",
+    },
+    "sykkelruteinfo_tabell": {
+        Language.EN: "bike_trail_info_table",
+    },
+}
+
+COLUMN_TRANSLATIONS = {
+    # Common identification columns
+    "objtype": {
+        Language.EN: "object_type",
+    },
+    "lokalid": {
+        Language.EN: "local_id",
+    },
+    "navnerom": {
+        Language.EN: "namespace",
+    },
+    "versjonid": {
+        Language.EN: "version_id",
+    },
+    "anleggsnummer": {
+        Language.EN: "facility_number",
+    },
+    "omradeid": {
+        Language.EN: "area_id",
+    },
+    "uukoblingsid": {
+        Language.EN: "no_connection_id",
+    },
+    # Date and time columns
+    "datafangstdato": {
+        Language.EN: "data_capture_date",
+    },
+    "oppdateringsdato": {
+        Language.EN: "update_date",
+    },
+    "kopidato": {
+        Language.EN: "copy_date",
+    },
+    # Trail information columns
+    "rutenavn": {
+        Language.EN: "trail_name",
+    },
+    "rutenummer": {
+        Language.EN: "trail_number",
+    },
+    "rutefolger": {
+        Language.EN: "trail_follows",
+    },
+    "rutebredde": {
+        Language.EN: "trail_width",
+    },
+    "rutetype": {
+        Language.EN: "trail_type",
+    },
+    "rutebetydning": {
+        Language.EN: "trail_significance",
+    },
+    "ruteinformasjon": {
+        Language.EN: "trail_information",
+    },
+    "ruteinfoid": {
+        Language.EN: "trail_info_id",
+    },
+    "ryddebredde": {
+        Language.EN: "clearing_width",
+    },
+    # Special trail type columns
+    "spesialfotrutetype": {
+        Language.EN: "special_hiking_trail_type",
+    },
+    "spesialskiloypetype": {
+        Language.EN: "special_ski_trail_type",
+    },
+    "spesialsykkelrutetype": {
+        Language.EN: "special_bike_trail_type",
+    },
+    "spesialannenrutetype": {
+        Language.EN: "special_other_trail_type",
+    },
+    # Physical attributes
+    "merking": {
+        Language.EN: "marking",
+    },
+    "belysning": {
+        Language.EN: "lighting",
+    },
+    "skilting": {
+        Language.EN: "signage",
+    },
+    "underlagstype": {
+        Language.EN: "surface_type",
+    },
+    "sesong": {
+        Language.EN: "season",
+    },
+    "gradering": {
+        Language.EN: "difficulty",
+    },
+    "tilpasning": {
+        Language.EN: "accessibility",
+    },
+    "tilrettelegging": {
+        Language.EN: "facilitation",
+    },
+    "trafikkbelastning": {
+        Language.EN: "traffic_load",
+    },
+    # Maintenance and quality
+    "vedlikeholdsansvarlig": {
+        Language.EN: "maintenance_responsible",
+    },
+    "malemetode": {
+        Language.EN: "measurement_method",
+    },
+    "noyaktighet": {
+        Language.EN: "accuracy",
+    },
+    "informasjon": {
+        Language.EN: "information",
+    },
+    "opphav": {
+        Language.EN: "origin",
+    },
+    "originaldatavert": {
+        Language.EN: "original_data_host",
+    },
+    # Ski-specific columns
+    "antallskispor": {
+        Language.EN: "number_of_ski_tracks",
+    },
+    "preparering": {
+        Language.EN: "preparation",
+    },
+    "skoytetrase": {
+        Language.EN: "skating_track",
+    },
+    # Foreign key columns
+    "fotrute_fk": {
+        Language.EN: "hiking_trail_fk",
+    },
+    "annenrute_fk": {
+        Language.EN: "other_trail_fk",
+    },
+    "skiloype_fk": {
+        Language.EN: "ski_trail_fk",
+    },
+    "sykkelrute_fk": {
+        Language.EN: "bike_trail_fk",
+    },
+    # Geometry columns
+    "SHAPE_Length": {
+        Language.EN: "shape_length",
+    },
+    "geometry": {
+        Language.EN: "geometry",
+    },
+}
+
+
+def _translate_name(name: str, translation_dict: dict[str, dict[Language, str]], language: Language) -> str:
+    """
+    Translate a name using the translation dictionary.
+    Returns original if no translation exists for the given language.
+
+    Args:
+        name: The name to translate
+        translation_dict: Dictionary with language mappings
+        language: Target language
+
+    Returns:
+        Translated name or original if no translation exists
+    """
+    if name in translation_dict and language in translation_dict[name]:
+        return translation_dict[name][language]
+    return name
 
 
 class AtomFeedEntry(NamedTuple):
@@ -52,6 +259,7 @@ class TrailData:
     attribute_tables: dict[str, pd.DataFrame]  # Non-spatial attribute tables
     source_url: str  # The actual download URL from ATOM feed
     version: str  # Current version from ATOM feed
+    language: Language  # Language used for code expansion and translation
     crs: str = field(init=False)  # Auto-detected from spatial layers
 
     def __post_init__(self) -> None:
@@ -75,10 +283,7 @@ class TrailData:
             raise ValueError("No spatial layers with CRS found in TrailData")
 
         if len(crs_set) > 1:
-            raise ValueError(
-                f"Inconsistent CRS across spatial layers: {crs_set}. "
-                f"All spatial layers must have the same CRS."
-            )
+            raise ValueError(f"Inconsistent CRS across spatial layers: {crs_set}. All spatial layers must have the same CRS.")
 
         # Set the single CRS (frozen=True requires using object.__setattr__)
         object.__setattr__(self, "crs", crs_set.pop())
@@ -105,6 +310,36 @@ class TrailData:
         """List of attribute table names."""
         return list(self.attribute_tables.keys())
 
+    def get_description(self, column: str, value: str) -> str | None:
+        """Get description for a value in the data's language.
+
+        This method performs a reverse lookup to find the code from the value,
+        then returns the description for that code.
+
+        Args:
+            column: Column name (e.g., "gradering" or "difficulty")
+            value: Expanded value (e.g., "Enkel (Grønn)" or "Easy (Green)")
+
+        Returns:
+            Description in the data's language, or None if not found
+
+        Example:
+            # Norwegian data
+            desc = data.get_description("gradering", "Enkel (Grønn)")
+            # Returns Norwegian description for difficulty level G
+
+            # English data
+            desc = data.get_description("gradering", "Easy (Green)")
+            # Returns English description for difficulty level G
+        """
+        # Get the code from the value
+        code = geonorge_codes.get_code(column, value, self.language)
+        if code is None:
+            return None
+
+        # Get the description for the code
+        return geonorge_codes.get_description(column, code, self.language)
+
     def get_full_metadata(self) -> dict:
         """Combine static and dynamic metadata."""
         return {
@@ -120,6 +355,7 @@ class TrailData:
             # Dynamic instance data
             "source_url": self.source_url,
             "version": self.version,
+            "language": self.language.value,
             "crs": self.crs,
             "total_features": self.total_features,
             "spatial_layers": self.spatial_layer_names,
@@ -158,26 +394,48 @@ class Source:
         self.download_cache = cache.Download(f"{cache_dir}/downloads")
 
     def load_turrutebasen(
-        self, force_download: bool = False, target_crs: str | None = None
+        self,
+        force_download: bool = False,
+        target_crs: str | None = None,
+        language: Language = Language.NO,
     ) -> TrailData:
         """
-        Load Turrutebasen (trail database) from Geonorge.
+        Load Turrutebasen (trail database) from Geonorge with automatic code expansion.
+
+        Always:
+        - Expands codes to readable values
+        - Translates layer names when language=EN
+        - Translates column names when language=EN
 
         Args:
             force_download: Force re-download even if cached
             target_crs: Optional CRS to convert spatial layers to (e.g., "EPSG:4326")
+            language: Language for values, layer names, and column names (NO or EN)
 
         Returns:
-            TrailData object with loaded layers and metadata
+            TrailData object with expanded codes and translations
+
+        Example:
+            # Norwegian (default)
+            data = source.load_turrutebasen()
+            # Layer: "fotrute_senterlinje"
+            # Column: gradering="Enkel (Grønn)"
+
+            # English
+            data = source.load_turrutebasen(language=Language.EN)
+            # Layer: "hiking_trail_centerline"
+            # Column: difficulty="Easy (Green)"
 
         Raises:
             FileNotFoundError: If automatic download fails
         """
-        # Include target CRS in cache key if specified
+        # Include target CRS and language in cache key
         cache_key = "geonorge_turrutebasen"
         if target_crs:
             crs_suffix = target_crs.replace(":", "_").lower()
-            cache_key = f"geonorge_turrutebasen_{crs_suffix}"
+            cache_key = f"{cache_key}_{crs_suffix}"
+        if language != Language.NO:
+            cache_key = f"{cache_key}_{language.value}"
         zip_filename = "turrutebasen.zip"
 
         try:
@@ -205,9 +463,11 @@ class Source:
 
             # If we get here: either fresh download OR no cache exists
             print("Processing FGDB from ZIP file...")
-            spatial_layers, attribute_tables = self._load_fgdb_from_zip(
-                result.path, target_crs=target_crs
-            )
+            spatial_layers, attribute_tables = self._load_fgdb_from_zip(result.path, target_crs=target_crs)
+
+            # Process codes and translations
+            spatial_layers = self._process_layers(spatial_layers, language)
+            attribute_tables = self._process_layers(attribute_tables, language)
 
             # Create TrailData object (CRS will be auto-detected)
             trail_data = TrailData(
@@ -216,6 +476,7 @@ class Source:
                 attribute_tables=attribute_tables,
                 source_url=download_info.url,
                 version=result.version or "unknown",
+                language=language,
             )
 
             # Cache the TrailData object with its own metadata
@@ -233,9 +494,7 @@ class Source:
                 data = self.cache.load(cache_key)
                 assert isinstance(data, TrailData)
                 return data
-            raise FileNotFoundError(
-                f"Could not load data and no cache available.\nError: {e}"
-            ) from e
+            raise FileNotFoundError(f"Could not load data and no cache available.\nError: {e}") from e
 
     def _get_download_info(self) -> AtomFeedEntry:
         """Fetch download information from the ATOM feed.
@@ -270,9 +529,7 @@ class Source:
                 for link in entry.get("links", []):
                     href = link.get("href", "")
                     if href and href.endswith(".zip") and "FGDB" in href:
-                        nationwide_entries.append(
-                            AtomFeedEntry(url=href, title=title, updated=entry.get("updated", ""))
-                        )
+                        nationwide_entries.append(AtomFeedEntry(url=href, title=title, updated=entry.get("updated", "")))
                         break
 
         if not nationwide_entries:
@@ -290,9 +547,7 @@ class Source:
 
         return selected
 
-    def _load_fgdb_from_zip(
-        self, zip_path: Path, target_crs: str | None = None
-    ) -> tuple[dict[str, gpd.GeoDataFrame], dict[str, pd.DataFrame]]:
+    def _load_fgdb_from_zip(self, zip_path: Path, target_crs: str | None = None) -> tuple[dict[str, gpd.GeoDataFrame], dict[str, pd.DataFrame]]:
         """Load FGDB directly from ZIP file.
 
         This is a pure function that only transforms data from ZIP to GeoDataFrames.
@@ -356,6 +611,69 @@ class Source:
             raise ValueError("No layers could be loaded from FGDB")
 
         return spatial_layers, attribute_tables
+
+    def _process_layers(
+        self,
+        layers: dict[str, T],
+        language: Language,
+    ) -> dict[str, T]:
+        """Process layers: expand codes and translate if needed.
+
+        Args:
+            layers: Dictionary of layer_name -> DataFrame/GeoDataFrame
+            language: Target language for expansion and translation
+
+        Returns:
+            Processed layers with expanded codes and translated names
+        """
+        processed: dict[str, T] = {}
+
+        for layer_name, df in layers.items():
+            # Process the dataframe
+            # _process_dataframe preserves the type
+            processed_df = self._process_dataframe(df, language)
+
+            # Always translate - will return original if no translation exists
+            translated_name = _translate_name(layer_name, LAYER_TRANSLATIONS, language)
+
+            processed[translated_name] = processed_df
+
+        return processed
+
+    def _process_dataframe(
+        self,
+        df: T,
+        language: Language,
+    ) -> T:
+        """Process DataFrame: expand codes and translate columns.
+
+        Args:
+            df: DataFrame to process
+            language: Target language
+
+        Returns:
+            Processed DataFrame
+        """
+        # Make a copy to avoid modifying the original
+        df = df.copy()
+
+        # Step 1: Expand all codes to values
+        for column in df.columns:
+            col_name: str = str(column)
+            if geonorge_codes.has_code_table(col_name):
+                # Expand codes to values in the target language
+                df[col_name] = df[col_name].apply(
+                    lambda code, col=col_name: geonorge_codes.get_value(col, code, language) if pd.notna(code) else code
+                )
+
+        # Step 2: Always translate column names - will return original if no translation
+        rename_dict = {}
+        for col_name in df.columns:
+            rename_dict[col_name] = _translate_name(col_name, COLUMN_TRANSLATIONS, language)
+
+        df = df.rename(columns=rename_dict)
+
+        return df
 
     def _find_gdb_in_zip(self, zip_path: Path) -> str:
         """Find the GDB folder path inside a ZIP file.

@@ -466,9 +466,7 @@ class TestDownload:
         mock_requests.get.return_value = mock_response
 
         # Download version 1
-        result1 = download_cache.download(
-            "http://example.com/file.zip", "versioned.zip", version="v1.0"
-        )
+        result1 = download_cache.download("http://example.com/file.zip", "versioned.zip", version="v1.0")
         assert result1.was_downloaded is True
         assert result1.version == "v1.0"
 
@@ -476,9 +474,7 @@ class TestDownload:
         mock_response.iter_content.return_value = [b"v2_content"]
 
         # Download version 2 (should trigger new download)
-        result2 = download_cache.download(
-            "http://example.com/file.zip", "versioned.zip", version="v2.0"
-        )
+        result2 = download_cache.download("http://example.com/file.zip", "versioned.zip", version="v2.0")
         assert result2.was_downloaded is True
         assert result2.version == "v2.0"
         assert result2.path.read_bytes() == b"v2_content"
@@ -495,15 +491,11 @@ class TestDownload:
         mock_requests.get.return_value = mock_response
 
         # Download with version
-        result1 = download_cache.download(
-            "http://example.com/file.zip", "same_version.zip", version="v1.0"
-        )
+        result1 = download_cache.download("http://example.com/file.zip", "same_version.zip", version="v1.0")
         assert result1.was_downloaded is True
 
         # Same version should use cache
-        result2 = download_cache.download(
-            "http://example.com/file.zip", "same_version.zip", version="v1.0"
-        )
+        result2 = download_cache.download("http://example.com/file.zip", "same_version.zip", version="v1.0")
         assert result2.was_downloaded is False
         assert result2.version == "v1.0"
 
@@ -539,9 +531,7 @@ class TestDownload:
         mock_requests.get.return_value = mock_response
 
         # With version
-        result = download_cache.download(
-            "http://example.com/file.zip", "test.zip", version="2024.1"
-        )
+        result = download_cache.download("http://example.com/file.zip", "test.zip", version="2024.1")
         assert result.version == "2024.1"
 
         # Without version
@@ -564,7 +554,7 @@ class TestDownload:
         captured = capsys.readouterr()
         # Should show progress
         assert "Progress:" in captured.out
-        assert "100.0%" in captured.out
+        assert "100%" in captured.out
 
     @patch("trails.io.cache.requests")
     def test_download_without_content_length(self, mock_requests, download_cache, capsys):

@@ -26,11 +26,7 @@ def get_fixture_dir() -> Path:
 def download_turrutebasen() -> Path:
     """Download the real Turrutebasen dataset from Geonorge."""
     print("Downloading real Turrutebasen data from Geonorge...")
-    url = (
-        "https://nedlasting.geonorge.no/geonorge/Friluftsliv/"
-        "TurOgFriluftsruter/FGDB/Friluftsliv_0000_Norge_25833_"
-        "TurOgFriluftsruter_FGDB.zip"
-    )
+    url = "https://nedlasting.geonorge.no/geonorge/Friluftsliv/TurOgFriluftsruter/FGDB/Friluftsliv_0000_Norge_25833_TurOgFriluftsruter_FGDB.zip"
 
     response = requests.get(url, stream=True)
     response.raise_for_status()
@@ -68,9 +64,7 @@ def _find_gdb_in_zip(source_zip: Path) -> str:
     return gdb_path_in_zip
 
 
-def verify_fixture_completeness(
-    gdb_path: Path, expected_layers: Collection[str], processed_info: dict[str, dict[str, Any]]
-) -> None:
+def verify_fixture_completeness(gdb_path: Path, expected_layers: Collection[str], processed_info: dict[str, dict[str, Any]]) -> None:
     """Ensure all expected layers are present in the fixture."""
     print("\n  Verifying fixture completeness...")
 
@@ -83,9 +77,7 @@ def verify_fixture_completeness(
     missing = expected_layer_names - created_layer_names
     if missing:
         raise ValueError(
-            f"Fixture generation failed. Missing layers: {missing}\n"
-            f"Expected: {sorted(expected_layer_names)}\n"
-            f"Created: {sorted(created_layer_names)}"
+            f"Fixture generation failed. Missing layers: {missing}\nExpected: {sorted(expected_layer_names)}\nCreated: {sorted(created_layer_names)}"
         )
 
     # Verify each layer has features
@@ -101,9 +93,7 @@ def verify_fixture_completeness(
 
         expected_count = processed_info[layer_name]["features"]
         if len(df) != expected_count:
-            raise ValueError(
-                f"Layer '{layer_name}' has {len(df)} features, expected {expected_count}"
-            )
+            raise ValueError(f"Layer '{layer_name}' has {len(df)} features, expected {expected_count}")
 
         # Check type matches
         has_geometry = "geometry" in df.columns
@@ -111,9 +101,7 @@ def verify_fixture_completeness(
         actual_type = "spatial" if has_geometry else "attribute"
 
         if actual_type != expected_type:
-            raise ValueError(
-                f"Layer '{layer_name}' type mismatch: expected {expected_type}, got {actual_type}"
-            )
+            raise ValueError(f"Layer '{layer_name}' type mismatch: expected {expected_type}, got {actual_type}")
 
     spatial_count = sum(1 for v in processed_info.values() if v["type"] == "spatial")
     attribute_count = sum(1 for v in processed_info.values() if v["type"] == "attribute")
@@ -161,10 +149,7 @@ def create_minimal_turrutebasen_gdb(source_zip: Path, output_dir: Path) -> Path:
             missing_layers.append(layer_name)
 
     if missing_layers:
-        raise ValueError(
-            f"Expected layers not found in source data: {missing_layers}\n"
-            f"Available layers: {layers_df['name'].tolist()}"
-        )
+        raise ValueError(f"Expected layers not found in source data: {missing_layers}\nAvailable layers: {layers_df['name'].tolist()}")
 
     # Create output FGDB path
     gdb_path = output_dir / "Turrutebasen_minimal.gdb"

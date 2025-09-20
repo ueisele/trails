@@ -10,6 +10,7 @@ import pytest
 
 from trails.io import cache
 from trails.io.sources.geonorge import TURRUTEBASEN_METADATA, Metadata, Source, TrailData
+from trails.io.sources.language import Language
 
 # Test data constants for error cases
 ATOM_FEED_NO_NATIONWIDE = """<?xml version="1.0" encoding="UTF-8"?>
@@ -52,9 +53,7 @@ def create_test_geodataframe(num_features=10, crs="EPSG:25833"):
 
 def create_test_dataframe(num_rows=10):
     """Create a simple test DataFrame (non-spatial)."""
-    return pd.DataFrame(
-        {"id": range(num_rows), "description": [f"Description_{i}" for i in range(num_rows)]}
-    )
+    return pd.DataFrame({"id": range(num_rows), "description": [f"Description_{i}" for i in range(num_rows)]})
 
 
 class TestTrailData:
@@ -76,6 +75,7 @@ class TestTrailData:
             attribute_tables=attribute_tables,
             source_url="http://example.com/data.zip",
             version="2025-01-01",
+            language=Language.NO,
         )
 
         assert trail_data.crs == "EPSG:25833"
@@ -96,6 +96,7 @@ class TestTrailData:
                 attribute_tables={},
                 source_url="http://example.com/data.zip",
                 version="2025-01-01",
+                language=Language.NO,
             )
 
     def test_init_without_spatial_layers_raises_error(self):
@@ -107,6 +108,7 @@ class TestTrailData:
                 attribute_tables={"table1": create_test_dataframe()},
                 source_url="http://example.com/data.zip",
                 version="2025-01-01",
+                language=Language.NO,
             )
 
     def test_init_with_empty_spatial_layers_raises_error(self):
@@ -118,6 +120,7 @@ class TestTrailData:
                 attribute_tables={},
                 source_url="http://example.com/data.zip",
                 version="2025-01-01",
+                language=Language.NO,
             )
 
     def test_init_with_none_crs_in_layer_raises_error(self):
@@ -132,6 +135,7 @@ class TestTrailData:
                 attribute_tables={},
                 source_url="http://example.com/data.zip",
                 version="2025-01-01",
+                language=Language.NO,
             )
 
     def test_crs_auto_detection_epsg_format(self):
@@ -146,6 +150,7 @@ class TestTrailData:
             attribute_tables={},
             source_url="http://example.com/data.zip",
             version="2025-01-01",
+            language=Language.NO,
         )
 
         assert trail_data.crs == "EPSG:25833"
@@ -159,6 +164,7 @@ class TestTrailData:
             attribute_tables={},
             source_url="http://example.com/data.zip",
             version="2025-01-01",
+            language=Language.NO,
         )
 
         # Try to modify a field
@@ -182,6 +188,7 @@ class TestTrailData:
             attribute_tables=attribute_tables,
             source_url="http://example.com/data.zip",
             version="2025-01-01",
+            language=Language.NO,
         )
 
         assert trail_data.total_features == 50  # 10 + 5 + 20 + 15
@@ -203,6 +210,7 @@ class TestTrailData:
             attribute_tables=attribute_tables,
             source_url="http://example.com/data.zip",
             version="2025-01-01",
+            language=Language.NO,
         )
 
         assert set(trail_data.layer_names) == {"spatial1", "spatial2", "attr1", "attr2"}
@@ -221,6 +229,7 @@ class TestTrailData:
             },
             source_url="http://example.com/data.zip",
             version="2025-01-01",
+            language=Language.NO,
         )
 
         assert trail_data.spatial_layer_names == ["fotrute", "skiloype"]
@@ -238,6 +247,7 @@ class TestTrailData:
             },
             source_url="http://example.com/data.zip",
             version="2025-01-01",
+            language=Language.NO,
         )
 
         assert trail_data.attribute_table_names == ["info1", "info2"]
@@ -250,6 +260,7 @@ class TestTrailData:
             attribute_tables={"table1": create_test_dataframe(1)},
             source_url="http://example.com/data.zip",
             version="2025-01-01",
+            language=Language.NO,
         )
 
         full_metadata = trail_data.get_full_metadata()
@@ -293,6 +304,7 @@ class TestTrailData:
                 attribute_tables={},
                 source_url="http://example.com/data.zip",
                 version="2025-01-01",
+                language=Language.NO,
             )
 
             # Should fallback to string representation when EPSG code not available
@@ -317,6 +329,7 @@ class TestTrailData:
             attribute_tables=attribute_tables,
             source_url="http://example.com/data.zip",
             version="2025-01-01",
+            language=Language.NO,
         )
 
         full_metadata = trail_data.get_full_metadata()
@@ -397,10 +410,7 @@ class TestSource:
         source = Source()
         result = source._get_download_info()
 
-        assert (
-            result.url
-            == "https://example.com/Friluftsliv_0000_Norge_25833_TurOgFriluftsruter_FGDB.zip"
-        )
+        assert result.url == "https://example.com/Friluftsliv_0000_Norge_25833_TurOgFriluftsruter_FGDB.zip"
         assert result.title == "FGDB-format, Landsdekkende"
         assert result.updated == "2025-09-18T05:31:27"
 
@@ -418,9 +428,7 @@ class TestSource:
         """Error when no Landsdekkende/0000 entry."""
         mock_parse.return_value = Mock(
             bozo=False,
-            entries=[
-                {"title": "FGDB-format, Oslo", "links": [{"href": "https://example.com/oslo.zip"}]}
-            ],
+            entries=[{"title": "FGDB-format, Oslo", "links": [{"href": "https://example.com/oslo.zip"}]}],
         )
 
         source = Source()
@@ -535,9 +543,7 @@ class TestSource:
     @patch("trails.io.sources.geonorge.gpd.read_file")
     def test_load_fgdb_crs_conversion(self, mock_read, mock_list, tmp_path):
         """Apply target_crs to all spatial layers."""
-        mock_list.return_value = pd.DataFrame(
-            {"name": ["layer1", "layer2"], "geometry_type": ["Line String", "Point"]}
-        )
+        mock_list.return_value = pd.DataFrame({"name": ["layer1", "layer2"], "geometry_type": ["Line String", "Point"]})
 
         # Mock GeoDataFrames with CRS conversion
         mock_gdf1 = create_test_geodataframe(5, "EPSG:25833")
@@ -584,6 +590,7 @@ class TestSource:
             attribute_tables={},
             source_url="http://cached.com/data.zip",
             version="cached-version",
+            language=Language.NO,
         )
         source.cache.save("geonorge_turrutebasen", cached_data)
 
@@ -600,16 +607,12 @@ class TestSource:
 
         # Mock the download and FGDB loading
         with patch.object(source, "_get_download_info") as mock_info:
-            mock_info.return_value = Mock(
-                url="http://test.com/data.zip", title="Test Data", updated="2025-01-01"
-            )
+            mock_info.return_value = Mock(url="http://test.com/data.zip", title="Test Data", updated="2025-01-01")
 
             with patch.object(source.download_cache, "download") as mock_download:
                 from trails.io.cache import DownloadResult
 
-                mock_download.return_value = DownloadResult(
-                    path=Path(tmp_path / "test.zip"), was_downloaded=False, version="1.0"
-                )
+                mock_download.return_value = DownloadResult(path=Path(tmp_path / "test.zip"), was_downloaded=False, version="1.0")
 
                 with patch.object(source, "_load_fgdb_from_zip") as mock_load:
                     mock_load.return_value = (
@@ -640,21 +643,18 @@ class TestSource:
             attribute_tables={},
             source_url="http://cached.com/data.zip",
             version="cached-version",
+            language=Language.NO,
         )
         source.cache.save("geonorge_turrutebasen", cached_data)
 
         with patch.object(source, "_get_download_info") as mock_info:
-            mock_info.return_value = Mock(
-                url="http://test.com/data.zip", title="Test Data", updated="2025-01-01"
-            )
+            mock_info.return_value = Mock(url="http://test.com/data.zip", title="Test Data", updated="2025-01-01")
 
             # download returns (path, False) - False means NOT re-downloaded
             with patch.object(source.download_cache, "download") as mock_download:
                 from trails.io.cache import DownloadResult
 
-                mock_download.return_value = DownloadResult(
-                    path=Path(tmp_path / "test.zip"), was_downloaded=False, version="1.0"
-                )
+                mock_download.return_value = DownloadResult(path=Path(tmp_path / "test.zip"), was_downloaded=False, version="1.0")
 
                 # Should return cached data without processing
                 with patch.object(source, "_load_fgdb_from_zip") as mock_load:
@@ -678,21 +678,18 @@ class TestSource:
             attribute_tables={},
             source_url="http://old.com/data.zip",
             version="old-version",
+            language=Language.NO,
         )
         source.cache.save("geonorge_turrutebasen", old_cached)
 
         with patch.object(source, "_get_download_info") as mock_info:
-            mock_info.return_value = Mock(
-                url="http://test.com/data.zip", title="Test Data", updated="2025-01-01"
-            )
+            mock_info.return_value = Mock(url="http://test.com/data.zip", title="Test Data", updated="2025-01-01")
 
             # download returns DownloadResult with was_downloaded=True for fresh download
             with patch.object(source.download_cache, "download") as mock_download:
                 from trails.io.cache import DownloadResult
 
-                mock_download.return_value = DownloadResult(
-                    path=Path(tmp_path / "test.zip"), was_downloaded=True, version="new-version"
-                )
+                mock_download.return_value = DownloadResult(path=Path(tmp_path / "test.zip"), was_downloaded=True, version="new-version")
 
                 with patch.object(source, "_load_fgdb_from_zip") as mock_load:
                     mock_load.return_value = ({"new": create_test_geodataframe(1)}, {})
@@ -719,9 +716,7 @@ class TestSource:
                 from trails.io.cache import DownloadResult
 
                 # First call: Initial download
-                mock_download.return_value = DownloadResult(
-                    path=Path(tmp_path / "test.zip"), was_downloaded=True, version="2025-01-01"
-                )
+                mock_download.return_value = DownloadResult(path=Path(tmp_path / "test.zip"), was_downloaded=True, version="2025-01-01")
 
                 with patch.object(source, "_load_fgdb_from_zip") as mock_load:
                     mock_load.return_value = ({"layer_v1": create_test_geodataframe(1)}, {})
@@ -788,16 +783,12 @@ class TestSource:
         # Since load_turrutebasen doesn't have progress_callback parameter,
         # we verify that downloading/loading messages are printed
         with patch.object(source, "_get_download_info") as mock_info:
-            mock_info.return_value = Mock(
-                url="http://test.com/data.zip", title="Test Data", updated="2025-01-01"
-            )
+            mock_info.return_value = Mock(url="http://test.com/data.zip", title="Test Data", updated="2025-01-01")
 
             with patch.object(source.download_cache, "download") as mock_download:
                 from trails.io.cache import DownloadResult
 
-                mock_download.return_value = DownloadResult(
-                    path=Path(tmp_path / "test.zip"), was_downloaded=True, version="1.0"
-                )
+                mock_download.return_value = DownloadResult(path=Path(tmp_path / "test.zip"), was_downloaded=True, version="1.0")
 
                 with patch.object(source, "_load_fgdb_from_zip") as mock_load:
                     mock_load.return_value = ({"layer1": create_test_geodataframe(1)}, {})
@@ -840,9 +831,7 @@ class TestIntegration:
     """End-to-end integration tests."""
 
     @patch("trails.io.cache.requests")
-    def test_load_with_real_fixtures(
-        self, mock_requests, geonorge_zip_fixture, geonorge_atom_fixture, tmp_path
-    ):
+    def test_load_with_real_fixtures(self, mock_requests, geonorge_zip_fixture, geonorge_atom_fixture, tmp_path):
         """Test with real fixture files (if they exist)."""
         if not geonorge_zip_fixture.exists() or not geonorge_atom_fixture.exists():
             pytest.skip("Fixtures not found. Run 'command make fixtures' to generate them.")
@@ -862,9 +851,7 @@ class TestIntegration:
 
         mock_zip_response = Mock()
         mock_zip_response.headers = {"content-length": str(len(zip_content))}
-        mock_zip_response.iter_content = Mock(
-            return_value=[zip_content[i : i + 8192] for i in range(0, len(zip_content), 8192)]
-        )
+        mock_zip_response.iter_content = Mock(return_value=[zip_content[i : i + 8192] for i in range(0, len(zip_content), 8192)])
         mock_zip_response.raise_for_status = Mock()
 
         def get_side_effect(url, stream=False):
@@ -892,12 +879,8 @@ class TestIntegration:
             output = captured_output.getvalue()
 
             # Verify progress messages were shown
-            assert "Fetching download URL" in output or "Loading" in output, (
-                "Should show progress about fetching/loading"
-            )
-            assert "Download" in output or "Processing" in output or "FGDB" in output, (
-                "Should show progress about download/processing"
-            )
+            assert "Fetching download URL" in output or "Loading" in output, "Should show progress about fetching/loading"
+            assert "Download" in output or "Processing" in output or "FGDB" in output, "Should show progress about download/processing"
 
         finally:
             sys.stdout = old_stdout
@@ -908,10 +891,7 @@ class TestIntegration:
         assert len(trail_data.spatial_layers) > 0
 
         # Check we have the expected layers (at minimum)
-        assert (
-            "fotrute_senterlinje" in trail_data.spatial_layers
-            or "ruteinfopunkt_posisjon" in trail_data.spatial_layers
-        )
+        assert "fotrute_senterlinje" in trail_data.spatial_layers or "ruteinfopunkt_posisjon" in trail_data.spatial_layers
 
         # Verify the data is actually loaded
         for _layer_name, gdf in trail_data.spatial_layers.items():

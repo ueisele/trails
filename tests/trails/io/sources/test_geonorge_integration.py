@@ -56,9 +56,7 @@ class TestGeonorgeIntegration:
 
             # Validate we have the expected spatial layers
             # Turrutebasen has 5 spatial layers (senterlinje + posisjon layers)
-            assert len(result.spatial_layers) >= 5, (
-                f"Expected at least 5 spatial layers, got {len(result.spatial_layers)}"
-            )
+            assert len(result.spatial_layers) >= 5, f"Expected at least 5 spatial layers, got {len(result.spatial_layers)}"
             assert "fotrute_senterlinje" in result.spatial_layers
             # Check other expected layers (based on actual Turrutebasen data)
             expected_spatial_layers = {
@@ -68,9 +66,7 @@ class TestGeonorgeIntegration:
             }
             actual_spatial_layers = set(result.spatial_layers.keys())
             # At least the main layers should be present
-            assert expected_spatial_layers.issubset(actual_spatial_layers), (
-                f"Missing layers: {expected_spatial_layers - actual_spatial_layers}"
-            )
+            assert expected_spatial_layers.issubset(actual_spatial_layers), f"Missing layers: {expected_spatial_layers - actual_spatial_layers}"
 
             # Validate spatial layer content
             fotrute = result.spatial_layers["fotrute_senterlinje"]
@@ -80,9 +76,7 @@ class TestGeonorgeIntegration:
 
             # Validate we have attribute tables
             # Turrutebasen has 4 attribute info tables
-            assert len(result.attribute_tables) >= 4, (
-                f"Expected at least 4 attribute tables, got {len(result.attribute_tables)}"
-            )
+            assert len(result.attribute_tables) >= 4, f"Expected at least 4 attribute tables, got {len(result.attribute_tables)}"
 
             # Check for expected attribute tables
             expected_tables = ["fotruteinfo_tabell", "annenruteinfo_tabell"]
@@ -221,9 +215,7 @@ def test_network_error_handling():
     source = Source()
 
     # Create modified metadata with invalid URL
-    invalid_metadata = TURRUTEBASEN_METADATA.__replace__(
-        atom_feed_url="http://invalid.example.com/nonexistent.xml"
-    )
+    invalid_metadata = TURRUTEBASEN_METADATA.__replace__(atom_feed_url="http://invalid.example.com/nonexistent.xml")
 
     # Patch the module-level metadata constant
     with patch("trails.io.sources.geonorge.TURRUTEBASEN_METADATA", invalid_metadata):

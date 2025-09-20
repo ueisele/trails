@@ -149,9 +149,7 @@ class Download:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def download(
-        self, url: str, filename: str | None = None, version: str | None = None, force: bool = False
-    ) -> DownloadResult:
+    def download(self, url: str, filename: str | None = None, version: str | None = None, force: bool = False) -> DownloadResult:
         """Download a file if not cached or version changed.
 
         Args:
@@ -221,6 +219,7 @@ class Download:
 
         total_size = int(response.headers.get("content-length", 0))
         downloaded = 0
+        last_progress = -1
 
         with open(target_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
@@ -228,8 +227,11 @@ class Download:
                     f.write(chunk)
                     downloaded += len(chunk)
                     if total_size > 0:
-                        progress = (downloaded / total_size) * 100
-                        print(f"\rProgress: {progress:.1f}%", end="", flush=True)
+                        progress = int((downloaded / total_size) * 100)
+                        # Only update display when progress changes by at least 1%
+                        if progress != last_progress:
+                            print(f"\rProgress: {progress}%", end="", flush=True)
+                            last_progress = progress
 
         print()  # New line after progress
 
