@@ -27,21 +27,19 @@ def calculate_length_meters(geometry: LineString, crs: str | None = None) -> flo
     Returns:
         Length in meters
     """
-    # Create temporary GeoDataFrame
     gdf = gpd.GeoDataFrame([1], geometry=[geometry], crs=crs)
 
-    # If in geographic coordinates (lat/lon), project to appropriate UTM
-    if gdf.crs and gdf.crs.to_epsg() == 4326:
-        # Get centroid to determine UTM zone
-        lon = geometry.centroid.x
-        # Calculate UTM zone (Norway is mostly in zones 32-35)
-        utm_zone = int((lon + 180) / 6) + 1
-        utm_epsg = 32600 + utm_zone  # Northern hemisphere
+    # Check if already in meters
+    if gdf.crs and gdf.crs.axis_info:
+        units = gdf.crs.axis_info[0].unit_name
+        if units == "metre":
+            return float(gdf.geometry[0].length)
 
-        # Project to UTM
-        gdf = gdf.to_crs(f"EPSG:{utm_epsg}")
+    # Only project if not in meters
+    utm_crs = gdf.estimate_utm_crs()
+    if utm_crs:
+        gdf = gdf.to_crs(utm_crs)
 
-    # Return length (now in meters if projected)
     return float(gdf.geometry[0].length)
 
 
