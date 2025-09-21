@@ -52,6 +52,26 @@ uv run python script.py          # Execute Python scripts
 - Use descriptive names: `01_trail_elevation_analysis.ipynb`
 - Document analysis steps with markdown cells
 
+### CRITICAL: Notebook Editing Rules
+**ALWAYS check the notebook structure before and after edits:**
+1. **Every section header needs a code cell** - Don't create markdown headers without corresponding code
+2. **Use NotebookEdit cell_id carefully** - Cell IDs change when you insert/delete cells
+3. **Check cell order after edits** - Use `cat notebook.ipynb | python -c ...` to verify structure
+4. **Insert cells in correct position** - New cells go AFTER the cell_id specified
+5. **Markdown sections should flow logically**:
+   - Section 4 → 4.1 → 4.2 → 4.3 → Section 5 (not 4.1 → 5 → 4.2!)
+6. **When refactoring sections**:
+   - First: List all cells with their types (markdown/code)
+   - Second: Plan the changes
+   - Third: Execute changes in order
+   - Fourth: Verify final structure
+
+**Common mistakes to avoid:**
+- Creating subsection headers (4.1, 4.2) without moving/adding corresponding code
+- Inserting cells that break the logical flow (e.g., 4.4 appearing after Section 5)
+- Forgetting that insert puts the new cell AFTER the specified cell_id
+- Not checking if code cells match their section headers
+
 ### Code Style
 - Type hints for all public functions
 - Google-style docstrings

@@ -148,7 +148,7 @@ class TestGetValue:
 
     def test_alphanumeric_codes(self):
         """Test get_value with alphanumeric codes."""
-        value = get_value("underlagstype", "1.0", Language.NO)
+        value = get_value("underlagstype", "1", Language.NO)
         assert value == "Asfalt/betong"
 
 
@@ -321,9 +321,9 @@ class TestEdgeCases:
 
     def test_codes_with_dots(self):
         """Test codes containing dots."""
-        assert get_value("underlagstype", "1.0", Language.NO) == "Asfalt/betong"
-        assert get_value("underlagstype", "2.0", Language.NO) == "Grus"
-        assert get_value("rutetype", "1.0", Language.NO) == "Hovedrute"
+        assert get_value("underlagstype", "1", Language.NO) == "Asfalt/betong"
+        assert get_value("underlagstype", "2", Language.NO) == "Grus"
+        assert get_value("rutetype", "1", Language.NO) == "Hovedrute"
 
 
 @pytest.mark.parametrize(

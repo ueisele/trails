@@ -13,213 +13,11 @@ import geopandas as gpd
 import pandas as pd
 
 from trails.io import cache
-from trails.io.sources import geonorge_codes
+from trails.io.sources import geonorge_codes, geonorge_schema, geonorge_translations
 from trails.io.sources.language import Language
 
 # TypeVar for DataFrame types
 T = TypeVar("T", gpd.GeoDataFrame, pd.DataFrame)
-
-# Translation dictionaries - structured for multi-language support
-LAYER_TRANSLATIONS = {
-    "fotrute_senterlinje": {
-        Language.EN: "hiking_trail_centerline",
-    },
-    "annenrute_senterlinje": {
-        Language.EN: "other_trail_centerline",
-    },
-    "skiloype_senterlinje": {
-        Language.EN: "ski_trail_centerline",
-    },
-    "sykkelrute_senterlinje": {
-        Language.EN: "bike_trail_centerline",
-    },
-    "ruteinfopunkt_posisjon": {
-        Language.EN: "trail_info_point_position",
-    },
-    "fotruteinfo_tabell": {
-        Language.EN: "hiking_trail_info_table",
-    },
-    "annenruteinfo_tabell": {
-        Language.EN: "other_trail_info_table",
-    },
-    "skiloypeinfo_tabell": {
-        Language.EN: "ski_trail_info_table",
-    },
-    "sykkelruteinfo_tabell": {
-        Language.EN: "bike_trail_info_table",
-    },
-}
-
-COLUMN_TRANSLATIONS = {
-    # Common identification columns
-    "objtype": {
-        Language.EN: "object_type",
-    },
-    "lokalid": {
-        Language.EN: "local_id",
-    },
-    "navnerom": {
-        Language.EN: "namespace",
-    },
-    "versjonid": {
-        Language.EN: "version_id",
-    },
-    "anleggsnummer": {
-        Language.EN: "facility_number",
-    },
-    "omradeid": {
-        Language.EN: "area_id",
-    },
-    "uukoblingsid": {
-        Language.EN: "no_connection_id",
-    },
-    # Date and time columns
-    "datafangstdato": {
-        Language.EN: "data_capture_date",
-    },
-    "oppdateringsdato": {
-        Language.EN: "update_date",
-    },
-    "kopidato": {
-        Language.EN: "copy_date",
-    },
-    # Trail information columns
-    "rutenavn": {
-        Language.EN: "trail_name",
-    },
-    "rutenummer": {
-        Language.EN: "trail_number",
-    },
-    "rutefolger": {
-        Language.EN: "trail_follows",
-    },
-    "rutebredde": {
-        Language.EN: "trail_width",
-    },
-    "rutetype": {
-        Language.EN: "trail_type",
-    },
-    "rutebetydning": {
-        Language.EN: "trail_significance",
-    },
-    "ruteinformasjon": {
-        Language.EN: "trail_information",
-    },
-    "ruteinfoid": {
-        Language.EN: "trail_info_id",
-    },
-    "ryddebredde": {
-        Language.EN: "clearing_width",
-    },
-    # Special trail type columns
-    "spesialfotrutetype": {
-        Language.EN: "special_hiking_trail_type",
-    },
-    "spesialskiloypetype": {
-        Language.EN: "special_ski_trail_type",
-    },
-    "spesialsykkelrutetype": {
-        Language.EN: "special_bike_trail_type",
-    },
-    "spesialannenrutetype": {
-        Language.EN: "special_other_trail_type",
-    },
-    # Physical attributes
-    "merking": {
-        Language.EN: "marking",
-    },
-    "belysning": {
-        Language.EN: "lighting",
-    },
-    "skilting": {
-        Language.EN: "signage",
-    },
-    "underlagstype": {
-        Language.EN: "surface_type",
-    },
-    "sesong": {
-        Language.EN: "season",
-    },
-    "gradering": {
-        Language.EN: "difficulty",
-    },
-    "tilpasning": {
-        Language.EN: "accessibility",
-    },
-    "tilrettelegging": {
-        Language.EN: "facilitation",
-    },
-    "trafikkbelastning": {
-        Language.EN: "traffic_load",
-    },
-    # Maintenance and quality
-    "vedlikeholdsansvarlig": {
-        Language.EN: "maintenance_responsible",
-    },
-    "malemetode": {
-        Language.EN: "measurement_method",
-    },
-    "noyaktighet": {
-        Language.EN: "accuracy",
-    },
-    "informasjon": {
-        Language.EN: "information",
-    },
-    "opphav": {
-        Language.EN: "origin",
-    },
-    "originaldatavert": {
-        Language.EN: "original_data_host",
-    },
-    # Ski-specific columns
-    "antallskispor": {
-        Language.EN: "number_of_ski_tracks",
-    },
-    "preparering": {
-        Language.EN: "preparation",
-    },
-    "skoytetrase": {
-        Language.EN: "skating_track",
-    },
-    # Foreign key columns
-    "fotrute_fk": {
-        Language.EN: "hiking_trail_fk",
-    },
-    "annenrute_fk": {
-        Language.EN: "other_trail_fk",
-    },
-    "skiloype_fk": {
-        Language.EN: "ski_trail_fk",
-    },
-    "sykkelrute_fk": {
-        Language.EN: "bike_trail_fk",
-    },
-    # Geometry columns
-    "SHAPE_Length": {
-        Language.EN: "shape_length",
-    },
-    "geometry": {
-        Language.EN: "geometry",
-    },
-}
-
-
-def _translate_name(name: str, translation_dict: dict[str, dict[Language, str]], language: Language) -> str:
-    """
-    Translate a name using the translation dictionary.
-    Returns original if no translation exists for the given language.
-
-    Args:
-        name: The name to translate
-        translation_dict: Dictionary with language mappings
-        language: Target language
-
-    Returns:
-        Translated name or original if no translation exists
-    """
-    if name in translation_dict and language in translation_dict[name]:
-        return translation_dict[name][language]
-    return name
 
 
 class AtomFeedEntry(NamedTuple):
@@ -634,7 +432,7 @@ class Source:
             processed_df = self._process_dataframe(df, language)
 
             # Always translate - will return original if no translation exists
-            translated_name = _translate_name(layer_name, LAYER_TRANSLATIONS, language)
+            translated_name = geonorge_translations.translate_layer_name(layer_name, language)
 
             processed[translated_name] = processed_df
 
@@ -645,31 +443,37 @@ class Source:
         df: T,
         language: Language,
     ) -> T:
-        """Process DataFrame: expand codes and translate columns.
+        """Process DataFrame: standardize types, expand codes, and translate columns.
 
         Args:
             df: DataFrame to process
             language: Target language
 
         Returns:
-            Processed DataFrame
+            Processed DataFrame with standardized types and expanded codes
         """
         # Make a copy to avoid modifying the original
         df = df.copy()
 
-        # Step 1: Expand all codes to values
+        # Step 1: Standardize column types (converts numeric codes to strings)
+        df = geonorge_schema.standardize_types(df)
+
+        # Step 2: Expand code columns to human-readable values
         for column in df.columns:
             col_name: str = str(column)
-            if geonorge_codes.has_code_table(col_name):
-                # Expand codes to values in the target language
-                df[col_name] = df[col_name].apply(
-                    lambda code, col=col_name: geonorge_codes.get_value(col, code, language) if pd.notna(code) else code
-                )
+            # Check if this is a code column using the schema
+            if geonorge_schema.get_column_type(col_name) == "code":
+                # Now codes are strings, so lookup will work correctly
+                df[col_name] = (
+                    df[col_name]
+                    .apply(lambda code, col=col_name: geonorge_codes.get_value(col, code, language) if pd.notna(code) else pd.NA)
+                    .astype("string")
+                )  # Ensure result is string dtype, not object
 
-        # Step 2: Always translate column names - will return original if no translation
+        # Step 3: Translate column names - will return original if no translation
         rename_dict = {}
         for col_name in df.columns:
-            rename_dict[col_name] = _translate_name(col_name, COLUMN_TRANSLATIONS, language)
+            rename_dict[col_name] = geonorge_translations.translate_column_name(col_name, language)
 
         df = df.rename(columns=rename_dict)
 

@@ -1523,7 +1523,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
     # Underlagstype (Surface Type)
     # Reference: https://objektkatalog.geonorge.no/Objekttype/Index/EAID_EC77E9DE_6519_4548_9A18_5D5247D926EA
     "underlagstype": {
-        "1.0": {
+        "1": {
             Language.NO: CodeEntry(
                 value="Asfalt/betong",
                 description="Strekningen har fast dekke av asfalt eller betong",
@@ -1533,7 +1533,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
                 description="The stretch has a fixed surface of asphalt or concrete",
             ),
         },
-        "2.0": {
+        "2": {
             Language.NO: CodeEntry(
                 value="Grus",
                 description="Strekningen har grusdekke",
@@ -1543,7 +1543,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
                 description="The stretch has a gravel surface",
             ),
         },
-        "3.0": {
+        "3": {
             Language.NO: CodeEntry(
                 value="Naturlig grunn",
                 description=("Strekningen går ikke på opparbeidet grunn, men på sti eller over fjell eller lignende"),
@@ -1553,7 +1553,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
                 description=("The stretch does not go on developed ground, but on a path or over rock or similar"),
             ),
         },
-        "4.0": {
+        "4": {
             Language.NO: CodeEntry(
                 value="Annet underlag",
                 description="Strekningen har annen type underlag enn de nevnte",
@@ -1567,7 +1567,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
     # Rutetype (Route Type)
     # Reference: https://objektkatalog.geonorge.no/Objekttype/Index/EAID_F4D4837F_64BE_485a_B1AC_7A665578B773
     "rutetype": {
-        "1.0": {
+        "1": {
             Language.NO: CodeEntry(
                 value="Hovedrute",
                 description=("Mye brukt rute som utgjør hovedtraseene i løypenettet. Ruter som når inn til og er forbindelser mellom viktige turmål"),
@@ -1579,7 +1579,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
                 ),
             ),
         },
-        "2.0": {
+        "2": {
             Language.NO: CodeEntry(
                 value="Forgreningsrute",
                 description=("Mye brukt rute som binder sammen hovedløypenettet, og som er supplerende eller alternative ruter til hovedruter"),
@@ -1589,7 +1589,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
                 description=("Frequently used route connecting the main trail network, supplementing or providing alternatives to main routes"),
             ),
         },
-        "3.0": {
+        "3": {
             Language.NO: CodeEntry(
                 value="Materute",
                 description=("Rute som utgjør alternative traseer, snarveier eller går til målpunkt. Ofte ikke tilrettelagte ruter"),
@@ -1603,7 +1603,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
     # Rutebetydning (Route Significance)
     # Reference: https://objektkatalog.geonorge.no/Objekttype/Index/EAID_ABD406FF_C931_47b7_ACCD_00BBC7714250
     "rutebetydning": {
-        "1.0": {
+        "1": {
             Language.NO: CodeEntry(
                 value="Nasjonal betydning",
                 description="Ruter av nasjonal betydning brukes av folk fra hele landet",
@@ -1613,7 +1613,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
                 description="Routes of national significance used by people from across the country",
             ),
         },
-        "2.0": {
+        "2": {
             Language.NO: CodeEntry(
                 value="Regional betydning",
                 description="Ruter av regional betydning brukes av folk fra regionen",
@@ -1623,7 +1623,7 @@ CODE_TABLES: dict[str, dict[str, dict[Language, CodeEntry]]] = {
                 description="Routes of regional significance used by people from the region",
             ),
         },
-        "3.0": {
+        "3": {
             Language.NO: CodeEntry(
                 value="Lokal betydning",
                 description="Ruter av lokal betydning brukes primært av lokalbefolkningen",

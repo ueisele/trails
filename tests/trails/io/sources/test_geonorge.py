@@ -44,8 +44,17 @@ def create_test_geodataframe(num_features=10, crs="EPSG:25833"):
 
     geometries = [LineString([(0, i), (1, i), (2, i)]) for i in range(num_features)]
 
+    # Use real columns from our schema to avoid warnings
+    data = {
+        "lokalid": [f"trail_{i}" for i in range(num_features)],  # string column from schema
+        "rutenavn": [f"Trail_{i}" for i in range(num_features)],  # string column from schema
+    }
+    # Add a code column with cycling values
+    gradering_values = ["G", "B", "R", "S"]
+    data["gradering"] = [gradering_values[i % len(gradering_values)] for i in range(num_features)]
+
     return gpd.GeoDataFrame(
-        {"id": range(num_features), "name": [f"Trail_{i}" for i in range(num_features)]},
+        data,
         geometry=geometries,
         crs=crs,
     )
@@ -53,7 +62,13 @@ def create_test_geodataframe(num_features=10, crs="EPSG:25833"):
 
 def create_test_dataframe(num_rows=10):
     """Create a simple test DataFrame (non-spatial)."""
-    return pd.DataFrame({"id": range(num_rows), "description": [f"Description_{i}" for i in range(num_rows)]})
+    # Use real columns from our schema to avoid warnings
+    return pd.DataFrame(
+        {
+            "ruteinfoid": [f"info_{i}" for i in range(num_rows)],  # string column from schema
+            "informasjon": [f"Description_{i}" for i in range(num_rows)],  # string column from schema
+        }
+    )
 
 
 class TestTrailData:
@@ -520,7 +535,7 @@ class TestSource:
             if layer == "fotrute_senterlinje":
                 return create_test_geodataframe(5)
             else:
-                return pd.DataFrame({"id": [1, 2, 3]})
+                return pd.DataFrame({"ruteinfoid": ["info_1", "info_2", "info_3"]})
 
         mock_read.side_effect = read_side_effect
 
