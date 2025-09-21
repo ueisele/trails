@@ -132,14 +132,14 @@ class TestGetValue:
         assert value == "Medium (Blue)"
 
     def test_invalid_column(self):
-        """Test get_value with invalid column."""
+        """Test get_value with invalid column returns original code."""
         value = get_value("invalid_column", "B", Language.NO)
-        assert value is None
+        assert value == "B"  # Returns original code when column not found
 
     def test_invalid_code(self):
-        """Test get_value with invalid code."""
+        """Test get_value with invalid code returns original code."""
         value = get_value("gradering", "INVALID", Language.NO)
-        assert value is None
+        assert value == "INVALID"  # Returns original code when not found
 
     def test_numeric_codes(self):
         """Test get_value with numeric string codes."""
@@ -292,22 +292,22 @@ class TestEdgeCases:
         """Test functions handle None inputs gracefully."""
         # These should not raise exceptions
         assert get_entry(None, "G", Language.NO) is None  # type: ignore
-        assert get_value("gradering", None, Language.NO) is None  # type: ignore
+        assert get_value("gradering", None, Language.NO) is None  # type: ignore  # Returns None when code is None
         assert get_description(None, None, Language.NO) is None  # type: ignore
         assert get_code(None, "value", Language.NO) is None  # type: ignore
 
     def test_empty_string_inputs(self):
         """Test functions handle empty strings."""
         assert get_entry("", "", Language.NO) is None
-        assert get_value("", "", Language.NO) is None
+        assert get_value("", "", Language.NO) == ""  # Returns original code when not found
         assert get_description("", "", Language.NO) is None
         assert get_code("", "", Language.NO) is None
         assert has_code_table("") is False
 
     def test_mixed_case_columns(self):
         """Test columns are case sensitive."""
-        assert get_value("GRADERING", "G", Language.NO) is None
-        assert get_value("Gradering", "G", Language.NO) is None
+        assert get_value("GRADERING", "G", Language.NO) == "G"  # Returns original code when column not found
+        assert get_value("Gradering", "G", Language.NO) == "G"  # Returns original code when column not found
         assert get_value("gradering", "G", Language.NO) == "Enkel (Grønn)"
 
     def test_numeric_vs_string_codes(self):
@@ -316,8 +316,8 @@ class TestEdgeCases:
         assert get_value("rutebredde", "0", Language.NO) == "0-0.5 m"
         assert get_value("rutebredde", "1", Language.NO) == "0.5 - opp til 1.5 m"
 
-        # But actual integers should not work (type mismatch)
-        assert get_value("rutebredde", 0, Language.NO) is None  # type: ignore
+        # But actual integers should return the integer itself (type mismatch)
+        assert get_value("rutebredde", 0, Language.NO) == 0  # type: ignore
 
     def test_codes_with_dots(self):
         """Test codes containing dots."""

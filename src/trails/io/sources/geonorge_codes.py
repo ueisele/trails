@@ -1980,7 +1980,7 @@ def get_entry(column: str, code: str, language: Language = Language.NO) -> CodeE
     return None
 
 
-def get_value(column: str, code: str, language: Language = Language.NO) -> str | None:
+def get_value(column: str, code: str, language: Language = Language.NO) -> str:
     """Get expanded value for a code in specified language.
 
     Args:
@@ -1989,10 +1989,10 @@ def get_value(column: str, code: str, language: Language = Language.NO) -> str |
         language: Target language
 
     Returns:
-        Expanded value if found, None otherwise
+        Expanded value if found, original code otherwise
     """
     entry = get_entry(column, code, language)
-    return entry.value if entry else None
+    return entry.value if entry else code
 
 
 def get_description(column: str, code: str, language: Language = Language.NO) -> str | None:
