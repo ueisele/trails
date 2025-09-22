@@ -89,3 +89,7 @@ logs/
 *.tmp
 tmp/
 temp/
+
+# Output files
+output/
+*.html
