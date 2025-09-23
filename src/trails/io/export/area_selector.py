@@ -486,6 +486,69 @@ def create_interactive_selection_map(
         layout=widgets.Layout(margin="5px 0"),
     )
 
+    # Function to load and display a preset
+    def load_and_display_preset(preset_bounds: tuple[float, float, float, float]) -> None:
+        """Load a preset and display it on the map."""
+        if preset_bounds:
+            min_lon, min_lat, max_lon, max_lat = preset_bounds
+
+            # Update bounds container
+            bounds_container["bounds"] = preset_bounds
+
+            # Remove previous rectangle if exists
+            if bounds_container["rectangle"]:
+                try:
+                    m.remove_layer(bounds_container["rectangle"])
+                except Exception:
+                    pass
+
+            # Add visual rectangle
+            rectangle = ipyleaflet.Rectangle(
+                bounds=((min_lat, min_lon), (max_lat, max_lon)),
+                color="blue",  # Different color for loaded presets
+                fill_color="blue",
+                fill_opacity=0.1,
+                weight=2,
+            )
+            m.add_layer(rectangle)
+            bounds_container["rectangle"] = rectangle
+
+            # Calculate center and zoom to fit bounds
+            center_lat = (min_lat + max_lat) / 2
+            center_lon = (min_lon + max_lon) / 2
+            m.center = (center_lat, center_lon)
+
+            # Calculate appropriate zoom level based on bounds size
+            lat_diff = max_lat - min_lat
+            lon_diff = max_lon - min_lon
+            max_diff = max(lat_diff, lon_diff)
+
+            # Rough approximation for zoom level
+            if max_diff > 5:
+                zoom = 6
+            elif max_diff > 2:
+                zoom = 7
+            elif max_diff > 1:
+                zoom = 8
+            elif max_diff > 0.5:
+                zoom = 9
+            elif max_diff > 0.25:
+                zoom = 10
+            elif max_diff > 0.1:
+                zoom = 11
+            else:
+                zoom = 12
+
+            m.zoom = zoom
+
+            # Update status
+            status_label.value = (
+                f"<b style='color: blue;'>📦 Preset loaded!</b><br>Bounds: ({min_lon:.3f}, {min_lat:.3f}, {max_lon:.3f}, {max_lat:.3f})"
+            )
+
+    # Store the function in bounds_container for external use
+    bounds_container["load_preset"] = load_and_display_preset
+
     # Create the widget layout
     map_widget = widgets.VBox([instructions, search_widget, m, status_label])
 
