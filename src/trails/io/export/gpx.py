@@ -283,7 +283,7 @@ def export_to_gpx_single_track(
     if "special_hiking_trail_type" in export_gdf.columns:
         trail_types = export_gdf["special_hiking_trail_type"].value_counts().head(3)
         if not trail_types.empty:
-            desc_parts.append("Types: " + ", ".join(f"{k} ({v})" for k, v in trail_types.items() if pd.notna(k)))
+            desc_parts.append("Types: " + ", ".join(f"{str(k)} ({v})" for k, v in trail_types.items() if k is not None))
 
     etree.SubElement(trk, "desc").text = " | ".join(desc_parts)
 
@@ -504,7 +504,7 @@ def find_connected_segments(
     connected = np.zeros((n_segments, n_segments), dtype=bool)
 
     # Extract endpoints for each segment
-    endpoints = []
+    endpoints: list[tuple[Point, Point] | tuple[None, None]] = []
     for _idx, row in working_segments.iterrows():
         geom = row.geometry
         if geom and not geom.is_empty:
@@ -527,19 +527,21 @@ def find_connected_segments(
 
     # Check connectivity between all pairs
     for i in range(n_segments):
-        if endpoints[i][0] is None:
+        ep_i = endpoints[i]
+        if ep_i[0] is None or ep_i[1] is None:
             continue
 
         for j in range(i + 1, n_segments):
-            if endpoints[j][0] is None:
+            ep_j = endpoints[j]
+            if ep_j[0] is None or ep_j[1] is None:
                 continue
 
             # Check all endpoint combinations
             distances = [
-                endpoints[i][0].distance(endpoints[j][0]),  # start-start
-                endpoints[i][0].distance(endpoints[j][1]),  # start-end
-                endpoints[i][1].distance(endpoints[j][0]),  # end-start
-                endpoints[i][1].distance(endpoints[j][1]),  # end-end
+                ep_i[0].distance(ep_j[0]),  # start-start
+                ep_i[0].distance(ep_j[1]),  # start-end
+                ep_i[1].distance(ep_j[0]),  # end-start
+                ep_i[1].distance(ep_j[1]),  # end-end
             ]
 
             if min(distances) <= tolerance_m:
