@@ -76,7 +76,9 @@ pipeline/
 │   ├── osm-transformation.md      # Complete OSM guide
 │   ├── graphhopper-build-step.md  # GraphHopper build design
 │   ├── release-step.md            # GitHub Releases design
-│   └── dtm-integration.md         # Elevation data integration
+│   ├── dtm-integration.md         # Elevation data integration
+│   ├── dtm-feasibility-analysis.md # DTM10 vs SRTM cost/benefit
+│   └── land-cover-integration.md  # Land cover design
 └── README.md                 # This file
 ```
 
@@ -155,16 +157,32 @@ The pipeline includes elevation data via SRTM (~30m resolution):
 - Global coverage (works for all of Norway and beyond)
 - Optional: Can be upgraded to Norwegian DTM10 (10m) for higher quality
 
-See `docs/dtm-integration.md` for DTM upgrade guide.
+See `docs/dtm-integration.md` for DTM upgrade guide and `docs/dtm-feasibility-analysis.md` for cost/benefit analysis.
+
+### Land Cover (Planned)
+
+Land cover integration enables terrain-aware routing:
+- **Phase 1** (Planned): Leverage existing OSM tags (`natural=wood`, `surface=*`)
+  - Zero additional data - uses existing OSM content
+  - Custom routing models for forest preference, seasonal routing
+  - Implementation time: 1-2 hours (configuration only)
+- **Phase 2** (Future): ESA WorldCover 10m data
+  - Comprehensive global land cover at 10m resolution
+  - 11 land cover classes (tree cover, grassland, etc.)
+  - Free and open (CC BY 4.0 license)
+  - ~2-3 GB download (feasible in GitHub Actions)
+
+See `docs/land-cover-integration.md` for detailed design.
 
 ## Future Enhancements
 
-- [ ] Norwegian DTM10 integration (10m resolution)
-- [ ] Land cover (AR5) integration
+- [ ] Land cover Phase 1: OSM-based custom routing models
+- [ ] Land cover Phase 2: ESA WorldCover 10m integration
+- [ ] Norwegian DTM10 integration (10m resolution, requires self-hosted runner)
 - [ ] Multi-country support (Sweden, Denmark, Finland)
 - [ ] Incremental updates (delta builds)
 - [ ] GraphHopper routing validation tests
-- [ ] Custom routing profiles (winter, family, etc.)
+- [ ] Advanced routing profiles (winter safety, scenic variety, etc.)
 
 ## License
 
