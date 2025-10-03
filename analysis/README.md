@@ -30,9 +30,10 @@ analysis/
 ├── notebooks/          # Jupyter notebooks
 ├── scripts/            # Analysis scripts
 ├── docs/               # Notebook descriptions
-├── .cache/             # Local cache (git-ignored)
 └── README.md           # This file
 ```
+
+**Note**: Cached data is stored in the repository root `.cache/` directory, shared across all components.
 
 ## Note
 
