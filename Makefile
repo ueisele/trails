@@ -53,59 +53,59 @@ check: format-check lint type test
 # Individual check commands
 format:
 	@echo "📝 Formatting code..."
-	uv run ruff format src/ tests/ notebooks/
+	uv run ruff format lib/src/ lib/tests/ analysis/notebooks/
 
 format-check:
 	@echo "🔍 Checking code formatting..."
-	uv run ruff format --check src/ tests/ notebooks/
+	uv run ruff format --check lib/src/ lib/tests/ analysis/notebooks/
 	@echo "✅ Format check passed"
 
 lint:
 	@echo "🔍 Checking code style..."
-	uv run ruff check src/ tests/ notebooks/
+	uv run ruff check lib/src/ lib/tests/ analysis/notebooks/
 	@echo "✅ Lint check passed"
 
 lint-fix:
 	@echo "🔧 Auto-fixing lint issues..."
-	uv run ruff check src/ tests/ notebooks/ --fix
+	uv run ruff check lib/src/ lib/tests/ analysis/notebooks/ --fix
 	@echo "✅ Lint issues fixed"
 
 test:
 	@echo "🧪 Running tests (excluding integration)..."
-	uv run pytest tests/ -v -m "not integration"
+	uv run pytest lib/tests/ -v -m "not integration"
 	@echo "✅ Tests passed"
 
 test-all:
 	@echo "🧪 Running all tests (including integration)..."
-	uv run pytest tests/ -v
+	uv run pytest lib/tests/ -v
 	@echo "✅ All tests passed"
 
 test-integration:
 	@echo "🌐 Running integration tests (requires network)..."
 	@echo "⚠️  This will download ~150MB from Geonorge and may take several minutes"
-	uv run pytest tests/ -v -m integration
+	uv run pytest lib/tests/ -v -m integration
 	@echo "✅ Integration tests passed"
 
 test-cov:
 	@echo "📊 Running tests with coverage (excluding integration)..."
-	uv run pytest tests/ -v -m "not integration" --cov=trails --cov-report=term-missing
+	uv run pytest lib/tests/ -v -m "not integration" --cov=trails --cov-report=term-missing
 	@echo "✅ Coverage report generated"
 
 test-cov-all:
 	@echo "📊 Running all tests with coverage (including integration)..."
-	uv run pytest tests/ -v --cov=trails --cov-report=term-missing
+	uv run pytest lib/tests/ -v --cov=trails --cov-report=term-missing
 	@echo "✅ Full coverage report generated"
 
 test-cov-html:
 	@echo "📊 Generating HTML coverage report..."
-	uv run pytest tests/ -v -m "not integration" --cov=trails --cov-report=html --cov-report=term
+	uv run pytest lib/tests/ -v -m "not integration" --cov=trails --cov-report=html --cov-report=term
 	@echo "✅ HTML coverage report generated in htmlcov/"
 	@echo "   Open htmlcov/index.html in your browser to view"
 
 type:
 	@echo "🔎 Type checking..."
-	uv run mypy src/ tests/fixture_generators/
-	uv run nbqa mypy notebooks/
+	uv run mypy lib/src/ lib/tests/fixture_generators/
+	uv run nbqa mypy analysis/notebooks/
 	@echo "✅ Type check passed"
 
 # Utility commands
@@ -129,7 +129,7 @@ notebook:
 
 notebook-clean:
 	@echo "🧹 Clearing notebook outputs..."
-	@find notebooks -name "*.ipynb" -exec uv run nbstripout {} \;
+	@find analysis/notebooks -name "*.ipynb" -exec uv run nbstripout {} \;
 	@echo "✅ Notebook outputs cleared"
 
 cache-clean:
@@ -196,9 +196,9 @@ fixtures:  ## Generate/update test fixtures from real data sources
 	@echo "=================================="
 	@# Run fixture generation modules
 	@echo "→ Generating Geonorge Turrutebasen fixtures..."
-	uv run python -m tests.fixture_generators.trails.io.sources.geonorge
+	uv run python -m lib.tests.fixture_generators.trails.io.sources.geonorge
 	@# Add more fixture generators here as they are created:
-	@# uv run python -m tests.fixture_generators.trails.io.sources.other_source
+	@# uv run python -m lib.tests.fixture_generators.trails.io.sources.other_source
 	@echo ""
 	@echo "✓ All fixtures generated successfully!"
 
@@ -207,13 +207,13 @@ fixtures-info:  ## Show information about test fixtures
 	@echo "===================="
 	@echo ""
 	@echo "Expected fixture files:"
-	@echo "  • tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip"
-	@echo "  • tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml"
+	@echo "  • lib/tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip"
+	@echo "  • lib/tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml"
 	@echo ""
 	@echo "Current status:"
 	@for file in \
-		tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip \
-		tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml; do \
+		lib/tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip \
+		lib/tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml; do \
 		if [ -f "$$file" ]; then \
 			size=$$(du -h "$$file" | cut -f1); \
 			echo "  ✓ $$file ($$size)"; \
@@ -226,7 +226,7 @@ fixtures-info:  ## Show information about test fixtures
 
 fixtures-clean:  ## Remove all test fixtures
 	@echo "🗑️  Removing test fixtures..."
-	rm -rf tests/fixtures/trails/io/sources/geonorge/
+	rm -rf lib/tests/fixtures/trails/io/sources/geonorge/
 	@echo "✅ Test fixtures removed."
 
 # Quick commands for development

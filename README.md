@@ -6,16 +6,25 @@ A Python project for analyzing hiking trail data using Jupyter notebooks, built 
 
 ```
 trails/
-├── src/trails/          # Python package with reusable modules
-│   ├── io/             # Data input/output utilities
-│   ├── processing/     # Data processing functions
-│   ├── analysis/       # Analysis and metrics
-│   ├── visualization/  # Plotting and mapping
-│   └── utils/          # Utility functions
-├── notebooks/          # Jupyter notebooks for analysis
-├── tests/             # Unit tests
-└── .cache/            # Local cache for data (git-ignored)
+├── lib/                 # Shared library (reusable Python code)
+│   ├── src/trails/     # Python package
+│   ├── tests/          # Library tests
+│   └── docs/           # Library documentation
+├── pipeline/           # GraphHopper data pipeline (future)
+│   ├── src/            # Pipeline code
+│   ├── tests/          # Pipeline tests
+│   ├── scripts/        # Helper scripts
+│   └── config/         # Configuration files
+├── analysis/           # Exploratory analysis
+│   ├── notebooks/      # Jupyter notebooks
+│   ├── scripts/        # Analysis scripts
+│   └── .cache/         # Local cache (git-ignored)
+└── app/                # Trail application (future)
+    ├── backend/        # GraphHopper server
+    └── frontend/       # Web interface
 ```
+
+Each component is self-contained with its own source code, tests, and documentation.
 
 ## Setup
 
@@ -70,23 +79,24 @@ make notebook
    - Select "uv" from the environment types
    - PyCharm will configure everything automatically
 4. Mark directories as source roots:
-   - Right-click on the `src` folder → "Mark Directory as" → "Sources Root"
-   - Right-click on the `tests` folder → "Mark Directory as" → "Test Sources Root"
+   - Right-click on `lib/src` → "Mark Directory as" → "Sources Root"
+   - Right-click on `lib/tests` → "Mark Directory as" → "Test Sources Root"
 
 This tells PyCharm's static analyzer where to find your package code and tests.
 
 ### Development
 
-The project follows a modular approach:
-- Reusable code lives in `src/trails/`
-- Notebooks import from the package and focus on analysis
-- Each notebook is self-contained and downloads its own data
+The project follows a component-based structure:
+- **lib/** - Reusable Python library (`trails` package)
+- **pipeline/** - GraphHopper data processing pipeline (planned)
+- **analysis/** - Exploratory notebooks and scripts
+- **app/** - Deployed application (planned)
 
 Example notebook usage:
 ```python
 from trails.utils.hello import hello_trails
-from trails.analysis import metrics  # Future module
-from trails.visualization import maps  # Future module
+from trails.io.sources.geonorge import GeonorgeSource
+from trails.analysis import describe
 
 # Your analysis code here
 ```
@@ -111,12 +121,12 @@ make test-integration
 
 Run a specific test module:
 ```bash
-uv run pytest tests/trails/io/sources/test_geonorge.py -v
+uv run pytest lib/tests/trails/io/sources/test_geonorge.py -v
 ```
 
 Run specific test classes or functions:
 ```bash
-uv run pytest tests/trails/io/sources/test_geonorge.py::TestTrailData -v
+uv run pytest lib/tests/trails/io/sources/test_geonorge.py::TestTrailData -v
 ```
 
 #### Test Coverage
@@ -192,9 +202,12 @@ make l           # Alias for lint
 
 ## Getting Started
 
-1. Open `notebooks/01_hello_world.ipynb` to verify your setup
-2. The notebook will test that all dependencies are working
-3. Start creating your own analysis notebooks!
+1. Explore `analysis/notebooks/01_data_exploration.ipynb` for trail data analysis
+2. Check out component READMEs for more details:
+   - `lib/README.md` - Library usage and API
+   - `analysis/README.md` - Analysis notebooks
+   - `pipeline/README.md` - Data pipeline (coming soon)
+3. Start creating your own analysis notebooks in `analysis/notebooks/`!
 
 ## License
 
