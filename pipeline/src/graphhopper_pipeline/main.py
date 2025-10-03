@@ -7,7 +7,7 @@ from pathlib import Path
 from trails.pipeline import PipelineContext
 
 from graphhopper_pipeline.config import load_country_config, load_pipeline_config
-from graphhopper_pipeline.steps import FetchTrailsStep, TransformToOSMStep, ValidateTrailDataStep
+from graphhopper_pipeline.steps import BuildGraphHopperStep, FetchTrailsStep, TransformToOSMStep, ValidateTrailDataStep
 
 
 def main() -> int:
@@ -150,14 +150,47 @@ def main() -> int:
     print(f"   Output file: {transform_result.output}")
     print()
 
-    # TODO: Add more pipeline steps here
-    # - Build GraphHopper graph
-    # - Create release
+    # Store transform output
+    transform_output = transform_result.output
+    if transform_output is None:
+        print("❌ Transform returned no output file")
+        return 1
+
+    # Execute build step
+    print("Step 4: Build GraphHopper graph")
+    print("-" * 60)
+
+    build_step = BuildGraphHopperStep(
+        country_code=args.country,
+        graphhopper_version=pipeline_config.graphhopper_version,
+    )
+
+    build_result = build_step.execute(context, transform_output)
+
+    if build_result.failed:
+        print(f"❌ Build failed: {build_result.error}")
+        return 1
+
+    print(f"✅ Build succeeded in {build_result.duration_seconds:.1f}s")
+    print(f"   Graph size: {build_result.metadata.get('graph_size_mb', 0):.1f} MB")
+    print(f"   Nodes: {build_result.metadata.get('node_count', 0):,}")
+    print(f"   Edges: {build_result.metadata.get('edge_count', 0):,}")
+    if "import_time_seconds" in build_result.metadata:
+        print(f"   Import time: {build_result.metadata['import_time_seconds']:.1f}s")
+    print(f"   Graph directory: {build_result.output}")
+    print()
+
+    # TODO: Add release step
+    # - Package graph and OSM files
+    # - Create GitHub release
+    # - Upload artifacts
 
     print("=" * 60)
     print("Pipeline execution completed successfully!")
-    print(f"\nGenerated OSM file: {transform_result.output}")
-    print("\nNote: GraphHopper build and release steps not yet implemented")
+    print("\nGenerated files:")
+    print(f"  - OSM: {transform_output}")
+    print(f"  - Graph: {build_result.output}")
+    print("\nNote: Release step not yet implemented")
 
     return 0
 

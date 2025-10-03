@@ -43,7 +43,7 @@ The pipeline runs automatically:
 | Fetch | ✅ Implemented | Downloads from Geonorge with caching |
 | Validate | ✅ Implemented | Quality checks (geometry, bounds, etc.) |
 | Transform | ✅ Implemented | OSM conversion with attribute mapping & inference |
-| Build | ⏳ Planned | GraphHopper graph generation |
+| Build | ✅ Implemented | GraphHopper graph generation via Java CLI |
 | Release | ⏳ Planned | GitHub Releases automation |
 
 ## Structure
@@ -57,26 +57,29 @@ pipeline/
 │       └── steps/            # Pipeline steps
 │           ├── fetch.py      # ✅ Data fetching
 │           ├── validate.py   # ✅ Quality checks
-│           └── transform.py  # ✅ OSM conversion
+│           ├── transform.py  # ✅ OSM conversion
+│           └── build.py      # ✅ Graph building
 ├── config/                   # TOML configuration
 │   ├── pipeline.toml         # Main settings
 │   └── countries/
 │       └── no.toml           # Norway config
-├── tests/                    # Unit tests (57 passing)
+├── tests/                    # Unit tests (72 passing)
 │   ├── test_config.py
 │   └── steps/
 │       ├── test_fetch.py
 │       ├── test_validate.py
-│       └── test_transform.py
+│       ├── test_transform.py
+│       └── test_build.py
 ├── docs/                     # Documentation
-│   └── osm-transformation.md # Complete OSM guide
+│   ├── osm-transformation.md      # Complete OSM guide
+│   └── graphhopper-build-step.md  # GraphHopper build design
 └── README.md                 # This file
 ```
 
 ## Testing
 
 ```bash
-# All tests (38 passing)
+# All tests (72 passing)
 cd pipeline
 uv run pytest tests/ -v
 
@@ -140,12 +143,12 @@ uv run ruff check src/ && uv run ruff format src/ && uv run mypy src/ && uv run 
 
 ## Future Enhancements
 
-- [ ] Complete OSM transformation implementation
-- [ ] GraphHopper build integration
+- [ ] GitHub Releases automation
 - [ ] Elevation data (DTM) integration
 - [ ] Land cover (AR5) integration
-- [ ] Multi-country support (Sweden, Denmark)
+- [ ] Multi-country support (Sweden, Denmark, Finland)
 - [ ] Incremental updates
+- [ ] GraphHopper routing validation tests
 
 ## License
 
