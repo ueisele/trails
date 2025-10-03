@@ -44,7 +44,7 @@ The pipeline runs automatically:
 | Validate | ✅ Implemented | Quality checks (geometry, bounds, etc.) |
 | Transform | ✅ Implemented | OSM conversion with attribute mapping & inference |
 | Build | ✅ Implemented | GraphHopper graph generation via Java CLI |
-| Release | ⏳ Planned | GitHub Releases automation |
+| Release | ✅ Implemented | GitHub Releases with artifacts & retention |
 
 ## Structure
 
@@ -58,28 +58,31 @@ pipeline/
 │           ├── fetch.py      # ✅ Data fetching
 │           ├── validate.py   # ✅ Quality checks
 │           ├── transform.py  # ✅ OSM conversion
-│           └── build.py      # ✅ Graph building
+│           ├── build.py      # ✅ Graph building
+│           └── release.py    # ✅ GitHub Releases
 ├── config/                   # TOML configuration
 │   ├── pipeline.toml         # Main settings
 │   └── countries/
 │       └── no.toml           # Norway config
-├── tests/                    # Unit tests (72 passing)
+├── tests/                    # Unit tests (93 passing)
 │   ├── test_config.py
 │   └── steps/
 │       ├── test_fetch.py
 │       ├── test_validate.py
 │       ├── test_transform.py
-│       └── test_build.py
+│       ├── test_build.py
+│       └── test_release.py
 ├── docs/                     # Documentation
 │   ├── osm-transformation.md      # Complete OSM guide
-│   └── graphhopper-build-step.md  # GraphHopper build design
+│   ├── graphhopper-build-step.md  # GraphHopper build design
+│   └── release-step.md            # GitHub Releases design
 └── README.md                 # This file
 ```
 
 ## Testing
 
 ```bash
-# All tests (72 passing)
+# All tests (93 passing)
 cd pipeline
 uv run pytest tests/ -v
 
@@ -143,12 +146,12 @@ uv run ruff check src/ && uv run ruff format src/ && uv run mypy src/ && uv run 
 
 ## Future Enhancements
 
-- [ ] GitHub Releases automation
 - [ ] Elevation data (DTM) integration
 - [ ] Land cover (AR5) integration
 - [ ] Multi-country support (Sweden, Denmark, Finland)
-- [ ] Incremental updates
+- [ ] Incremental updates (delta builds)
 - [ ] GraphHopper routing validation tests
+- [ ] Custom routing profiles (winter, family, etc.)
 
 ## License
 

@@ -4,10 +4,17 @@ import argparse
 import sys
 from pathlib import Path
 
-from trails.pipeline import PipelineContext
+from trails.pipeline import PipelineContext, StepStatus
 
 from graphhopper_pipeline.config import load_country_config, load_pipeline_config
-from graphhopper_pipeline.steps import BuildGraphHopperStep, FetchTrailsStep, TransformToOSMStep, ValidateTrailDataStep
+from graphhopper_pipeline.steps import (
+    BuildGraphHopperStep,
+    CreateReleaseStep,
+    FetchTrailsStep,
+    ReleaseArtifacts,
+    TransformToOSMStep,
+    ValidateTrailDataStep,
+)
 
 
 def main() -> int:
@@ -180,17 +187,54 @@ def main() -> int:
     print(f"   Graph directory: {build_result.output}")
     print()
 
-    # TODO: Add release step
-    # - Package graph and OSM files
-    # - Create GitHub release
-    # - Upload artifacts
+    # Store build output
+    build_output = build_result.output
+    if build_output is None:
+        print("❌ Build returned no output directory")
+        return 1
+
+    # Execute release step
+    print("Step 5: Create GitHub Release")
+    print("-" * 60)
+
+    # Prepare release artifacts
+    release_artifacts = ReleaseArtifacts(
+        osm_file=transform_output,
+        graph_dir=build_output,
+        build_stats={
+            **result.metadata,  # Fetch metadata (trail_count, version, etc.)
+            **transform_result.metadata,  # Transform metadata (way_count, etc.)
+            **build_result.metadata,  # Build metadata (node_count, edge_count, etc.)
+        },
+    )
+
+    release_step = CreateReleaseStep(
+        country_code=args.country,
+        retention_count=pipeline_config.retention_count,
+    )
+
+    release_result = release_step.execute(context, release_artifacts)
+
+    if release_result.failed:
+        print(f"❌ Release failed: {release_result.error}")
+        return 1
+
+    if release_result.status == StepStatus.SKIPPED:
+        print(f"⏭️  Release skipped: {release_result.metadata.get('reason', 'Unknown reason')}")
+    else:
+        print(f"✅ Release succeeded in {release_result.duration_seconds:.1f}s")
+        print(f"   Version: {release_result.metadata.get('version', 'unknown')}")
+        print(f"   Release URL: {release_result.output}")
+        print(f"   Assets: {release_result.metadata.get('asset_count', 0)} files")
+    print()
 
     print("=" * 60)
     print("Pipeline execution completed successfully!")
     print("\nGenerated files:")
     print(f"  - OSM: {transform_output}")
-    print(f"  - Graph: {build_result.output}")
-    print("\nNote: Release step not yet implemented")
+    print(f"  - Graph: {build_output}")
+    if release_result.status != StepStatus.SKIPPED and release_result.output:
+        print(f"  - Release: {release_result.output}")
 
     return 0
 
