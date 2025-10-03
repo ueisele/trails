@@ -1,0 +1,82 @@
+# Norway-specific configuration
+
+[country]
+name = "Norway"
+code = "NO"
+crs = "EPSG:25833"  # UTM Zone 33N (Norway)
+
+[country.bounds]
+# Expected bounding box for Norway trails (EPSG:4326)
+min_lon = 4.0
+max_lon = 32.0
+min_lat = 57.0
+max_lat = 72.0
+
+[data_sources.turrutebasen]
+# Norwegian hiking trails from Kartverket
+provider = "Geonorge"
+dataset_id = "e29e0d6f-6648-476d-9732-e3e37ab85bc4"
+dataset_name = "Turkart"
+atom_feed_url = "https://nedlasting.geonorge.no/geonorge/Forvaltning/Turvei/GML/Metadata_Turkart_GML.xml"
+update_schedule = "Monday nights"  # Geonorge update pattern
+
+[data_sources.elevation]
+# Digital Terrain Model (DTM)
+provider = "Geonorge"
+dataset_id = "dtm-10m"
+resolution_meters = 10
+format = "GeoTIFF"
+
+[data_sources.land_cover]
+# AR5 Land Cover
+provider = "Geonorge"
+dataset_id = "ar5"
+format = "GeoPackage"
+
+[osm_mapping]
+# How to map Turrutebasen attributes to OSM tags
+
+[osm_mapping.essential]
+# Tier 1 - Essential attributes (high completeness)
+objtype = "highway"                    # 100% complete
+rutefolger = "highway_refinement"      # 94% complete
+merking = "trail_marking"              # 100% complete
+rutenavn = "name"                      # 95.4% complete
+rutenummer = "ref"                     # 100% complete
+
+[osm_mapping.recommended]
+# Tier 2 - Recommended attributes (with inference)
+gradering = "sac_scale"                # 36.2% → infer from rutefolger
+rutebetydning = "importance"           # 29.5%
+vedlikeholdsansvarlig = "operator"     # 57.2%
+
+[osm_mapping.optional]
+# Tier 3 - Nice to have
+rutetype = "trail_type"                # 3.5%
+sesong = "seasonal"                    # 100%
+belysning = "lit"                      # 100%
+trafikkbelastning = "trail_visibility" # 13.4%
+noyaktighet = "accuracy"               # 100%
+oppdateringsdato = "check_date"        # 100%
+
+[osm_mapping.metadata]
+# Always include
+lokalid = "ref:geonorge"               # 100% - unique ID
+opphav = "source"                      # 100%
+
+[inference]
+# Rules for inferring missing attributes
+
+[inference.gradering]
+# Infer difficulty from rutefolger
+"ST" = "hiking"      # Sti (Path) → easy hiking
+"TI" = "hiking"      # Tilrettelagt (Adapted) → easy
+"VE" = "mountain_hiking"  # Veg (Road) → moderate
+"LE" = "demanding_mountain_hiking"  # Leden (Cairned) → challenging
+
+[inference.surface]
+# Infer surface from rutefolger
+"ST" = "ground"      # Path
+"TI" = "paved"       # Adapted trail
+"VE" = "unpaved"     # Road/track
+"LE" = "rock"        # Cairned route

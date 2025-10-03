@@ -1,0 +1,64 @@
+# GraphHopper Pipeline Configuration
+# Main pipeline settings
+
+[pipeline]
+name = "graphhopper-trails-pipeline"
+version = "1.0.0"
+
+[pipeline.schedule]
+# Saturday 6 AM UTC (after Geonorge Monday night updates)
+cron = "0 6 * * 6"
+timezone = "UTC"
+
+[pipeline.storage]
+# Where to store outputs
+output_dir = "output"
+work_dir = "work"
+cache_dir = ".cache"
+
+[pipeline.release]
+# GitHub Release settings
+retention_count = 2  # Keep last 2 releases
+name_format = "v{date}-{source}-{version}"  # e.g., v2025-10-03-geonorge-20251001
+
+[pipeline.validation]
+# Quality checks
+max_trail_count_drop_percent = 20.0
+check_bounding_box = true
+check_unique_ids = true
+check_geometry_validity = true
+check_routing = true
+
+[pipeline.retry]
+# Retry settings for network operations
+max_attempts = 5
+initial_backoff_minutes = 5
+backoff_multiplier = 2.0
+max_backoff_minutes = 60
+
+[graphhopper]
+# GraphHopper configuration
+version = "8.0"  # GraphHopper version to use
+profiles = ["hiking"]  # Only hiking for MVP
+
+[graphhopper.build]
+# Build settings
+graph_location = "graphhopper-data"
+datareader_file = "trails.osm.pbf"
+import_osm = true
+
+[graphhopper.routing]
+# Test routes for validation
+[[graphhopper.routing.test_routes]]
+name = "Oslo-Frognerseteren"
+description = "Popular Oslo hiking trail"
+start = [59.9139, 10.7522]  # Oslo
+end = [59.9850, 10.6690]     # Frognerseteren
+max_distance_km = 15.0
+
+[[graphhopper.routing.test_routes]]
+name = "Preikestolen"
+description = "Famous cliff hike in Rogaland"
+start = [58.9863, 6.1900]    # Preikestolen parking
+end = [58.9865, 6.1898]      # Preikestolen cliff
+max_distance_km = 8.0
