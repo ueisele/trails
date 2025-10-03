@@ -220,9 +220,11 @@ class BuildGraphHopperStep(PipelineStep[Path, Path]):
     foot_access, sac_scale, trail_visibility,
     operator, surface, smoothness, width
 
-  # Elevation data (SRTM fallback)
+  # Elevation data (SRTM ~30m resolution)
   graph.elevation.provider: srtm
   graph.elevation.cache_dir: {elevation_cache}
+  graph.elevation.interpolate: bilinear
+  graph.elevation.calc_mean_elevation: true
 
   # Import settings - ignore highways
   import.osm.ignored_highways: |

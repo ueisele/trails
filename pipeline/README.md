@@ -8,7 +8,7 @@ This pipeline:
 1. **Fetches** trail data from Geonorge (Kartverket Turrutebasen)
 2. **Validates** data quality (geometry, bounds, completeness)
 3. **Transforms** Turrutebasen data to OSM PBF format
-4. **Builds** GraphHopper routing graph
+4. **Builds** GraphHopper routing graph with elevation data (SRTM ~30m)
 5. **Releases** packaged data on GitHub
 
 Runs weekly via GitHub Actions, but only creates releases when data changes.
@@ -43,7 +43,7 @@ The pipeline runs automatically:
 | Fetch | ✅ Implemented | Downloads from Geonorge with caching |
 | Validate | ✅ Implemented | Quality checks (geometry, bounds, etc.) |
 | Transform | ✅ Implemented | OSM conversion with attribute mapping & inference |
-| Build | ✅ Implemented | GraphHopper graph generation via Java CLI |
+| Build | ✅ Implemented | GraphHopper graph with elevation (SRTM ~30m) |
 | Release | ✅ Implemented | GitHub Releases with artifacts & retention |
 
 ## Structure
@@ -75,7 +75,8 @@ pipeline/
 ├── docs/                     # Documentation
 │   ├── osm-transformation.md      # Complete OSM guide
 │   ├── graphhopper-build-step.md  # GraphHopper build design
-│   └── release-step.md            # GitHub Releases design
+│   ├── release-step.md            # GitHub Releases design
+│   └── dtm-integration.md         # Elevation data integration
 └── README.md                 # This file
 ```
 
@@ -144,9 +145,21 @@ uv run ruff check src/ && uv run ruff format src/ && uv run mypy src/ && uv run 
   - Builds GraphHopper graph
   - Creates GitHub Release
 
+## Features
+
+### Elevation Data
+
+The pipeline includes elevation data via SRTM (~30m resolution):
+- Automatic download and caching by GraphHopper
+- Bilinear interpolation for smooth elevation profiles
+- Global coverage (works for all of Norway and beyond)
+- Optional: Can be upgraded to Norwegian DTM10 (10m) for higher quality
+
+See `docs/dtm-integration.md` for DTM upgrade guide.
+
 ## Future Enhancements
 
-- [ ] Elevation data (DTM) integration
+- [ ] Norwegian DTM10 integration (10m resolution)
 - [ ] Land cover (AR5) integration
 - [ ] Multi-country support (Sweden, Denmark, Finland)
 - [ ] Incremental updates (delta builds)

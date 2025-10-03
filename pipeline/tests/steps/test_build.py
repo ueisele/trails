@@ -125,6 +125,11 @@ def test_generate_config(mock_context: PipelineContext, sample_osm_file: Path):
     assert "foot_access" in content
     assert "sac_scale" in content
 
+    # Verify elevation configuration
+    assert "graph.elevation.provider: srtm" in content
+    assert "graph.elevation.cache_dir:" in content
+    assert "graph.elevation.interpolate: bilinear" in content
+
 
 def test_parse_build_output():
     """Test parsing GraphHopper build output."""
