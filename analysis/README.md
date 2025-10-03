@@ -36,11 +36,11 @@ analysis/
 
 ## Note
 
-This is an exploratory workspace. Code here can be messy and experimental. Production code belongs in `lib/src/trails/`.
+This is an exploratory workspace. Code here can be messy and experimental. Production code belongs in `libs/src/trails/`.
 
 ## Exporting to Production
 
 When analysis code is mature and reusable:
-1. Move it to `lib/src/trails/`
-2. Add tests in `lib/tests/`
+1. Move it to `libs/src/trails/`
+2. Add tests in `libs/tests/`
 3. Import in notebooks: `from trails.analysis import your_function`

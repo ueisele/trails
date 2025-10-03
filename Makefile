@@ -53,58 +53,58 @@ check: format-check lint type test
 # Individual check commands
 format:
 	@echo "📝 Formatting code..."
-	uv run ruff format lib/src/ lib/tests/ analysis/notebooks/
+	uv run ruff format libs/src/ libs/tests/ analysis/notebooks/
 
 format-check:
 	@echo "🔍 Checking code formatting..."
-	uv run ruff format --check lib/src/ lib/tests/ analysis/notebooks/
+	uv run ruff format --check libs/src/ libs/tests/ analysis/notebooks/
 	@echo "✅ Format check passed"
 
 lint:
 	@echo "🔍 Checking code style..."
-	uv run ruff check lib/src/ lib/tests/ analysis/notebooks/
+	uv run ruff check libs/src/ libs/tests/ analysis/notebooks/
 	@echo "✅ Lint check passed"
 
 lint-fix:
 	@echo "🔧 Auto-fixing lint issues..."
-	uv run ruff check lib/src/ lib/tests/ analysis/notebooks/ --fix
+	uv run ruff check libs/src/ libs/tests/ analysis/notebooks/ --fix
 	@echo "✅ Lint issues fixed"
 
 test:
 	@echo "🧪 Running tests (excluding integration)..."
-	uv run pytest lib/tests/ -v -m "not integration"
+	uv run pytest libs/tests/ -v -m "not integration"
 	@echo "✅ Tests passed"
 
 test-all:
 	@echo "🧪 Running all tests (including integration)..."
-	uv run pytest lib/tests/ -v
+	uv run pytest libs/tests/ -v
 	@echo "✅ All tests passed"
 
 test-integration:
 	@echo "🌐 Running integration tests (requires network)..."
 	@echo "⚠️  This will download ~150MB from Geonorge and may take several minutes"
-	uv run pytest lib/tests/ -v -m integration
+	uv run pytest libs/tests/ -v -m integration
 	@echo "✅ Integration tests passed"
 
 test-cov:
 	@echo "📊 Running tests with coverage (excluding integration)..."
-	uv run pytest lib/tests/ -v -m "not integration" --cov=trails --cov-report=term-missing
+	uv run pytest libs/tests/ -v -m "not integration" --cov=trails --cov-report=term-missing
 	@echo "✅ Coverage report generated"
 
 test-cov-all:
 	@echo "📊 Running all tests with coverage (including integration)..."
-	uv run pytest lib/tests/ -v --cov=trails --cov-report=term-missing
+	uv run pytest libs/tests/ -v --cov=trails --cov-report=term-missing
 	@echo "✅ Full coverage report generated"
 
 test-cov-html:
 	@echo "📊 Generating HTML coverage report..."
-	uv run pytest lib/tests/ -v -m "not integration" --cov=trails --cov-report=html --cov-report=term
+	uv run pytest libs/tests/ -v -m "not integration" --cov=trails --cov-report=html --cov-report=term
 	@echo "✅ HTML coverage report generated in htmlcov/"
 	@echo "   Open htmlcov/index.html in your browser to view"
 
 type:
 	@echo "🔎 Type checking..."
-	uv run mypy lib/src/ lib/tests/fixture_generators/
+	uv run mypy libs/src/ libs/tests/fixture_generators/
 	uv run nbqa mypy analysis/notebooks/
 	@echo "✅ Type check passed"
 
@@ -207,13 +207,13 @@ fixtures-info:  ## Show information about test fixtures
 	@echo "===================="
 	@echo ""
 	@echo "Expected fixture files:"
-	@echo "  • lib/tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip"
-	@echo "  • lib/tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml"
+	@echo "  • libs/tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip"
+	@echo "  • libs/tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml"
 	@echo ""
 	@echo "Current status:"
 	@for file in \
-		lib/tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip \
-		lib/tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml; do \
+		libs/tests/fixtures/trails/io/sources/geonorge/turrutebasen_minimal.zip \
+		libs/tests/fixtures/trails/io/sources/geonorge/turrutebasen_atom_feed.xml; do \
 		if [ -f "$$file" ]; then \
 			size=$$(du -h "$$file" | cut -f1); \
 			echo "  ✓ $$file ($$size)"; \
@@ -226,7 +226,7 @@ fixtures-info:  ## Show information about test fixtures
 
 fixtures-clean:  ## Remove all test fixtures
 	@echo "🗑️  Removing test fixtures..."
-	rm -rf lib/tests/fixtures/trails/io/sources/geonorge/
+	rm -rf libs/tests/fixtures/trails/io/sources/geonorge/
 	@echo "✅ Test fixtures removed."
 
 # Quick commands for development

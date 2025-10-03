@@ -6,7 +6,7 @@ A Python project for analyzing hiking trail data using Jupyter notebooks, built 
 
 ```
 trails/
-├── lib/                 # Shared library (reusable Python code)
+├── libs/                 # Shared library (reusable Python code)
 │   ├── src/trails/     # Python package
 │   ├── tests/          # Library tests
 │   └── docs/           # Library documentation
@@ -79,15 +79,15 @@ make notebook
    - Select "uv" from the environment types
    - PyCharm will configure everything automatically
 4. Mark directories as source roots:
-   - Right-click on `lib/src` → "Mark Directory as" → "Sources Root"
-   - Right-click on `lib/tests` → "Mark Directory as" → "Test Sources Root"
+   - Right-click on `libs/src` → "Mark Directory as" → "Sources Root"
+   - Right-click on `libs/tests` → "Mark Directory as" → "Test Sources Root"
 
 This tells PyCharm's static analyzer where to find your package code and tests.
 
 ### Development
 
 The project follows a component-based structure:
-- **lib/** - Reusable Python library (`trails` package)
+- **libs/** - Reusable Python library (`trails` package)
 - **pipeline/** - GraphHopper data processing pipeline (planned)
 - **analysis/** - Exploratory notebooks and scripts
 - **app/** - Deployed application (planned)
@@ -121,12 +121,12 @@ make test-integration
 
 Run a specific test module:
 ```bash
-uv run pytest lib/tests/trails/io/sources/test_geonorge.py -v
+uv run pytest libs/tests/trails/io/sources/test_geonorge.py -v
 ```
 
 Run specific test classes or functions:
 ```bash
-uv run pytest lib/tests/trails/io/sources/test_geonorge.py::TestTrailData -v
+uv run pytest libs/tests/trails/io/sources/test_geonorge.py::TestTrailData -v
 ```
 
 #### Test Coverage
@@ -204,7 +204,7 @@ make l           # Alias for lint
 
 1. Explore `analysis/notebooks/01_data_exploration.ipynb` for trail data analysis
 2. Check out component READMEs for more details:
-   - `lib/README.md` - Library usage and API
+   - `libs/README.md` - Library usage and API
    - `analysis/README.md` - Analysis notebooks
    - `pipeline/README.md` - Data pipeline (coming soon)
 3. Start creating your own analysis notebooks in `analysis/notebooks/`!

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:georss="http://www.georss.org/georss">
+    <id>test-feed-id</id>
+    <title>Tur- og friluftsruter</title>
+    <subtitle>Test ATOM feed for Turrutebasen</subtitle>
+    <rights>Kartverket</rights>
+    <updated>2025-09-18T05:31:27+02:00</updated>
+    <generator version="1.0">Test Generator</generator>
+
+    <entry>
+        <author>
+            <name>Kartverket</name>
+        </author>
+        <category term="EPSG:25833" scheme="http://www.opengis.net/def/crs/"/>
+        <id>test-entry-id</id>
+        <link rel="alternate"
+              href="https://test.example.com/turrutebasen_minimal.zip"
+              type="application/zip"
+              title="FGDB-format, Landsdekkende"/>
+        <published>2025-09-18T05:31:27+02:00</published>
+        <rights>Kartverket</rights>
+        <title>FGDB-format, Landsdekkende</title>
+        <updated>2025-09-18T05:31:27</updated>
+    </entry>
+</feed>
