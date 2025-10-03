@@ -42,7 +42,7 @@ The pipeline runs automatically:
 |------|--------|-------------|
 | Fetch | ✅ Implemented | Downloads from Geonorge with caching |
 | Validate | ✅ Implemented | Quality checks (geometry, bounds, etc.) |
-| Transform | ⚠️ Documented | OSM conversion (see `docs/osm-transformation.md`) |
+| Transform | ✅ Implemented | OSM conversion with attribute mapping & inference |
 | Build | ⏳ Planned | GraphHopper graph generation |
 | Release | ⏳ Planned | GitHub Releases automation |
 
@@ -57,16 +57,17 @@ pipeline/
 │       └── steps/            # Pipeline steps
 │           ├── fetch.py      # ✅ Data fetching
 │           ├── validate.py   # ✅ Quality checks
-│           └── transform.py  # ⚠️ OSM conversion (stub)
+│           └── transform.py  # ✅ OSM conversion
 ├── config/                   # TOML configuration
 │   ├── pipeline.toml         # Main settings
 │   └── countries/
 │       └── no.toml           # Norway config
-├── tests/                    # Unit tests (38 passing)
+├── tests/                    # Unit tests (57 passing)
 │   ├── test_config.py
 │   └── steps/
 │       ├── test_fetch.py
-│       └── test_validate.py
+│       ├── test_validate.py
+│       └── test_transform.py
 ├── docs/                     # Documentation
 │   └── osm-transformation.md # Complete OSM guide
 └── README.md                 # This file

@@ -4,9 +4,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from graphhopper_pipeline.config import load_country_config, load_pipeline_config
-from graphhopper_pipeline.steps import FetchTrailsStep
 from trails.pipeline import PipelineContext
+
+from graphhopper_pipeline.config import load_country_config, load_pipeline_config
+from graphhopper_pipeline.steps import FetchTrailsStep, TransformToOSMStep, ValidateTrailDataStep
 
 
 def main() -> int:
@@ -95,15 +96,68 @@ def main() -> int:
     print(f"   Version: {result.metadata.get('version', 'unknown')}")
     print()
 
+    # Store fetch output
+    fetch_output = result.output
+    if fetch_output is None:
+        print("❌ Fetch returned no data")
+        return 1
+
+    # Execute validate step
+    print("Step 2: Validate trail data")
+    print("-" * 60)
+
+    validate_step = ValidateTrailDataStep(
+        country_code=args.country,
+        expected_trail_count=country_config.expected_trail_count,
+    )
+
+    validate_result = validate_step.execute(context, fetch_output)
+
+    if validate_result.failed:
+        print(f"❌ Validation failed: {validate_result.error}")
+        return 1
+
+    print(f"✅ Validation succeeded in {validate_result.duration_seconds:.1f}s")
+    print(f"   Issues: {validate_result.metadata.get('issues_count', 0)}")
+    print(f"   Warnings: {validate_result.metadata.get('warnings_count', 0)}")
+    if validate_result.metadata.get("warnings"):
+        for warning in validate_result.metadata["warnings"]:
+            print(f"   ⚠️  {warning}")
+    print()
+
+    # Store validated output
+    validated_output = validate_result.output
+    if validated_output is None:
+        print("❌ Validation returned no data")
+        return 1
+
+    # Execute transform step
+    print("Step 3: Transform to OSM")
+    print("-" * 60)
+
+    transform_step = TransformToOSMStep(country_code=args.country)
+
+    transform_result = transform_step.execute(context, validated_output)
+
+    if transform_result.failed:
+        print(f"❌ Transform failed: {transform_result.error}")
+        return 1
+
+    print(f"✅ Transform succeeded in {transform_result.duration_seconds:.1f}s")
+    print(f"   Input trails: {transform_result.metadata.get('input_trail_count', 0):,}")
+    print(f"   OSM ways generated: {transform_result.metadata.get('way_count', 0):,}")
+    print(f"   Output format: {transform_result.metadata.get('output_format', 'unknown')}")
+    print(f"   Output file: {transform_result.output}")
+    print()
+
     # TODO: Add more pipeline steps here
-    # - Transform to OSM
-    # - Validate data
     # - Build GraphHopper graph
     # - Create release
 
     print("=" * 60)
     print("Pipeline execution completed successfully!")
-    print("\nNote: Additional steps (transform, build, release) not yet implemented")
+    print(f"\nGenerated OSM file: {transform_result.output}")
+    print("\nNote: GraphHopper build and release steps not yet implemented")
 
     return 0
 

@@ -148,7 +148,7 @@ class ValidateTrailDataStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], 
         completed_at = datetime.now()
         duration = (completed_at - started_at).total_seconds()
 
-        metadata = {
+        metadata: dict[str, int | list[str]] = {
             "trail_count": len(spatial_gdf),
             "attribute_count": len(attributes_df),
             "invalid_geometries": int(invalid_geoms),
