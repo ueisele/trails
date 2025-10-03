@@ -1,26 +1,32 @@
-# GraphHopper Data Pipeline
+# GraphHopper Trails Pipeline
 
-Automated pipeline for preparing trail data for GraphHopper routing engine.
+Automated pipeline for building GraphHopper routing graphs from Norwegian trail data (Turrutebasen from Geonorge).
 
 ## Overview
 
 This pipeline:
-1. Fetches trail data from national sources (Geonorge for Norway)
-2. Transforms data to OSM format for GraphHopper
-3. Merges with elevation data (DTM) and land cover (AR5)
-4. Builds GraphHopper routing graphs
-5. Releases graphs to GitHub Releases
+1. **Fetches** trail data from Geonorge (Kartverket Turrutebasen)
+2. **Validates** data quality (geometry, bounds, completeness)
+3. **Transforms** Turrutebasen data to OSM PBF format
+4. **Builds** GraphHopper routing graph
+5. **Releases** packaged data on GitHub
+
+Runs weekly via GitHub Actions, but only creates releases when data changes.
 
 ## Quick Start
 
 ### Local Development
 
 ```bash
-# Run the pipeline locally
-command make pipeline-run-local
+# Install dependencies (from repo root)
+uv sync --all-extras
 
-# Download latest graph
-command make pipeline-download-graph
+# Run pipeline locally
+cd pipeline
+uv run python -m graphhopper_pipeline.main --country NO
+
+# Run with dry-run
+uv run python -m graphhopper_pipeline.main --country NO --dry-run
 ```
 
 ### GitHub Actions
@@ -28,36 +34,118 @@ command make pipeline-download-graph
 The pipeline runs automatically:
 - **Schedule**: Every Saturday at 6:00 AM UTC
 - **Condition**: Only if source data has changed
-- **Manual**: Can be triggered via GitHub Actions UI
+- **Manual trigger**: `gh workflow run pipeline-build.yml -f country=NO`
+
+## Pipeline Status
+
+| Step | Status | Description |
+|------|--------|-------------|
+| Fetch | ✅ Implemented | Downloads from Geonorge with caching |
+| Validate | ✅ Implemented | Quality checks (geometry, bounds, etc.) |
+| Transform | ⚠️ Documented | OSM conversion (see `docs/osm-transformation.md`) |
+| Build | ⏳ Planned | GraphHopper graph generation |
+| Release | ⏳ Planned | GitHub Releases automation |
 
 ## Structure
 
 ```
 pipeline/
-├── src/                       # Pipeline code
+├── src/                       # Pipeline implementation
 │   └── graphhopper_pipeline/
-│       ├── main.py           # Entry point
-│       ├── orchestrator.py   # Pipeline orchestration
-│       ├── steps/            # Pipeline steps
-│       ├── validation/       # Quality checks
-│       └── countries/        # Country-specific configs
+│       ├── main.py           # CLI entry point
+│       ├── config.py         # Configuration loading
+│       └── steps/            # Pipeline steps
+│           ├── fetch.py      # ✅ Data fetching
+│           ├── validate.py   # ✅ Quality checks
+│           └── transform.py  # ⚠️ OSM conversion (stub)
 ├── config/                   # TOML configuration
-├── scripts/                  # Helper scripts
-├── tests/                    # Pipeline tests
-├── docs/                     # Pipeline documentation
+│   ├── pipeline.toml         # Main settings
+│   └── countries/
+│       └── no.toml           # Norway config
+├── tests/                    # Unit tests (38 passing)
+│   ├── test_config.py
+│   └── steps/
+│       ├── test_fetch.py
+│       └── test_validate.py
+├── docs/                     # Documentation
+│   └── osm-transformation.md # Complete OSM guide
 └── README.md                 # This file
 ```
-
-## Configuration
-
-See `config/pipeline.toml` for main configuration and `config/countries/` for country-specific settings.
-
-## Documentation
-
-See `docs/` for detailed setup, usage, and troubleshooting guides.
 
 ## Testing
 
 ```bash
-command make pipeline-test
+# All tests (38 passing)
+cd pipeline
+uv run pytest tests/ -v
+
+# Specific module
+uv run pytest tests/test_config.py -v
+
+# With coverage
+uv run pytest tests/ --cov=src --cov-report=term-missing
 ```
+
+## Configuration
+
+### Pipeline Settings (`config/pipeline.toml`)
+
+- Schedule: Saturday 6 AM UTC
+- Retry logic: 5 attempts with exponential backoff
+- Validation: Max 20% trail count drop allowed
+- Retention: Keep last 2 releases
+
+### Country Settings (`config/countries/no.toml`)
+
+- Data source: Geonorge Turrutebasen
+- CRS: EPSG:25833 (UTM Zone 33N)
+- OSM mappings: 16 trail attributes
+- Inference rules: Difficulty from route type
+
+## Documentation
+
+- `docs/osm-transformation.md` - Complete OSM transformation guide
+  - Data structure and mapping
+  - Inference rules
+  - Implementation steps with code examples
+  - Many-to-one relationship handling
+
+## Development
+
+```bash
+# Lint and format
+uv run ruff check src/ tests/
+uv run ruff format src/ tests/
+
+# Type check
+uv run mypy src/ tests/
+
+# Run all checks
+uv run ruff check src/ && uv run ruff format src/ && uv run mypy src/ && uv run pytest tests/
+```
+
+## CI/CD
+
+- **CI Workflow** (`../.github/workflows/ci.yml`) - Runs on every push/PR
+  - Lints, formats, type checks
+  - Runs all tests
+  - Checks library, pipeline, and notebooks
+
+- **Pipeline Workflow** (`../.github/workflows/pipeline-build.yml`) - Weekly build
+  - Fetches latest data
+  - Transforms to OSM
+  - Builds GraphHopper graph
+  - Creates GitHub Release
+
+## Future Enhancements
+
+- [ ] Complete OSM transformation implementation
+- [ ] GraphHopper build integration
+- [ ] Elevation data (DTM) integration
+- [ ] Land cover (AR5) integration
+- [ ] Multi-country support (Sweden, Denmark)
+- [ ] Incremental updates
+
+## License
+
+MIT License. Data from Kartverket Turrutebasen licensed under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).

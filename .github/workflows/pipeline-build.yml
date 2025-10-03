@@ -1,0 +1,318 @@
+name: GraphHopper Pipeline
+
+on:
+  # Run weekly on Saturday at 6 AM UTC (after Geonorge Monday night updates)
+  schedule:
+    - cron: '0 6 * * 6'
+
+  # Allow manual triggers
+  workflow_dispatch:
+    inputs:
+      country:
+        description: 'Country code to process'
+        required: false
+        default: 'NO'
+      force_rebuild:
+        description: 'Force rebuild even if no changes detected'
+        required: false
+        type: boolean
+        default: false
+
+# Only allow one pipeline run at a time
+concurrency:
+  group: graphhopper-pipeline
+  cancel-in-progress: false
+
+jobs:
+  # Step 1: Fetch trail data
+  fetch:
+    name: Fetch Trail Data
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check.outputs.has_changes }}
+      version: ${{ steps.fetch.outputs.version }}
+      trail_count: ${{ steps.fetch.outputs.trail_count }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Cache data downloads
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: trails-data-${{ github.run_id }}
+          restore-keys: |
+            trails-data-
+
+      - name: Fetch trail data
+        id: fetch
+        working-directory: pipeline
+        run: |
+          uv run python -m graphhopper_pipeline.main \
+            --country ${{ inputs.country || 'NO' }} \
+            --dry-run | tee fetch.log
+
+          # Extract metadata from logs
+          version=$(grep "Version:" fetch.log | cut -d: -f2 | xargs)
+          trail_count=$(grep "Trails:" fetch.log | cut -d: -f2 | xargs)
+
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "trail_count=$trail_count" >> $GITHUB_OUTPUT
+
+      - name: Check for changes
+        id: check
+        run: |
+          # Compare with latest release
+          latest_version=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "none")
+          current_version="${{ steps.fetch.outputs.version }}"
+
+          if [ "$latest_version" = "none" ] || [ "$latest_version" != "$current_version" ] || [ "${{ inputs.force_rebuild }}" = "true" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "✅ Changes detected (latest: $latest_version, current: $current_version)"
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "⏭️  No changes detected"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Upload fetch artifacts
+        if: steps.check.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fetch-results
+          path: |
+            .cache/
+            pipeline/fetch.log
+          retention-days: 1
+
+  # Step 2: Transform to OSM
+  transform:
+    name: Transform to OSM
+    runs-on: ubuntu-latest
+    needs: fetch
+    if: needs.fetch.outputs.has_changes == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Download fetch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: fetch-results
+
+      - name: Install osmium-tool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y osmium-tool
+
+      - name: Transform to OSM
+        working-directory: pipeline
+        run: |
+          # TODO: Implement transformation step
+          echo "⚠️  Transform step not yet implemented"
+          echo "This step will:"
+          echo "  1. Join spatial and attribute data"
+          echo "  2. Map Turrutebasen → OSM tags"
+          echo "  3. Apply inference rules"
+          echo "  4. Generate OSM XML"
+          echo "  5. Convert to PBF"
+
+          # For now, create placeholder
+          mkdir -p work
+          touch work/trails.osm.pbf
+
+      - name: Upload transform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: transform-results
+          path: pipeline/work/trails.osm.pbf
+          retention-days: 1
+
+  # Step 3: Build GraphHopper graph
+  build:
+    name: Build GraphHopper Graph
+    runs-on: ubuntu-latest
+    needs: [fetch, transform]
+    if: needs.fetch.outputs.has_changes == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Download transform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: transform-results
+
+      - name: Download GraphHopper
+        run: |
+          # TODO: Download and build GraphHopper
+          echo "⚠️  Build step not yet implemented"
+          echo "This step will:"
+          echo "  1. Download GraphHopper 8.0"
+          echo "  2. Build routing graph from OSM PBF"
+          echo "  3. Validate routing with test queries"
+
+          # For now, create placeholder
+          mkdir -p graphhopper-data
+          touch graphhopper-data/graph.bin
+
+      - name: Test routing
+        run: |
+          echo "⚠️  Routing validation not yet implemented"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphhopper-graph
+          path: |
+            graphhopper-data/
+            trails.osm.pbf
+          retention-days: 7
+
+  # Step 4: Create GitHub Release
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [fetch, build]
+    if: needs.fetch.outputs.has_changes == 'true'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: graphhopper-graph
+          path: release/
+
+      - name: Prepare release
+        id: prepare
+        run: |
+          version="${{ needs.fetch.outputs.version }}"
+          date=$(date +%Y%m%d)
+          tag="v${date}-geonorge-${version}"
+
+          echo "tag=$tag" >> $GITHUB_OUTPUT
+          echo "date=$date" >> $GITHUB_OUTPUT
+
+          # Compress artifacts
+          cd release
+          tar -czf graphhopper-norway-${date}.tar.gz graphhopper-data/
+          tar -czf trails-norway-${date}.osm.pbf.tar.gz trails.osm.pbf
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.prepare.outputs.tag }}
+          name: Norway Trails - ${{ steps.prepare.outputs.date }}
+          body: |
+            # GraphHopper Routing Data - Norway
+
+            **Data Source**: Kartverket Turrutebasen (Geonorge)
+            **Data Version**: ${{ needs.fetch.outputs.version }}
+            **Build Date**: ${{ steps.prepare.outputs.date }}
+            **Trail Count**: ${{ needs.fetch.outputs.trail_count }}
+
+            ## Files
+
+            - `graphhopper-norway-*.tar.gz` - Pre-built GraphHopper routing graph
+            - `trails-norway-*.osm.pbf.tar.gz` - OSM PBF file (source data)
+
+            ## Usage
+
+            ```bash
+            # Download and extract
+            wget https://github.com/${{ github.repository }}/releases/download/${{ steps.prepare.outputs.tag }}/graphhopper-norway-${{ steps.prepare.outputs.date }}.tar.gz
+            tar -xzf graphhopper-norway-${{ steps.prepare.outputs.date }}.tar.gz
+
+            # Run GraphHopper
+            java -jar graphhopper-web-8.0.jar server config-norway.yml
+            ```
+
+            ## Data Attribution
+
+            Data from Kartverket Turrutebasen, licensed under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+            🤖 Generated with [Claude Code](https://claude.com/claude-code)
+          files: |
+            release/graphhopper-norway-*.tar.gz
+            release/trails-norway-*.osm.pbf.tar.gz
+          draft: false
+          prerelease: false
+
+      - name: Cleanup old releases
+        run: |
+          # Keep only the last 2 releases
+          gh release list --limit 100 --json tagName,createdAt -q '.[2:] | .[].tagName' | \
+            xargs -I {} gh release delete {} --yes || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Summary job
+  summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [fetch, transform, build, release]
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          # GraphHopper Pipeline Results
+
+          ## Status
+
+          | Step | Status |
+          |------|--------|
+          | Fetch | ${{ needs.fetch.result }} |
+          | Transform | ${{ needs.transform.result }} |
+          | Build | ${{ needs.build.result }} |
+          | Release | ${{ needs.release.result }} |
+
+          ## Data Info
+
+          - **Version**: ${{ needs.fetch.outputs.version }}
+          - **Trail Count**: ${{ needs.fetch.outputs.trail_count }}
+          - **Has Changes**: ${{ needs.fetch.outputs.has_changes }}
+
+          EOF
+
+          if [ "${{ needs.release.result }}" = "success" ]; then
+            echo "✅ Pipeline completed successfully!" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.fetch.outputs.has_changes }}" = "false" ]; then
+            echo "⏭️ Skipped - no changes detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Pipeline failed - check logs above" >> $GITHUB_STEP_SUMMARY
+          fi

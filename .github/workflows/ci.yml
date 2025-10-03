@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-libs:
+    name: Test Library
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Lint with ruff
+        run: uv run ruff check libs/src/ libs/tests/
+
+      - name: Format check with ruff
+        run: uv run ruff format --check libs/src/ libs/tests/
+
+      - name: Type check with mypy
+        run: uv run mypy libs/src/ libs/tests/fixture_generators/
+
+      - name: Run tests
+        run: uv run pytest libs/tests/ -v --cov=libs/src --cov-report=term-missing
+
+  test-pipeline:
+    name: Test Pipeline
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pipeline
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: |
+          cd ..
+          uv sync --all-extras
+
+      - name: Lint with ruff
+        run: uv run ruff check src/ tests/
+
+      - name: Format check with ruff
+        run: uv run ruff format --check src/ tests/
+
+      - name: Type check with mypy
+        run: uv run mypy src/ tests/
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
+  test-analysis:
+    name: Test Analysis Notebooks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: analysis
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: |
+          cd ..
+          uv sync --all-extras
+
+      - name: Check notebook formatting
+        run: uv run nbqa ruff notebooks/
+
+      - name: Type check notebooks
+        run: uv run nbqa mypy notebooks/ || true
+
+  all-tests:
+    name: All Tests Passed
+    runs-on: ubuntu-latest
+    needs: [test-libs, test-pipeline, test-analysis]
+    if: always()
+
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.test-libs.result }}" != "success" ] || \
+             [ "${{ needs.test-pipeline.result }}" != "success" ] || \
+             [ "${{ needs.test-analysis.result }}" != "success" ]; then
+            echo "❌ Some tests failed"
+            exit 1
+          else
+            echo "✅ All tests passed"
+          fi
