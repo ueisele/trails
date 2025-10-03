@@ -1,9 +1,22 @@
 """Configuration management for the pipeline."""
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+@dataclass
+class OSMMapping:
+    """Configuration for mapping a Turrutebasen field to OSM tags."""
+
+    turrutebasen_field: str
+    osm_tag: str
+    tier: int
+    completeness: float
+    required: bool = False
+    values: dict[str, str] = field(default_factory=dict)
+    default: str | None = None
 
 
 @dataclass
@@ -34,9 +47,10 @@ class CountryConfig:
     code: str
     crs: str
     bounds: dict[str, float]
-    data_sources: dict[str, Any]
-    osm_mapping: dict[str, Any]
-    inference: dict[str, Any]
+    data_sources: list[dict[str, Any]]
+    osm_mappings: dict[str, OSMMapping]
+    inference_rules: dict[str, dict[str, Any]]
+    expected_trail_count: int | None = None
 
 
 def load_pipeline_config(config_path: Path | None = None) -> PipelineConfig:
@@ -49,7 +63,9 @@ def load_pipeline_config(config_path: Path | None = None) -> PipelineConfig:
         PipelineConfig instance
     """
     if config_path is None:
-        config_path = Path(__file__).parent.parent.parent / "config" / "pipeline.toml"
+        # Try to find config relative to this file
+        module_dir = Path(__file__).parent  # .../pipeline/src/graphhopper_pipeline
+        config_path = module_dir.parent.parent / "config" / "pipeline.toml"
 
     with open(config_path, "rb") as f:
         data = tomllib.load(f)
@@ -93,7 +109,9 @@ def load_country_config(country_code: str, config_dir: Path | None = None) -> Co
         FileNotFoundError: If country config doesn't exist
     """
     if config_dir is None:
-        config_dir = Path(__file__).parent.parent.parent / "config"
+        # Find config relative to this module
+        module_dir = Path(__file__).parent  # .../pipeline/src/graphhopper_pipeline
+        config_dir = module_dir.parent.parent / "config"
 
     country_file = config_dir / "countries" / f"{country_code.lower()}.toml"
 
@@ -105,12 +123,32 @@ def load_country_config(country_code: str, config_dir: Path | None = None) -> Co
 
     country = data["country"]
 
+    # Parse OSM mappings (simplified - just pass through raw dict for now)
+    # TODO: Parse into OSMMapping objects when config structure is finalized
+    osm_mappings_raw = data.get("osm_mapping", {})
+    osm_mappings = {}
+    for tier_name, tier_mappings in osm_mappings_raw.items():
+        if isinstance(tier_mappings, dict):
+            for field, tag in tier_mappings.items():
+                osm_mappings[field] = OSMMapping(
+                    turrutebasen_field=field,
+                    osm_tag=tag,
+                    tier=1 if tier_name == "essential" else 2 if tier_name == "recommended" else 3,
+                    completeness=100.0,  # Placeholder
+                    required=(tier_name == "essential"),
+                )
+
+    # Parse data sources (convert from nested dict to list)
+    data_sources_raw = data.get("data_sources", {})
+    data_sources = [{"type": k, **v} for k, v in data_sources_raw.items()]
+
     return CountryConfig(
         name=country["name"],
         code=country["code"],
         crs=country["crs"],
         bounds=country["bounds"],
-        data_sources=data.get("data_sources", {}),
-        osm_mapping=data.get("osm_mapping", {}),
-        inference=data.get("inference", {}),
+        data_sources=data_sources,
+        osm_mappings=osm_mappings,
+        inference_rules=data.get("inference", {}),
+        expected_trail_count=country.get("expected_trail_count"),
     )
