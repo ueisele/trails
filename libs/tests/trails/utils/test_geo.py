@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point
-from trails.utils.geo import calculate_lengths_meters
+from trails.utils.geo import calculate_lengths_meters, merge_lines, thin_points
 
 
 class TestCalculateLengthsMeters:
@@ -264,3 +264,126 @@ class TestCalculateLengthsMeters:
         # Should give same result each time
         assert result1.iloc[0] == result2.iloc[0]
         assert pytest.approx(result1.iloc[0], rel=1e-6) == 1000.0
+
+
+class TestMergeLines:
+    """Tests for merge_lines."""
+
+    def test_joins_touching_segments(self):
+        gdf = gpd.GeoDataFrame(
+            {"typeveg": ["sti", "sti"], "geometry": [LineString([(0, 0), (1, 1)]), LineString([(1, 1), (2, 2)])]},
+            crs="EPSG:25833",
+        )
+        merged = merge_lines(gdf)
+
+        assert len(merged) == 1
+        assert merged.geometry.iloc[0].geom_type == "LineString"
+
+    def test_leaves_disjoint_segments_separate(self):
+        gdf = gpd.GeoDataFrame(
+            {"geometry": [LineString([(0, 0), (1, 1)]), LineString([(5, 5), (6, 6)])]},
+            crs="EPSG:25833",
+        )
+        assert len(merge_lines(gdf)) == 2
+
+    def test_single_line_is_returned_unchanged(self):
+        # unary_union of one line yields a bare LineString, which linemerge rejects.
+        gdf = gpd.GeoDataFrame({"geometry": [LineString([(0, 0), (1, 1)])]}, crs="EPSG:25833")
+        merged = merge_lines(gdf)
+
+        assert len(merged) == 1
+        assert merged.geometry.iloc[0].geom_type == "LineString"
+
+    def test_group_by_keeps_the_attribute_and_merges_within_it(self):
+        gdf = gpd.GeoDataFrame(
+            {
+                "typeveg": ["sti", "sti", "traktorveg"],
+                "geometry": [LineString([(0, 0), (1, 1)]), LineString([(1, 1), (2, 2)]), LineString([(2, 2), (3, 3)])],
+            },
+            crs="EPSG:25833",
+        )
+        merged = merge_lines(gdf, group_by="typeveg")
+
+        assert sorted(merged["typeveg"]) == ["sti", "traktorveg"]
+        assert len(merged) == 2
+
+    def test_total_length_is_preserved(self):
+        gdf = gpd.GeoDataFrame(
+            {"geometry": [LineString([(0, 0), (0, 10)]), LineString([(0, 10), (0, 25)])]},
+            crs="EPSG:25833",
+        )
+        assert merge_lines(gdf).length.sum() == pytest.approx(gdf.length.sum())
+
+    def test_empty_input_returns_empty_frame(self):
+        gdf = gpd.GeoDataFrame({"typeveg": [], "geometry": []}, geometry="geometry", crs="EPSG:25833")
+        merged = merge_lines(gdf, group_by="typeveg")
+
+        assert len(merged) == 0
+        assert "typeveg" in merged.columns
+
+    def test_crs_is_preserved(self):
+        gdf = gpd.GeoDataFrame({"geometry": [LineString([(0, 0), (1, 1)])]}, crs="EPSG:25833")
+        assert merge_lines(gdf).crs.to_epsg() == 25833
+
+
+class TestThinPoints:
+    """Tests for thin_points."""
+
+    @pytest.fixture
+    def labels(self) -> gpd.GeoDataFrame:
+        """Three positions of one valley plus one of another name."""
+        return gpd.GeoDataFrame(
+            {
+                "name": ["Eiterådalen", "Eiterådalen", "Eiterådalen", "Sørvassdalen"],
+                "rank": [7, 7, 7, 3],
+                "geometry": [
+                    Point(400000, 7280000),
+                    Point(400000, 7281200),  # 1.2 km from the first
+                    Point(400000, 7288400),  # 8.4 km from the first
+                    Point(400000, 7280500),  # close, but a different name
+                ],
+            },
+            crs="EPSG:25833",
+        )
+
+    def test_drops_positions_closer_than_the_spacing(self, labels):
+        result = thin_points(labels, 3000.0, group_by="name")
+
+        valley = result[result["name"] == "Eiterådalen"]
+        assert len(valley) == 2
+
+    def test_keeps_the_well_separated_extremes(self, labels):
+        result = thin_points(labels, 3000.0, group_by="name")
+
+        ys = sorted(result[result["name"] == "Eiterådalen"].geometry.y)
+        assert ys == [7280000, 7288400]
+
+    def test_grouping_keeps_different_names_independent(self, labels):
+        # Sørvassdalen is 500 m from an Eiterådalen label but must survive.
+        result = thin_points(labels, 3000.0, group_by="name")
+        assert "Sørvassdalen" in set(result["name"])
+
+    def test_without_grouping_nearby_names_compete(self, labels):
+        result = thin_points(labels, 3000.0)
+        assert len(result) < len(thin_points(labels, 3000.0, group_by="name"))
+
+    def test_priority_decides_which_position_survives(self, labels):
+        gdf = labels.copy()
+        gdf.loc[1, "rank"] = 1  # the middle position becomes the important one
+        result = thin_points(gdf, 3000.0, group_by="name", priority="rank")
+
+        ys = sorted(result[result["name"] == "Eiterådalen"].geometry.y)
+        assert 7281200 in ys
+
+    def test_zero_spacing_is_a_no_op(self, labels):
+        assert len(thin_points(labels, 0.0, group_by="name")) == len(labels)
+
+    def test_empty_input_returns_empty(self):
+        empty = gpd.GeoDataFrame({"name": []}, geometry=[], crs="EPSG:25833")
+        assert len(thin_points(empty, 3000.0, group_by="name")) == 0
+
+    def test_input_crs_and_columns_are_preserved(self, labels):
+        result = thin_points(labels.to_crs("EPSG:4326"), 3000.0, group_by="name")
+
+        assert result.crs.to_epsg() == 4326
+        assert list(result.columns) == list(labels.columns)
