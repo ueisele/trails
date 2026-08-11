@@ -69,6 +69,29 @@ TERRAIN_NAME_COLORS = {
 #: Used for any type without an entry above.
 TERRAIN_NAME_DEFAULT_COLOR = "#455a64"
 
+#: Glyph drawn before each terrain name, so the feature type reads without
+#: relying on colour alone. Deliberately plain Unicode from widely supported
+#: blocks rather than Font Awesome, which has no valley, lake or marsh icon and
+#: would tie the labels to a CDN.
+TERRAIN_NAME_SYMBOLS = {
+    "elv": "\u2248",  # wavy lines, running water
+    "bekk": "\u2248",
+    "foss": "\u2248",
+    "vann": "\u25cf",  # a filled body of standing water
+    "tjern": "\u25cf",
+    "isbre": "\u25c7",  # open diamond, ice
+    "dal": "\u2228",  # V, the classic valley cross-section
+    "skar": "\u2228",
+    "fjell": "\u25b2",  # a peak
+    "fjellomr\u00e5de": "\u25b2",
+    "li": "\u25e2",  # a slope
+    "myr": "\u224b",  # wet ground hatching
+    "seter": "\u2302",  # a hut
+}
+
+#: Used for any type without a glyph above.
+TERRAIN_NAME_DEFAULT_SYMBOL = "\u00b7"
+
 #: Groups of types sharing one colour, for the legend.
 TERRAIN_NAME_LEGEND = (
     ("running water", {"elv", "bekk", "foss"}),
@@ -403,6 +426,7 @@ def main() -> int:
             terrain_names = terrain_names.copy()
             terrain_names["font_size"] = (15.0 - terrain_names["rank"] * 0.5).clip(lower=10.0).round(1)
             terrain_names["color"] = terrain_names["kind"].map(TERRAIN_NAME_COLORS).fillna(TERRAIN_NAME_DEFAULT_COLOR)
+            terrain_names["symbol"] = terrain_names["kind"].map(TERRAIN_NAME_SYMBOLS).fillna(TERRAIN_NAME_DEFAULT_SYMBOL)
             repeated = int(terrain_names["name"].duplicated(keep=False).sum())
             print(f"  terrain names (<{args.names_km:g} km): {len(terrain_names)} labels ({before - len(terrain_names)} thinned out)")
             print(f"    {repeated} of them are repeats of an extended feature")
@@ -543,7 +567,14 @@ def main() -> int:
         )
     if len(terrain_names):
         maps.add_text_labels(
-            fmap, terrain_names, name="Terrain names [SSR]", label_field="name", size_field="font_size", color_field="color", show=False
+            fmap,
+            terrain_names,
+            name="Terrain names [SSR]",
+            label_field="name",
+            size_field="font_size",
+            color_field="color",
+            symbol_field="symbol",
+            show=False,
         )
     if len(shelters):
         maps.add_points(fmap, shelters, name="Huts and shelters [OSM]", color="darkblue", icon="campground", popup_fields=SHELTER_POPUP_FIELDS)
@@ -574,7 +605,10 @@ def main() -> int:
         for label, kinds in TERRAIN_NAME_LEGEND:
             present = sorted(kinds & drawn_kinds)
             if present:
-                legend[f"Name: {label} — {', '.join(present)} [SSR]"] = TERRAIN_NAME_COLORS[present[0]]
+                # Types can share a colour but differ in glyph (fjell vs li), so
+                # show every glyph the group actually draws.
+                glyphs = dict.fromkeys(TERRAIN_NAME_SYMBOLS.get(kind, TERRAIN_NAME_DEFAULT_SYMBOL) for kind in present)
+                legend[f"Name {' '.join(glyphs)} {label} — {', '.join(present)} [SSR]"] = TERRAIN_NAME_COLORS[present[0]]
 
     # Point layers carry an icon rather than a line colour, so they are listed
     # here only to record their source alongside everything else.

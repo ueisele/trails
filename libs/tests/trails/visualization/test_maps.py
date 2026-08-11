@@ -374,3 +374,52 @@ class TestLegendEscaping:
         marker = next(child for child in group._children.values() if isinstance(child, folium.Marker))
         icon = next(c for c in marker._children.values() if isinstance(c, folium.DivIcon))
         assert "&lt;test&gt;" in icon.options["html"]
+
+
+class TestTextLabelSymbols:
+    """Tests for the glyph drawn before a label."""
+
+    @pytest.fixture
+    def typed_names(self) -> gpd.GeoDataFrame:
+        """A valley and a river with glyphs, plus one without."""
+        return gpd.GeoDataFrame(
+            {
+                "name": ["Eiterådalen", "Vefsna", "Namnlaus"],
+                "symbol": ["∨", "≈", None],
+                "geometry": [Point(13.14, 65.6), Point(13.1, 65.7), Point(13.2, 65.5)],
+            },
+            crs="EPSG:4326",
+        )
+
+    def _html(self, group) -> list[str]:
+        """Collect the rendered HTML of every label in a group."""
+        markers = [child for child in group._children.values() if isinstance(child, folium.Marker)]
+        icons = [next(c for c in m._children.values() if isinstance(c, folium.DivIcon)) for m in markers]
+        return [icon.options["html"] for icon in icons]
+
+    def test_symbol_precedes_the_name(self, typed_names):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_text_labels(fmap, typed_names, name="Names", symbol_field="symbol")
+
+        assert any("∨ Eiterådalen" in html for html in self._html(group))
+        assert any("≈ Vefsna" in html for html in self._html(group))
+
+    def test_missing_symbol_leaves_the_name_alone(self, typed_names):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_text_labels(fmap, typed_names, name="Names", symbol_field="symbol")
+
+        assert any(">Namnlaus</div>" in html for html in self._html(group))
+
+    def test_no_symbol_field_means_plain_names(self, typed_names):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_text_labels(fmap, typed_names, name="Names")
+
+        assert all(" " not in html for html in self._html(group))
+
+    def test_symbols_are_escaped_like_the_name(self, typed_names):
+        gdf = typed_names.copy()
+        gdf.loc[0, "symbol"] = "<b>"
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_text_labels(fmap, gdf, name="Names", symbol_field="symbol")
+
+        assert any("&lt;b&gt;" in html for html in self._html(group))

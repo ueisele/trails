@@ -323,6 +323,7 @@ def add_text_labels(
     default_size: float = 11.0,
     color: str = "#37474f",
     color_field: str | None = None,
+    symbol_field: str | None = None,
     halo: str = "#ffffff",
     show: bool = True,
 ) -> folium.FeatureGroup:
@@ -342,6 +343,8 @@ def add_text_labels(
         color: Text colour used when no per-label colour is given
         color_field: Column holding a per-label CSS colour, e.g. to distinguish
             rivers from valleys
+        symbol_field: Column holding a short glyph drawn before the label, so the
+            feature type reads without relying on colour alone
         halo: Outline colour drawn around the glyphs for legibility over the map
         show: Whether the layer starts visible
 
@@ -370,6 +373,9 @@ def add_text_labels(
             text_color = str(row[color_field])
 
         text = escape(str(row[label_field]))
+        if symbol_field and symbol_field in row and pd.notna(row[symbol_field]):
+            text = f"{escape(str(row[symbol_field]))}\u2009{text}"
+
         html = (
             f'<div style="font-family:sans-serif;font-size:{size:g}px;color:{text_color};'
             f'text-shadow:{shadow};white-space:nowrap;transform:translate(-50%,-50%)">{text}</div>'
