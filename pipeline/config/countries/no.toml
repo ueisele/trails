@@ -65,18 +65,25 @@ lokalid = "ref:geonorge"               # 100% - unique ID
 opphav = "source"                      # 100%
 
 [inference]
-# Rules for inferring missing attributes
+# Rules for inferring missing attributes.
+#
+# Keys are the *expanded* rutefolger values, not the raw SOSI codes: the loader
+# always resolves codes to readable text, so "ST" and friends never reach the
+# pipeline. Observed distribution over 139,191 segments (2026-08 extract):
+# Sti 80,924 · Bilvei 24,041 · Traktorvei 17,602 · Skogsbilvei 4,876 · Gangvei 2,391
 
 [inference.gradering]
 # Infer difficulty from rutefolger
-"ST" = "hiking"      # Sti (Path) → easy hiking
-"TI" = "hiking"      # Tilrettelagt (Adapted) → easy
-"VE" = "mountain_hiking"  # Veg (Road) → moderate
-"LE" = "demanding_mountain_hiking"  # Leden (Cairned) → challenging
+"Sti" = "hiking"                  # footpath → easy hiking
+"Gangvei" = "hiking"              # made-up walkway → easy
+"Traktorvei" = "hiking"           # tractor track → easy
+"Skogsbilvei" = "mountain_hiking" # forest road → moderate
+"Bilvei" = "mountain_hiking"      # road → moderate
 
 [inference.surface]
 # Infer surface from rutefolger
-"ST" = "ground"      # Path
-"TI" = "paved"       # Adapted trail
-"VE" = "unpaved"     # Road/track
-"LE" = "rock"        # Cairned route
+"Sti" = "ground"
+"Gangvei" = "paved"
+"Traktorvei" = "unpaved"
+"Skogsbilvei" = "unpaved"
+"Bilvei" = "asphalt"

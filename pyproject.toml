@@ -50,7 +50,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["libs/src/trails"]
+packages = ["libs/src/trails", "pipeline/src/graphhopper_pipeline"]
 
 [tool.ruff]
 line-length = 150
@@ -89,7 +89,7 @@ pretty = true
 show_column_numbers = true
 show_error_codes = true
 show_error_context = true
-mypy_path = "libs/src"
+mypy_path = "libs/src:pipeline/src"
 
 [tool.pytest.ini_options]
 testpaths = ["libs/tests"]

@@ -33,7 +33,7 @@ def mock_context(tmp_path: Path) -> PipelineContext:
 def valid_trail_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     """Create valid trail data for testing."""
     spatial_data = {
-        "local_id": ["id1", "id2", "id3"],
+        "lokalid": ["id1", "id2", "id3"],
         "geometry": [
             LineString([(10.0, 60.0), (10.1, 60.1)]),
             LineString([(10.2, 60.2), (10.3, 60.3)]),
@@ -43,7 +43,7 @@ def valid_trail_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     spatial_gdf = gpd.GeoDataFrame(spatial_data, crs="EPSG:4326")
 
     attribute_data = {
-        "hiking_trail_fk": ["id1", "id1", "id2", "id3"],
+        "fotrute_fk": ["id1", "id1", "id2", "id3"],
         "trail_name": ["Trail A", "Trail B", "Trail C", "Trail D"],
     }
     attributes_df = pd.DataFrame(attribute_data)
@@ -125,34 +125,34 @@ def test_execute_duplicate_ids(
     mock_context: PipelineContext,
     valid_trail_data: tuple[gpd.GeoDataFrame, pd.DataFrame],
 ) -> None:
-    """Test validation with duplicate local_ids."""
+    """Test validation with duplicate lokalids."""
     spatial_gdf, attributes_df = valid_trail_data
 
     # Create duplicate ID
-    spatial_gdf.loc[1, "local_id"] = "id1"
+    spatial_gdf.loc[1, "lokalid"] = "id1"
 
     step = ValidateTrailDataStep(country_code="NO")
     result = step.execute(mock_context, (spatial_gdf, attributes_df))
 
     assert result.status == StepStatus.FAILED
-    assert "duplicate local_ids" in result.error.lower()
+    assert "duplicate lokalids" in result.error.lower()
 
 
-def test_execute_missing_local_id(
+def test_execute_missing_lokalid(
     mock_context: PipelineContext,
     valid_trail_data: tuple[gpd.GeoDataFrame, pd.DataFrame],
 ) -> None:
-    """Test validation with missing local_id column."""
+    """Test validation with missing lokalid column."""
     spatial_gdf, attributes_df = valid_trail_data
 
-    # Remove local_id column
-    spatial_gdf = spatial_gdf.drop(columns=["local_id"])
+    # Remove lokalid column
+    spatial_gdf = spatial_gdf.drop(columns=["lokalid"])
 
     step = ValidateTrailDataStep(country_code="NO")
     result = step.execute(mock_context, (spatial_gdf, attributes_df))
 
     assert result.status == StepStatus.FAILED
-    assert "local_id" in result.error.lower()
+    assert "lokalid" in result.error.lower()
 
 
 def test_execute_orphaned_foreign_keys(
@@ -163,7 +163,7 @@ def test_execute_orphaned_foreign_keys(
     spatial_gdf, attributes_df = valid_trail_data
 
     # Add orphaned FK
-    new_row = pd.DataFrame({"hiking_trail_fk": ["nonexistent"], "trail_name": ["Orphan"]})
+    new_row = pd.DataFrame({"fotrute_fk": ["nonexistent"], "trail_name": ["Orphan"]})
     attributes_df = pd.concat([attributes_df, new_row], ignore_index=True)
 
     step = ValidateTrailDataStep(country_code="NO")
@@ -181,7 +181,7 @@ def test_execute_unreferenced_ids_warning(
     spatial_gdf, attributes_df = valid_trail_data
 
     # Remove some attribute rows so id3 has no attributes
-    attributes_df = attributes_df[attributes_df["hiking_trail_fk"] != "id3"]
+    attributes_df = attributes_df[attributes_df["fotrute_fk"] != "id3"]
 
     step = ValidateTrailDataStep(country_code="NO")
     result = step.execute(mock_context, (spatial_gdf, attributes_df))

@@ -6,9 +6,32 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 from lxml import etree
+from shapely.geometry import LineString, MultiLineString
+from shapely.geometry.base import BaseGeometry
 from trails.pipeline import PipelineContext, PipelineStep, StepResult, StepStatus
 
 from graphhopper_pipeline.config import CountryConfig, load_country_config
+
+
+def _line_parts(geometry: BaseGeometry | None) -> list[LineString]:
+    """Return every LineString a geometry consists of.
+
+    Turrutebasen centerlines come out of the FileGDB as MultiLineString — all
+    139,191 of them — so treating only LineString would emit no ways at all.
+
+    Args:
+        geometry: A shapely geometry, possibly None or empty
+
+    Returns:
+        The LineString parts, empty if there are none
+    """
+    if geometry is None or geometry.is_empty:
+        return []
+    if isinstance(geometry, LineString):
+        return [geometry]
+    if isinstance(geometry, MultiLineString):
+        return [part for part in geometry.geoms if not part.is_empty]
+    return []
 
 
 class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Path]):
@@ -62,20 +85,20 @@ class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Pat
         if "geometry" not in spatial_gdf.columns:
             errors.append("Spatial GeoDataFrame missing 'geometry' column")
 
-        if "local_id" not in spatial_gdf.columns:
-            errors.append("Spatial GeoDataFrame missing 'local_id' column")
+        if "lokalid" not in spatial_gdf.columns:
+            errors.append("Spatial GeoDataFrame missing 'lokalid' column")
 
         # Check attribute data
         if attributes_df.empty:
             errors.append("Attributes DataFrame is empty")
 
-        if "hiking_trail_fk" not in attributes_df.columns:
-            errors.append("Attributes DataFrame missing 'hiking_trail_fk' column")
+        if "fotrute_fk" not in attributes_df.columns:
+            errors.append("Attributes DataFrame missing 'fotrute_fk' column")
 
         # Check relationship
         if not errors:
-            spatial_ids = set(spatial_gdf["local_id"])
-            attr_fks = set(attributes_df["hiking_trail_fk"])
+            spatial_ids = set(spatial_gdf["lokalid"])
+            attr_fks = set(attributes_df["fotrute_fk"])
 
             orphaned = attr_fks - spatial_ids
             if len(orphaned) > 0:
@@ -169,12 +192,18 @@ class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Pat
         Returns:
             Joined GeoDataFrame with one row per OSM way
         """
-        # Join on local_id = hiking_trail_fk
+        # Join on lokalid = fotrute_fk.
+        #
+        # Both tables carry an "objtype" column. With pandas' default suffixes it
+        # would be split into objtype_x/objtype_y, and the mapping — which looks
+        # for "objtype" — would silently drop the highway tag. Keep the spatial
+        # side's names and push the attribute table's duplicates aside instead.
         joined = spatial_gdf.merge(
             attributes_df,
-            left_on="local_id",
-            right_on="hiking_trail_fk",
+            left_on="lokalid",
+            right_on="fotrute_fk",
             how="inner",
+            suffixes=("", "_info"),
         )
 
         return joined
@@ -203,9 +232,8 @@ class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Pat
 
         # Generate nodes from all trail geometries
         for _, row in joined_gdf.iterrows():
-            geom = row.geometry
-            if geom.geom_type == "LineString":
-                for coord in geom.coords:
+            for line in _line_parts(row.geometry):
+                for coord in line.coords:
                     # Round to avoid float precision issues
                     coord_key = (round(coord[0], 7), round(coord[1], 7))
 
@@ -223,24 +251,24 @@ class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Pat
         # Generate ways
         way_id = 1000000
         for _, row in joined_gdf.iterrows():
-            geom = row.geometry
-            if geom.geom_type != "LineString":
-                continue
-
-            way = etree.SubElement(root, "way", id=str(way_id), version="1")
-
-            # Add node references
-            for coord in geom.coords:
-                coord_key = (round(coord[0], 7), round(coord[1], 7))
-                etree.SubElement(way, "nd", ref=str(coord_to_node[coord_key]))
-
-            # Add OSM tags
             tags = self._map_to_osm_tags(row, country_config)
-            for key, value in tags.items():
-                if value:  # Skip empty values
-                    etree.SubElement(way, "tag", k=key, v=str(value))
 
-            way_id += 1
+            # A multi-part trail becomes one way per part; they share the tags
+            # but cannot share a single node list.
+            for line in _line_parts(row.geometry):
+                way = etree.SubElement(root, "way", id=str(way_id), version="1")
+
+                # Add node references
+                for coord in line.coords:
+                    coord_key = (round(coord[0], 7), round(coord[1], 7))
+                    etree.SubElement(way, "nd", ref=str(coord_to_node[coord_key]))
+
+                # Add OSM tags
+                for key, value in tags.items():
+                    if value:  # Skip empty values
+                        etree.SubElement(way, "tag", k=key, v=str(value))
+
+                way_id += 1
 
         # Write XML
         tree = etree.ElementTree(root)
@@ -300,8 +328,8 @@ class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Pat
         tags["source"] = "Kartverket Turrutebasen"
 
         # Add reference to original ID
-        if "local_id" in row:
-            tags["ref:geonorge"] = str(row["local_id"])
+        if "lokalid" in row:
+            tags["ref:geonorge"] = str(row["lokalid"])
 
         return tags
 

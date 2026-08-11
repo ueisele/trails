@@ -9,7 +9,7 @@ import pytest
 from graphhopper_pipeline.config import CountryConfig, OSMMapping
 from graphhopper_pipeline.steps.transform import TransformToOSMStep
 from lxml import etree
-from shapely.geometry import LineString
+from shapely.geometry import LineString, MultiLineString
 from trails.pipeline import PipelineContext, StepStatus
 
 
@@ -29,25 +29,30 @@ def mock_context(tmp_path: Path) -> PipelineContext:
 def sample_trail_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     """Create sample trail data for testing."""
     # Create spatial layer
+    # Mirrors what the loader actually hands over: Turrutebasen's own Norwegian
+    # column names, code values already expanded to readable text, and geometry
+    # as MultiLineString — every one of the 139,191 centerlines is multi-part.
     spatial_data = {
-        "local_id": ["trail1", "trail2", "trail3"],
+        "lokalid": ["trail1", "trail2", "trail3"],
         "geometry": [
-            LineString([(10.0, 60.0), (10.1, 60.1), (10.2, 60.2)]),
-            LineString([(11.0, 61.0), (11.1, 61.1)]),
+            MultiLineString([[(10.0, 60.0), (10.1, 60.1), (10.2, 60.2)]]),
+            MultiLineString([[(11.0, 61.0), (11.1, 61.1)], [(11.5, 61.5), (11.6, 61.6)]]),
             LineString([(12.0, 62.0), (12.1, 62.1), (12.2, 62.2), (12.3, 62.3)]),
         ],
-        "objtype": ["TurrStrekningEnkel", "TurrStrekningEnkel", "TurrStrekningEnkel"],
-        "rutefolger": ["ST", "TI", "LE"],
-        "merking": ["1", "1", "0"],
+        "objtype": ["Fotrute", "Fotrute", "Fotrute"],
+        "rutefolger": ["Sti", "Gangvei", "Bilvei"],
+        "merking": ["Merket", "Merket", "Ikke merket"],
     }
     spatial_gdf = gpd.GeoDataFrame(spatial_data, crs="EPSG:4326")
 
-    # Create attribute table with some many-to-one relationships
-    # Note: gradering is NOT included here to test inference
+    # Create attribute table with some many-to-one relationships.
+    # gradering is omitted so inference is exercised. objtype is present here
+    # too, exactly as in the real info table, so the join cannot rename it away.
     attribute_data = {
-        "hiking_trail_fk": ["trail1", "trail1", "trail2", "trail3"],
-        "trail_name": ["Pilegrimsleden", "Gudbrandsdalsleden", "Besseggen", "Galdhøpiggen"],
-        "trail_number": ["1", "2", "3", "4"],
+        "fotrute_fk": ["trail1", "trail1", "trail2", "trail3"],
+        "objtype": ["Fotruteinfo", "Fotruteinfo", "Fotruteinfo", "Fotruteinfo"],
+        "rutenavn": ["Pilegrimsleden", "Gudbrandsdalsleden", "Besseggen", "Galdhøpiggen"],
+        "rutenummer": ["1", "2", "3", "4"],
     }
     attributes_df = pd.DataFrame(attribute_data)
 
@@ -65,7 +70,7 @@ def mock_country_config() -> CountryConfig:
             tier=1,
             completeness=100.0,
             required=True,
-            values={"TurrStrekningEnkel": "path"},
+            values={"Fotrute": "path"},
         ),
         "rutefolger": OSMMapping(
             turrutebasen_field="rutefolger",
@@ -73,7 +78,7 @@ def mock_country_config() -> CountryConfig:
             tier=1,
             completeness=94.0,
             required=False,
-            values={"ST": "path", "TI": "path", "LE": "path"},
+            values={"Sti": "path", "Gangvei": "footway", "Bilvei": "track"},
         ),
         "merking": OSMMapping(
             turrutebasen_field="merking",
@@ -81,17 +86,17 @@ def mock_country_config() -> CountryConfig:
             tier=1,
             completeness=100.0,
             required=False,
-            values={"1": "yes", "0": "no"},
+            values={"Merket": "yes", "Ikke merket": "no"},
         ),
-        "trail_name": OSMMapping(
-            turrutebasen_field="trail_name",
+        "rutenavn": OSMMapping(
+            turrutebasen_field="rutenavn",
             osm_tag="name",
             tier=1,
             completeness=95.0,
             required=False,
         ),
-        "trail_number": OSMMapping(
-            turrutebasen_field="trail_number",
+        "rutenummer": OSMMapping(
+            turrutebasen_field="rutenummer",
             osm_tag="ref",
             tier=1,
             completeness=100.0,
@@ -102,14 +107,14 @@ def mock_country_config() -> CountryConfig:
     # Create inference rules (matches the structure from no.toml)
     inference_rules = {
         "gradering": {
-            "ST": "hiking",
-            "TI": "hiking",
-            "LE": "demanding_mountain_hiking",
+            "Sti": "hiking",
+            "Gangvei": "hiking",
+            "Bilvei": "mountain_hiking",
         },
         "surface": {
-            "ST": "ground",
-            "TI": "paved",
-            "LE": "rock",
+            "Sti": "ground",
+            "Gangvei": "paved",
+            "Bilvei": "asphalt",
         },
     }
 
@@ -153,7 +158,7 @@ def test_validate_input_empty_spatial() -> None:
     """Test validation with empty spatial data."""
     step = TransformToOSMStep(country_code="NO")
     spatial_gdf = gpd.GeoDataFrame()
-    attributes_df = pd.DataFrame({"hiking_trail_fk": ["id1"]})
+    attributes_df = pd.DataFrame({"fotrute_fk": ["id1"]})
 
     errors = step.validate_input((spatial_gdf, attributes_df))
     assert len(errors) > 0
@@ -164,12 +169,12 @@ def test_validate_input_missing_columns() -> None:
     """Test validation with missing required columns."""
     step = TransformToOSMStep(country_code="NO")
 
-    # Missing local_id
+    # Missing lokalid
     spatial_gdf = gpd.GeoDataFrame({"geometry": [LineString([(0, 0), (1, 1)])]})
-    attributes_df = pd.DataFrame({"hiking_trail_fk": ["id1"]})
+    attributes_df = pd.DataFrame({"fotrute_fk": ["id1"]})
 
     errors = step.validate_input((spatial_gdf, attributes_df))
-    assert any("local_id" in e.lower() for e in errors)
+    assert any("lokalid" in e.lower() for e in errors)
 
 
 def test_validate_input_orphaned_fks(
@@ -180,7 +185,7 @@ def test_validate_input_orphaned_fks(
     step = TransformToOSMStep(country_code="NO")
 
     # Add orphaned FK
-    new_row = pd.DataFrame({"hiking_trail_fk": ["nonexistent"], "trail_name": ["Orphan"]})
+    new_row = pd.DataFrame({"fotrute_fk": ["nonexistent"], "rutenavn": ["Orphan"]})
     attributes_df = pd.concat([attributes_df, new_row], ignore_index=True)
 
     errors = step.validate_input((spatial_gdf, attributes_df))
@@ -199,9 +204,9 @@ def test_join_data(
 
     # Should have 4 rows (trail1 appears twice in attributes)
     assert len(joined) == 4
-    assert "local_id" in joined.columns
-    assert "hiking_trail_fk" in joined.columns
-    assert "trail_name" in joined.columns
+    assert "lokalid" in joined.columns
+    assert "fotrute_fk" in joined.columns
+    assert "rutenavn" in joined.columns
     assert "geometry" in joined.columns
 
 
@@ -214,8 +219,9 @@ def test_join_data_preserves_geometry(
 
     joined = step._join_data(spatial_gdf, attributes_df)
 
-    # Check that geometries are LineStrings
-    assert all(joined.geometry.geom_type == "LineString")
+    # The join must not rename the columns the tag mapping reads.
+    assert "objtype" in joined.columns
+    assert set(joined["objtype"]) == {"Fotrute"}
 
 
 def test_map_to_osm_tags_basic(
@@ -270,12 +276,12 @@ def test_map_to_osm_tags_different_route_types(
 
     joined = step._join_data(spatial_gdf, attributes_df)
 
-    # Trail3 has rutefolger="LE" (cairned route)
-    trail3_row = joined[joined["local_id"] == "trail3"].iloc[0]
+    # trail3 follows a road (rutefolger="Bilvei")
+    trail3_row = joined[joined["lokalid"] == "trail3"].iloc[0]
     tags = step._map_to_osm_tags(trail3_row, mock_country_config)
 
-    assert tags["sac_scale"] == "demanding_mountain_hiking"
-    assert tags["surface"] == "rock"
+    assert tags["sac_scale"] == "mountain_hiking"
+    assert tags["surface"] == "asphalt"
 
 
 def test_generate_osm_xml_structure(
@@ -293,7 +299,8 @@ def test_generate_osm_xml_structure(
     way_count = step._generate_osm_xml(joined, output_path, mock_country_config)
 
     # Should generate 4 ways (one per joined row)
-    assert way_count == 4
+    # 4 joined rows, but trail2 is a two-part MultiLineString and becomes two ways.
+    assert way_count == 5
     assert output_path.exists()
 
     # Parse and validate XML
@@ -323,7 +330,8 @@ def test_generate_osm_xml_nodes(
 
     nodes = root.findall("node")
     # Should have unique nodes (9 total coordinates across 3 trails)
-    assert len(nodes) == 9
+    # 9 distinct coordinates plus the 2 of trail2's second part.
+    assert len(nodes) == 11
 
     # Check node has required attributes
     assert nodes[0].get("id") is not None
@@ -349,7 +357,7 @@ def test_generate_osm_xml_ways(
     root = tree.getroot()
 
     ways = root.findall("way")
-    assert len(ways) == 4
+    assert len(ways) == 5
 
     # Check first way
     way = ways[0]
@@ -392,7 +400,8 @@ def test_execute_success(
     assert result.metadata["input_trail_count"] == 3
     assert result.metadata["input_attribute_count"] == 4
     assert result.metadata["joined_count"] == 4
-    assert result.metadata["way_count"] == 4
+    # One way per line part, so the two-part trail2 contributes two.
+    assert result.metadata["way_count"] == 5
     assert result.metadata["output_format"] in ["xml", "pbf"]
 
     # Check output file exists
@@ -478,3 +487,52 @@ def test_execute_duration_tracking(
     assert result.started_at is not None
     assert result.completed_at is not None
     assert result.completed_at >= result.started_at
+
+
+def test_multilinestring_trails_are_not_dropped(
+    mock_country_config: CountryConfig,
+    tmp_path: Path,
+) -> None:
+    """Every Turrutebasen centerline is multi-part; none may be skipped."""
+    spatial_gdf = gpd.GeoDataFrame(
+        {
+            "lokalid": ["a", "b"],
+            "objtype": ["Fotrute", "Fotrute"],
+            "rutefolger": ["Sti", "Sti"],
+            "merking": ["Merket", "Merket"],
+            "geometry": [
+                MultiLineString([[(10.0, 60.0), (10.1, 60.1)], [(10.5, 60.5), (10.6, 60.6)]]),
+                MultiLineString([[(11.0, 61.0), (11.1, 61.1)]]),
+            ],
+        },
+        crs="EPSG:4326",
+    )
+    attributes_df = pd.DataFrame({"fotrute_fk": ["a", "b"], "objtype": ["Fotruteinfo", "Fotruteinfo"]})
+
+    step = TransformToOSMStep(country_code="NO")
+    joined = step._join_data(spatial_gdf, attributes_df)
+    output_path = tmp_path / "trails.osm"
+    way_count = step._generate_osm_xml(joined, output_path, mock_country_config)
+
+    # 2 parts + 1 part; the old LineString-only filter produced 0.
+    assert way_count == 3
+
+    root = etree.parse(str(output_path)).getroot()
+    ways = root.findall("way")
+    assert len(ways) == 3
+    # Every way must carry the routing tag, on every part.
+    assert all(any(tag.get("k") == "highway" for tag in way.findall("tag")) for way in ways)
+
+
+def test_join_keeps_the_column_the_mapping_reads() -> None:
+    """objtype exists in both tables; the merge must not rename the spatial one."""
+    spatial_gdf = gpd.GeoDataFrame(
+        {"lokalid": ["a"], "objtype": ["Fotrute"], "geometry": [LineString([(0, 0), (1, 1)])]},
+        crs="EPSG:4326",
+    )
+    attributes_df = pd.DataFrame({"fotrute_fk": ["a"], "objtype": ["Fotruteinfo"]})
+
+    joined = TransformToOSMStep(country_code="NO")._join_data(spatial_gdf, attributes_df)
+
+    assert joined["objtype"].iloc[0] == "Fotrute"
+    assert "objtype_info" in joined.columns

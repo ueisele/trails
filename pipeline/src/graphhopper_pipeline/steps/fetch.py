@@ -77,7 +77,10 @@ class FetchTrailsStep(PipelineStep[None, tuple[gpd.GeoDataFrame, pd.DataFrame]])
             source = GeonorgeSource(cache_dir=cache_dir_str)
 
             # Load Turrutebasen data with English translations
-            trail_data = source.load_turrutebasen(language=Language.EN)
+            # The country config, the inference rules and the docs all key on
+            # Turrutebasen's own Norwegian field names, so the pipeline works on
+            # the untranslated source. Language.EN is for analysis, not mapping.
+            trail_data = source.load_turrutebasen(language=Language.NO)
 
             # Extract spatial and attribute layers
             spatial_layer_name = "hiking_trail_centerline"

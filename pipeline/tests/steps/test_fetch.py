@@ -29,7 +29,7 @@ def mock_trail_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     """Create mock trail data."""
     # Create spatial layer
     spatial_data = {
-        "local_id": ["id1", "id2", "id3"],
+        "lokalid": ["id1", "id2", "id3"],
         "geometry": [
             LineString([(10.0, 60.0), (10.1, 60.1)]),
             LineString([(10.2, 60.2), (10.3, 60.3)]),
@@ -40,7 +40,7 @@ def mock_trail_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
 
     # Create attribute table
     attribute_data = {
-        "hiking_trail_fk": ["id1", "id1", "id2", "id3"],
+        "fotrute_fk": ["id1", "id1", "id2", "id3"],
         "trail_name": ["Trail A", "Trail B", "Trail C", "Trail D"],
         "trail_number": ["1", "2", "3", "4"],
     }

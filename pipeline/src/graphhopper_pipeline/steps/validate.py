@@ -67,17 +67,17 @@ class ValidateTrailDataStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], 
             issues.append(f"Found {empty_geoms} empty geometries")
 
         # 2. Check unique identifiers
-        if "local_id" in spatial_gdf.columns:
-            duplicate_ids = spatial_gdf["local_id"].duplicated().sum()
+        if "lokalid" in spatial_gdf.columns:
+            duplicate_ids = spatial_gdf["lokalid"].duplicated().sum()
             if duplicate_ids > 0:
-                issues.append(f"Found {duplicate_ids} duplicate local_ids")
+                issues.append(f"Found {duplicate_ids} duplicate lokalids")
         else:
-            issues.append("Missing required column: local_id")
+            issues.append("Missing required column: lokalid")
 
         # 3. Check foreign key integrity
-        if "hiking_trail_fk" in attributes_df.columns and "local_id" in spatial_gdf.columns:
-            spatial_ids = set(spatial_gdf["local_id"])
-            attr_fks = set(attributes_df["hiking_trail_fk"])
+        if "fotrute_fk" in attributes_df.columns and "lokalid" in spatial_gdf.columns:
+            spatial_ids = set(spatial_gdf["lokalid"])
+            attr_fks = set(attributes_df["fotrute_fk"])
 
             orphaned_fks = attr_fks - spatial_ids
             if len(orphaned_fks) > 0:
@@ -124,12 +124,12 @@ class ValidateTrailDataStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], 
                 warnings.append(f"Trail count dropped {drop_percent:.1f}% (expected ~{self.expected_trail_count:,})")
 
         # 6. Check required fields
-        required_spatial_fields = ["local_id", "geometry"]
+        required_spatial_fields = ["lokalid", "geometry"]
         for field in required_spatial_fields:
             if field not in spatial_gdf.columns:
                 issues.append(f"Missing required spatial field: {field}")
 
-        required_attribute_fields = ["hiking_trail_fk"]
+        required_attribute_fields = ["fotrute_fk"]
         for field in required_attribute_fields:
             if field not in attributes_df.columns:
                 issues.append(f"Missing required attribute field: {field}")
