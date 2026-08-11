@@ -1,11 +1,12 @@
 name: GraphHopper Pipeline
 
 on:
-  # Run weekly on Saturday at 6 AM UTC (after Geonorge Monday night updates)
-  schedule:
-    - cron: '0 6 * * 6'
-
-  # Allow manual triggers
+  # Manual only for now. The weekly schedule is disabled until the pipeline
+  # actually produces data: the transform and build jobs are still placeholders
+  # that `touch` empty files, and the release job would publish those as a real
+  # GitHub Release every Saturday. Restore once those steps are implemented:
+  #   schedule:
+  #     - cron: '0 6 * * 6'   # Saturday 06:00 UTC, after Geonorge's Monday update
   workflow_dispatch:
     inputs:
       country:
