@@ -330,7 +330,6 @@ def main() -> int:
     # Mosjøen 9.8 km, Vevelstad 10.3 km, Brønnøysund 11.2 km from the boundary.
     parser.add_argument("--approach-km", type=float, default=15.0, help="Width of the approach zone around the park (km)")
     parser.add_argument("--trailhead-km", type=float, default=2.0, help="Band around the park in which farms and sæters are shown as trailheads (km)")
-    parser.add_argument("--label-km", type=float, default=5.0, help="Band around the park in which hamlets get a permanent label, not just a tooltip")
     parser.add_argument("--names-km", type=float, default=2.0, help="Band around the park covered by the terrain-name layer (valleys, passes, peaks)")
     parser.add_argument("--no-names", action="store_true", help="Skip the place-name layer")
     parser.add_argument("--highlight", help="Mark every position of this place name in red, numbered, for checking what the register holds")
@@ -551,16 +550,10 @@ def main() -> int:
     if len(trailheads):
         maps.add_labelled_points(fmap, trailheads, name="Trailheads, farms and sæters [OSM]", color="#6d4c41", radius=3.5)
     if len(places):
-        # Towns and villages are labelled wherever they are; hamlets only close to
-        # the park, where they are the actual trailheads (Eiterådalen, Aursletta,
-        # Ausen). Labelling all 155 hamlets would bury the map in text.
-        places = places.copy()
-        near = places.to_crs(METRIC_CRS).distance(park.to_crs(METRIC_CRS).union_all()) <= args.label_km * 1000
-        places["label_class"] = [
-            "prominent" if prominent else kind
-            for prominent, kind in zip(places["kind"].isin(("town", "village")) | near, places["kind"], strict=True)
-        ]
-        maps.add_labelled_points(fmap, places, name="Towns and villages [OSM]", always_label=("prominent",), kind_field="label_class")
+        # Names appear on hover only, like every other point layer. Drawing 165
+        # settlement names permanently competes with the topo backdrop, which
+        # already labels them.
+        maps.add_labelled_points(fmap, places, name="Towns and villages [OSM]")
 
     # Added last so the boundary outline stays legible on top of every trail layer.
     maps.add_boundary(fmap, park, name="National park boundary [Naturbase]", weight=3.5)
