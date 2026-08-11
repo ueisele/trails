@@ -1,11 +1,9 @@
 """Fetch step: Download trail data from sources."""
 
 from datetime import datetime
-from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
-
 from trails.io.sources.geonorge import Source as GeonorgeSource
 from trails.io.sources.language import Language
 from trails.pipeline import PipelineContext, PipelineStep, StepResult, StepStatus

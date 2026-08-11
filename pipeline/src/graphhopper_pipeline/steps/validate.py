@@ -4,7 +4,6 @@ from datetime import datetime
 
 import geopandas as gpd
 import pandas as pd
-
 from trails.pipeline import PipelineContext, PipelineStep, StepResult, StepStatus
 
 
@@ -120,10 +119,7 @@ class ValidateTrailDataStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], 
             drop_percent = ((self.expected_trail_count - trail_count) / self.expected_trail_count) * 100
 
             if drop_percent > max_drop_percent:
-                issues.append(
-                    f"Trail count dropped {drop_percent:.1f}% "
-                    f"(expected ~{self.expected_trail_count:,}, got {trail_count:,})"
-                )
+                issues.append(f"Trail count dropped {drop_percent:.1f}% (expected ~{self.expected_trail_count:,}, got {trail_count:,})")
             elif drop_percent > 5:
                 warnings.append(f"Trail count dropped {drop_percent:.1f}% (expected ~{self.expected_trail_count:,})")
 

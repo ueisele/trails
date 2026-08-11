@@ -83,9 +83,7 @@ class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Pat
 
         return errors
 
-    def execute(
-        self, context: PipelineContext, input_data: tuple[gpd.GeoDataFrame, pd.DataFrame]
-    ) -> StepResult[Path]:
+    def execute(self, context: PipelineContext, input_data: tuple[gpd.GeoDataFrame, pd.DataFrame]) -> StepResult[Path]:
         """Execute the transform step.
 
         Args:
@@ -158,9 +156,7 @@ class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Pat
                 completed_at=completed_at,
             )
 
-    def _join_data(
-        self, spatial_gdf: gpd.GeoDataFrame, attributes_df: pd.DataFrame
-    ) -> gpd.GeoDataFrame:
+    def _join_data(self, spatial_gdf: gpd.GeoDataFrame, attributes_df: pd.DataFrame) -> gpd.GeoDataFrame:
         """Join spatial and attribute data.
 
         Creates one row per (geometry, trail_name) combination to handle
@@ -183,9 +179,7 @@ class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Pat
 
         return joined
 
-    def _generate_osm_xml(
-        self, joined_gdf: gpd.GeoDataFrame, output_path: Path, country_config: CountryConfig
-    ) -> int:
+    def _generate_osm_xml(self, joined_gdf: gpd.GeoDataFrame, output_path: Path, country_config: CountryConfig) -> int:
         """Generate OSM XML from joined trail data.
 
         Args:

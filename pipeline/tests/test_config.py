@@ -3,11 +3,8 @@
 from pathlib import Path
 
 import pytest
-
 from graphhopper_pipeline.config import (
-    CountryConfig,
     OSMMapping,
-    PipelineConfig,
     load_country_config,
     load_pipeline_config,
 )

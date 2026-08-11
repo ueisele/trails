@@ -7,9 +7,8 @@ from unittest.mock import MagicMock, patch
 import geopandas as gpd
 import pandas as pd
 import pytest
-from shapely.geometry import LineString
-
 from graphhopper_pipeline.steps.fetch import FetchTrailsStep
+from shapely.geometry import LineString
 from trails.pipeline import PipelineContext, StepStatus
 
 

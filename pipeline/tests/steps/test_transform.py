@@ -6,11 +6,10 @@ from unittest.mock import MagicMock, patch
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lxml import etree
-from shapely.geometry import LineString
-
 from graphhopper_pipeline.config import CountryConfig, OSMMapping
 from graphhopper_pipeline.steps.transform import TransformToOSMStep
+from lxml import etree
+from shapely.geometry import LineString
 from trails.pipeline import PipelineContext, StepStatus
 
 

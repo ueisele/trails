@@ -53,31 +53,35 @@ check: format-check lint type test
 # Individual check commands
 format:
 	@echo "📝 Formatting code..."
-	uv run ruff format libs/src/ libs/tests/ analysis/notebooks/
+	uv run ruff format libs/src/ libs/tests/ pipeline/src/ pipeline/tests/ analysis/scripts/ analysis/notebooks/
 
 format-check:
 	@echo "🔍 Checking code formatting..."
-	uv run ruff format --check libs/src/ libs/tests/ analysis/notebooks/
+	uv run ruff format --check libs/src/ libs/tests/ pipeline/src/ pipeline/tests/ analysis/scripts/ analysis/notebooks/
 	@echo "✅ Format check passed"
 
 lint:
 	@echo "🔍 Checking code style..."
-	uv run ruff check libs/src/ libs/tests/ analysis/notebooks/
+	uv run ruff check libs/src/ libs/tests/ pipeline/src/ pipeline/tests/ analysis/scripts/ analysis/notebooks/
 	@echo "✅ Lint check passed"
 
 lint-fix:
 	@echo "🔧 Auto-fixing lint issues..."
-	uv run ruff check libs/src/ libs/tests/ analysis/notebooks/ --fix
+	uv run ruff check libs/src/ libs/tests/ pipeline/src/ pipeline/tests/ analysis/scripts/ analysis/notebooks/ --fix
 	@echo "✅ Lint issues fixed"
 
 test:
 	@echo "🧪 Running tests (excluding integration)..."
 	uv run pytest libs/tests/ -v -m "not integration"
+	# Separate run: both trees have a package called "tests", so pytest cannot
+	# import them in one session.
+	uv run pytest pipeline/tests/ -v -m "not integration"
 	@echo "✅ Tests passed"
 
 test-all:
 	@echo "🧪 Running all tests (including integration)..."
 	uv run pytest libs/tests/ -v
+	uv run pytest pipeline/tests/ -v
 	@echo "✅ All tests passed"
 
 test-integration:
@@ -104,7 +108,7 @@ test-cov-html:
 
 type:
 	@echo "🔎 Type checking..."
-	uv run mypy libs/src/ libs/tests/fixture_generators/
+	uv run mypy libs/src/ libs/tests/fixture_generators/ pipeline/src/ analysis/scripts/
 	uv run nbqa mypy analysis/notebooks/
 	@echo "✅ Type check passed"
 

@@ -166,12 +166,15 @@ class BuildGraphHopperStep(PipelineStep[Path, Path]):
         total_size = int(response.headers.get("content-length", 0))
         block_size = 8192
 
-        with open(jar_path, "wb") as f, tqdm(
-            total=total_size,
-            unit="B",
-            unit_scale=True,
-            desc="Downloading",
-        ) as pbar:
+        with (
+            open(jar_path, "wb") as f,
+            tqdm(
+                total=total_size,
+                unit="B",
+                unit_scale=True,
+                desc="Downloading",
+            ) as pbar,
+        ):
             for chunk in response.iter_content(chunk_size=block_size):
                 f.write(chunk)
                 pbar.update(len(chunk))
@@ -235,9 +238,7 @@ class BuildGraphHopperStep(PipelineStep[Path, Path]):
   # Snap to trails (not roads)
   routing.snap_max_distance: 500
   routing.snap_preventions: [motorway, trunk]
-""".format(
-            elevation_cache=(context.cache_dir or Path(".cache")) / "elevation"
-        )
+""".format(elevation_cache=(context.cache_dir or Path(".cache")) / "elevation")
 
         # Write configuration
         config_file = context.work_dir / "graphhopper-config.yml"

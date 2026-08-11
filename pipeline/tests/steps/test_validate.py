@@ -5,9 +5,8 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import pytest
-from shapely.geometry import LineString, Point
-
 from graphhopper_pipeline.steps.validate import ValidateTrailDataStep
+from shapely.geometry import LineString, Point
 from trails.pipeline import PipelineContext, StepStatus
 
 

@@ -1,14 +1,13 @@
 """Tests for release step."""
 
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, mock_open, patch
+from unittest.mock import Mock, patch
 
 import pytest
-
-from trails.pipeline import PipelineContext, StepStatus
-
 from graphhopper_pipeline.config import CountryConfig, PipelineConfig
 from graphhopper_pipeline.steps import CreateReleaseStep, ReleaseArtifacts
+from trails.pipeline import PipelineContext, StepStatus
 
 
 @pytest.fixture
@@ -158,7 +157,8 @@ def test_generate_version(sample_artifacts: ReleaseArtifacts):
 
     version = step._generate_version(sample_artifacts)
 
-    assert version.startswith("v2025-")
+    # The date comes from the clock, so pin the shape rather than a fixed year.
+    assert version.startswith(f"v{datetime.now():%Y-%m-%d}-")
     assert "geonorge" in version
     assert "20251001" in version
 
@@ -408,6 +408,45 @@ v2025-09-12-geonorge-20250910\tRelease 4\tLatest\t2025-09-12"""
 
         # Should delete 2 oldest releases
         assert mock_run.call_count == 3  # 1 list + 2 deletes
+
+
+def test_cleanup_spans_years():
+    """Releases from an earlier year must still be cleaned up."""
+    step = CreateReleaseStep(country_code="NO")
+
+    mock_list_result = Mock()
+    mock_list_result.returncode = 0
+    mock_list_result.stdout = (
+        "v2026-01-10-geonorge-20260108\tRelease 1\tLatest\t2026-01-10\n"
+        "v2025-12-27-geonorge-20251225\tRelease 2\t\t2025-12-27\n"
+        "v2025-12-20-geonorge-20251218\tRelease 3\t\t2025-12-20"
+    )
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [mock_list_result, Mock(returncode=0)]
+        step._cleanup_old_releases(keep_count=2)
+
+    # 1 list + 1 delete: the oldest goes even though it predates the current year.
+    assert mock_run.call_count == 2
+
+
+def test_cleanup_leaves_foreign_releases_alone():
+    """Tags this pipeline did not create must never be deleted."""
+    step = CreateReleaseStep(country_code="NO")
+
+    mock_list_result = Mock()
+    mock_list_result.returncode = 0
+    mock_list_result.stdout = (
+        "v1.2.0\tHand-made release\tLatest\t2026-02-01\nnightly\tNightly build\t\t2026-01-31\nv2026-01-10-geonorge-20260108\tRelease 1\t\t2026-01-10"
+    )
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [mock_list_result, Mock(returncode=0)]
+        step._cleanup_old_releases(keep_count=0)
+
+    # Only this pipeline's own tag is eligible; the hand-made ones are untouched.
+    deleted = [call.args[0][3] for call in mock_run.call_args_list[1:]]
+    assert deleted == ["v2026-01-10-geonorge-20260108"]
 
 
 def test_execute_dry_run(mock_context: PipelineContext, sample_artifacts: ReleaseArtifacts):

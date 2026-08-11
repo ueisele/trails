@@ -1,14 +1,12 @@
 """Tests for GraphHopper build step."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-from trails.pipeline import PipelineContext, StepStatus
-
 from graphhopper_pipeline.config import CountryConfig, PipelineConfig
 from graphhopper_pipeline.steps import BuildGraphHopperStep
+from trails.pipeline import PipelineContext, StepStatus
 
 
 @pytest.fixture
