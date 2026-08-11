@@ -19,6 +19,14 @@ on:
         type: boolean
         default: false
 
+# GitHub's implicit shell is `bash -e` without pipefail, so a step like
+# `cmd | tee log` reports the exit code of tee and swallows a failing cmd.
+# That is how a ModuleNotFoundError in the fetch step went unnoticed while the
+# rest of the pipeline carried on and published empty artifacts.
+defaults:
+  run:
+    shell: bash
+
 # Only allow one pipeline run at a time
 concurrency:
   group: graphhopper-pipeline
