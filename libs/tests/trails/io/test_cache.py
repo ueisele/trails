@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from trails.io import cache
+from trails.io.cache import Download
 
 
 @dataclass
@@ -353,7 +354,9 @@ class TestDownload:
     def test_download_new_file(self, mock_requests, download_cache):
         """Mock fresh download, verify was_downloaded=True."""
         mock_response = Mock()
-        mock_response.headers = {"content-length": "100"}
+        # Content-Length must match the body: a shorter stream is a truncated
+        # download and is now rejected.
+        mock_response.headers = {"content-length": "18"}
         mock_response.iter_content.return_value = [
             b"chunk1",
             b"chunk2",
@@ -382,7 +385,7 @@ class TestDownload:
     def test_use_cached_file(self, mock_requests, download_cache):
         """Second call uses cache, was_downloaded=False."""
         mock_response = Mock()
-        mock_response.headers = {"content-length": "100"}
+        mock_response.headers = {"content-length": "4"}
         mock_response.iter_content.return_value = [b"data"]
         mock_response.raise_for_status.return_value = None
         mock_requests.get.return_value = mock_response
@@ -601,9 +604,8 @@ class TestDownload:
     def test_chunked_download(self, mock_requests, download_cache):
         """Verify chunk-based download works."""
         mock_response = Mock()
-        mock_response.headers = {"content-length": "30"}
-        # Return chunks separately
         chunks = [b"chunk1-", b"chunk2-", b"chunk3"]
+        mock_response.headers = {"content-length": str(sum(len(c) for c in chunks))}
         mock_response.iter_content.return_value = chunks
         mock_response.raise_for_status.return_value = None
         mock_requests.get.return_value = mock_response
@@ -615,7 +617,7 @@ class TestDownload:
         assert result.path.read_bytes() == expected_content
 
         # Verify stream=True was used
-        mock_requests.get.assert_called_with("http://example.com/file.zip", stream=True)
+        assert mock_requests.get.call_args.kwargs["stream"] is True
 
     # Cache Management
     def test_get_cached_file_exists(self, download_cache):
@@ -700,3 +702,82 @@ class TestDownload:
         assert loaded_meta["name"] == "测试数据"
         assert loaded_meta["emoji"] == "🚀🔥"
         assert loaded_meta["special"] == "äöü€"
+
+
+class TestDownloadIntegrity:
+    """A partial download must never be served as a cache hit."""
+
+    def _response(self, body: bytes, content_length: int | None = None):
+        """Build a mock streaming response."""
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.headers = {"content-length": str(content_length if content_length is not None else len(body))}
+        response.iter_content.return_value = [body]
+        return response
+
+    def test_completed_download_lands_at_the_target_path(self, tmp_path):
+        cache = Download(str(tmp_path))
+
+        with patch("requests.get", return_value=self._response(b"payload")):
+            result = cache.download("https://example.test/f.zip", filename="f.zip", version="1")
+
+        assert result.path.read_bytes() == b"payload"
+        assert result.was_downloaded is True
+
+    def test_truncated_download_raises_and_leaves_no_file(self, tmp_path):
+        cache = Download(str(tmp_path))
+
+        # Server advertises 100 bytes but the stream ends after 7.
+        with patch("requests.get", return_value=self._response(b"payload", content_length=100)):
+            with pytest.raises(OSError, match="Download incomplete"):
+                cache.download("https://example.test/f.zip", filename="f.zip", version="1")
+
+        assert not (tmp_path / "f.zip").exists()
+        assert not (tmp_path / "f.zip.part").exists()
+
+    def test_a_leftover_file_without_metadata_is_re_downloaded(self, tmp_path):
+        # Exactly the situation an interrupted run used to leave behind.
+        cache = Download(str(tmp_path))
+        (tmp_path / "f.zip").write_bytes(b"truncated")
+
+        with patch("requests.get", return_value=self._response(b"complete payload")) as mock_get:
+            result = cache.download("https://example.test/f.zip", filename="f.zip", version="1")
+
+        mock_get.assert_called_once()
+        assert result.path.read_bytes() == b"complete payload"
+
+    def test_size_mismatch_against_metadata_triggers_a_re_download(self, tmp_path):
+        cache = Download(str(tmp_path))
+
+        with patch("requests.get", return_value=self._response(b"payload")):
+            cache.download("https://example.test/f.zip", filename="f.zip", version="1")
+
+        # Something truncated the cached file after it was stored.
+        (tmp_path / "f.zip").write_bytes(b"cut")
+
+        with patch("requests.get", return_value=self._response(b"payload")) as mock_get:
+            result = cache.download("https://example.test/f.zip", filename="f.zip", version="1")
+
+        mock_get.assert_called_once()
+        assert result.was_downloaded is True
+        assert result.path.read_bytes() == b"payload"
+
+    def test_intact_cache_entry_is_reused(self, tmp_path):
+        cache = Download(str(tmp_path))
+
+        with patch("requests.get", return_value=self._response(b"payload")):
+            cache.download("https://example.test/f.zip", filename="f.zip", version="1")
+
+        with patch("requests.get") as mock_get:
+            result = cache.download("https://example.test/f.zip", filename="f.zip", version="1")
+
+        mock_get.assert_not_called()
+        assert result.was_downloaded is False
+
+    def test_request_carries_a_timeout(self, tmp_path):
+        cache = Download(str(tmp_path), timeout=17)
+
+        with patch("requests.get", return_value=self._response(b"payload")) as mock_get:
+            cache.download("https://example.test/f.zip", filename="f.zip")
+
+        assert mock_get.call_args.kwargs["timeout"] == 17

@@ -868,7 +868,7 @@ class TestIntegration:
         mock_zip_response.iter_content = Mock(return_value=[zip_content[i : i + 8192] for i in range(0, len(zip_content), 8192)])
         mock_zip_response.raise_for_status = Mock()
 
-        def get_side_effect(url, stream=False):
+        def get_side_effect(url, **kwargs):
             if "ATOM" in url:
                 return mock_atom_response
             else:

@@ -140,14 +140,17 @@ class DownloadResult(NamedTuple):
 class Download:
     """Cache for downloaded files with versioning."""
 
-    def __init__(self, cache_dir: str = ".cache/downloads"):
+    def __init__(self, cache_dir: str = ".cache/downloads", timeout: int = 60):
         """Initialize download cache.
 
         Args:
             cache_dir: Directory for storing downloaded files
+            timeout: Seconds to wait for the server to send data. Without one a
+                stalled connection hangs the process indefinitely.
         """
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.timeout = timeout
 
     def download(self, url: str, filename: str | None = None, version: str | None = None, force: bool = False) -> DownloadResult:
         """Download a file if not cached or version changed.
@@ -169,15 +172,19 @@ class Download:
         file_path = self.cache_dir / filename
         meta_path = file_path.with_suffix(file_path.suffix + ".meta.json")
 
-        # Check if we need to download
-        needs_download = force or not file_path.exists()
+        # A file without its metadata sidecar cannot be trusted: the sidecar is
+        # only written once a download completed, so its absence means the file
+        # is a leftover from an interrupted run.
+        needs_download = force or not file_path.exists() or not meta_path.exists()
 
-        if not needs_download and meta_path.exists():
-            # Check version if provided
+        if not needs_download:
             with open(meta_path) as f:
                 metadata = json.load(f)
             if version and metadata.get("version") != version:
                 print(f"Version changed: {metadata.get('version')} → {version}")
+                needs_download = True
+            elif metadata.get("file_size") is not None and metadata["file_size"] != file_path.stat().st_size:
+                print(f"Cached file is {file_path.stat().st_size} bytes, expected {metadata['file_size']} — re-downloading")
                 needs_download = True
 
         if needs_download:
@@ -208,32 +215,52 @@ class Download:
             return DownloadResult(path=file_path, was_downloaded=False, version=cached_version)
 
     def _download_file(self, url: str, target_path: Path) -> None:
-        """Download file with progress indicator.
+        """Download a file to its final path, atomically.
+
+        The body goes to a temporary file that is only moved into place once the
+        transfer completed and matched the advertised length. Writing straight to
+        the target would leave a truncated file behind on an interruption, and
+        every later run would serve that as a cache hit.
 
         Args:
             url: URL to download
             target_path: Where to save the file
+
+        Raises:
+            requests.HTTPError: If the server returned an error status
+            requests.Timeout: If the server stopped sending data
+            OSError: If the transfer ended short of the advertised length
         """
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
+        partial_path = target_path.with_suffix(target_path.suffix + ".part")
 
-        total_size = int(response.headers.get("content-length", 0))
-        downloaded = 0
-        last_progress = -1
+        try:
+            response = requests.get(url, stream=True, timeout=self.timeout)
+            response.raise_for_status()
 
-        with open(target_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        progress = int((downloaded / total_size) * 100)
-                        # Only update display when progress changes by at least 1%
-                        if progress != last_progress:
-                            print(f"\rProgress: {progress}%", end="", flush=True)
-                            last_progress = progress
+            total_size = int(response.headers.get("content-length", 0))
+            downloaded = 0
+            last_progress = -1
 
-        print()  # New line after progress
+            with open(partial_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            progress = int((downloaded / total_size) * 100)
+                            # Only update display when progress changes by at least 1%
+                            if progress != last_progress:
+                                print(f"\rProgress: {progress}%", end="", flush=True)
+                                last_progress = progress
+
+            print()  # New line after progress
+
+            if total_size and downloaded != total_size:
+                raise OSError(f"Download incomplete: got {downloaded} of {total_size} bytes from {url}")
+
+            partial_path.replace(target_path)
+        finally:
+            partial_path.unlink(missing_ok=True)
 
     def get_cached_file(self, filename: str) -> Path | None:
         """Get path to cached file if it exists.
