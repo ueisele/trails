@@ -573,3 +573,10 @@ priority:
 - [GraphHopper Custom Models](https://github.com/graphhopper/graphhopper/blob/master/docs/core/custom-models.md)
 - [OpenStreetMap Land Cover Tagging](https://wiki.openstreetmap.org/wiki/Landcover)
 - [OSM Natural Tags](https://wiki.openstreetmap.org/wiki/Key:natural)
+
+## Related
+
+`trail-network-sources.md` answers the other half of the question — which paths
+exist at all, and which datasets to combine for them. The two meet at surface
+tags: `typeveg` from FKB and N50 can feed the same `surface=*` tags that
+`rutefolger` from Turrutebasen does today.
