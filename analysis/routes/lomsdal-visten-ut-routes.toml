@@ -1,0 +1,346 @@
+# UT.no hiking routes for Lomsdal-Visten national park.
+#
+# Researched by hand on 2026-08-10, because Nasjonal Turbase — the API behind
+# ut.no — needs a DNT key that is no longer handed out. Every route below was
+# checked to return a GPX with a non-empty track and one segment.
+#
+# The GPX itself is not listed per route: it is always
+# https://ut.no/api/gpx/trip/<id>, which trails.io.sources.ut derives from the
+# id. The page URLs are recorded verbatim, since their slugs are not derivable.
+#
+# Ski and cycling tours are deliberately excluded.
+#
+# category = "core"    a route inside the park or one of its main routes
+# category = "access"  a track that ends short of the core area, or only leads in
+#
+# ut_summary is what UT.no itself states, taken from the trip data behind each
+# route page on 2026-08-12: distance, walking time, and ascent. It is not the
+# measured length of the GPX track, and the two often differ by a kilometre or
+# more — the map shows both, side by side.
+#
+# "return" means UT's distance already covers the way back, and "round trip"
+# that the route closes on itself. Both come from UT's own direction field
+# (ABA / AA), not from an estimate.
+
+name = "Lomsdal-Visten"
+compiled = "2026-08-10"
+source = "https://ut.no"
+guide = "https://lomsdalvisten.no"
+
+# --- Core and park routes ---------------------------------------------------
+
+[[route]]
+id = 114687
+name = "Rundtur i Lomsdal-Visten: Jordbruvatnene - Elgviddvatnet - Gåsvatnet"
+category = "core"
+ut_url = "https://ut.no/turforslag/114687/rundtur-i-lomsdal-visten-nasjonalpark-jordbruvatnene-elgviddvatnet-gasvatnet"
+ut_summary = "42,7 km, 3 d, +1640 m"
+# The only route here without a lomsdalvisten.no counterpart.
+
+[[route]]
+id = 1113666
+name = "Sarvejællanjaevrie"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113666"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/sarvejaellanjaevrie/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/sarvejaellanjaevrie/"
+ut_summary = "6,4 km return, 2 h, +178 m"
+
+[[route]]
+id = 1113855
+name = "Elgviddevatnet via Sarvejælla/Gåsvassdalen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113855"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/elgvidda-via-sarvejaella-gavassdalen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/to-elgvidda-via-sarvejaella-gavassdalen/"
+ut_summary = "18,2 km, 12 h, +697 m"
+
+[[route]]
+id = 1113856
+name = "Elgviddevatnet fra Stavassdalen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113856"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/elgvidda-fra-stavassdalen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/to-elgvidda-from-stavassdalen/"
+ut_summary = "16,1 km, 5 h, +755 m"
+
+[[route]]
+id = 1113858
+name = "Elgvidda fra Tosfjellet"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113858"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/elgvidda-fra-tosfjellet/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/to-elgvidda-from-tosfjellet/"
+ut_summary = "17,4 km, 12 h, +733 m"
+
+[[route]]
+id = 1113741
+name = "Litlskardvatnet og Elgvidda via Måsskardet"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113741"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/litlskardvatnet-og-elgvidda-via-masskardet/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/litlskardvatnet-and-elgvidda-via-masskardet-pass/"
+ut_summary = "17,9 km, 7 h, +816 m"
+
+[[route]]
+id = 1113931
+name = "Stormoio - Lomsdalen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113931"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/stormoio-eiteradal-lomsdalen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/stormoio-eiteradal-lomsdalen/"
+ut_summary = "23,4 km, 2 d, +1088 m"
+
+[[route]]
+id = 1113981
+name = "Vistkjerringa"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113981"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/vistkjerringa/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/vistkjerringa/"
+ut_summary = "17,8 km return, 9 h, +1129 m"
+
+[[route]]
+id = 1114219
+name = "Litlvasshytto/Litlvatnet"
+category = "core"
+ut_url = "https://ut.no/turforslag/1114219"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/litlvasshytto-litlvatnet/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/litlvatnet-lake-and-cabin/"
+ut_summary = "12,6 km return, 4 h, +225 m"
+
+[[route]]
+id = 1113933
+name = "Rundtur Skjørlægda"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113933"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/rundtur-skjorlaegda/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/the-skjorlaegda-circut/"
+ut_summary = "13,7 km round trip, 4 h, +309 m"
+
+[[route]]
+id = 1113847
+name = "Lavatnet/Lavasshytta"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113847"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/lavatnet-lavasshytta/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/lavatnet-lake-and-cabin/"
+ut_summary = "20,7 km return, 10 h, +814 m"
+
+[[route]]
+id = 1113854
+name = "Tverådalen - Bønå"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113854"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/tveradalen-bona/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/tveradalen-bona/"
+ut_summary = "33,0 km, 3 d, +1233 m"
+
+[[route]]
+id = 1113435
+name = "Storklumpen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113435"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/storklumpen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/storklumpen/"
+ut_summary = "15,4 km return, 4 h, +1055 m"
+
+[[route]]
+id = 1113845
+name = "Gamle Stavassveg"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113845"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/gamle-stavassveg/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/gamle-stavassveg-the-old-road/"
+ut_summary = "17,2 km return, 5 h, +447 m"
+
+[[route]]
+id = 1113849
+name = "Breivasstind"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113849"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/breivasstind/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/breivasstind/"
+ut_summary = "22,5 km return, 10 h, +1359 m"
+
+[[route]]
+id = 1113935
+name = "Alternative Midtre - Nedre Breivatn"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113935"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/alternativ-trase-mellom-midtre-og-nedre-breivatn/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/alternative-route-between-midtre-and-nedre-breitvatn/"
+ut_summary = "4,9 km, 1 h 30 min, +49 m"
+
+[[route]]
+id = 1113930
+name = "Bjønnstokken - Strompdalen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113930"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/bjonnstokken-strompdalen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/bjonnstokken-strompdalen/"
+ut_summary = "13,1 km, 5 h, +337 m"
+
+[[route]]
+id = 1113681
+name = "Tosbotn - Bjørnstokken"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113681"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/tosbotn-bjonnstokken/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/tosbotn-bjonnstokken/"
+ut_summary = "9,2 km return, 3 h, +388 m"
+
+[[route]]
+id = 1113929
+name = "Nedre Breivatn - Lomsdalen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113929"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/nedre-breivatn-lomsdalen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/nedre-breivatn-lomsdalen/"
+ut_summary = "7,6 km, 3 h, +71 m"
+
+[[route]]
+id = 1113927
+name = "Strompdalen - Nedre Breivatn"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113927"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/strompdalen-nedre-breivatn/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/strompdalen-nedre-breivatn/"
+ut_summary = "6,8 km return, 3 h, +244 m"
+
+[[route]]
+id = 1113926
+name = "Vintervegen til Lomsdalen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113926"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/vintervegen-til-lomsdalen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/the-winter-road-to-lomsdalen/"
+ut_summary = "13,8 km return, 4 h, +358 m"
+
+[[route]]
+id = 1113925
+name = "Strompdalen - Lomsdalen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113925"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/strompdalen-lomsdalen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/strompdalen-lomsdalen/"
+ut_summary = "13,4 km return, 4 h, +216 m"
+
+[[route]]
+id = 1113924
+name = "Børjeøra - Strompdalen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113924"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/borjeora-strompdalen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/borjeora-strompdalen/"
+ut_summary = "9,3 km return, 4 h, +387 m"
+
+[[route]]
+id = 1113860
+name = "Sjøbergmarsjruta"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113860"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/sjobergmarsjruta/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/route-to-the-sjoberg-march/"
+ut_summary = "21,2 km, 8 h, +881 m"
+
+[[route]]
+id = 1113743
+name = "Storbørja - Tøymvatnet"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113743"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/storborja-toymvatnet/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/storborja-toymvatnet/"
+ut_summary = "16,1 km return, 5 h, +344 m"
+
+[[route]]
+id = 1113843
+name = "Aursletta - Tøymvasshytta"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113843"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/aursletta-toymvasshytta/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/aursletta-toymvasshytta-cabin/"
+ut_summary = "15,2 km, 5 h, +300 m"
+
+[[route]]
+id = 1113572
+name = "Snøfjelltind"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113572"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/snofjelltind/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/snofjelltind/"
+ut_summary = "10,3 km return, 4 h, +1027 m"
+
+[[route]]
+id = 11359
+name = "Store Finnkneet"
+category = "core"
+ut_url = "https://ut.no/turforslag/11359"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/store-finnkneet/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/store-finnkneet-a-mountain-landmark/"
+ut_summary = "12,6 km return, 8 h, +1186 m"
+
+[[route]]
+id = 1113434
+name = "Andalshatten"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113434"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/andalshatten/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/andalshatten/"
+ut_summary = "7,7 km, 5 h, +895 m"
+
+[[route]]
+id = 1113813
+name = "Storfjorden - Langvatnet"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113813"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/storfjorden-langvatnet/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/storfjorden-langvatnet/"
+ut_summary = "6,5 km return, 5 h, +332 m"
+
+[[route]]
+id = 1113815
+name = "Langvatnet fra Ausen"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113815"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/langvatnet-fra-ausen/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/to-langvatnet-from-ausen/"
+ut_summary = "13,9 km return, 5 h, +466 m"
+
+[[route]]
+id = 1113809
+name = "Fjellgården Auslia"
+category = "core"
+ut_url = "https://ut.no/turforslag/1113809"
+guide_url_no = "https://lomsdalvisten.no/turbeskrivelser/fjellgarden-auslia/"
+guide_url_en = "https://lomsdalvisten.no/en/hiking-descriptions/auslia-mountain-farm/"
+ut_summary = "7,1 km return, 3 h, +284 m"
+
+# --- Access routes and connections ------------------------------------------
+#
+# These end short of the core area or only lead into the park.
+#
+# For the two "return" routes below, UT's distance covers the way back while the
+# GPX track holds only the outward leg — so the map's measured length is about
+# half of what ut_summary states.
+
+[[route]]
+id = 1110818
+name = "Fottur til Kvannlia"
+category = "access"
+ut_url = "https://ut.no/turforslag/1110818/tur-til-kvannlia"
+ut_summary = "12,0 km return, 4 h, +1402 m"
+
+[[route]]
+id = 1110099
+name = "Fottur til Hornstinden"
+category = "access"
+ut_url = "https://ut.no/turforslag/1110099/topptur-til-hornstinden"
+ut_summary = "9,6 km return, 3 h, +1008 m"
+
+[[route]]
+id = 116015
+name = "Dagstur i Godvassdalen"
+category = "access"
+ut_url = "https://ut.no/turforslag/116015/dagstur-i-godvassdalen-til-ende-og-litt-til"
+ut_summary = "7,2 km, 5 h, +473 m"

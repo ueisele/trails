@@ -1,8 +1,10 @@
 """Build an interactive hiking map for Lomsdal-Visten national park.
 
-Combines four sources:
+Combines six sources:
   * Turrutebasen (Kartverket/Geonorge) - official marked routes, with DNT-maintained
     segments highlighted separately
+  * UT.no - hand-researched DNT route suggestions for this park, read from
+    ``analysis/routes/lomsdal-visten-ut-routes.toml``
   * Traktorveg og Skogsbilveg WFS (Kartverket) - the detailed FKB path network the
     topographic base map draws at high zoom; by far the richest source here
   * N50 Kartdata (Kartverket) - the generalised path network the base map draws at
@@ -26,7 +28,7 @@ from typing import Any
 import geopandas as gpd
 import pandas as pd
 from trails.io.export.gpx import export_to_gpx
-from trails.io.sources import kommuneinfo, n50, naturbase, overpass, stedsnavn, traktorvegsti
+from trails.io.sources import kommuneinfo, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
 from trails.io.sources.geonorge import Source as GeonorgeSource
 from trails.io.sources.language import Language
 from trails.utils.geo import merge_lines, thin_points
@@ -132,6 +134,29 @@ N50_POPUP_FIELDS = {
     "vedlikeholdsansvarlig": "Maintained by",
     "medium": "Medium",
     "length_km": "Length (km)",
+}
+
+#: How a catalogue category reads in a popup.
+UT_CATEGORY_LABELS = {
+    "core": "Route in or through the park",
+    "access": "Access or connection",
+}
+
+UT_POPUP_FIELDS = {
+    "name": "Route",
+    "category_label": "Kind",
+    "length_km": "Track length (km)",
+    "ut_summary": "UT.no states",
+}
+
+#: Clickable links in the UT.no popup. The route page and the park's own
+#: description carry everything the geometry cannot: season, difficulty, the
+#: state of the river crossings.
+UT_LINK_FIELDS = {
+    "ut_url": "→ Route on ut.no",
+    "guide_url_no": "→ Beskrivelse på lomsdalvisten.no",
+    "guide_url_en": "→ Description on lomsdalvisten.no",
+    "gpx_url": "→ Download GPX",
 }
 
 TRAIL_POPUP_FIELDS = {
@@ -355,6 +380,12 @@ def main() -> int:
     parser.add_argument("--trailhead-km", type=float, default=2.0, help="Band around the park in which farms and sæters are shown as trailheads (km)")
     parser.add_argument("--names-km", type=float, default=2.0, help="Band around the park covered by the terrain-name layer (valleys, passes, peaks)")
     parser.add_argument("--no-names", action="store_true", help="Skip the place-name layer")
+    parser.add_argument(
+        "--ut-routes",
+        default=str(repo_root / "analysis" / "routes" / "lomsdal-visten-ut-routes.toml"),
+        help="Catalogue of UT.no routes to draw; one GPX is downloaded per entry",
+    )
+    parser.add_argument("--no-ut", action="store_true", help="Skip the UT.no route layers")
     parser.add_argument("--highlight", help="Mark every position of this place name in red, numbered, for checking what the register holds")
     parser.add_argument(
         "--names-spacing-m", type=float, default=1000.0, help="Minimum distance between two labels of the same name; closer copies are dropped"
@@ -397,6 +428,21 @@ def main() -> int:
     # Everything within reach of the park, used for features that make no sense
     # to split at the boundary, such as ferries and quays.
     approach_and_park = gpd.GeoDataFrame(geometry=[approach.union_all().union(park.union_all())], crs="EPSG:4326")
+
+    ut_core = gpd.GeoDataFrame()
+    ut_access = gpd.GeoDataFrame()
+    if not args.no_ut:
+        print("\nLoading UT.no routes...")
+        # Not clipped: a route suggestion is a whole proposal, and cutting it at
+        # the park boundary would strip exactly the approach it describes.
+        catalogue = ut.load_catalogue(args.ut_routes)
+        ut_routes = ut.Source(cache_dir=args.cache_dir).load_routes(catalogue, force_download=args.force_download)
+        ut_routes["category_label"] = ut_routes["category"].map(UT_CATEGORY_LABELS)
+        ut_core = ut_routes[ut_routes["category"] == "core"]
+        ut_access = ut_routes[ut_routes["category"] == "access"]
+        summarize("UT.no core and park routes", ut_core)
+        summarize("UT.no access routes", ut_access)
+        print(f"  {ut_routes['guide_url_no'].notna().sum()} of {len(ut_routes)} also described on lomsdalvisten.no")
 
     # Every per-municipality Geonorge dataset needs this, so resolve it once.
     codes = kommuneinfo.Source(cache_dir=args.cache_dir).intersecting(approach, fylke=FYLKE_PREFIXES)
@@ -553,6 +599,35 @@ def main() -> int:
         maps.add_trails(fmap, drawn, name=label, color=color, weight=weight, popup_fields=popup_fields, dash_array=dash, show=show)
         legend[f"{label} ({len(gdf)})"] = color
 
+    # UT.no last, and therefore on top: these are the only lines that come with a
+    # written description, so they should win wherever they share a path with a
+    # Turrutebasen or FKB line. They also carry links, which no other layer does.
+    ut_groups = []
+    for gdf, label, color, weight in (
+        (ut_core, "Routes [UT.no]", "#d81b60", 4.0),
+        (ut_access, "Access routes [UT.no]", "#f48fb1", 3.0),
+    ):
+        if not len(gdf):
+            continue
+        ut_groups.append(
+            maps.add_trails(
+                fmap,
+                simplify_for_display(gdf, args.simplify_m),
+                name=label,
+                color=color,
+                weight=weight,
+                popup_fields=UT_POPUP_FIELDS,
+                link_fields=UT_LINK_FIELDS,
+                tooltip_field="name",
+                group_field="trip_id",
+            )
+        )
+        legend[f"{label} ({len(gdf)})"] = color
+
+    # 35 routes through the same handful of valleys are impossible to follow by
+    # eye where they run together, so a click picks one out of the bundle.
+    maps.add_click_highlight(fmap, ut_groups)
+
     if len(terminals):
         maps.add_points(fmap, terminals, name="Ferry quays [OSM]", color="cadetblue", icon="ship", popup_fields=TERMINAL_POPUP_FIELDS)
     if len(cabins):
@@ -637,6 +712,8 @@ def main() -> int:
         ("lomsdal-visten-fkb.gpx", [fkb_in_park, fkb_in_approach], "typeveg", ["typeveg", "length_km"]),
         ("lomsdal-visten-n50.gpx", [n50_in_park, n50_in_approach], "typeveg", ["typeveg", "rutemerking", "length_km"]),
         ("lomsdal-visten-osm.gpx", [osm_in_park, osm_in_approach], "name", ["highway", "surface", "sac_scale", "length_km"]),
+        # One file with all catalogued routes, named, instead of 35 downloads.
+        ("lomsdal-visten-ut.gpx", [ut_core, ut_access], "name", ["category_label", "length_km", "ut_url"]),
     ]
     for filename, parts, name_field, desc_fields in exports:
         populated = [part for part in parts if len(part)]
@@ -649,6 +726,8 @@ def main() -> int:
     print("\n" + "=" * 70)
     print(f"Sources: Turrutebasen {version} (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)")
     print("         all Kartverket | Naturbase (NLOD, Miljødirektoratet) | OpenStreetMap (ODbL)")
+    if not args.no_ut:
+        print(f"         {ut.METADATA.attribution} ({ut.METADATA.license}) — non-commercial, unlike the rest")
     print("=" * 70)
     return 0
 

@@ -10,6 +10,8 @@ visually::
     fmap.save("map.html")
 """
 
+import hashlib
+import re
 from enum import Enum
 from html import escape
 from typing import Any
@@ -17,6 +19,8 @@ from typing import Any
 import folium
 import geopandas as gpd
 import pandas as pd
+from branca.element import MacroElement
+from jinja2 import Template
 
 #: Bounding box as (min_lon, min_lat, max_lon, max_lat), matching GeoPandas.
 Bounds = tuple[float, float, float, float]
@@ -114,12 +118,52 @@ def create_map(
     return fmap
 
 
-def _build_popup(row: pd.Series, fields: dict[str, str]) -> str | None:
+#: Schemes a popup link may use. Anything else — ``javascript:`` above all —
+#: would execute in the page as soon as a reader clicks a trail.
+_LINK_SCHEMES = ("http://", "https://")
+
+#: Prefix of the CSS class identifying which route a line belongs to.
+_GROUP_CLASS_PREFIX = "trail-group-"
+
+#: Anything outside this becomes a dash, so a route name or id always yields a
+#: single valid CSS class token.
+_CLASS_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def _group_class(value: object) -> str:
+    """Build the CSS class marking every line of one route.
+
+    Args:
+        value: Identifying value, typically a route id or name
+
+    Returns:
+        A single CSS class token, distinct for distinct values
+    """
+    # A single null anywhere in an id column makes pandas store it as float, and
+    # 1113860.0 would otherwise yield a different class than 1113860 — the same
+    # route named differently depending on an unrelated row.
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+
+    text = str(value)
+    token = _CLASS_SAFE.sub("-", text)
+    if token != text:
+        # "Bønå" and "Bønö" both flatten to "B-n-", which would silently merge two
+        # routes into one selection, so anything reshaped keeps a digest of the
+        # original. Plain ids pass through untouched.
+        token = f"{token}-{hashlib.md5(text.encode()).hexdigest()[:6]}"
+    return f"{_GROUP_CLASS_PREFIX}{token}"
+
+
+def _build_popup(row: pd.Series, fields: dict[str, str], link_fields: dict[str, str] | None = None) -> str | None:
     """Render a popup table from selected fields.
 
     Args:
         row: Row of a GeoDataFrame
         fields: Mapping of column name to display label
+        link_fields: Mapping of a column holding a URL to the link text to show
+            for it. Rendered below the table rows, one link per line. Values that
+            are not http(s) URLs are dropped.
 
     Returns:
         HTML table, or None if the row has no populated fields
@@ -137,6 +181,19 @@ def _build_popup(row: pd.Series, fields: dict[str, str]) -> str | None:
             f"<td style='padding:2px 0'><b>{escape(str(value))}</b></td></tr>"
         )
 
+    for column, text in (link_fields or {}).items():
+        if column not in row:
+            continue
+        url = row[column]
+        if pd.isna(url) or not str(url).startswith(_LINK_SCHEMES):
+            continue
+        # noopener keeps the opened page from reaching back into this one.
+        rows.append(
+            f"<tr><td colspan='2' style='padding:3px 0'>"
+            f'<a href="{escape(str(url), quote=True)}" target="_blank" rel="noopener noreferrer">{escape(str(text))}</a>'
+            f"</td></tr>"
+        )
+
     if not rows:
         return None
     return f"<table style='font-family:sans-serif;font-size:12px'>{''.join(rows)}</table>"
@@ -150,6 +207,9 @@ def add_trails(
     weight: float = 3.0,
     opacity: float = 0.85,
     popup_fields: dict[str, str] | None = None,
+    link_fields: dict[str, str] | None = None,
+    tooltip_field: str | None = None,
+    group_field: str | None = None,
     dash_array: str | None = None,
     show: bool = True,
 ) -> folium.FeatureGroup:
@@ -163,6 +223,13 @@ def add_trails(
         weight: Line width in pixels
         opacity: Line opacity between 0 and 1
         popup_fields: Mapping of column name to popup label
+        link_fields: Mapping of a column holding a URL to its link text, for
+            trails that have a description page elsewhere
+        tooltip_field: Column shown on hover, so a line can be identified before
+            it is clicked
+        group_field: Column whose value ties the parts of one route together, so
+            :func:`add_click_highlight` can pick out all of it at once. A route
+            split into several lines shares one value.
         dash_array: SVG dash pattern, e.g. ``"8,6"``. Use for connections that
             are not walked, such as ferry crossings.
         show: Whether the layer starts visible
@@ -181,7 +248,17 @@ def add_trails(
             continue
 
         lines = list(geometry.geoms) if geometry.geom_type == "MultiLineString" else [geometry]
-        popup_html = _build_popup(row, popup_fields) if popup_fields else None
+        popup_html = _build_popup(row, popup_fields or {}, link_fields) if (popup_fields or link_fields) else None
+
+        tooltip = None
+        if tooltip_field and tooltip_field in row and pd.notna(row[tooltip_field]):
+            tooltip = str(row[tooltip_field])
+
+        # Leaflet writes className straight onto the SVG path, which makes it the
+        # natural place to carry the route identity into the browser.
+        class_name = None
+        if group_field and group_field in row and pd.notna(row[group_field]):
+            class_name = _group_class(row[group_field])
 
         for line in lines:
             polyline = folium.PolyLine(
@@ -190,6 +267,8 @@ def add_trails(
                 weight=weight,
                 opacity=opacity,
                 dash_array=dash_array,
+                tooltip=tooltip,
+                class_name=class_name,
             )
             if popup_html:
                 polyline.add_child(folium.Popup(popup_html, max_width=320))
@@ -197,6 +276,115 @@ def add_trails(
 
     group.add_to(fmap)
     return group
+
+
+class _ClickHighlight(MacroElement):
+    """Leaflet behaviour that lifts the clicked route out of the tangle.
+
+    Rendered after the layers it operates on, so their JavaScript variables
+    already exist by the time this runs.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function () {
+            var groups = [{{ this.group_names|join(', ') }}];
+            var boost = {{ this.weight_boost }};
+            var dim = {{ this.dim_opacity }};
+            var selected = null;
+
+            function eachPath(fn) {
+                groups.forEach(function (group) {
+                    group.eachLayer(function (layer) {
+                        if (layer.setStyle && layer.options.className) { fn(layer); }
+                    });
+                });
+            }
+
+            // Captured before anything is restyled, so a restore is always exact.
+            eachPath(function (layer) {
+                layer._baseStyle = {
+                    color: layer.options.color,
+                    weight: layer.options.weight,
+                    opacity: layer.options.opacity
+                };
+            });
+
+            function clear() {
+                selected = null;
+                eachPath(function (layer) { layer.setStyle(layer._baseStyle); });
+            }
+
+            function select(key) {
+                selected = key;
+                eachPath(function (layer) {
+                    if (layer.options.className === key) {
+                        layer.setStyle({weight: layer._baseStyle.weight + boost, opacity: 1});
+                        layer.bringToFront();
+                    } else {
+                        // Width is reset too, or switching straight from one route
+                        // to another would leave the previous one widened.
+                        layer.setStyle({weight: layer._baseStyle.weight, opacity: dim});
+                    }
+                });
+            }
+
+            eachPath(function (layer) {
+                layer.on('click', function () {
+                    if (selected === layer.options.className) { clear(); } else { select(layer.options.className); }
+                });
+            });
+
+            // Leaflet only fires a map click when the click hit no layer, so this
+            // clears the selection on empty terrain without fighting the handler above.
+            {{ this._parent.get_name() }}.on('click', clear);
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, groups: list[folium.FeatureGroup], weight_boost: float, dim_opacity: float) -> None:
+        """Initialize the behaviour.
+
+        Args:
+            groups: Feature groups whose lines take part
+            weight_boost: Pixels added to the selected route's width
+            dim_opacity: Opacity the unselected routes fall back to
+        """
+        super().__init__()
+        self._name = "ClickHighlight"
+        self.group_names = [group.get_name() for group in groups]
+        self.weight_boost = weight_boost
+        self.dim_opacity = dim_opacity
+
+
+def add_click_highlight(
+    fmap: folium.Map,
+    groups: list[folium.FeatureGroup],
+    weight_boost: float = 4.0,
+    dim_opacity: float = 0.15,
+) -> None:
+    """Make a clicked route stand out from the ones it overlaps.
+
+    Where many routes share the same valley, none of them can be followed by
+    eye. Clicking one widens it, draws it in front of everything else and fades
+    its neighbours, so a single trip reads end to end. Clicking it again, or
+    clicking empty terrain, puts everything back.
+
+    Only lines carrying a ``group_field`` take part, and all lines sharing that
+    value are selected together, so a route split into several pieces still
+    highlights as one.
+
+    Call after the layers have been added, and before :func:`finalize`.
+
+    Args:
+        fmap: Map holding the layers
+        groups: Feature groups returned by :func:`add_trails`
+        weight_boost: Pixels added to the selected route's width
+        dim_opacity: Opacity the unselected routes fall back to
+    """
+    if not groups:
+        return
+    _ClickHighlight(groups, weight_boost=weight_boost, dim_opacity=dim_opacity).add_to(fmap)
 
 
 def add_points(

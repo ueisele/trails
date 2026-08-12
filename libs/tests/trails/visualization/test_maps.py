@@ -105,6 +105,76 @@ class TestPopup:
     def test_returns_none_when_nothing_populated(self, trails):
         assert maps._build_popup(trails.iloc[1], {"trail_name": "Route", "difficulty": "Difficulty"}) is None
 
+    def test_renders_link_fields_as_anchors(self, trails):
+        row = trails.iloc[0].copy()
+        row["ut_url"] = "https://ut.no/turforslag/1113860"
+
+        html = maps._build_popup(row, {"trail_name": "Route"}, {"ut_url": "Open on ut.no"})
+
+        assert 'href="https://ut.no/turforslag/1113860"' in html
+        assert "Open on ut.no</a>" in html
+        assert 'rel="noopener noreferrer"' in html
+
+    def test_a_link_alone_is_enough_for_a_popup(self, trails):
+        row = trails.iloc[1].copy()
+        row["ut_url"] = "https://ut.no/turforslag/1"
+
+        assert maps._build_popup(row, {}, {"ut_url": "Route"}) is not None
+
+    def test_skips_missing_link_values(self, trails):
+        row = trails.iloc[0].copy()
+        row["guide_url_en"] = None
+
+        html = maps._build_popup(row, {"trail_name": "Route"}, {"guide_url_en": "Description", "absent": "Absent"})
+
+        assert "<a " not in html
+
+    def test_rejects_non_http_links(self, trails):
+        """A URL from a data file must not be able to run script on click."""
+        row = trails.iloc[0].copy()
+        row["ut_url"] = "javascript:alert(1)"
+
+        html = maps._build_popup(row, {"trail_name": "Route"}, {"ut_url": "Open"})
+
+        assert "javascript:" not in html
+
+    def test_link_url_is_escaped(self, trails):
+        row = trails.iloc[0].copy()
+        row["ut_url"] = 'https://ut.no/x?a=1"><script>alert(1)</script>'
+
+        html = maps._build_popup(row, {"trail_name": "Route"}, {"ut_url": "Open"})
+
+        assert "<script>" not in html
+        assert "&quot;&gt;&lt;script&gt;" in html
+
+
+class TestClickHighlight:
+    """Tests for add_click_highlight."""
+
+    def test_renders_after_the_layers_it_drives(self, trails):
+        """The snippet names the feature groups, so they must exist by then."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="UT.no", group_field="trail_name")
+        maps.add_click_highlight(fmap, [group])
+
+        html = fmap.get_root().render()
+        assert html.index(f"var {group.get_name()} = L.featureGroup") < html.index(f"var groups = [{group.get_name()}]")
+
+    def test_uses_the_given_boost_and_dimming(self, trails):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="UT.no", group_field="trail_name")
+        maps.add_click_highlight(fmap, [group], weight_boost=6.0, dim_opacity=0.3)
+
+        html = fmap.get_root().render()
+        assert "var boost = 6.0;" in html
+        assert "var dim = 0.3;" in html
+
+    def test_without_groups_nothing_is_added(self):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_click_highlight(fmap, [])
+
+        assert "var groups = [" not in fmap.get_root().render()
+
 
 class TestAddTrails:
     """Tests for add_trails."""
@@ -116,6 +186,65 @@ class TestAddTrails:
         polylines = [child for child in group._children.values() if isinstance(child, folium.PolyLine)]
         # One plain LineString plus two parts of the MultiLineString.
         assert len(polylines) == 3
+
+    def test_tooltip_field_labels_each_line(self, trails):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="UT.no", tooltip_field="trail_name")
+
+        polyline = next(child for child in group._children.values() if isinstance(child, folium.PolyLine))
+        tooltip = next(child for child in polyline._children.values() if isinstance(child, folium.Tooltip))
+        assert tooltip.text == "Sjøbergmarsjen"
+
+    def test_link_fields_reach_the_popup(self, trails):
+        gdf = trails.copy()
+        gdf["ut_url"] = "https://ut.no/turforslag/1113860"
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+
+        maps.add_trails(fmap, gdf, name="UT.no", link_fields={"ut_url": "Open on ut.no"})
+
+        assert "ut.no/turforslag/1113860" in fmap.get_root().render()
+
+    def test_group_field_marks_every_part_of_one_route(self, trails):
+        gdf = trails.copy()
+        gdf["trip_id"] = [1113860, 116015]
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+
+        group = maps.add_trails(fmap, gdf, name="UT.no", group_field="trip_id")
+
+        classes = [child.options["className"] for child in group._children.values() if isinstance(child, folium.PolyLine)]
+        # The second route is a MultiLineString: both its parts carry one class.
+        assert classes == ["trail-group-1113860", "trail-group-116015", "trail-group-116015"]
+
+    def test_group_value_is_reduced_to_a_css_token(self, trails):
+        gdf = trails.copy()
+        gdf["route"] = ["Tverådalen - Bønå", "x"]
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+
+        group = maps.add_trails(fmap, gdf, name="UT.no", group_field="route")
+
+        polyline = next(child for child in group._children.values() if isinstance(child, folium.PolyLine))
+        assert polyline.options["className"].startswith("trail-group-Tver-dalen---B-n--")
+
+    def test_names_that_flatten_alike_stay_distinct(self):
+        """Without the digest both of these would become one selection."""
+        assert maps._group_class("Bønå") != maps._group_class("Bønö")
+
+    def test_plain_ids_are_not_given_a_digest(self):
+        assert maps._group_class(1113860) == "trail-group-1113860"
+
+    def test_a_whole_float_id_matches_the_integer(self):
+        """One null in the column turns the whole thing into floats."""
+        assert maps._group_class(1113860.0) == maps._group_class(1113860)
+
+    def test_rows_without_a_group_value_get_no_class(self, trails):
+        gdf = trails.copy()
+        gdf["trip_id"] = [1113860, None]
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+
+        group = maps.add_trails(fmap, gdf, name="UT.no", group_field="trip_id")
+
+        classes = [child.options.get("className") for child in group._children.values() if isinstance(child, folium.PolyLine)]
+        assert classes == ["trail-group-1113860", None, None]
 
     def test_layer_name_includes_feature_count(self, trails):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
