@@ -482,6 +482,13 @@ class TestLegendEscaping:
         assert "&lt;15 km" in html
         assert "approach <15 km" not in html
 
+    def test_boundary_does_not_intercept_clicks(self, park):
+        """It is drawn last, so an interactive fill would swallow every trail click."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_boundary(fmap, park, name="National park")
+
+        assert '"interactive": false' in fmap.get_root().render()
+
     def test_title_is_escaped(self):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_legend(fmap, "A <b>bold</b> title", {"x": "#000000"})

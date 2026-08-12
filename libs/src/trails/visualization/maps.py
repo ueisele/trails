@@ -604,7 +604,11 @@ def add_boundary(
     def style(_: Any) -> dict[str, Any]:
         return {"color": color, "weight": weight, "fillColor": color, "fillOpacity": fill_opacity}
 
-    layer = folium.GeoJson(gdf.to_json(), name=name, style_function=style, show=show)
+    # A boundary is drawn last so its outline stays legible over every trail, which
+    # also puts its fill on top of them for hit-testing — and a faint fill still
+    # swallows clicks. Since the outline carries no popup, it opts out of pointer
+    # events entirely and lets clicks reach the trails underneath.
+    layer = folium.GeoJson(gdf.to_json(), name=name, style_function=style, show=show, interactive=False)
     layer.add_to(fmap)
     return layer
 
