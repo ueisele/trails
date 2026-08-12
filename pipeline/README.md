@@ -159,30 +159,33 @@ The pipeline includes elevation data via SRTM (~30m resolution):
 
 See `docs/dtm-integration.md` for DTM upgrade guide and `docs/dtm-feasibility-analysis.md` for cost/benefit analysis.
 
-### Land Cover (Planned)
+### Surface Tags & Custom Routing (Planned)
 
-Land cover integration enables terrain-aware routing:
-- **Phase 1** (Planned): Leverage existing OSM tags (`natural=wood`, `surface=*`)
-  - Zero additional data - uses existing OSM content
-  - Custom routing models for forest preference, seasonal routing
+The pipeline includes surface tags inferred from Turrutebasen trail types:
+- **Current**: Surface tags from Turrutebasen (ground, paved, unpaved, rock)
+  - Automatically inferred from trail type (`rutefolger` field)
+  - Encoded in GraphHopper graph for routing use
+  - Ready for custom routing models
+- **Phase 1** (Planned): Custom routing models using existing surface data
+  - Seasonal routing (summer vs winter trail preferences)
+  - Difficulty-based routing (family-friendly, challenging, etc.)
   - Implementation time: 1-2 hours (configuration only)
-- **Phase 2** (Future): ESA WorldCover 10m data
-  - Comprehensive global land cover at 10m resolution
-  - 11 land cover classes (tree cover, grassland, etc.)
-  - Free and open (CC BY 4.0 license)
+- **Phase 2** (Future): ESA WorldCover 10m land cover data
+  - Add actual land cover information (forest, grassland, etc.)
+  - Enable forest preference, scenic variety routing
+  - 11 land cover classes, free and open (CC BY 4.0 license)
   - ~2-3 GB download (feasible in GitHub Actions)
 
 See `docs/land-cover-integration.md` for detailed design.
 
 ## Future Enhancements
 
-- [ ] Land cover Phase 1: OSM-based custom routing models
-- [ ] Land cover Phase 2: ESA WorldCover 10m integration
+- [ ] Custom routing models Phase 1: Use existing surface tags for seasonal/difficulty routing
+- [ ] Land cover Phase 2: ESA WorldCover 10m integration for forest/terrain preferences
 - [ ] Norwegian DTM10 integration (10m resolution, requires self-hosted runner)
 - [ ] Multi-country support (Sweden, Denmark, Finland)
 - [ ] Incremental updates (delta builds)
 - [ ] GraphHopper routing validation tests
-- [ ] Advanced routing profiles (winter safety, scenic variety, etc.)
 
 ## License
 

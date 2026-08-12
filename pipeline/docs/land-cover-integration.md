@@ -91,80 +91,95 @@ Land cover information enables:
 
 **Verdict**: ⏳ **Alternative option** if WorldCover insufficient
 
-### Option 4: OpenStreetMap Tags (Already Available!)
+### Option 4: OpenStreetMap Data (Requires Integration)
 
 **Source**: OpenStreetMap
 **Resolution**: Varies (vector data)
 **License**: ✅ **ODbL** (Open Database License)
 
+**Important**: Our pipeline uses **Turrutebasen** (not OpenStreetMap). To use OSM land cover data, we would need to download OSM polygons and merge them with Turrutebasen trails.
+
 **Pros:**
-- ✅ Already in OSM data we're using
-- ✅ No additional download needed
 - ✅ Detailed tagging (natural=*, landuse=*, surface=*)
 - ✅ Local knowledge from mappers
-- ✅ Zero implementation effort
+- ✅ Free and open license
+- ✅ Good coverage in Norway
 
 **Available Tags:**
 - `natural=wood` - Forested areas
 - `natural=scrub` - Shrubland
 - `landuse=forest` - Managed forest
-- `surface=*` - Trail surface type
-- `smoothness=*` - Trail condition
 
 **Cons:**
+- ❌ **Not currently in our pipeline** - Would require downloading OSM data
 - ⚠️ Incomplete coverage (depends on mapper activity)
 - ⚠️ Inconsistent tagging standards
-- ⚠️ Not available for all trail areas
+- ⚠️ Requires spatial join with Turrutebasen trails
 
-**Verdict**: ✅ **Use first** - Leverage existing OSM data before adding external datasets
+**Verdict**: ⏳ **Possible option** - Would require similar effort to WorldCover integration
 
-## Recommended Approach: Hybrid Strategy
+## Recommended Approach
 
-### Phase 1: OpenStreetMap Land Cover (Immediate)
+### Current State (What We Have)
 
-**Status**: ✅ **Already available** (no implementation needed)
+**Status**: ✅ **Surface tags from Turrutebasen**
 
-GraphHopper already reads OSM tags like:
-- `surface=*` (paved, unpaved, gravel, dirt, grass, etc.)
-- `smoothness=*` (excellent, good, intermediate, bad, etc.)
-- `natural=wood` (forest areas adjacent to trails)
+Our pipeline currently includes:
+- `surface=*` tags inferred from Turrutebasen `rutefolger` field
+  - ST (Sti/Path) → `surface=ground`
+  - TI (Tilrettelagt/Adapted) → `surface=paved`
+  - VE (Vei/Road) → `surface=unpaved`
+  - LE (Lederute/Cairned) → `surface=rock`
+- GraphHopper configured to encode surface tags
+- **No land cover tags** (natural=wood, etc.) - would need external data
 
-**Action**: Create custom routing models that use these tags.
+### Phase 1: Custom Routing Models (Recommended First Step)
+
+**Status**: ❌ **Not implemented** (configuration needed)
+
+**Goal**: Create routing profiles that use the existing surface tags for intelligent routing.
 
 **Implementation:**
 ```yaml
 # In GraphHopper config
 profiles:
-  - name: hiking_forest
+  - name: hiking_summer
     vehicle: foot
     weighting: custom
     custom_model:
       priority:
-        # Prefer forest trails (natural=wood nearby)
-        - if: "road_environment == FOREST"
-          multiply_by: 1.2
-
         # Prefer good surfaces
-        - if: "surface == PAVED || surface == GRAVEL"
+        - if: "surface == PAVED || surface == GROUND"
           multiply_by: 1.1
 
-        # Avoid poor surfaces
-        - if: "surface == DIRT && smoothness == BAD"
-          multiply_by: 0.7
+        # Avoid rocky terrain in summer
+        - if: "surface == ROCK"
+          multiply_by: 0.8
 
-        # Prefer shaded paths in summer
-        - if: "natural == WOOD"
-          multiply_by: 1.15
+  - name: hiking_winter
+    vehicle: foot
+    weighting: custom
+    custom_model:
+      priority:
+        # Prefer maintained trails in winter
+        - if: "surface == PAVED"
+          multiply_by: 1.3
+
+        # Avoid unpaved in winter conditions
+        - if: "surface == UNPAVED || surface == GROUND"
+          multiply_by: 0.7
 ```
 
 **Effort**: 1-2 hours (configuration only)
-**Benefit**: Immediate terrain-aware routing with zero additional data
+**Benefit**: Terrain-aware routing with existing data, zero additional downloads
 
 ### Phase 2: ESA WorldCover Integration (Future Enhancement)
 
-**Status**: ⏳ **Future** (if OSM coverage insufficient)
+**Status**: ⏳ **Future** (for comprehensive land cover)
 
-Add ESA WorldCover 10m data for comprehensive land cover:
+**Goal**: Add actual land cover information (forest, grassland, etc.) to enable forest preference, scenic routing, etc.
+
+Add ESA WorldCover 10m data:
 
 **Architecture:**
 ```
@@ -224,43 +239,44 @@ hiking_scenic:
 
 ## Implementation Details
 
-### Phase 1: OSM-Based Land Cover (Recommended Start)
+### Phase 1: Custom Routing Models (Recommended Start)
 
 **No new code required** - just configuration:
 
 1. **Update GraphHopper config** to enable custom models:
 ```yaml
 profiles:
-  - name: hiking
+  - name: hiking_summer
     vehicle: foot
     weighting: custom
     custom_model_files:
-      - hiking_forest.yml
       - hiking_summer.yml
+  - name: hiking_winter
+    vehicle: foot
+    weighting: custom
+    custom_model_files:
       - hiking_winter.yml
 ```
 
-2. **Create custom model files** (e.g., `hiking_forest.yml`):
+2. **Create custom model files** (e.g., `hiking_summer.yml`):
 ```yaml
 priority:
-  # Prefer trails through/near forests
-  - if: "road_environment == FOREST"
-    multiply_by: 1.2
-
-  # Good surfaces
-  - if: "surface IN [PAVED, COMPACTED, GRAVEL]"
+  # Prefer good surfaces in summer
+  - if: "surface IN [PAVED, GROUND]"
     multiply_by: 1.1
 
-  # Poor surfaces
-  - if: "surface IN [DIRT, SAND] && smoothness IN [BAD, VERY_BAD]"
-    multiply_by: 0.6
+  # Avoid rocky/difficult terrain
+  - if: "surface == ROCK"
+    multiply_by: 0.8
 
-  # Avoid very steep in difficult terrain
-  - if: "average_slope > 15 && surface != PAVED"
+  # Consider trail difficulty
+  - if: "sac_scale IN [hiking, mountain_hiking]"
+    multiply_by: 1.0
+  - if: "sac_scale IN [demanding_mountain_hiking, alpine_hiking]"
     multiply_by: 0.7
 ```
 
-3. **Test with existing data** - No new downloads needed!
+3. **Test with existing data** - Uses surface tags already in the pipeline!
 
 ### Phase 2: WorldCover Integration (If Needed)
 
@@ -398,70 +414,89 @@ Only the processed land cover attributes added to trails would be released.
 
 ## Custom Routing Model Examples
 
-### Example 1: Forest Preference (Summer)
+**Note**: These examples use surface tags currently available from Turrutebasen. For land cover routing (forest preference, etc.), you would need Phase 2 (WorldCover integration).
+
+### Example 1: Summer Hiking (Good Conditions)
 
 ```yaml
-# hiking_forest_summer.yml
+# hiking_summer.yml
 priority:
-  # Strong preference for shaded forest trails
-  - if: "land_cover == TREE_COVER || natural == WOOD"
-    multiply_by: 1.3
+  # Prefer well-maintained trails
+  - if: "surface IN [PAVED, GROUND]"
+    multiply_by: 1.1
 
-  # Avoid exposed open terrain in hot weather
-  - if: "land_cover == GRASSLAND && elevation < 800"
+  # Avoid rocky/cairned routes in summer
+  - if: "surface == ROCK"
     multiply_by: 0.8
 
-  # Prefer good trail conditions
-  - if: "surface IN [PAVED, GRAVEL] && smoothness IN [EXCELLENT, GOOD]"
-    multiply_by: 1.2
+  # Consider trail difficulty
+  - if: "sac_scale IN [hiking, mountain_hiking]"
+    multiply_by: 1.0
+  - if: "sac_scale IN [demanding_mountain_hiking, alpine_hiking]"
+    multiply_by: 0.7
 ```
 
-### Example 2: Open Terrain (Winter Safety)
+### Example 2: Winter Safety
 
 ```yaml
-# hiking_winter_safe.yml
+# hiking_winter.yml
 priority:
-  # Avoid dense forest near steep slopes (avalanche terrain)
-  - if: "land_cover == TREE_COVER && average_slope > 25"
-    multiply_by: 0.4
-
-  # Prefer open terrain below treeline
-  - if: "land_cover IN [GRASSLAND, SHRUBLAND] && elevation < 1200"
-    multiply_by: 1.3
-
-  # Avoid glacier/snow areas in winter
-  - if: "land_cover == SNOW_ICE || natural == GLACIER"
-    multiply_by: 0.3
-```
-
-### Example 3: Scenic Variety
-
-```yaml
-# hiking_scenic.yml
-priority:
-  # Calculate variety by checking surrounding land cover
-  # (requires custom implementation)
-
-  # Prefer routes through mixed terrain
-  - if: "land_cover_diversity > 3"  # 3+ different types along route
+  # Strong preference for maintained/paved trails
+  - if: "surface == PAVED"
     multiply_by: 1.4
 
-  # Bonus for water views
-  - if: "land_cover == WATER || natural == WATER"
-    multiply_by: 1.2
+  # Avoid unpaved and natural surfaces (snow coverage risk)
+  - if: "surface IN [UNPAVED, GROUND]"
+    multiply_by: 0.7
+
+  # Avoid rocky/cairned routes (hidden by snow)
+  - if: "surface == ROCK"
+    multiply_by: 0.5
+
+  # Only use easy trails in winter
+  - if: "sac_scale IN [hiking]"
+    multiply_by: 1.0
+  - if: "sac_scale IN [mountain_hiking, demanding_mountain_hiking, alpine_hiking]"
+    multiply_by: 0.4
+```
+
+### Example 3: Easy Family Hiking
+
+```yaml
+# hiking_family.yml
+priority:
+  # Strong preference for paved/adapted trails
+  - if: "surface == PAVED"
+    multiply_by: 1.5
+
+  # Good surfaces acceptable
+  - if: "surface IN [GROUND, UNPAVED]"
+    multiply_by: 1.0
+
+  # Avoid rocky terrain
+  - if: "surface == ROCK"
+    multiply_by: 0.3
+
+  # Only easy trails
+  - if: "sac_scale == hiking"
+    multiply_by: 1.0
+  - else:
+    multiply_by: 0.2
 ```
 
 ## Testing Strategy
 
-### Phase 1 Testing (OSM-based)
+### Phase 1 Testing (Custom Routing Models)
 
 1. **Verify custom model loading**
    - Test GraphHopper starts with custom models
    - Verify profiles accessible via API
 
 2. **Routing tests**
-   - Compare routes with/without land cover preferences
-   - Verify forest trails preferred when configured
+   - Compare routes with/without surface preferences
+   - Verify summer profile prefers paved/ground surfaces
+   - Verify winter profile strongly prefers paved surfaces
+   - Verify family profile avoids difficult terrain
 
 3. **Performance tests**
    - Measure routing time with custom models
@@ -483,15 +518,23 @@ priority:
 
 ## Recommendations
 
-### Immediate Action: Phase 1 (OSM-Based)
+### Immediate Action: Phase 1 (Custom Routing Models)
 
 **Implementation time**: 1-2 hours
 **Effort**: Configuration only
 **Benefits**:
-- ✅ Terrain-aware routing with existing data
-- ✅ Zero additional downloads
-- ✅ Works within GitHub Actions
-- ✅ Multiple routing profiles (summer, winter, scenic)
+- ✅ Terrain-aware routing using existing surface tags
+- ✅ Zero additional data needed
+- ✅ Works within current pipeline
+- ✅ Multiple routing profiles (summer, winter, etc.)
+
+**What we have now**:
+- Surface tags from Turrutebasen (ground, paved, unpaved, rock)
+- SAC scale difficulty tags
+- GraphHopper configured to encode these tags
+
+**What's missing**:
+- Custom routing models to USE these tags for preferences
 
 **Action items**:
 1. Create custom model YAML files
@@ -502,24 +545,26 @@ priority:
 ### Future Enhancement: Phase 2 (WorldCover)
 
 **Implementation time**: 3-5 days
-**When to implement**: If user feedback indicates OSM coverage insufficient
+**When to implement**: If you need actual land cover data (forest, grassland, etc.)
 **Benefits**:
 - ✅ Comprehensive land cover for all Norway
-- ✅ Consistent global data
-- ✅ Better than sparse OSM tagging
+- ✅ Enables forest preference routing
+- ✅ Enables scenic variety routing
+- ✅ Consistent global data (works anywhere)
 
-**Blockers**:
-- Need user feedback on OSM-based routing first
-- Requires 2-3 GB download (but feasible in GitHub Actions)
+**Requirements**:
+- 2-3 GB download (feasible in GitHub Actions)
+- Spatial join with Turrutebasen trails
+- Additional tags in OSM output
 
 ## Next Steps
 
 1. ✅ Research completed
 2. ✅ Design documented
-3. ⏭️ Implement Phase 1 (OSM-based custom models)
-4. ⏭️ Test with sample trails
-5. ⏭️ Document custom routing profiles
-6. ⏭️ (Optional) Implement Phase 2 if needed
+3. ⏭️ Implement Phase 1 (custom routing models using existing surface tags)
+4. ⏭️ Test routing with different profiles
+5. ⏭️ Document custom routing profiles in README
+6. ⏭️ (Optional) Implement Phase 2 (WorldCover) if land cover data needed
 
 ## References
 
