@@ -503,6 +503,12 @@ class _NameSearch(MacroElement):
             };
             control.addTo(map);
 
+            // Leaflet appends to a top corner, which would leave the box below
+            // the zoom buttons. It is the first thing reached for, so it belongs
+            // above them.
+            var corner = control.getContainer().parentNode;
+            corner.insertBefore(control.getContainer(), corner.firstChild);
+
             // Norwegian names are unreachable from most keyboards otherwise, so
             // "tveravegen" has to find "Tveråvegen". Combining marks fall out by
             // decomposition; ø and æ are letters in their own right and do not.
