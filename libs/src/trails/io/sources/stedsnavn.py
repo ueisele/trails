@@ -25,9 +25,17 @@ from .geonorge_order import KommuneOrderClient
 #: Geonorge catalogue entry for the per-municipality Stedsnavn distribution.
 METADATA_UUID = "30caed2f-454e-44be-b5cc-26bb5c0110ca"
 
-#: Geometry layers holding named places. Lines are almost entirely street names
-#: and areas exist for only a handful of features, so neither is read here.
+#: Geometry layers holding named places as points. Areas exist for only a handful
+#: of features, so they are not read; the line layer is read separately by
+#: :meth:`Source.load_road_names`.
 GEOMETRY_LAYERS = ("sted_posisjon", "sted_multipunkt")
+
+#: Layer holding named features that are lines rather than positions.
+LINE_LAYER = "sted_senterlinje"
+
+#: ``navneobjekttype`` of a named road in :data:`LINE_LAYER`. It is by far the
+#: bulk of that layer — the rest is tunnels, bridges and a stray stream.
+ROAD_NAME_TYPE = "adressenavn"
 
 #: Tables carrying the name text, joined to the geometry via ``lokalid``.
 NAME_TABLE = "stedsnavn"
@@ -35,6 +43,20 @@ SPELLING_TABLE = "skrivemate"
 
 #: Terrain feature types worth labelling on a hiking map.
 TERRAIN_NAME_TYPES = ("dal", "skar", "fjell", "fjellområde", "vann", "tjern", "seter", "isbre", "foss", "elv", "li", "myr")
+
+#: Places people live in, from a town down to a cluster of houses.
+SETTLEMENT_NAME_TYPES = ("by", "tettbebyggelse", "grend", "boligfelt")
+
+#: Farms and smallholdings. Far more numerous than settlements — over a thousand
+#: around one national park — and the usual starting point of a walk here.
+FARM_NAME_TYPES = ("gard", "bruk")
+
+#: Huts a walker can head for. ``turisthytte`` is the staffed or self-service
+#: kind an association runs; the rest are private.
+HUT_NAME_TYPES = ("turisthytte", "hytte", "koie")
+
+#: Where a boat puts in. On this coast that is often the only way to a trailhead.
+QUAY_NAME_TYPES = ("ferjekai", "kai", "havn")
 
 #: The register's own importance ranking, most prominent first. Useful for
 #: deciding label size and which names to draw at all.
@@ -113,6 +135,66 @@ class Source:
         joined = spellings.merge(names[["objid", "sted_fk", "navnestatus"]], left_on="stedsnavn_fk", right_on="objid")
         main = joined[joined["navnestatus"] == "hovednavn"]
         return main.groupby("sted_fk")["komplettskrivemate"].first()
+
+    def load_road_names(
+        self,
+        kommune_codes: list[str],
+        force_download: bool = False,
+    ) -> gpd.GeoDataFrame:
+        """Load named roads as whole centerlines.
+
+        The register holds a named road as one feature over its full run, where
+        a topographic dataset splits the same road into hundreds of fragments.
+        That makes this the natural source for road names, and for deciding what
+        counts as one road when a reader clicks it.
+
+        It is not a complete road network: only roads that carry an official
+        address name are in here, which leaves out about half the private forest
+        and farm tracks. Pair it with a geometry source for those.
+
+        Args:
+            kommune_codes: Municipality numbers to load
+            force_download: Re-order and re-download even if cached
+
+        Returns:
+            GeoDataFrame in EPSG:4326 with line geometries and the columns
+            ``road_id``, ``name``, ``importance``, ``rank`` and ``kommune``.
+            ``road_id`` identifies the road itself: names repeat across
+            municipalities, so two distinct roads can share one.
+        """
+        codes = sorted(kommune_codes)
+        cache_key = f"ssr_roads2_{'-'.join(codes)}"
+
+        if not force_download and self.cache.exists(cache_key):
+            print("Loading road names from cache...")
+            cached = self.cache.load(cache_key)
+            assert isinstance(cached, gpd.GeoDataFrame)
+            return cached
+
+        archives = self.orders.fetch(codes, force_download=force_download)
+
+        frames = []
+        for code, archive in archives.items():
+            print(f"Reading {LINE_LAYER} for municipality {code}...")
+            names = self._read_names(archive)
+            frame = gpd.read_file(f"/vsizip/{archive}/{_find_gdb(archive)}", layer=LINE_LAYER)
+            frame = frame[frame["navneobjekttype"] == ROAD_NAME_TYPE]
+            frame["name"] = frame["lokalid"].astype("int64").map(names)
+            frame["kommune"] = code
+            # The register's own id, kept because "Havnegata" exists three times
+            # over in this area and the name alone cannot tell them apart.
+            frame["road_id"] = frame["lokalid"].astype("int64")
+            frames.append(frame[["road_id", "name", "sortering", "kommune", "geometry"]])
+
+        merged = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs=frames[0].crs)
+        roads = merged[merged["name"].notna() & merged.geometry.notna()].reset_index(drop=True)
+        roads = roads.rename(columns={"sortering": "importance"})
+        roads["rank"] = roads["importance"].map(importance_rank)
+        roads = gpd.GeoDataFrame(roads.to_crs("EPSG:4326"), geometry="geometry", crs="EPSG:4326")
+
+        print(f"Loaded {len(roads):,} named roads")
+        self.cache.save(cache_key, roads, metadata={"kommune_codes": codes, "count": len(roads)})
+        return roads
 
     def load_places(
         self,

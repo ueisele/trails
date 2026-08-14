@@ -47,6 +47,24 @@ WALKABLE_ROAD_TYPES = ("sti", "traktorveg", "gangOgSykkelveg", "barmarksløype")
 #: ``typeveg`` values describing ferry crossings.
 FERRY_ROAD_TYPES = ("bilferje", "passasjerferje")
 
+#: ``typeveg`` values a car can drive. N50 makes no finer distinction than this
+#: at 1:50 000; what separates a motorway from a forest track is ``vegkategori``.
+CAR_ROAD_TYPES = ("enkelBilveg",)
+
+#: ``vegkategori`` codes, expanded. The distinction that matters on a hiking map
+#: is P against the rest: a private road is the last stretch to a trailhead,
+#: everything else is a public road the topographic backdrop already draws.
+ROAD_CATEGORIES = {
+    "E": "Europaveg",
+    "R": "Riksveg",
+    "F": "Fylkesveg",
+    "K": "Kommunal veg",
+    "P": "Privat veg",
+}
+
+#: The ``vegkategori`` code for privately maintained roads.
+PRIVATE_ROAD_CATEGORY = "P"
+
 #: Layer holding the place-name labels drawn on the topographic map.
 PLACE_NAME_LAYER = "N50_Stedsnavn_tekstplassering"
 
@@ -300,6 +318,32 @@ class Source:
             GeoDataFrame in EPSG:4326 restricted to the requested ferry types
         """
         return self._load_by_type(kommune_codes, road_types, "ferries", force_download=force_download)
+
+    def load_roads(
+        self,
+        kommune_codes: list[str],
+        road_types: tuple[str, ...] = CAR_ROAD_TYPES,
+        force_download: bool = False,
+    ) -> gpd.GeoDataFrame:
+        """Load the drivable road network.
+
+        A hiking map needs these for the approach: every trip starts at a road
+        end. N50 carries no road names at all, so the returned frame has only
+        ``vegkategori`` to tell a forest track from a trunk road — see
+        :mod:`trails.io.sources.stedsnavn` for the names.
+
+        Args:
+            kommune_codes: Municipality numbers to load
+            road_types: ``typeveg`` values to keep
+            force_download: Re-order and re-download even if cached
+
+        Returns:
+            GeoDataFrame in EPSG:4326 with a ``road_category`` column holding the
+            expanded :data:`ROAD_CATEGORIES` label
+        """
+        roads = self._load_by_type(kommune_codes, road_types, "car roads", force_download=force_download)
+        roads["road_category"] = roads["vegkategori"].map(ROAD_CATEGORIES).fillna(roads["vegkategori"])
+        return roads
 
     def _load_by_type(
         self,

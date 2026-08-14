@@ -246,6 +246,63 @@ class TestLoadFerries:
         assert ferries["typeveg"].tolist() == ["bilferje"]
 
 
+class TestLoadRoads:
+    """Tests for Source.load_roads."""
+
+    @pytest.fixture
+    def transport_with_roads(self) -> gpd.GeoDataFrame:
+        """A path plus car roads of a private, a county and an unknown category."""
+        return gpd.GeoDataFrame(
+            {
+                "objtype": ["Veglenke"] * 4,
+                "typeveg": ["sti", "enkelBilveg", "enkelBilveg", "enkelBilveg"],
+                "vegkategori": [None, "P", "F", "X"],
+                "geometry": [
+                    LineString([(12.8, 65.4), (12.81, 65.41)]),
+                    LineString([(12.9, 65.5), (12.95, 65.55)]),
+                    LineString([(13.0, 65.6), (13.05, 65.65)]),
+                    LineString([(13.1, 65.7), (13.15, 65.75)]),
+                ],
+            },
+            crs="EPSG:4326",
+        )
+
+    def test_keeps_only_car_roads(self, tmp_path, transport_with_roads):
+        source = n50.Source(cache_dir=str(tmp_path))
+
+        with patch.object(source, "load_transport", return_value=transport_with_roads):
+            roads = source.load_roads(["1824"])
+
+        assert set(roads["typeveg"]) == {"enkelBilveg"}
+        assert roads.crs.to_epsg() == 4326
+
+    def test_expands_the_road_category_code(self, tmp_path, transport_with_roads):
+        source = n50.Source(cache_dir=str(tmp_path))
+
+        with patch.object(source, "load_transport", return_value=transport_with_roads):
+            roads = source.load_roads(["1824"])
+
+        assert roads.loc[roads["vegkategori"] == "P", "road_category"].iloc[0] == "Privat veg"
+        assert roads.loc[roads["vegkategori"] == "F", "road_category"].iloc[0] == "Fylkesveg"
+
+    def test_unknown_category_keeps_its_raw_code(self, tmp_path, transport_with_roads):
+        """Better an unexplained code than a silently blank column."""
+        source = n50.Source(cache_dir=str(tmp_path))
+
+        with patch.object(source, "load_transport", return_value=transport_with_roads):
+            roads = source.load_roads(["1824"])
+
+        assert roads.loc[roads["vegkategori"] == "X", "road_category"].iloc[0] == "X"
+
+    def test_paths_are_excluded_from_roads(self, tmp_path, transport_with_roads):
+        source = n50.Source(cache_dir=str(tmp_path))
+
+        with patch.object(source, "load_transport", return_value=transport_with_roads):
+            roads = source.load_roads(["1824"])
+
+        assert "sti" not in set(roads["typeveg"])
+
+
 class TestLoadPaths:
     """Tests for filtering the transport network down to walkable ways."""
 

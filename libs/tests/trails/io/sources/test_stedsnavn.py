@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import MultiPoint, Point
+from shapely.geometry import LineString, MultiPoint, Point
 from trails.io.sources import stedsnavn
 
 
@@ -113,3 +113,62 @@ class TestLoadPlaces:
     def test_rank_is_available_for_label_sizing(self, cached):
         result = cached.load_places(["1824", "1816"], name_types=("fjell",))
         assert result["rank"].iloc[0] == stedsnavn.importance_rank("viktighetB")
+
+
+class TestLoadRoadNames:
+    """Tests for load_road_names."""
+
+    @pytest.fixture
+    def roads(self) -> gpd.GeoDataFrame:
+        """Two named roads as whole centerlines."""
+        return gpd.GeoDataFrame(
+            {
+                "road_id": [10001, 10002],
+                "name": ["Tveråvegen", "Tosenveien"],
+                "importance": ["viktighetC", "viktighetB"],
+                "rank": [2, 1],
+                "kommune": ["1824", "1824"],
+                "geometry": [LineString([(12.8, 65.4), (12.9, 65.45)]), LineString([(13.0, 65.5), (13.1, 65.55)])],
+            },
+            crs="EPSG:4326",
+        )
+
+    @pytest.fixture
+    def cached(self, tmp_path, roads) -> stedsnavn.Source:
+        """A source with a prepared cache entry, so no network is touched."""
+        source = stedsnavn.Source(cache_dir=str(tmp_path))
+        source.cache.save("ssr_roads2_1824", roads)
+        return source
+
+    def test_reads_from_cache_without_ordering(self, cached):
+        with patch.object(cached.orders, "fetch") as mock_fetch:
+            result = cached.load_road_names(["1824"])
+
+        mock_fetch.assert_not_called()
+        assert len(result) == 2
+        assert result.crs.to_epsg() == 4326
+
+    def test_carries_the_register_id_so_same_named_roads_stay_apart(self, cached):
+        """A name cannot identify a road: "Havnegata" exists three times over in this area.
+
+        The id is not unique across the frame either — a road crossing a municipal
+        boundary appears in both extracts under one id, which is what reunites it.
+        """
+        result = cached.load_road_names(["1824"])
+
+        assert result.groupby("name")["road_id"].nunique().max() == 1
+        assert result["road_id"].nunique() == 2
+
+    def test_keeps_whole_roads_rather_than_fragments(self, cached):
+        """One feature per road is what makes it usable as a click target."""
+        result = cached.load_road_names(["1824"])
+
+        assert sorted(result["name"]) == ["Tosenveien", "Tveråvegen"]
+        assert set(result.geometry.geom_type) <= {"LineString", "MultiLineString"}
+
+    def test_force_download_bypasses_the_cache(self, cached, roads):
+        with patch.object(cached.orders, "fetch", return_value={}) as mock_fetch:
+            with pytest.raises((IndexError, ValueError)):
+                cached.load_road_names(["1824"], force_download=True)
+
+        mock_fetch.assert_called_once()
