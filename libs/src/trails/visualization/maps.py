@@ -527,43 +527,62 @@ class _NameSearch(MacroElement):
 
             function display(layer, visible) {
                 var value = visible ? '' : 'none';
-                if (layer._path) { layer._path.style.display = value; }
-                if (layer._icon) { layer._icon.style.display = value; }
+                // A layer is drawn either as a path or as an icon, never both.
+                var element = layer._path || layer._icon;
+                // Reading the current value is cheap; writing one that is already
+                // set is not, and with twelve thousand features that is the whole
+                // difference between a filter that keeps up and one that stalls.
+                if (!element || element.style.display === value) { return; }
+                element.style.display = value;
                 if (layer._shadow) { layer._shadow.style.display = value; }
             }
 
             var query = '';
 
-            function hide_revealed() {
-                revealed.forEach(function (index) { map.removeLayer(groups[index]); });
-                revealed = [];
+            // Only the difference is applied. Tearing every revealed layer off the
+            // map and putting it straight back would rebuild a thousand markers on
+            // each keystroke, and that work blocks the thread the map zooms on:
+            // the wheel piles up and only lands once typing stops.
+            function set_revealed(wanted) {
+                revealed = revealed.filter(function (index) {
+                    if (wanted && wanted[index]) { return true; }
+                    map.removeLayer(groups[index]);
+                    return false;
+                });
+                if (!wanted) { return; }
+                Object.keys(wanted).forEach(function (index) {
+                    if (!map.hasLayer(groups[index])) { map.addLayer(groups[index]); revealed.push(index); }
+                });
             }
+
+            var filtering = false;
 
             function apply() {
                 query = fold(input.value.trim());
                 if (!query) {
-                    entries.forEach(function (e) { display(e.layer, true); });
-                    hide_revealed();
+                    if (filtering) {
+                        entries.forEach(function (e) { display(e.layer, true); });
+                        filtering = false;
+                    }
+                    set_revealed(null);
                     count.textContent = '';
                     return;
                 }
 
                 var matched = entries.map(function (e) { return !!e.text && e.folded.indexOf(query) !== -1; });
 
-                // Reveal before restyling: an element only exists once its layer
-                // is on the map.
-                hide_revealed();
                 var wanted = {};
                 matched.forEach(function (hit, i) { if (hit) { wanted[entries[i].group] = true; } });
-                Object.keys(wanted).forEach(function (index) {
-                    if (!map.hasLayer(groups[index])) { map.addLayer(groups[index]); revealed.push(index); }
-                });
+                // Reveal before restyling: an element only exists once its layer
+                // is on the map.
+                set_revealed(wanted);
 
                 var hits = 0;
                 entries.forEach(function (e, i) {
                     display(e.layer, matched[i]);
                     if (matched[i]) { hits += 1; }
                 });
+                filtering = true;
                 count.textContent = hits === 1 ? '1 match' : hits + ' matches';
             }
 
