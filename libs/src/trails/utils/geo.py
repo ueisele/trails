@@ -92,6 +92,74 @@ def thin_points(
     return gdf.loc[sorted(keep)]
 
 
+def attach_nearest(
+    gdf: gpd.GeoDataFrame,
+    source: gpd.GeoDataFrame,
+    fields: dict[str, str],
+    max_distance_m: float,
+    metric_crs: str = "EPSG:25833",
+    min_overlap: float = 0.0,
+) -> gpd.GeoDataFrame:
+    """Copy attributes onto each feature from the closest feature of another set.
+
+    For pairing a dataset that has the geometry with one that has the names, when
+    the two share no identifier. Nothing is copied beyond ``max_distance_m``, so
+    a feature with no counterpart keeps empty values rather than borrowing those
+    of something unrelated further away.
+
+    Proximity alone is a weak test for lines: at a junction the first metres of a
+    side road lie well within tolerance of the main road, and would take its name.
+    ``min_overlap`` demands that the line actually run *along* its counterpart
+    rather than merely touch it.
+
+    Args:
+        gdf: Features to attach attributes to
+        source: Features to take attributes from
+        fields: Mapping of column in ``source`` to column name on the result
+        max_distance_m: Furthest a counterpart may be, in metres
+        metric_crs: Projected CRS the distance is measured in
+        min_overlap: Least share of a line that must lie within
+            ``max_distance_m`` of its counterpart, between 0 and 1. Features
+            without a length, such as points, are not subject to it.
+
+    Returns:
+        Copy of ``gdf`` carrying the requested columns. Where several source
+        features tie for nearest, the first wins.
+    """
+    attached = gdf.copy()
+    if attached.empty or source.empty:
+        for target in fields.values():
+            attached[target] = pd.Series(dtype=object)
+        return attached
+
+    projected = attached.to_crs(metric_crs)
+    right = source[[*fields, source.geometry.name]].rename(columns=fields).to_crs(metric_crs)
+    joined = gpd.sjoin_nearest(
+        projected,
+        right,
+        how="left",
+        max_distance=max_distance_m,
+        distance_col="_attach_distance",
+    )
+
+    # sjoin_nearest emits one row per tied match; keep the first per input feature.
+    joined = joined[~joined.index.duplicated(keep="first")]
+
+    keep = joined["index_right"].notna()
+    if min_overlap > 0 and keep.any():
+        counterparts = right.geometry.reindex(joined.loc[keep, "index_right"]).to_numpy()
+        lines = projected.geometry.loc[keep.index[keep]]
+        shares = [
+            line.intersection(other.buffer(max_distance_m)).length / line.length if line.length else 1.0
+            for line, other in zip(lines, counterparts, strict=True)
+        ]
+        keep.loc[keep] = pd.Series(shares, index=lines.index) >= min_overlap
+
+    for target in fields.values():
+        attached[target] = joined[target].where(keep)
+    return attached
+
+
 def merge_lines(gdf: gpd.GeoDataFrame, group_by: str | None = None) -> gpd.GeoDataFrame:
     """Join touching line segments into continuous lines.
 

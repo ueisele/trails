@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point
-from trails.utils.geo import calculate_lengths_meters, merge_lines, thin_points
+from trails.utils.geo import attach_nearest, calculate_lengths_meters, merge_lines, thin_points
 
 
 class TestCalculateLengthsMeters:
@@ -264,6 +264,117 @@ class TestCalculateLengthsMeters:
         # Should give same result each time
         assert result1.iloc[0] == result2.iloc[0]
         assert pytest.approx(result1.iloc[0], rel=1e-6) == 1000.0
+
+
+class TestAttachNearest:
+    """Tests for attach_nearest."""
+
+    @pytest.fixture
+    def fragments(self) -> gpd.GeoDataFrame:
+        """Three road fragments: two along one road, one far away."""
+        return gpd.GeoDataFrame(
+            {
+                "vegkategori": ["P", "P", "K"],
+                "geometry": [
+                    LineString([(0, 0), (100, 0)]),
+                    LineString([(100, 0), (200, 0)]),
+                    LineString([(0, 5000), (100, 5000)]),
+                ],
+            },
+            crs="EPSG:25833",
+        )
+
+    @pytest.fixture
+    def named(self) -> gpd.GeoDataFrame:
+        """One named road running along the first two fragments."""
+        return gpd.GeoDataFrame(
+            {"name": ["Tveråvegen"], "extra": ["viktighetC"], "geometry": [LineString([(0, 10), (200, 10)])]},
+            crs="EPSG:25833",
+        )
+
+    def test_copies_the_name_onto_nearby_features(self, fragments, named):
+        result = attach_nearest(fragments, named, {"name": "road_name"}, max_distance_m=25)
+
+        assert result["road_name"].tolist()[:2] == ["Tveråvegen", "Tveråvegen"]
+
+    def test_leaves_distant_features_empty(self, fragments, named):
+        """A fragment with no counterpart must not borrow a far-away name."""
+        result = attach_nearest(fragments, named, {"name": "road_name"}, max_distance_m=25)
+
+        assert pd.isna(result["road_name"].iloc[2])
+
+    def test_respects_the_distance_limit(self, fragments, named):
+        result = attach_nearest(fragments, named, {"name": "road_name"}, max_distance_m=5)
+
+        assert result["road_name"].isna().all()
+
+    def test_keeps_the_input_columns_and_geometry(self, fragments, named):
+        result = attach_nearest(fragments, named, {"name": "road_name"}, max_distance_m=25)
+
+        assert result["vegkategori"].tolist() == ["P", "P", "K"]
+        assert result.geometry.equals(fragments.geometry)
+        assert result.crs == fragments.crs
+
+    def test_renames_several_fields_at_once(self, fragments, named):
+        result = attach_nearest(fragments, named, {"name": "road_name", "extra": "importance"}, max_distance_m=25)
+
+        assert result["importance"].iloc[0] == "viktighetC"
+
+    def test_one_row_per_input_even_when_several_tie(self, fragments):
+        """sjoin_nearest emits a row per tied match; the result must not grow."""
+        tied = gpd.GeoDataFrame(
+            {"name": ["A", "B"], "geometry": [LineString([(0, 10), (200, 10)]), LineString([(0, -10), (200, -10)])]},
+            crs="EPSG:25833",
+        )
+        result = attach_nearest(fragments, tied, {"name": "road_name"}, max_distance_m=25)
+
+        assert len(result) == len(fragments)
+
+    def test_reprojects_before_measuring(self, named):
+        """Distances are metres, so a degree-based input must be projected first."""
+        degrees = gpd.GeoDataFrame({"geometry": [LineString([(12.8, 65.4), (12.81, 65.4)])]}, crs="EPSG:4326")
+        result = attach_nearest(degrees, named.to_crs("EPSG:4326"), {"name": "road_name"}, max_distance_m=25)
+
+        assert len(result) == 1
+        assert result.crs.to_epsg() == 4326
+
+    def test_min_overlap_rejects_a_line_that_only_touches(self):
+        """A side road at a junction is near the main road but not part of it."""
+        junction = gpd.GeoDataFrame({"geometry": [LineString([(100, 0), (100, 400)])]}, crs="EPSG:25833")
+        main = gpd.GeoDataFrame({"name": ["Tveråvegen"], "geometry": [LineString([(0, 10), (200, 10)])]}, crs="EPSG:25833")
+
+        lenient = attach_nearest(junction, main, {"name": "road_name"}, max_distance_m=25)
+        strict = attach_nearest(junction, main, {"name": "road_name"}, max_distance_m=25, min_overlap=0.5)
+
+        assert lenient["road_name"].iloc[0] == "Tveråvegen"
+        assert pd.isna(strict["road_name"].iloc[0])
+
+    def test_min_overlap_keeps_a_line_that_runs_along(self, fragments, named):
+        result = attach_nearest(fragments, named, {"name": "road_name"}, max_distance_m=25, min_overlap=0.5)
+
+        assert result["road_name"].tolist()[:2] == ["Tveråvegen", "Tveråvegen"]
+
+    def test_min_overlap_leaves_points_alone(self, named):
+        """A point has no length to run along anything."""
+        points = gpd.GeoDataFrame({"geometry": [Point(100, 12)]}, crs="EPSG:25833")
+
+        result = attach_nearest(points, named, {"name": "road_name"}, max_distance_m=25, min_overlap=0.9)
+
+        assert result["road_name"].iloc[0] == "Tveråvegen"
+
+    def test_empty_input_gains_the_column(self, named):
+        empty = gpd.GeoDataFrame({"vegkategori": []}, geometry=[], crs="EPSG:25833")
+        result = attach_nearest(empty, named, {"name": "road_name"}, max_distance_m=25)
+
+        assert "road_name" in result.columns
+        assert len(result) == 0
+
+    def test_empty_source_leaves_every_value_empty(self, fragments):
+        empty = gpd.GeoDataFrame({"name": []}, geometry=[], crs="EPSG:25833")
+        result = attach_nearest(fragments, empty, {"name": "road_name"}, max_distance_m=25)
+
+        assert result["road_name"].isna().all()
+        assert len(result) == len(fragments)
 
 
 class TestMergeLines:
