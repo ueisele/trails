@@ -11,6 +11,7 @@ visually::
 """
 
 import hashlib
+import json
 import re
 from enum import Enum
 from html import escape
@@ -155,7 +156,28 @@ def _group_class(value: object) -> str:
     return f"{_GROUP_CLASS_PREFIX}{token}"
 
 
-def _build_popup(row: pd.Series, fields: dict[str, str], link_fields: dict[str, str] | None = None) -> str | None:
+#: Attribute under which a feature group carries the text its lines can be found
+#: by. Leaflet path options accept no custom keys, so the names travel beside the
+#: layer rather than on it, keyed by the class each path already carries.
+SEARCH_NAMES_ATTR = "search_names"
+
+
+def _record_search_names(group: folium.FeatureGroup, names: dict[str, str]) -> None:
+    """Attach the searchable names of a layer to its feature group.
+
+    Args:
+        group: Feature group the names belong to
+        names: Mapping of CSS class to the text it can be found by
+    """
+    setattr(group, SEARCH_NAMES_ATTR, names)
+
+
+def _build_popup(
+    row: pd.Series,
+    fields: dict[str, str],
+    link_fields: dict[str, str] | None = None,
+    source: str | None = None,
+) -> str | None:
     """Render a popup table from selected fields.
 
     Args:
@@ -164,9 +186,12 @@ def _build_popup(row: pd.Series, fields: dict[str, str], link_fields: dict[str, 
         link_fields: Mapping of a column holding a URL to the link text to show
             for it. Rendered below the table rows, one link per line. Values that
             are not http(s) URLs are dropped.
+        source: Dataset the feature came from, shown as a footer. A map that
+            stacks seven sources is unreadable without it, so it is worth a line
+            even where nothing else about the feature is known.
 
     Returns:
-        HTML table, or None if the row has no populated fields
+        HTML table, or None if the row has nothing to show at all
     """
     rows = []
     for column, label in fields.items():
@@ -194,6 +219,11 @@ def _build_popup(row: pd.Series, fields: dict[str, str], link_fields: dict[str, 
             f"</td></tr>"
         )
 
+    if source:
+        # Set off by a rule, so it reads as provenance rather than as another
+        # attribute of the feature.
+        rows.append(f"<tr><td colspan='2' style='padding:5px 0 0;border-top:1px solid #ddd;color:#777'>Source: {escape(str(source))}</td></tr>")
+
     if not rows:
         return None
     return f"<table style='font-family:sans-serif;font-size:12px'>{''.join(rows)}</table>"
@@ -210,6 +240,8 @@ def add_trails(
     link_fields: dict[str, str] | None = None,
     tooltip_field: str | None = None,
     group_field: str | None = None,
+    search_field: str | None = None,
+    source: str | None = None,
     dash_array: str | None = None,
     show: bool = True,
 ) -> folium.FeatureGroup:
@@ -230,6 +262,8 @@ def add_trails(
         group_field: Column whose value ties the parts of one route together, so
             :func:`add_click_highlight` can pick out all of it at once. A route
             split into several lines shares one value.
+        search_field: Column holding the text :func:`add_search` matches against
+        source: Dataset the lines came from, shown at the foot of every popup
         dash_array: SVG dash pattern, e.g. ``"8,6"``. Use for connections that
             are not walked, such as ferry crossings.
         show: Whether the layer starts visible
@@ -241,6 +275,7 @@ def add_trails(
         gdf = gdf.to_crs(epsg=4326)
 
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
+    search_names: dict[str, str] = {}
 
     for _, row in gdf.iterrows():
         geometry = row.geometry
@@ -248,17 +283,22 @@ def add_trails(
             continue
 
         lines = list(geometry.geoms) if geometry.geom_type == "MultiLineString" else [geometry]
-        popup_html = _build_popup(row, popup_fields or {}, link_fields) if (popup_fields or link_fields) else None
+        popup_html = _build_popup(row, popup_fields or {}, link_fields, source) if (popup_fields or link_fields or source) else None
 
         tooltip = None
         if tooltip_field and tooltip_field in row and pd.notna(row[tooltip_field]):
             tooltip = str(row[tooltip_field])
 
         # Leaflet writes className straight onto the SVG path, which makes it the
-        # natural place to carry the route identity into the browser.
+        # natural place to carry the route identity into the browser. Path options
+        # drop unknown keys, so the searchable text cannot ride along the same way
+        # and is handed to the browser as a lookup keyed by this class instead.
         class_name = None
-        if group_field and group_field in row and pd.notna(row[group_field]):
-            class_name = _group_class(row[group_field])
+        key_field = group_field or search_field
+        if key_field and key_field in row and pd.notna(row[key_field]):
+            class_name = _group_class(row[key_field])
+        if class_name and search_field and search_field in row and pd.notna(row[search_field]):
+            search_names[class_name] = str(row[search_field])
 
         for line in lines:
             polyline = folium.PolyLine(
@@ -274,6 +314,7 @@ def add_trails(
                 polyline.add_child(folium.Popup(popup_html, max_width=320))
             polyline.add_to(group)
 
+    _record_search_names(group, search_names)
     group.add_to(fmap)
     return group
 
@@ -310,21 +351,32 @@ class _ClickHighlight(MacroElement):
                 };
             });
 
+            function step_back(layer) {
+                // Width is reset alongside the fade, or a route that was selected
+                // a moment ago would stay widened underneath the new one.
+                layer.setStyle({weight: layer._baseStyle.weight, opacity: dim});
+            }
+
             function clear() {
+                if (selected === null) { return; }
                 selected = null;
                 eachPath(function (layer) { layer.setStyle(layer._baseStyle); });
             }
 
             function select(key) {
+                // Restyling is the expensive part on a map with thousands of lines,
+                // so only what actually changes is touched: the first selection
+                // fades everything once, and each later one repaints just the two
+                // routes involved.
+                var previous = selected;
                 selected = key;
                 eachPath(function (layer) {
-                    if (layer.options.className === key) {
+                    var mine = layer.options.className === key;
+                    if (mine) {
                         layer.setStyle({weight: layer._baseStyle.weight + boost, opacity: 1});
                         layer.bringToFront();
-                    } else {
-                        // Width is reset too, or switching straight from one route
-                        // to another would leave the previous one widened.
-                        layer.setStyle({weight: layer._baseStyle.weight, opacity: dim});
+                    } else if (previous === null || layer.options.className === previous) {
+                        step_back(layer);
                     }
                 });
             }
@@ -365,14 +417,14 @@ def add_click_highlight(
 ) -> None:
     """Make a clicked route stand out from the ones it overlaps.
 
-    Where many routes share the same valley, none of them can be followed by
-    eye. Clicking one widens it, draws it in front of everything else and fades
-    its neighbours, so a single trip reads end to end. Clicking it again, or
-    clicking empty terrain, puts everything back.
+    Where several sources map the same valley, none of their lines can be
+    followed by eye. Clicking one widens it, draws it in front of everything
+    else and fades every other line on the map, so a single trip reads end to
+    end. Clicking it again, or clicking empty terrain, puts everything back.
 
     Only lines carrying a ``group_field`` take part, and all lines sharing that
-    value are selected together, so a route split into several pieces still
-    highlights as one.
+    value are selected together, so a route split into several pieces — or
+    across two layers — still highlights as one.
 
     Call after the layers have been added, and before :func:`finalize`.
 
@@ -387,6 +439,176 @@ def add_click_highlight(
     _ClickHighlight(groups, weight_boost=weight_boost, dim_opacity=dim_opacity).add_to(fmap)
 
 
+class _NameSearch(MacroElement):
+    """A box that reduces the map to whatever matches what is typed.
+
+    Deliberately separate from :class:`_ClickHighlight`: this one decides what is
+    *visible*, that one decides what is *emphasised*. Two independent properties,
+    so the two can be used together without either undoing the other.
+    """
+
+    _template = Template("""
+        {% macro html(this, kwargs) %}
+        <div style="position:fixed;top:12px;left:56px;z-index:9999;background:rgba(255,255,255,0.95);
+             padding:6px 8px;border:1px solid #999;border-radius:4px;font-family:sans-serif;font-size:12px">
+          <input id="{{ this.get_name() }}-input" type="search" placeholder="{{ this.placeholder }}" autocomplete="off"
+                 style="width:210px;font-size:12px;padding:3px 6px;border:1px solid #bbb;border-radius:3px">
+          <span id="{{ this.get_name() }}-count" style="margin-left:8px;color:#666"></span>
+        </div>
+        {% endmacro %}
+
+        {% macro script(this, kwargs) %}
+        (function () {
+            var map = {{ this._parent.get_name() }};
+            var groups = [{{ this.group_names|join(', ') }}];
+            var names = {{ this.names_json }};
+            var input = document.getElementById('{{ this.get_name() }}-input');
+            var count = document.getElementById('{{ this.get_name() }}-count');
+
+            // Norwegian names are unreachable from most keyboards otherwise, so
+            // "tveravegen" has to find "Tveråvegen". Combining marks fall out by
+            // decomposition; ø and æ are letters in their own right and do not.
+            function fold(text) {
+                return (text || '').toLowerCase()
+                    .replace(/ø/g, 'o').replace(/æ/g, 'ae').replace(/å/g, 'a')
+                    .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
+            }
+
+            var entries = [];
+            groups.forEach(function (group, index) {
+                group.eachLayer(function (layer) {
+                    var text = layer.options.searchName || names[layer.options.className] || null;
+                    entries.push({layer: layer, group: index, text: text, folded: fold(text)});
+                });
+            });
+
+            // A layer switched off holds no elements to reveal, so a match inside
+            // it would be silently unfindable. Those layers are switched on for
+            // the duration of the search and put back afterwards.
+            var revealed = [];
+
+            function display(layer, visible) {
+                var value = visible ? '' : 'none';
+                if (layer._path) { layer._path.style.display = value; }
+                if (layer._icon) { layer._icon.style.display = value; }
+                if (layer._shadow) { layer._shadow.style.display = value; }
+            }
+
+            var query = '';
+
+            function hide_revealed() {
+                revealed.forEach(function (index) { map.removeLayer(groups[index]); });
+                revealed = [];
+            }
+
+            function apply() {
+                query = fold(input.value.trim());
+                if (!query) {
+                    entries.forEach(function (e) { display(e.layer, true); });
+                    hide_revealed();
+                    count.textContent = '';
+                    return;
+                }
+
+                var matched = entries.map(function (e) { return !!e.text && e.folded.indexOf(query) !== -1; });
+
+                // Reveal before restyling: an element only exists once its layer
+                // is on the map.
+                hide_revealed();
+                var wanted = {};
+                matched.forEach(function (hit, i) { if (hit) { wanted[entries[i].group] = true; } });
+                Object.keys(wanted).forEach(function (index) {
+                    if (!map.hasLayer(groups[index])) { map.addLayer(groups[index]); revealed.push(index); }
+                });
+
+                var hits = 0;
+                entries.forEach(function (e, i) {
+                    display(e.layer, matched[i]);
+                    if (matched[i]) { hits += 1; }
+                });
+                count.textContent = hits === 1 ? '1 match' : hits + ' matches';
+            }
+
+            function fit() {
+                if (!query) { return; }
+                var bounds = L.latLngBounds([]);
+                entries.forEach(function (e) {
+                    if (!e.text || e.folded.indexOf(query) === -1) { return; }
+                    if (e.layer.getBounds) { bounds.extend(e.layer.getBounds()); }
+                    else if (e.layer.getLatLng) { bounds.extend(e.layer.getLatLng()); }
+                });
+                if (bounds.isValid()) { map.fitBounds(bounds, {maxZoom: 14, padding: [40, 40]}); }
+            }
+
+            var pending = null;
+            input.addEventListener('input', function () {
+                window.clearTimeout(pending);
+                pending = window.setTimeout(apply, 150);
+            });
+            input.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') { window.clearTimeout(pending); apply(); fit(); }
+                if (event.key === 'Escape') { input.value = ''; window.clearTimeout(pending); apply(); }
+            });
+
+            // Toggling a layer back on rebuilds its elements at full visibility,
+            // which would smuggle non-matching features past an active filter.
+            map.on('overlayadd', function () { window.setTimeout(apply, 0); });
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, groups: list[folium.FeatureGroup], names: dict[str, str], placeholder: str) -> None:
+        """Initialize the search box.
+
+        Args:
+            groups: Feature groups to search across
+            names: Mapping of CSS class to searchable text, for path layers
+            placeholder: Hint shown in the empty input
+        """
+        super().__init__()
+        self._name = "NameSearch"
+        self.group_names = [group.get_name() for group in groups]
+        self.names_json = json.dumps(names, ensure_ascii=False)
+        self.placeholder = escape(placeholder, quote=True)
+
+
+def add_search(
+    fmap: folium.Map,
+    groups: list[folium.FeatureGroup],
+    placeholder: str = "Search names… (Enter to zoom)",
+) -> None:
+    """Add a box that hides everything not matching what is typed.
+
+    On a map carrying several thousand features from seven sources, finding the
+    one place named in a brochure is otherwise hopeless. Typing reduces the map
+    to the matches — across trails, roads, huts and place names alike — so what
+    is left standing is the answer. Enter zooms to it, Escape restores.
+
+    Matching ignores case and folds Norwegian letters, so ``tveravegen`` finds
+    ``Tveråvegen`` from a keyboard that cannot type å.
+
+    Only features given a searchable name take part; anything unnamed disappears
+    while a search is active, which is what makes the remainder legible. A layer
+    that is switched off is switched on for as long as it holds a match, so a
+    name cannot hide behind an unticked box.
+
+    Call after the layers have been added, and before :func:`finalize`.
+
+    Args:
+        fmap: Map holding the layers
+        groups: Feature groups to search across, of any layer type
+        placeholder: Hint shown in the empty input
+    """
+    if not groups:
+        return
+
+    names: dict[str, str] = {}
+    for group in groups:
+        names.update(getattr(group, SEARCH_NAMES_ATTR, {}))
+
+    _NameSearch(groups, names, placeholder).add_to(fmap)
+
+
 def add_points(
     fmap: folium.Map,
     gdf: gpd.GeoDataFrame,
@@ -395,6 +617,8 @@ def add_points(
     icon: str = "home",
     popup_fields: dict[str, str] | None = None,
     label_field: str | None = "name",
+    search_field: str | None = None,
+    source: str | None = None,
     show: bool = True,
 ) -> folium.FeatureGroup:
     """Add point features (huts, shelters, info points) as a toggleable layer.
@@ -408,6 +632,9 @@ def add_points(
         icon: Glyph name from the Font Awesome set bundled with Folium
         popup_fields: Mapping of column name to popup label
         label_field: Column used for the hover tooltip
+        search_field: Column holding the text :func:`add_search` matches against;
+            defaults to ``label_field``
+        source: Dataset the points came from, shown at the foot of every popup
         show: Whether the layer starts visible
 
     Returns:
@@ -427,11 +654,19 @@ def add_points(
         if label_field and label_field in row and pd.notna(row[label_field]):
             tooltip = str(row[label_field])
 
-        popup_html = _build_popup(row, popup_fields) if popup_fields else None
+        popup_html = _build_popup(row, popup_fields or {}, source=source) if (popup_fields or source) else None
+        # Unlike a path, a marker keeps whatever options it is handed, so the
+        # searchable text can travel on the layer itself.
+        found_by = search_field or label_field
+        options: dict[str, Any] = {}
+        if found_by and found_by in row and pd.notna(row[found_by]):
+            options["searchName"] = str(row[found_by])
+
         marker = folium.Marker(
             location=(geometry.y, geometry.x),
             tooltip=tooltip,
             icon=folium.Icon(color=color, icon=icon, prefix="fa"),
+            **options,
         )
         if popup_html:
             marker.add_child(folium.Popup(popup_html, max_width=320))
@@ -446,10 +681,13 @@ def add_labelled_points(
     gdf: gpd.GeoDataFrame,
     name: str,
     color: str = "#37474f",
-    radius: float = 4.0,
+    radius: float = 6.0,
     label_field: str = "name",
     always_label: tuple[str, ...] = (),
     kind_field: str = "kind",
+    popup_fields: dict[str, str] | None = None,
+    source: str | None = None,
+    searchable: bool = True,
     show: bool = True,
 ) -> folium.FeatureGroup:
     """Add place markers as small labelled circles.
@@ -463,10 +701,15 @@ def add_labelled_points(
         gdf: GeoDataFrame with point geometries; reprojected to WGS84 if needed
         name: Layer name shown in the layer control
         color: Circle fill and outline color
-        radius: Circle radius in pixels
+        radius: Circle radius in pixels. Doubles as the click target, so a dot
+            small enough to look tidy is often too small to hit.
         label_field: Column holding the label text
         always_label: Values of ``kind_field`` whose labels are always shown
         kind_field: Column consulted for ``always_label``
+        popup_fields: Mapping of column name to popup label. Without it a marker
+            only names itself on hover, which reads as a dead click.
+        source: Dataset the points came from, shown at the foot of every popup
+        searchable: Whether :func:`add_search` can find these by their label
         show: Whether the layer starts visible
 
     Returns:
@@ -476,6 +719,7 @@ def add_labelled_points(
         gdf = gdf.to_crs(epsg=4326)
 
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
+    search_names: dict[str, str] = {}
 
     for _, row in gdf.iterrows():
         geometry = row.geometry
@@ -487,7 +731,12 @@ def add_labelled_points(
         label = str(row[label_field])
         permanent = kind_field in row and row[kind_field] in always_label
 
-        folium.CircleMarker(
+        class_name = None
+        if searchable:
+            class_name = _group_class(label)
+            search_names[class_name] = label
+
+        marker = folium.CircleMarker(
             location=(geometry.y, geometry.x),
             radius=radius,
             color=color,
@@ -495,9 +744,16 @@ def add_labelled_points(
             fill=True,
             fill_color=color,
             fill_opacity=0.9,
+            class_name=class_name,
             tooltip=folium.Tooltip(label, permanent=permanent, direction="right"),
-        ).add_to(group)
+        )
 
+        popup_html = _build_popup(row, popup_fields or {}, source=source) if (popup_fields or source) else None
+        if popup_html:
+            marker.add_child(folium.Popup(popup_html, max_width=320))
+        marker.add_to(group)
+
+    _record_search_names(group, search_names)
     group.add_to(fmap)
     return group
 
@@ -569,7 +825,11 @@ def add_text_labels(
             f'text-shadow:{shadow};white-space:nowrap;transform:translate(-50%,-50%)">{text}</div>'
         )
         # A zero-sized icon keeps Leaflet from reserving a box around the text.
-        folium.Marker(location=(geometry.y, geometry.x), icon=folium.DivIcon(icon_size=(0, 0), icon_anchor=(0, 0), html=html)).add_to(group)
+        folium.Marker(
+            location=(geometry.y, geometry.x),
+            icon=folium.DivIcon(icon_size=(0, 0), icon_anchor=(0, 0), html=html),
+            searchName=str(row[label_field]),
+        ).add_to(group)
 
     group.add_to(fmap)
     return group

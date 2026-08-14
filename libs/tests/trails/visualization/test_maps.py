@@ -105,6 +105,26 @@ class TestPopup:
     def test_returns_none_when_nothing_populated(self, trails):
         assert maps._build_popup(trails.iloc[1], {"trail_name": "Route", "difficulty": "Difficulty"}) is None
 
+    def test_shows_the_source_as_a_footer(self, trails):
+        html = maps._build_popup(trails.iloc[0], {"trail_name": "Route"}, source="Turrutebasen")
+
+        assert "Source: Turrutebasen" in html
+        assert html.index("Sjøbergmarsjen") < html.index("Source:")
+
+    def test_a_source_alone_is_enough_for_a_popup(self, trails):
+        """A feature the source says nothing else about should still name it."""
+        assert maps._build_popup(trails.iloc[1], {"trail_name": "Route"}, source="N50") is not None
+
+    def test_without_a_source_nothing_is_appended(self, trails):
+        html = maps._build_popup(trails.iloc[0], {"trail_name": "Route"})
+
+        assert "Source:" not in html
+
+    def test_source_is_escaped(self, trails):
+        html = maps._build_popup(trails.iloc[0], {"trail_name": "Route"}, source="N50 <b>x</b>")
+
+        assert "<b>x</b>" not in html
+
     def test_renders_link_fields_as_anchors(self, trails):
         row = trails.iloc[0].copy()
         row["ut_url"] = "https://ut.no/turforslag/1113860"
@@ -146,6 +166,39 @@ class TestPopup:
 
         assert "<script>" not in html
         assert "&quot;&gt;&lt;script&gt;" in html
+
+
+class TestLabelledPoints:
+    """Tests for add_labelled_points."""
+
+    def test_a_click_opens_a_popup_when_fields_are_given(self, shelters):
+        """Without one the dot is interactive but answers nothing, which reads as broken."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_labelled_points(fmap, shelters, name="Places [SSR]", popup_fields={"name": "Name"}, source="SSR")
+
+        markers = [child for child in group._children.values() if isinstance(child, folium.CircleMarker)]
+        popups = [c for m in markers for c in m._children.values() if isinstance(c, folium.Popup)]
+        assert len(popups) == 1
+
+    def test_the_popup_names_its_source(self, shelters):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_labelled_points(fmap, shelters, name="Places [SSR]", popup_fields={"name": "Name"}, source="SSR")
+
+        assert "Source: SSR" in fmap.get_root().render()
+
+    def test_without_popup_fields_only_the_tooltip_remains(self, shelters):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_labelled_points(fmap, shelters, name="Places")
+
+        markers = [child for child in group._children.values() if isinstance(child, folium.CircleMarker)]
+        popups = [c for m in markers for c in m._children.values() if isinstance(c, folium.Popup)]
+        assert not popups
+
+    def test_labels_are_recorded_for_the_search(self, shelters):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_labelled_points(fmap, shelters, name="Places")
+
+        assert "Stavassgården" in getattr(group, maps.SEARCH_NAMES_ATTR).values()
 
 
 class TestClickHighlight:
@@ -194,6 +247,15 @@ class TestAddTrails:
         polyline = next(child for child in group._children.values() if isinstance(child, folium.PolyLine))
         tooltip = next(child for child in polyline._children.values() if isinstance(child, folium.Tooltip))
         assert tooltip.text == "Sjøbergmarsjen"
+
+    def test_source_reaches_every_popup(self, trails):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="Paths [N50]", popup_fields={"trail_name": "Route"}, source="N50")
+
+        lines = [child for child in group._children.values() if isinstance(child, folium.PolyLine)]
+        popups = [c for line in lines for c in line._children.values() if isinstance(c, folium.Popup)]
+        # Every drawn line gets one, including the row with no populated field.
+        assert len(popups) == len(lines) == 3
 
     def test_link_fields_reach_the_popup(self, trails):
         gdf = trails.copy()
