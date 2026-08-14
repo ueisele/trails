@@ -551,11 +551,23 @@ class TestLegendEscaping:
 
         assert '"interactive": false' in fmap.get_root().render()
 
-    def test_title_is_escaped(self):
+    def test_title_cannot_inject_markup(self):
+        """The heading is written as text, so markup in it stays text."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_legend(fmap, "A <b>bold</b> title", {"x": "#000000"})
 
-        assert "&lt;b&gt;bold&lt;/b&gt;" in fmap.get_root().render()
+        html = fmap.get_root().render()
+        assert "<b>bold</b>" not in html
+        assert "bold" in html
+
+    def test_nothing_can_close_the_script_block(self):
+        """A value carrying </script> would end the block and start markup."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_legend(fmap, "T </script><img src=x>", {"Also </script> here": "#000000"})
+
+        html = fmap.get_root().render()
+        assert "</script><img" not in html
+        assert "\\u003c/script>" in html
 
     def test_popup_values_are_escaped(self, trails):
         row = trails.iloc[0].copy()

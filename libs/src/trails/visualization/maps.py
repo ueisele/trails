@@ -439,6 +439,23 @@ def add_click_highlight(
     _ClickHighlight(groups, weight_boost=weight_boost, dim_opacity=dim_opacity).add_to(fmap)
 
 
+def _script_json(value: object) -> str:
+    """Serialise a value for embedding inside a ``<script>`` block.
+
+    ``json.dumps`` leaves ``<`` alone, so a string holding ``</script>`` would
+    close the block and everything after it would be parsed as markup. Escaping
+    the one character shuts that door; a JavaScript parser reads ``\\u003c``
+    back as ``<``, so any HTML carried in the value survives intact.
+
+    Args:
+        value: Anything JSON can represent
+
+    Returns:
+        A JavaScript literal safe to paste into a script block
+    """
+    return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c")
+
+
 class _NameSearch(MacroElement):
     """A box that reduces the map to whatever matches what is typed.
 
@@ -448,22 +465,43 @@ class _NameSearch(MacroElement):
     """
 
     _template = Template("""
-        {% macro html(this, kwargs) %}
-        <div style="position:fixed;top:12px;left:56px;z-index:9999;background:rgba(255,255,255,0.95);
-             padding:6px 8px;border:1px solid #999;border-radius:4px;font-family:sans-serif;font-size:12px">
-          <input id="{{ this.get_name() }}-input" type="search" placeholder="{{ this.placeholder }}" autocomplete="off"
-                 style="width:210px;font-size:12px;padding:3px 6px;border:1px solid #bbb;border-radius:3px">
-          <span id="{{ this.get_name() }}-count" style="margin-left:8px;color:#666"></span>
-        </div>
-        {% endmacro %}
-
         {% macro script(this, kwargs) %}
         (function () {
             var map = {{ this._parent.get_name() }};
             var groups = [{{ this.group_names|join(', ') }}];
             var names = {{ this.names_json }};
-            var input = document.getElementById('{{ this.get_name() }}-input');
-            var count = document.getElementById('{{ this.get_name() }}-count');
+
+            // A real Leaflet control rather than a box floating over the page.
+            // Anchored in the map, it moves with it — and, decisively, a wheel
+            // turned over it still bubbles to the map and zooms. A panel outside
+            // the container swallows the wheel instead, which reads as the map
+            // having frozen the moment you finish typing.
+            var input = document.createElement('input');
+            input.type = 'search';
+            input.placeholder = {{ this.placeholder_json }};
+            input.autocomplete = 'off';
+            input.style.cssText = 'width:210px;font-size:12px;padding:3px 6px;border:1px solid #bbb;border-radius:3px';
+
+            var count = document.createElement('span');
+            count.style.cssText = 'margin-left:8px;color:#666';
+
+            var control = L.control({position: 'topleft'});
+            control.onAdd = function () {
+                var box = L.DomUtil.create('div');
+                box.style.cssText = 'background:rgba(255,255,255,0.95);padding:6px 8px;border:1px solid #999;' +
+                    'border-radius:4px;font-family:sans-serif;font-size:12px';
+                box.appendChild(input);
+                box.appendChild(count);
+                // Clicking and dragging inside the box must not reach the map;
+                // scrolling must. Leaflet has a separate opt-out for each, and
+                // only the click one is wanted here.
+                L.DomEvent.disableClickPropagation(box);
+                // Leaflet binds its own keyboard shortcuts to the container, so
+                // typing a "+" would otherwise zoom the map mid-word.
+                L.DomEvent.on(input, 'keydown keypress keyup', L.DomEvent.stopPropagation);
+                return box;
+            };
+            control.addTo(map);
 
             // Norwegian names are unreachable from most keyboards otherwise, so
             // "tveravegen" has to find "Tveråvegen". Combining marks fall out by
@@ -568,8 +606,8 @@ class _NameSearch(MacroElement):
         super().__init__()
         self._name = "NameSearch"
         self.group_names = [group.get_name() for group in groups]
-        self.names_json = json.dumps(names, ensure_ascii=False)
-        self.placeholder = escape(placeholder, quote=True)
+        self.names_json = _script_json(names)
+        self.placeholder_json = _script_json(placeholder)
 
 
 def add_search(
@@ -873,13 +911,76 @@ def add_boundary(
     return layer
 
 
-def add_legend(fmap: folium.Map, title: str, entries: dict[str, str]) -> None:
-    """Add a fixed-position legend to the map.
+class _Legend(MacroElement):
+    """A legend that can be folded away.
+
+    A control rather than a box floating over the page, for the same reason the
+    search is one: a panel outside the map container swallows the wheel, and
+    with two dozen entries this one covers a good part of the map.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function () {
+            var control = L.control({position: 'bottomleft'});
+            control.onAdd = function () {
+                var box = L.DomUtil.create('div');
+                box.style.cssText = 'background:rgba(255,255,255,0.92);padding:8px 12px;border:1px solid #999;' +
+                    'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4;' +
+                    'max-height:70vh;overflow-y:auto';
+
+                var header = document.createElement('div');
+                header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none';
+                var body = document.createElement('div');
+                body.innerHTML = {{ this.rows_json }};
+                var title = {{ this.title_json }};
+                var open = {{ 'false' if this.collapsed else 'true' }};
+
+                function draw() {
+                    header.textContent = (open ? '\u25be ' : '\u25b8 ') + title;
+                    header.style.marginBottom = open ? '6px' : '0';
+                    body.style.display = open ? '' : 'none';
+                }
+                header.addEventListener('click', function () { open = !open; draw(); });
+                draw();
+
+                box.appendChild(header);
+                box.appendChild(body);
+                L.DomEvent.disableClickPropagation(box);
+                return box;
+            };
+            control.addTo({{ this._parent.get_name() }});
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, title: str, rows: str, collapsed: bool) -> None:
+        """Initialize the legend.
+
+        Args:
+            title: Legend heading, doubling as the fold handle
+            rows: Rendered HTML of the entries
+            collapsed: Whether it starts folded away
+        """
+        super().__init__()
+        self._name = "Legend"
+        self.title_json = _script_json(title)
+        self.rows_json = _script_json(rows)
+        self.collapsed = collapsed
+
+
+def add_legend(fmap: folium.Map, title: str, entries: dict[str, str], collapsed: bool = False) -> None:
+    """Add a legend that folds away at a click on its heading.
+
+    Enough sources and enough layers make a legend tall enough to hide the
+    terrain behind it, so it has to be possible to get it out of the way
+    without losing the key to the colours.
 
     Args:
         fmap: Map to add the legend to
-        title: Legend heading
+        title: Legend heading, which doubles as the fold handle
         entries: Mapping of label to CSS color
+        collapsed: Whether it starts folded away
     """
     swatch = "display:inline-block;width:18px;height:4px;vertical-align:middle;margin-right:8px"
     # Labels routinely contain characters like "<15 km"; unescaped they would be
@@ -887,14 +988,7 @@ def add_legend(fmap: folium.Map, title: str, entries: dict[str, str]) -> None:
     rows = "".join(
         f"<div style='margin:3px 0'><span style='{swatch};background:{color}'></span>{escape(label)}</div>" for label, color in entries.items()
     )
-    html = (
-        '<div style="position:fixed;bottom:24px;left:24px;z-index:9999;background:rgba(255,255,255,0.92);'
-        'padding:10px 14px;border:1px solid #999;border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4">'
-        f"<div style='font-weight:600;margin-bottom:6px'>{escape(title)}</div>{rows}</div>"
-    )
-    root = fmap.get_root()
-    assert isinstance(root, folium.Figure), "map root must be a Figure to hold raw HTML"
-    root.html.add_child(folium.Element(html))
+    _Legend(title, rows, collapsed).add_to(fmap)
 
 
 def finalize(fmap: folium.Map) -> folium.Map:
