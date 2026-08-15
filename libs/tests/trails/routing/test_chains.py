@@ -6,6 +6,7 @@ sequence to lay an elevation profile along.
 """
 
 import geopandas as gpd
+import pandas as pd
 import pytest
 from shapely.geometry import LineString, box
 from trails.routing.chains import CHAIN_COLUMNS, ChainRule, build_chains, chains_of, split_source
@@ -164,6 +165,23 @@ class TestIdentity:
         )
         assert sorted(chains_of(named)["length_m"]) == [50.0, 100.0]
 
+    def test_a_column_that_says_nothing_the_nullable_way_still_says_nothing(self):
+        """Test the one missing value that is neither None nor a nan.
+
+        A source that reads its text as pandas' ``string`` dtype — Turrutebasen
+        does, throughout — writes ``pd.NA`` where it has no name. Taken for a
+        value it becomes the text ``<NA>``, and then every unnamed line in the
+        source shares one identity: measured on this network, that turned three
+        arms of nothing-in-particular into a way that divides and put 2,713
+        chains onto FKB that are not there.
+        """
+        lines = [LineString([(0, 0), (50, 0)]), LineString([(50, 0), (100, 0)]), LineString([(50, 0), (50, 50)])]
+        frame = gpd.GeoDataFrame({"road": pd.array(["R", None, None], dtype="string")}, geometry=lines, crs=CRS)
+        named = NetworkSource("S", frame, identity_field="road")
+
+        assert frame["road"].isna().sum() == 2, "the fixture has to hold the value it is about"
+        assert sorted(chains_of(named)["length_m"]) == [50.0, 100.0]
+
     def test_several_identities_in_one_value_are_read_apart(self):
         """Test a segment belonging to two routes, as the layers write them."""
         shared = source(
@@ -228,6 +246,32 @@ class TestChainGeometry:
         """Test that agreement is not turned into a list."""
         same = source(LineString([(0, 0), (50, 0)]), LineString([(50, 0), (100, 0)]), typeveg=["sti", "sti"], attributes=("typeveg",))
         assert same.gdf is not None and chains_of(same)["typeveg"].tolist() == ["sti"]
+
+    def test_a_register_writing_nothing_as_an_empty_string_is_read_as_nothing(self):
+        """Test the other way these sources say nothing.
+
+        A blank is not a value: joined with the piece beside it a chain would
+        read ``" / sti"``, and the column would report itself populated where it
+        holds 3-6 %, which is how FKB's sparse fields once read as complete.
+        """
+        blank = source(
+            LineString([(0, 0), (50, 0)]),
+            LineString([(50, 0), (100, 0)]),
+            typeveg=["", "sti"],
+            attributes=("typeveg",),
+        )
+        assert chains_of(blank)["typeveg"].tolist() == ["sti"]
+
+    def test_an_attribute_the_source_leaves_empty_stays_empty(self):
+        """Test that a column of nothing is not filled with the word for nothing.
+
+        Turrutebasen writes ``pd.NA`` on the 88 % of its segments that record no
+        signage. Read as a value it becomes the text ``<NA>``, and the column
+        then reports itself fully populated while saying nothing at all.
+        """
+        frame = gpd.GeoDataFrame({"signage": pd.array([None], dtype="string")}, geometry=[LineString([(0, 0), (50, 0)])], crs=CRS)
+        chains = chains_of(NetworkSource("S", frame, attributes=("signage",)))
+        assert chains["signage"].isna().tolist() == [True]
 
     def test_the_frame_carries_the_columns_it_promises(self):
         """Test the shape of the result."""

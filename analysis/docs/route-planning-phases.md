@@ -166,6 +166,12 @@ paths. True where nothing from FKB, N50 paths, N50 roads or OSM lies within
 **25 m** — a deliberately generous tolerance, because the more that counts as
 recorded, the more it means when nothing is.
 
+Built, "nothing within 25 m" turned out to mean *less than half the edge*, by
+the same guard as above and for the same reason. Read as all-or-nothing it hands
+an edge's whole length to whatever it touches once, reports 12.7 km rather than
+19.9, and reports *Dagstur i Godvassdalen* as having none at all. The decisions
+document carries the measurement; the figure it lands on is **20.2 km**.
+
 Its absence asserts **nothing whatever**: the sources over-record, so a line's
 presence is no evidence of a path. That one-directionality has to survive into
 the name, the docstring and any text that ever shows it. The reasoning, and why
@@ -185,7 +191,8 @@ are in the same position: nobody drew them, which is what a bridge *is*.
 Expect **19.9 km of UT.no's 376**, concentrated in three trips: *Alternative
 Midtre – Nedre Breivatn* entirely, *Dagstur i Godvassdalen* about half, and
 11.2 km of the 42.4 km *Rundtur i Lomsdal-Visten*. Spread thin across many trips
-instead means the 25 m tolerance was not applied.
+instead means the 25 m tolerance was not applied. It came out at 20.2 km, in
+those three trips: 4.7 of 4.7, 3.6 of 7.2, and 10.3 of 42.4.
 
 **Carry N50's `malemetode` onto the chain** while you are in there — not as an
 input to anything derived, but for the popup. Across the zone 47 % of N50's paths
@@ -209,6 +216,14 @@ every walking edge carries `waymarked` and `no_path_recorded`, ferries carry
 neither, the three measured figures land — **31 % of UT.no marked, 246 km of FKB
 marked, 19.9 km with no path recorded** — and phase 1's statistics are unchanged
 to the last digit.
+
+Done: 115.8 km of UT.no marked = 31 %, 246.3 km of FKB marked, 20.2 km with no
+path recorded, and every phase 1 figure identical — checked against the cached
+phase 1 graph rather than the printed report, down to the chain ids, the
+geometry and the total cost. The `unmarked`/`unknown` split it was to report is
+in the decisions document, where it is now the reference. **Unknown is the
+largest bucket in the network**, 3,700 km of the 5,850 walked, which is what
+makes it its own answer rather than a rounding of unmarked.
 
 **Not to be built here**, decided and reasoned in the decisions document: no
 positive `on_path`, no filtering of the graph by how well a path is evidenced,

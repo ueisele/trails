@@ -1000,6 +1000,33 @@ removes both errors at once. It is one of only two attributes that sit on the
 edge rather than being read through `chain_id` — the other is below — and both
 earn the exception by being summed in kilometres.
 
+**As built, the two steps above are one test against two masks**, and step 1 is
+not a special case of anything. A mask of every Turrutebasen feature and every
+N50 path reading `JA` is what "marked" means; a mask of the ones reading `NEI` is
+what "unmarked" means; every edge is then tested against both by the same half-
+length rule, and a Turrutebasen edge comes out marked because it lies on its own
+feature. Reading step 1 off the edge instead would go wrong exactly where it
+matters: `rutemerking` reaches an edge only through its chain, and 38 chains
+carrying 158 km of it have already been merged into an ambiguous `JA / NEI`.
+
+Measured over the built graph, and this is the reference:
+
+| source | marked | unmarked | unknown | total |
+|---|---:|---:|---:|---:|
+| UT.no | 115.8 km · 31 % | 43.8 km · 12 % | 216.5 km · 58 % | 376 km |
+| Turrutebasen | 235.3 km · 100 % | — | — | 235 km |
+| FKB | 246.3 km · 12 % | 376.0 km · 19 % | 1,356.8 km · 69 % | 1,979 km |
+| N50 paths | 248.5 km · 24 % | 535.3 km · 51 % | 273.4 km · 26 % | 1,057 km |
+| N50 roads | 42.0 km · 3 % | 1.4 km · 0 % | 1,471.0 km · 97 % | 1,514 km |
+| OSM | 151.5 km · 22 % | 146.3 km · 21 % | 393.5 km · 57 % | 691 km |
+
+Two of those are worth reading twice. **Unknown is the largest bucket in the
+network**, which is what makes it its own answer rather than a rounding of
+unmarked: 3,700 km of the 5,850 walked. And **FKB reads 19 % unmarked**, none of
+which is FKB's own statement — it carries no marking field at all. That is N50
+lying along it and saying so, which is precisely the case masks exist to catch
+and reading each source's own fields would have missed.
+
 ### Whether there is a path at all — and why that cannot be answered
 
 A route register suggests a way; a topographic dataset records one. In a park
@@ -1053,6 +1080,38 @@ Measured, it is 19.9 km of UT.no's 376 and concentrated where it matters:
 | Dagstur i Godvassdalen | 3.8 of 7.2 km |
 | Rundtur i Lomsdal-Visten, 3 days | **11.2 of 42.4 km** |
 | the other 32 trips together | about 3 km |
+
+**"Nothing within 25 m" turned out to mean less than half the edge, not none of
+it**, and the difference is a third of the figure. The wording above describes a
+length: it was measured by buffering the route and intersecting, so a stretch
+counts from where the last line leaves it. An edge is not a length but a unit
+that has to answer yes or no, and asked whether *anything* lies within 25 m of it
+an edge answers no only where it is clear of everything along its whole run —
+which hands its whole length to whatever it touches once. Fourteen UT.no edges
+are in exactly that position here, averaging 535 m each and 7.5 km between them —
+long edges, because a stretch nobody records is a stretch nothing crosses, and
+nothing crossing is what leaves an edge long. Built that way it reports 12.7 km
+rather than 19.9, and *Dagstur i Godvassdalen* as **0.0** of its 7.2 km against the 3.5
+the length measurement finds. The same half-length guard `waymarked` already uses
+is what reproduces the figure, and it is the same guard for the same reason: what
+most of an edge does decides the edge.
+
+Built, and this is the reference:
+
+| | with no path recorded |
+|---|---|
+| UT.no | **20.2 km of 376**, 188 edges |
+| Turrutebasen | 0.1 km of 235 |
+| FKB · N50 paths · N50 roads · OSM | 0.0 km — they *are* the mask |
+| Rundtur i Lomsdal-Visten, 3 days | 10.3 of 42.4 km |
+| Alternative Midtre – Nedre Breivatn | 4.7 of 4.7 km |
+| Dagstur i Godvassdalen | 3.6 of 7.2 km |
+| the other 32 trips together | 1.5 km |
+
+Ferries and bridged connectors are excluded, not flagged. Nothing is recorded
+across open water, by its nature, and nobody drew a connector — which is what a
+connector *is*. Left in, the rule would report all 149 km of ferry as ground with
+no path recorded, and that figure would land beside the walking.
 
 **Decided against**, so it is not reopened:
 

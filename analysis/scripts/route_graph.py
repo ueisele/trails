@@ -30,9 +30,26 @@ from trails.io import cache as cache_module
 from trails.io.sources import kommuneinfo, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
 from trails.io.sources.geonorge import Source as GeonorgeSource
 from trails.io.sources.language import Language
-from trails.routing import ChainRule, Network, NetworkSource, build_chains, build_network, chains_of, label_components, split_source
+from trails.routing import (
+    DEFAULT_MARKED_M,
+    DEFAULT_MIN_SHARE,
+    DEFAULT_RECORDED_M,
+    MARKED,
+    UNKNOWN,
+    UNMARKED,
+    ChainRule,
+    Network,
+    NetworkSource,
+    build_chains,
+    build_network,
+    chains_of,
+    label_components,
+    no_path_recorded,
+    split_source,
+    waymarked,
+)
 from trails.routing.noding import clip_lines
-from trails.routing.sources import BRIDGE, FERRY
+from trails.routing.sources import BRIDGE, FERRY, PATH
 from trails.utils.geo import attach_nearest
 
 PARK_NAME = "Lomsdal-Visten"
@@ -63,22 +80,124 @@ COST_FACTORS = {
     "N50 roads": 1.30,
 }
 
+#: What Turrutebasen's chains carry. It is the one source here that *describes*
+#: its routes rather than only drawing them, so this is where a planned route's
+#: reporting has to come from. Measured over this zone: ``marking`` is on all 770
+#: segments and the maintaining body on all of them, ``signage`` on 88,
+#: ``difficulty`` on 27 % and ``trail_significance`` on 31 %. The register's
+#: other four fields — season, surface type, trail width and trail type — hold
+#: nothing at all here, and a column of nulls on every chain is worse than none.
+TRAIL_ATTRIBUTES = ("marking", "signage", "maintenance_responsible", "difficulty", "trail_significance")
 
-def _join_names(values: pd.Series) -> str | None:
-    """Collapse the names a Turrutebasen segment carries into one value.
+#: What a segment takes from the info table, which holds a row per named route a
+#: segment belongs to rather than a row per segment. ``trail_name`` is also the
+#: identity the chains are built on.
+TRAIL_INFO_FIELDS = ("trail_name", "maintenance_responsible", "difficulty", "trail_significance")
 
-    A segment can belong to several named routes. The chain rule reads several
+#: N50's own account of how a line was captured. It feeds nothing derived and is
+#: carried for the popup, where it is worth more than any category computed from
+#: it: 47 % of N50's paths in this zone are ``dig``, digitised from a map rather
+#: than seen, with capture dates back to 1965 and accuracies as coarse as 50 m.
+SURVEY_FIELD = "malemetode"
+
+#: ``rutemerking`` on an N50 path: whether the register states it is waymarked.
+N50_MARKED, N50_UNMARKED = "JA", "NEI"
+
+#: The sources whose lines are a record that something is drawn on this ground.
+#: Their silence is the whole of what ``no_path_recorded`` says; their lines say
+#: nothing, because all four record liberally and three of them are Kartverket.
+RECORDED_SOURCES = ("FKB", "N50 paths", "N50 roads", "OSM")
+
+#: The sources that suggest a way rather than record one. Whether anything draws
+#: a path is only a question for these: an FKB line *is* the record, so for it
+#: the test answers itself.
+ROUTE_REGISTERS = ("UT.no", "Turrutebasen")
+
+#: The rule the two derived edge fields are read by: how close counts as running
+#: along a marking mask, how close counts as recorded at all, and how much of an
+#: edge has to lie that close. All three are fixed by measurement in the
+#: decisions document rather than being preferences, so they are not options.
+#: They live here as one value because three places need exactly the same
+#: numbers — the derivation, the fingerprint that decides whether a cached graph
+#: answers for them, and the report. Read from anywhere else, a change to one of
+#: them would leave a graph in the cache that no longer matches its own key.
+MARKED_M, RECORDED_M, MIN_SHARE = DEFAULT_MARKED_M, DEFAULT_RECORDED_M, DEFAULT_MIN_SHARE
+
+
+def _join_values(values: pd.Series) -> str | None:
+    """Collapse what a Turrutebasen segment carries into one value.
+
+    A segment can belong to several named routes, so the info table holds more
+    than one row for it and they need not agree. The chain rule reads several
     identities out of one value, so they are joined the way the road and trail
-    layers already write them rather than one being picked.
+    layers already write them rather than one being picked — and the same holds
+    for what those routes say about themselves: a segment shared by an easy
+    route and a strenuous one is both, and reads so.
 
     Args:
-        values: Names of the routes a segment belongs to
+        values: What the routes a segment belongs to say
 
     Returns:
-        The names, joined, or None where the segment has none
+        The values, joined, or None where the segment has none
     """
     names = sorted({str(value) for value in values.dropna().unique()})
     return " / ".join(names) if names else None
+
+
+class Masks(NamedTuple):
+    """Raw source geometry the two derived edge fields are decided against.
+
+    Built out of the sources rather than read off the edges, and that is not a
+    detail. A marking flag reaches an edge only through the chain it lies on,
+    where a run that changes character has already been merged into an ambiguous
+    ``JA / NEI`` — 38 chains and 158 km of it, exactly where the answer matters.
+    A mask has no such problem and it treats every source alike: a Turrutebasen
+    edge lies on its own feature and comes out marked without a special case.
+
+    Attributes:
+        marked: Every Turrutebasen feature — membership is the statement, since
+            all 770 segments in this zone read ``marking = Marked`` — together
+            with every N50 path the register marks as waymarked
+        unmarked: Every N50 path the register marks as not waymarked
+        recorded: Every line from :data:`RECORDED_SOURCES`
+    """
+
+    marked: gpd.GeoSeries
+    unmarked: gpd.GeoSeries
+    recorded: gpd.GeoSeries
+
+
+def masks_from(sources: list[NetworkSource]) -> Masks:
+    """Build the masks the derived edge fields are tested against.
+
+    Args:
+        sources: The datasets, as loaded
+
+    Returns:
+        The three masks, in :data:`METRIC_CRS`
+
+    Raises:
+        ValueError: If N50 states its marking in terms this does not know
+    """
+    frames = {source.name: source.gdf.to_crs(METRIC_CRS) for source in sources}
+    paths = frames["N50 paths"]
+    marking = paths["rutemerking"].astype("string").str.strip().str.upper()
+
+    # A code that stopped being a code would empty both masks and cost nothing
+    # to notice: every walked edge would come back unknown, and a report full of
+    # unknown is exactly what this park looks like anyway. The sibling loader
+    # already expands its codes into words, so this is not a distant prospect.
+    stated = set(marking.dropna().unique())
+    if stated and not stated & {N50_MARKED, N50_UNMARKED}:
+        raise ValueError(f"N50 states its marking as {sorted(stated)}, not as {N50_MARKED}/{N50_UNMARKED}")
+
+    marked = pd.concat([frames["Turrutebasen"].geometry, paths.geometry[marking == N50_MARKED]], ignore_index=True)
+    recorded = pd.concat([frames[name].geometry for name in RECORDED_SOURCES], ignore_index=True)
+    return Masks(
+        marked=gpd.GeoSeries(marked, crs=METRIC_CRS),
+        unmarked=gpd.GeoSeries(paths.geometry[marking == N50_UNMARKED].reset_index(drop=True), crs=METRIC_CRS),
+        recorded=gpd.GeoSeries(recorded, crs=METRIC_CRS),
+    )
 
 
 class Landmarks(NamedTuple):
@@ -134,7 +253,8 @@ def load_sources(args: argparse.Namespace, zone: gpd.GeoDataFrame) -> tuple[list
     info = turrutebasen.attribute_tables["hiking_trail_info_table"]
     # A segment can belong to several named routes, so the info table holds more
     # than one row per segment; the chain rule reads them all out of one value.
-    merged = routes.merge(info.groupby("hiking_trail_fk")["trail_name"].apply(_join_names), left_on="local_id", right_index=True, how="left")
+    described = info.groupby("hiking_trail_fk")[list(TRAIL_INFO_FIELDS)].agg(_join_values)
+    merged = routes.merge(described, left_on="local_id", right_index=True, how="left")
     marked = clip_lines(gpd.GeoDataFrame(merged, geometry="geometry", crs=routes.crs), extent)
     named = marked[marked["trail_name"].notna()]
     print(f"  {len(marked):,} marked route segments in the zone, {len(named):,} of them named")
@@ -209,26 +329,34 @@ def load_sources(args: argparse.Namespace, zone: gpd.GeoDataFrame) -> tuple[list
             marked,
             cost_factor=COST_FACTORS["Turrutebasen"],
             identity_field="trail_name",
+            attributes=TRAIL_ATTRIBUTES,
             node_simplify_m=args.route_noding_m,
         ),
         NetworkSource("FKB", fkb, cost_factor=COST_FACTORS["FKB"], identity_field="route_name", attributes=("typeveg",)),
-        NetworkSource("N50 paths", paths, cost_factor=COST_FACTORS["N50 paths"], attributes=("typeveg", "rutemerking")),
+        NetworkSource("N50 paths", paths, cost_factor=COST_FACTORS["N50 paths"], attributes=("typeveg", "rutemerking", SURVEY_FIELD)),
         # Roads are named by the register, and the register id is what says two
         # fragments are the same road; the name repeats across the county.
-        NetworkSource("N50 roads", roads, cost_factor=COST_FACTORS["N50 roads"], identity_field="road_id", attributes=("vegkategori", "road_name")),
+        NetworkSource(
+            "N50 roads",
+            roads,
+            cost_factor=COST_FACTORS["N50 roads"],
+            identity_field="road_id",
+            attributes=("vegkategori", "road_name", SURVEY_FIELD),
+        ),
         NetworkSource("OSM", osm, cost_factor=COST_FACTORS["OSM"], identity_field="name", attributes=("highway",)),
         # Nobody walks these, and without them the whole west of the park — where
         # the UT.no routes start — cannot be reached at all.
-        NetworkSource("Ferries", ferries, kind=FERRY, attributes=("typeveg",)),
+        NetworkSource("Ferries", ferries, kind=FERRY, attributes=("typeveg", SURVEY_FIELD)),
     ]
     return sources, Landmarks(town=towns, quays=quays)
 
 
-def fingerprint(sources: list[NetworkSource], args: argparse.Namespace) -> str:
+def fingerprint(sources: list[NetworkSource], masks: Masks, args: argparse.Namespace) -> str:
     """Summarise what went into a build, so a cached one can be recognised.
 
     Args:
         sources: The datasets
+        masks: What the derived edge fields were decided against
         args: Parsed command line, for the parameters that shape the result
 
     Returns:
@@ -239,7 +367,11 @@ def fingerprint(sources: list[NetworkSource], args: argparse.Namespace) -> str:
     # count and a total length cannot tell two of these builds apart.
     parts = [
         f"{args.approach_km}|{args.stroke_deg}|{args.probe_m}|{args.bridge_m}"
-        f"|{args.ferry_cost_km}|{args.route_noding_m}|{args.road_name_m}|{args.trail_name_m}"
+        f"|{args.ferry_cost_km}|{args.route_noding_m}|{args.road_name_m}|{args.trail_name_m}",
+        # And the masks with the rule they are read by. A mask is a filtered
+        # subset of its sources, so a change in which features go into one shows
+        # up in no source's row count or length.
+        f"{_mask_digest(masks.marked)}|{_mask_digest(masks.unmarked)}|{_mask_digest(masks.recorded)}|{MARKED_M}|{RECORDED_M}|{MIN_SHARE}",
     ]
     for source in sources:
         length = source.gdf.to_crs(METRIC_CRS).length.sum() if len(source.gdf) else 0.0
@@ -249,6 +381,18 @@ def fingerprint(sources: list[NetworkSource], args: argparse.Namespace) -> str:
         # length — yet a change in either moves where a chain ends.
         parts.append(f"{source.name}:{len(source.gdf)}:{length:.0f}:{source.cost_factor}:{source.keep_whole}:{_values_digest(source)}")
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def _mask_digest(mask: gpd.GeoSeries) -> str:
+    """Summarise a mask, so a graph is not read back for a different one.
+
+    Args:
+        mask: Lines the derived fields are decided against
+
+    Returns:
+        Its size and total length
+    """
+    return f"{len(mask)}:{mask.length.sum():.0f}"
 
 
 def _values_digest(source: NetworkSource) -> str:
@@ -317,7 +461,7 @@ def chain_report(sources: list[NetworkSource], clip: gpd.GeoDataFrame, args: arg
     return pd.DataFrame(rows)
 
 
-def build(sources: list[NetworkSource], clip: gpd.GeoDataFrame, args: argparse.Namespace) -> tuple[Network, pd.DataFrame]:
+def build(sources: list[NetworkSource], masks: Masks, clip: gpd.GeoDataFrame, args: argparse.Namespace) -> tuple[Network, pd.DataFrame]:
     """Build the network, or read back the last build of the same inputs.
 
     Elevation comes later and will make this expensive; the cache is here from
@@ -325,6 +469,7 @@ def build(sources: list[NetworkSource], clip: gpd.GeoDataFrame, args: argparse.N
 
     Args:
         sources: The datasets
+        masks: What the derived edge fields are decided against
         clip: Extent to cut them to
         args: Parsed command line
 
@@ -332,7 +477,7 @@ def build(sources: list[NetworkSource], clip: gpd.GeoDataFrame, args: argparse.N
         The network and the per-source chain counts
     """
     store = cache_module.Object(cache_dir=str(Path(args.cache_dir) / "objects"))
-    key = f"route_graph_{PARK_NAME.lower()}_{fingerprint(sources, args)}"
+    key = f"route_graph_{PARK_NAME.lower()}_{fingerprint(sources, masks, args)}"
 
     if not args.rebuild and store.exists(key):
         print(f"\nReading the graph back from the cache ({key})...")
@@ -352,8 +497,33 @@ def build(sources: list[NetworkSource], clip: gpd.GeoDataFrame, args: argparse.N
         bridge_m=args.bridge_m,
         ferry_cost_m=args.ferry_cost_km * 1000,
     )
+
+    print("Asking every edge what the ground it runs over is recorded as...")
+    network = replace(network, edges=derive(network.edges, masks))
+
     store.save(key, {"network": network, "chains": chains}, metadata={"park": PARK_NAME, "approach_km": args.approach_km})
     return network, chains
+
+
+def derive(edges: gpd.GeoDataFrame, masks: Masks) -> gpd.GeoDataFrame:
+    """Add the two fields an edge cannot read off the chain it lies on.
+
+    Both are summed in kilometres by a planned route, which is what earns them a
+    place on the edge rather than on the chain: a chain takes one value along its
+    whole length, and both of these change along it.
+
+    Args:
+        edges: The graph's edges
+        masks: Raw source geometry to decide them against
+
+    Returns:
+        The edges carrying ``waymarked`` and ``no_path_recorded``, both of them
+        empty on a crossing and on an inferred connector
+    """
+    return edges.assign(
+        waymarked=waymarked(edges, masks.marked, masks.unmarked, distance_m=MARKED_M, min_share=MIN_SHARE),
+        no_path_recorded=no_path_recorded(edges, masks.recorded, distance_m=RECORDED_M, min_share=MIN_SHARE),
+    )
 
 
 def reach_across(edges: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> float:
@@ -378,18 +548,26 @@ def reach_across(edges: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> float:
     return float(north - south)
 
 
-def report(network: Network, chains: pd.DataFrame, park: gpd.GeoDataFrame, landmarks: Landmarks, args: argparse.Namespace) -> None:
+def report(
+    network: Network,
+    chains: pd.DataFrame,
+    sources: list[NetworkSource],
+    park: gpd.GeoDataFrame,
+    landmarks: Landmarks,
+    args: argparse.Namespace,
+) -> None:
     """Print everything the phase is checked against.
 
     Args:
         network: The finished network
         chains: Per-source chain counts
+        sources: The datasets, for what each of them carries
         park: Park boundary
         landmarks: Points to check the main component against
         args: Parsed command line
     """
     edges = network.edges
-    walking = edges[edges["kind"] != FERRY]
+    on_land = edges[edges["kind"] != FERRY]
 
     print("\n" + "=" * 78)
     print("CHAINS PER SOURCE")
@@ -416,7 +594,7 @@ def report(network: Network, chains: pd.DataFrame, park: gpd.GeoDataFrame, landm
     park_extent = float(park.to_crs(METRIC_CRS).total_bounds[3] - park.to_crs(METRIC_CRS).total_bounds[1])
     town = landmarks.town.to_crs(METRIC_CRS)
 
-    for label, subset in (("land only", walking), ("with ferries", edges)):
+    for label, subset in (("land only", on_land), ("with ferries", edges)):
         component = label_components(subset)
         main = subset[component == 0]
         share = main["length_m"].sum() / subset["length_m"].sum() * 100
@@ -438,6 +616,98 @@ def report(network: Network, chains: pd.DataFrame, park: gpd.GeoDataFrame, landm
     for source, group in edges.groupby("source"):
         factor = "flat" if group["kind"].iloc[0] == FERRY else f"{(group['cost'] / group['length_m']).mean():.2f}"
         print(f"    {str(source):<12} {factor:>7} {len(group):>9,} {group['length_m'].sum() / 1000:>8,.0f}")
+
+    report_attributes(network.chains, sources)
+    report_derived(network)
+
+
+def _filled(values: pd.Series) -> float:
+    """Measure how much of a column actually says something.
+
+    ``notna`` is not the test. These registers write an empty string where they
+    have nothing, and counting those once made a set of FKB's fields look fully
+    populated when they are really at 3-6 %.
+
+    Args:
+        values: One column
+
+    Returns:
+        Share of its rows carrying a value, between 0 and 1
+    """
+    if values.empty:
+        return 0.0
+    said = values.notna() & (values.astype("string").str.strip() != "")
+    return float(said.sum()) / len(values)
+
+
+def report_attributes(chains: gpd.GeoDataFrame, sources: list[NetworkSource]) -> None:
+    """Print what each source's chains carry beyond their geometry.
+
+    An edge names its chain, so a route reads any of this through ``chain_id``
+    in one lookup. Nothing here is copied onto the edges.
+
+    Args:
+        chains: The chains of every source
+        sources: The datasets, for which columns each of them promised
+    """
+    print("\n" + "=" * 78)
+    print("WHAT THE CHAINS CARRY")
+    print("=" * 78)
+    for source in sources:
+        held = chains[chains["source"] == source.name]
+        # A source's identity column arrives under the one name every chain
+        # carries it as, whatever the source called it.
+        carried = [("identity", source.identity_field), *((column, column) for column in source.attributes)]
+        described = " · ".join(f"{label} {_filled(held[column]):.0%}" for column, label in carried if label)
+        print(f"  {source.name:<13} {len(held):>6,} chains   {described or 'nothing but its geometry'}")
+
+
+def report_derived(network: Network) -> None:
+    """Print the two fields the edges carry about the ground they run over.
+
+    Args:
+        network: The finished network
+    """
+    walked = network.edges[network.edges["kind"] == PATH]
+    identities = network.chains.set_index("chain_id")["identity"]
+
+    print("\n" + "=" * 78)
+    print("WHAT THE GROUND SAYS, PER EDGE")
+    print("=" * 78)
+    print("  Both are derived from masks over the raw sources, never from an edge's own")
+    print("  attributes, and both leave out the ferries and the bridged connectors: a")
+    print("  crossing is not walking, and nobody drew a connector.")
+
+    print(f"\n  waymarked — at least {MIN_SHARE:.0%} of the edge within {MARKED_M:g} m of a mask")
+    print(f"    {'source':<13} {'marked':>18} {'unmarked':>18} {'unknown':>18} {'km':>9}")
+    for source, group in walked.groupby("source"):
+        total = group["length_m"].sum() / 1000
+        cells = ""
+        for answer in (MARKED, UNMARKED, UNKNOWN):
+            distance = group.loc[group["waymarked"] == answer, "length_m"].sum() / 1000
+            cells += f" {distance:>9,.1f} km {distance / total * 100 if total else 0:>3.0f} %"
+        print(f"    {str(source):<13}{cells} {total:>9,.0f}")
+
+    print(f"\n  no path recorded — less than {MIN_SHARE:.0%} of the edge within {RECORDED_M:g} m of any of")
+    print(f"  {', '.join(RECORDED_SOURCES)}. Their silence is evidence; their lines are not,")
+    print("  so this says nothing whatever about the ground it leaves unflagged.")
+    flagged = walked[walked["no_path_recorded"].fillna(False).astype(bool)]
+    for source, group in walked.groupby("source"):
+        found = flagged[flagged["source"] == source]
+        print(f"    {str(source):<13} {found['length_m'].sum() / 1000:>8,.1f} km of {group['length_m'].sum() / 1000:>7,.0f} ({len(found):,} edges)")
+
+    print("\n    where it falls, for the sources that suggest a way rather than record one")
+    registers = walked[walked["source"].isin(ROUTE_REGISTERS)]
+    whole = registers.groupby(registers["chain_id"].map(identities))["length_m"].sum().to_dict()
+    on_nothing = flagged[flagged["source"].isin(ROUTE_REGISTERS)]
+    if on_nothing.empty:
+        print("      nothing")
+        return
+    per_route = on_nothing.groupby(on_nothing["chain_id"].map(identities))["length_m"].sum().sort_values(ascending=False)
+    for name, distance in per_route.head(8).items():
+        print(f"      {str(name)[:52]:<52} {distance / 1000:>5,.1f} of {whole[name] / 1000:>5,.1f} km")
+    if len(per_route) > 8:
+        print(f"      {'the other ' + str(len(per_route) - 8) + ' together':<52} {per_route.iloc[8:].sum() / 1000:>5,.1f} km")
 
 
 def _within(points: gpd.GeoDataFrame, edges: gpd.GeoDataFrame, distance_m: float) -> int:
@@ -510,8 +780,9 @@ def main() -> int:
     zone = zone_around(park, args.approach_km)
 
     sources, landmarks = load_sources(args, zone)
-    network, chains = build(sources, zone, args)
-    report(network, chains, park, landmarks, args)
+    masks = masks_from(sources)
+    network, chains = build(sources, masks, zone, args)
+    report(network, chains, sources, park, landmarks, args)
 
     print("\n" + "=" * 78)
     print("Sources: Turrutebasen (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)")

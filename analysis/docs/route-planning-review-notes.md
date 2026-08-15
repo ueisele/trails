@@ -8,9 +8,24 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phase 1 is built and reviewed.** `libs/src/trails/routing/` (1,096 lines, 100
-tests, no new dependency) and `analysis/scripts/route_graph.py`. Its output is
-now the reference in the decisions document; phases 1B, 1C and 2–8 remain.
+**Phases 1 and 1B are built and reviewed.** `libs/src/trails/routing/` and
+`analysis/scripts/route_graph.py`, no new dependency. Their output is now the
+reference in the decisions document; phases 1C and 2–8 remain.
+
+**Phase 1B** added `routing/coverage.py`, the five Turrutebasen fields and N50's
+`malemetode` onto the chains, and `waymarked` and `no_path_recorded` onto every
+walked edge. Every phase 1 figure came out unchanged — checked against the
+cached phase 1 graph rather than against the printed report: identical chain
+ids, identical geometry, identical total edge length and cost to the last digit.
+Two things it changed on the way, both found by measuring:
+
+- **`no_path_recorded` is a half-length test, not an all-or-nothing one.** The
+  literal "nothing within 25 m" reports 12.7 km where the documented measurement
+  says 19.9, and reports one of the three named trips as having none at all. The
+  decisions document now carries the reasoning and both numbers.
+- **`pd.NA` was landing on chains as the text `<NA>`.** See the trap list below.
+  It cost 2,713 phantom FKB chains before it was tracked down, and it was in the
+  phase 1 code all along, waiting for a source column in a nullable dtype.
 
 What the review changed, both measured rather than argued:
 
@@ -68,9 +83,11 @@ Popups were audited against what each layer's data actually holds:
 - **FKB was left alone.** Its extra fields look 100 % populated and are not:
   `notna()` counts empty strings. Really 3–6 %.
 
-The map has **not been rebuilt** since. Its runtime is unmeasured — the "half an
-hour" quoted in conversation came from a timeout allowance, not a measurement,
-which is why `analysis/README.md` states no figure.
+The map has been rebuilt and the new fields verified in the HTML. Its warm-cache
+runtime is **53 seconds**, not the "half an hour" quoted twice in conversation —
+that figure came from a timeout allowance rather than a measurement. Worth
+remembering as a habit: a number nobody measured is worth nothing even when it
+is only used to decide whether to bother.
 
 The measurement scripts that produced the figures lived in a session scratchpad
 and are gone. Their methods are below so a figure can be re-derived rather than
@@ -163,6 +180,25 @@ every one was invisible until something was actually run.
   crosses a municipal boundary — correctly, that is what reunites it. And a
   single null in an integer column makes pandas store it as float, so `1113860`
   becomes `1113860.0` and hashes differently.
+- **There are three ways a frame says nothing and `pd.NA` is the one that gets
+  through.** `None` and a float `nan` are what an object column holds; a column
+  in a nullable dtype holds `pd.NA`, which is neither, and Turrutebasen's loader
+  produces `string` columns throughout. A check written as
+  `value is None or isnan(value)` passes it, `str()` turns it into the text
+  `<NA>`, and it lands on the chain as a value. As an attribute that fills an
+  empty column and reports it 100 % populated; as an *identity* it makes every
+  unnamed line in the source the same way as every other unnamed line, which put
+  2,713 chains onto FKB that are not there. `pd.isna` is the test. The symptom
+  was a chain count moving in a source nothing had been done to — attributes had
+  been added to Turrutebasen and FKB was what moved.
+- **Merging pieces of a line does not deduplicate them.** Measuring how much of
+  an edge lies near a mask, the natural form is to intersect the edge with each
+  nearby line's buffer and merge the pieces. Those pieces overlap where the mask
+  lines do, and at projected-CRS magnitudes they do not dissolve into one
+  another: one edge came out at **3.6 times its own length**. Merge the buffers
+  into one area first and intersect once. It is also 8× faster to shortcut the
+  two cases that need no merge at all — one mask line covering the whole edge,
+  which is 99 % of them, and only one line near it.
 
 ## Reviewing each phase
 

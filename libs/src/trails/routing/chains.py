@@ -15,9 +15,11 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from enum import Enum
 from itertools import groupby
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 from shapely.geometry import LineString
 
 from trails.routing.noding import (
@@ -228,6 +230,36 @@ def build_chains(
     return _assemble(source, coordinates, members, pieces, identities, tolerance_m)
 
 
+def _missing(value: Any) -> bool:
+    """Say whether a value is one of the ways a frame writes nothing.
+
+    A frame has several. ``None`` and a float ``nan`` are what an object column
+    uses; a column in one of pandas' nullable dtypes writes ``pd.NA``, which is
+    neither, and a source that reads its text as ``string`` produces those
+    throughout. Missed, ``pd.NA`` survives every check and lands on the chain as
+    the literal text ``<NA>`` — which as an identity makes every unnamed line
+    the same way as every other unnamed line, and as an attribute fills a column
+    that is empty.
+
+    A register with nothing to say also writes an empty string, which is how a
+    set of FKB's fields once read as fully populated when they hold 3-6 %. Taken
+    for a value it joins the ones beside it, and a chain running from a piece
+    that says nothing into a piece that says ``sti`` reads ``" / sti"``.
+
+    Args:
+        value: One value out of a column
+
+    Returns:
+        Whether it says nothing
+    """
+    if isinstance(value, str):
+        return not value.strip()
+    missing = pd.isna(value)
+    # Anything that is not a scalar — a list of route numbers, say — answers
+    # elementwise, and something present is not missing whatever it holds.
+    return bool(missing) if isinstance(missing, bool | np.bool_) else False
+
+
 def _identity_values(frame: gpd.GeoDataFrame, identity_field: str | None) -> list[frozenset[str]]:
     """Read each row's identities.
 
@@ -243,7 +275,7 @@ def _identity_values(frame: gpd.GeoDataFrame, identity_field: str | None) -> lis
 
     values: list[frozenset[str]] = []
     for value in frame[identity_field]:
-        if value is None or (isinstance(value, float) and math.isnan(value)):
+        if _missing(value):
             values.append(frozenset())
             continue
         parts = {part.strip() for part in str(value).split(IDENTITY_SEPARATOR)}
@@ -526,7 +558,7 @@ def _combine(values: Iterable[object]) -> object:
         The value where they agree, the sorted values joined where they do not,
         None where there are none
     """
-    present = sorted({str(value) for value in values if value is not None and not (isinstance(value, float) and math.isnan(value))})
+    present = sorted({str(value) for value in values if not _missing(value)})
     if not present:
         return None
     return present[0] if len(present) == 1 else IDENTITY_SEPARATOR.join(present)

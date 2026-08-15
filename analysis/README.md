@@ -32,10 +32,11 @@ plus one GPX per source beside it:
 command make map
 ```
 
-Everything it downloads is cached, so a second run does not fetch again. The
-first run on an empty cache does, and takes considerably longer. Re-fetch on
-purpose with `--force-download`; `command make cache-clean` throws the cache away
-entirely, which is rarely what you want.
+Everything it downloads is cached, so a second run does not fetch again and takes
+about a minute. The first run on an empty cache fetches some 150 MB from Geonorge
+and Overpass and takes considerably longer. Re-fetch on purpose with
+`--force-download`; `command make cache-clean` throws the cache away entirely,
+which is rarely what you want.
 
 Both targets pass `ARGS` through, so `command make map ARGS="--approach-km 10"`
 works; the script itself is `analysis/scripts/lomsdal_visten.py`.
@@ -57,7 +58,11 @@ instead; it does the same job per layer, instantly, without a rebuild.
 **The routing graph** — builds nothing visible and draws nothing. It reports the
 statistics the route planning is verified against: chains per source, edges,
 components, how far the network reaches across the park, and whether the coast is
-reachable without the ferries.
+reachable without the ferries. Then what each source's chains carry, and what
+every walked edge is told by the ground it runs over — how much of the network is
+waymarked, and how much of it runs where no source records a path at all. That
+last one reads in one direction only: the sources over-record, so their silence
+means something and their lines do not.
 
 ```bash
 command make graph
