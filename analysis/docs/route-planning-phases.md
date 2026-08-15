@@ -1,7 +1,8 @@
 # Route planning: the phases
 
-Seven phases. Every decision they rest on is in `route-planning-decisions.md` —
-read it first, and do not re-derive what it already settles by measurement.
+Eight phases, with 1B and 1C added after the first was already under way. Every
+decision they rest on is in `route-planning-decisions.md` — read it first, and do
+not re-derive what it already settles by measurement.
 
 ## How to work through them
 
@@ -21,6 +22,19 @@ rather than quietly carrying on.
 tests, and anything that touches the browser has been driven in a real browser
 rather than reasoned about. That last one is not optional — see the list of bugs
 in the decisions document that were only ever visible that way.
+
+**No phase needs a new dependency.** What is already in `pyproject.toml` covers
+all of them: shapely and geopandas build the graph, requests fetches the
+elevations, pyarrow holds the point store, and everything from phase 3 onward is
+JavaScript in the page. Do not reach for `networkx` for the graph or `scipy` for
+the spatial queries — shapely's `STRtree` and a hand-written union-find are
+enough, and phase 4 draws its chart by hand for reasons of its own. If a phase
+genuinely does need something new, say so in its report and justify it; a
+dependency should never arrive unremarked in the lockfile.
+
+**Dependency upgrades never share a phase with a feature.** Refreshing `uv.lock`
+alongside a change makes a failing review ambiguous — the change or the new
+version? Phase 1C does nothing else, which is what makes it safe.
 
 **Performance is not a phase.** It is a condition of phases 3, 4 and 7, which all
 touch a map already carrying twelve thousand features. Two mistakes have already
@@ -68,6 +82,71 @@ spanning 94 % of the park north to south, and Mosjøen on it.
 
 Those numbers are the test. If they come out far off, something is wrong in the
 construction, not in the document.
+
+---
+
+## Phase 1B — What the graph has to carry
+
+Small, and separate only because phase 1 was already under way when these came
+up. Do it after phase 1 lands; it does not block phase 2.
+
+- **Carry the attributes later phases need** onto chains and edges, following the
+  rule in the decisions document — constant values through, differing ones
+  joined. At least: the source, the name, the road category, and whether a
+  stretch is waymarked. Phase 6 reports how much of a route is marked and how
+  much is not, which for a wilderness route matters as much as the distance, and
+  it cannot invent the field afterwards.
+- **The cache key covers the extent and the source set**, not only the source
+  data. A graph built for 15 km and one built for 5 km are different artefacts
+  and must not answer to the same key.
+- **Turrutebasen belongs in the graph** — check whether phase 1 already put it
+  there, and add it if not. The map draws it as two layers of its own, and from
+  phase 3 those layers come from the graph; leave it out and they vanish. The
+  1–4 % of it that FKB does not cover would be lost geometry as well, and it is
+  the best source for whether a stretch is waymarked. Weight it **1.02**, between
+  UT.no's described walks and FKB's surveyed lines: an officially marked route is
+  a better thing to follow than a path that merely exists.
+
+  Every figure in the decisions document was measured **without it** — that is an
+  omission in the measuring, not a decision. So the edge count will come out
+  above the stated 129,616, and that is expected rather than a fault. What should
+  *not* move is the reach: 235 km running parallel to FKB improves connectivity
+  if anything. Treat phase 1's own output as the new reference and correct the
+  documented figures to match.
+- **Refuse to build a partial graph.** A source that fails to load is an error
+  with a clear message, not a smaller graph. Without roads the largest component
+  falls from 79 % to 5 %; without ferries eleven quays are unreachable. A graph
+  missing a source produces numbers that quietly disagree with this document,
+  which is the worst way for it to be wrong.
+
+---
+
+## Phase 1C — Refresh the dependencies
+
+Maintenance, not a feature, and here for two reasons.
+
+**Everything from phase 3 onward is folium and Leaflet work.** That library has
+changed behaviour under this project before — `class_name` handling, which
+`Icon` colours are accepted, and the marker class it overwrites. Upgrading after
+the browser phases would put that work at risk and need its own regression pass;
+upgrading now means phase 3's acceptance — *the map behaves as it did* — covers
+the upgrade too.
+
+**And phase 1 has just produced verified numbers.** Edges, components, reach,
+chain counts. If an upgrade to shapely or geopandas moves the graph, the same
+statistics script says so at once, and there is nothing else it could have been.
+Later, a difference could be the upgrade or the new work.
+
+- `uv lock --upgrade`, then `command make hooks-run`.
+- Rebuild the map and drive it in a browser. The things that have broken before
+  are the things to check: clicks reaching lines, the wheel reaching the map,
+  markers appearing at all.
+- Re-run phase 1's statistics and compare. Any movement is the upgrade's doing.
+- Record what changed in folium's behaviour: the trap list in the review notes
+  was written against 0.17.
+
+**Done when** the numbers are unchanged, the map behaves as before, and anything
+that did change is written down rather than discovered later.
 
 ---
 
@@ -119,9 +198,24 @@ edge naming the chain it lies on.
   and the whole named way, so neither number lies.
 - The search still matches by name across every chain carrying it.
 
-**Done when** the map looks and behaves as it does today, the object count has
-gone *down* — under 10,000 against today's 23,041 — and clicking a road that
-branches selects only the arm under the cursor.
+**Retire the source flags while you are here.** `--no-osm`, `--no-n50`,
+`--no-fkb`, `--no-roads`, `--no-ut` and `--no-names` predate the layer control,
+which does the job better — per layer, instantly, without a rebuild. With a graph
+they become actively harmful: a missing source does not make it smaller, it makes
+it wrong. `--fkb-km` goes too, folded into `--approach-km`; the density it
+guarded against is what chains solve. What remains is `--approach-km` as a graph
+parameter, `--simplify-m` for the drawn copy, `--force-download` and
+`--highlight`.
+
+That means FKB is loaded over the full 15 km rather than 5 km — every other
+source already was, and every figure in the decisions document assumes it.
+
+**Done when** the map looks and behaves as it does today, clicking a road that
+branches selects only the arm under the cursor, and the object count has roughly
+halved: about 10,500 against today's 23,041. Measured per source with the stroke
+rule: FKB 5,959, N50 roads 1,724, N50 paths 961, UT.no 35 whole trips, plus OSM
+and Turrutebasen which were not measured and are estimated at some 1,850
+together.
 
 ---
 
@@ -155,14 +249,34 @@ must not dive to −276 m where the sampling strayed over water.
 The selected chain, downloadable, with real elevation.
 
 - One file, dense: every vertex, filled so no gap exceeds 5 m, an `<ele>` on
-  each. A sparser variant would be unusable — the target platforms do not know
+  each.
+- **Every file says what it is.** Build the `<extensions>` mechanism here, with
+  the writer, rather than retrofitting it in phase 6 — and give it something to
+  carry straight away: that this is a single chain, its name, its source and its
+  chain id. A file that identifies itself can be recognised on load instead of
+  matched, and an exported stretch becomes something you can bring back in as the
+  start of a plan. Phase 6 then only adds fields to a mechanism that already
+  exists. A sparser variant would be unusable — the target platforms do not know
   these paths and cannot rebuild the line between distant points. Show the point
   count and total ascent next to the button.
 - `libs/src/trails/io/export/gpx.py` learns `<ele>` at the same time — it has
   carried a comment marking the spot since it was written — so the build-time
   exports gain it too. The browser writes its own GPX; the two cannot share code
   across that boundary but must agree on structure.
-- The licence note belongs at the download, not only in documentation.
+- **Name the sources in the file, and say which before it leaves.** Put the
+  sources actually used, with their licences, into `<metadata>` — a chain export
+  usually has one, plus Kartverket's height model. Do not fill in a single
+  `<copyright>`: see the decisions document, a route mixing CC0, CC BY 4.0, ODbL
+  and CC BY-NC has no one answer, and inventing one would be worse than listing
+  what is there.
+- Carry the rest of what the decisions document asks for: the source versions
+  the file was built from, the ascent figure with the method that produced it,
+  the named ways the track follows, and `<metadata><time>`. And **no timestamps
+  on the trackpoints** — a track carrying them reads as a recorded activity
+  rather than a plan.
+- Replace the generic licence note at the download with what this file actually
+  contains. A stretch of FKB is unproblematic; a stretch of OSM is share-alike.
+  The reader should know which before pressing the button, not afterwards.
 
 **Done when** a downloaded file imports into Komoot and Outdooractive and shows
 an elevation profile there.
@@ -198,10 +312,40 @@ that is phase 7.
   route uses, laid end to end, with the on-demand samples of any straight leg
   spliced in at the right place. Mark the straight stretches in the curve too, so
   the profile says the same thing the map does.
-- **Export it**, through the writer from phase 5, with the clicked waypoints
-  along as `<wpt>`. Little more than wiring — the composed geometry and its
-  elevations already exist, because the profile needs them — and without it the
-  phase stops one step short of the point of the whole feature.
+- **Export it**, through the writer from phase 5. Little more than wiring — the
+  composed geometry and its elevations already exist, because the profile needs
+  them — and without it the phase stops one step short of the point of the whole
+  feature.
+- The sources list now spans several: report the length contributed by each and
+  the licence that comes with it, so *3.2 km OSM (ODbL) · 1.1 km UT.no (CC BY-NC)*
+  is visible before the download rather than a blanket warning.
+- **Say how much of the route lies inside the national park** — *38 km, of which
+  22 inside*. The boundary has been drawn all along and the plan made no use of
+  it, yet the rules inside differ from those outside. Decide it at the 5 m
+  samples, as the decisions document sets out, so edges carry it from build time
+  and free legs get it from the samples they fetch anyway.
+- Put the figure in the exported description, and a **generated waypoint** at
+  each crossing so a reader sees where the route enters and leaves.
+- **Mark every `<wpt>` as set or generated.** A boundary marker is not a waypoint
+  anyone chose, and phase 8 must not read it back as one — a loaded route would
+  otherwise gain stations nobody placed and route through them. The rule covers
+  any marker the map adds by itself, now or later.
+- **Say how much of it is waymarked**, as length and in three buckets — marked,
+  unmarked, unknown. FKB is the largest source and carries no marking data at
+  all, so calling those stretches unmarked would assert what the data does not
+  say. See the decisions document. The edges carry the field from phase 1B.
+- **Name a waypoint after what is there.** When one lands within about 50 m of
+  a named point the map already draws — a hut, a quay, a trailhead, a farm —
+  take that point's name, type and position for the `<wpt>`, while the route
+  itself stays on the network. It costs a nearest-lookup against layers already
+  in the page, and it is the difference between a file that reads *Lavasshytta →
+  Sæterskaret skogstue → Bønå ferjekai* and one that reads as three coordinates.
+- **Extend what phase 5 started.** The `<extensions>` mechanism is already
+  there; a plan adds the clicked waypoints as `<wpt>` and each leg's mode —
+  routed, free over land, crossing. Do it here, not in phase 8: everything
+  exported from now on should be loadable, and a file written before its
+  description existed can never be restored exactly, only matched. Phase 8 adds
+  the reading side and nothing else.
 
 Crossings — ferries and free legs over water alike — are reported apart from the
 walking distance and break the GPX track into segments, so neither reads as
@@ -232,10 +376,62 @@ keeps up while dragging, and the exported GPX matches what is drawn.
 
 ---
 
-## After the seven
+## Phase 8 — Loading a route and working on it
+
+Read a GPX back in and carry on from it: one of our own exports, or a track from
+Komoot, or one a friend sent.
+
+It comes after phase 7 for a reason rather than by convenience — a loaded route
+has to be immediately editable, and editing is what phase 7 builds. Before that
+you could load a route and look at it, which is not the point.
+
+**Ask on load what should happen to it.** Three answers, and they cost very
+different amounts:
+
+| mode | what it does | effort |
+|---|---|---|
+| take it as it is | the whole track becomes one fixed leg, untouched | trivial |
+| align to the network | read the `<wpt>` list and route between them afresh | small |
+| **match where a path exists** | follow the track, replace the stretches that run along network edges, leave the rest as drawn | **the real work** |
+
+The middle one is not routing. Re-routing between waypoints throws the shape away
+— fine for one of our own plans, which *is* a handful of waypoints, useless for a
+foreign track that has thousands of points and no waypoints at all. What it needs
+is map-matching: walk the track, find where it follows an edge within a
+tolerance, swap that stretch for the edge, keep the remainder verbatim.
+
+That is `attach_nearest` with `min_overlap` applied along a track instead of
+between datasets, and it inherits the same trap: a track running beside a
+parallel path will snap to the wrong one unless the overlap is checked, not just
+the distance.
+
+Build it as one phase even though the ends are cheap. Split, and the loading and
+parsing gets written twice.
+
+**Anything this map wrote restores exactly**, without matching: a chain export
+names itself since phase 5, a plan carries its waypoints and leg modes since
+phase 6. Only foreign tracks go through matching.
+
+**Done when** a track exported from this map loads back identically, and a GPX
+from Komoot loads, matches onto the network where one exists, and can then be
+edited like any other plan.
+
+---
+
+## After the eight
 
 Not planned, but worth knowing they are near, so nothing is built that would
 block them:
+
+- **Naming the huts a route passes**, not only those chosen as waypoints —
+  *passes Lavasshytta at km 12*. A search along the finished route rather than a
+  field that already exists, which is why it waits.
+- **Splitting a route into days.** Purely additive on a finished route, and what
+  the multi-day UT.no routes imply.
+- **Moving a waypoint onto a hut or a quay**, rather than only naming it after
+  one. Phase 6 takes the name and leaves the route on the network, which is the
+  part that matters; making the route physically reach a building 30 m off the
+  path is a separate question and probably not wanted.
 
 - **Elevation-aware routing.** With a height on every edge it is a change to the
   weights and nothing else. Check that routes do not start taking absurd detours

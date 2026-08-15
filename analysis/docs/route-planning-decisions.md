@@ -81,6 +81,7 @@ Give each edge a cost of `length × factor`:
 | source | factor |
 |---|---:|
 | UT.no | 1.00 |
+| Turrutebasen | 1.02 |
 | FKB | 1.05 |
 | N50 paths | 1.10 |
 | OSM | 1.20 |
@@ -175,7 +176,14 @@ Connectivity is better here than over the smaller extent (79 % against 67 %),
 because the road network outside the park ties the valleys together.
 
 Per source: FKB 1,979 km · N50 roads 1,514 km · N50 paths 1,057 km · OSM 691 km ·
-UT.no 282 km.
+UT.no 282 km · Turrutebasen 235 km.
+
+**These figures were measured without Turrutebasen in the network.** That was an
+oversight in the measuring rather than a decision — it belongs in the graph, and
+phase 1B says so. Expect the edge count to come out above 129,616 once it is
+there. The reach should not move: its 235 km run parallel to FKB and improve
+connectivity if they change it at all. Phase 1's own output is the reference from
+then on.
 
 ### Full source precision, at 1.8 MB — do not simplify to save space
 
@@ -415,9 +423,30 @@ lets every path show its climb without unpacking a profile.
   resample the line every 5 m: that drops the original vertices and rounds off
   every corner between two samples. Keep every vertex, insert extra points only
   where a gap exceeds 5 m, and carry an `<ele>` on all of them.
-- Put the clicked waypoints in the same file as `<wpt>` elements. It costs
-  nothing, it is what GPX is for, and it lets a platform show them as markers or
-  re-route between them if that is what the reader wants.
+- **A waypoint set at a named place keeps the name.** The map already draws huts,
+  quays, trailheads, farms and settlements; a waypoint landing within about 50 m
+  of one takes its name, type and position for the `<wpt>`, while the route stays
+  on the network. Do not move the route to reach a building standing 30 m off the
+  path — the name is the useful part, not the geometry. A file whose waypoints
+  read *Lavasshytta → Sæterskaret skogstue → Bønå ferjekai* is a different thing
+  in Komoot than three bare coordinates.
+- **A planned route** carries its waypoints as `<wpt>` elements and each leg's
+  mode — routed, free over land, crossing — in a small `<extensions>` block. Both
+  cost nothing, both are what GPX provides for, and together they make the
+  exported file a **save file**: the waypoints let a plan be rebuilt, the modes
+  let it be rebuilt exactly rather than approximately. Komoot and Outdooractive
+  ignore extensions they do not recognise. Write them from the first export of a
+  plan, not later: a file written before the description existed can never be
+  restored exactly, only matched.
+- **A single exported chain** has neither waypoints nor legs, but it still says
+  what it is: its name, its source and its chain id. That is enough to recognise
+  it on load rather than match it, and it means the `<extensions>` mechanism is
+  built once, with the writer, instead of being retrofitted when a plan first
+  needs it.
+- The six GPX files the map writes at build time come from the raw sources
+  today. From phase 3 they are built from chains instead, so one geometry serves
+  the map, the exports and the router; from phase 5 they carry `<ele>` like
+  everything else.
 - Elevation belongs on the trackpoints, not only in a summary: Komoot and
   Outdooractive both read `<ele>` and will draw their own profile from it.
 - Every path's popup can now carry its ascent and offer its profile, not only a
@@ -573,6 +602,33 @@ Where an identity exists, the popup shows the chain's own figure *and* the named
 way's total, so a stretch of Tveråvegen reads 3.2 km against the road's 15.1 km
 rather than pretending to be either.
 
+#### The graph is one artefact, not a set of options
+
+It always holds every source over the whole extent. The extent is a parameter and
+part of the cache key; which sources go in is not a choice.
+
+The map's `--no-osm`, `--no-n50`, `--no-fkb`, `--no-roads`, `--no-ut` and
+`--no-names` therefore go. They predate the layer control, which does the visual
+job better — per layer, instantly, without a rebuild — and their other purpose,
+skipping an expensive fetch, is answered by the cache after the first run. With a
+graph they are worse than redundant: a missing source does not make it smaller,
+it makes it **wrong**, and quietly. Without roads the largest component falls from
+79 % of length to 5 %; without ferries eleven of seventeen quays are unreachable;
+without the place-name register the chains lose the identity that keeps them
+whole and fall back on the angle heuristic. Each produces a map that looks
+plausible and disagrees with every figure here.
+
+So: a source that cannot be loaded is an error, not a smaller graph.
+
+`--fkb-km` goes as well, folded into `--approach-km`. It existed because FKB is
+dense — 14,045 features over the full zone against 2,169 within 5 km — and
+density is exactly what chains solve: those 14,045 become 5,959 drawn objects.
+Every measurement in this document already assumes FKB over the full 15 km; every
+other source was always loaded that way.
+
+What remains: `--approach-km` as a graph parameter, `--simplify-m` for the drawn
+copy only, `--force-download`, and `--highlight` as a diagnostic.
+
 #### Chain ids have to be stable across builds
 
 They key the elevation cache, the click highlight and the search. An id that
@@ -676,11 +732,16 @@ Measured, chains computed within each source:
 | FKB | 14,045 | 9,118 | 5,959 |
 | N50 paths | 1,715 | 1,365 | 961 |
 | N50 roads | 5,272 | 3,908 | 1,724 |
-| OSM | 1,974 | 2,481 | not measured |
-| **total** | **23,041** | 19,283 | **well under 10,000** |
+| OSM | 1,974 | 2,481 | *not measured* |
+| Turrutebasen | 773 | *not measured* | *not measured* |
+| **total** | **23,041** | 19,283 | **about 10,500** |
 
-So drawing chains is **far fewer** objects than the map draws today, not more.
-The render load does not regress; it roughly halves.
+The two unmeasured rows are estimated at some 1,850 chains together, by the
+reduction the other sources showed. Treat that as an estimate, not a target.
+
+So drawing chains is **fewer** objects than the map draws today, not more: the
+render load roughly halves. An earlier draft of this document said "well under
+10,000", which was too generous — it had not counted FKB over the full extent.
 
 One exception the table exposes: UT.no shatters into 2,411 pieces because its 35
 routes overlap each other heavily and noding cuts them at every shared stretch.
@@ -723,6 +784,33 @@ to make this argument decisive: with a height on every vertex, a climb penalty
 in the edge cost gets most of the way there without a server. Turn restrictions
 and alternatives remain genuinely absent, and remain the reason to revisit this.
 
+### A server would help, but not with anything that is blocking
+
+Asked separately from GraphHopper: would moving to client and server be better?
+Measured, nothing in this design requires it. 1.8 MB of graph in the page, a
+Dijkstra over 130,000 edges answering in milliseconds, a profile in seconds, and
+94 % of the park reachable. Against that, a server turns a file you double-click
+into a service you must start first.
+
+Three things would change that, and none is true yet:
+
+- **More than one area.** This graph fits in a page; Norway does not.
+- **Elevation-aware routing**, which needs heights for the whole network. Phase 2
+  now provides them, so this argument has weakened since it was first made.
+- **Turn restrictions, alternative routes, a real foot profile** — GraphHopper's
+  territory, and then the pipeline work pays for itself.
+
+The one place a server would help today is elevation: it would replace repeated
+calls to a public endpoint with a local sample. That needs no routing server at
+all, only a small service holding a DTM extract — the sketch in
+`docs/trail_routing_architecture_guide.md` is the shape of it. It is not needed
+while the point store keeps a second build from asking again.
+
+What makes this cheap to revisit: **the graph module is architecture-neutral.**
+It takes GeoDataFrames and returns chains and edges. Whether that feeds a
+Dijkstra in a page, a service, or the pipeline's transform step is a decision
+downstream of it, and building it now commits to none of them.
+
 ### The graph module is shared ground with the pipeline
 
 The two paths are not rivals; the second builds on the first. The merged network
@@ -747,6 +835,132 @@ So shape the graph module accordingly, and the work is done once:
 Then `pipeline/src/graphhopper_pipeline/steps/transform.py` can consume the same
 module and write its OSM PBF from a network twenty times richer than the one it
 uses today.
+
+### A plan is persisted as its GPX, and only ever as coordinates
+
+There is no store, no database and no session. A plan lives in the page and is
+exported; the exported file is what carries it forward. For ad-hoc planning that
+is enough, and it has the property that a plan is portable by construction.
+
+One constraint follows and it is worth stating before anything is built:
+**waypoints are stored as coordinates, never as node or chain ids.** Coordinates
+survive a rebuild of the graph; ids do not. Get this wrong and a plan saved today
+points at nothing after the next source update, and the format has to be broken
+to fix it.
+
+That also answers what happens when the sources change under a plan: nothing.
+It is re-matched or re-routed against whatever the network is now, and the
+difference is visible rather than silent.
+
+### What else an exported file carries
+
+Beyond the geometry, the elevations and what the file is:
+
+- **The data it was built from.** Turrutebasen publishes a version string, N50
+  and SSR carry the date they were ordered. Load a plan months later and the
+  route may differ; without this there is a difference and no cause. One line,
+  and it is the difference between a puzzle and an explanation.
+- **The ascent figure together with how it was reached** — `DTM1, sampled every
+  5 m, gains under 5 m ignored`. The same route measured differently reads
+  anywhere between 965 and 1,214 m, so the number alone asserts nothing. It also
+  explains why the figure will not match the one Komoot computes from its own
+  model.
+- **The named ways the route follows**, in the track's `<desc>`: *via
+  Tveråvegen, Gamle Stavassveg, Sjøbergmarsjruta*. That is how a person describes
+  a route, and every edge already knows its chain.
+- **When the file was written**, in `<metadata><time>`.
+
+And one thing to leave out deliberately:
+
+- **No `<time>` on the trackpoints.** Komoot and Outdooractive read a track
+  carrying timestamps as a *recorded activity* rather than a plan. Inventing them
+  would turn a route you are considering into a walk you never took. For the same
+  reason, no speeds and no durations: both would be guesses dressed as data.
+
+Per-leg source attribution is not worth carrying either. The file-level list
+covers the licence question, which is the one that matters, and finer detail
+grows the extensions for nothing.
+
+### How much of a route is waymarked
+
+For a route through a roadless park this is as much a planning fact as the
+distance. *8 km marked, 14 km unmarked* says what kind of day it will be;
+38 km on its own does not.
+
+The data is already there and already shown in popups: N50 carries `rutemerking`,
+Turrutebasen the marking type and the maintaining body. What is new is only that
+an edge has to keep it — which is why it is in phase 1B — and that a route sums
+it.
+
+Three things to get right:
+
+- **Report it as length, not as a proportion of edges.** Marked stretches are
+  long and unmarked ones fragmentary, so counting edges would flatter the marked
+  share badly.
+- **Unknown is its own answer.** FKB carries no marking information at all, and
+  FKB is the largest source in the network. A stretch on FKB is not "unmarked",
+  it is *not known*, and reporting it as unmarked would be a claim the data does
+  not support. Three buckets: marked, unmarked, unknown.
+- **Free legs are unmarked by construction**, not unknown. Nobody marks a line
+  you drew across open ground.
+
+### How much of a route lies inside the park, and how it gets there
+
+Decide it **at the 5 m samples** — the same ones that carry elevation. The park
+share is then simply how many fell inside, times five metres.
+
+That gives one mechanism instead of two: an edge's share is computed once at
+build time and sits on the edge beside its length and its ascent, while a free
+leg over land gets it from the samples it fetches anyway. The error is ±5 m at
+each boundary crossing, which on a 38 km route is noise. Water crossings are
+excluded, since they are not walking distance and so not park distance either.
+
+In the exported file this appears twice:
+
+- **As a figure** in the description — *22 of 38 km inside Lomsdal-Visten
+  nasjonalpark*.
+- **As waypoints at the crossings**, so a reader sees a marker where the route
+  enters and leaves. GPX has no way to carry the boundary itself; it holds
+  waypoints, routes and tracks, and no polygons.
+
+Which forces a distinction worth making before the first generated marker exists:
+
+**Every `<wpt>` says whether it was set or generated.** A boundary marker is not
+a waypoint the reader chose, and phase 8 must not read it back as one — a loaded
+route would gain stations nobody placed and start routing through them. One field
+in the extensions, and loading ignores the generated ones. The rule is general:
+any marker the map adds by itself, at a crossing, a hut or anywhere else, falls
+under it.
+
+Two things are deliberately not claimed here. The rules inside a Norwegian
+national park differ from outside, but *how* they differ is in that park's
+verneforskrift and has not been read — the figure is offered as a fact about the
+route, not as advice. And Naturbase holds other protected areas besides national
+parks, some with stricter rules; whether any lie within this zone has never been
+checked, and the map draws only the park.
+
+### An exported file names its sources, and cannot name one licence
+
+Record in `<metadata>` the sources a file actually draws on, each with its
+licence. Not in `<copyright>`, which holds exactly one — and a planned route has
+no single licence to put there:
+
+| source | licence |
+|---|---|
+| Turrutebasen | CC0 |
+| FKB, N50, and the DTM1 heights | CC BY 4.0 |
+| OpenStreetMap | ODbL, share-alike |
+| UT.no | CC BY-NC, non-commercial |
+
+ODbL and NC compose badly, and the strictest terms govern the mixture. Filling in
+a single `<copyright>` would mean inventing an answer that does not exist.
+Listing what is present is both honest and more useful.
+
+It is also not the same for every route. One that runs on FKB and Turrutebasen
+alone is unencumbered; one that picks up a kilometre of OSM is not. So compute it
+per file and **show it at the download** — *3.2 km OSM (ODbL) · 1.1 km UT.no
+(CC BY-NC)* — instead of a blanket warning nobody reads. The reader should know
+what they are passing on before they pass it on.
 
 ## Licence, before the export ships
 
