@@ -12,7 +12,7 @@ needs them to.
 import hashlib
 import math
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Container, Iterable, Mapping, Sequence
 from enum import StrEnum
 from itertools import groupby
 from typing import Any
@@ -283,6 +283,101 @@ def _identity_values(frame: gpd.GeoDataFrame, identity_field: str | None) -> lis
     return values
 
 
+def parts_of(value: object) -> list[str]:
+    """Read a chain's value back as the values it was combined from.
+
+    A chain spans several source features and their values need not agree, so
+    :func:`_combine` joins them: a run that changes character reads
+    ``sti / traktorveg`` and one waymarked only in part reads ``JA / NEI``.
+    Anything translating or counting such a value has to see the parts, or it
+    looks up the whole string, finds no entry and hands back something nobody
+    wrote.
+
+    Args:
+        value: One value off a chain
+
+    Returns:
+        Its parts, in the order the chain wrote them; empty where it says
+        nothing
+    """
+    if _missing(value):
+        return []
+    return [part for part in (piece.strip() for piece in str(value).split(IDENTITY_SEPARATOR)) if part]
+
+
+def translate_joined(values: pd.Series, labels: Mapping[str, str]) -> pd.Series:
+    """Translate each part of a chain's combined value.
+
+    Args:
+        values: One column of a chain frame, holding codes
+        labels: Mapping of code to readable text. A code it does not cover
+            passes through unchanged rather than being dropped: an untranslated
+            value still says something, and a missing one says nothing.
+
+    Returns:
+        The same column with every part translated, the parts rejoined as the
+        chain wrote them and repeats removed — two codes can mean one thing
+    """
+
+    def read(value: object) -> object:
+        parts = parts_of(value)
+        if not parts:
+            return None
+        return IDENTITY_SEPARATOR.join(dict.fromkeys(labels.get(part, part) for part in parts))
+
+    return values.map(read)
+
+
+def whole_way_length(chains: gpd.GeoDataFrame, *, ignore: Container[str] = frozenset()) -> pd.Series:
+    """Measure the whole named way each chain is a stretch of.
+
+    A chain is the arm of a road under the cursor rather than the road, which is
+    the point — a branching selection has no elevation profile. What is lost is
+    that clicking Tveråvegen no longer says how long Tveråvegen is, and the only
+    honest way to give it back is both figures at once: 3.2 km of the road's
+    15.6.
+
+    A chain can carry more than one identity, where a register calls one run two
+    ways. The figure is then the union of every chain sharing either of them,
+    counted once, which is the only reading under which the whole is never less
+    than the stretch.
+
+    Args:
+        chains: Chains carrying ``source``, ``identity`` and ``length_m``.
+            Identities are counted within a source, never across: two sources
+            naming a way the same have not agreed about anything.
+        ignore: Identity values that name nothing — a register's placeholder for
+            an unknown name, which would otherwise make every unnamed way the
+            same way as every other unnamed way and sum them all together.
+            Which values those are is the register's business, not this
+            module's, so they arrive from the caller.
+
+    Returns:
+        Metres per chain, NaN where a chain has no identity left after
+        ``ignore``. It equals the chain's own length exactly where the chain is
+        the whole way.
+    """
+    named = [[part for part in parts_of(identity) if part not in ignore] for identity in chains["identity"]]
+    sources = list(chains["source"])
+    lengths = chains["length_m"].to_numpy(dtype=float)
+
+    members: dict[tuple[object, str], list[int]] = {}
+    for position, (source, parts) in enumerate(zip(sources, named, strict=True)):
+        for part in parts:
+            members.setdefault((source, part), []).append(position)
+
+    totals: list[float] = []
+    for source, parts in zip(sources, named, strict=True):
+        if not parts:
+            totals.append(math.nan)
+            continue
+        shared: set[int] = set()
+        for part in parts:
+            shared.update(members[(source, part)])
+        totals.append(float(lengths[sorted(shared)].sum()))
+    return pd.Series(totals, index=chains.index, dtype="float64")
+
+
 def _pair_arms(
     geometries: Sequence[LineString],
     node_of_arm: np.ndarray,
@@ -551,6 +646,13 @@ def _combine(values: Iterable[object]) -> object:
     Both are true and both are useful, so a run that changes character reads
     ``sti / traktorveg`` rather than picking a side.
 
+    Read as parts and not as whole strings, because a source value can already
+    be a join of its own: a Turrutebasen segment looked after by two clubs
+    arrives as ``Mosåsens venner / Helgeland friluftsråd``, and a chain over two
+    such segments would otherwise read every club once per segment it appears
+    in. Splitting first makes the join idempotent, which is what a reader
+    expects of a list.
+
     Args:
         values: One value per piece of the chain
 
@@ -558,7 +660,7 @@ def _combine(values: Iterable[object]) -> object:
         The value where they agree, the sorted values joined where they do not,
         None where there are none
     """
-    present = sorted({str(value) for value in values if not _missing(value)})
+    present = sorted({part for value in values for part in parts_of(value)})
     if not present:
         return None
     return present[0] if len(present) == 1 else IDENTITY_SEPARATOR.join(present)

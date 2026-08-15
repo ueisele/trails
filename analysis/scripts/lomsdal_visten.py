@@ -1,5 +1,12 @@
 """Build an interactive hiking map for Lomsdal-Visten national park.
 
+Every line on this map is a **chain** out of the routing graph
+(:mod:`trails.network.norway`), so a drawn line and a selectable track are the
+same object. Each source still draws its own layer in its own colour, and where
+several of them describe one valley their lines still lie over each other as
+separate objects — the merged graph stays underneath, with every edge naming the
+chain it lies on.
+
 Combines seven sources:
   * Turrutebasen (Kartverket/Geonorge) - official marked routes, with DNT-maintained
     segments highlighted separately
@@ -13,42 +20,60 @@ Combines seven sources:
   * Stedsnavn/SSR (Kartverket) - terrain names, and the road names N50 lacks
   * Naturbase (Miljødirektoratet) - the national park boundary used for clipping
 
+Which sources go in is not a choice: a graph missing one is not smaller, it is
+wrong. The layer control does the visual job instead, per layer and without a
+rebuild.
+
 Produces an HTML map and GPX exports under ``analysis/output/``.
 
 Usage::
 
     uv run python analysis/scripts/lomsdal_visten.py
-    uv run python analysis/scripts/lomsdal_visten.py --approach-km 10 --no-osm
+    uv run python analysis/scripts/lomsdal_visten.py --approach-km 10
 """
 
 import argparse
 import re
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import geopandas as gpd
 import pandas as pd
 from trails.io.export.gpx import export_to_gpx
-from trails.io.sources import kommuneinfo, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
-from trails.io.sources.geonorge import Source as GeonorgeSource
-from trails.io.sources.language import Language
-from trails.utils.geo import attach_nearest, merge_lines, thin_points
+from trails.io.sources import n50, naturbase, overpass, stedsnavn, ut
+from trails.network.norway import (
+    FERRIES,
+    FKB,
+    METRIC_CRS,
+    N50_PATHS,
+    N50_ROADS,
+    OSM,
+    PLACEHOLDER_IDENTITIES,
+    SOURCE_NAMES,
+    TURRUTEBASEN,
+    UT,
+    Params,
+    build,
+    load_sources,
+    masks_from,
+    zone_around,
+)
+from trails.routing import parts_of, translate_joined, whole_way_length
+from trails.utils.geo import attach_nearest, thin_points
 from trails.visualization import maps
 
 PARK_NAME = "Lomsdal-Visten"
 
-#: Metric CRS for Norway, used for buffering and length calculations.
-METRIC_CRS = "EPSG:25833"
-
 #: Substrings identifying DNT (Den Norske Turistforening) as maintainer.
 DNT_PATTERN = "DNT|Turistforening"
 
+#: Share of its own length a chain must have inside the park to be drawn as a
+#: park layer rather than an approach one. A chain is never cut at the boundary,
+#: so it goes whole into whichever layer holds the greater part of it.
+IN_PARK_SHARE = 0.5
+
 #: Place types that act as trailheads around this park, as opposed to settlements.
 TRAILHEAD_PLACE_TYPES = ("farm", "isolated_dwelling")
-
-#: County prefix searched when resolving which municipalities the area covers.
-FYLKE_PREFIXES = ("18",)
 
 #: Label colour per terrain feature type. The topographic backdrop is uniformly
 #: pale (luminance 0.77-0.98, its water a washed-out #e0fefe), so these are dark,
@@ -78,23 +103,23 @@ TERRAIN_NAME_DEFAULT_COLOR = "#455a64"
 #: blocks rather than Font Awesome, which has no valley, lake or marsh icon and
 #: would tie the labels to a CDN.
 TERRAIN_NAME_SYMBOLS = {
-    "elv": "\u2248",  # wavy lines, running water
-    "bekk": "\u2248",
-    "foss": "\u2248",
-    "vann": "\u25cf",  # a filled body of standing water
-    "tjern": "\u25cf",
-    "isbre": "\u25c7",  # open diamond, ice
-    "dal": "\u2228",  # V, the classic valley cross-section
-    "skar": "\u2228",
-    "fjell": "\u25b2",  # a peak
-    "fjellomr\u00e5de": "\u25b2",
-    "li": "\u25e2",  # a slope
-    "myr": "\u224b",  # wet ground hatching
-    "seter": "\u2302",  # a hut
+    "elv": "≈",  # wavy lines, running water
+    "bekk": "≈",
+    "foss": "≈",
+    "vann": "●",  # a filled body of standing water
+    "tjern": "●",
+    "isbre": "◇",  # open diamond, ice
+    "dal": "∨",  # V, the classic valley cross-section
+    "skar": "∨",
+    "fjell": "▲",  # a peak
+    "fjellområde": "▲",
+    "li": "◢",  # a slope
+    "myr": "≋",  # wet ground hatching
+    "seter": "⌂",  # a hut
 }
 
 #: Used for any type without a glyph above.
-TERRAIN_NAME_DEFAULT_SYMBOL = "\u00b7"
+TERRAIN_NAME_DEFAULT_SYMBOL = "·"
 
 #: Groups of types sharing one colour, for the legend.
 TERRAIN_NAME_LEGEND = (
@@ -132,12 +157,14 @@ TERMINAL_POPUP_FIELDS = {
     "osm_id": "OSM ID",
 }
 
-#: Lengths here describe the whole road, matching what a click lights up, not
-#: the N50 fragment that happened to be under the cursor.
+#: A click now selects the arm of the road under the cursor rather than every
+#: arm sharing its name, so both figures are needed and neither alone is true:
+#: 3.2 km of Tveråvegen's 15.6.
 ROAD_POPUP_FIELDS = {
     "road_name": "Road",
     "road_category": "Category",
-    "road_length_km": "Length (km)",
+    "length_km": "This stretch (km)",
+    "whole_km": "Road in total (km)",
     "survey_method": "Captured",
     "surveyed": "Captured on",
 }
@@ -199,6 +226,7 @@ TRAIL_POPUP_FIELDS = {
     "trail_significance": "Significance",
     "maintenance_responsible": "Maintained by",
     "length_km": "Length (km)",
+    "whole_km": "Route in total (km)",
     "survey_method": "Captured",
     "surveyed": "Captured on",
     # 80 % of this register's geometry here is "Rett i kartet" — entered by the
@@ -214,7 +242,11 @@ OSM_POPUP_FIELDS = {
     "sac_scale": "SAC scale",
     "trail_visibility": "Visibility",
     "length_km": "Length (km)",
-    "osm_id": "OSM ID",
+    "whole_km": "Way in total (km)",
+    # Plural, and it is not pedantry: 64 % of these chains span more than one
+    # OSM way — median 2, worst 33 — so a single id would be wrong for most of
+    # them. The value is joined like every other multi-valued field.
+    "osm_id": "OSM IDs",
 }
 
 #: Popup for the OSM place layers, which carry only these three.
@@ -239,23 +271,28 @@ SHELTER_POPUP_FIELDS = {
     "osm_id": "OSM ID",
 }
 
+#: Column identifying which chain a drawn line belongs to. A chain is linear by
+#: construction, so a click can never select a branching network.
+CHAIN_KEY = "chain_id"
+
+#: Trailing bracket of a layer label, which by convention holds its dataset.
+SOURCE_IN_LABEL = re.compile(r"\[([^\]]+)\]\s*$")
+
 
 class TrailLayer(NamedTuple):
     """One line layer of the map, in draw order.
 
     Attributes:
-        gdf: Features to draw
+        gdf: Chains to draw
         label: Layer name in the control and legend, ending in its source
         color: Line colour
         weight: Line width in pixels
         popup_fields: Mapping of column name to popup label
-        source: Short source tag; a named route sharing this tag is selected as
-            one, even where it is split across two layers
-        name_field: Column identifying the route, deciding what one click
-            selects. Not always the readable name: roads are grouped by their
-            register id, because names repeat.
-        search_field: Column the search box matches against; defaults to
-            ``name_field`` where that is already the readable name
+        link_fields: Mapping of a column holding a URL to its link text
+        tooltip_field: Column shown on hover
+        search_field: Column the search box matches against. Not the chain id:
+            what a reader types is a name, and a road's identity is a register
+            id because names repeat across the county.
         dash: SVG dash pattern, for connections that are not walked
     """
 
@@ -264,51 +301,10 @@ class TrailLayer(NamedTuple):
     color: str
     weight: float
     popup_fields: dict[str, str]
-    source: str
-    name_field: str | None = None
+    link_fields: dict[str, str] | None = None
+    tooltip_field: str | None = None
     search_field: str | None = None
     dash: str | None = None
-
-    @property
-    def found_by(self) -> str | None:
-        """Column the search box matches against."""
-        return self.search_field or self.name_field
-
-
-#: Column holding the value that decides what a single click selects.
-HIGHLIGHT_KEY = "highlight_key"
-
-#: Trailing bracket of a layer label, which by convention holds its dataset.
-SOURCE_IN_LABEL = re.compile(r"\[([^\]]+)\]\s*$")
-
-
-def describe_whole_roads(roads: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Describe each road as a whole rather than fragment by fragment.
-
-    N50 stores a road as many short pieces — Tveråvegen is 42 of them, most
-    under 100 m. A click selects the whole named road, so its popup has to
-    describe the whole road too; reporting the length of whichever piece was hit
-    contradicts what the reader sees light up.
-
-    A road can also change category along its run, which is why one selection
-    can span both the private and the public layer. Listing every category the
-    road passes through explains that rather than leaving it a puzzle.
-
-    Args:
-        roads: Road fragments carrying ``road_id``, ``road_category`` and
-            ``length_km``
-
-    Returns:
-        Copy with ``road_length_km`` and an aggregated ``road_category``
-    """
-    described = roads.copy()
-    # Fragments the register does not name are a road of their own, so they group
-    # only with themselves.
-    grouping = described["road_id"].where(described["road_id"].notna(), pd.Series(range(len(described)), index=described.index).map("#{}".format))
-
-    described["road_length_km"] = described.groupby(grouping)["length_km"].transform("sum").round(2)
-    described["road_category"] = described.groupby(grouping)["road_category"].transform(lambda values: " / ".join(sorted(set(values.dropna()))))
-    return described
 
 
 def source_of(label: str) -> str | None:
@@ -326,38 +322,6 @@ def source_of(label: str) -> str | None:
     """
     match = SOURCE_IN_LABEL.search(label)
     return match.group(1) if match else None
-
-
-def highlight_keys(gdf: gpd.GeoDataFrame, layer_tag: str, source: str, name_field: str | None = None) -> gpd.GeoDataFrame:
-    """Give every line the key deciding what one click selects.
-
-    A named route shares one key across layers, so clicking a segment inside the
-    park lights up its continuation in the approach zone as well — the two are
-    one walk, split only by the boundary.
-
-    Anything unnamed falls back to a key of its own. FKB and N50 carry no route
-    identity at all, so there a click selects the one stretch you hit; for FKB
-    that is already a merged run rather than a fragment.
-
-    Args:
-        gdf: Features about to be drawn
-        layer_tag: Short tag unique to this layer, keeping the fallback keys of
-            two layers of the same source apart
-        source: Short source tag shared by layers of the same dataset
-        name_field: Column naming the route, if there is one
-
-    Returns:
-        Copy of the input with a :data:`HIGHLIGHT_KEY` column
-    """
-    keys = [f"{layer_tag}-{position}" for position in range(len(gdf))]
-    if name_field and name_field in gdf.columns:
-        keys = [
-            f"{source}:{name}" if pd.notna(name) and str(name).strip() else fallback for name, fallback in zip(gdf[name_field], keys, strict=True)
-        ]
-
-    keyed = gdf.copy()
-    keyed[HIGHLIGHT_KEY] = keys
-    return keyed
 
 
 def load_park_boundary(cache_dir: str) -> gpd.GeoDataFrame:
@@ -379,166 +343,120 @@ def load_park_boundary(cache_dir: str) -> gpd.GeoDataFrame:
     return park
 
 
-def aggregate_trail_info(info: pd.DataFrame) -> pd.DataFrame:
-    """Collapse the trail info table to one row per geometry segment.
+def only_the_wider_way(chains: gpd.GeoDataFrame) -> pd.Series:
+    """Say how long the whole named way is, where that is more than the chain.
 
-    A segment can belong to several named routes, so the info table holds
-    multiple rows per ``hiking_trail_fk``. Names are concatenated; the remaining
-    attributes take the first populated value.
-
-    Args:
-        info: Hiking trail info table
-
-    Returns:
-        DataFrame indexed by segment id with one row per segment
-    """
-
-    def join_names(values: pd.Series) -> str | None:
-        names = sorted({str(v) for v in values.dropna().unique()})
-        return " / ".join(names) if names else None
-
-    def first_value(values: pd.Series) -> object:
-        populated = values.dropna()
-        return populated.iloc[0] if len(populated) else None
-
-    aggregations: dict[str, Callable[[pd.Series], Any]] = {"trail_name": join_names}
-    for column in ("trail_number", "difficulty", "trail_significance", "special_hiking_trail_type", "maintenance_responsible", "season"):
-        if column in info.columns:
-            aggregations[column] = first_value
-
-    grouped = info.groupby("hiking_trail_fk").agg(aggregations)
-
-    # Flag DNT across all rows of a segment, not just the first one.
-    is_dnt = info["maintenance_responsible"].str.contains(DNT_PATTERN, case=False, na=False)
-    grouped["is_dnt"] = is_dnt.groupby(info["hiking_trail_fk"]).any()
-
-    return grouped
-
-
-def load_official_trails(cache_dir: str, force_download: bool = False) -> tuple[gpd.GeoDataFrame, str]:
-    """Load Turrutebasen hiking trails joined with their attributes.
+    :func:`whole_way_length` answers for every chain that has an identity, and
+    for most of them the answer is the chain's own length — a way that does not
+    divide is one chain. Showing the same number twice under two labels is
+    noise, so those are left empty and the popup drops the row.
 
     Args:
-        cache_dir: Root cache directory
-        force_download: Re-download the source dataset
+        chains: Chains carrying ``source``, ``identity`` and ``length_m``
 
     Returns:
-        Tuple of (trails in EPSG:4326 with attributes attached, dataset version)
+        Kilometres, empty where the chain is the whole way, has no identity, or
+        is identified only by a placeholder — a 16 m stub named *Ukjent* would
+        otherwise report the total of every other stretch the register also had
+        no name for
     """
-    source = GeonorgeSource(cache_dir=cache_dir)
-    data = source.load_turrutebasen(target_crs="EPSG:4326", language=Language.EN, force_download=force_download)
-
-    trails = data.spatial_layers["hiking_trail_centerline"]
-    info = data.attribute_tables["hiking_trail_info_table"]
-
-    merged = trails.merge(aggregate_trail_info(info), left_on="local_id", right_index=True, how="left")
-    merged["is_dnt"] = merged["is_dnt"].fillna(False).astype(bool)
-    # This register writes its capture method out in words already, so it needs
-    # no code table — only the date turning into one.
-    merged = describe_survey(merged, "measurement_method", "data_capture_date")
-
-    print(f"Turrutebasen version {data.version}: {len(merged):,} hiking segments nationwide")
-    return gpd.GeoDataFrame(merged, geometry="geometry", crs=trails.crs), data.version
+    whole = whole_way_length(chains, ignore=PLACEHOLDER_IDENTITIES)
+    # A metre of slack: the same lengths summed in a different order need not
+    # come out bit for bit equal.
+    return (whole / 1000).round(2).where(whole > chains["length_m"] + 1.0)
 
 
-def describe_survey(
-    gdf: gpd.GeoDataFrame,
-    method_field: str,
-    date_field: str,
-    labels: dict[str, str] | None = None,
-) -> gpd.GeoDataFrame:
-    """Add readable capture method and date columns.
-
-    Both are already in every Kartverket line layer and neither was ever shown.
-    They are what separates a path somebody surveyed from a line carried forward
-    off an older map, which is the one thing a popup asserting "path" cannot
-    otherwise be judged on.
+def share_inside(chains: gpd.GeoDataFrame, area: gpd.GeoDataFrame) -> pd.Series:
+    """Measure how much of each chain lies inside an area.
 
     Args:
-        gdf: Features carrying the source's own provenance fields
-        method_field: Column holding how the line was captured
-        date_field: Column holding when it was captured
-        labels: Mapping of raw code to readable text, for a source that writes
-            codes rather than words. Codes it does not cover pass through
-            unchanged rather than being dropped.
+        chains: Chains carrying ``length_m``, in :data:`METRIC_CRS`
+        area: Boundary to measure against
 
     Returns:
-        Copy carrying ``survey_method`` and ``surveyed``; either is absent where
-        the source does not supply it
+        Share of each chain's length inside it, between 0 and 1
     """
-    described = gdf.copy()
-    if method_field in described:
-        method = described[method_field]
-        described["survey_method"] = method.map(lambda value: labels.get(value, value)) if labels else method
-    if date_field in described:
-        # The raw value is a timestamp, and a popup wants a date.
-        described["surveyed"] = pd.to_datetime(described[date_field], errors="coerce", utc=True).dt.strftime("%Y-%m-%d")
-    return described
+    inside = chains.geometry.intersection(area.to_crs(METRIC_CRS).union_all()).length
+    return inside / chains["length_m"]
 
 
-def clip_to(gdf: gpd.GeoDataFrame, boundary: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Clip features to a boundary and recompute their length.
+def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.GeoDataFrame]:
+    """Give every chain the columns a popup, a search box and a layer need.
+
+    Everything here is read off what the chain already carries. Nothing is
+    joined, looked up or clipped: the graph is the only place the geometry and
+    the attributes come from, so the map cannot disagree with the router about
+    what a line is.
 
     Args:
-        gdf: Features to clip, in EPSG:4326
-        boundary: Clipping polygon(s), in EPSG:4326
+        chains: Every chain of the network, in a metric CRS
+        park: Park boundary
 
     Returns:
-        Clipped GeoDataFrame with a ``length_km`` column
+        One frame per source, keyed by source name. Every source has an entry,
+        empty where a small extent left it with no chains at all: a layer with
+        nothing in it is drawn as nothing, and a missing key is a crash.
     """
-    clipped = gpd.clip(gdf, boundary).copy()
-    if len(clipped):
-        clipped["length_km"] = (clipped.to_crs(METRIC_CRS).length / 1000).round(2)
-    else:
-        clipped["length_km"] = pd.Series(dtype=float)
-    return clipped
+    described = chains.copy()
+    described["length_km"] = (described["length_m"] / 1000).round(2)
+    described["whole_km"] = only_the_wider_way(described)
+    described["in_park"] = share_inside(described, park) >= IN_PARK_SHARE
 
+    frames = {name: gpd.GeoDataFrame(described[described["source"] == name].copy(), geometry="geometry", crs=described.crs) for name in SOURCE_NAMES}
 
-def buffer_area(park: gpd.GeoDataFrame, distance_km: float) -> gpd.GeoDataFrame:
-    """Grow the park outline by a distance, keeping the interior.
+    routes = frames[UT]
+    routes["name"] = routes["identity"]
+    routes["category_label"] = translate_joined(routes["category"], UT_CATEGORY_LABELS)
 
-    Args:
-        park: Park boundary in EPSG:4326
-        distance_km: Buffer distance in kilometers
+    trails = frames[TURRUTEBASEN]
+    trails["trail_name"] = trails["identity"]
+    # This register writes its capture method out in words already.
+    trails["survey_method"] = trails["measurement_method"]
+    # A chain runs across segments different clubs look after, and 113 of the
+    # 245 carry more than one maintainer — three of them, 9.4 km, a DNT club
+    # and a local one together. A chain has to go wholly into one layer, so
+    # touching DNT anywhere counts: the layer is called "DNT routes", not
+    # "maintained solely by DNT". `_combine` has already merged away which club
+    # held which stretch, so weighting by length is not available to ask.
+    trails["is_dnt"] = trails["maintenance_responsible"].str.contains(DNT_PATTERN, case=False, na=False)
 
-    Returns:
-        GeoDataFrame in EPSG:4326 holding the buffered area
-    """
-    metric = park.to_crs(METRIC_CRS)
-    return gpd.GeoDataFrame(geometry=metric.buffer(distance_km * 1000), crs=METRIC_CRS).to_crs("EPSG:4326")
+    paths = frames[N50_PATHS]
+    paths["survey_method"] = translate_joined(paths["malemetode"], SURVEY_METHOD_LABELS)
 
+    roads = frames[N50_ROADS]
+    roads["road_category"] = translate_joined(roads["vegkategori"], n50.ROAD_CATEGORIES)
+    roads["survey_method"] = translate_joined(roads["malemetode"], SURVEY_METHOD_LABELS)
+    # Private only where the whole chain is: the colour encodes who may drive
+    # it, and a road that is public for half its run is not a private road. The
+    # popup's category line names both wherever a chain spans the two.
+    roads["is_private"] = roads["vegkategori"] == n50.PRIVATE_ROAD_CATEGORY
 
-def build_approach_zone(park: gpd.GeoDataFrame, distance_km: float) -> gpd.GeoDataFrame:
-    """Build a ring around the park covering approach routes.
+    frames[OSM]["name"] = frames[OSM]["identity"]
 
-    The park interior is cut out so approach features can be styled separately
-    from what lies inside the boundary.
+    ferries = frames[FERRIES]
+    ferries["survey_method"] = translate_joined(ferries["malemetode"], SURVEY_METHOD_LABELS)
 
-    Args:
-        park: Park boundary in EPSG:4326
-        distance_km: Width of the ring in kilometers
-
-    Returns:
-        GeoDataFrame in EPSG:4326 holding the ring geometry
-    """
-    metric = park.to_crs(METRIC_CRS)
-    ring = metric.buffer(distance_km * 1000).difference(metric.union_all())
-    return gpd.GeoDataFrame(geometry=ring, crs=METRIC_CRS).to_crs("EPSG:4326")
+    return frames
 
 
 def simplify_for_display(gdf: gpd.GeoDataFrame, tolerance_m: float) -> gpd.GeoDataFrame:
     """Thin out vertices for map rendering.
 
-    N50 and OSM geometries carry far more detail than a browser map needs; at
-    these zoom levels a few metres of tolerance is invisible but removes most of
-    the coordinates. GPX exports keep the full geometry.
+    The drawn copy is a separate thing from the geometry that is exported and
+    routed, and always has been. Folium writes drawn geometry into the page as
+    JSON coordinate arrays, and the network's half-million vertices cost 22 MB
+    written that way; at these zoom levels a few metres of tolerance is
+    invisible. The chain's own geometry, which the GPX and the router read, is
+    untouched.
 
     Args:
-        gdf: Features to simplify, in EPSG:4326
+        gdf: Features to simplify
         tolerance_m: Douglas-Peucker tolerance in metres
 
     Returns:
-        Copy of the input with simplified geometries
+        Copy of the input with simplified geometries, in EPSG:4326 — or the
+        input untouched, in whatever CRS it arrived in, where there is nothing
+        to do. The map layer reprojects either way.
     """
     if not len(gdf) or tolerance_m <= 0:
         return gdf
@@ -565,14 +483,14 @@ def bounds_of(gdf: gpd.GeoDataFrame) -> maps.Bounds:
 
 
 def summarize(name: str, gdf: gpd.GeoDataFrame) -> None:
-    """Print a one-line summary of a trail layer.
+    """Print a one-line summary of a line layer.
 
     Args:
         name: Label for the layer
-        gdf: Clipped trail features carrying a ``length_km`` column
+        gdf: Chains carrying a ``length_km`` column
     """
     total_km = gdf["length_km"].sum() if len(gdf) else 0.0
-    print(f"  {name}: {len(gdf):,} segments, {total_km:,.1f} km")
+    print(f"  {name}: {len(gdf):,} chains, {total_km:,.1f} km")
 
 
 def main() -> int:
@@ -591,30 +509,17 @@ def main() -> int:
     parser.add_argument("--approach-km", type=float, default=15.0, help="Width of the approach zone around the park (km)")
     parser.add_argument("--trailhead-km", type=float, default=2.0, help="Band around the park in which farms and sæters are shown as trailheads (km)")
     parser.add_argument("--names-km", type=float, default=2.0, help="Band around the park covered by the terrain-name layer (valleys, passes, peaks)")
-    parser.add_argument("--no-names", action="store_true", help="Skip the place-name layer")
     parser.add_argument(
         "--ut-routes",
         default=str(repo_root / "analysis" / "routes" / "lomsdal-visten-ut-routes.toml"),
         help="Catalogue of UT.no routes to draw; one GPX is downloaded per entry",
     )
-    parser.add_argument("--no-ut", action="store_true", help="Skip the UT.no route layers")
     parser.add_argument("--highlight", help="Mark every position of this place name in red, numbered, for checking what the register holds")
     parser.add_argument(
         "--names-spacing-m", type=float, default=1000.0, help="Minimum distance between two labels of the same name; closer copies are dropped"
     )
     parser.add_argument("--simplify-m", type=float, default=8.0, help="Vertex tolerance for map rendering in metres; GPX keeps full detail")
-    parser.add_argument("--no-osm", action="store_true", help="Skip OpenStreetMap layers")
-    # N50 is not a subset of FKB: it is maintained separately and holds stretches
-    # FKB lacks (~51 km within 5 km of this park). It also covers the whole approach
-    # zone, where FKB is limited to --fkb-km. Worth its ~3 MB.
-    parser.add_argument("--no-n50", action="store_true", help="Skip N50 Kartdata paths, the generalised base map network")
-    parser.add_argument("--no-fkb", action="store_true", help="Skip the detailed FKB path network")
-    parser.add_argument("--no-roads", action="store_true", help="Skip the car road layers; every trip still starts at a road end")
     parser.add_argument("--hut-name-m", type=float, default=50.0, help="How far an N50 cabin may look for its name in the place-name register (m)")
-    parser.add_argument(
-        "--road-name-m", type=float, default=25.0, help="How far a road fragment may look for its name in the place-name register (m)"
-    )
-    parser.add_argument("--fkb-km", type=float, default=5.0, help="How far beyond the park to load detailed FKB paths (km); they are dense")
     parser.add_argument("--force-download", action="store_true", help="Re-download source data instead of using the cache")
     args = parser.parse_args()
 
@@ -626,324 +531,217 @@ def main() -> int:
     print("=" * 70)
 
     park = load_park_boundary(args.cache_dir)
-    approach = build_approach_zone(park, args.approach_km)
+    params = Params.from_args(args)
+    # Park and approach zone as one polygon. Nothing here is split at the
+    # boundary; where a layer is, it is decided per chain further down.
+    zone = zone_around(park, params.approach_km)
 
-    print("\nLoading Turrutebasen...")
-    trails, version = load_official_trails(args.cache_dir, force_download=args.force_download)
+    loaded = load_sources(params, zone)
+    network, _ = build(loaded.sources, masks_from(loaded.sources), zone, params, name=PARK_NAME.lower())
+    by_source = describe(network.chains, park)
 
-    print("\nClipping to park...")
-    in_park = clip_to(trails, park)
-    in_approach = clip_to(trails, approach)
-    dnt_in_park = in_park[in_park["is_dnt"]]
-    summarize("Inside park", in_park)
-    summarize("  of which DNT-maintained", dnt_in_park)
-    summarize(f"Approach zone (<{args.approach_km:g} km)", in_approach)
+    print(f"\nChains from the graph: {len(network.chains):,} drawn, over {len(network.edges):,} routing edges")
+    routes = by_source[UT]
+    ut_core = routes[routes["category"] == "core"]
+    ut_access = routes[routes["category"] == "access"]
+    trails = by_source[TURRUTEBASEN]
+    roads = by_source[N50_ROADS]
+    ferries = by_source[FERRIES]
 
-    dnt_in_approach = in_approach[in_approach["is_dnt"]]
-    summarize("  of which DNT-maintained", dnt_in_approach)
+    layer_of: dict[str, gpd.GeoDataFrame] = {}
+    for source, in_park_label, approach_label in (
+        (FKB, "FKB paths inside park", "FKB paths in approach zone"),
+        (N50_PATHS, "N50 paths inside park", "N50 paths in approach zone"),
+        (OSM, "OSM paths inside park", "OSM paths in approach zone"),
+    ):
+        frame = by_source[source]
+        layer_of[f"{source}/park"] = frame[frame["in_park"]]
+        layer_of[f"{source}/approach"] = frame[~frame["in_park"]]
+        summarize(in_park_label, layer_of[f"{source}/park"])
+        summarize(approach_label, layer_of[f"{source}/approach"])
 
-    # Everything within reach of the park, used for features that make no sense
-    # to split at the boundary, such as ferries and quays.
-    approach_and_park = gpd.GeoDataFrame(geometry=[approach.union_all().union(park.union_all())], crs="EPSG:4326")
+    in_park, in_approach = trails[trails["in_park"]], trails[~trails["in_park"]]
+    summarize("Turrutebasen inside park", in_park)
+    summarize("  of which DNT-maintained", in_park[in_park["is_dnt"]])
+    summarize("Turrutebasen in approach zone", in_approach)
+    summarize("  of which DNT-maintained", in_approach[in_approach["is_dnt"]])
+    summarize("UT.no core and park routes", ut_core)
+    summarize("UT.no access routes", ut_access)
+    print(f"  {routes['guide_url_no'].notna().sum()} of {len(routes)} also described on lomsdalvisten.no")
 
-    ut_core = gpd.GeoDataFrame()
-    ut_access = gpd.GeoDataFrame()
-    if not args.no_ut:
-        print("\nLoading UT.no routes...")
-        # Not clipped: a route suggestion is a whole proposal, and cutting it at
-        # the park boundary would strip exactly the approach it describes.
-        catalogue = ut.load_catalogue(args.ut_routes)
-        ut_routes = ut.Source(cache_dir=args.cache_dir).load_routes(catalogue, force_download=args.force_download)
-        ut_routes["category_label"] = ut_routes["category"].map(UT_CATEGORY_LABELS)
-        ut_core = ut_routes[ut_routes["category"] == "core"]
-        ut_access = ut_routes[ut_routes["category"] == "access"]
-        summarize("UT.no core and park routes", ut_core)
-        summarize("UT.no access routes", ut_access)
-        print(f"  {ut_routes['guide_url_no'].notna().sum()} of {len(ut_routes)} also described on lomsdalvisten.no")
+    roads_private, roads_public = roads[roads["is_private"]], roads[~roads["is_private"]]
+    summarize("Private roads (forest and farm tracks)", roads_private)
+    summarize("Public roads", roads_public)
+    named = roads["road_name"].notna()
+    named_km, total_km = roads.loc[named, "length_km"].sum(), roads["length_km"].sum()
+    print(f"  named from SSR: {int(named.sum()):,} of {len(roads):,} chains, {named_km:,.0f} of {total_km:,.0f} km")
+    # A chain that changes category along its run reads as both, and it is
+    # drawn public: the colour encodes who may drive it, and a road public for
+    # half its length is not a private road. Worth printing, because it is the
+    # one place a chain has to answer a question its pieces disagreed on.
+    mixed = roads["road_category"].map(lambda value: len(parts_of(value)) > 1)
+    print(f"  {int(mixed.sum()):,} chains change category along their run ({roads.loc[mixed, 'length_km'].sum():,.0f} km), and are drawn public")
+    print(f"    {roads['road_category'].value_counts().head(6).to_dict()}")
+    summarize("Ferry crossings", ferries)
 
-    # Every per-municipality Geonorge dataset needs this, so resolve it once.
-    codes = kommuneinfo.Source(cache_dir=args.cache_dir).intersecting(approach, fylke=FYLKE_PREFIXES)
+    codes = loaded.municipalities
 
-    terrain_names = gpd.GeoDataFrame()
-    settlements = gpd.GeoDataFrame()
-    farms = gpd.GeoDataFrame()
-    ssr_huts = gpd.GeoDataFrame()
-    ssr_quays = gpd.GeoDataFrame()
-    hut_names = gpd.GeoDataFrame()
+    print("\nLoading place names (SSR)...")
+    names_source = stedsnavn.Source(cache_dir=args.cache_dir)
+    # Read the register once, in full, and split it here. The terrain names
+    # are a map layer; the rest answer "where is the place the brochure named",
+    # which is a different job and a different extent.
+    all_names = names_source.load_places(codes, name_types=None, force_download=args.force_download)
+
+    def of_kind(types: tuple[str, ...], where: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        """Names of certain feature types, clipped to an area."""
+        return gpd.clip(all_names[all_names["kind"].isin(types)], where)
+
+    terrain_names = of_kind(stedsnavn.TERRAIN_NAME_TYPES, zone_around(park, args.names_km))
+    settlements = of_kind(stedsnavn.SETTLEMENT_NAME_TYPES, zone)
+    farms = of_kind(stedsnavn.FARM_NAME_TYPES, zone)
+    ssr_huts = of_kind(stedsnavn.HUT_NAME_TYPES, zone)
+    ssr_quays = of_kind(stedsnavn.QUAY_NAME_TYPES, zone)
+    hut_names = all_names[all_names["kind"].isin(stedsnavn.HUT_NAME_TYPES)]
+    print(f"  settlements: {len(settlements)} | farms and holdings: {len(farms)}")
+    print(f"  named huts: {len(ssr_huts)} | quays: {len(ssr_quays)}")
+
     highlighted = gpd.GeoDataFrame()
-    if not args.no_names:
-        print("\nLoading place names (SSR)...")
-        names_source = stedsnavn.Source(cache_dir=args.cache_dir)
-        # Read the register once, in full, and split it here. The terrain names
-        # are a map layer; the rest answer "where is the place the brochure named",
-        # which is a different job and a different extent.
-        all_names = names_source.load_places(codes, name_types=None, force_download=args.force_download)
+    if args.highlight:
+        highlighted = terrain_names[terrain_names["name"].str.casefold() == args.highlight.casefold()].copy()
+        print(f"  highlighting '{args.highlight}': {len(highlighted)} position(s) before thinning")
+        for number, (_, row) in enumerate(highlighted.iterrows(), start=1):
+            print(f"    {number}: {row.geometry.y:.5f} / {row.geometry.x:.5f}  kind={row['kind']} importance={row['importance']}")
+        highlighted["marker_label"] = [f"{i}. {n}" for i, n in enumerate(highlighted["name"], start=1)]
 
-        def of_kind(types: tuple[str, ...], where: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-            """Names of certain feature types, clipped to an area."""
-            return gpd.clip(all_names[all_names["kind"].isin(types)], where)
+    if len(terrain_names):
+        # A name repeated along a feature only reads as a repetition when the
+        # copies are far enough apart; closer than this they collide.
+        before = len(terrain_names)
+        terrain_names = thin_points(terrain_names, args.names_spacing_m, group_by="name", priority="rank")
 
-        terrain_names = of_kind(stedsnavn.TERRAIN_NAME_TYPES, buffer_area(park, args.names_km))
-        settlements = of_kind(stedsnavn.SETTLEMENT_NAME_TYPES, approach_and_park)
-        farms = of_kind(stedsnavn.FARM_NAME_TYPES, approach_and_park)
-        ssr_huts = of_kind(stedsnavn.HUT_NAME_TYPES, approach_and_park)
-        ssr_quays = of_kind(stedsnavn.QUAY_NAME_TYPES, approach_and_park)
-        hut_names = all_names[all_names["kind"].isin(stedsnavn.HUT_NAME_TYPES)]
-        print(f"  settlements: {len(settlements)} | farms and holdings: {len(farms)}")
-        print(f"  named huts: {len(ssr_huts)} | quays: {len(ssr_quays)}")
+        # The register ranks importance itself; use it for label size rather
+        # than drawing every name at the same weight.
+        terrain_names = terrain_names.copy()
+        terrain_names["font_size"] = (15.0 - terrain_names["rank"] * 0.5).clip(lower=10.0).round(1)
+        terrain_names["color"] = terrain_names["kind"].map(TERRAIN_NAME_COLORS).fillna(TERRAIN_NAME_DEFAULT_COLOR)
+        terrain_names["symbol"] = terrain_names["kind"].map(TERRAIN_NAME_SYMBOLS).fillna(TERRAIN_NAME_DEFAULT_SYMBOL)
+        repeated = int(terrain_names["name"].duplicated(keep=False).sum())
+        print(f"  terrain names (<{args.names_km:g} km): {len(terrain_names)} labels ({before - len(terrain_names)} thinned out)")
+        print(f"    {repeated} of them are repeats of an extended feature")
+        print(f"    {terrain_names['kind'].value_counts().head(6).to_dict()}")
 
-        if args.highlight:
-            highlighted = terrain_names[terrain_names["name"].str.casefold() == args.highlight.casefold()].copy()
-            print(f"  highlighting '{args.highlight}': {len(highlighted)} position(s) before thinning")
-            for number, (_, row) in enumerate(highlighted.iterrows(), start=1):
-                print(f"    {number}: {row.geometry.y:.5f} / {row.geometry.x:.5f}  kind={row['kind']} importance={row['importance']}")
-            highlighted["marker_label"] = [f"{i}. {n}" for i, n in enumerate(highlighted["name"], start=1)]
+    print("\nLoading N50 cabins...")
+    n50_source = n50.Source(cache_dir=args.cache_dir)
+    # N50 names cabins that OSM and the place-name register often miss.
+    cabins = gpd.clip(n50_source.load_cabins(codes, force_download=args.force_download), zone)
+    if len(cabins) and len(hut_names):
+        # N50 has the buildings but names few of them; the register names the
+        # huts but is missing some as buildings. Joined, Sæterskaret skogstue —
+        # the hut from the park brochure — finally carries its name.
+        before = int(cabins["navn"].notna().sum())
+        cabins = attach_nearest(cabins, hut_names, {"name": "ssr_name"}, max_distance_m=args.hut_name_m, metric_crs=METRIC_CRS)
+        cabins["navn"] = cabins["navn"].fillna(cabins["ssr_name"])
+        print(f"  named from SSR: {int(cabins['navn'].notna().sum()) - before} cabin(s) that N50 leaves unnamed")
+    print(f"  N50 cabins and wilderness huts: {len(cabins)} ({cabins['navn'].notna().sum() if len(cabins) else 0} named)")
+    if len(cabins):
+        print(f"    {cabins['kind'].value_counts().to_dict()}")
 
-        if len(terrain_names):
-            # A name repeated along a feature only reads as a repetition when the
-            # copies are far enough apart; closer than this they collide.
-            before = len(terrain_names)
-            terrain_names = thin_points(terrain_names, args.names_spacing_m, group_by="name", priority="rank")
+    print("\nLoading OpenStreetMap points...")
+    osm_source = overpass.Source(cache_dir=args.cache_dir)
+    search_bounds = bounds_of(zone)
+    # Shelters and settlements matter inside the park and along the way in.
+    shelters = gpd.clip(osm_source.fetch_shelters(search_bounds, force_download=args.force_download), zone)
+    places = gpd.clip(osm_source.fetch_places(search_bounds, force_download=args.force_download), zone)
+    terminals = gpd.clip(osm_source.fetch_ferry_terminals(search_bounds, force_download=args.force_download), zone)
 
-            # The register ranks importance itself; use it for label size rather
-            # than drawing every name at the same weight.
-            terrain_names = terrain_names.copy()
-            terrain_names["font_size"] = (15.0 - terrain_names["rank"] * 0.5).clip(lower=10.0).round(1)
-            terrain_names["color"] = terrain_names["kind"].map(TERRAIN_NAME_COLORS).fillna(TERRAIN_NAME_DEFAULT_COLOR)
-            terrain_names["symbol"] = terrain_names["kind"].map(TERRAIN_NAME_SYMBOLS).fillna(TERRAIN_NAME_DEFAULT_SYMBOL)
-            repeated = int(terrain_names["name"].duplicated(keep=False).sum())
-            print(f"  terrain names (<{args.names_km:g} km): {len(terrain_names)} labels ({before - len(terrain_names)} thinned out)")
-            print(f"    {repeated} of them are repeats of an extended feature")
-            print(f"    {terrain_names['kind'].value_counts().head(6).to_dict()}")
-
-    ferries = gpd.GeoDataFrame()
-    cabins = gpd.GeoDataFrame()
-    fkb_in_park = gpd.GeoDataFrame()
-    fkb_in_approach = gpd.GeoDataFrame()
-    if not args.no_fkb:
-        print("\nLoading detailed FKB paths (what the base map draws at high zoom)...")
-        fkb_zone = buffer_area(park, args.fkb_km)
-        fkb_paths = traktorvegsti.Source(cache_dir=args.cache_dir).fetch_paths(bounds_of(fkb_zone), force_download=args.force_download)
-
-        # The service delivers paths in short pieces; merging keeps the geometry
-        # but cuts the feature count roughly in a third.
-        fkb_in_park = clip_to(merge_lines(gpd.clip(fkb_paths, park), group_by="typeveg"), park)
-        fkb_ring = build_approach_zone(park, args.fkb_km)
-        fkb_in_approach = clip_to(merge_lines(gpd.clip(fkb_paths, fkb_ring), group_by="typeveg"), fkb_ring)
-        summarize("FKB paths inside park", fkb_in_park)
-        summarize(f"FKB paths within {args.fkb_km:g} km", fkb_in_approach)
-
-    roads_private = gpd.GeoDataFrame()
-    roads_public = gpd.GeoDataFrame()
-    if not args.no_roads:
-        print("\nLoading car roads (N50 geometry, SSR names)...")
-        # Neither source alone will do. N50 has every road but no name for any of
-        # them; the place-name register names whole roads but only those carrying
-        # an official address name, which leaves out half the private tracks. So
-        # N50 provides the geometry and SSR is joined onto it for the names.
-        roads = clip_to(n50.Source(cache_dir=args.cache_dir).load_roads(codes, force_download=args.force_download), approach)
-        road_names = stedsnavn.Source(cache_dir=args.cache_dir).load_road_names(codes, force_download=args.force_download)
-        roads = attach_nearest(
-            roads,
-            road_names,
-            {"road_id": "road_id", "name": "road_name"},
-            max_distance_m=args.road_name_m,
-            metric_crs=METRIC_CRS,
-            # Nearness alone hands the main road's name to every side road that
-            # meets it: 23 % of matches followed their road for less than half
-            # their length. A fragment must run along the road to be part of it.
-            min_overlap=0.5,
-        )
-        roads = describe_survey(describe_whole_roads(roads), "malemetode", "datafangstdato", SURVEY_METHOD_LABELS)
-
-        is_private = roads["vegkategori"] == n50.PRIVATE_ROAD_CATEGORY
-        roads_private = roads[is_private]
-        roads_public = roads[~is_private]
-        summarize("Private roads (forest and farm tracks)", roads_private)
-        summarize("Public roads", roads_public)
-        named = roads["road_name"].notna()
-        named_km, total_km = roads.loc[named, "length_km"].sum(), roads["length_km"].sum()
-        print(f"  named from SSR: {named.sum():,} of {len(roads):,} fragments, {named_km:,.0f} of {total_km:,.0f} km")
-        print(f"    {roads['road_category'].value_counts().to_dict()}")
-
-    n50_in_park = gpd.GeoDataFrame()
-    n50_in_approach = gpd.GeoDataFrame()
-    if not args.no_n50:
-        print("\nLoading N50 Kartdata (topographic base map paths)...")
-        n50_paths = describe_survey(
-            n50.Source(cache_dir=args.cache_dir).load_paths(codes, force_download=args.force_download),
-            "malemetode",
-            "datafangstdato",
-            SURVEY_METHOD_LABELS,
-        )
-        n50_in_park = clip_to(n50_paths, park)
-        n50_in_approach = clip_to(n50_paths, approach)
-        summarize("N50 paths inside park", n50_in_park)
-        summarize("N50 paths in approach zone", n50_in_approach)
-
-        # rutemerking says whether a path is waymarked; the unmarked ones are
-        # exactly what Turrutebasen leaves out.
-        if len(n50_in_park):
-            marked = (n50_in_park["rutemerking"] == "JA").sum()
-            print(f"    waymarked: {marked}, unmarked: {len(n50_in_park) - marked}")
-
-        # On this coast a ferry is often the only way to reach a trailhead.
-        n50_source = n50.Source(cache_dir=args.cache_dir)
-        ferries = clip_to(
-            describe_survey(n50_source.load_ferries(codes, force_download=args.force_download), "malemetode", "datafangstdato", SURVEY_METHOD_LABELS),
-            approach_and_park,
-        )
-        summarize("Ferry crossings", ferries)
-        if len(ferries):
-            print(f"    {ferries['typeveg'].value_counts().to_dict()}")
-
-        # N50 names cabins that OSM and the place-name register often miss.
-        cabins = gpd.clip(n50_source.load_cabins(codes, force_download=args.force_download), approach_and_park)
-        if len(cabins) and len(hut_names):
-            # N50 has the buildings but names few of them; the register names the
-            # huts but is missing some as buildings. Joined, Sæterskaret skogstue —
-            # the hut from the park brochure — finally carries its name.
-            before = int(cabins["navn"].notna().sum())
-            cabins = attach_nearest(cabins, hut_names, {"name": "ssr_name"}, max_distance_m=args.hut_name_m, metric_crs=METRIC_CRS)
-            cabins["navn"] = cabins["navn"].fillna(cabins["ssr_name"])
-            print(f"  named from SSR: {int(cabins['navn'].notna().sum()) - before} cabin(s) that N50 leaves unnamed")
-        print(f"  N50 cabins and wilderness huts: {len(cabins)} ({cabins['navn'].notna().sum() if len(cabins) else 0} named)")
-        if len(cabins):
-            print(f"    {cabins['kind'].value_counts().to_dict()}")
-
-    osm_in_park = gpd.GeoDataFrame()
-    osm_in_approach = gpd.GeoDataFrame()
-    shelters = gpd.GeoDataFrame()
-    places = gpd.GeoDataFrame()
-    trailheads = gpd.GeoDataFrame()
-    terminals = gpd.GeoDataFrame()
-    if not args.no_osm:
-        print("\nLoading OpenStreetMap...")
-        osm_source = overpass.Source(cache_dir=args.cache_dir)
-        search_bounds = bounds_of(approach)
-        osm_paths = osm_source.fetch_paths(search_bounds, force_download=args.force_download)
-        osm_in_park = clip_to(osm_paths, park)
-        osm_in_approach = clip_to(osm_paths, approach)
-
-        # Shelters and settlements matter inside the park and along the way in.
-        shelters = gpd.clip(osm_source.fetch_shelters(search_bounds, force_download=args.force_download), approach_and_park)
-        places = gpd.clip(osm_source.fetch_places(search_bounds, force_download=args.force_download), approach_and_park)
-        terminals = gpd.clip(osm_source.fetch_ferry_terminals(search_bounds, force_download=args.force_download), approach_and_park)
-
-        # Farms and sæters are the actual starting points here (Bønnåa, Strompdalen,
-        # Stavassgården), but the region has over a thousand of them, so they are
-        # limited to a narrow band around the boundary.
-        trailheads = gpd.clip(
-            osm_source.fetch_places(search_bounds, place_types=TRAILHEAD_PLACE_TYPES, force_download=args.force_download),
-            buffer_area(park, args.trailhead_km),
-        )
-        summarize("OSM paths inside park", osm_in_park)
-        summarize("OSM paths in approach zone", osm_in_approach)
-        print(f"  Shelters and huts: {len(shelters)}")
-        print(f"  Settlements: {len(places)}")
-        print(f"  Trailheads (<{args.trailhead_km:g} km from boundary): {len(trailheads)}")
-        print(f"  Ferry and express-boat quays: {len(terminals)}")
+    # Farms and sæters are the actual starting points here (Bønnåa, Strompdalen,
+    # Stavassgården), but the region has over a thousand of them, so they are
+    # limited to a narrow band around the boundary.
+    trailheads = gpd.clip(
+        osm_source.fetch_places(search_bounds, place_types=TRAILHEAD_PLACE_TYPES, force_download=args.force_download),
+        zone_around(park, args.trailhead_km),
+    )
+    print(f"  Shelters and huts: {len(shelters)}")
+    print(f"  Settlements: {len(places)}")
+    print(f"  Trailheads (<{args.trailhead_km:g} km from boundary): {len(trailheads)}")
+    print(f"  Ferry and express-boat quays: {len(terminals)}")
 
     print("\nBuilding map...")
-    approach_label = f"\u2264{args.approach_km:g} km"
+    approach_label = f"≤{args.approach_km:g} km"
     # Fit to the full approach zone, not just the park, so trailhead towns are visible.
-    fmap = maps.create_map(bounds=bounds_of(approach), base=maps.BaseMap.KARTVERKET_TOPO)
+    fmap = maps.create_map(bounds=bounds_of(zone), base=maps.BaseMap.KARTVERKET_TOPO)
 
     # Layers are added back-to-front so official routes draw on top of OSM,
     # and only non-empty ones appear in the control and legend. Everything is on
     # by default except the terrain names, which the topo backdrop already draws.
-    fkb_label = f"\u2264{args.fkb_km:g} km"
     # Every label ends with its dataset in brackets, so the legend and the layer
     # control always say where a line or a name came from.
     layers = [
         # Roads first, so they sit under the walking network: they are how you get
         # to the start, not part of the walk. Muted for the same reason.
-        TrailLayer(roads_public, "Roads, public [N50+SSR]", "#b0bec5", 2.0, ROAD_POPUP_FIELDS, "road", "road_id", "road_name"),
-        TrailLayer(roads_private, "Roads, private [N50+SSR]", "#a1887f", 2.0, ROAD_POPUP_FIELDS, "road", "road_id", "road_name"),
-        TrailLayer(ferries, "Ferry crossings [N50]", "#0277bd", 2.5, FERRY_POPUP_FIELDS, "ferry", dash="10,7"),
-        TrailLayer(osm_in_approach, f"Paths, approach {approach_label} [OSM]", "#ce93d8", 1.5, OSM_POPUP_FIELDS, "osm", name_field="name"),
-        TrailLayer(n50_in_approach, f"Paths, approach {approach_label} [N50]", "#80cbc4", 1.5, N50_POPUP_FIELDS, "n50"),
-        TrailLayer(fkb_in_approach, f"Paths, approach {fkb_label} [FKB]", "#5c6bc0", 1.8, FKB_POPUP_FIELDS, "fkb"),
+        TrailLayer(roads_public, "Roads, public [N50+SSR]", "#b0bec5", 2.0, ROAD_POPUP_FIELDS, search_field="road_name"),
+        TrailLayer(roads_private, "Roads, private [N50+SSR]", "#a1887f", 2.0, ROAD_POPUP_FIELDS, search_field="road_name"),
+        TrailLayer(ferries, "Ferry crossings [N50]", "#0277bd", 2.5, FERRY_POPUP_FIELDS, dash="10,7"),
+        TrailLayer(layer_of[f"{OSM}/approach"], f"Paths, approach {approach_label} [OSM]", "#ce93d8", 1.5, OSM_POPUP_FIELDS, search_field="name"),
+        TrailLayer(layer_of[f"{N50_PATHS}/approach"], f"Paths, approach {approach_label} [N50]", "#80cbc4", 1.5, N50_POPUP_FIELDS),
+        TrailLayer(layer_of[f"{FKB}/approach"], f"Paths, approach {approach_label} [FKB]", "#5c6bc0", 1.8, FKB_POPUP_FIELDS),
         TrailLayer(
             in_approach[~in_approach["is_dnt"]],
             f"Marked routes, approach {approach_label} [Turrutebasen]",
             "#f9a825",
             2.5,
             TRAIL_POPUP_FIELDS,
-            "turrutebasen",
-            name_field="trail_name",
+            search_field="trail_name",
         ),
         TrailLayer(
-            dnt_in_approach,
+            in_approach[in_approach["is_dnt"]],
             f"DNT routes, approach {approach_label} [Turrutebasen]",
             "#ef6c00",
             3.5,
             TRAIL_POPUP_FIELDS,
-            "turrutebasen",
-            name_field="trail_name",
+            search_field="trail_name",
         ),
-        TrailLayer(osm_in_park, "Paths in park [OSM]", "#8e24aa", 2.5, OSM_POPUP_FIELDS, "osm", name_field="name"),
-        TrailLayer(n50_in_park, "Paths in park [N50]", "#00796b", 2.5, N50_POPUP_FIELDS, "n50"),
-        TrailLayer(fkb_in_park, "Paths in park [FKB]", "#283593", 3.0, FKB_POPUP_FIELDS, "fkb"),
+        TrailLayer(layer_of[f"{OSM}/park"], "Paths in park [OSM]", "#8e24aa", 2.5, OSM_POPUP_FIELDS, search_field="name"),
+        TrailLayer(layer_of[f"{N50_PATHS}/park"], "Paths in park [N50]", "#00796b", 2.5, N50_POPUP_FIELDS),
+        TrailLayer(layer_of[f"{FKB}/park"], "Paths in park [FKB]", "#283593", 3.0, FKB_POPUP_FIELDS),
         TrailLayer(
-            in_park[~in_park["is_dnt"]], "Marked routes in park [Turrutebasen]", "#1b5e20", 3.5, TRAIL_POPUP_FIELDS, "turrutebasen", "trail_name"
+            in_park[~in_park["is_dnt"]], "Marked routes in park [Turrutebasen]", "#1b5e20", 3.5, TRAIL_POPUP_FIELDS, search_field="trail_name"
         ),
-        TrailLayer(dnt_in_park, "DNT routes in park [Turrutebasen]", "#c62828", 4.0, TRAIL_POPUP_FIELDS, "turrutebasen", "trail_name"),
+        TrailLayer(in_park[in_park["is_dnt"]], "DNT routes in park [Turrutebasen]", "#c62828", 4.0, TRAIL_POPUP_FIELDS, search_field="trail_name"),
+        # UT.no last, and therefore on top: these are the only lines that come
+        # with a written description, so they should win wherever they share a
+        # path with a Turrutebasen or FKB line. They also carry links, which no
+        # other layer does.
+        TrailLayer(ut_core, "Routes [UT.no]", "#d81b60", 4.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name"),
+        TrailLayer(ut_access, "Access routes [UT.no]", "#f48fb1", 3.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name"),
     ]
 
     legend: dict[str, str] = {}
     highlightable = []
-    for index, layer in enumerate(layers):
+    for layer in layers:
         if not len(layer.gdf):
             continue
-        drawn = simplify_for_display(highlight_keys(layer.gdf, f"{layer.source}{index}", layer.source, layer.name_field), args.simplify_m)
         highlightable.append(
             maps.add_trails(
                 fmap,
-                drawn,
+                simplify_for_display(layer.gdf, args.simplify_m),
                 name=layer.label,
                 color=layer.color,
                 weight=layer.weight,
                 popup_fields=layer.popup_fields,
+                link_fields=layer.link_fields,
+                tooltip_field=layer.tooltip_field,
                 dash_array=layer.dash,
-                group_field=HIGHLIGHT_KEY,
-                search_field=layer.found_by,
+                group_field=CHAIN_KEY,
+                search_field=layer.search_field,
                 source=source_of(layer.label),
             )
         )
         legend[f"{layer.label} ({len(layer.gdf)})"] = layer.color
 
-    # UT.no last, and therefore on top: these are the only lines that come with a
-    # written description, so they should win wherever they share a path with a
-    # Turrutebasen or FKB line. They also carry links, which no other layer does.
-    for index, (gdf, label, color, weight) in enumerate(
-        (
-            (ut_core, "Routes [UT.no]", "#d81b60", 4.0),
-            (ut_access, "Access routes [UT.no]", "#f48fb1", 3.0),
-        )
-    ):
-        if not len(gdf):
-            continue
-        drawn = simplify_for_display(highlight_keys(gdf, f"ut{index}", "ut", "trip_id"), args.simplify_m)
-        highlightable.append(
-            maps.add_trails(
-                fmap,
-                drawn,
-                name=label,
-                color=color,
-                weight=weight,
-                popup_fields=UT_POPUP_FIELDS,
-                link_fields=UT_LINK_FIELDS,
-                tooltip_field="name",
-                group_field=HIGHLIGHT_KEY,
-                search_field="name",
-                source=source_of(label),
-            )
-        )
-        legend[f"{label} ({len(gdf)})"] = color
-
     # Six sources through the same handful of valleys are impossible to follow by
-    # eye where they run together, so a click picks one line out of the bundle.
+    # eye where they run together, so a click picks one chain out of the bundle.
     maps.add_click_highlight(fmap, highlightable)
 
     # Everything a name can be typed at, lines and points alike.
@@ -1089,31 +887,31 @@ def main() -> int:
     fmap.save(str(map_path))
     print(f"  Map: {map_path} ({map_path.stat().st_size / 1e6:.1f} MB)")
 
-    # GPX exports cover the park plus the approach zone, since the park itself
-    # has no road access and every trip starts outside it.
+    # Built from the chains, not from the raw sources, so one geometry serves
+    # the map, the exports and the router. At full source precision: the
+    # simplified copy above is the drawn one and goes nowhere near this.
     print("\nExporting GPX...")
     exports = [
-        ("lomsdal-visten-turrutebasen.gpx", [in_park, in_approach], "trail_name", ["maintenance_responsible", "difficulty", "marking", "length_km"]),
-        ("lomsdal-visten-fkb.gpx", [fkb_in_park, fkb_in_approach], "typeveg", ["typeveg", "length_km"]),
-        ("lomsdal-visten-n50.gpx", [n50_in_park, n50_in_approach], "typeveg", ["typeveg", "rutemerking", "length_km"]),
-        ("lomsdal-visten-osm.gpx", [osm_in_park, osm_in_approach], "name", ["highway", "surface", "sac_scale", "length_km"]),
+        ("lomsdal-visten-turrutebasen.gpx", trails, "trail_name", ["maintenance_responsible", "difficulty", "marking", "length_km"]),
+        ("lomsdal-visten-fkb.gpx", by_source[FKB], "typeveg", ["typeveg", "length_km"]),
+        ("lomsdal-visten-n50.gpx", by_source[N50_PATHS], "typeveg", ["typeveg", "rutemerking", "length_km"]),
+        ("lomsdal-visten-osm.gpx", by_source[OSM], "name", ["highway", "surface", "sac_scale", "length_km"]),
         # One file with all catalogued routes, named, instead of 35 downloads.
-        ("lomsdal-visten-ut.gpx", [ut_core, ut_access], "name", ["category_label", "length_km", "ut_url"]),
-        ("lomsdal-visten-roads.gpx", [roads_private, roads_public], "road_name", ["road_category", "road_length_km"]),
+        ("lomsdal-visten-ut.gpx", routes, "name", ["category_label", "length_km", "ut_url"]),
+        # The chain's own length, not the whole road's: a track in this file
+        # *is* one chain, and a figure about other tracks would not describe it.
+        ("lomsdal-visten-roads.gpx", roads, "road_name", ["road_category", "length_km"]),
     ]
-    for filename, parts, name_field, desc_fields in exports:
-        populated = [part for part in parts if len(part)]
-        if not populated:
+    for filename, chains, name_field, desc_fields in exports:
+        if not len(chains):
             continue
-        combined = gpd.GeoDataFrame(pd.concat(populated, ignore_index=True), crs="EPSG:4326")
-        path, stats = export_to_gpx(combined, output_dir / filename, name_field=name_field, desc_fields=desc_fields)
+        path, stats = export_to_gpx(chains, output_dir / filename, name_field=name_field, desc_fields=desc_fields)
         print(f"  {path.name}: {stats['total_trails']} tracks, {stats['total_points']:,} points, {stats['file_size_mb']:.2f} MB")
 
     print("\n" + "=" * 70)
-    print(f"Sources: Turrutebasen {version} (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)")
+    print(f"Sources: Turrutebasen {loaded.turrutebasen_version} (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)")
     print("         all Kartverket | Naturbase (NLOD, Miljødirektoratet) | OpenStreetMap (ODbL)")
-    if not args.no_ut:
-        print(f"         {ut.METADATA.attribution} ({ut.METADATA.license}) — non-commercial, unlike the rest")
+    print(f"         {ut.METADATA.attribution} ({ut.METADATA.license}) — non-commercial, unlike the rest")
     print("=" * 70)
     return 0
 

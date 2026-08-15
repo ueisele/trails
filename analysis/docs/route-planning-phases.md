@@ -1,6 +1,6 @@
 # Route planning: the phases
 
-Eight phases, with 1B, 1C and 1D added after the first was already under way. Every
+Eight phases, with 1B, 1C, 1D and 3B added after the first was already under way. Every
 decision they rest on is in `route-planning-decisions.md` — read it first, and do
 not re-derive what it already settles by measurement.
 
@@ -348,8 +348,28 @@ Still nothing visible. Every edge gains a real elevation series.
   public service on every run.
 - Sampling every 5 m along each edge, and a per-edge ascent computed with the 5 m
   threshold. Skip ferry edges: there is no ground under them and the endpoint
-  would answer with depths. The edge from phase 1 gains `elevations` and `ascent`; nothing else
-  about it changes.
+  would answer with depths. **Bridged connectors are sampled** — nobody drew
+  them, but there is ground under them. The edge from phase 1 gains `elevations`
+  and `ascent`; nothing else about it changes.
+- **A per-chain ascent as well, computed over the chain's full series** — not
+  summed from its edges. The two are not the same figure and the difference is
+  not small: 42 % of the edges are shorter than 5 m and the median is 6.9 m, so
+  under a 5 m threshold most edges report zero climb and a chain of twenty of
+  them climbing sixty metres would sum to nothing. The per-*edge* figure is for
+  elevation-aware routing, where per-edge is exactly right. The per-*chain*
+  figure is what a popup shows, and phase 4 draws its panel from the same call.
+- **Sample at least both endpoints, whatever the edge's length.** 97,974 edges
+  are under 5 m and 28,373 are under one metre; "every 5 m" has to mean a floor
+  of two, not a floor of zero.
+
+Measured before this phase was handed over, so the cost is not a guess:
+**1,017,876 unique coordinates** after rounding to the centimetre — 28 % of the
+1.41 million samples are duplicates, mostly edge ends meeting at a node, which
+is what the store has to catch *within* one build and not only between builds.
+At 50 points per request that is **20,358 requests**, and the endpoint answered
+a probe in **0.29 s**, so six in parallel puts the run at **about sixteen
+minutes**. `datakilde: "dtm1"`, `terreng: "Skog"` and `access-control-allow-origin: *`
+are all as the decisions document describes them.
 - Reject the readings that are not elevations. Over water the endpoint answers
   with a depth — `datakilde: "dybdekurver"`, a negative `z` — and outside its
   coverage with `null`. Check `datakilde` and carry a gap rather than a number.
@@ -358,6 +378,15 @@ Still nothing visible. Every edge gains a real elevation series.
 within a few metres of that when the sampling step is changed to 10 or 15 m. That
 invariance is the whole point of the threshold. A second build must not touch the
 endpoint at all.
+
+**Say which Sjøbergmarsjruta.** It is *three* chains, one each from UT.no,
+Turrutebasen and FKB, all 20.48 km over the same ground and all starting at the
+same rounded point — `ut-no-398130-7281098-20477`,
+`turrutebasen-398130-7281098-20478`, `fkb-398130-7281098-20483`. Three
+digitisations give three ascents, and UT.no's is a consumer GPS track whose noise
+adds apparent climb that the threshold suppresses but does not remove. Report all
+three and record which one the 996 m refers to; a single figure against a name
+that resolves three ways is not an acceptance.
 
 ---
 
@@ -505,13 +534,72 @@ likely way for this phase to look finished when it is not.
 
 ---
 
+## Phase 3B — Get the graph into the page
+
+Nothing visible again, and it exists because two later phases assume it. Phase 4
+draws a profile from the 5 m samples and phase 6 runs a Dijkstra over the
+weighted graph — and after phase 2 both of those live in Python and neither is
+in the browser. The decisions document specifies the encoding in detail under
+*Full source precision*; no phase had claimed it.
+
+**Two representations, and they must not be unified.** Phase 3 draws chains as
+folium GeoJSON, simplified for rendering. This phase adds a *second* payload:
+the routing graph at full source precision, which is never drawn. Drawing and
+routing are different units — that is the whole point of the chain/edge split —
+and an attempt to serve both from one copy loses either the accuracy or the
+render budget.
+
+**Build:**
+
+- A Python encoder: zigzag varints over the delta between consecutive points,
+  one run per edge, quantised at 1e-6 — 0.11 m, an order of magnitude finer than
+  the best source in the set — then gzip, then base64. It belongs to the map
+  script, not the graph builder: the graph module returns plain geometry and
+  attributes and stays architecture-neutral.
+- The edge table beside it: `from_node`, `to_node`, `cost`, `source`, `kind`,
+  `chain_id`, and the per-edge ascent from phase 2.
+- **Node positions**, which phase 6 needs to snap a click to the nearest node
+  within 150 m and which nothing above provides. Do not ship a node table:
+  derive the positions from the edge endpoints while decoding, so they cannot
+  disagree with the geometry and cost nothing in payload. A linear scan over
+  116,970 points answers a click in a few milliseconds, so no spatial index is
+  needed in the browser — say so, or someone will build one.
+- The elevation series, delta-encoded at 0.1 m.
+- A JavaScript decoder in the page, inflating with `DecompressionStream`. Hand
+  written, like the legend, the search and the profile — a CDN script does not
+  load from `file://` and fails silently.
+
+**The test that matters is a round trip.** Encode, decode in the browser, and
+compare against the source coordinates: nothing may move by more than the
+quantisation. Do it over the whole graph, not a sample — a decoder that is
+correct for 99.9 % of runs is a decoder with a bug in the long ones.
+
+**Done when** the page opens and behaves exactly as phase 3 left it — 198
+markers, one non-interactive path, search at 10 px, wheel 9 → 11 — and:
+
+| | budget |
+|---|---|
+| geometry, 948,475 edge vertices | ~3.3 MB, scaled from the 1.8 MB measured at 523,857 |
+| elevations, about 1.2 million samples | ~1 MB |
+| the graph's whole contribution | **under 5 MB** |
+| decode on load | report it; it is a number nobody has yet |
+
+That budget is tighter than it looks: 4.3 MB of a 5 MB allowance, on a page
+already carrying 27 MB. **Measure before assuming it fits, and if it does not,
+report it rather than quietly quantising coarser** — 1e-5 saves 0.7 MB and costs
+1.11 m, which is worse than the best source in the set and would undo what phase
+1 was careful about.
+
+---
+
 ## Phase 4 — The profile panel
 
 A panel at the foot of the map showing the selected chain's profile: distance
 against elevation, total ascent and descent, high and low point. Foldable like
 the legend, and it stays folded until wanted.
 
-Draw it from the 5 m samples as **inline SVG, by hand** — no charting library.
+Draw it from the 5 m samples — which reach the browser through phase 3B, not
+through this phase — as **inline SVG, by hand**, and no charting library.
 A script from a CDN does not load on a `file://` page and fails silently, as the
 OpenStreetMap tiles once did. Reduce the series to one point per pixel column,
 keeping each column's minimum and maximum, so ten thousand samples cost nine
@@ -750,3 +838,17 @@ block them:
 - **The pipeline consuming the same graph.** `pipeline/TODO.md` and
   `pipeline/docs/trail-network-sources.md` both point at this. It is why phase 1
   is a library module and not script-local code.
+- **A local height service.** The decisions document names the one place a server
+  would earn its keep today: replacing repeated calls to a public endpoint with a
+  local DTM extract — no routing server, just a small service, and
+  `docs/trail_routing_architecture_guide.md` sketches the shape. Deliberately no
+  phase: it is **not needed while phase 2's point store keeps a second build from
+  asking again**, and that is the condition to watch. If builds start hammering
+  `hoydedata` because the store is missing them, this is the answer, not a bigger
+  cache.
+
+Everything in this section is here because it was checked against the decisions
+document and found to have no phase *on purpose*. That check is worth repeating
+whenever the decisions document grows: **ask of every specification which phase
+receives it.** It is what turned up the popup ascent, which had fallen between
+phases 2, 3 and 4, and the page encoding, which is now phase 3B.

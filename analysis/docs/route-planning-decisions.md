@@ -78,18 +78,39 @@ and N50 alike should run on the UT.no track, not on a strand 8 m beside it.
 
 Give each edge a cost of `length × factor`:
 
-| source | factor |
-|---|---:|
-| UT.no | 1.00 |
-| Turrutebasen | 1.02 |
-| FKB | 1.05 |
-| N50 paths | 1.10 |
-| OSM | 1.20 |
-| N50 roads | 1.30 |
+| source | factor | what it actually holds, measured |
+|---|---:|---|
+| UT.no | 1.00 | described trips |
+| Turrutebasen | 1.02 | waymarked routes |
+| FKB | 1.05 | `sti`, `traktorveg` |
+| N50 paths | 1.10 | `sti`, `traktorveg`, `gangOgSykkelveg` |
+| OSM | 1.20 | `path`, `track`, `footway`, `steps` — **no roads** |
+| N50 roads | 1.30 | `enkelBilveg` — **cars only** |
+
+**The scale means two different things and the break is between 1.20 and 1.30.**
+From 1.00 to 1.20 every source holds the same kind of thing — a path — and the
+factor ranks how well it was surveyed, which is the question above: where three
+datasets draw one valley, follow the best-surveyed strand rather than the one
+8 m beside it.
+
+**1.30 is not a statement about N50.** N50's road geometry is perfectly good.
+It is a preference about *ground*: a route should take three kilometres of path
+over 2.4 km of tarmac, and 1.30 is what buys that. Read as a quality ranking it
+invites exactly the wrong correction — "N50's roads are well surveyed, so why are
+they last?" — and correcting it would silently change how every route behaves.
+
+The right-hand column is there for the same reason. OSM is loaded through
+`HIKING_HIGHWAY_TYPES` and carries no `residential`, `unclassified` or `service`
+at all; without saying so, `OSM 1.20` sitting above `N50 roads 1.30` reads as
+though the two were comparable. They are not: one is 691 km of footpath, the
+other 1,514 km of road.
 
 Dijkstra then prefers the better source wherever the detour is small, and no
 path is ever lost. Tune the factors if routes take odd turns; keep them close to
-1.0 or the route will make real detours to reach a preferred source.
+1.0 or the route will make real detours to reach a preferred source. **The 1.30
+in particular is an assertion nobody has yet seen on a route** — check it when
+phase 6 draws the first real ones, because a factor that justifies a 30 % detour
+is worth seeing before it is believed.
 
 ### Ferries are routable, but they are not walking
 
@@ -404,9 +425,23 @@ tuning to match.
 #### What it costs in the page
 
 1.1 million elevations, delta-encoded at 0.1 m next to the geometry, land around
-a megabyte — call it 2.8 MB for geometry and elevation together. Store a single
-ascent figure per edge as well: it is 234,363 numbers, nothing, and it is what
-lets every path show its climb without unpacking a profile.
+a megabyte. Measured against the built graph, the count holds: 1,017,876 unique
+coordinates once they are rounded to the centimetre, which is 28 % fewer than the
+1.41 million samples taken, because edge ends meet at nodes.
+
+Store **two** ascent figures, and do not confuse them:
+
+- **Per edge** — 234,363 numbers, nothing — for elevation-aware routing, where
+  per-edge is exactly the granularity a weight needs.
+- **Per chain**, computed over the chain's full series, for anything displayed.
+
+An earlier draft said the per-edge figure was "what lets every path show its
+climb without unpacking a profile". It is not, and the error is not small. The
+reported ascent ignores gains under 5 m, and that threshold restarts at every
+edge boundary: 42 % of the edges are shorter than 5 m and the median is 6.9 m, so
+most of them report no climb at all, and a chain of twenty such edges rising
+sixty metres would sum to zero. Summing per-edge ascents does not approximate the
+figure — it destroys it.
 
 ### Elevation in the profile and in the export
 
@@ -1199,9 +1234,20 @@ per file and **show it at the download** — *3.2 km OSM (ODbL) · 1.1 km UT.no
 (CC BY-NC)* — instead of a blanket warning nobody reads. The reader should know
 what they are passing on before they pass it on.
 
-## Licence, before the export ships
+## Licence: in the file, not in the interface
 
 The graph carries OpenStreetMap geometry (ODbL, share-alike) and UT.no tracks
 (CC BY-NC, non-commercial). Personal import into Komoot is unproblematic;
-publishing routes derived from it is not. Say so in the UI or the documentation
-rather than leaving it implicit.
+publishing routes derived from it is not.
+
+An earlier draft asked for that to be said in the UI or the documentation as
+well. **Decided against**: nothing here is published, and the obligations attach
+to distribution rather than to use. The mitigation is already in the plan and
+sits in the right place — **the exported file is the only thing that leaves the
+machine**, and phase 5 puts the sources and their licences into its
+`<metadata>` while phase 6 shows the length contributed by each before the
+download. The map itself is a local HTML file.
+
+If that ever stops being true — if the map is hosted, or routes derived from it
+are published — this is the paragraph to come back to. ODbL's share-alike is
+the one with teeth.

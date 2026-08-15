@@ -13,10 +13,14 @@ is what lets both the map and the pipeline build on the same network.
 from trails.routing.chains import (
     DEFAULT_PROBE_M,
     DEFAULT_STROKE_ANGLE_DEG,
+    IDENTITY_SEPARATOR,
     ChainRule,
     build_chains,
     chains_of,
+    parts_of,
     split_source,
+    translate_joined,
+    whole_way_length,
 )
 from trails.routing.coverage import (
     DEFAULT_MARKED_M,
@@ -52,6 +56,7 @@ __all__ = [
     "DEFAULT_RECORDED_M",
     "DEFAULT_STROKE_ANGLE_DEG",
     "FERRY",
+    "IDENTITY_SEPARATOR",
     "MARKED",
     "NODE_TOLERANCE_M",
     "PATH",
@@ -65,7 +70,10 @@ __all__ = [
     "chains_of",
     "label_components",
     "no_path_recorded",
+    "parts_of",
     "share_within",
     "split_source",
+    "translate_joined",
     "waymarked",
+    "whole_way_length",
 ]

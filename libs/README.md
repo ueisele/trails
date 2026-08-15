@@ -9,6 +9,7 @@ The `trails` package provides modular functionality for:
 - **Data processing** (`trails.processing`) - Transforming and enriching trail data
 - **Analysis** (`trails.analysis`) - Computing metrics and statistics
 - **Routing** (`trails.routing`) - Building a routable network from several line datasets
+- **Network** (`trails.network`) - Which datasets go into that network, and what each carries
 - **Visualization** (`trails.visualization`) - Creating maps and charts
 - **Export formats** (`trails.io.export`) - Exporting to GPX, GeoJSON, and other formats
 - **Utilities** (`trails.utils`) - Common helper functions
@@ -44,6 +45,7 @@ libs/
 │   ├── processing/     # Data transformations
 │   ├── analysis/       # Metrics and calculations
 │   ├── routing/        # Chains and the routing graph
+│   ├── network/        # The datasets that network is assembled from
 │   ├── visualization/  # Maps and charts
 │   └── utils/          # Utility functions
 ├── tests/              # Tests (mirrors src structure)

@@ -10,8 +10,16 @@ what to look at in each phase.
 
 **Phases 1, 1B, 1C and 1D are built and reviewed.** `libs/src/trails/routing/`
 and `analysis/scripts/route_graph.py`. Their output is now the reference in the
-decisions document; phases 2–8 remain. The project runs on **Python 3.14**, and
-`uv.lock` is tracked from 1D onwards.
+decisions document; phases 2 and 4–8 remain. The project runs on **Python
+3.14**, and `uv.lock` is tracked from 1D onwards.
+
+**Phase 3 is being implemented, in this same working tree.**
+`libs/src/trails/network/norway.py` is new and `analysis/scripts/route_graph.py`
+is being rebuilt around it — the library lift the phase asks for first. While
+that is true: **documents only, no code, no `git commit`**, whose hook stashes
+unstaged changes and would pull work out from under it. `command make hooks-run`
+will fail on files that are half-written; that is not a finding. Check
+`git status` before assuming this has ended.
 
 **Phase 1C** refreshed `uv.lock` and nothing else. Not one figure moved, folium
 did not move either, and what did change is in *What 1C found* below.
@@ -335,10 +343,82 @@ revisiting; the "0.17" this document used to give was the floor in
 issue no requests. Then check a coastal path: any profile touching −276 m means
 `datakilde` is not being checked.
 
-**Phase 3, drawn from the graph.** Nothing new should work; everything old should
-still work. Object count down, layers still toggle independently, UT.no off still
-leaves the network, overlapping sources still select separately. This is the
-phase where a regression hides.
+Two things the phase was checked against reality for, before it was handed over:
+
+- **Ask which ascent figure a number came from.** There are two and they are not
+  interchangeable: per edge for routing weights, per chain over the full series
+  for anything shown. Summing the per-edge ones does not approximate the
+  per-chain one, it destroys it — 42 % of the edges are under 5 m and the median
+  is 6.9 m, so under the threshold most report nothing at all. The decisions
+  document said the opposite until this check; if a figure looks suspiciously
+  low, this is why.
+- **"Sjøbergmarsjruta" is three chains** — UT.no, Turrutebasen and FKB all draw
+  it, all 20.48 km, all starting at the same rounded point. The acceptance names
+  one figure against a name that resolves three ways, and the UT.no one is a
+  consumer GPS track whose noise adds climb. Insist on all three.
+
+What did *not* need changing, having been measured: 20,358 requests against a
+documented 22,000, 1.02 million elevations against 1.1, and 16.4 minutes against
+"about seventeen" — the endpoint answered a probe in 0.29 s. The graph nearly
+doubled since those were written and the figures still hold, because
+deduplication absorbs it.
+
+**Phase 3, drawn from the graph.** Nothing new should work; everything old
+should still work. This is the phase where a regression hides, and the specific
+place it hides is a popup.
+
+The phase was checked against the built graph before it was handed over, the way
+1B was, and "popups keep what they show today" turned out **not to be achievable
+as written**: fifteen attributes had to be added to the chains, UT.no's four
+links and its summary among them. So the first thing to review is not the
+mechanism but the content — open a popup of every one of the seven line layers
+and compare it against the map committed at `8497154`.
+
+What that inventory also turned up, and what to check it was honoured:
+
+- **`is_dnt` splits Turrutebasen into two of the seven layers**, so a missing
+  flag is a missing layer rather than a missing field. It is derivable from
+  `maintenance_responsible`, but 113 of 245 chains carry more than one
+  maintainer and three of those, 9.4 km, are part DNT and part not. Decided:
+  `.any()`, as today. Check that the decision was taken rather than stumbled
+  into.
+- **`osm_id` on a chain is a list**, because 64 % of the OSM chains span more
+  than one way — worst case 33. Decided: keep it joined, plural label.
+- **`describe_whole_roads` should be gone.** A chain *is* the whole road arm now;
+  that function existed to fake it. `road_length_km` becomes `length_m`. If both
+  still exist, something was carried across that should have dissolved.
+- **The whole-named-way figure** is now a sum over the chains sharing an
+  identity. 132 of the 2,326 road chains carry more than one `road_id`.
+
+And a correction to this document, which had it wrong for several days: **the
+`--simplify-m` on the drawn copy does not contradict "do not simplify to save
+space".** That rule governs the exported and routed geometry, which keeps full
+precision. Folium writes drawn geometry as JSON coordinate arrays, measured at
+22.4 MB for the network's vertices. Anyone "fixing" the apparent contradiction
+by removing the simplification puts twenty megabytes into the page. The script
+has said `GPX keeps full detail` all along; I read the two rules as one and they
+are not.
+
+The browser baseline is measured rather than remembered, because 1C and 1D both
+drove the map and it read the same each time: **198** markers in
+`.leaflet-marker-pane > *` and 0 under `.leaflet-marker-icon`, **12,357** paths
+of which exactly **1** non-interactive, the search control at **10 px** against
+the zoom at 60, and the wheel taking zoom **9 → 11**. All of those must come out
+identical. The path count is the one figure that should move, roughly halving as
+23,876 objects become 11,292 chains.
+
+**Phase 3B, the page payload.** It exists because reading the decisions document
+against the phases turned up an encoding specified over thirty lines — zigzag
+varints, gzip, base64, `DecompressionStream` — that no phase had claimed, while
+two later ones assume it. **Ask of any specification: which phase receives this?**
+That question found this, and it found the popup ascent in phase 4.
+
+Review it on the round trip, not the size: decode the whole graph in the browser
+and compare against the source coordinates. A decoder correct for 99.9 % of runs
+has a bug in the long ones. Then the budget, which is tighter than it reads —
+about 4.3 MB against an allowance of 5, on a page already carrying 27 MB. If it
+does not fit, the wrong answer is a coarser quantisation: 1e-5 saves 0.7 MB and
+costs 1.11 m, worse than the best source in the set.
 
 **Phase 4, the profile.** Check it is hand-drawn SVG and nothing is fetched from
 a CDN — a CDN script fails silently on `file://`. Check the map still zooms while
@@ -584,6 +664,24 @@ So they are not quietly reopened:
 - No reduced GPX variant: the target platforms cannot rebuild these paths from
   sparse points, and no point limit is known that would justify one.
 - No offline elevation. The map's tiles are already online-only.
+- **No renaming of the `OSM` source to `OSM paths`.** It carries only paths, so
+  the name is imprecise and the `N50 paths` / `N50 roads` split next to it makes
+  that visible. But the source name is the **prefix of every chain id**, which
+  keys the elevation cache, the highlight and the search — renaming moves all
+  1,505 of them. The N50 split exists because N50 genuinely supplies both and
+  both are loaded; within OSM there is nothing to disambiguate, and the layer is
+  already labelled *Paths in park [OSM]*. The confusion this came from was a
+  documentation one, in the cost table, and that is where it is fixed. If OSM
+  roads are ever loaded, split then — that is the moment, exactly as it was for
+  N50. Note the window: today a rename is free because nothing persists a chain
+  id; from phase 2 it keys a cache and from phase 5 it is written into exported
+  files.
+- **No licence notice in the interface.** An earlier draft of the decisions
+  document asked for one. Nothing here is published, and the obligations attach
+  to distribution rather than use — and the mitigation is already in the right
+  place, since the exported GPX is the only thing that leaves the machine and it
+  carries its sources and their licences. Revisit only if the map is hosted or
+  routes from it are published; ODbL's share-alike is the one with teeth.
 - **No positive `on_path`.** Asked directly, measured, and refused: the sources
   over-record. FKB knows only `sti` and `traktorveg`, both asserting a physical
   feature, and calls 90 % of UT.no a path — while disclosing nothing about how

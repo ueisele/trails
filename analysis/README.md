@@ -26,7 +26,9 @@ Each notebook is self-contained and downloads/caches its own data.
 ### Scripts
 
 **The map** — builds `analysis/output/lomsdal-visten.html` from seven sources,
-plus one GPX per source beside it:
+plus one GPX per source beside it. Every line it draws is a chain out of the
+routing graph below, so a drawn line and a selectable track are the same object;
+the two scripts share one cached build:
 
 ```bash
 command make map
@@ -49,11 +51,14 @@ Worth knowing:
 | `--approach-km N` | how far beyond the park boundary to draw (default 15) |
 | `--simplify-m N` | vertex tolerance for what is *drawn*; the GPX keeps full detail |
 | `--highlight NAME` | mark every position the place-name register holds for a name |
-| `--no-osm`, `--no-n50`, `--no-fkb`, `--no-roads`, `--no-ut`, `--no-names` | leave a source out |
 
-The `--no-*` switches predate the layer control and are retired in phase 3 of the
-route-planning work — see `docs/route-planning-phases.md`. Use the layer control
-instead; it does the same job per layer, instantly, without a rebuild.
+**There is no way to leave a source out, and that is deliberate.** The `--no-*`
+switches and `--fkb-km` were retired in phase 3: the map draws the routing graph,
+and a graph missing a source is not smaller but wrong — without the roads the
+largest component falls from 79 % of the network to 5 %, without the ferries
+eleven of seventeen quays are unreachable. Use the layer control instead; it does
+the visual job better, per layer, instantly and without a rebuild. See
+`docs/route-planning-decisions.md`.
 
 **The routing graph** — builds nothing visible and draws nothing. It reports the
 statistics the route planning is verified against: chains per source, edges,
@@ -71,6 +76,11 @@ command make graph
 The built graph is cached under `.cache/objects/` and keyed by everything that
 shapes it, so an unchanged rebuild is instant and a changed one is detected
 automatically. Force one with `--rebuild`. See `docs/route-planning-phases.md`.
+
+Both scripts build it through `trails.network.norway`, with the same parameters
+and therefore the same cache key, so whichever runs first pays and the second is
+instant. The parameters the map does not offer fall to that module's defaults
+rather than to the map's own, which is what keeps the two agreeing.
 
 ## Structure
 
