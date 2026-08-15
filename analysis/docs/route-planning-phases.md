@@ -383,6 +383,55 @@ edge naming the chain it lies on.
   and the whole named way, so neither number lies.
 - The search still matches by name across every chain carrying it.
 
+### What the chains do not carry yet — check this before starting
+
+"Popups keep what they show today" is not achievable as things stand, and the
+gap is the bulk of this phase's work. Measured against the built graph:
+
+**Recoverable without adding anything.** `name` and `trail_name` are in
+`identity`; `category_label` follows from `category`; `survey_method` follows
+from `malemetode`; `road_category` follows from `vegkategori`. And
+`road_length_km` simply *becomes* `length_m` — a chain is now the whole road arm,
+which is the thing `describe_whole_roads` was written to fake. That function goes.
+
+**Genuinely missing, and each has to be added as a chain attribute:**
+
+| layer | missing |
+|---|---|
+| UT.no | `ut_summary`, and all four links — `ut_url`, `guide_url_no`, `guide_url_en`, `gpx_url` |
+| OSM | `surface`, `sac_scale`, `trail_visibility`, `osm_id` |
+| Turrutebasen | `trail_number`, `trail_follows`, `special_hiking_trail_type`, `origin`, `data_capture_date` |
+| N50 paths | `vedlikeholdsansvarlig`, `medium`, `datafangstdato` |
+| N50 roads · ferries | `datafangstdato` |
+
+The UT.no popups are the richest on the map and the only ones carrying links.
+Losing them would make this phase a regression dressed as a refactor.
+
+**And one that is not a popup field at all: `is_dnt`.** It splits Turrutebasen
+into *two* of the seven line layers — "Marked routes" and "DNT routes". Without
+it one layer cannot be built. It is derived in `lomsdal_visten.py` today from
+`maintenance_responsible`, which the chains do carry, so it can be derived again
+— but it has to be, deliberately.
+
+### Three decisions this phase has to make
+
+- **Where the map gets the graph.** Recommended: call the same cached `build()`
+  that `route_graph.py` uses, so both scripts produce the identical graph and the
+  second of them is instant. That means lifting `load_sources`, `masks_from` and
+  `build` out of the script into the library — do that first, before adding
+  attributes, or the attribute work has to be moved twice.
+- **What `osm_id` means for a chain.** A chain spans several OSM ways, so
+  `_combine` will render it `123 / 456 / 789`. Honest, and no longer a link to
+  one way. Decide whether to keep it joined, as `typeveg` already is, or drop it;
+  do not let it silently become a list that reads like an id.
+- **The whole-named-way figure.** The popup is to show the stretch *and* the
+  named way's total — *3.2 km of Tveråvegen's 15.6*. That is now a sum over the
+  chains sharing an identity, computed once at build time. Note that 132 of the
+  2,326 road chains carry more than one `road_id`.
+
+The six build-time GPX exports come from the chains from this phase on — that is
+in the decisions document rather than above, and it is easy to miss.
+
 **Retire the source flags while you are here.** `--no-osm`, `--no-n50`,
 `--no-fkb`, `--no-roads`, `--no-ut` and `--no-names` predate the layer control,
 which does the job better — per layer, instantly, without a rebuild. With a graph
@@ -400,6 +449,26 @@ branches selects only the arm under the cursor, and the object count has roughly
 halved: **11,292** chains against today's 23,876. Built per source: FKB 6,202 ·
 N50 roads 2,326 · OSM 1,505 · N50 paths 958 · Turrutebasen 245 · UT.no 35 whole
 trips · ferries 21.
+
+"Behaves as it does today" is measured, not remembered. Phases 1C and 1D both
+drove the map in Firefox and it read the same each time; that is the baseline,
+and it is the sharpest it will ever be:
+
+| | before this phase |
+|---|---|
+| markers in `.leaflet-marker-pane > *` | **198**, and 0 under `.leaflet-marker-icon` |
+| paths in the overlay pane | **12,357**, of which exactly **1** non-interactive — the park boundary |
+| search control | top **10 px**, above the zoom buttons at 60 |
+| wheel over the search box | zoom **9 → 11** |
+
+Every one of those except the path count must come out identical. The path count
+is the one figure that *should* move, and roughly halve — it is what this phase
+is for.
+
+Popups are part of "behaves as it does today": check UT.no's four links and its
+summary, Turrutebasen's marking and maintainer, and a road showing both its own
+length and its named way's total. A popup that quietly lost a line is the most
+likely way for this phase to look finished when it is not.
 
 ---
 
