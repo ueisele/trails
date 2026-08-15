@@ -103,6 +103,18 @@ reporting success.
 A skip should skip the fetch, not the pipeline — or the freshness window should
 not be the same length as the schedule interval.
 
+## A richer network is being built elsewhere
+
+`analysis/docs/route-planning-task.md` specifies a routing graph merged from
+FKB, N50, OSM, Turrutebasen and the road network — 5,523 km against the 235 km
+of Turrutebasen alone inside the same area. It is written to live in
+`libs/src/trails/` and to stay free of anything browser-specific, precisely so
+that `steps/transform.py` can build its OSM PBF from it.
+
+That is the recommendation of `docs/trail-network-sources.md` finally becoming
+code. Read both before reworking the transform step, or the same network will be
+assembled twice.
+
 ## Stale documentation
 
 `pipeline/README.md` still describes a weekly schedule ("Every Saturday at
