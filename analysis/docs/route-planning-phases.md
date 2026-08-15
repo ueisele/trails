@@ -1,6 +1,6 @@
 # Route planning: the phases
 
-Eight phases, with 1B and 1C added after the first was already under way. Every
+Eight phases, with 1B, 1C and 1D added after the first was already under way. Every
 decision they rest on is in `route-planning-decisions.md` — read it first, and do
 not re-derive what it already settles by measurement.
 
@@ -279,10 +279,88 @@ Later, a difference could be the upgrade or the new work.
   markers appearing at all.
 - Re-run phase 1's statistics and compare. Any movement is the upgrade's doing.
 - Record what changed in folium's behaviour: the trap list in the review notes
-  was written against 0.17.
+  was observed under 0.20.0, not the 0.17 that document used to name — that
+  figure was the floor in `pyproject.toml`, never an installed version.
 
 **Done when** the numbers are unchanged, the map behaves as before, and anything
 that did change is written down rather than discovered later.
+
+Done: 102 packages moved, across three major versions — pandas 2 → 3, mypy 1 → 2,
+pytest 8 → 9 — and every figure came out identical, checked against the geometry
+and the chain ids rather than the printed report. folium did not move at all, so
+no trap needed revisiting, and the map is byte-identical but for the element ids
+folium regenerates each build. What did change, and the trap of comparing a
+cached graph against itself, is in the review notes under *What 1C found*.
+
+---
+
+## Phase 1D — Settle the Python version
+
+Maintenance again, and separate from 1C for the same reason 1C is separate from a
+feature: one cause per change. Do it **after 1C is accepted** and after `uv.lock`
+and the dependency bounds are committed, so that a moved figure has exactly one
+possible explanation.
+
+**The problem is not that Python 3.14 exists.** Nothing in phases 2–8 needs it.
+The problem is that this project now states its Python version four times and no
+two agree:
+
+| where | says |
+|---|---|
+| `requires-python` | `>=3.11` |
+| `[tool.ruff] target-version` | `py311` |
+| `[tool.mypy] python_version` | `3.12` |
+| `.python-version`, and the venv | `3.13` |
+
+The floor is the interesting one, because the `>=3.11` claim is already being
+paid for. Phase 1C had to move mypy off 3.11 — numpy 2.5 dropped it and writes
+its stubs with PEP 695 `type` statements, which mypy refuses to parse when told
+to target 3.11. The lockfile therefore covers **two different resolutions**,
+numpy 2.4.6 on 3.11 and 2.5.2 from 3.12 on, and only one of them is ever run or
+tested. A supported version nobody exercises is a claim, not a fact.
+
+1C's review established that last point rather than assuming it: CI asks for
+`setup-python 3.11`, then runs `uv sync`, which honours `.python-version` and
+gives it 3.13. **The 3.11 floor has never been exercised anywhere**, before this
+phase or after it. And `target-version = "py311"` does not cover the gap — ruff
+catches 3.12-only *syntax*, not a 3.12-only stdlib import like
+`itertools.batched`, which now type-checks and lints clean and would fail on
+3.11 at import time. So the floor is not merely inconsistent; nothing is
+defending it.
+
+Raising the floor removes the workaround rather than documenting it further —
+and note where the value is. Almost all of it is in the **floor**, not in the
+newest version: both the numpy split and the mypy workaround are caused by the
+3.11 end, not by anything above 3.13. **Staying on 3.13 and raising the floor to
+3.13 is a perfectly good outcome of this phase**, and 3.14 is an option that gets
+tested, not the goal. Do not move up merely because a version exists.
+
+This phase does **not** touch the dependency lower bounds — `pandas>=2.2.0` and
+the rest. Those follow 1C, alongside committing `uv.lock`, and are a consequence
+of that upgrade rather than of this one.
+
+- **Find out what is actually possible** before deciding anything:
+  `uv sync -p 3.14`. One command says whether the whole geo stack — numpy,
+  pandas, pyarrow, shapely, geopandas — has wheels for it. Everything else here
+  is speculation until it has run. 3.14.7 is already installed on this machine.
+- **Choose the floor**, and say why. It should be a version somebody runs.
+- **Make all four agree**, and move the venv to the same one.
+- **Delete the mypy comment if the upgrade makes it moot.** A workaround that
+  outlives its cause is worse than none: the next reader takes it for a
+  constraint.
+
+**Done when** the four numbers agree, `command make hooks-run` is green, and the
+graph's figures are unchanged: 11,292 chains — 6,202 FKB · 2,326 N50 roads ·
+1,505 OSM · 958 N50 paths · 245 Turrutebasen · 35 UT.no · 21 ferries — 234,363
+edges, 757 and 747 components, reach 50.8 km = 94 %, 17 quays, Mosjøen 2.17 m,
+and UT.no 31 % marked · FKB 246.3 km marked · 20.2 km with no path recorded. Then
+drive the map in a browser, as 1C did.
+
+A moved figure is the finding. Do not adjust the reference to match.
+
+**Not to be bundled with anything**, including 1C. Two version changes in one
+commit and a broken number has two suspects, which is the whole reason these
+phases are apart.
 
 ---
 

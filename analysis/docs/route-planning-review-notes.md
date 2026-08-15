@@ -8,9 +8,12 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1 and 1B are built and reviewed.** `libs/src/trails/routing/` and
+**Phases 1, 1B and 1C are built and reviewed.** `libs/src/trails/routing/` and
 `analysis/scripts/route_graph.py`, no new dependency. Their output is now the
-reference in the decisions document; phases 1C and 2–8 remain.
+reference in the decisions document; phases 1D and 2–8 remain.
+
+**Phase 1C** refreshed `uv.lock` and nothing else. Not one figure moved, folium
+did not move either, and what did change is in *What 1C found* below.
 
 **Phase 1B** added `routing/coverage.py`, the five Turrutebasen fields and N50's
 `malemetode` onto the chains, and `waymarked` and `no_path_recorded` onto every
@@ -191,6 +194,19 @@ every one was invisible until something was actually run.
   2,713 chains onto FKB that are not there. `pd.isna` is the test. The symptom
   was a chain count moving in a source nothing had been done to — attributes had
   been added to Turrutebasen and FKB was what moved.
+  **Under pandas 3.0 this is half true, and the surviving half is the dangerous
+  one.** The scalar is unchanged: `str(pd.NA)` and `f"{pd.NA}"` are still the
+  text `<NA>`, so the trap above stands exactly as written. What moved is the
+  *vectorised* path — `Series.astype(str)` no longer stringifies a missing value,
+  it leaves it missing, and `.str.cat()` then drops it. Phase 1C found this the
+  only way it shows: the graph's cache fingerprint changed without one figure in
+  the graph changing, because `_values_digest` concatenates exactly that way.
+  That reads like an improvement and is not. Dropping a missing value throws away
+  its **position**: `['A', NA]` and `[NA, 'A']` both concatenate to `'A'` and
+  digest the same, where pandas 2 wrote `<NA>` into the run and kept them apart.
+  So the vectorised path is no longer a safe way to summarise a column, and the
+  scalar path was never one. Neither is a substitute for `pd.isna`. What this
+  costs `_values_digest` is written up under *What 1C found*.
 - **Merging pieces of a line does not deduplicate them.** Measuring how much of
   an edge lies near a mask, the natural form is to intersect the edge with each
   nearby line's buffer and merge the pieces. Those pieces overlap where the mask
@@ -308,8 +324,10 @@ text, name or docstring reads it as "there is a path here", that is a finding.
 and compare. Any movement in edges, components or reach is the upgrade's doing
 and nothing else's — that is the whole reason it sits here rather than later.
 Then drive the map in a browser: clicks reaching lines, the wheel reaching the
-map, markers rendering at all. The trap list above was written against folium
-0.17; if the upgrade moves past it, the list needs revisiting.
+map, markers rendering at all. The trap list above was observed under **folium
+0.20.0**, which is also what the upgrade left installed, so none of it needed
+revisiting; the "0.17" this document used to give was the floor in
+`pyproject.toml` read as a version. See *What 1C found* below.
 
 **Phase 2, elevation.** The invariance is the test: the same route's ascent at
 5, 10 and 15 m sampling. Then check the cache actually holds — a second run must
@@ -424,6 +442,182 @@ the open question, and nothing downstream is blocked on it.
 
 Otherwise nothing is known to be open. That has been true twice
 before and was wrong both times — see the question above, and ask it again.
+
+## What 1C found
+
+The upgrade moved 102 packages and crossed three major versions — **pandas 2.3.2
+→ 3.0.5**, mypy 1 → 2, pytest 8 → 9 — alongside numpy 2.3.3 → 2.5.2, shapely
+2.1.1 → 2.1.2, geopandas 1.1.1 → 1.1.4 and pyarrow 21 → 25.
+
+**Not one figure moved.** Chains, edges, nodes, vertices, components, reach,
+quays, Mosjøen, and both phase 1B coverage figures came out identical, and so did
+the graph underneath them: same geometry hash over all 234,363 edges, same
+`chain_id` hash, same total length to six decimals (6,048,994.047071 m) and same
+total cost (6,820,867.05014). Checked by rebuilding, not by re-reading a cache —
+see the trap below.
+
+**folium did not move at all**, 0.20.0 either side, so no trap in the list above
+needed revisiting. The generated map is byte-identical once folium's per-build
+random element ids are normalised away, and all five browser checks came out the
+same: the boundary is still the one non-interactive path of 12,357 and a click
+inside the park still reaches a line and opens its popup; the wheel over the
+search box still zooms while `+` still types; the box still sits above the zoom
+buttons; 198 markers in `.leaflet-marker-pane` and, as ever, zero under
+`.leaflet-marker-icon`; and typing still applies differences rather than
+rebuilding — `map.addLayer` stays flat across every keystroke and moves once,
+after the debounce.
+
+Three things did change, all of them the upgrade's doing and all confirmed
+against a pre-upgrade `hooks-run` that was green:
+
+- **The cache fingerprint changed without the graph changing.** pandas 3 stopped
+  stringifying missing values in `Series.astype(str)`, which is how
+  `_values_digest` builds its digest, so the key moved from `0013142f7bc05b97`
+  to `82f3dc694c9a3831` and every cached graph rebuilds once. Content unchanged.
+  Proven rather than inferred: restoring pandas 2's handling in that one function
+  and nothing else re-derives the old key exactly. Five of the seven sources
+  differ — the two that do not, UT.no and Ferries, are the two carrying no
+  missing value in an identity or attribute column. The stored pickle also grew
+  from 48.6 MB to 59.4 MB for the same 234,363 edges.
+
+  **That diagnosis stopped one step short, and the step matters.** `str.cat`
+  drops a missing value rather than writing a placeholder for it, so the digest
+  had become blind to *whether a value is there at all*: three different frames
+  of the same row count hashed identically. That is a false cache *hit*, not the
+  harmless miss it looked like — and it half-defeats the reason the digest was
+  added, which is that a name arriving from SSR changes neither the row count
+  nor the length of the source it lands in. Fixed with `na_rep` on the same
+  call; the graph rebuilds identical. Severity was low because the row count and
+  the total length are in the key too, which narrows any collision.
+
+  Worth generalising: a library that stops writing a placeholder for nothing is
+  a *silent* change to anything that hashes or concatenates. It does not raise
+  and it does not usually alter a figure — it alters what two different inputs
+  look like to each other.
+
+  **This left a real defect behind, found by the review and deliberately not
+  fixed here.** `_values_digest` is now weaker than it was: dropping the missing
+  values loses their positions, so `['A', NA]` and `[NA, 'A']` digest alike.
+  Move an identity value between two rows of a source — row count, total length
+  and geometry all unchanged — and the fingerprint does not notice, so `make
+  graph` replays a cached graph built from different identities, which is
+  precisely what `_values_digest` was added in the phase 1 review to prevent.
+  The fix is a `na_rep` on the `.str.cat()` at `route_graph.py:415`, or hashing
+  the raw values instead of a concatenation. It is left undone because it moves
+  the cache key a third time in a phase whose whole value is that a moved figure
+  has one cause; it should go in before anything else relies on that guard.
+- **Four tests pinned pandas' defaults rather than this project's behaviour** —
+  `[object]` for a text column and `datetime64[ns]` — both of which pandas 3
+  changed, to `str` and `datetime64[us]`. They now read the dtype off the series
+  they built, so they hold either side of the change. A fifth assertion in the
+  same file had gone *vacuous* rather than red: `"b [object]:" not in result`
+  passes for a reason that no longer has anything to do with what it was testing.
+- **mypy could no longer target 3.11.** numpy 2.5 dropped 3.11 and writes its
+  stubs with PEP 695 `type` statements, which mypy refuses to parse when told to
+  target 3.11 — fatally, before any per-module override can apply. The setting is
+  now 3.12, the lowest that parses. Two further errors surfaced from the new
+  pandas and numpy stubs and are silenced at the two call sites with the reason
+  named; neither is a runtime change, and `warn_unused_ignores` will flag them
+  when the stubs catch up.
+
+**The trap this phase nearly fell into**, worth keeping: `make graph` reads the
+cached graph back, and the fingerprint covers the sources and the parameters but
+not the library versions. Had the fingerprint *not* moved, a plain run after the
+upgrade would have replayed the cache and reported every number unchanged without
+executing a line of shapely. Rebuild with `--rebuild` and check that the run says
+"Building chains per source", or the comparison proves nothing.
+
+## After phase 1C — two things that must happen, and one to read for
+
+Written while 1C was running, from findings that came out of asking why the trap
+list named folium 0.17 when 0.20 was installed. None of it is optional and none
+of it is 1C's own work.
+
+### Read 1C's report for pandas 3.0 first
+
+The upgrade jumped three major versions in one command — **pandas 2 → 3**,
+mypy 1 → 2, pytest 8 → 9 — and one of them lands directly on ground this project
+has already been cut by.
+
+**pandas 3.0 makes the string dtype the default**, which means `pd.NA` where an
+object column used to hold `None`. That is exactly the value that survived
+phase 1's missing-value check, reached a chain as the literal text `<NA>`, made
+every unnamed FKB line the same way as every other, and produced 2,713 chains
+that are not there. Phase 1B fixed it in `chains.py::_missing` for *one* nullable
+column. Under pandas 3.0 the same mechanism applies to **every text column from
+every source**, so that fix now carries far more load than it was written for.
+
+The indicator is the same one that caught it the first time: **the per-source
+chain counts.** 6,202 FKB · 2,326 N50 roads · 1,505 OSM · 958 N50 paths · 245
+Turrutebasen · 35 UT.no · 21 ferries. If one of those moved, the cause this time
+is the library rather than new code, and it is the finding — not something to
+adjust the reference to.
+
+### Commit `uv.lock`
+
+It is gitignored at `.gitignore:32`, from the repository's first commit, under a
+`# uv` heading beside `.venv/` — a template default rather than a decision. It
+should be tracked, and the reasons here are stronger than the usual ones:
+
+- **Phase 1C is unverifiable without it.** Its whole premise is *compare before
+  and after; any movement is the upgrade*. With no committed lockfile there is no
+  "before" anyone but the running process can see. The phases document already
+  requires that a dependency "never arrive unremarked in the lockfile", which an
+  ignored file cannot satisfy.
+- Three major versions just moved at once. When something breaks in a fortnight,
+  *which version was it before* has no answer without the history.
+- The trap list is version-sensitive by its nature — `class_name`, the accepted
+  `Icon` colours, the overwritten marker class are all folium behaviour that has
+  changed under this project.
+- This is an application, not a library: `packages = ["libs/src/trails",
+  "pipeline/src/graphhopper_pipeline"]`, nothing published, everything run
+  locally. uv's own guidance for that case is to commit it, and the pipeline's
+  reproducibility depends on it.
+
+**Do it after 1C confirms the numbers**, not before. Committed now it records a
+state nobody has validated; committed after, the first tracked lockfile is a
+verified one.
+
+### Bump the bounds in `pyproject.toml`
+
+They have drifted far enough to be wrong rather than merely stale, and with the
+lockfile ignored they are currently the *only* versioned statement of what this
+code expects:
+
+| declared | resolved |
+|---|---|
+| `pandas>=2.2.0` | **3.0.5** |
+| `numpy>=1.26.0` | 2.5.2 |
+| `pyarrow>=21.0.0` | 25.0.1 |
+| `geopandas>=1.0.0` | 1.1.4 |
+| `folium>=0.17.0` | 0.20.0 |
+| `matplotlib>=3.8.0` | 3.11.1 |
+| `pandas-stubs>=2.3.2.250827` | 3.0.5.260730 |
+
+**`pandas-stubs` is not optional to include, and 1C's review found why.** The two
+`# type: ignore` comments 1C added only fire against pandas-stubs 3.x. With
+`warn_unused_ignores = true`, any resolution older than 3.0 — which the declared
+bound still permits — fails `make type` with two *unused ignore* errors rather
+than passing. A floor that the ignores depend on has to state it.
+
+Declaring `pandas>=2.2.0` while running 3.0 asserts a compatibility nobody has
+tested and which the `pd.NA` behaviour above makes unlikely. Write the new bounds
+from what 1C actually verified, and decide then whether to add upper bounds — a
+ceiling would be a defensible claim immediately after a major jump.
+
+The `folium>=0.17.0` line is also where this document's "the trap list was
+written against folium 0.17" came from. That is a **lower bound, not an observed
+version**; 0.20 is what is installed and 0.20 is what the traps were seen under
+unless 1C establishes otherwise.
+
+### One correction to how phases 1 and 1B were verified
+
+"No new dependency" was checked with `git diff --stat -- pyproject.toml uv.lock`
+and reported as empty both times. For `uv.lock` that check was **vacuous** — an
+untracked file never shows a diff. It rested entirely on `pyproject.toml`, which
+does catch a direct dependency, since `uv add` writes there too; it never caught
+a transitive one. Both reports stand; half the stated reasoning did not. Once the
+lockfile is tracked the check means what it was supposed to mean.
 
 ## Decisions taken not to do things
 

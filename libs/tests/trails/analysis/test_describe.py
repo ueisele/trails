@@ -12,7 +12,7 @@ class TestDescribeColumn:
         series = pd.Series(["Marked", "Not marked", "Marked", "Marked", "Not marked", None])
         result = describe_column(series, "marking")
 
-        assert "marking [object]:" in result
+        assert f"marking [{series.dtype}]:" in result
         assert "Non-null: 5/6 (83.3% complete)" in result
         assert "Unique values: 2" in result
         assert "Is unique: False" in result
@@ -23,7 +23,7 @@ class TestDescribeColumn:
         series = pd.Series(["A", "B", "C", "D", "E", "F", "A", "B", "A", "B"])
         result = describe_column(series, "category")
 
-        assert "category [object]:" in result
+        assert f"category [{series.dtype}]:" in result
         assert "Non-null: 10/10 (100.0% complete)" in result
         assert "Unique values: 6" in result
         assert "Is unique: False" in result
@@ -83,7 +83,7 @@ class TestDescribeColumn:
         series = pd.Series(["A", "B", "C", "D"])
         result = describe_column(series, "id")
 
-        assert "id [object]:" in result
+        assert f"id [{series.dtype}]:" in result
         assert "Is unique: True" in result
 
     def test_pandas_string_dtype(self):
@@ -134,9 +134,9 @@ class TestDescribeDataFrame:
         df = pd.DataFrame({"string": ["A", "B", "A"], "number": [1, 2, 3], "date": pd.to_datetime(["2023-01-01", "2023-02-01", "2023-03-01"])})
         result = describe_dataframe(df)
 
-        assert "string [object]:" in result
+        assert f"string [{df['string'].dtype}]:" in result
         assert "number [int64]:" in result
-        assert "date [datetime64[ns]]:" in result
+        assert f"date [{df['date'].dtype}]:" in result
 
     def test_describe_specific_columns(self):
         """Test describing specific columns only."""
@@ -145,7 +145,7 @@ class TestDescribeDataFrame:
 
         assert "a [int64]:" in result
         assert "c [int64]:" in result
-        assert "b [object]:" not in result
+        assert f"b [{df['b'].dtype}]:" not in result
 
     def test_describe_nonexistent_column(self):
         """Test handling of nonexistent column names."""

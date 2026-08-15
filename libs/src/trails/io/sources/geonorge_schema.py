@@ -120,7 +120,11 @@ def standardize_types(df: T) -> T:
                 if pd.api.types.is_number(x):
                     # Convert numeric codes to string
                     # For whole numbers like 1.0, this gives us "1" instead of "1.0"
-                    if x == int(x):  # Check if it's a whole number
+                    # pandas-stubs 3 narrows is_number() to TypeGuard[Number |
+                    # np.number], and int() does not accept a numbers.Number.
+                    # Nothing to do with numpy or the Python version — this one
+                    # goes when pandas-stubs changes. Stubs only; check unchanged.
+                    if x == int(x):  # type: ignore[arg-type]
                         return str(int(x))
                     else:
                         # Keep decimal for values like 1.5

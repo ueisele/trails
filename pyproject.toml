@@ -73,7 +73,12 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 
 [tool.mypy]
-python_version = "3.11"
+# 3.12 rather than the 3.11 the project supports at runtime: numpy 2.5 dropped
+# 3.11 and writes its stubs with PEP 695 `type` statements, which mypy refuses
+# to parse when told to target 3.11 — fatally, before any per-module override
+# can apply. The lock resolves numpy 2.4.6 on 3.11 and 2.5.2 from 3.12 on, so a
+# 3.11 interpreter still gets stubs it can read; only this setting had to move.
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

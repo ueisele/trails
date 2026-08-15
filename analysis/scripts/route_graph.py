@@ -412,7 +412,14 @@ def _values_digest(source: NetworkSource) -> str:
     digest = hashlib.sha256()
     for column in columns:
         digest.update(f"\n{column}\n".encode())
-        digest.update(source.gdf[column].astype(str).str.cat(sep="\x00").encode())
+        # `na_rep` is what keeps a missing value visible here. Without it
+        # `str.cat` drops one entirely rather than writing a placeholder, so a
+        # road that loses its name and a road that never had one hash the same,
+        # and this digest exists precisely because a name arriving from SSR
+        # changes neither the row count nor the length of the source it lands
+        # in. Under pandas 2 `astype(str)` wrote "None" and hid the gap; pandas
+        # 3 stopped, which is what exposed it.
+        digest.update(source.gdf[column].astype(str).str.cat(sep="\x00", na_rep="\x01").encode())
     return digest.hexdigest()[:12]
 
 

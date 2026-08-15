@@ -13,7 +13,7 @@ import hashlib
 import math
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from enum import Enum
+from enum import StrEnum
 from itertools import groupby
 from typing import Any
 
@@ -58,7 +58,7 @@ CHAIN_COLUMNS = ("chain_id", "source", "kind", "identity", "length_m")
 Coordinate = tuple[float, ...]
 
 
-class ChainRule(str, Enum):
+class ChainRule(StrEnum):
     """How a source's noded pieces are joined back into chains.
 
     Attributes:

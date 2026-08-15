@@ -147,7 +147,9 @@ def attach_nearest(
 
     keep = joined["index_right"].notna()
     if min_overlap > 0 and keep.any():
-        counterparts = right.geometry.reindex(joined.loc[keep, "index_right"]).to_numpy()
+        # pandas-stubs for pandas 3 types to_numpy against Series[Never], which a
+        # Series[BaseGeometry] does not satisfy. Stubs only; the call is unchanged.
+        counterparts = right.geometry.reindex(joined.loc[keep, "index_right"]).to_numpy()  # type: ignore[misc]
         lines = projected.geometry.loc[keep.index[keep]]
         shares = [
             line.intersection(other.buffer(max_distance_m)).length / line.length if line.length else 1.0
