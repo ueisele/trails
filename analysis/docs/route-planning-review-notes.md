@@ -8,23 +8,69 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phase 1 is being implemented by another agent, in this same working tree.**
-`libs/src/trails/routing/`, `libs/tests/trails/routing/` and
-`analysis/scripts/route_graph.py` are its work in progress.
+**Phase 1 is built and reviewed.** `libs/src/trails/routing/` (1,096 lines, 100
+tests, no new dependency) and `analysis/scripts/route_graph.py`. Its output is
+now the reference in the decisions document; phases 1B, 1C and 2–8 remain.
 
-While that is true, the standing instruction is: **documents only. Do not change
-code and do not run tests.** That includes `command make hooks-run`, which runs
-`pre-commit --all-files` over the agent's files, and `git commit`, whose hook
-stashes unstaged changes and would pull work out from under it. Check
-`git status` before assuming this has ended.
+What the review changed, both measured rather than argued:
 
-The three route-planning documents are uncommitted: `decisions` and `phases` are
-modified since `ec9ec7f`, these notes are untracked. Everything in them past that
-commit came out of a long series of questions from the maintainer, and belongs in
-a commit of its own, separate from the agent's code.
+- **Turrutebasen was weighted 1.00, not the specified 1.02.** The implementation
+  carried a comment saying the decisions document leaves it out; it does not —
+  the table gives 1.02 and phase 1B spells out the reasoning. Corrected.
+- **`--route-noding-m` defaulted to 8 m and is now 0.** Built both ways: chains,
+  components, reach, quays and Mosjøen come out *identical*, so all it bought was
+  234,363 edges down to 166,900 and two minutes down to one. What it cost was
+  4,086 nodes (4.5 %) where two edges meeting there lie more than a metre apart,
+  191 over five, the worst 7.55 m — gaps in any track stitched from edges. Both
+  budgets hold without it (3.3 MB against 5, two minutes against single-digit),
+  so the standing rule applied: reach for it only if a budget is exceeded. The
+  parameter stays available; only the default changed.
 
-The map itself — `analysis/scripts/lomsdal_visten.py` — is untouched by any of
-this.
+Three smaller findings from the same review are fixed. One of them was larger
+than it looked and is worth remembering:
+`test_a_node_sits_where_one_of_its_edges_begins` ended in
+`... or edge.source == "UT.no"`, which read like a known displacement being
+tolerated. It was not: the fixture put the crossing at `x=150`, on the straight
+tail of the wiggly line, where the simplified copy and the drawn line coincide.
+The measured displacement was **0.0** — the test had never had a case. Moving the
+crossing onto a wiggle (`x=37`) produces 3.034 m, and the bound is now asserted
+against the tolerance, with `assert worst > 1.0` so it cannot go vacuous again.
+**A green test that exempts something is worth measuring before believing.** The
+other two: `carry_positions`' docstring now matches the window projection it
+uses, and `fingerprint` now digests each source's identity and attribute values,
+so a change in the SSR road names or the Turrutebasen route names is noticed.
+
+### What is uncommitted
+
+Everything since `7c9666d`, in three natural groups:
+
+1. **Phase 1** — `libs/src/trails/routing/`, `libs/tests/trails/routing/`,
+   `analysis/scripts/route_graph.py`, plus both READMEs. Untracked, so the
+   agent's work and the review's corrections to it cannot be separated into two
+   commits; they are the same never-versioned files.
+2. **The map** — `analysis/scripts/lomsdal_visten.py`. The line above that said
+   it was untouched is no longer true. See below.
+3. **The documents** — all three.
+
+### What changed in the map
+
+Popups were audited against what each layer's data actually holds:
+
+- **OSM was the only line layer with no length.** `clip_to` had been computing
+  `length_km` for it all along; `OSM_POPUP_FIELDS` simply omitted the entry.
+- **No layer showed provenance**, though every Kartverket line layer carries it.
+  A new `describe_survey()` adds `survey_method` and `surveyed` to N50's paths,
+  ferries and roads — translating `fot`/`dig`/`sat` through
+  `SURVEY_METHOD_LABELS` — and to Turrutebasen, which writes its method out in
+  words already. Turrutebasen also gained `origin`, `trail_significance` and
+  `special_hiking_trail_type`; the last needed adding to
+  `aggregate_trail_info`, which had been discarding it.
+- **FKB was left alone.** Its extra fields look 100 % populated and are not:
+  `notna()` counts empty strings. Really 3–6 %.
+
+The map has **not been rebuilt** since. Its runtime is unmeasured — the "half an
+hour" quoted in conversation came from a timeout allowance, not a measurement,
+which is why `analysis/README.md` states no figure.
 
 The measurement scripts that produced the figures lived in a session scratchpad
 and are gone. Their methods are below so a figure can be re-derived rather than
@@ -60,6 +106,26 @@ contributes zero error, so 5 m looks better than it is — the true advantage ov
 
 **Payload sizes.** Zigzag varints over deltas between consecutive points, one run
 per edge, then gzip, then base64. Twelve times smaller than JSON arrays.
+
+**Coincidence between two sources** — the figure behind the 34 % marked, the
+94 % on a mapped line and the 19.9 km on nothing. Buffer each chain of the
+subject by the tolerance, `STRtree`-query the mask for hits, union *only the
+hits* and intersect. Buffering the whole union first is the obvious way and does
+not finish. Always run it at two tolerances: if the answer moves little between
+10 m and 25 m it is a property of the ground, and if it collapses below 5 m it
+was GPS noise.
+
+**Node displacement**, which decided `node_simplify_m`. Per edge, the distance
+from each end's node position to that end's own coordinate, grouped by source.
+Then, per node, the widest gap between any two edge ends meeting on it — that
+second one is what a stitched route actually sees.
+
+**Provenance.** `malemetode`, `noyaktighet` and `datafangstdato` on N50;
+`measurement_method`, `accuracy`, `origin` on Turrutebasen; FKB has none, and its
+WFS `DescribeFeatureType` is what proves it rather than an absence in the loader.
+Weight the breakdown by **length**, not by feature count — the two disagree
+badly. Careful with fill rates: `notna()` counts `""` as populated, which made
+FKB's fields look complete when they are at 3–6 %.
 
 ## What this codebase does that will bite
 
@@ -119,9 +185,13 @@ across two builds — rebuild and diff them. Check a road that branches, such as
 Tveråvegen, selects one arm and not eight. Check a ring-shaped chain does not
 crash whatever looks for endpoints.
 
-**Phase 1, simplification before noding.** Phase 1 reported that Turrutebasen
-braids against FKB — 24,478 edges for 235 km, one every ten metres — and
-introduced a `node_simplify_m` to deal with it. Three things to check, in order:
+**Phase 1, simplification before noding — settled, kept here as the method.**
+Phase 1 reported that Turrutebasen braids against FKB and introduced a
+`node_simplify_m` to deal with it. The three checks below were run and the
+outcome is in "Where things stand": the geometry on the edge was never thinned
+(check 1 passed cleanly), and checks 2 and 3 decided it — measured, it changed
+nothing but the edge count, and cost node accuracy. The default is now 0. Re-read
+this if the parameter is ever proposed again.
 
 1. **What ends up on the edge.** The specification allows simplifying *what goes
    into the noding* and requires the **full geometry to remain on the edge**. If
@@ -163,11 +233,40 @@ Neither looks threatened by 25,000 extra edges: a Dijkstra does not notice
 unchanged because it is the same vertices either way. If the measurement says
 otherwise, that is worth knowing on its own.
 
-**Phase 1B, what the graph carries.** Three things, each cheap to miss: is
-Turrutebasen in the graph at all; do edges carry the attributes phase 6 will
-report on, above all whether a stretch is waymarked; does the cache key cover the
-extent and the source set, so a 5 km graph cannot answer for a 15 km one. And
-that a missing source is an error rather than a smaller graph.
+**Phase 1B, what the graph carries.** Rewritten after the phase 1 review: three
+of its four original points were already satisfied and are struck through in the
+phases document. What is left is Turrutebasen's attributes, N50's `malemetode`,
+and the two derived edge fields.
+
+The acceptance is the same for all of it and it is the thing to check first:
+**no figure from phase 1 may move.** Attributes ride along the chains, only
+`identity_field` decides them. 11,292 chains, 234,363 edges, 757 and 747
+components, 50.8 km = 94 %, 17 quays, Mosjøen at 2.17 m. If any shifts, something
+touched the geometry, and that is the finding rather than the new column.
+
+Then the two derived fields, each with a number to land on:
+
+- `waymarked` — UT.no **31 %**, FKB **246 km**. These were re-measured under the
+  rule as specified, after an earlier draft of the phase quoted 34 % and 173 km
+  taken from *different* measurements: the first a plain length overlap rather
+  than the half-length test, the second the `attach_nearest` name join at 25 m,
+  which never saw N50's own marked paths. A correct implementation would have
+  been told it had failed. **Check that a predicted figure was measured under the
+  rule it is predicting, not merely near it.**
+- `no_path_recorded` — near **19.9 km** of UT.no's 376, and it must be
+  concentrated in three trips rather than spread thin. Spread thin means the
+  25 m tolerance was not applied.
+
+Two things the specification had wrong until they were checked, both worth
+re-checking in the implementation: **ferries must be excluded** from both derived
+fields — a crossing has no path mask within 25 m, so 149 km of it would be
+flagged as pathless — and `waymarked` must be built from **masks over the raw
+sources**, not from the edge's own attributes, because `rutemerking` reaches an
+edge only through its chain, where `_combine` has already merged 158 km of it
+into an ambiguous `JA / NEI`.
+
+And the trap the whole design rests on: **its absence asserts nothing.** If any
+text, name or docstring reads it as "there is a path here", that is a finding.
 
 **Phase 1C, the dependency refresh.** Run phase 1's statistics before and after
 and compare. Any movement in edges, components or reach is the upgrade's doing
@@ -274,7 +373,20 @@ one landscape protection area. None of the reserves touches the park, one —
 Strauman — borders it. Phase 6 therefore reports protected areas rather than the
 park alone, and `naturbase.Source` needs a spatial query to find them.
 
-Nothing is currently known to be open. That has been true twice
+One thing is open, and it is open by decision rather than by oversight:
+
+**FKB's provenance cannot be queried, and FKB carries 90 % of the network's path
+evidence.** Its WFS exposes `objtype`, `typeveg`, `vegkategori`, `vegfase`,
+`vegnummer` and `kommunenummer` — nothing about how a line was captured or when.
+N50, which does expose it, shows 47 % of its paths digitised from a map rather
+than surveyed, with capture dates back to 1965 and accuracies to 50 m; and the
+two are not independent, both being Kartverket. So "is there a path here" is
+unanswerable, and phase 1B builds only the negative form of it. The Geonorge file
+download would carry FKB's own `målemetode` and settle it — it needs an account
+and a second loading path, which is why the module uses the WFS. That trade is
+the open question, and nothing downstream is blocked on it.
+
+Otherwise nothing is known to be open. That has been true twice
 before and was wrong both times — see the question above, and ask it again.
 
 ## Decisions taken not to do things
@@ -302,3 +414,24 @@ So they are not quietly reopened:
 - No reduced GPX variant: the target platforms cannot rebuild these paths from
   sparse points, and no point limit is known that would justify one.
 - No offline elevation. The map's tiles are already online-only.
+- **No positive `on_path`.** Asked directly, measured, and refused: the sources
+  over-record. FKB knows only `sti` and `traktorveg`, both asserting a physical
+  feature, and calls 90 % of UT.no a path — while disclosing nothing about how
+  any line was captured. N50, which does disclose, is 47 % digitised off older
+  maps here, back to 1965, at accuracies to 50 m; and the two are not independent
+  witnesses, both being Kartverket. Only the negative form survives, and only
+  because a liberal recorder's silence means something. Two corrections to
+  earlier reasoning are folded into the decisions document: FKB and N50 are not
+  independent, and for paths it is **absence** that is evidence, not presence.
+- **No survey-quality summary in the exported GPX.** Right in a popup, where the
+  question is one line and the answer is concrete; useless in a file, where FKB's
+  90 % would make it read *30 km not disclosed*.
+- **No Geonorge file download for FKB.** It carries FKB's own `målemetode` and is
+  the only thing that would settle the question above. It needs an account and a
+  second loading path, which is exactly why the module uses the WFS. Open by
+  decision, and nothing is blocked on it.
+- **No park in the names of the Makefile targets.** `make map` and `make graph`
+  exist, and both scripts hard-code `PARK_NAME`. Naming the targets for the park
+  would be noise on every invocation while there is only one; the park is in
+  `make help` instead, which is where someone looks. If a second is added, the
+  scripts grow a `--park` option first and the targets follow it.

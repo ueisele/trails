@@ -23,6 +23,50 @@ command make notebook
 
 Each notebook is self-contained and downloads/caches its own data.
 
+### Scripts
+
+**The map** — builds `analysis/output/lomsdal-visten.html` from seven sources,
+plus one GPX per source beside it:
+
+```bash
+command make map
+```
+
+Everything it downloads is cached, so a second run does not fetch again. The
+first run on an empty cache does, and takes considerably longer. Re-fetch on
+purpose with `--force-download`; `command make cache-clean` throws the cache away
+entirely, which is rarely what you want.
+
+Both targets pass `ARGS` through, so `command make map ARGS="--approach-km 10"`
+works; the script itself is `analysis/scripts/lomsdal_visten.py`.
+
+Worth knowing:
+
+| | |
+|---|---|
+| `--output-dir DIR` | write somewhere other than `analysis/output/` |
+| `--approach-km N` | how far beyond the park boundary to draw (default 15) |
+| `--simplify-m N` | vertex tolerance for what is *drawn*; the GPX keeps full detail |
+| `--highlight NAME` | mark every position the place-name register holds for a name |
+| `--no-osm`, `--no-n50`, `--no-fkb`, `--no-roads`, `--no-ut`, `--no-names` | leave a source out |
+
+The `--no-*` switches predate the layer control and are retired in phase 3 of the
+route-planning work — see `docs/route-planning-phases.md`. Use the layer control
+instead; it does the same job per layer, instantly, without a rebuild.
+
+**The routing graph** — builds nothing visible and draws nothing. It reports the
+statistics the route planning is verified against: chains per source, edges,
+components, how far the network reaches across the park, and whether the coast is
+reachable without the ferries.
+
+```bash
+command make graph
+```
+
+The built graph is cached under `.cache/objects/` and keyed by everything that
+shapes it, so an unchanged rebuild is instant and a changed one is detected
+automatically. Force one with `--rebuild`. See `docs/route-planning-phases.md`.
+
 ## Structure
 
 ```

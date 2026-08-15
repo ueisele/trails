@@ -1,4 +1,4 @@
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph
 
 # Default target
 help:
@@ -23,6 +23,9 @@ help:
 	@echo "  make cache-clean-all Remove entire .cache directory"
 	@echo "  make notebook      Start JupyterLab"
 	@echo "  make notebook-clean Clear all notebook outputs"
+	@echo "  make map           Build the Lomsdal-Visten map into analysis/output/"
+	@echo "  make graph         Build the Lomsdal-Visten routing graph and report it"
+	@echo "                     both take ARGS=\"...\", e.g. make map ARGS=\"--approach-km 10\""
 	@echo "  make fixtures      Generate/update test fixtures from real data"
 	@echo "  make fixtures-info Show information about test fixtures"
 	@echo "  make fixtures-clean Remove all test fixtures"
@@ -135,6 +138,19 @@ notebook-clean:
 	@echo "🧹 Clearing notebook outputs..."
 	@find analysis/notebooks -name "*.ipynb" -exec uv run nbstripout {} \;
 	@echo "✅ Notebook outputs cleared"
+
+# Both scripts are written for one park, which is why these targets need no
+# argument to say which. If a second one is ever added, the scripts grow a --park
+# option first and these follow it; naming them for the park before that would be
+# noise on every invocation.
+map:
+	@echo "🗺️  Building the Lomsdal-Visten map (cached sources; a cold cache takes far longer)..."
+	uv run python analysis/scripts/lomsdal_visten.py $(ARGS)
+	@echo "✅ analysis/output/lomsdal-visten.html"
+
+graph:
+	@echo "🕸️  Building the Lomsdal-Visten routing graph..."
+	uv run python analysis/scripts/route_graph.py $(ARGS)
 
 cache-clean:
 	@echo "🗑️  Cleaning cache directory (.cache)..."

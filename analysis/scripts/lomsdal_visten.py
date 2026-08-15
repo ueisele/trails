@@ -114,6 +114,8 @@ FKB_POPUP_FIELDS = {
 FERRY_POPUP_FIELDS = {
     "typeveg": "Ferry type",
     "length_km": "Crossing (km)",
+    "survey_method": "Captured",
+    "surveyed": "Captured on",
 }
 
 CABIN_POPUP_FIELDS = {
@@ -136,6 +138,8 @@ ROAD_POPUP_FIELDS = {
     "road_name": "Road",
     "road_category": "Category",
     "road_length_km": "Length (km)",
+    "survey_method": "Captured",
+    "surveyed": "Captured on",
 }
 
 N50_POPUP_FIELDS = {
@@ -144,6 +148,22 @@ N50_POPUP_FIELDS = {
     "vedlikeholdsansvarlig": "Maintained by",
     "medium": "Medium",
     "length_km": "Length (km)",
+    "survey_method": "Captured",
+    "surveyed": "Captured on",
+}
+
+#: How N50's ``malemetode`` code reads in a popup. The code is the difference
+#: between a path somebody saw and a line inherited off an older map, and in this
+#: zone 47 % of N50's paths are the latter — some captured in the 1960s, at
+#: accuracies as coarse as 50 m. Without it a popup asserts a path with no way to
+#: judge the assertion. Turrutebasen writes the same thing out in words already.
+SURVEY_METHOD_LABELS = {
+    "fot": "Photogrammetry — seen in aerial imagery",
+    "sat": "Satellite positioning — measured on the ground",
+    "dig": "Digitised from a map",
+    "pla": "From a plan",
+    "gen": "Generated from other geometry",
+    "ukj": "Unknown",
 }
 
 #: How a catalogue category reads in a popup.
@@ -175,8 +195,16 @@ TRAIL_POPUP_FIELDS = {
     "difficulty": "Difficulty",
     "marking": "Marking",
     "trail_follows": "Follows",
+    "special_hiking_trail_type": "Special type",
+    "trail_significance": "Significance",
     "maintenance_responsible": "Maintained by",
     "length_km": "Length (km)",
+    "survey_method": "Captured",
+    "surveyed": "Captured on",
+    # 80 % of this register's geometry here is "Rett i kartet" — entered by the
+    # people who maintain the route — and only 1 % each from FKB and N50. It is
+    # the one line source in this map that is not a Kartverket derivative.
+    "origin": "Geometry from",
 }
 
 OSM_POPUP_FIELDS = {
@@ -185,6 +213,7 @@ OSM_POPUP_FIELDS = {
     "surface": "Surface",
     "sac_scale": "SAC scale",
     "trail_visibility": "Visibility",
+    "length_km": "Length (km)",
     "osm_id": "OSM ID",
 }
 
@@ -373,7 +402,7 @@ def aggregate_trail_info(info: pd.DataFrame) -> pd.DataFrame:
         return populated.iloc[0] if len(populated) else None
 
     aggregations: dict[str, Callable[[pd.Series], Any]] = {"trail_name": join_names}
-    for column in ("trail_number", "difficulty", "trail_significance", "maintenance_responsible", "season"):
+    for column in ("trail_number", "difficulty", "trail_significance", "special_hiking_trail_type", "maintenance_responsible", "season"):
         if column in info.columns:
             aggregations[column] = first_value
 
@@ -404,9 +433,47 @@ def load_official_trails(cache_dir: str, force_download: bool = False) -> tuple[
 
     merged = trails.merge(aggregate_trail_info(info), left_on="local_id", right_index=True, how="left")
     merged["is_dnt"] = merged["is_dnt"].fillna(False).astype(bool)
+    # This register writes its capture method out in words already, so it needs
+    # no code table — only the date turning into one.
+    merged = describe_survey(merged, "measurement_method", "data_capture_date")
 
     print(f"Turrutebasen version {data.version}: {len(merged):,} hiking segments nationwide")
     return gpd.GeoDataFrame(merged, geometry="geometry", crs=trails.crs), data.version
+
+
+def describe_survey(
+    gdf: gpd.GeoDataFrame,
+    method_field: str,
+    date_field: str,
+    labels: dict[str, str] | None = None,
+) -> gpd.GeoDataFrame:
+    """Add readable capture method and date columns.
+
+    Both are already in every Kartverket line layer and neither was ever shown.
+    They are what separates a path somebody surveyed from a line carried forward
+    off an older map, which is the one thing a popup asserting "path" cannot
+    otherwise be judged on.
+
+    Args:
+        gdf: Features carrying the source's own provenance fields
+        method_field: Column holding how the line was captured
+        date_field: Column holding when it was captured
+        labels: Mapping of raw code to readable text, for a source that writes
+            codes rather than words. Codes it does not cover pass through
+            unchanged rather than being dropped.
+
+    Returns:
+        Copy carrying ``survey_method`` and ``surveyed``; either is absent where
+        the source does not supply it
+    """
+    described = gdf.copy()
+    if method_field in described:
+        method = described[method_field]
+        described["survey_method"] = method.map(lambda value: labels.get(value, value)) if labels else method
+    if date_field in described:
+        # The raw value is a timestamp, and a popup wants a date.
+        described["surveyed"] = pd.to_datetime(described[date_field], errors="coerce", utc=True).dt.strftime("%Y-%m-%d")
+    return described
 
 
 def clip_to(gdf: gpd.GeoDataFrame, boundary: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -687,7 +754,7 @@ def main() -> int:
             # their length. A fragment must run along the road to be part of it.
             min_overlap=0.5,
         )
-        roads = describe_whole_roads(roads)
+        roads = describe_survey(describe_whole_roads(roads), "malemetode", "datafangstdato", SURVEY_METHOD_LABELS)
 
         is_private = roads["vegkategori"] == n50.PRIVATE_ROAD_CATEGORY
         roads_private = roads[is_private]
@@ -703,7 +770,12 @@ def main() -> int:
     n50_in_approach = gpd.GeoDataFrame()
     if not args.no_n50:
         print("\nLoading N50 Kartdata (topographic base map paths)...")
-        n50_paths = n50.Source(cache_dir=args.cache_dir).load_paths(codes, force_download=args.force_download)
+        n50_paths = describe_survey(
+            n50.Source(cache_dir=args.cache_dir).load_paths(codes, force_download=args.force_download),
+            "malemetode",
+            "datafangstdato",
+            SURVEY_METHOD_LABELS,
+        )
         n50_in_park = clip_to(n50_paths, park)
         n50_in_approach = clip_to(n50_paths, approach)
         summarize("N50 paths inside park", n50_in_park)
@@ -717,7 +789,10 @@ def main() -> int:
 
         # On this coast a ferry is often the only way to reach a trailhead.
         n50_source = n50.Source(cache_dir=args.cache_dir)
-        ferries = clip_to(n50_source.load_ferries(codes, force_download=args.force_download), approach_and_park)
+        ferries = clip_to(
+            describe_survey(n50_source.load_ferries(codes, force_download=args.force_download), "malemetode", "datafangstdato", SURVEY_METHOD_LABELS),
+            approach_and_park,
+        )
         summarize("Ferry crossings", ferries)
         if len(ferries):
             print(f"    {ferries['typeveg'].value_counts().to_dict()}")

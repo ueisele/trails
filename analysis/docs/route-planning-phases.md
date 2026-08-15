@@ -56,8 +56,9 @@ extent, the source loading and everything Folium stay in the calling script.
 
 - Chains per source: node each alone, `linemerge`, then chain through junctions
   by the rule in the decisions document — identity first, the 45° stroke rule
-  where there is none. UT.no trips and Turrutebasen routes keep their published
-  unit.
+  where there is none. UT.no trips keep their published unit, one feature per
+  trip; Turrutebasen goes through the rule, where identity reassembles each named
+  route across the segments the register draws it as.
 - Identity to feed that rule: route names from Turrutebasen onto FKB via
   `attach_nearest`, alongside the road names already joined from SSR.
 - The routing graph: union of everything, noded, loose ends bridged at 25 m,
@@ -87,37 +88,157 @@ construction, not in the document.
 
 ## Phase 1B — What the graph has to carry
 
-Small, and separate only because phase 1 was already under way when these came
-up. Do it after phase 1 lands; it does not block phase 2.
+Small. Phase 1 settled three of the four points this phase was written for and
+the review settled a fourth, so what remains is two pieces of work, both
+specified below with the figures they have to land on. Nothing here is an open
+question. It does not block phase 2.
 
-- **Carry the attributes later phases need** onto chains and edges, following the
-  rule in the decisions document — constant values through, differing ones
-  joined. At least: the source, the name, the road category, and whether a
-  stretch is waymarked. Phase 6 reports how much of a route is marked and how
-  much is not, which for a wilderness route matters as much as the distance, and
-  it cannot invent the field afterwards.
-- **The cache key covers the extent and the source set**, not only the source
-  data. A graph built for 15 km and one built for 5 km are different artefacts
-  and must not answer to the same key.
-- **Turrutebasen belongs in the graph** — check whether phase 1 already put it
-  there, and add it if not. The map draws it as two layers of its own, and from
-  phase 3 those layers come from the graph; leave it out and they vanish. The
-  1–4 % of it that FKB does not cover would be lost geometry as well, and it is
-  the best source for whether a stretch is waymarked. Weight it **1.02**, between
-  UT.no's described walks and FKB's surveyed lines: an officially marked route is
-  a better thing to follow than a path that merely exists.
+### Still to do
 
-  Every figure in the decisions document was measured **without it** — that is an
-  omission in the measuring, not a decision. So the edge count will come out
-  above the stated 129,616, and that is expected rather than a fault. What should
-  *not* move is the reach: 235 km running parallel to FKB improves connectivity
-  if anything. Treat phase 1's own output as the new reference and correct the
-  documented figures to match.
-- **Refuse to build a partial graph.** A source that fails to load is an error
-  with a clear message, not a smaller graph. Without roads the largest component
-  falls from 79 % to 5 %; without ferries eleven quays are unreachable. A graph
-  missing a source produces numbers that quietly disagree with this document,
-  which is the worst way for it to be wrong.
+**Turrutebasen carries nothing but its name.** Built, its 245 chains hold
+`chain_id`, `source`, `kind`, `identity` and `length_m` and no attribute at all,
+because `route_graph.py` gives it `attributes=()`. It is the one source that
+*describes* its routes rather than merely drawing them, so this is where phase
+6's reporting has to come from. Measured over the zone, what is actually there:
+
+| field | where | in the zone |
+|---|---|---|
+| `marking` | centreline | **770 of 770 "Marked"** |
+| `signage` | centreline | 88 "Yes", the rest empty |
+| `maintenance_responsible` | info table | 100 % — *Helgeland friluftsråd* and four local groups |
+| `difficulty` | info table | 27 % — Easy · Medium · Strenuous · Expert |
+| `trail_significance` | info table | 31 % — local, regional |
+| `season`, `surface_type`, `trail_width`, `trail_type` | both | **empty here** |
+
+So carry `marking` and `signage` from the centreline, and join
+`maintenance_responsible`, `difficulty` and `trail_significance` from the info
+table the way `trail_name` already is. Leave the four empty ones alone: they are
+in the schema and hold nothing in this zone, and a column of nulls on every chain
+is worse than no column.
+
+**Derive `waymarked` onto every walking edge**, `marked` · `unmarked` ·
+`unknown`, by the rule in the decisions document under *How much of a route is
+waymarked*. Build it as **two masks out of the raw sources**, then test every
+edge against both the same way:
+
+| mask | from |
+|---|---|
+| marked | every Turrutebasen feature, plus every N50 path with `rutemerking = JA` |
+| unmarked | every N50 path with `rutemerking = NEI` |
+
+An edge is `marked` where at least **half its length lies within 10 m** of the
+marked mask; failing that `unmarked` on the same test against the unmarked mask;
+failing both, `unknown`. Marked wins where an edge meets both.
+
+Do it with masks and not by reading the edge's own source, however natural that
+looks. `rutemerking` lives on the **chain**, where `_combine` has already merged
+a run that changes character into `JA / NEI` — 38 chains and 158 km of it — so an
+edge reaching through `chain_id` gets an answer that is ambiguous exactly where
+it matters. Masks avoid the problem instead of unpicking it, and they treat all
+seven sources alike: a Turrutebasen edge lies on its own feature and comes out
+marked without a special case.
+
+**Ferries are excluded, not classified.** They are not walking, everything
+downstream keeps them out of the walking figures, and a crossing is neither
+marked nor unmarked nor unknown.
+
+The half-length guard is not optional. Proximity alone once put 23 % of the road
+names on the side road at a junction, and an edge that merely crosses a marked
+route would otherwise count whole.
+
+Measured under exactly this rule, so it is a real acceptance and not an estimate:
+
+| | marked |
+|---|---:|
+| UT.no | **115.8 km of 376 = 31 %** |
+| FKB | **246.3 km of 1,979 = 12 %** |
+
+An earlier draft of this phase predicted 34 % and 173 km. Both were wrong,
+because both came from a different measurement — the 34 % from a plain length
+overlap rather than the half-length test, and the 173 km from the
+`attach_nearest` name join at 25 m, which never saw N50's own marked paths at
+all. A correct implementation would have been told it had failed. The
+`unmarked`/`unknown` split is **not** predicted here; report it and it becomes
+the reference, as phase 1's numbers did.
+
+**Derive `no_path_recorded` onto every edge**, and derive nothing else about
+paths. True where nothing from FKB, N50 paths, N50 roads or OSM lies within
+**25 m** — a deliberately generous tolerance, because the more that counts as
+recorded, the more it means when nothing is.
+
+Its absence asserts **nothing whatever**: the sources over-record, so a line's
+presence is no evidence of a path. That one-directionality has to survive into
+the name, the docstring and any text that ever shows it. The reasoning, and why
+a positive `on_path` cannot be built, is in the decisions document under *Whether
+there is a path at all*.
+
+The question is only meaningful for edges from a route register — UT.no,
+Turrutebasen, and later a free leg. An FKB edge *is* the record, so for it the
+question is empty and the test answers itself.
+
+**Ferries are excluded here too, and this one would go wrong silently.** A
+crossing has nothing from the path mask within 25 m of it, so the rule as written
+would flag all 149 km of ferry as having no path recorded — true, meaningless,
+and it would land in the route's figure beside the walking. Bridged connectors
+are in the same position: nobody drew them, which is what a bridge *is*.
+
+Expect **19.9 km of UT.no's 376**, concentrated in three trips: *Alternative
+Midtre – Nedre Breivatn* entirely, *Dagstur i Godvassdalen* about half, and
+11.2 km of the 42.4 km *Rundtur i Lomsdal-Visten*. Spread thin across many trips
+instead means the 25 m tolerance was not applied.
+
+**Carry N50's `malemetode` onto the chain** while you are in there — not as an
+input to anything derived, but for the popup. Across the zone 47 % of N50's paths
+are `dig`, digitised from a map rather than seen, with capture dates back to 1965
+and accuracies as coarse as 50 m. "Digitised from a map" beside a path is worth
+more to a planner than any category computed from it.
+
+### Two things not to be surprised by
+
+- **The cache key changes, so the first run rebuilds.** Attributes are part of
+  the build's fingerprint, which is what stops a graph answering for a source set
+  it was not built from. Two minutes. Not a fault.
+- **No figure from phase 1 may move.** Attributes ride along the chains, they do
+  not decide them; only `identity_field` does that. So 11,292 chains, 234,363
+  edges, 757 and 747 components, 50.8 km = 94 % reach, 17 quays and Mosjøen at
+  2.17 m all have to come out exactly as before. If any of them shifts, something
+  touched the geometry, and that is the finding — not the new column.
+
+**Done when** the chains carry Turrutebasen's five fields and N50's `malemetode`,
+every walking edge carries `waymarked` and `no_path_recorded`, ferries carry
+neither, the three measured figures land — **31 % of UT.no marked, 246 km of FKB
+marked, 19.9 km with no path recorded** — and phase 1's statistics are unchanged
+to the last digit.
+
+**Not to be built here**, decided and reasoned in the decisions document: no
+positive `on_path`, no filtering of the graph by how well a path is evidenced,
+and no Geonorge file download for FKB. The last is the only thing that would
+change the picture — it carries FKB's own `målemetode` — and it needs an account
+and a second loading path. It is recorded as open, not as work.
+
+### Settled, recorded so it is not reopened
+
+- ~~Carry the attributes onto chains **and edges**~~ — **chains only, with one
+  exception.** An edge names its chain, so a route reads any attribute through
+  `chain_id` in one lookup; copying five columns onto 234,363 edges buys nothing.
+  Bridge edges name no chain and correctly carry no attribute — nobody drew them.
+  The exceptions are `waymarked` and `no_path_recorded` above, both summed in
+  kilometres and therefore needing the finer grain.
+- ~~The cache key covers the extent and the source set~~ — **it does:** the
+  approach distance, every parameter that shapes the graph, and per source its
+  name, row count, total length, cost factor and `keep_whole`. The review added
+  the values the chains are built *from*, because the road names come from SSR
+  and the route names from Turrutebasen, and neither shows up in the row count or
+  length of the source it lands in.
+- ~~Turrutebasen belongs in the graph~~ — **it is in**, at the specified 1.02,
+  contributing 235 km as 245 chains and 25,965 edges. The edge count came out at
+  234,363 against the documented 129,616, exactly as predicted, and the reach did
+  not move: 50.8 km = 94 %. The decisions document now carries phase 1's output
+  as its reference.
+- ~~Refuse to build a partial graph~~ — **satisfied by construction.**
+  `route_graph.py` has no per-source switches and no fallback: a source that
+  fails to load raises. Retiring the switches the *map* still carries is phase
+  3's work and is listed there.
 
 ---
 
@@ -212,10 +333,9 @@ source already was, and every figure in the decisions document assumes it.
 
 **Done when** the map looks and behaves as it does today, clicking a road that
 branches selects only the arm under the cursor, and the object count has roughly
-halved: about 10,500 against today's 23,041. Measured per source with the stroke
-rule: FKB 5,959, N50 roads 1,724, N50 paths 961, UT.no 35 whole trips, plus OSM
-and Turrutebasen which were not measured and are estimated at some 1,850
-together.
+halved: **11,292** chains against today's 23,876. Built per source: FKB 6,202 ·
+N50 roads 2,326 · OSM 1,505 · N50 paths 958 · Turrutebasen 245 · UT.no 35 whole
+trips · ferries 21.
 
 ---
 
@@ -337,6 +457,14 @@ that is phase 7.
   unmarked, unknown. FKB is the largest source and carries no marking data at
   all, so calling those stretches unmarked would assert what the data does not
   say. See the decisions document. The edges carry the field from phase 1B.
+- **And how much of it runs where no source records a path** — *8 km with no
+  path recorded*. Also from phase 1B, also summed off the edges, and for this
+  park it says more about the day ahead than any other single figure: the
+  three-day Rundtur reads 11 of its 42 km that way. State it as recorded, not as
+  fact: the sources over-record, so their silence is evidence and their lines are
+  not. Do **not** add a survey-quality breakdown beside it — FKB is 90 % of the
+  network and discloses nothing, so it would read *30 km not disclosed*. That
+  belongs in the popup, where the question is about one line, and it is there.
 - **Name a waypoint after what is there.** When one lands within about 50 m of
   a named point the map already draws — a hut, a quay, a trailhead, a farm —
   take that point's name, type and position for the `<wpt>`, while the route

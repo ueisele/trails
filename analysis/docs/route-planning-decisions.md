@@ -101,6 +101,9 @@ is where the UT.no routes start. Measured over the 15 km zone:
 | land only | 759 | 4,348 km = 79 % | **6 of 17** |
 | with ferries | 750 | 5,135 km = **91 %** | **17 of 17** |
 
+Phase 1, built, reproduces this: 757 and 747 components, 79 % and 91 %, 6 quays
+and then all 17.
+
 Eleven quays — Bønå, Visthus, Forvik, Tjøtta, Horn, Stokkasjøen among them — hang
 off the network entirely until the crossings are in it. Use
 `n50.Source.load_ferries`, which the map already draws.
@@ -163,27 +166,36 @@ already draws, `--approach-km 15`.
 
 Measured over that zone, plain union with 25 m bridging:
 
-| | |
-|---|---:|
-| input | 23,041 lines, 5,523 km |
-| graph | 129,616 edges, 72,113 nodes, 683,226 vertices |
-| components | 759 |
-| largest component | 4,350 km = **79 %** of the network |
-| its reach across the park | 50.8 km = **94 %** of 53.9 km |
-| its distance to Mosjoen | **0.00 km** — the town sits on it |
+| | measured before phase 1 | **phase 1, built** |
+|---|---:|---:|
+| input | 23,041 lines, 5,523 km | 23,876 lines, 6,001 km |
+| graph | 129,616 edges, 72,113 nodes | **234,363 edges, 116,970 nodes** |
+| vertices | 683,226 | **948,475** |
+| chains | about 10,500 | **11,292** |
+| components, land only | 759 | **757** |
+| largest component | 4,350 km = 79 % | **4,637 km = 79 %** |
+| its reach across the park | 50.8 km = 94 % | **50.8 km = 94 %** of 53.9 km |
+| its distance to Mosjoen | 0.00 km | **2.17 m** — the town sits on it |
+| with ferries | 750 comps, 91 %, 17 quays | **747, 91 %, 17 of 17** |
 
 Connectivity is better here than over the smaller extent (79 % against 67 %),
 because the road network outside the park ties the valleys together.
 
 Per source: FKB 1,979 km · N50 roads 1,514 km · N50 paths 1,057 km · OSM 691 km ·
-UT.no 282 km · Turrutebasen 235 km.
+UT.no 376 km · Turrutebasen 235 km · ferries 149 km.
 
-**These figures were measured without Turrutebasen in the network.** That was an
-oversight in the measuring rather than a decision — it belongs in the graph, and
-phase 1B says so. Expect the edge count to come out above 129,616 once it is
-there. The reach should not move: its 235 km run parallel to FKB and improve
-connectivity if they change it at all. Phase 1's own output is the reference from
-then on.
+**The left column was measured without Turrutebasen in the network**, which was
+an oversight in the measuring rather than a decision. The right column is phase
+1's own output and is the reference from here on. Two differences are worth
+naming, because neither is a fault:
+
+- **The edge count nearly doubles.** Turrutebasen contributes 25,965 edges of its
+  own and, being a second digitisation of ground FKB already holds, some 10,000
+  further crossings in FKB and N50. What did *not* move is the reach, exactly as
+  predicted: 94 %, unchanged to the metre.
+- **UT.no reads 376 km, not 282.** 282 km was the union of the 35 trips; 376 km is
+  their sum, and the sum is what goes into the graph, because a published trip
+  keeps its published unit and two trips sharing a stretch each keep it.
 
 ### Full source precision, at 1.8 MB — do not simplify to save space
 
@@ -195,6 +207,13 @@ The network carries **523,857 vertices** at the sources' own resolution
 57,585 · OSM 31,402). Written as JSON coordinate arrays that is 22.4 MB, which is
 where an earlier estimate in this document went wrong. Written properly it is
 not:
+
+> Phase 1, built, carries more: **541,062 vertices across the chains** and
+> 948,475 across the edges, the difference being the vertex each cut duplicates.
+> Scaling the encoded figures below by that gives 1.9 MB for what is drawn and
+> 3.3 MB for the routing graph — both inside the 5 MB this was budgeted at, and
+> the reason phase 1 nodes the published sources at their own resolution rather
+> than a simplified one.
 
 | encoding | in the file |
 |---|---:|
@@ -304,8 +323,8 @@ again.
 That distinction matters because of how the sampling works. Sample points are
 interpolated at a fixed 5 m step along each edge, so if one vertex of an edge
 changes, every sample on that edge shifts and misses a coordinate-keyed cache.
-That is tolerable only because edges are short — 5,523 km across 129,616 edges
-is a 43 m average, about nine samples each. A changed edge costs nine lookups,
+That is tolerable only because edges are short — 6,049 km across 234,363 edges
+is a 26 m average, about five samples each. A changed edge costs five lookups,
 not a region.
 
 Key on the coordinate rounded to a centimetre. Do **not** quantise to a coarser
@@ -386,7 +405,7 @@ tuning to match.
 
 1.1 million elevations, delta-encoded at 0.1 m next to the geometry, land around
 a megabyte — call it 2.8 MB for geometry and elevation together. Store a single
-ascent figure per edge as well: it is 129,616 numbers, nothing, and it is what
+ascent figure per edge as well: it is 234,363 numbers, nothing, and it is what
 lets every path show its climb without unpacking a profile.
 
 ### Elevation in the profile and in the export
@@ -478,7 +497,7 @@ This is not an edge case. Of 544 named roads in the zone, **178 branch**:
 | Tosenveien | 44.2 km | 24 | ~40 |
 | Vefsnvegen | 24.1 km | 15 | ~25 |
 | Vestersidvegen | 22.8 km | 16 | ~22 |
-| Tveråvegen | 15.1 km | 7 | ~8 |
+| Tveråvegen | 15.1 km | 7 | ~8 — phase 1 built **14**, longest 5.17 km |
 
 So **split every named group into chains** and make each chain its own selectable
 track, even where they share a name.
@@ -556,9 +575,11 @@ with `attach_nearest`, the same way road names were joined onto N50, with the
 same `min_overlap` guard against a side path taking the name of the route it
 meets.
 
-That reaches 235 km of FKB's 1,979 km in the zone. Small in length, but it is the
-**waymarked** part: where a walker most expects a name, and where the chain rule
-most wants a reliable one instead of a guess about angles.
+Built, that names 1,214 FKB paths carrying 173 km of FKB's 1,979 km in the zone —
+Turrutebasen's own 235 km is what does the naming, not what comes back named, and
+an earlier draft of this document confused the two. Small in length either way,
+but it is the **waymarked** part: where a walker most expects a name, and where
+the chain rule most wants a reliable one instead of a guess about angles.
 
 #### The rule, in order
 
@@ -576,8 +597,15 @@ For each source on its own:
    - nothing at the junction comes within 45° — every arm ends its chain
 4. Never break a chain merely because something crosses it.
 
-UT.no trips and Turrutebasen routes skip all of this: they are published as whole
-routes and stay whole.
+UT.no trips skip all of this: one feature is one published trip, already linear
+and already the unit a reader means, so they stay whole.
+
+Turrutebasen does **not** skip it, although an earlier draft of this document
+said it did. Its published unit is the named *route*, and the register draws that
+as 770 separate segments — keeping its features whole would give 770 scraps, the
+opposite of the intent. So it goes through the rule above, where the identity
+step reassembles each route across its segments and ends a chain only where the
+route genuinely divides: 770 segments become 245 chains.
 
 The invariant the whole rule exists to protect: **a selectable unit is linear.**
 Anything that would produce a branching selection is a bug, because it has no
@@ -718,7 +746,7 @@ But the drawing unit and the routing unit are **not the same**, and confusing
 them wrecks both:
 
 - **Routing** uses the fully merged graph — every crossing between every source
-  is a node. 129,616 edges at a 43 m average.
+  is a node. 234,363 edges at a 26 m average.
 - **Drawing and selecting** uses units decided *within* each source. A chain
   broken wherever some unrelated parallel dataset happens to cross it is a 43 m
   scrap, useless as something to click, and there would be ten times as many of
@@ -726,18 +754,24 @@ them wrecks both:
 
 Measured, chains computed within each source:
 
-| source | drawn today | broken at every junction | with the 45° stroke rule |
-|---|---:|---:|---:|
-| UT.no | 35 | 2,411 | kept whole as 35 trips |
-| FKB | 14,045 | 9,118 | 5,959 |
-| N50 paths | 1,715 | 1,365 | 961 |
-| N50 roads | 5,272 | 3,908 | 1,724 |
-| OSM | 1,974 | 2,481 | *not measured* |
-| Turrutebasen | 773 | *not measured* | *not measured* |
-| **total** | **23,041** | 19,283 | **about 10,500** |
+| source | drawn today | broken at every junction | the 45° angle alone | **identity first, then the angle** |
+|---|---:|---:|---:|---:|
+| UT.no | 35 | 15,469 | 451 | **35, kept whole** |
+| Turrutebasen | 770 | 251 | 121 | **245** |
+| FKB | 14,045 | 9,096 | 5,952 | **6,202** |
+| N50 paths | 1,715 | 1,365 | 958 | **958** |
+| N50 roads | 5,272 | 3,908 | 1,723 | **2,326** |
+| OSM | 1,974 | 2,480 | 1,504 | **1,505** |
+| Ferries | 65 | 47 | 21 | **21** |
+| **total** | **23,876** | 32,616 | 10,730 | **11,292** |
 
-The two unmeasured rows are estimated at some 1,850 chains together, by the
-reduction the other sources showed. Treat that as an estimate, not a target.
+The third column is what this document originally measured and estimated at
+"about 10,500"; phase 1 reproduces it at 10,730. The fourth is what the rule
+actually specifies and what the graph is built from. Identity costs 562 chains
+rather than saving them, because a named way ends its chain wherever it divides,
+and a named road divides at most of its junctions — that is the rule working, not
+failing. Both columns are printed side by side by `route_graph.py`, so the
+difference stays visible.
 
 So drawing chains is **fewer** objects than the map draws today, not more: the
 render load roughly halves. An earlier draft of this document said "well under
@@ -868,6 +902,11 @@ Beyond the geometry, the elevations and what the file is:
 - **The named ways the route follows**, in the track's `<desc>`: *via
   Tveråvegen, Gamle Stavassveg, Sjøbergmarsjruta*. That is how a person describes
   a route, and every edge already knows its chain.
+- **How far it runs where no source records a path**, from phase 1B's
+  `no_path_recorded`: *8 km with no path recorded in any source*. For a route
+  through this park that changes the character of a day more than any other
+  single figure — the three-day Rundtur reads 11 of its 42 km that way. It is
+  summed from the edges, so it costs a column and nothing else.
 - **When the file was written**, in `<metadata><time>`.
 
 And one thing to leave out deliberately:
@@ -877,9 +916,24 @@ And one thing to leave out deliberately:
   would turn a route you are considering into a walk you never took. For the same
   reason, no speeds and no durations: both would be guesses dressed as data.
 
-Per-leg source attribution is not worth carrying either. The file-level list
-covers the licence question, which is the one that matters, and finer detail
-grows the extensions for nothing.
+Per-leg source attribution is not worth carrying either — but the reason first
+given for that was too narrow, and it is worth correcting rather than leaving to
+be rediscovered. The file-level list settles the **licence** question. How well a
+line is *evidenced* is a different question, and one this park makes sharp: N50
+discloses that 47 % of its paths here were digitised off an older map rather than
+surveyed, some captured in the 1960s at accuracies to 50 m.
+
+That still does not belong in the file, for a reason that only measurement
+showed: **FKB carries 90 % of the network and discloses nothing at all.** A
+route-level summary would therefore read *3 km measured on the ground, 5 km seen
+in imagery, 30 km not disclosed* — true, and useless to someone opening the file
+in Komoot, because "not disclosed" dominates almost every route.
+
+Where it does belong is the popup, and that is where it now is: `survey_method`
+and `surveyed` on every N50 and Turrutebasen line. Looking at one line, the
+answer is concrete — *digitised from a map, 1984* — and it is exactly what a
+reader doubting a path needs. One line and a whole route are different questions
+and want different granularity.
 
 ### How much of a route is waymarked
 
@@ -903,6 +957,117 @@ Three things to get right:
   not support. Three buckets: marked, unmarked, unknown.
 - **Free legs are unmarked by construction**, not unknown. Nobody marks a line
   you drew across open ground.
+
+#### The rule, in order
+
+No single field answers this, so it is derived — and derived per **edge**, not
+per chain, for a reason measured below.
+
+1. **The edge's own source states it.**
+
+   | source | says |
+   |---|---|
+   | Turrutebasen | **marked** — 770 of 770 segments in this zone read `marking = Marked`, so membership *is* the statement |
+   | N50 paths | **marked** where `rutemerking = JA` (289), **unmarked** where `NEI` (747), nothing where unset (679) |
+   | FKB · OSM · roads · UT.no | nothing |
+
+2. **Otherwise the ground states it.** An edge with at least **half its length
+   within 10 m** of an edge whose source calls it marked is marked too. Half, not
+   merely near: this repository has already paid for that lesson once, when
+   joining road names by nearness alone put 23 % of them onto the side road at a
+   junction, and `min_overlap` was what fixed it. The same guard applies here.
+
+3. **Otherwise `unknown`** — never `unmarked`.
+
+**UT.no says nothing, and must not be assumed to.** It is DNT, so red-T marking
+is the obvious guess, and here it is wrong: measured, only **34 % of its 376 km**
+lies on ground any other source calls marked — 128.9 km within 10 m, 133.0 km
+within 25 m. The figure barely moves with the tolerance, so it is a real property
+of the terrain and not an artefact. Two thirds of the described routes cross
+ground nobody marks, which is what this park is. Calling UT.no marked because of
+who publishes it would overstate by some 250 km.
+
+**Why per edge and not per chain.** A chain takes one value along its whole
+length, and both network sources smear when it does:
+
+| | chain level says | measured |
+|---|---:|---:|
+| FKB carrying a Turrutebasen route name | 560 chains, 223 km | 1,214 paths, 173 km — **50 km too much** |
+| N50 paths | 38 chains read `JA / NEI`, 158 km | unresolvable at this granularity |
+
+An edge averages 26 m, so deriving it there costs one spatial query per edge and
+removes both errors at once. It is one of only two attributes that sit on the
+edge rather than being read through `chain_id` — the other is below — and both
+earn the exception by being summed in kilometres.
+
+### Whether there is a path at all — and why that cannot be answered
+
+A route register suggests a way; a topographic dataset records one. In a park
+that is largely trackless those come apart, and the obvious next question is how
+much of a route runs on an actual path. It cannot be answered, and the reason is
+worth writing down so nobody builds it twice.
+
+**The sources over-record.** FKB knows only `sti` and `traktorveg` — both assert
+a physical feature, and it has no category for a recommended line over open
+ground. It calls 90 % of UT.no's 376 km a path. But its WFS exposes no
+provenance at all: `objtype`, `typeveg`, `vegkategori`, `vegfase`, `vegnummer`,
+`kommunenummer`, and nothing about how the line was captured or when.
+
+N50 does expose it, and what it shows undermines the whole family:
+
+| N50 paths in the zone | |
+|---|---:|
+| `dig` — digitised from a map | 956 km = **47 %** |
+| `fot` — seen photogrammetrically | 695 km = 34 % |
+| `sat` — measured on the ground | 325 km = 16 % |
+| capture dates | **1965** to 2026 |
+| stated accuracy | up to **5,000 cm = 50 m** |
+
+Along one route the maintainer knows to be largely pathless — *Tverådalen–Bønå*,
+32.5 km — FKB calls 82 % of it `sti` and follows the GPS track to within 2 m over
+three quarters of its length. N50 covers 41 % of it with lines **digitised from a
+map**, some captured in 1983, against only 15 % seen photogrammetrically. The
+evidence for "there is a path here" is largely an inherited cartographic line at
+an accuracy coarser than the test used to match it.
+
+And FKB and N50 are **not independent**: both are Kartverket, and N50 is
+plausibly a generalisation of the same base. The only independent record is OSM,
+which covers 22 %.
+
+**So presence proves nothing — but absence does.** That asymmetry is the whole
+of what can be salvaged, and it runs the opposite way to intuition: where sources
+draw lines liberally, a stretch that *none* of them records is genuinely
+recorded by none of them.
+
+Hence one edge attribute, `no_path_recorded`, true only where nothing from FKB,
+N50 paths, N50 roads or OSM lies within **25 m**. The tolerance is deliberately
+generous — the more that counts as recorded, the more it means when nothing is.
+Its absence asserts **nothing whatever**, and that has to survive into its name,
+its docstring and any text that shows it.
+
+Measured, it is 19.9 km of UT.no's 376 and concentrated where it matters:
+
+| trip | with nothing recorded |
+|---|---|
+| Alternative Midtre – Nedre Breivatn | 4.7 of 4.7 km |
+| Dagstur i Godvassdalen | 3.8 of 7.2 km |
+| Rundtur i Lomsdal-Visten, 3 days | **11.2 of 42.4 km** |
+| the other 32 trips together | about 3 km |
+
+**Decided against**, so it is not reopened:
+
+- **No positive `on_path`.** It would report a 1983 map line at 50 m accuracy as
+  a path.
+- **No filtering the graph by evidence quality.** Almost nothing would survive,
+  and a route over a poorly evidenced path is still the only route there is.
+- **No Geonorge file download for FKB.** It carries `målemetode` and
+  `datafangstdato` for FKB too and is the one thing that would change this
+  picture — but it needs an account and a second loading path, which is exactly
+  why the module uses the WFS. Recorded as open, not as work.
+
+What *is* worth carrying is N50's `malemetode` itself, onto the chain, for the
+popup rather than for any derived field. "Digitised from a map" beside a path is
+worth more to a planner than any category computed from it.
 
 ### How much of a route lies inside the park, and how it gets there
 
