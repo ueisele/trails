@@ -510,6 +510,20 @@ series.
 
 The only smoothing is the threshold on the reported ascent, never on the curve.
 
+**Put the ascent in every chain's popup too, not only in the panel.** The
+decisions document calls this "the main thing the build-time sampling buys" and
+no phase had claimed it: phase 2 puts `ascent` on the *edge* and does not touch
+the map, phase 3 rebuilds the popups before any elevation exists, and this phase
+is the first to have both. It belongs here.
+
+**A chain's ascent is not the sum of its edges' ascents.** The reported figure
+ignores gains under 5 m, and that threshold breaks at every edge boundary — with
+234,363 edges averaging 26 m, summing per-edge figures would count a great deal
+of noise that the threshold exists to discard. Compute it the way the panel
+already has to: over the chain's full series, once. Two places asking the same
+question must not get two answers, so derive the popup's figure and the panel's
+from the same call.
+
 Settle where it sits: the legend already occupies the bottom left. Give the panel
 the width and leave the legend its corner above, or move the legend — but pick
 one.
