@@ -360,6 +360,6 @@ class TransformToOSMStep(PipelineStep[tuple[gpd.GeoDataFrame, pd.DataFrame], Pat
             # If osmium failed, log but don't fail the step
             return False
 
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except FileNotFoundError, subprocess.TimeoutExpired:
             # osmium not available or timed out
             return False

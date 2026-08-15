@@ -86,7 +86,7 @@ def is_empty(value: Any) -> bool:
     return pd.isna(value) or value == "" or value is None
 
 
-def standardize_types(df: T) -> T:
+def standardize_types[T: (gpd.GeoDataFrame, pd.DataFrame)](df: T) -> T:
     """Standardize column types according to schema.
 
     Converts columns to their expected types based on COLUMN_SCHEMA.

@@ -36,7 +36,7 @@ def calculate_lengths_meters(gdf: gpd.GeoDataFrame) -> pd.Series:
             if utm_crs:
                 gdf_utm = gdf.to_crs(utm_crs)
                 return gdf_utm.geometry.length
-        except (ValueError, RuntimeError):
+        except ValueError, RuntimeError:
             # Can't estimate UTM (e.g., empty bounds or no CRS)
             pass
 

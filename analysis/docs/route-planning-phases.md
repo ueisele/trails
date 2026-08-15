@@ -294,73 +294,44 @@ cached graph against itself, is in the review notes under *What 1C found*.
 
 ---
 
-## Phase 1D — Settle the Python version
+## Phase 1D — Settle the Python version — **done**
 
-Maintenance again, and separate from 1C for the same reason 1C is separate from a
-feature: one cause per change. Do it **after 1C is accepted** and after `uv.lock`
-and the dependency bounds are committed, so that a moved figure has exactly one
-possible explanation.
+The project stated its Python version in four places and no two agreed. They now
+all read **3.14**: `requires-python = ">=3.14"`, ruff's `target-version = "py314"`,
+mypy's `python_version = "3.14"`, and `.python-version`.
 
-**The problem is not that Python 3.14 exists.** Nothing in phases 2–8 needs it.
-The problem is that this project now states its Python version four times and no
-two agree:
+What decided it was not that 3.14 exists but that raising the dependency bounds
+made the floor unavoidable: `uv lock` refuses `numpy>=2.5.2` against a floor of
+3.11, because numpy 2.5 does not support it. Tested at each candidate, 3.12,
+3.13 and 3.14 all resolve — and 3.14 resolves *better*, collapsing the split the
+mypy workaround was written for:
 
-| where | says |
-|---|---|
-| `requires-python` | `>=3.11` |
-| `[tool.ruff] target-version` | `py311` |
-| `[tool.mypy] python_version` | `3.12` |
-| `.python-version`, and the venv | `3.13` |
+    Updated numpy v2.4.6, v2.5.2 -> v2.5.2
+    Removed overrides v7.7.0
 
-The floor is the interesting one, because the `>=3.11` claim is already being
-paid for. Phase 1C had to move mypy off 3.11 — numpy 2.5 dropped it and writes
-its stubs with PEP 695 `type` statements, which mypy refuses to parse when told
-to target 3.11. The lockfile therefore covers **two different resolutions**,
-numpy 2.4.6 on 3.11 and 2.5.2 from 3.12 on, and only one of them is ever run or
-tested. A supported version nobody exercises is a claim, not a fact.
+So the lockfile now carries one resolution rather than two, one of which was
+never run or tested, and the workaround is deleted rather than documented
+further.
 
-1C's review established that last point rather than assuming it: CI asks for
-`setup-python 3.11`, then runs `uv sync`, which honours `.python-version` and
-gives it 3.13. **The 3.11 floor has never been exercised anywhere**, before this
-phase or after it. And `target-version = "py311"` does not cover the gap — ruff
-catches 3.12-only *syntax*, not a 3.12-only stdlib import like
-`itertools.batched`, which now type-checks and lints clean and would fail on
-3.11 at import time. So the floor is not merely inconsistent; nothing is
-defending it.
+**What it cost**, all of it ruff-driven and mechanical:
 
-Raising the floor removes the workaround rather than documenting it further —
-and note where the value is. Almost all of it is in the **floor**, not in the
-newest version: both the numpy split and the mypy workaround are caused by the
-3.11 end, not by anything above 3.13. **Staying on 3.13 and raising the floor to
-3.13 is a perfectly good outcome of this phase**, and 3.14 is an option that gets
-tested, not the goal. Do not move up merely because a version exists.
+- `Generic[T]` subclasses and functions become PEP 695 type parameters — UP046
+  and UP047, four sites in `pipeline/base.py` and `geonorge_schema.py`. This
+  arrives at any floor above 3.11, since PEP 695 is 3.12.
+- One `except (A, B):` becomes `except A, B:` — PEP 758, and 3.14 only. The one
+  change here that a reader may find worse rather than better; a floor of 3.13
+  would have avoided it and nothing else.
+- B027 surfaced once `PipelineStep` was rewritten: `cleanup` is an empty method
+  on an ABC. It is an optional hook and making it abstract would force every
+  subclass to write an empty override, so it carries a `noqa` with that reason.
 
-This phase does **not** touch the dependency lower bounds — `pandas>=2.2.0` and
-the rest. Those follow 1C, alongside committing `uv.lock`, and are a consequence
-of that upgrade rather than of this one.
-
-- **Find out what is actually possible** before deciding anything:
-  `uv sync -p 3.14`. One command says whether the whole geo stack — numpy,
-  pandas, pyarrow, shapely, geopandas — has wheels for it. Everything else here
-  is speculation until it has run. 3.14.7 is already installed on this machine.
-- **Choose the floor**, and say why. It should be a version somebody runs.
-- **Make all four agree**, and move the venv to the same one.
-- **Delete the mypy comment if the upgrade makes it moot.** A workaround that
-  outlives its cause is worse than none: the next reader takes it for a
-  constraint.
-
-**Done when** the four numbers agree, `command make hooks-run` is green, and the
-graph's figures are unchanged: 11,292 chains — 6,202 FKB · 2,326 N50 roads ·
-1,505 OSM · 958 N50 paths · 245 Turrutebasen · 35 UT.no · 21 ferries — 234,363
-edges, 757 and 747 components, reach 50.8 km = 94 %, 17 quays, Mosjøen 2.17 m,
-and UT.no 31 % marked · FKB 246.3 km marked · 20.2 km with no path recorded. Then
-drive the map in a browser, as 1C did.
-
-A moved figure is the finding. Do not adjust the reference to match.
-
-**Not to be bundled with anything**, including 1C. Two version changes in one
-commit and a broken number has two suspects, which is the whole reason these
-phases are apart.
+**Verified**: `command make hooks-run` green, every graph figure identical on a
+`--rebuild` — 11,292 chains, 234,363 edges, 757 and 747 components, 50.8 km =
+94 %, 17 quays, Mosjøen 2.17 m, UT.no 31 % marked, FKB 246.3 km, 20.2 km with no
+path recorded — and all five browser checks unchanged: 198 markers in
+`.leaflet-marker-pane > *` and none under `.leaflet-marker-icon`, 12,357 paths of
+which exactly one non-interactive, the search above the zoom buttons at 10 px
+against 60, and the wheel taking the map from zoom 9 to 11.
 
 ---
 

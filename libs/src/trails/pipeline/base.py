@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 # Type variables for pipeline step inputs/outputs
 TInput = TypeVar("TInput")
@@ -27,7 +27,7 @@ class StepStatus(Enum):
 
 
 @dataclass
-class StepResult(Generic[TOutput]):
+class StepResult[TOutput]:
     """Result of executing a pipeline step.
 
     Attributes:
@@ -90,7 +90,7 @@ class PipelineContext:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
 
-class PipelineStep(ABC, Generic[TInput, TOutput]):
+class PipelineStep[TInput, TOutput](ABC):
     """Abstract base class for pipeline steps.
 
     Pipeline steps are composable units of work that:
@@ -160,7 +160,7 @@ class PipelineStep(ABC, Generic[TInput, TOutput]):
         """
         return False, None
 
-    def cleanup(self, context: PipelineContext) -> None:
+    def cleanup(self, context: PipelineContext) -> None:  # noqa: B027 — an optional hook, not a contract
         """Clean up resources after execution.
 
         Called after execute() completes, regardless of success/failure.

@@ -8,9 +8,10 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1, 1B and 1C are built and reviewed.** `libs/src/trails/routing/` and
-`analysis/scripts/route_graph.py`, no new dependency. Their output is now the
-reference in the decisions document; phases 1D and 2–8 remain.
+**Phases 1, 1B, 1C and 1D are built and reviewed.** `libs/src/trails/routing/`
+and `analysis/scripts/route_graph.py`. Their output is now the reference in the
+decisions document; phases 2–8 remain. The project runs on **Python 3.14**, and
+`uv.lock` is tracked from 1D onwards.
 
 **Phase 1C** refreshed `uv.lock` and nothing else. Not one figure moved, folium
 did not move either, and what did change is in *What 1C found* below.
@@ -527,97 +528,36 @@ upgrade would have replayed the cache and reported every number unchanged withou
 executing a line of shapely. Rebuild with `--rebuild` and check that the run says
 "Building chains per source", or the comparison proves nothing.
 
-## After phase 1C — two things that must happen, and one to read for
+## After 1C and 1D — done, and what it turned up
 
-Written while 1C was running, from findings that came out of asking why the trap
-list named folium 0.17 when 0.20 was installed. None of it is optional and none
-of it is 1C's own work.
+All of what stood here has happened. Kept, because two of the findings were not
+what they first looked like.
 
-### Read 1C's report for pandas 3.0 first
+**`uv.lock` is tracked**, and `.gitignore` no longer hides it. It had been
+ignored since the first commit under a `# uv` heading beside `.venv/`, which
+reads as a template default rather than a decision. The version committed is the
+one 1C verified, so the first tracked state is a checked one.
 
-The upgrade jumped three major versions in one command — **pandas 2 → 3**,
-mypy 1 → 2, pytest 8 → 9 — and one of them lands directly on ground this project
-has already been cut by.
+**shapely and branca were imported but never declared.** shapely appears in
+thirteen modules — the whole of `routing/`, the exports, the geometry helpers and
+the pipeline's transform step — and worked only because geopandas pulls it in;
+branca carries the two `MacroElement`s the click-highlight and the search are
+built on. Neither was found by looking for missing dependencies. Both turned up
+while listing what the bounds ought to say. **A dependency that arrives
+transitively looks exactly like a declared one, right up to the day it stops
+arriving.**
 
-**pandas 3.0 makes the string dtype the default**, which means `pd.NA` where an
-object column used to hold `None`. That is exactly the value that survived
-phase 1's missing-value check, reached a chain as the literal text `<NA>`, made
-every unnamed FKB line the same way as every other, and produced 2,713 chains
-that are not there. Phase 1B fixed it in `chains.py::_missing` for *one* nullable
-column. Under pandas 3.0 the same mechanism applies to **every text column from
-every source**, so that fix now carries far more load than it was written for.
+**Raising the bounds forced the Python floor**, which is how 1D stopped being a
+tidiness exercise and became unavoidable: `uv lock` refuses `numpy>=2.5.2`
+against `requires-python = ">=3.11"`, because numpy 2.5 does not support it. The
+floor is now 3.14 and all four version statements agree. The phase records what
+that cost.
 
-The indicator is the same one that caught it the first time: **the per-source
-chain counts.** 6,202 FKB · 2,326 N50 roads · 1,505 OSM · 958 N50 paths · 245
-Turrutebasen · 35 UT.no · 21 ferries. If one of those moved, the cause this time
-is the library rather than new code, and it is the finding — not something to
-adjust the reference to.
-
-### Commit `uv.lock`
-
-It is gitignored at `.gitignore:32`, from the repository's first commit, under a
-`# uv` heading beside `.venv/` — a template default rather than a decision. It
-should be tracked, and the reasons here are stronger than the usual ones:
-
-- **Phase 1C is unverifiable without it.** Its whole premise is *compare before
-  and after; any movement is the upgrade*. With no committed lockfile there is no
-  "before" anyone but the running process can see. The phases document already
-  requires that a dependency "never arrive unremarked in the lockfile", which an
-  ignored file cannot satisfy.
-- Three major versions just moved at once. When something breaks in a fortnight,
-  *which version was it before* has no answer without the history.
-- The trap list is version-sensitive by its nature — `class_name`, the accepted
-  `Icon` colours, the overwritten marker class are all folium behaviour that has
-  changed under this project.
-- This is an application, not a library: `packages = ["libs/src/trails",
-  "pipeline/src/graphhopper_pipeline"]`, nothing published, everything run
-  locally. uv's own guidance for that case is to commit it, and the pipeline's
-  reproducibility depends on it.
-
-**Do it after 1C confirms the numbers**, not before. Committed now it records a
-state nobody has validated; committed after, the first tracked lockfile is a
-verified one.
-
-### Bump the bounds in `pyproject.toml`
-
-They have drifted far enough to be wrong rather than merely stale, and with the
-lockfile ignored they are currently the *only* versioned statement of what this
-code expects:
-
-| declared | resolved |
-|---|---|
-| `pandas>=2.2.0` | **3.0.5** |
-| `numpy>=1.26.0` | 2.5.2 |
-| `pyarrow>=21.0.0` | 25.0.1 |
-| `geopandas>=1.0.0` | 1.1.4 |
-| `folium>=0.17.0` | 0.20.0 |
-| `matplotlib>=3.8.0` | 3.11.1 |
-| `pandas-stubs>=2.3.2.250827` | 3.0.5.260730 |
-
-**`pandas-stubs` is not optional to include, and 1C's review found why.** The two
-`# type: ignore` comments 1C added only fire against pandas-stubs 3.x. With
-`warn_unused_ignores = true`, any resolution older than 3.0 — which the declared
-bound still permits — fails `make type` with two *unused ignore* errors rather
-than passing. A floor that the ignores depend on has to state it.
-
-Declaring `pandas>=2.2.0` while running 3.0 asserts a compatibility nobody has
-tested and which the `pd.NA` behaviour above makes unlikely. Write the new bounds
-from what 1C actually verified, and decide then whether to add upper bounds — a
-ceiling would be a defensible claim immediately after a major jump.
-
-The `folium>=0.17.0` line is also where this document's "the trap list was
-written against folium 0.17" came from. That is a **lower bound, not an observed
-version**; 0.20 is what is installed and 0.20 is what the traps were seen under
-unless 1C establishes otherwise.
-
-### One correction to how phases 1 and 1B were verified
-
-"No new dependency" was checked with `git diff --stat -- pyproject.toml uv.lock`
-and reported as empty both times. For `uv.lock` that check was **vacuous** — an
-untracked file never shows a diff. It rested entirely on `pyproject.toml`, which
-does catch a direct dependency, since `uv add` writes there too; it never caught
-a transitive one. Both reports stand; half the stated reasoning did not. Once the
-lockfile is tracked the check means what it was supposed to mean.
+**And the `>=3.11` claim had been charging for itself invisibly.** The lockfile
+carried two resolutions — numpy 2.4.6 below 3.12, 2.5.2 above — and only one was
+ever run or tested. Moving to 3.14 collapsed them into one and removed a package
+outright. A supported version nobody exercises is not free; it is a second build
+that fails only for somebody else.
 
 ## Decisions taken not to do things
 
