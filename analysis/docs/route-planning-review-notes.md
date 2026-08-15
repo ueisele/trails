@@ -415,10 +415,23 @@ That question found this, and it found the popup ascent in phase 4.
 
 Review it on the round trip, not the size: decode the whole graph in the browser
 and compare against the source coordinates. A decoder correct for 99.9 % of runs
-has a bug in the long ones. Then the budget, which is tighter than it reads —
-about 4.3 MB against an allowance of 5, on a page already carrying 27 MB. If it
-does not fit, the wrong answer is a coarser quantisation: 1e-5 saves 0.7 MB and
-costs 1.11 m, worse than the best source in the set.
+has a bug in the long ones.
+
+Then the budget, which was measured after the phase was written and turned up two
+errors in it. The geometry is **cheaper** than the scaling suggested — 2.35 MB
+against 3.30, because gzip does better on more data than a linear scale assumes.
+And the edge table, which the draft listed as a deliverable and left out of the
+budget, is **1.98 MB as JSON** and puts the total at 6.5 MB, over. Sorted by
+`from_node` with both columns delta-encoded it is **0.27 MB**. That seven-fold
+difference is the whole margin: 4.8 MB against an allowance of 5.
+
+So the check is: was the table encoded or serialised, and did the sort scramble
+what ties an edge to its chain? A scrambled graph is not obviously broken.
+`cost` should not be in the payload at all — it is length times a source factor
+and the browser has both.
+
+**Budgeting a payload by scaling another payload does not work.** That is what
+produced both errors here, in a document that insists elsewhere on measuring.
 
 **Phase 4, the profile.** Check it is hand-drawn SVG and nothing is fetched from
 a CDN — a CDN script fails silently on `file://`. Check the map still zooms while

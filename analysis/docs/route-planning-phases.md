@@ -575,20 +575,36 @@ quantisation. Do it over the whole graph, not a sample — a decoder that is
 correct for 99.9 % of runs is a decoder with a bug in the long ones.
 
 **Done when** the page opens and behaves exactly as phase 3 left it — 198
-markers, one non-interactive path, search at 10 px, wheel 9 → 11 — and:
+markers, one non-interactive path, search at 10 px, wheel 9 → 11 — and the
+payload comes in under budget. These were encoded and measured rather than
+scaled, because an earlier draft of this phase scaled them and got two things
+wrong:
 
-| | budget |
-|---|---|
-| geometry, 948,465 edge vertices | ~3.3 MB, scaled from the 1.8 MB measured at 523,857 |
-| elevations, about 1.2 million samples | ~1 MB |
-| the graph's whole contribution | **under 5 MB** |
-| decode on load | report it; it is a number nobody has yet |
+| | measured |
+|---|---:|
+| geometry, 948,465 vertices, varint + gzip + base64 | **2.35 MB** |
+| edge table, sorted by `from_node`, both columns delta-encoded | **0.27 MB** |
+| source per edge, one byte | under 0.01 MB |
+| elevations, ~1.41 million samples at 0.1 m | ~2.2 MB, *estimated* — phase 2 has not run |
+| **total** | **≈ 4.8 MB** against an allowance of 5 |
 
-That budget is tighter than it looks: 4.3 MB of a 5 MB allowance, on a page
-already carrying 27 MB. **Measure before assuming it fits, and if it does not,
-report it rather than quietly quantising coarser** — 1e-5 saves 0.7 MB and costs
-1.11 m, which is worse than the best source in the set and would undo what phase
-1 was careful about.
+**The edge table has to be encoded, not serialised.** An earlier draft listed it
+without budgeting it, and as JSON it is 1.98 MB, which puts the total at 6.5 MB
+and over. Sorted by `from_node` with both columns delta-encoded it is 0.27 MB —
+a seven-fold difference, and the single most consequential decision in this
+phase. Sorting changes the edge order, so whatever ties an edge to its chain and
+its geometry has to survive the reordering; get that wrong and the graph is
+quietly scrambled rather than obviously broken.
+
+**Do not ship `cost`.** It is `length × source factor`, the length is in the
+geometry the browser already has, and the factors are six numbers. The exception
+is the 58 ferry edges, whose cost is flat.
+
+It fits, but not with room: 4.8 MB of 5, and the map itself is 24.2 MB, so this
+is a fifth again on the page. **If it does not fit, report it rather than
+quietly quantising coarser** — 1e-5 saves 0.7 MB and costs 1.11 m, which is
+worse than the best source in the set and would undo what phase 1 was careful
+about. And measure the decode: it is a number nobody has yet.
 
 ---
 
