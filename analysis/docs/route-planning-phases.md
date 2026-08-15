@@ -408,10 +408,33 @@ The UT.no popups are the richest on the map and the only ones carrying links.
 Losing them would make this phase a regression dressed as a refactor.
 
 **And one that is not a popup field at all: `is_dnt`.** It splits Turrutebasen
-into *two* of the seven line layers — "Marked routes" and "DNT routes". Without
-it one layer cannot be built. It is derived in `lomsdal_visten.py` today from
-`maintenance_responsible`, which the chains do carry, so it can be derived again
-— but it has to be, deliberately.
+into *two* of the seven line layers — "Marked routes" and "DNT routes" — so
+without it one layer cannot be built.
+
+It is derivable: `maintenance_responsible` is on all 245 Turrutebasen chains,
+100 % filled, and the test is the same `DNT|Turistforening` the script uses
+today. But chaining creates a case that does not exist now. **113 of the 245
+chains carry more than one maintainer**, because a chain runs across segments
+different clubs look after, and on **three of them, 9.4 km, one is DNT and the
+other is not**:
+
+    DNT | Sør-Helgeland / UL Fremskritt
+    DNT | Sør-Helgeland / Vevelstad Idrettslag
+    DNT | Brurskanken Turlag / Vefsn kommune og Marsøras venner
+
+Today each segment sits in exactly one of the two layers. A chain has to go
+wholly into one — and that is a choice, not a derivation. The rule used at the
+park boundary, *the layer holding the greater part of its length*, cannot be
+applied here: by the time the question is asked, `_combine` has already merged
+away which maintainer held which stretch.
+
+**Decided: keep `.any()`, as today.** A chain touching DNT anywhere is DNT, so
+those three go to the DNT layer. It is wrong in the direction that draws a red
+DNT line over 9.4 km of 235 that DNT does not look after — acceptable because the
+layer is called "DNT routes" rather than "maintained solely by DNT". The exact
+alternative is to carry the flag on the *pieces*, before chaining, and weight it
+by length per chain; that is more faithful and means the chain builder has to
+carry something it otherwise would not. Not worth it for 4 % of one source.
 
 ### Three decisions this phase has to make
 
