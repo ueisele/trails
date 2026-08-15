@@ -932,12 +932,25 @@ in the extensions, and loading ignores the generated ones. The rule is general:
 any marker the map adds by itself, at a crossing, a hut or anywhere else, falls
 under it.
 
-Two things are deliberately not claimed here. The rules inside a Norwegian
-national park differ from outside, but *how* they differ is in that park's
-verneforskrift and has not been read — the figure is offered as a fact about the
-route, not as advice. And Naturbase holds other protected areas besides national
-parks, some with stricter rules; whether any lie within this zone has never been
-checked, and the map draws only the park.
+**It is not only the park.** Naturbase was queried for the rest, and the zone
+holds **26 nature reserves** and one landscape protection area. None of the
+reserves touches the park itself, so a route that stays inside is unaffected —
+but every approach crosses the zone, where one of the 26 may lie. Strauman
+landskapsvernområde borders the park directly.
+
+So report **protected areas**, not the national park alone: *38 km, of which 22
+in Lomsdal-Visten nasjonalpark and 3 in Strauman landskapsvernområde*. Reserves
+carry their own, sometimes stricter, rules, and a figure that counts only the
+park would be silent about them.
+
+The work is small. `naturbase.Source` searches by name today and needs a spatial
+query — the same endpoint with a geometry parameter instead of a `where` clause,
+and the layers are already enumerated. The samples then carry which area they
+fell in rather than a yes or no.
+
+One thing is deliberately not claimed: the rules inside a Norwegian protected
+area differ from outside, but *how* they differ is in each area's verneforskrift
+and none has been read. The figure is a fact about the route, not advice.
 
 ### An exported file names its sources, and cannot name one licence
 

@@ -319,8 +319,11 @@ that is phase 7.
 - The sources list now spans several: report the length contributed by each and
   the licence that comes with it, so *3.2 km OSM (ODbL) · 1.1 km UT.no (CC BY-NC)*
   is visible before the download rather than a blanket warning.
-- **Say how much of the route lies inside the national park** — *38 km, of which
-  22 inside*. The boundary has been drawn all along and the plan made no use of
+- **Say which protected areas the route touches and how far** — *38 km, of which
+  22 in the national park and 3 in Strauman landskapsvernområde*. Not the park
+  alone: the zone holds 26 nature reserves besides, none touching the park but
+  every approach crossing the ground they sit on. `naturbase.Source` needs a
+  spatial query for this; it searches by name today. The boundary has been drawn all along and the plan made no use of
   it, yet the rules inside differ from those outside. Decide it at the 5 m
   samples, as the decisions document sets out, so edges carry it from build time
   and free legs get it from the samples they fetch anyway.

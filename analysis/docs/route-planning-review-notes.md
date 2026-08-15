@@ -119,6 +119,50 @@ across two builds — rebuild and diff them. Check a road that branches, such as
 Tveråvegen, selects one arm and not eight. Check a ring-shaped chain does not
 crash whatever looks for endpoints.
 
+**Phase 1, simplification before noding.** Phase 1 reported that Turrutebasen
+braids against FKB — 24,478 edges for 235 km, one every ten metres — and
+introduced a `node_simplify_m` to deal with it. Three things to check, in order:
+
+1. **What ends up on the edge.** The specification allows simplifying *what goes
+   into the noding* and requires the **full geometry to remain on the edge**. If
+   the stored geometry has been thinned, that is a finding: accuracy was the one
+   thing stated as non-negotiable, and this is exactly where it would quietly go.
+   Compare an edge's vertex count against its source features.
+2. **Whether it was needed at all.** 24,478 extra edges take the graph from about
+   130,000 to 155,000, which a Dijkstra does not notice. The drawn objects are
+   untouched, since Turrutebasen keeps its routes as units. The only real symptom
+   is a route able to hop between Turrutebasen and FKB every ten metres — and the
+   source weights, 1.02 against 1.05, already hold it on the better one. Ask what
+   the measured cost was before accepting a mechanism against it.
+3. **Whether it treats the cause.** The braiding produces crossings, not
+   vertices, and none of those crossings is a junction: both lines carry on the
+   same way. Filtering crossings by angle — the stroke rule applied to noding
+   rather than chaining — addresses that directly, where simplification only
+   removes the wiggles that happen to cross. If `node_simplify_m` survives
+   review, it should be because it was measured to work, not because it was the
+   first thing to hand.
+
+The same question applies to UT.no, which has the same problem for the same
+reason and where the specification already sanctions simplifying the noding
+input.
+
+**The order to do this in: build without it, measure, and reach for it only if a
+budget is actually exceeded.** Simplification is not a free optimisation — fewer
+crossings means different nodes, which means different chains and possibly
+different connectivity. It is an intervention, and it needs its own before-and-
+after on reach and chain counts, not just on the edge count it was aimed at.
+
+Budgets worth stating, so "too large" is testable:
+
+- the graph's whole contribution to the page stays under about 5 MB, against the
+  1.8 MB of geometry already measured
+- noding stays within single-digit minutes
+
+Neither looks threatened by 25,000 extra edges: a Dijkstra does not notice
+155,000, the edge records add a few hundred kilobytes, and the geometry is
+unchanged because it is the same vertices either way. If the measurement says
+otherwise, that is worth knowing on its own.
+
 **Phase 1B, what the graph carries.** Three things, each cheap to miss: is
 Turrutebasen in the graph at all; do edges carry the attributes phase 6 will
 report on, above all whether a stretch is waymarked; does the cache key cover the
@@ -225,13 +269,12 @@ All of what stood here has since been settled, and is recorded where it belongs:
 - Snapping a waypoint to a hut or a quay, and splitting a route into days, are
   both after phase 8. Neither is blocked by anything earlier.
 
-One thing is knowingly unchecked: **Naturbase holds protected areas besides
-national parks** — reserves, landscape protection areas — and whether any lie
-inside this zone has never been looked at. The map draws only the park, and the
-park share reported for a route counts only the park. If others are there, the
-honest figure is closer to "crosses three protected areas" than to one number.
+That has since been checked and answered: the zone holds 26 nature reserves and
+one landscape protection area. None of the reserves touches the park, one —
+Strauman — borders it. Phase 6 therefore reports protected areas rather than the
+park alone, and `naturbase.Source` needs a spatial query to find them.
 
-Beyond that, nothing is currently known to be open. That has been true twice
+Nothing is currently known to be open. That has been true twice
 before and was wrong both times — see the question above, and ask it again.
 
 ## Decisions taken not to do things
