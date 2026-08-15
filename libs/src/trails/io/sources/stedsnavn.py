@@ -42,7 +42,26 @@ NAME_TABLE = "stedsnavn"
 SPELLING_TABLE = "skrivemate"
 
 #: Terrain feature types worth labelling on a hiking map.
-TERRAIN_NAME_TYPES = ("dal", "skar", "fjell", "fjellområde", "vann", "tjern", "seter", "isbre", "foss", "elv", "li", "myr")
+TERRAIN_NAME_TYPES = (
+    "dal",
+    "skar",
+    "fjell",
+    "fjellområde",
+    "vann",
+    "tjern",
+    "seter",
+    "isbre",
+    "foss",
+    "elv",
+    "li",
+    "myr",
+    # Slopes and sandy flats. Both are landmarks a walker uses and the register
+    # holds few of them: 14 and 32 within 2 km of this park, against 725 terrain
+    # names already drawn there. Deliberately not `utmark`, which is a land-use
+    # category for a whole tract rather than a feature with a position.
+    "bakke",
+    "mo",
+)
 
 #: Places people live in, from a town down to a cluster of houses.
 SETTLEMENT_NAME_TYPES = ("by", "tettbebyggelse", "grend", "boligfelt")

@@ -91,7 +91,9 @@ TERRAIN_NAME_COLORS = {
     "fjell": "#263238",  # rock and slopes, near-black slate
     "fjellområde": "#263238",
     "li": "#263238",
+    "bakke": "#263238",
     "myr": "#2e7d32",  # marsh, dark green
+    "mo": "#8d6e63",  # sandy flats, pale brown
     "seter": "#7b1fa2",  # summer farms are cultural, not terrain
 }
 
@@ -114,7 +116,9 @@ TERRAIN_NAME_SYMBOLS = {
     "fjell": "▲",  # a peak
     "fjellområde": "▲",
     "li": "◢",  # a slope
+    "bakke": "◢",
     "myr": "≋",  # wet ground hatching
+    "mo": "▭",  # flat open ground
     "seter": "⌂",  # a hut
 }
 
@@ -126,8 +130,9 @@ TERRAIN_NAME_LEGEND = (
     ("running water", {"elv", "bekk", "foss"}),
     ("lakes and ice", {"vann", "tjern", "isbre"}),
     ("valleys and passes", {"dal", "skar"}),
-    ("mountains and slopes", {"fjell", "fjellområde", "li"}),
+    ("mountains and slopes", {"fjell", "fjellområde", "li", "bakke"}),
     ("marsh", {"myr"}),
+    ("sandy flats", {"mo"}),
     ("summer farms", {"seter"}),
 )
 
