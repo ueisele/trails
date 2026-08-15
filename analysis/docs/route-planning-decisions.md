@@ -190,9 +190,9 @@ Measured over that zone, plain union with 25 m bridging:
 | | measured before phase 1 | **phase 1, built** |
 |---|---:|---:|
 | input | 23,041 lines, 5,523 km | 23,876 lines, 6,001 km |
-| graph | 129,616 edges, 72,113 nodes | **234,363 edges, 116,970 nodes** |
-| vertices | 683,226 | **948,475** |
-| chains | about 10,500 | **11,292** |
+| graph | 129,616 edges, 72,113 nodes | **234,358 edges, 116,967 nodes** |
+| vertices | 683,226 | **948,465** |
+| chains | about 10,500 | **11,290** |
 | components, land only | 759 | **757** |
 | largest component | 4,350 km = 79 % | **4,637 km = 79 %** |
 | its reach across the park | 50.8 km = 94 % | **50.8 km = 94 %** of 53.9 km |
@@ -230,7 +230,7 @@ where an earlier estimate in this document went wrong. Written properly it is
 not:
 
 > Phase 1, built, carries more: **541,062 vertices across the chains** and
-> 948,475 across the edges, the difference being the vertex each cut duplicates.
+> 948,465 across the edges, the difference being the vertex each cut duplicates.
 > Scaling the encoded figures below by that gives 1.9 MB for what is drawn and
 > 3.3 MB for the routing graph — both inside the 5 MB this was budgeted at, and
 > the reason phase 1 nodes the published sources at their own resolution rather
@@ -344,7 +344,7 @@ again.
 That distinction matters because of how the sampling works. Sample points are
 interpolated at a fixed 5 m step along each edge, so if one vertex of an edge
 changes, every sample on that edge shifts and misses a coordinate-keyed cache.
-That is tolerable only because edges are short — 6,049 km across 234,363 edges
+That is tolerable only because edges are short — 6,049 km across 234,358 edges
 is a 26 m average, about five samples each. A changed edge costs five lookups,
 not a region.
 
@@ -431,7 +431,7 @@ coordinates once they are rounded to the centimetre, which is 28 % fewer than th
 
 Store **two** ascent figures, and do not confuse them:
 
-- **Per edge** — 234,363 numbers, nothing — for elevation-aware routing, where
+- **Per edge** — 234,358 numbers, nothing — for elevation-aware routing, where
   per-edge is exactly the granularity a weight needs.
 - **Per chain**, computed over the chain's full series, for anything displayed.
 
@@ -640,7 +640,7 @@ said it did. Its published unit is the named *route*, and the register draws tha
 as 770 separate segments — keeping its features whole would give 770 scraps, the
 opposite of the intent. So it goes through the rule above, where the identity
 step reassembles each route across its segments and ends a chain only where the
-route genuinely divides: 770 segments become 245 chains.
+route genuinely divides: 770 segments become 244 chains.
 
 The invariant the whole rule exists to protect: **a selectable unit is linear.**
 Anything that would produce a branching selection is a bug, because it has no
@@ -781,7 +781,7 @@ But the drawing unit and the routing unit are **not the same**, and confusing
 them wrecks both:
 
 - **Routing** uses the fully merged graph — every crossing between every source
-  is a node. 234,363 edges at a 26 m average.
+  is a node. 234,358 edges at a 26 m average.
 - **Drawing and selecting** uses units decided *within* each source. A chain
   broken wherever some unrelated parallel dataset happens to cross it is a 43 m
   scrap, useless as something to click, and there would be ten times as many of
@@ -793,12 +793,12 @@ Measured, chains computed within each source:
 |---|---:|---:|---:|---:|
 | UT.no | 35 | 15,469 | 451 | **35, kept whole** |
 | Turrutebasen | 770 | 251 | 121 | **245** |
-| FKB | 14,045 | 9,096 | 5,952 | **6,202** |
+| FKB | 14,045 | 9,096 | 5,952 | **6,201** |
 | N50 paths | 1,715 | 1,365 | 958 | **958** |
 | N50 roads | 5,272 | 3,908 | 1,723 | **2,326** |
 | OSM | 1,974 | 2,480 | 1,504 | **1,505** |
 | Ferries | 65 | 47 | 21 | **21** |
-| **total** | **23,876** | 32,616 | 10,730 | **11,292** |
+| **total** | **23,876** | 32,616 | 10,730 | **11,290** |
 
 The third column is what this document originally measured and estimated at
 "about 10,500"; phase 1 reproduces it at 10,730. The fourth is what the rule

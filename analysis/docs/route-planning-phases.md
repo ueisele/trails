@@ -95,7 +95,7 @@ question. It does not block phase 2.
 
 ### Still to do
 
-**Turrutebasen carries nothing but its name.** Built, its 245 chains hold
+**Turrutebasen carries nothing but its name.** Built, its 244 chains hold
 `chain_id`, `source`, `kind`, `identity` and `length_m` and no attribute at all,
 because `route_graph.py` gives it `attributes=()`. It is the one source that
 *describes* its routes rather than merely drawing them, so this is where phase
@@ -206,7 +206,7 @@ more to a planner than any category computed from it.
   the build's fingerprint, which is what stops a graph answering for a source set
   it was not built from. Two minutes. Not a fault.
 - **No figure from phase 1 may move.** Attributes ride along the chains, they do
-  not decide them; only `identity_field` does that. So 11,292 chains, 234,363
+  not decide them; only `identity_field` does that. So 11,290 chains, 234,358
   edges, 757 and 747 components, 50.8 km = 94 % reach, 17 quays and Mosjøen at
   2.17 m all have to come out exactly as before. If any of them shifts, something
   touched the geometry, and that is the finding — not the new column.
@@ -235,7 +235,7 @@ and a second loading path. It is recorded as open, not as work.
 
 - ~~Carry the attributes onto chains **and edges**~~ — **chains only, with one
   exception.** An edge names its chain, so a route reads any attribute through
-  `chain_id` in one lookup; copying five columns onto 234,363 edges buys nothing.
+  `chain_id` in one lookup; copying five columns onto 234,358 edges buys nothing.
   Bridge edges name no chain and correctly carry no attribute — nobody drew them.
   The exceptions are `waymarked` and `no_path_recorded` above, both summed in
   kilometres and therefore needing the finer grain.
@@ -246,8 +246,8 @@ and a second loading path. It is recorded as open, not as work.
   and the route names from Turrutebasen, and neither shows up in the row count or
   length of the source it lands in.
 - ~~Turrutebasen belongs in the graph~~ — **it is in**, at the specified 1.02,
-  contributing 235 km as 245 chains and 25,965 edges. The edge count came out at
-  234,363 against the documented 129,616, exactly as predicted, and the reach did
+  contributing 235 km as 244 chains and 25,965 edges. The edge count came out at
+  234,358 against the documented 129,616, exactly as predicted, and the reach did
   not move: 50.8 km = 94 %. The decisions document now carries phase 1's output
   as its reference.
 - ~~Refuse to build a partial graph~~ — **satisfied by construction.**
@@ -326,7 +326,7 @@ further.
   subclass to write an empty override, so it carries a `noqa` with that reason.
 
 **Verified**: `command make hooks-run` green, every graph figure identical on a
-`--rebuild` — 11,292 chains, 234,363 edges, 757 and 747 components, 50.8 km =
+`--rebuild` — 11,290 chains, 234,358 edges, 757 and 747 components, 50.8 km =
 94 %, 17 quays, Mosjøen 2.17 m, UT.no 31 % marked, FKB 246.3 km, 20.2 km with no
 path recorded — and all five browser checks unchanged: 198 markers in
 `.leaflet-marker-pane > *` and none under `.leaflet-marker-icon`, 12,357 paths of
@@ -440,7 +440,7 @@ Losing them would make this phase a regression dressed as a refactor.
 into *two* of the seven line layers — "Marked routes" and "DNT routes" — so
 without it one layer cannot be built.
 
-It is derivable: `maintenance_responsible` is on all 245 Turrutebasen chains,
+It is derivable: `maintenance_responsible` is on all 244 Turrutebasen chains,
 100 % filled, and the test is the same `DNT|Turistforening` the script uses
 today. But chaining creates a case that does not exist now. **113 of the 245
 chains carry more than one maintainer**, because a chain runs across segments
@@ -508,8 +508,8 @@ source already was, and every figure in the decisions document assumes it.
 
 **Done when** the map looks and behaves as it does today, clicking a road that
 branches selects only the arm under the cursor, and the object count has roughly
-halved: **11,292** chains against today's 23,876. Built per source: FKB 6,202 ·
-N50 roads 2,326 · OSM 1,505 · N50 paths 958 · Turrutebasen 245 · UT.no 35 whole
+halved: **11,290** chains against today's 23,876. Built per source: FKB 6,201 ·
+N50 roads 2,326 · OSM 1,505 · N50 paths 958 · Turrutebasen 244 · UT.no 35 whole
 trips · ferries 21.
 
 "Behaves as it does today" is measured, not remembered. Phases 1C and 1D both
@@ -579,7 +579,7 @@ markers, one non-interactive path, search at 10 px, wheel 9 → 11 — and:
 
 | | budget |
 |---|---|
-| geometry, 948,475 edge vertices | ~3.3 MB, scaled from the 1.8 MB measured at 523,857 |
+| geometry, 948,465 edge vertices | ~3.3 MB, scaled from the 1.8 MB measured at 523,857 |
 | elevations, about 1.2 million samples | ~1 MB |
 | the graph's whole contribution | **under 5 MB** |
 | decode on load | report it; it is a number nobody has yet |
@@ -616,7 +616,7 @@ is the first to have both. It belongs here.
 
 **A chain's ascent is not the sum of its edges' ascents.** The reported figure
 ignores gains under 5 m, and that threshold breaks at every edge boundary — with
-234,363 edges averaging 26 m, summing per-edge figures would count a great deal
+234,358 edges averaging 26 m, summing per-edge figures would count a great deal
 of noise that the threshold exists to discard. Compute it the way the panel
 already has to: over the chain's full series, once. Two places asking the same
 question must not get two answers, so derive the popup's figure and the panel's

@@ -175,7 +175,7 @@ def chains_of(
     """
     if source.keep_whole:
         lines = _prepare(source, clip, metric_crs)
-        identities = _identity_values(lines, source.identity_field)
+        identities = _identity_values(lines, source.identity_field, source.placeholder_identities)
         coordinates: list[list[Coordinate]] = [list(geometry.coords) for geometry in lines.geometry]
         return _assemble(source, coordinates, [[row] for row in range(len(lines))], lines, identities, tolerance_m)
 
@@ -213,7 +213,7 @@ def build_chains(
         Chains described by :data:`CHAIN_COLUMNS` and the source's attributes
     """
     geometries = lines_of(pieces.geometry)
-    identities = _identity_values(pieces, source.identity_field)
+    identities = _identity_values(pieces, source.identity_field, source.placeholder_identities)
     if not geometries:
         return _assemble(source, [], [], pieces, identities, tolerance_m)
 
@@ -260,12 +260,21 @@ def _missing(value: Any) -> bool:
     return bool(missing) if isinstance(missing, bool | np.bool_) else False
 
 
-def _identity_values(frame: gpd.GeoDataFrame, identity_field: str | None) -> list[frozenset[str]]:
+def _identity_values(
+    frame: gpd.GeoDataFrame,
+    identity_field: str | None,
+    placeholders: frozenset[str] = frozenset(),
+) -> list[frozenset[str]]:
     """Read each row's identities.
 
     Args:
         frame: Pieces or lines
         identity_field: Column holding them, if the source has one
+        placeholders: What the source writes where it has no identity, dropped
+            rather than read as a name. A register that writes ``Ukjent`` into a
+            name column is saying it has none, and taking it at face value makes
+            every unnamed way the same way as every other — which the rule then
+            carries through junctions, gluing two ways into one chain.
 
     Returns:
         One set per row; empty where the source names nothing
@@ -279,7 +288,7 @@ def _identity_values(frame: gpd.GeoDataFrame, identity_field: str | None) -> lis
             values.append(frozenset())
             continue
         parts = {part.strip() for part in str(value).split(IDENTITY_SEPARATOR)}
-        values.append(frozenset(part for part in parts if part))
+        values.append(frozenset(part for part in parts if part and part not in placeholders))
     return values
 
 

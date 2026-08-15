@@ -182,6 +182,32 @@ class TestIdentity:
         assert frame["road"].isna().sum() == 2, "the fixture has to hold the value it is about"
         assert sorted(chains_of(named)["length_m"]) == [50.0, 100.0]
 
+    def test_a_placeholder_identity_does_not_glue_two_ways(self):
+        """Test that a register's word for "no name" is not read as a name.
+
+        Turrutebasen writes ``Ukjent`` where it has no name. Taken at face
+        value every unnamed way becomes the same way as every other, and the
+        identity rule then carries a chain straight through a junction that two
+        unrelated ways merely share.
+        """
+        # A Y with its arms 120 degrees apart, so every pair deflects by 60 and
+        # the angle rule refuses all of them. Only a shared identity can carry a
+        # chain through here, which is what makes the test about identity.
+        arms = [
+            LineString([(0, 0), (100.0, 0.0)]),
+            LineString([(0, 0), (-50.0, 86.6)]),
+            LineString([(0, 0), (-50.0, -86.6)]),
+        ]
+        frame = gpd.GeoDataFrame({"name": ["Ukjent", "Ukjent", None]}, geometry=arms, crs="EPSG:25833")
+
+        glued = chains_of(NetworkSource("S", frame, identity_field="name"))
+        apart = chains_of(NetworkSource("S", frame, identity_field="name", placeholder_identities=frozenset({"Ukjent"})))
+
+        # Read as a name, "unknown" matches "unknown" and the chain runs on
+        # through a 63 degree turn the angle rule would have refused.
+        assert len(glued) == 2
+        assert len(apart) == 3
+
     def test_several_identities_in_one_value_are_read_apart(self):
         """Test a segment belonging to two routes, as the layers write them."""
         shared = source(

@@ -130,16 +130,13 @@ N50_MARKED, N50_UNMARKED = "JA", "NEI"
 #: every other unnamed route. Three Turrutebasen segments say it here, and it
 #: reaches nineteen FKB paths through the route-name join.
 #:
-#: **It is not yet excluded from the identity itself, and that is a known
-#: defect.** Measured, dropping it moves Turrutebasen from 245 chains to 244 and
-#: FKB from 6,202 to 6,201 — two chains that the rule carried through a junction
-#: on the strength of the word "unknown", and which are therefore two ways glued
-#: at a crossing rather than one way. It is left for a change of its own because
-#: it moves a chain count that phase 3's acceptance is stated against, and the
-#: whole value of that acceptance is that a moved figure has one cause. What is
-#: excluded here is the *derived* figure — see
-#: :func:`trails.routing.whole_way_length` — so nothing new asserts a way that
-#: does not exist while the identity waits.
+#: Excluded from the identity itself as well as from the derived figures, which
+#: is what moved Turrutebasen from 245 chains to 244 and FKB from 6,202 to
+#: 6,201: two chains the rule had carried through a junction on the strength of
+#: the word "unknown", and which are two ways glued at a crossing rather than
+#: one way. That correction waited for a change of its own, because it moves a
+#: chain count several phases were accepted against and the value of such an
+#: acceptance is that a moved figure has exactly one cause.
 PLACEHOLDER_IDENTITIES = frozenset({"Ukjent"})
 
 #: The sources whose lines are a record that something is drawn on this ground.
@@ -434,10 +431,18 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
             marked,
             cost_factor=COST_FACTORS[TURRUTEBASEN],
             identity_field="trail_name",
+            placeholder_identities=PLACEHOLDER_IDENTITIES,
             attributes=TRAIL_ATTRIBUTES,
             node_simplify_m=params.route_noding_m,
         ),
-        NetworkSource(FKB, fkb, cost_factor=COST_FACTORS[FKB], identity_field="route_name", attributes=("typeveg",)),
+        NetworkSource(
+            FKB,
+            fkb,
+            cost_factor=COST_FACTORS[FKB],
+            identity_field="route_name",
+            attributes=("typeveg",),
+            placeholder_identities=PLACEHOLDER_IDENTITIES,
+        ),
         NetworkSource(
             N50_PATHS,
             paths,

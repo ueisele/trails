@@ -42,6 +42,13 @@ class NetworkSource:
         keep_whole: The source publishes whole routes, and a route is already
             linear. Its features become chains untouched, rather than being cut
             at every crossing and chained back together.
+        placeholder_identities: Values the source writes in its identity column
+            when it has *no* identity — ``Ukjent`` and its kind. Read as a name
+            they are worse than nothing: every unnamed way becomes the same way
+            as every other unnamed way, and the rule then carries a chain
+            through a junction on the strength of the word "unknown". Which
+            words those are is the source's business, not this module's, so they
+            arrive here rather than being guessed.
         node_simplify_m: Tolerance for a simplified copy used **only** when
             noding this source against the others. Raw GPS density otherwise
             shatters every line such a track runs along. The chain and the edges
@@ -55,4 +62,5 @@ class NetworkSource:
     identity_field: str | None = None
     attributes: tuple[str, ...] = field(default=())
     keep_whole: bool = False
+    placeholder_identities: frozenset[str] = frozenset()
     node_simplify_m: float = 0.0

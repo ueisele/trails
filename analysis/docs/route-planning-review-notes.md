@@ -46,7 +46,7 @@ What the review changed, both measured rather than argued:
   the table gives 1.02 and phase 1B spells out the reasoning. Corrected.
 - **`--route-noding-m` defaulted to 8 m and is now 0.** Built both ways: chains,
   components, reach, quays and Mosjøen come out *identical*, so all it bought was
-  234,363 edges down to 166,900 and two minutes down to one. What it cost was
+  234,358 edges down to 166,900 and two minutes down to one. What it cost was
   4,086 nodes (4.5 %) where two edges meeting there lie more than a metre apart,
   191 over five, the worst 7.55 m — gaps in any track stitched from edges. Both
   budgets hold without it (3.3 MB against 5, two minutes against single-digit),
@@ -301,7 +301,7 @@ and the two derived edge fields.
 
 The acceptance is the same for all of it and it is the thing to check first:
 **no figure from phase 1 may move.** Attributes ride along the chains, only
-`identity_field` decides them. 11,292 chains, 234,363 edges, 757 and 747
+`identity_field` decides them. 11,290 chains, 234,358 edges, 757 and 747
 components, 50.8 km = 94 %, 17 quays, Mosjøen at 2.17 m. If any shifts, something
 touched the geometry, and that is the finding rather than the new column.
 
@@ -378,7 +378,7 @@ What that inventory also turned up, and what to check it was honoured:
 
 - **`is_dnt` splits Turrutebasen into two of the seven layers**, so a missing
   flag is a missing layer rather than a missing field. It is derivable from
-  `maintenance_responsible`, but 113 of 245 chains carry more than one
+  `maintenance_responsible`, but 113 of 244 chains carry more than one
   maintainer and three of those, 9.4 km, are part DNT and part not. Decided:
   `.any()`, as today. Check that the decision was taken rather than stumbled
   into.
@@ -405,7 +405,7 @@ drove the map and it read the same each time: **198** markers in
 of which exactly **1** non-interactive, the search control at **10 px** against
 the zoom at 60, and the wheel taking zoom **9 → 11**. All of those must come out
 identical. The path count is the one figure that should move, roughly halving as
-23,876 objects become 11,292 chains.
+23,876 objects become 11,290 chains.
 
 **Phase 3B, the page payload.** It exists because reading the decisions document
 against the phases turned up an encoding specified over thirty lines — zigzag
@@ -532,7 +532,7 @@ The upgrade moved 102 packages and crossed three major versions — **pandas 2.3
 
 **Not one figure moved.** Chains, edges, nodes, vertices, components, reach,
 quays, Mosjøen, and both phase 1B coverage figures came out identical, and so did
-the graph underneath them: same geometry hash over all 234,363 edges, same
+the graph underneath them: same geometry hash over all 234,358 edges, same
 `chain_id` hash, same total length to six decimals (6,048,994.047071 m) and same
 total cost (6,820,867.05014). Checked by rebuilding, not by re-reading a cache —
 see the trap below.
@@ -559,7 +559,7 @@ against a pre-upgrade `hooks-run` that was green:
   and nothing else re-derives the old key exactly. Five of the seven sources
   differ — the two that do not, UT.no and Ferries, are the two carrying no
   missing value in an identity or attribute column. The stored pickle also grew
-  from 48.6 MB to 59.4 MB for the same 234,363 edges.
+  from 48.6 MB to 59.4 MB for the same 234,358 edges.
 
   **That diagnosis stopped one step short, and the step matters.** `str.cat`
   drops a missing value rather than writing a placeholder for it, so the digest
@@ -664,6 +664,16 @@ So they are not quietly reopened:
 - No reduced GPX variant: the target platforms cannot rebuild these paths from
   sparse points, and no point limit is known that would justify one.
 - No offline elevation. The map's tiles are already online-only.
+- **`Ukjent` is no longer read as an identity**, and the reference moved with it:
+  11,290 chains, FKB 6,201, Turrutebasen 244, 234,358 edges. Everything that
+  matters held — 757 and 747 components, 79 % and 91 %, reach 50.8 km = 94 %,
+  6 → 17 quays, Mosjøen 2.17 m, and both coverage figures to the decimal. The
+  edge count fell by five through three fewer bridged loose ends, which is a
+  knock-on of the split rather than a separate effect. This was the third time
+  the same shape of bug appeared: a placeholder for *nothing* read as a value —
+  `pd.NA` as the text `<NA>`, an empty string counted by `notna`, and now a
+  register writing "unknown" into a name column. **Ask what a source writes when
+  it has nothing to say, before trusting a column.**
 - **No renaming of the `OSM` source to `OSM paths`.** It carries only paths, so
   the name is imprecise and the `N50 paths` / `N50 roads` split next to it makes
   that visible. But the source name is the **prefix of every chain id**, which
