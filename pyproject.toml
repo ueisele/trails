@@ -8,8 +8,14 @@ dependencies = [
     "numpy>=1.26.0",
     "pandas>=2.2.0",
     "geopandas>=1.0.0",
+    # Imported directly in thirteen modules, the whole of routing/ among them,
+    # and present until now only because geopandas happens to pull it in.
+    "shapely>=2.0.0",
     "matplotlib>=3.8.0",
     "folium>=0.17.0",
+    # Same: visualization/maps.py builds on branca's MacroElement, which
+    # arrived only as folium's own dependency.
+    "branca>=0.7.0",
     "feedparser>=6.0.12",
     "pyarrow>=21.0.0",
     "lxml>=6.0.2",
