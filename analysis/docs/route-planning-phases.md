@@ -443,10 +443,12 @@ carry something it otherwise would not. Not worth it for 4 % of one source.
   second of them is instant. That means lifting `load_sources`, `masks_from` and
   `build` out of the script into the library — do that first, before adding
   attributes, or the attribute work has to be moved twice.
-- **What `osm_id` means for a chain.** A chain spans several OSM ways, so
-  `_combine` will render it `123 / 456 / 789`. Honest, and no longer a link to
-  one way. Decide whether to keep it joined, as `typeveg` already is, or drop it;
-  do not let it silently become a list that reads like an id.
+- **What `osm_id` means for a chain.** Measured: 64 % of the OSM chains span
+  more than one way — median 2, worst 33 — so for most of them a single id is
+  simply wrong. **Decided: keep it joined**, as `typeveg` and every other
+  multi-valued field already are, and **rename the label to the plural**, so it
+  does not read as one id when it is thirty-three. Dropping it would discard
+  something the source has; a special case would be the only one on the map.
 - **The whole-named-way figure.** The popup is to show the stretch *and* the
   named way's total — *3.2 km of Tveråvegen's 15.6*. That is now a sum over the
   chains sharing an identity, computed once at build time. Note that 132 of the
@@ -454,6 +456,14 @@ carry something it otherwise would not. Not worth it for 4 % of one source.
 
 The six build-time GPX exports come from the chains from this phase on — that is
 in the decisions document rather than above, and it is easy to miss.
+
+**`--simplify-m` stays, and it is not in conflict with "do not simplify".** That
+rule governs the geometry that is *exported and routed*, which keeps full source
+precision; the *drawn* copy is a separate thing and always has been — the script
+already says so, `GPX keeps full detail`. Folium writes drawn geometry as JSON
+coordinate arrays, and the decisions document measured what that costs: 22.4 MB
+for the network's vertices. Removing the simplification would not be a fidelity
+fix, it would put twenty megabytes of coordinates into the page. Leave it.
 
 **Retire the source flags while you are here.** `--no-osm`, `--no-n50`,
 `--no-fkb`, `--no-roads`, `--no-ut` and `--no-names` predate the layer control,
