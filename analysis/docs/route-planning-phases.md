@@ -650,12 +650,19 @@ render budget.
   only consumer is elevation-aware routing, which is explicitly not yet decided,
   and a route's own ascent is computed over its composed series for the same
   reason a chain's is.
-- **A chain's edges have to come back in order.** The panel composes a chain's
-  series from the series of its edges, laid end to end, and sorting the table by
-  `from_node` destroys the order they were cut in. Carry whatever restores it —
-  a position within the chain is the obvious thing. This is the sharper form of
-  the sorting trap below: a scrambled *tie* is caught by the round trip, a
-  scrambled *order* is not, because every sample is still present and correct.
+- **A chain's edges have to come back in order, and the order is already lost.**
+  The panel composes a chain's series from its edges' series laid end to end.
+  Measured: **2,212 chains — one in five — have edges that do not join up in the
+  frame's own order**, with jumps of up to 20 km, so this is not a matter of
+  sorting by `from_node` breaking something that worked. The order has to be
+  *reconstructed* and then carried: a position within the chain, written on the
+  edge. Phase 2 solved it for itself by projecting each edge onto the chain — the
+  browser has no chain geometry to project onto, so it must be told.
+
+  This is the sharper form of the sorting trap below, and the reason it needs
+  saying twice: a scrambled *tie* is caught by the round trip, a scrambled
+  *order* is not, because every sample is still present and still correct. What
+  comes out is a profile that looks like a profile.
 - **The four per-chain figures — ascent, descent, high and low** — do not belong
   in this payload. They ride as properties on the drawn chains, which phase 3
   already puts in the page as GeoJSON and which the panel has in hand the moment
@@ -688,8 +695,8 @@ wrong:
 | geometry, 948,465 vertices, varint + gzip + base64 | **2.35 MB** |
 | edge table, sorted by `from_node`, both columns delta-encoded | **0.27 MB** |
 | source per edge, one byte | under 0.01 MB |
-| elevations, ~1.41 million samples at 0.1 m | ~2.2 MB, *estimated* — phase 2 has not run |
-| **total** | **≈ 4.8 MB** against an allowance of 5 |
+| elevations, 1,406,040 samples at 0.1 m | **0.98 MB** |
+| **total** | **≈ 3.6 MB** against an allowance of 5 |
 
 **The edge table has to be encoded, not serialised.** An earlier draft listed it
 without budgeting it, and as JSON it is 1.98 MB, which puts the total at 6.5 MB
@@ -703,9 +710,11 @@ quietly scrambled rather than obviously broken.
 geometry the browser already has, and the factors are six numbers. The exception
 is the 58 ferry edges, whose cost is flat.
 
-It fits, but not with room: 4.8 MB of 5, and the map itself is 24.2 MB, so this
-is a fifth again on the page. **If it does not fit, report it rather than
-quietly quantising coarser** — 1e-5 saves 0.7 MB and costs 1.11 m, which is
+It fits with room. An earlier draft of this table estimated the elevations at
+2.2 MB before phase 2 had run; measured they are 0.98, so the total is 3.6 rather
+than 4.8. The map itself is 24.2 MB, so this adds about a seventh to the page.
+**Do not spend that margin on premature thrift**, and if something later does not
+fit, report it rather than quietly quantising coarser — 1e-5 saves 0.7 MB and costs 1.11 m, which is
 worse than the best source in the set and would undo what phase 1 was careful
 about. And measure the decode: it is a number nobody has yet.
 

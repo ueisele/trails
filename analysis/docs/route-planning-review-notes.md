@@ -448,6 +448,20 @@ budget, is **1.98 MB as JSON** and puts the total at 6.5 MB, over. Sorted by
 `from_node` with both columns delta-encoded it is **0.27 MB**. That seven-fold
 difference is the whole margin: 4.8 MB against an allowance of 5.
 
+A second pass once phase 2 had run corrected the table again in the other
+direction: the elevations were estimated at 2.2 MB and measure **0.98**, so the
+total is 3.6 rather than 4.8. **Both errors were estimates standing where the
+document demands measurements**, and they pointed opposite ways — which is what
+estimates do.
+
+The same pass found the ordering problem is larger than the phase first said.
+**2,212 chains, one in five, have edges that do not join up in the frame's own
+order**, with jumps to 20 km. So the order is not something sorting breaks; it
+is already lost and has to be reconstructed and carried. Phase 2 solved that for
+itself by projecting each edge onto the chain, without being asked to and without
+saying so — check that 3B does not assume the frame order is meaningful just
+because phase 2's figures came out right.
+
 So the check is: was the table encoded or serialised, and did the sort scramble
 what ties an edge to its chain? A scrambled graph is not obviously broken.
 `cost` should not be in the payload at all — it is length times a source factor
