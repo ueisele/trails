@@ -55,10 +55,12 @@ from trails.routing.graph import (
     label_components,
 )
 from trails.routing.noding import DEFAULT_METRIC_CRS, NODE_TOLERANCE_M
+from trails.routing.order import CHAIN_ORDER_COLUMNS, chain_order
 from trails.routing.sources import BRIDGE, FERRY, PATH, NetworkSource
 
 __all__ = [
     "BRIDGE",
+    "CHAIN_ORDER_COLUMNS",
     "DEFAULT_ASCENT_THRESHOLD_M",
     "DEFAULT_BRIDGE_COST_FACTOR",
     "DEFAULT_BRIDGE_M",
@@ -84,6 +86,7 @@ __all__ = [
     "ascent",
     "build_chains",
     "build_network",
+    "chain_order",
     "chain_profiles",
     "chain_series",
     "chains_of",

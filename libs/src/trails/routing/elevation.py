@@ -27,7 +27,9 @@ boundary. In this park's network 42 % of the edges are shorter than five metres
 and the median is 6.9 m, so most of them report no climb at all, and a chain of
 twenty such edges rising sixty metres would sum to zero. Summing does not
 approximate the figure, it destroys it. :func:`chain_series` lays the chain's
-own series out instead, from the same samples, by walking its edges end to end.
+own series out instead, from the same samples, by walking its edges end to end —
+a walk that lives in :mod:`trails.routing.order`, because the browser has to lay
+the same edges out in the same order and two walks would eventually disagree.
 
 **A crossing is not sampled.** There is no ground under a ferry, and a height
 service asked about open water answers with a depth — a coastal profile that
@@ -56,6 +58,7 @@ from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
 from trails.routing.graph import Network
+from trails.routing.order import lay_out, runs_backwards
 from trails.routing.sources import FERRY
 
 #: How far apart the samples are laid along an edge. Measured against a dense
@@ -383,9 +386,9 @@ def _series_of(
         The heights along the chain
     """
     parts: list[np.ndarray] = []
-    for run in _lay_out(members, pairs):
+    for run in lay_out(members, pairs):
         laid = _joined([(values[position], reversed_) for position, reversed_ in run])
-        if geometry is not None and _runs_backwards(run, geometries, geometry):
+        if runs_backwards(run, geometries, geometry):
             laid = laid[::-1]
         # Where the walk had to start again, the two stretches do not join, so
         # they are carried apart rather than as one series: a climb counted
@@ -394,65 +397,6 @@ def _series_of(
             parts.append(_GAP)
         parts.append(laid)
     return np.concatenate(parts) if parts else np.empty(0, dtype=float)
-
-
-def _lay_out(members: Sequence[int], pairs: Sequence[tuple[int, int]]) -> list[list[tuple[int, bool]]]:
-    """Walk a chain's edges from one end to the other.
-
-    Nearly always one run: 11,241 of this park's 11,290 chains walk straight
-    through, and another 41 close on themselves. The rest touch themselves
-    somewhere, which leaves the walk a choice at that node, and what it cannot
-    reach in one pass is started again as a separate run rather than being
-    joined to what came before.
-
-    Args:
-        members: Positions of the edges lying on this chain
-        pairs: ``(from_node, to_node)`` per edge
-
-    Returns:
-        ``(position, reversed)`` in walking order, one list per run
-    """
-    incident: dict[int, list[tuple[int, bool]]] = defaultdict(list)
-    for position in members:
-        from_node, to_node = pairs[position]
-        incident[from_node].append((position, False))
-        incident[to_node].append((position, True))
-
-    remaining = set(members)
-    # An end of the chain first, so an open chain comes out as one run walked
-    # from its beginning rather than from somewhere in its middle.
-    ends = [node for node, arms in incident.items() if len(arms) == 1]
-    runs: list[list[tuple[int, bool]]] = []
-    for node in [*ends, *(pairs[position][0] for position in members)]:
-        if not remaining:
-            break
-        run = _walk(node, incident, remaining, pairs)
-        if run:
-            runs.append(run)
-    return runs
-
-
-def _walk(node: int, incident: dict[int, list[tuple[int, bool]]], remaining: set[int], pairs: Sequence[tuple[int, int]]) -> list[tuple[int, bool]]:
-    """Follow one run of edges from a node as far as it goes.
-
-    Args:
-        node: Where to start
-        incident: Edges meeting at each node, and which way they leave it
-        remaining: Edges not yet walked, emptied as they are
-        pairs: ``(from_node, to_node)`` per edge
-
-    Returns:
-        ``(position, reversed)`` in walking order
-    """
-    run: list[tuple[int, bool]] = []
-    while True:
-        leaving = next(((position, reversed_) for position, reversed_ in incident[node] if position in remaining), None)
-        if leaving is None:
-            return run
-        position, reversed_ = leaving
-        remaining.discard(position)
-        run.append(leaving)
-        node = pairs[position][0] if reversed_ else pairs[position][1]
 
 
 def _joined(pieces: Sequence[tuple[np.ndarray, bool]]) -> np.ndarray:
@@ -470,21 +414,3 @@ def _joined(pieces: Sequence[tuple[np.ndarray, bool]]) -> np.ndarray:
         ordered = values[::-1] if reversed_ else values
         laid.append(ordered[1:] if laid else ordered)
     return np.concatenate(laid) if laid else np.empty(0, dtype=float)
-
-
-def _runs_backwards(run: Sequence[tuple[int, bool]], geometries: np.ndarray, geometry: BaseGeometry) -> bool:
-    """Say whether a walk went against the chain's own direction.
-
-    Args:
-        run: ``(position, reversed)`` in walking order
-        geometries: Geometry per edge
-        geometry: The chain
-
-    Returns:
-        Whether the walk ended nearer the chain's start than it began
-    """
-    first, first_reversed = run[0]
-    last, last_reversed = run[-1]
-    start = geometries[first].coords[-1 if first_reversed else 0]
-    end = geometries[last].coords[0 if last_reversed else -1]
-    return bool(geometry.project(shapely.Point(start)) > geometry.project(shapely.Point(end)))
