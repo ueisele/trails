@@ -28,13 +28,15 @@ import geopandas as gpd
 import pandas as pd
 
 from trails.io import cache as cache_module
-from trails.io.sources import kommuneinfo, n50, overpass, stedsnavn, traktorvegsti, ut
+from trails.io.sources import hoydedata, kommuneinfo, n50, overpass, stedsnavn, traktorvegsti, ut
 from trails.io.sources.geonorge import Source as GeonorgeSource
 from trails.io.sources.language import Language
 from trails.routing import (
+    DEFAULT_ASCENT_THRESHOLD_M,
     DEFAULT_MARKED_M,
     DEFAULT_MIN_SHARE,
     DEFAULT_RECORDED_M,
+    DEFAULT_STEP_M,
     IDENTITY_SEPARATOR,
     ChainRule,
     Network,
@@ -46,6 +48,7 @@ from trails.routing import (
     parts_of,
     split_source,
     waymarked,
+    with_elevation,
 )
 from trails.routing.noding import clip_lines
 from trails.routing.sources import FERRY
@@ -159,6 +162,13 @@ ROUTE_REGISTERS = (UT, TURRUTEBASEN)
 #: them would leave a graph in the cache that no longer matches its own key.
 MARKED_M, RECORDED_M, MIN_SHARE = DEFAULT_MARKED_M, DEFAULT_RECORDED_M, DEFAULT_MIN_SHARE
 
+#: What a stored graph holds, bumped whenever a build starts producing something
+#: a cached one does not carry. The rest of the fingerprint covers what went
+#: *into* a build; this covers what comes out of it. Without it, a graph cached
+#: before a column existed is served to code that reads that column — the
+#: parameters and the sources are unchanged, so nothing else in the key notices.
+GRAPH_LAYOUT = "elevation"
+
 
 @dataclass(frozen=True)
 class Params:
@@ -185,6 +195,11 @@ class Params:
         road_name_m: How far a road fragment may look for its name in the
             place-name register
         trail_name_m: How far an FKB path may look for a Turrutebasen route name
+        elevation_step_m: How far apart the height samples are laid along an
+            edge. A parameter only so that the invariance the ascent threshold
+            exists for can be checked: the same route has to read the same
+            climb at 5, 10 and 15 m.
+        ascent_threshold_m: Gains under this are not counted as climb
         force_download: Re-download source data instead of using the cache
         rebuild: Rebuild the graph even if a cached one matches
     """
@@ -200,6 +215,8 @@ class Params:
     route_noding_m: float = 0.0
     road_name_m: float = 25.0
     trail_name_m: float = 25.0
+    elevation_step_m: float = DEFAULT_STEP_M
+    ascent_threshold_m: float = DEFAULT_ASCENT_THRESHOLD_M
     force_download: bool = False
     rebuild: bool = False
 
@@ -520,8 +537,14 @@ def fingerprint(sources: list[NetworkSource], masks: Masks, params: Params) -> s
     # they change no geometry, only which chains carry which identity, so a row
     # count and a total length cannot tell two of these builds apart.
     parts = [
+        GRAPH_LAYOUT,
         f"{params.approach_km}|{params.stroke_deg}|{params.probe_m}|{params.bridge_m}"
-        f"|{params.ferry_cost_km}|{params.route_noding_m}|{params.road_name_m}|{params.trail_name_m}",
+        f"|{params.ferry_cost_km}|{params.route_noding_m}|{params.road_name_m}|{params.trail_name_m}"
+        # And how the ground under the edges was read. Neither moves a line, but
+        # a graph sampled every 15 m must not be served to a caller asking for
+        # every 5 m — that is precisely the comparison the threshold is checked
+        # by, and it would compare a cache against itself.
+        f"|{params.elevation_step_m}|{params.ascent_threshold_m}",
         # And the masks with the rule they are read by. A mask is a filtered
         # subset of its sources, so a change in which features go into one shows
         # up in no source's row count or length.
@@ -632,10 +655,11 @@ def build(
 ) -> tuple[Network, pd.DataFrame]:
     """Build the network, or read back the last build of the same inputs.
 
-    Elevation comes later and will make this expensive; the cache is here from
-    the start so that a rebuild of an unchanged graph costs nothing — and so
-    that the second of two callers asking for the same graph pays nothing at
-    all.
+    Reading the ground height along every edge is what makes this expensive —
+    twenty thousand requests against a public service, a quarter of an hour
+    once. Two caches stand between that and a rebuild: this one, which serves an
+    unchanged graph whole, and the point store underneath it, which means even a
+    changed source only asks about the ground that actually moved.
 
     Args:
         sources: The datasets
@@ -646,6 +670,10 @@ def build(
 
     Returns:
         The network and the per-source chain counts
+
+    Raises:
+        ValueError: If the height endpoint does not speak the CRS the network is
+            built in
     """
     store = cache_module.Object(cache_dir=str(Path(params.cache_dir) / "objects"))
     key = f"route_graph_{name}_{fingerprint(sources, masks, params)}"
@@ -672,8 +700,38 @@ def build(
     print("Asking every edge what the ground it runs over is recorded as...")
     network = replace(network, edges=derive(network.edges, masks))
 
+    print(f"Reading the ground height every {params.elevation_step_m:g} m along every edge but the crossings...")
+    network = measure(network, params)
+
     store.save(key, {"network": network, "chains": chains}, metadata={"area": name, "approach_km": params.approach_km})
     return network, chains
+
+
+def measure(network: Network, params: Params) -> Network:
+    """Read the ground under the network and put it on the edges and chains.
+
+    Ferries are skipped rather than filtered afterwards: there is no ground
+    under a crossing, and asked about open water the endpoint answers with a
+    depth from its depth contours — a ferry edge would come back at -276 m.
+    Bridged connectors *are* sampled. Nobody drew one, which is what a connector
+    is, but there is ground under it.
+
+    Args:
+        network: The finished network, in :data:`METRIC_CRS`
+        params: What decides the build
+
+    Returns:
+        A copy carrying ``elevations`` and ``ascent`` on every edge, and
+        ``ascent`` on every chain
+
+    Raises:
+        ValueError: If the endpoint does not speak the CRS the network is in
+    """
+    if METRIC_CRS != hoydedata.REQUEST_CRS:
+        raise ValueError(f"the height endpoint answers in {hoydedata.REQUEST_CRS}, the network is built in {METRIC_CRS}")
+
+    heights = hoydedata.Source(cache_dir=params.cache_dir)
+    return with_elevation(network, heights.elevations, step_m=params.elevation_step_m, threshold_m=params.ascent_threshold_m)
 
 
 def derive(edges: gpd.GeoDataFrame, masks: Masks) -> gpd.GeoDataFrame:

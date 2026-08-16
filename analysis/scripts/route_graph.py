@@ -25,7 +25,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
-from trails.io.sources import naturbase, stedsnavn, ut
+from trails.io.sources import hoydedata, naturbase, stedsnavn, ut
 from trails.network.norway import (
     MARKED_M,
     METRIC_CRS,
@@ -47,6 +47,17 @@ PARK_NAME = "Lomsdal-Visten"
 #: The town the graph has to contain: it is where anyone arrives from, and it
 #: lies 9.8 km outside the park, which is what sets the extent.
 GATEWAY_TOWN = "Mosjøen"
+
+#: The route the elevation work is checked against. It resolves to *three*
+#: chains — UT.no, Turrutebasen and FKB all draw it, all 20.48 km over the same
+#: ground — and three digitisations give three ascents. A single figure against
+#: a name that resolves three ways is not a check, so all three are printed.
+#:
+#: Matched on the stem, because the two registers do not spell it the same way:
+#: UT.no publishes *Sjøbergmarsjruta* and Turrutebasen *Sjøbergmarsjen*, which
+#: reaches FKB through the route-name join. Searching for either in full finds
+#: one digitisation and misses two, and would have looked like a check.
+CHECK_ROUTE = "Sjøbergmarsj"
 
 
 class Landmarks(NamedTuple):
@@ -176,6 +187,7 @@ def report(
 
     report_attributes(network.chains, sources)
     report_derived(network)
+    report_elevation(network, params)
 
 
 def _filled(values: pd.Series) -> float:
@@ -267,6 +279,83 @@ def report_derived(network: Network) -> None:
         print(f"      {'the other ' + str(len(per_route) - 8) + ' together':<52} {per_route.iloc[8:].sum() / 1000:>5,.1f} km")
 
 
+def report_elevation(network: Network, params: Params) -> None:
+    """Print what the ground under the network came out as.
+
+    Args:
+        network: The finished network
+        params: What decided the build
+    """
+    edges, chains = network.edges, network.chains
+    series = list(edges["elevations"])
+    samples = int(sum(len(values) for values in series))
+    read = int(sum(int(np.count_nonzero(~np.isnan(values))) for values in series))
+
+    print("\n" + "=" * 78)
+    print("ELEVATION")
+    print("=" * 78)
+    print(f"  Sampled every {params.elevation_step_m:g} m along every edge but the crossings — there is no")
+    print("  ground under a ferry and the endpoint answers over water with a depth. An")
+    print("  inferred connector is sampled: nobody drew it, but there is ground under it.")
+    print(f"  Ascent is reported with gains under {params.ascent_threshold_m:g} m ignored.")
+
+    walked = edges[edges["kind"] != FERRY]
+    print(f"\n  samples          {samples:,} over {len(walked):,} edges")
+    print(f"  read             {read:,} ({read / samples * 100 if samples else 0:.2f} %)")
+    print(f"  no reading       {samples - read:,} — over water, or outside the model's coverage")
+    # A figure of nothing would read as flat ground at sea level, which is what
+    # the edges and chains counted here decline to say. Crossings are left out:
+    # they were never asked about, so carrying no figure is not a gap.
+    unread = chains[(chains["kind"] != FERRY) & chains["ascent"].isna()]
+    print(f"  nothing read     {int(walked['ascent'].isna().sum()):,} walked edges and {len(unread):,} chains carry no figure at all")
+
+    heights = np.concatenate([values for values in series if len(values)]) if samples else np.empty(0)
+    if read:
+        print(f"  lowest           {np.nanmin(heights):,.1f} m   <- a profile touching -276 m means datakilde is not checked")
+        print(f"  highest          {np.nanmax(heights):,.1f} m")
+
+    print("\n  per source, computed over each chain's full series")
+    print(f"    {'source':<13} {'chains':>7} {'km':>8} {'ascent m':>10} {'descent m':>10} {'highest':>8} {'lowest':>8} {'nothing read':>13}")
+    for source, group in chains.groupby("source"):
+        climbed, fell = group["ascent"].sum(), group["descent"].sum()
+        high, low = group["high_m"].max(), group["low_m"].min()
+        missing = int(group["ascent"].isna().sum())
+        print(
+            f"    {str(source):<13} {len(group):>7,} {group['length_m'].sum() / 1000:>8,.0f} {climbed:>10,.0f} {fell:>10,.0f} "
+            f"{high:>8,.0f} {low:>8,.1f} {missing:>13,}"
+        )
+
+    # Printed side by side because the two are easy to confuse and the second is
+    # not an approximation of the first. The threshold restarts at every edge
+    # boundary, and 42 % of the edges are shorter than the threshold is tall.
+    per_chain = chains["ascent"].sum()
+    per_edge = edges["ascent"].sum()
+    share = per_edge / per_chain * 100 if per_chain else 0
+    print(f"\n  ascent per chain, over each chain's full series   {per_chain / 1000:>8,.1f} km   <- the figure to show")
+    print(f"  the same edges' own figures, summed               {per_edge / 1000:>8,.1f} km   <- {share:.0f} % of it, and no estimate of it")
+
+    report_check_route(chains)
+
+
+def report_check_route(chains: gpd.GeoDataFrame) -> None:
+    """Print every chain the checked route resolves to.
+
+    Args:
+        chains: The chains of every source
+    """
+    named = chains[chains["identity"].astype("string").str.contains(CHECK_ROUTE, na=False)]
+    print(f"\n  {CHECK_ROUTE}… — one route, three digitisations of the same ground")
+    if named.empty:
+        print("    nothing carries that name")
+        return
+    print(f"    {'chain':<38} {'source':<13} {'identity':<18} {'km':>6} {'ascent':>8} {'descent':>8} {'high':>6} {'low':>6}")
+    for _, chain in named.sort_values("source").iterrows():
+        print(
+            f"    {chain['chain_id']:<38} {chain['source']:<13} {str(chain['identity'])[:18]:<18} {chain['length_m'] / 1000:>6,.2f} "
+            f"{chain['ascent']:>8,.0f} {chain['descent']:>8,.0f} {chain['high_m']:>6,.0f} {chain['low_m']:>6,.1f}"
+        )
+
+
 def _within(points: gpd.GeoDataFrame, edges: gpd.GeoDataFrame, distance_m: float) -> int:
     """Count how many points a set of edges passes close to.
 
@@ -322,6 +411,18 @@ def main() -> int:
         default=0.0,
         help="Node the published route datasets by a simplified copy of themselves (m); their own geometry is kept either way",
     )
+    # Offered so the invariance the ascent threshold exists for can be checked
+    # from the product rather than from a script beside it: the same route has
+    # to read the same climb sampled every 5, 10 or 15 m.
+    #
+    # Coarsening it is not free, and it is worth knowing before it is run: the
+    # samples are spread evenly between an edge's ends rather than laid at a
+    # fixed step, so a coarser set is a subset of the finer one only where the
+    # two counts divide. Measured over this network, a 10 m run asked about
+    # 189,616 coordinates the 5 m run had not, and a 15 m one 127,943 — four
+    # and two and a half minutes against a public endpoint. Not much beside the
+    # first run's twenty thousand requests, and not nothing either.
+    parser.add_argument("--elevation-step-m", type=float, default=5.0, help="How far apart the height samples are laid along an edge (m)")
     parser.add_argument("--road-name-m", type=float, default=25.0, help="How far a road fragment may look for its name in the register (m)")
     parser.add_argument("--trail-name-m", type=float, default=25.0, help="How far an FKB path may look for a Turrutebasen route name (m)")
     parser.add_argument("--reach-m", type=float, default=150.0, help="How close a component must pass a quay or town to count as reaching it")
@@ -345,7 +446,10 @@ def main() -> int:
 
     print("\n" + "=" * 78)
     print(f"Sources: Turrutebasen {loaded.turrutebasen_version} (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)")
-    print("         Stedsnavn/SSR (CC BY 4.0), all Kartverket | Naturbase (NLOD) | OpenStreetMap (ODbL)")
+    # Every figure in the ELEVATION section comes out of this one, and CC BY
+    # asks to be named for it.
+    print(f"         Stedsnavn/SSR (CC BY 4.0) | {hoydedata.METADATA.name} ({hoydedata.METADATA.license}), all Kartverket")
+    print("         Naturbase (NLOD) | OpenStreetMap (ODbL)")
     print(f"         {ut.METADATA.attribution} ({ut.METADATA.license}) — non-commercial, unlike the rest")
     print("=" * 78)
     return 0

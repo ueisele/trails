@@ -8,7 +8,7 @@ The `trails` package provides modular functionality for:
 - **Data sources** (`trails.io.sources`) - Loading trail data from various providers (Geonorge, OpenStreetMap, etc.)
 - **Data processing** (`trails.processing`) - Transforming and enriching trail data
 - **Analysis** (`trails.analysis`) - Computing metrics and statistics
-- **Routing** (`trails.routing`) - Building a routable network from several line datasets
+- **Routing** (`trails.routing`) - Building a routable network from several line datasets, and reading the ground under it
 - **Network** (`trails.network`) - Which datasets go into that network, and what each carries
 - **Visualization** (`trails.visualization`) - Creating maps and charts
 - **Export formats** (`trails.io.export`) - Exporting to GPX, GeoJSON, and other formats

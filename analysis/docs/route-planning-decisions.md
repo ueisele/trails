@@ -355,6 +355,19 @@ of elevation, and this whole section exists to avoid errors of that size.
 1.1 million rows is roughly ten megabytes of parquet. It is the cheapest part of
 the whole design.
 
+Built, it is: **1,017,874 rows in 11.7 MB**, keyed on the coordinate in
+centimetres as two integers with the height beside them, rewritten atomically and
+flushed every minute during a run so an interrupted one resumes rather than
+starting again. **A point with no height is still a row** — over water and
+outside the coverage the endpoint answers with something that is not a height,
+and a store holding only the successes would ask again about exactly the points
+that can never answer, on every build, for as long as the network touches a
+coast. 1,748 of the rows are of that kind.
+
+The run itself came out at **20,183 requests in 13.6 minutes**, six in parallel,
+24.4 requests a second — against the 20,358 and sixteen minutes predicted. Both
+a plain second build and a forced `--rebuild` issue **no requests at all**.
+
 Beyond that, treat it as any other expensive fetch here: retry on failure, send a
 real User-Agent, and hold the concurrency at **six** parallel requests. Twelve
 measured faster, but this is a bulk run of 22,000 against a public service and
@@ -416,24 +429,119 @@ same reason: vertex spacing varies wildly between sources — UT.no's tracks sit
 depend on which dataset happened to draw it. Interpolate onto the vertices for
 the GPX.
 
+**"Every 5 m along an edge" means `⌊length / 5⌋ + 1` samples, at least two,
+spread evenly between the two ends.** That is what reproduces the measured
+1,406,040 samples exactly — laying them from one end instead misses the far end
+of most edges and gives the same count over a different set of points. Spreading
+them evenly is also what makes an edge's last sample the same coordinate as its
+neighbour's first, which is where most of the 28 % duplication comes from and
+what lets a chain's series be laid out of its edges' rather than sampled again.
+The floor of two is not a detail: 97,974 edges are under 5 m and 28,373 under one
+metre, so a floor of zero would leave a third of the network with no profile, no
+ascent and no ends to join its neighbours at.
+
+**The floor means the spacing is 5 m or wider, never narrower**, and the review
+asked the fair question of whether "every 5 m" then means what the table above
+measured. Asked of the built graph, weighted by length — which is the weighting
+that matters, since a short edge contributes little of the network:
+
+| effective spacing | share of the network's length |
+|---|---:|
+| under 6 m | **90.5 %** |
+| 6 to 8 m | 7.4 % |
+| 8 to 10 m | 2.1 % |
+| 10 m or wider | **0.0 %** |
+
+Mean 5.04 m, median 5.10 m, and nothing at all at 10 m or coarser: a long edge's
+spacing converges on the step, and only short edges — which carry almost no
+length between them — sit above it. So the fidelity the table measured holds
+over 98 % of the network by length. `⌈length / 5⌉ + 1` would put every edge at
+5 m or finer and cost 1,542,371 samples against 1,406,040, a tenth more traffic
+against a public endpoint for the last 2 %. Not worth it, and it would move
+every figure this phase was accepted against.
+
 For orientation, UT.no publishes +881 m for this route against our 992 m. There
 is no ground truth to appeal to; UT evidently smooths harder. Since the map shows
 UT's own figure alongside, staying near their convention has something to be said
 for it — but this is a single route, and worth checking across several before
 tuning to match.
 
+##### Built, and the table above does not reproduce
+
+**The invariance does; the absolute figure does not.** Phase 2, built exactly as
+specified, reads Sjøbergmarsjruta at **1,176 m** on UT.no's digitisation,
+**1,196 m** on Turrutebasen's and **1,195 m** on FKB's, where the table says
+996 m. These are now the reference. What was checked before saying so:
+
+| | the table above | built |
+|---|---:|---:|
+| 5 m spacing, no threshold | 1,214 m | **1,370 m** |
+| 5 m spacing, 5 m threshold | 996 m | **1,171 m** |
+| what the threshold removes | 218 m | **200 m** |
+| 5 / 10 / 15 m at the 5 m threshold | 996 / 992 / 994 | **1,171 / 1,167 / 1,163** |
+
+The right-hand column is sampled uniformly along the UT.no chain, the same way
+the left-hand one describes, so the two are directly comparable — and the
+disagreement is already there **with no threshold applied at all**. The filter
+takes out much the same amount either way; it is the series underneath that
+differs by some 160 m. So this is not the ascent rule, it is what was sampled or
+what was read.
+
+Three other readings of "ignore gains under 5 m" were tried on the built series
+and none lands near 996 m: turning at the threshold gives 1,171 m, keeping only
+points a threshold apart gives 1,098 m, and smoothing the series first gives
+1,234 m — and the last is **not invariant**, falling to 963 m at 100 m spacing,
+which the table above requires of whatever produced it.
+
+**It was recovered afterwards, in review, and the recovery is what settles the
+question.** Compose the chain's series the way the build does — out of its edges,
+in order, the shared node counted once — and apply the threshold in its
+*strictest* reading, where any fall at all ends the climbing run: UT.no reads
+**999.7 m**. That is the 996, near enough. So the original figure was neither
+invented nor mis-sampled; it came from a defensible reading of the same rule.
+
+That reading is nevertheless the wrong one, and the reason is visible only
+because the same ground is digitised three times:
+
+| on one identical series | UT.no | Turrutebasen | FKB | spread |
+|---|---:|---:|---:|---:|
+| as built | 1,175.7 | 1,196.3 | 1,195.4 | **20 m** |
+| strictest reading | 999.7 | 755.2 | 932.7 | **245 m** |
+| no threshold | 1,375.6 | 1,394.0 | 1,389.3 | 19 m |
+
+A steady climb that the height model dresses in centimetre wobble is chopped by
+the strict reading into runs of which none reaches five metres, and how much
+survives then depends on how noisy that particular digitisation is rather than on
+the hill. Three drawings of one slope must not differ by a quarter of the answer.
+**Take the cross-source spread as the test of an ascent rule, not the invariance
+alone** — the strict reading passes invariance across sampling steps and fails
+this, and only the second one asks whether the number is about the terrain.
+
+Two smaller things the build turned up about this route:
+
+- **It resolves under two names, not one.** UT.no publishes *Sjøbergmarsjruta*
+  and Turrutebasen *Sjøbergmarsjen*, which reaches FKB through the route-name
+  join. Searching for either in full finds one digitisation and misses two.
+- **UT.no's reads lowest of the three**, by 20 m, against the expectation that a
+  consumer GPS track's noise would add climb. At this threshold it does not: the
+  noise is what the threshold removes, and what is left is the terrain, which
+  the surveyed digitisations follow more closely.
+
 #### What it costs in the page
 
 1.1 million elevations, delta-encoded at 0.1 m next to the geometry, land around
 a megabyte. Measured against the built graph, the count holds: 1,017,876 unique
 coordinates once they are rounded to the centimetre, which is 28 % fewer than the
-1.41 million samples taken, because edge ends meet at nodes.
+1.41 million samples taken, because edge ends meet at nodes. Phase 2, built,
+lands two apart: **1,406,040 samples, 1,017,874 distinct**.
 
-Store **two** ascent figures, and do not confuse them:
+Store **two sets of figures**, and do not confuse them:
 
-- **Per edge** — 234,358 numbers, nothing — for elevation-aware routing, where
-  per-edge is exactly the granularity a weight needs.
-- **Per chain**, computed over the chain's full series, for anything displayed.
+- **Per edge: ascent and descent** — 234,358 numbers each, nothing — for
+  elevation-aware routing, where per-edge is exactly the granularity a weight
+  needs, and for nothing else.
+- **Per chain: ascent, descent, high and low point**, computed over the chain's
+  full series, for anything displayed.
 
 An earlier draft said the per-edge figure was "what lets every path show its
 climb without unpacking a profile". It is not, and the error is not small. The
@@ -441,7 +549,26 @@ reported ascent ignores gains under 5 m, and that threshold restarts at every
 edge boundary: 42 % of the edges are shorter than 5 m and the median is 6.9 m, so
 most of them report no climb at all, and a chain of twenty such edges rising
 sixty metres would sum to zero. Summing per-edge ascents does not approximate the
-figure — it destroys it.
+figure — it destroys it. Over the whole network, built: **222.4 km of ascent per
+chain against 148.4 km summed per edge**, which is 67 % of it.
+
+**Descent is stored wherever ascent is**, rather than being derived later. A
+chain is oriented so that its id stays stable across builds, not because a walker
+is obliged to take it that way, so an ascent alone is true in one direction and
+silent about the other. The high and low point carry no threshold and could
+disagree with nothing — but the popup that shows them is rendered in Python at
+build time, so they have to sit on the chain like the rest.
+
+**The chain's series is laid out from its edges', not sampled a second time.**
+Every edge samples both its own ends, so consecutive edges share a coordinate at
+the node between them — which is where most of that 28 % of duplication comes
+from — and laying the edges of a chain end to end gives the chain's own series
+with each node counted once. Sampling the chain separately would double the
+requests for the same numbers. A chain is linear, so its edges form a path and
+following it is unambiguous; the exception is a chain that touches itself, which
+leaves the walk a choice at that node. 49 of the 11,290 do, and what a walk
+cannot reach in one pass is laid down after a gap rather than joined, so no climb
+is counted across a step nothing was measured along.
 
 ### Elevation in the profile and in the export
 

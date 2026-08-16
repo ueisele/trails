@@ -337,56 +337,143 @@ against 60, and the wheel taking the map from zoom 9 to 11.
 
 ## Phase 2 — Elevation
 
-Still nothing visible. Every edge gains a real elevation series.
+Still nothing visible. Every walked edge gains a real elevation series, and every
+chain the four figures that describe it.
 
-- A source module for `https://ws.geonorge.no/hoydedata/v1/punkt`: 50 points per
-  request, retries, a real User-Agent, **six** requests in parallel. Twelve is
-  faster but this is 22,000 requests against a public service; six puts the run
-  at about seventeen minutes, once.
-- A coordinate-keyed store under `.cache/`, consulted before anything is
-  requested. This is the part that matters — without it the build hammers a
-  public service on every run.
-- Sampling every 5 m along each edge, and a per-edge ascent computed with the 5 m
-  threshold. Skip ferry edges: there is no ground under them and the endpoint
-  would answer with depths. **Bridged connectors are sampled** — nobody drew
-  them, but there is ground under them. The edge from phase 1 gains `elevations`
-  and `ascent`; nothing else about it changes.
-- **A per-chain ascent as well, computed over the chain's full series** — not
-  summed from its edges. The two are not the same figure and the difference is
-  not small: 42 % of the edges are shorter than 5 m and the median is 6.9 m, so
-  under a 5 m threshold most edges report zero climb and a chain of twenty of
-  them climbing sixty metres would sum to nothing. The per-*edge* figure is for
-  elevation-aware routing, where per-edge is exactly right. The per-*chain*
-  figure is what a popup shows, and phase 4 draws its panel from the same call.
-- **Sample at least both endpoints, whatever the edge's length.** 97,974 edges
-  are under 5 m and 28,373 are under one metre; "every 5 m" has to mean a floor
-  of two, not a floor of zero.
+**Fetching, and being a decent guest.** A source module for
+`https://ws.geonorge.no/hoydedata/v1/punkt`: 50 points per request, retries, a
+real User-Agent, and **six requests in parallel**. Twelve is faster and this is
+somebody's public endpoint. Measured before hand-over, so the cost is not a
+guess: 1.41 million samples reduce to **1,017,876 unique coordinates** once
+rounded to the centimetre — 28 % are duplicates, mostly edge ends meeting at a
+node — which is **20,358 requests**, and a probe answered in **0.29 s**. Six in
+parallel is about sixteen minutes, once.
 
-Measured before this phase was handed over, so the cost is not a guess:
-**1,017,876 unique coordinates** after rounding to the centimetre — 28 % of the
-1.41 million samples are duplicates, mostly edge ends meeting at a node, which
-is what the store has to catch *within* one build and not only between builds.
-At 50 points per request that is **20,358 requests**, and the endpoint answered
-a probe in **0.29 s**, so six in parallel puts the run at **about sixteen
-minutes**. `datakilde: "dtm1"`, `terreng: "Skog"` and `access-control-allow-origin: *`
-are all as the decisions document describes them.
-- Reject the readings that are not elevations. Over water the endpoint answers
-  with a depth — `datakilde: "dybdekurver"`, a negative `z` — and outside its
-  coverage with `null`. Check `datakilde` and carry a gap rather than a number.
+**The store is the part that matters.** Coordinate-keyed, under `.cache/`,
+consulted before anything is requested — and it has to deduplicate *within* a
+single run as well as between runs, because 28 % of the work is the same
+coordinate twice. Without it every build asks again. `pyarrow` is already a
+dependency and has had no user until now; this is what it was declared for.
 
-**Done when** Sjøbergmarsjruta reads about 996 m of ascent, and still reads
-within a few metres of that when the sampling step is changed to 10 or 15 m. That
-invariance is the whole point of the threshold. A second build must not touch the
-endpoint at all.
+**Sampling.** Every 5 m along each edge, with a floor of **both endpoints
+whatever the length**: 97,974 edges are under 5 m and 28,373 under one metre, so
+"every 5 m" has to mean a floor of two rather than of zero. Skip ferry edges —
+there is no ground under a crossing and the endpoint would answer with depths.
+**Sample bridged connectors**: nobody drew them, but there is ground under them.
+
+**Reject the readings that are not elevations.** Over water the endpoint answers
+with a depth — `datakilde: "dybdekurver"`, a negative `z` — and outside its
+coverage with `null`. Check `datakilde` and carry a gap rather than a number.
+
+### The figures, and why there are two sets
+
+**Per edge: ascent and descent**, both with the 5 m threshold. This is the
+granularity an elevation-aware weight needs, and it is the only thing it is good
+for.
+
+**Per chain: ascent, descent, high and low point**, computed over the chain's
+**full series** — never summed from its edges. The difference is not a rounding:
+42 % of the edges are shorter than 5 m and the median is 6.9 m, so under the
+threshold most edges report no climb at all, and a chain of twenty of them rising
+sixty metres would sum to zero. Summing does not approximate the figure, it
+destroys it.
+
+**Store descent wherever ascent is stored.** A chain is oriented so that its id
+stays stable, not because a walker is obliged to take it that way, so an ascent
+alone is true in one direction and silent about the other. Phase 4 shows both,
+with the direction, and cannot invent the second number.
+
+**High and low carry no threshold** and could not disagree with anything — but
+the popup that shows them is rendered in Python at build time, so they have to
+exist on the chain like the rest. Two numbers, and one rule instead of two.
+
+**Done when** the four figures are on every chain and both are on every walked
+edge, and:
+
+- Sjøbergmarsjruta reads **1,176 m of ascent** on UT.no's digitisation, 1,196 on
+  Turrutebasen's and 1,195 on FKB's, and each still reads within a few metres of
+  its own figure at 10 and 15 m sampling. That invariance is the whole point of
+  the threshold. **These replace the 996 m this phase asked for**, which was a
+  defensible reading of the same rule but a worse one — see the decisions
+  document: it makes three digitisations of one slope disagree by 245 m where the
+  built rule holds them within 20.
+- A second build touches the endpoint **not at all**.
+- A coastal path's profile never dives to −276 m, which is what an unchecked
+  `datakilde` looks like.
+- **Not one figure of the graph moves.** 11,290 chains — FKB 6,201 · N50 roads
+  2,326 · OSM 1,505 · N50 paths 958 · Turrutebasen 244 · UT.no 35 · ferries 21 —
+  234,358 edges, 757 and 747 components, reach 50.8 km = 94 %, 17 quays, Mosjøen
+  2.17 m. Elevation rides along; it decides nothing.
 
 **Say which Sjøbergmarsjruta.** It is *three* chains, one each from UT.no,
 Turrutebasen and FKB, all 20.48 km over the same ground and all starting at the
 same rounded point — `ut-no-398130-7281098-20477`,
 `turrutebasen-398130-7281098-20478`, `fkb-398130-7281098-20483`. Three
 digitisations give three ascents, and UT.no's is a consumer GPS track whose noise
-adds apparent climb that the threshold suppresses but does not remove. Report all
-three and record which one the 996 m refers to; a single figure against a name
-that resolves three ways is not an acceptance.
+adds apparent climb the threshold suppresses but does not remove. Report all
+three and record which the 996 m refers to; a single figure against a name that
+resolves three ways is not an acceptance.
+
+Done, except for one figure that does not reproduce and is written up below.
+`libs/src/trails/io/sources/hoydedata.py` fetches and stores;
+`libs/src/trails/routing/elevation.py` samples, lays a chain's series out of its
+edges and reads the four figures off it; `network/norway.py` wires the two into
+`build()`, so the map and the graph report share one cached graph as before. No
+new dependency: `pyarrow` has its first user.
+
+**The run**, at 5 m: **1,406,040 samples reduce to 1,017,874 distinct
+coordinates**, two short of the 1,017,876 predicted and 28 % below the samples,
+exactly as measured. 20,183 requests, six in parallel, **13.6 minutes** at 24.4
+requests a second. The store is 11.7 MB of parquet for that build.
+
+**A second build issues nothing at all** — not the plain rerun, which reads the
+graph back whole, and not `--rebuild`, which re-samples all 1,017,874
+coordinates and finds every one of them in the store.
+
+**Nothing dived to −276 m.** The lowest reading in the network is **−43.9 m**,
+and it is real ground: `datakilde: "dtm1"`, `terreng: "Steinbrudd"`, an N50 road
+descending into a quarry. 580 samples of 1.4 million are below sea level, on 28
+edges. 1,831 samples got no reading at all and are carried as gaps; two OSM
+chains are nothing but gaps and report no figure rather than a flat one.
+
+**Not one figure of the graph moved** — checked against the cached phase 1
+graph rather than the printed report: same 11,290 chains and 234,358 edges, same
+`chain_id` hash, same edge and chain geometry hashes, same total length to six
+decimals and same total cost. The map is byte-identical once folium's per-build
+element ids are normalised, and all six GPX exports are identical but for the
+`<metadata><time>` every build rewrites.
+
+**The four figures, and the name that resolves three ways.** UT.no publishes it
+as *Sjøbergmarsjruta* and Turrutebasen as *Sjøbergmarsjen*, which reaches FKB
+through the route-name join — so a search for either full name finds one
+digitisation, misses two, and looks like a check. Matched on the stem:
+
+| chain | ascent | descent | high | low | at 10 m | at 15 m |
+|---|---:|---:|---:|---:|---:|---:|
+| `ut-no-398130-7281098-20477` | **1,176 m** | 1,015 m | 903 m | 1.4 m | 1,174 | 1,170 |
+| `turrutebasen-398130-7281098-20478` | **1,196 m** | 1,035 m | 903 m | 1.4 m | 1,188 | 1,182 |
+| `fkb-398130-7281098-20483` | **1,195 m** | 1,034 m | 903 m | 1.4 m | 1,188 | 1,182 |
+
+**The invariance holds**: 6 m of spread across 5, 10 and 15 m sampling on UT.no's
+digitisation and 14 m on the other two, against 250 m of spread with no
+threshold. That is what the threshold is for and it does it.
+
+**The 996 m does not.** All three read near 1,190 m, and the disagreement is not
+in the threshold — sampled uniformly every 5 m along the UT.no chain the
+*unthresholded* figure is **1,370 m against the 1,214 m** in the decisions
+document's table. The filter removes about the same amount either way, 200 m
+here against 218 m there; it is the series underneath that differs by some
+160 m. Three other definitions of "ignore gains under 5 m" were tried and none
+lands on 996 either, and two of them are not invariant, which the document's own
+table requires. The reasoning and what was ruled out are in the decisions
+document under *Sample every 5 m*; the built figures are the reference from here
+on, as phase 1's were.
+
+Also worth knowing: **UT.no's digitisation reads lowest, not highest**, against
+the expectation above that a consumer GPS track would add climb. And the
+per-chain and per-edge figures came out 222.4 km against 148.4 km over the whole
+network — the summed per-edge figure is 67 % of the real one, which is what the
+two being kept apart buys.
 
 ---
 
@@ -556,8 +643,24 @@ render budget.
   the best source in the set — then gzip, then base64. It belongs to the map
   script, not the graph builder: the graph module returns plain geometry and
   attributes and stays architecture-neutral.
-- The edge table beside it: `from_node`, `to_node`, `cost`, `source`, `kind`,
-  `chain_id`, and the per-edge ascent from phase 2.
+- The edge table beside it: `from_node`, `to_node`, `source`, `kind` and
+  `chain_id`. **Not `cost`** — it is `length × source factor`, the length is in
+  the geometry the browser already has, and the factors are six numbers; the 58
+  ferry edges are the exception, flat. **Not the per-edge ascent** either: its
+  only consumer is elevation-aware routing, which is explicitly not yet decided,
+  and a route's own ascent is computed over its composed series for the same
+  reason a chain's is.
+- **A chain's edges have to come back in order.** The panel composes a chain's
+  series from the series of its edges, laid end to end, and sorting the table by
+  `from_node` destroys the order they were cut in. Carry whatever restores it —
+  a position within the chain is the obvious thing. This is the sharper form of
+  the sorting trap below: a scrambled *tie* is caught by the round trip, a
+  scrambled *order* is not, because every sample is still present and correct.
+- **The four per-chain figures — ascent, descent, high and low** — do not belong
+  in this payload. They ride as properties on the drawn chains, which phase 3
+  already puts in the page as GeoJSON and which the panel has in hand the moment
+  one is clicked. Phase 4 adds them there; this phase carries the routing graph
+  and the elevation series and nothing else.
 - **Node positions**, which phase 6 needs to snap a click to the nearest node
   within 150 m and which nothing above provides. Do not ship a node table:
   derive the positions from the edge endpoints while decoding, so they cannot
@@ -611,40 +714,105 @@ about. And measure the decode: it is a number nobody has yet.
 ## Phase 4 — The profile panel
 
 A panel at the foot of the map showing the selected chain's profile: distance
-against elevation, total ascent and descent, high and low point. Foldable like
-the legend, and it stays folded until wanted.
+against elevation, its ascent, descent, high and low point. Foldable like the
+legend, and folded until wanted.
 
-Draw it from the 5 m samples — which reach the browser through phase 3B, not
-through this phase — as **inline SVG, by hand**, and no charting library.
-A script from a CDN does not load on a `file://` page and fails silently, as the
-OpenStreetMap tiles once did. Reduce the series to one point per pixel column,
-keeping each column's minimum and maximum, so ten thousand samples cost nine
-hundred points on screen and no spike is lost. Compute the ascent from the full
-series.
+**Draw it as inline SVG, by hand**, from the 5 m samples phase 3B put in the
+page. No charting library: a script from a CDN does not load on a `file://` page
+and fails silently, the way the OpenStreetMap tiles once did, and the legend, the
+search and the click-highlight are all hand-written for the same reason.
 
-The only smoothing is the threshold on the reported ascent, never on the curve.
+Where a series is longer than the panel is wide, reduce it to one point per pixel
+column, keeping that column's minimum and maximum so no spike is lost. **That is
+the exception, not the common case**: measured, the median chain has **36
+samples** and a third have fewer than twenty; only **186 of 11,290** exceed nine
+hundred. The longest, the 42 km Rundtur, has 8,489. So the reduction must not be
+the only path through the code — bucketing 36 samples into 900 columns leaves 864
+of them empty, and a drawing routine that assumes one point per column produces a
+broken path or none. Draw a short series as it is. The reduction touches the
+curve alone, and nothing else smooths it.
 
-**Put the ascent in every chain's popup too, not only in the panel.** The
-decisions document calls this "the main thing the build-time sampling buys" and
-no phase had claimed it: phase 2 puts `ascent` on the *edge* and does not touch
-the map, phase 3 rebuilds the popups before any elevation exists, and this phase
-is the first to have both. It belongs here.
+**Ascent and descent are read, never recomputed.** Phase 2 computes them per
+chain over its full series, and both the panel and the popup take them from
+there. The temptation is to compute them in JavaScript, since the panel has the
+series anyway — and then one number exists twice, in two languages, **against a
+threshold**, and the popup and the panel disagree by a few metres on the same
+chain. That is worse than either being wrong.
 
-**A chain's ascent is not the sum of its edges' ascents.** The reported figure
-ignores gains under 5 m, and that threshold breaks at every edge boundary — with
-234,358 edges averaging 26 m, summing per-edge figures would count a great deal
-of noise that the threshold exists to discard. Compute it the way the panel
-already has to: over the chain's full series, once. Two places asking the same
-question must not get two answers, so derive the popup's figure and the panel's
-from the same call.
+**High and low point come from the chain too**, though for a different reason:
+they carry no threshold and could not disagree, but **the popup is rendered in
+Python at build time**, so anything it shows has to exist there whatever its
+provenance. Storing them is two numbers per chain and it keeps one rule instead
+of two — *everything either place shows comes from the chain; the series is
+decoded for the curve alone.*
 
-Settle where it sits: the legend already occupies the bottom left. Give the panel
-the width and leave the legend its corner above, or move the legend — but pick
-one.
+**The popup shows ascent, descent and the high point** — which is what the
+decisions document calls the main thing the build-time sampling buys, and it
+needs nothing from phase 3B: each is one more entry in a field dict reading one
+more chain column.
 
-**Done when** clicking any chain draws its profile, and the map still zooms and
-pans while it is on screen. Check a chain that runs along the shore: its profile
-must not dive to −276 m where the sampling strayed over water.
+**The panel reads the same four numbers as properties on the drawn chain**, not
+out of phase 3B's payload. Phase 3 already puts the chains in the page as
+GeoJSON and the panel has the clicked feature in hand, so add ascent, descent,
+high and low there. That is 11,290 chains times four numbers, and it keeps the
+encoded payload to what it is for: the routing graph and the elevation series. The high point earns its place over the low one here, because
+the peaks stand around 1,200 m and whether a stretch stays at 400 m or climbs to
+1,100 decides snow, weather and exposure in a way a low point does not.
+
+### Which way the figures run
+
+A chain is oriented so that its id stays stable, not because a walker is obliged
+to take it that way. Ascent and descent are therefore true in a direction the
+reader cannot see, and this phase has to make it visible — **once, three ways,
+and all three must agree**:
+
+- **In words**, from the bearing between the chain's endpoints, rounded to eight
+  points: *+996 / −850 m towards NE*. Eight and not four, because 35 % of the
+  chains lie more than 30° from a cardinal axis and a four-point label would be
+  wrong about a third of the time; at eight nothing is more than 22.5° out.
+- **As an arrow on the selected chain**, hand-drawn like the rest. This is what
+  actually orients a reader — the words only work once you know which end is
+  which.
+- **As the profile's own direction**: the panel runs left to right in the same
+  sense, so the curve rises where the walk rises.
+
+Do not offer both directions. Two rows of numbers make the reader do the
+matching, and the arrow is what removes the need for them.
+
+Three things measured beforehand, so none is a surprise:
+
+- **Every chain runs eastward.** `_canonical` orders by coordinate, so the
+  bearing always falls in the eastern half: N 15 %, NE 28 %, E 21 %, SE 23 %,
+  S 13 %, and never W, SW or NW. Not a bug, but it looks like one — put a
+  comment where the bearing is computed.
+- **52 chains are rings**, endpoints together. No direction, and none needed:
+  ascent equals descent whichever way round.
+- **452 are strongly wound**, straight-line distance under half their length.
+  There the endpoint bearing is a simplification and stays one; the alternative
+  is turning a label into a route description. The median chain is 0.93 as
+  straight as its own length, so this is the exception rather than the rule.
+
+**Ferries carry none of this.** There is no ground under a crossing, phase 2
+samples none, and it has no profile, no ascent and no direction worth stating.
+Its popup keeps what it has.
+
+### Where the panel sits
+
+The legend already occupies the bottom left. Give the panel the width and leave
+the legend its corner above it, or move the legend — but pick one. Both being
+folded by default makes the clash rare, not absent.
+
+**Done when** clicking any chain draws its profile, shows an arrow for the
+direction the figures describe, and reads the same ascent, descent, high point
+and bearing in the popup as in the panel — with the panel taking every one of
+them from the chain rather than recomputing it. The map still zooms and pans while the panel is open.
+
+Two checks, for the two ways this goes wrong quietly:
+
+- a chain along the shore, whose profile must not dive to −276 m where the
+  sampling strayed over water;
+- a chain whose arrow points one way while its curve rises the other. That is
+  what a reversed series looks like, and no figure will reveal it.
 
 ---
 

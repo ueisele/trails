@@ -8,18 +8,34 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1, 1B, 1C and 1D are built and reviewed.** `libs/src/trails/routing/`
-and `analysis/scripts/route_graph.py`. Their output is now the reference in the
-decisions document; phases 2 and 4–8 remain. The project runs on **Python
-3.14**, and `uv.lock` is tracked from 1D onwards.
+**Phases 1, 1B, 1C, 1D, 3 and 2 are built and reviewed**, and the map is drawn
+from the graph. `libs/src/trails/routing/`, `libs/src/trails/network/`,
+`analysis/scripts/route_graph.py` and `lomsdal_visten.py`. Their output is the
+reference in the decisions document; **3B and 4–8 remain**. The project runs on
+**Python 3.14** and `uv.lock` is tracked from 1D onwards.
 
-**Phase 3 is being implemented, in this same working tree.**
-`libs/src/trails/network/norway.py` is new and `analysis/scripts/route_graph.py`
-is being rebuilt around it — the library lift the phase asks for first. While
-that is true: **documents only, no code, no `git commit`**, whose hook stashes
-unstaged changes and would pull work out from under it. `command make hooks-run`
-will fail on files that are half-written; that is not a finding. Check
-`git status` before assuming this has ended.
+The order these were done in is not the order they are numbered, and that was
+deliberate: 1C → 1D → **3** → 2 → 3B → 4. Phase 3 went before 2 because its
+acceptance is *the map behaves as it did* and 1C and 1D had just measured that in
+a browser; a fresh baseline is perishable and phase 2's API wait is not. 3B waits
+for 2 because two fifths of its payload is elevation.
+
+**Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
+on every walked edge with its ascent and descent, and four figures on every
+chain. 20,183 requests in 13.6 minutes, none at all on a second build or on a
+forced `--rebuild`, and not one figure of the graph moved — checked against the
+cached pre-phase-2 graph down to the geometry hash, the chain ids, the total
+length to six decimals and the total cost. The one thing that did not come out
+is the documented 996 m; that is in *What phase 2 found* below and the decisions
+document now carries both columns.
+
+**Phase 3** drew the map from the chains and removed the source flags. Every
+browser figure held — 198 markers, one non-interactive path, 25 layers, search at
+10 px above the zoom at 60, wheel 9 → 11 — and the path count fell 12,357 →
+11,591, which is 11,290 chains plus 298 circle markers plus the boundary. It
+found that `Ukjent` was being read as a name and deliberately did not fix it,
+because that moves the count it was accepted against; the fix came immediately
+after, as its own change, and moved the reference to 11,290.
 
 **Phase 1C** refreshed `uv.lock` and nothing else. Not one figure moved, folium
 did not move either, and what did change is in *What 1C found* below.
@@ -67,39 +83,39 @@ other two: `carry_positions`' docstring now matches the window projection it
 uses, and `fingerprint` now digests each source's identity and attribute values,
 so a change in the SSR road names or the Turrutebasen route names is noticed.
 
-### What is uncommitted
+### What the map is now
 
-Everything since `7c9666d`, in three natural groups:
+Everything through phase 3 is committed; the tree carries only phase 2's work in
+progress. Two changes to the map are worth knowing because they are easy to read
+as regressions:
 
-1. **Phase 1** — `libs/src/trails/routing/`, `libs/tests/trails/routing/`,
-   `analysis/scripts/route_graph.py`, plus both READMEs. Untracked, so the
-   agent's work and the review's corrections to it cannot be separated into two
-   commits; they are the same never-versioned files.
-2. **The map** — `analysis/scripts/lomsdal_visten.py`. The line above that said
-   it was untouched is no longer true. See below.
-3. **The documents** — all three.
+- **The map is drawn from chains**, so a drawn line and a selectable track are
+  one object. `describe_whole_roads` and `highlight_keys` are gone — both faked
+  what a chain now is. The source flags are gone with them, and FKB therefore
+  loads over the full 15 km rather than 5.
+- **A chain is never cut at the park boundary**, which costs a little colour
+  accuracy: 2.4 km of FKB, 8.4 km of N50 and 14.8 km of OSM inside the park are
+  drawn in the approach colour, and 35 km of FKB outside it in the park colour.
+  That is the rule as written, not a bug.
 
-### What changed in the map
+Before that, an audit of the popups against what each layer's data actually
+holds turned up two things now folded into phase 3: **OSM was the only line
+layer showing no length**, though `clip_to` had computed it all along, and **no
+layer showed provenance** though every Kartverket line layer carries it. N50 and
+Turrutebasen now say how and when a line was captured — the difference between a
+path somebody surveyed and one carried forward off an older map, which is 47 % of
+N50's here.
 
-Popups were audited against what each layer's data actually holds:
+`bakke` and `mo` were added to the drawn place-name types afterwards, because a
+name in the register that the map never draws looks like a name the map has never
+heard of. Not `utmark`: a land-use category for a tract, not a feature with a
+position. **58 % of the register's points in the zone are still never drawn** —
+6,260 of 10,737 across 131 of its 151 types — and since the search only finds
+what is drawn, a known name can still come back empty. Mostly right, since 805
+hills and 751 streams would bury the map, but it is a phase of its own if wanted.
 
-- **OSM was the only line layer with no length.** `clip_to` had been computing
-  `length_km` for it all along; `OSM_POPUP_FIELDS` simply omitted the entry.
-- **No layer showed provenance**, though every Kartverket line layer carries it.
-  A new `describe_survey()` adds `survey_method` and `surveyed` to N50's paths,
-  ferries and roads — translating `fot`/`dig`/`sat` through
-  `SURVEY_METHOD_LABELS` — and to Turrutebasen, which writes its method out in
-  words already. Turrutebasen also gained `origin`, `trail_significance` and
-  `special_hiking_trail_type`; the last needed adding to
-  `aggregate_trail_info`, which had been discarding it.
-- **FKB was left alone.** Its extra fields look 100 % populated and are not:
-  `notna()` counts empty strings. Really 3–6 %.
-
-The map has been rebuilt and the new fields verified in the HTML. Its warm-cache
-runtime is **53 seconds**, not the "half an hour" quoted twice in conversation —
-that figure came from a timeout allowance rather than a measurement. Worth
-remembering as a habit: a number nobody measured is worth nothing even when it
-is only used to decide whether to bother.
+The map's warm-cache runtime is **53 seconds**, and the graph's is about two
+minutes on a full `--rebuild`.
 
 The measurement scripts that produced the figures lived in a session scratchpad
 and are gone. Their methods are below so a figure can be re-derived rather than
@@ -338,13 +354,20 @@ map, markers rendering at all. The trap list above was observed under **folium
 revisiting; the "0.17" this document used to give was the floor in
 `pyproject.toml` read as a version. See *What 1C found* below.
 
-**Phase 2, elevation.** The invariance is the test: the same route's ascent at
-5, 10 and 15 m sampling. Then check the cache actually holds — a second run must
-issue no requests. Then check a coastal path: any profile touching −276 m means
-`datakilde` is not being checked.
+**Phase 2, elevation — built.** The invariance is the test: the same route's
+ascent at 5, 10 and 15 m sampling. Then check the cache actually holds — a second
+run must issue no requests. Then check a coastal path: any profile touching
+−276 m means `datakilde` is not being checked. All three passed; see *What phase
+2 found* below for the one figure that did not.
 
 Two things the phase was checked against reality for, before it was handed over:
 
+- **Both ascent *and* descent, everywhere either is stored.** The specification
+  said ascent alone until it was asked what a popup would actually show. A chain
+  is oriented so its id is stable, not because a walker takes it that way, so an
+  ascent figure is true in one direction and silent about the other. If only one
+  number came back, that is the finding — and it was added to the phase while
+  phase 2 was already being implemented, so it may need saying out loud.
 - **Ask which ascent figure a number came from.** There are two and they are not
   interchangeable: per edge for routing weights, per chain over the full series
   for anything shown. Summing the per-edge ones does not approximate the
@@ -433,7 +456,27 @@ and the browser has both.
 **Budgeting a payload by scaling another payload does not work.** That is what
 produced both errors here, in a document that insists elsewhere on measuring.
 
-**Phase 4, the profile.** Check it is hand-drawn SVG and nothing is fetched from
+**Phase 4, the profile.** Two of its requirements arrived late and by being
+questioned, which is worth knowing when reviewing it.
+
+The **popup ascent** had fallen between phases 2, 3 and 4 — the decisions
+document calls it the main thing the sampling buys and no phase had claimed it.
+A first attempt to place it here reasoned that phase 4 was "the first to have
+both" the elevations and the rebuilt popups; that was wrong, since popups are
+rendered in Python at build time and need nothing from phase 3B's payload. Phase
+4 owns it only because it is the first phase after phase 2 that touches the map.
+
+**Descent, and the direction**, arrived when the plain question was asked: after
+this phase, do I see ascent *and* descent per segment? The specification said
+ascent alone, stored only per edge, with descent appearing solely in the panel's
+description. And a first fix — anchoring the numbers to the endpoint elevations
+— was refused for the right reason: it says which direction the figures describe
+but not which end of the drawn line you are standing at. The answer is one
+direction shown three ways, the arrow being the part that actually orients
+anybody. **A number that depends on direction is not finished until the reader
+can see the direction.**
+
+Check it is hand-drawn SVG and nothing is fetched from
 a CDN — a CDN script fails silently on `file://`. Check the map still zooms while
 the panel is open.
 
@@ -493,8 +536,16 @@ Quays [SSR] · Ferry quays [OSM] · Trailheads, farms and sæters [OSM] · Towns
 villages [OSM] and [SSR] · Farms and holdings [SSR] · Terrain names [SSR] ·
 National park boundary [Naturbase]
 
-That inventory is complete as of `ec9ec7f`. If a layer is added to the map later,
-it has to be asked the question above.
+That inventory was complete at `ec9ec7f` and still is, with one addition: the
+place-name layer now also draws `bakke` and `mo`. If a layer is added later, it
+has to be asked the question above.
+
+**And ask the same question of the specification, one level up:** *which phase
+receives this?* That is the inverted form, and it has found two things the
+inventory question could not, because neither was ever on the map — the page
+encoding, which was specified over thirty lines and belonged to no phase and is
+now 3B, and the popup ascent, which fell between phases 2, 3 and 4. Run it
+whenever the decisions document grows.
 
 ## Known open, and never asked
 
@@ -534,8 +585,59 @@ download would carry FKB's own `målemetode` and settle it — it needs an accou
 and a second loading path, which is why the module uses the WFS. That trade is
 the open question, and nothing downstream is blocked on it.
 
-Otherwise nothing is known to be open. That has been true twice
-before and was wrong both times — see the question above, and ask it again.
+One more, small and dated: the `Ukjent` fix showed that a register's word for
+*nothing* is worth hunting for deliberately. Turrutebasen's is now excluded.
+**No other source has been searched for its own placeholder**, and the same shape
+of bug has now appeared three times — `pd.NA` as the text `<NA>`, an empty string
+counted by `notna`, and "unknown" read as a name. A sweep of every carried column
+for values that mean absence would be an hour's work and is nobody's phase.
+
+Otherwise nothing is known to be open. **That has now been true three times and
+was wrong all three** — the phase readiness checks found gaps in 1B, in 3, in 2
+and in 3B, the last of which this document had written itself. The check that
+finds them is not reading the phase; it is measuring it against the built graph.
+Phases 4, 5, 6, 7 and 8 have not had it.
+
+## What phase 2 found
+
+**The documented 996 m does not reproduce, and the threshold is not why.** All
+three digitisations of Sjøbergmarsjruta read near 1,190 m. Before saying so, the
+*unthresholded* figure was measured on the same route sampled the same way: it
+is 1,370 m against the decisions document's 1,214 m. The filter removes 200 m
+here and 218 m there, so the two ascent rules behave alike; the series underneath
+differs by some 160 m. Three other readings of "ignore gains under 5 m" were
+tried and none lands on 996 m either, and two of them are not invariant, which
+the document's own table requires of whatever produced it. The original
+measurement scripts are gone, so what was sampled cannot be recovered. **A
+predicted figure that cannot be reproduced is worth taking apart into the part
+that does and the part that does not** — here the invariance reproduces exactly
+and the level does not, and only the invariance was ever the point.
+
+**The route resolves under two names.** UT.no publishes *Sjøbergmarsjruta* and
+Turrutebasen *Sjøbergmarsjen*, which reaches FKB through the route-name join. The
+first implementation of the check searched for the full name, found one
+digitisation of three and printed a table that looked complete. The three chain
+ids in the phase document are right; the name in it is one of two.
+
+**A cache key covering only the inputs is half a key.** The elevation parameters
+went into the fingerprint, so phase 1's graphs rebuilt — but when descent and the
+high and low point were added afterwards, nothing about the *inputs* changed and
+a cached graph without those columns was served to code that reads them. The
+fingerprint now also carries a `GRAPH_LAYOUT` marker, bumped when a build starts
+producing something a cached one does not carry. Worth remembering as a shape:
+the digest of what went in cannot notice a change in what comes out.
+
+**−43.9 m is real ground.** The lowest reading in the network is an N50 road
+descending into a quarry — `datakilde: "dtm1"`, `terreng: "Steinbrudd"` — not an
+unchecked depth contour. 580 of 1.4 million samples are below sea level, on 28
+edges, and nothing is anywhere near −276 m. So the coastal check needs a second
+question after "is it negative": *what does the endpoint say it read it from*.
+
+**A chain's series is laid out of its edges', not sampled again.** Sampling the
+chains separately would have doubled the requests for the same numbers, because
+every edge already samples both its ends. Two independent constructions agree to
+5 m over a 20 km route, which is what says the walk and the orientation are
+right; the check is worth repeating if either is touched.
 
 ## What 1C found
 
@@ -677,6 +779,15 @@ So they are not quietly reopened:
 - No reduced GPX variant: the target platforms cannot rebuild these paths from
   sparse points, and no point limit is known that would justify one.
 - No offline elevation. The map's tiles are already online-only.
+- **Not the strictest reading of the ascent threshold**, where any fall at all
+  ends the climbing run. It is what produced the documented 996 m and it was
+  recovered in review — 999.7 m on the same series the build uses — so the old
+  figure was a defensible reading rather than a mistake. It is still the worse
+  one: across three digitisations of the same slope it spreads 245 m, where the
+  built rule holds them within 20. **The cross-source spread is the test of an
+  ascent rule.** Invariance across sampling steps is necessary and not
+  sufficient; the strict reading passes that and still measures the noise of a
+  particular drawing rather than the hill.
 - **`Ukjent` is no longer read as an identity**, and the reference moved with it:
   11,290 chains, FKB 6,201, Turrutebasen 244, 234,358 edges. Everything that
   matters held — 757 and 747 components, 79 % and 91 %, reach 50.8 km = 94 %,

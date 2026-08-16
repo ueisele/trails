@@ -284,3 +284,16 @@ class TestFingerprint:
         """Test that a source with neither identity nor attributes is handled."""
         params = Params(cache_dir=".cache", ut_routes=CATALOGUE)
         assert fingerprint([source(identity=None)], masks(), params)
+
+    def test_reading_the_ground_differently_moves_it(self):
+        """Test that a graph sampled at one step cannot answer for another.
+
+        The invariance the ascent threshold exists for is checked by rebuilding
+        at 10 and 15 m and comparing, so a cached 5 m graph served to that
+        comparison would have it compare a cache against itself.
+        """
+        one = Params(cache_dir=".cache", ut_routes=CATALOGUE)
+        coarse = Params(cache_dir=".cache", ut_routes=CATALOGUE, elevation_step_m=15.0)
+        louder = Params(cache_dir=".cache", ut_routes=CATALOGUE, ascent_threshold_m=10.0)
+        assert fingerprint([source()], masks(), one) != fingerprint([source()], masks(), coarse)
+        assert fingerprint([source()], masks(), one) != fingerprint([source()], masks(), louder)
