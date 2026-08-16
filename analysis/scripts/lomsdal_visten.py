@@ -141,6 +141,8 @@ TERRAIN_NAME_LEGEND = (
 FKB_POPUP_FIELDS = {
     "typeveg": "Road type",
     "length_km": "Length (km)",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
 }
 
 FERRY_POPUP_FIELDS = {
@@ -174,6 +176,8 @@ ROAD_POPUP_FIELDS = {
     "whole_km": "Road in total (km)",
     "survey_method": "Captured",
     "surveyed": "Captured on",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
 }
 
 N50_POPUP_FIELDS = {
@@ -184,6 +188,8 @@ N50_POPUP_FIELDS = {
     "length_km": "Length (km)",
     "survey_method": "Captured",
     "surveyed": "Captured on",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
 }
 
 #: How N50's ``malemetode`` code reads in a popup. The code is the difference
@@ -200,6 +206,16 @@ SURVEY_METHOD_LABELS = {
     "ukj": "Unknown",
 }
 
+#: How the cross-source marking summary reads in a popup, per class. Distinct
+#: from N50's ``rutemerking`` and Turrutebasen's ``marking``, which are what one
+#: register says about its own lines: this is what *any* source says about the
+#: ground under the line, and a popup showing both must not label them alike.
+MARKING_LABELS = {
+    "marked_m": "marked",
+    "unmarked_m": "stated unmarked",
+    "unknown_m": "not stated",
+}
+
 #: How a catalogue category reads in a popup.
 UT_CATEGORY_LABELS = {
     "core": "Route in or through the park",
@@ -211,6 +227,8 @@ UT_POPUP_FIELDS = {
     "category_label": "Kind",
     "length_km": "Track length (km)",
     "ut_summary": "UT.no states",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
 }
 
 #: Clickable links in the UT.no popup. The route page and the park's own
@@ -240,6 +258,8 @@ TRAIL_POPUP_FIELDS = {
     # people who maintain the route — and only 1 % each from FKB and N50. It is
     # the one line source in this map that is not a Kartverket derivative.
     "origin": "Geometry from",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
 }
 
 OSM_POPUP_FIELDS = {
@@ -254,6 +274,8 @@ OSM_POPUP_FIELDS = {
     # OSM way — median 2, worst 33 — so a single id would be wrong for most of
     # them. The value is joined like every other multi-valued field.
     "osm_id": "OSM IDs",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
 }
 
 #: Popup for the OSM place layers, which carry only these three.
@@ -387,6 +409,56 @@ def share_inside(chains: gpd.GeoDataFrame, area: gpd.GeoDataFrame) -> pd.Series:
     return inside / chains["length_m"]
 
 
+def describe_marking(chains: gpd.GeoDataFrame) -> pd.Series:
+    """Say how much of each chain the sources between them call waymarked.
+
+    Kilometres per class rather than one verdict, because 467 chains here are
+    marked along part of their run and not along the rest, and a line labelled
+    "marked" that is marked for a third of its length is worse than no answer
+    at all.
+
+    ``not stated`` is a class of its own and is never folded into unmarked. FKB
+    carries no marking information whatever and is 90 % of this network's path
+    evidence, so most of what a reader sees is honestly unknown — 3,711 km of
+    5,853. A summary that hid that would read as a survey and is not one.
+
+    Args:
+        chains: Chains carrying :data:`CHAIN_COVERAGE_COLUMNS`
+
+    Returns:
+        One line per chain, empty where neither question was asked — a crossing
+        has no ground to be marked, and an empty popup row is dropped
+    """
+    lines = []
+    for row in chains[list(MARKING_LABELS)].itertuples(index=False):
+        pieces = [f"{metres / 1000:.2f} km {label}" for metres, label in zip(row, MARKING_LABELS.values(), strict=True) if metres > 0]
+        lines.append(" \u00b7 ".join(pieces))
+    return pd.Series(lines, index=chains.index, dtype="string")
+
+
+def describe_unrecorded(chains: gpd.GeoDataFrame) -> pd.Series:
+    """Say how much of each chain no source records a path along.
+
+    **The silence is the whole of the statement**, and the wording has to keep
+    saying so. This is ground that no register draws anything on — not ground
+    with no path. All four recording sources draw liberally and three of them
+    are Kartverket, so a line beside something is evidence of nothing; only
+    their saying nothing at all carries information.
+
+    Args:
+        chains: Chains carrying ``no_path_m``
+
+    Returns:
+        One line per chain, empty wherever every metre of it is recorded, which
+        is all but 20.3 km of the network
+    """
+    return pd.Series(
+        [f"{metres / 1000:.2f} km where no source records a path" if metres > 0 else "" for metres in chains["no_path_m"]],
+        index=chains.index,
+        dtype="string",
+    )
+
+
 def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.GeoDataFrame]:
     """Give every chain the columns a popup, a search box and a layer need.
 
@@ -408,6 +480,8 @@ def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.
     described["length_km"] = (described["length_m"] / 1000).round(2)
     described["whole_km"] = only_the_wider_way(described)
     described["in_park"] = share_inside(described, park) >= IN_PARK_SHARE
+    described["marking_all"] = describe_marking(described)
+    described["unrecorded"] = describe_unrecorded(described)
 
     frames = {name: gpd.GeoDataFrame(described[described["source"] == name].copy(), geometry="geometry", crs=described.crs) for name in SOURCE_NAMES}
 
