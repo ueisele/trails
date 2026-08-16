@@ -162,8 +162,8 @@ changes with every parameter:
 **Rebuild the map and drive it.** `command make map`, 53 seconds warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and wait ten seconds after load — the page
-is **29.6 MB** since 3B, and was 25.4 before it. The five probes, with what they
-read after 3B:
+is **31.1 MB** since 3B and the two coverage rows, and was 25.4 before either.
+The five probes, with what they read after both:
 
 | | |
 |---|---|
@@ -189,6 +189,12 @@ from the page alone — fold the decoded values as `header.checksum` was folded
 and compare. It reads **1,881,995,939 / 2,401,407,269** for the coordinates and
 **814,474,384 / 3,748,383,096** for the heights, over 948,465 vertices and
 1,406,040 samples.
+
+**Do not probe the popups with `map.eachLayer`.** It walks the map's top-level
+layers, which are the feature groups, and never reaches the lines inside them —
+so it reports zero popups on a page that has eleven thousand. Count the label in
+the HTML instead: *Marking, all sources* appears **11,269** times, one per chain
+that is not a ferry, and *Unrecorded ground* **10**.
 
 ## How each figure was measured
 
@@ -755,11 +761,6 @@ of bug has now appeared three times — `pd.NA` as the text `<NA>`, an empty str
 counted by `notna`, and "unknown" read as a name. A sweep of every carried column
 for values that mean absence would be an hour's work and is nobody's phase.
 
-One is open and dated, and belongs to phase 6: the page's payload carries no
-`waymarked` and no `no_path_recorded`, which is what a route would sum to say
-how much of itself is marked and how much is on nothing recorded. 3B was right
-not to add them unasked. They cost about two bits an edge. See *What 3B found*.
-
 Otherwise nothing is known to be open. **That has now been true four times and
 was wrong all four** — the phase readiness checks found gaps in 1B, in 3, in 2
 and in 3B, the last of which this document had written itself, and the 3B review
@@ -860,12 +861,46 @@ against this map, and a reviewer who goes looking for it will find it dormant.
   same thing. It now raises, which is what the module does at every other such
   ambiguity.
 
-**What the payload does not carry, and phase 6 will want.** `waymarked` and
-`no_path_recorded`, which a route sums in kilometres to say how much of itself is
-marked and how much is on nothing recorded. The phase named five edge fields and
-these are not among them, so 3B correctly did not add them. They are two bits per
-edge and the `sources` byte compresses to nothing, so they will cost about the
-same. **Decide it in phase 6 rather than discovering it there.**
+**What the payload did not carry — added straight after, in three commits.**
+`waymarked` and `no_path_recorded` are what a route sums to say how much of
+itself is marked and how much runs where nothing is recorded. The phase named
+five edge fields and these were not among them, so 3B correctly reported them
+rather than adding them.
+
+Adding them cost **no recomputation at all**, which is worth knowing before the
+next one of these: both columns were already on the edges in the cached graph,
+and the fingerprint covers what goes *into* a build, while the encoding happens
+after it. What did need a `GRAPH_LAYOUT` bump was the popup, because that needs
+the figures summed **per chain** and the chains carried nothing. Two minutes
+offline, no request to any endpoint — the height store is separate and even a
+`--rebuild` reads it.
+
+Measured after: payload **4.11 → 4.12 MB**, the byte costing 0.234 raw and
+0.009 gzipped. Every graph figure unchanged, every browser figure unchanged,
+both checksums still matching, no page errors.
+
+**And the part worth remembering.** The same two fields cost **1.57 MB in the
+popups** — 29.6 to 31.1 MB — against 0.009 in the payload. **Popup text is
+written out per feature and compresses against nothing, so showing a figure can
+cost 175 times what carrying it does.** Neither budget is threatened; the ratio
+is the surprise, and it is the right way round only because the payload is
+encoded and the popup is not.
+
+Three things decided while doing it, each of which could have gone the lazy way:
+
+- **Marking is three-valued, so the popup gives kilometres per class** rather
+  than a verdict. 467 chains are marked along part of their run and not the
+  rest, and 3,711 km of 5,853 are honestly *not stated* — FKB says nothing about
+  marking and is 90 % of the path evidence. A line labelled "marked" that is
+  marked for a third of its length is worse than no answer.
+- **Never asked is not nothing stated.** A crossing was never asked; an edge
+  that came back `unknown` was asked and no source answered. The payload's first
+  code is `null`, not `unknown`, and an unrecognised state raises rather than
+  falling into code 0. That is the *fourth* appearance of this shape.
+- **The label had to be new.** N50's `rutemerking` and Turrutebasen's `marking`
+  already sit in those popups and are what one register says about its own
+  lines. This is what any source says about the ground, so it reads *Marking,
+  all sources*.
 
 ## What 1C found
 
