@@ -106,9 +106,8 @@ so a change in the SSR road names or the Turrutebasen route names is noticed.
 
 ### What the map is now
 
-Everything through phase 3 is committed; the tree carries only phase 2's work in
-progress. Two changes to the map are worth knowing because they are easy to read
-as regressions:
+Everything through 3B is committed and the tree is clean. Two changes to the map
+are worth knowing because they are easy to read as regressions:
 
 - **The map is drawn from chains**, so a drawn line and a selectable track are
   one object. `describe_whole_roads` and `highlight_keys` are gone — both faked
