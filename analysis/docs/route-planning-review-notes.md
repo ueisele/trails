@@ -20,6 +20,18 @@ acceptance is *the map behaves as it did* and 1C and 1D had just measured that i
 a browser; a fresh baseline is perishable and phase 2's API wait is not. 3B waits
 for 2 because two fifths of its payload is elevation.
 
+**Phase 3B is being implemented, in this same working tree.** While that is
+true: **documents only, no code, no `git commit`** — the hook stashes unstaged
+changes and would pull work out from under it. `command make hooks-run` will fail
+on half-written files; that is not a finding. Check `git status` before assuming
+this has ended.
+
+What it should produce, so a wrong figure is recognisable: a payload near
+**3.6 MB** — geometry 2.35, edge table 0.27, elevations 0.98 — the page behaving
+exactly as phase 3 left it, and **the decode time, which nobody has yet**. The
+graph itself must not move at all: 11,290 chains, 234,358 edges, 757 and 747
+components, reach 50.8 km = 94 %, 17 quays, Mosjøen 2.17 m.
+
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
 chain. 20,183 requests in 13.6 minutes, none at all on a second build or on a
@@ -115,7 +127,12 @@ what is drawn, a known name can still come back empty. Mostly right, since 805
 hills and 751 streams would bury the map, but it is a phase of its own if wanted.
 
 The map's warm-cache runtime is **53 seconds**, and the graph's is about two
-minutes on a full `--rebuild`.
+minutes on a full `--rebuild`. Both read one cached graph, keyed by a fingerprint
+that covers the sources, the parameters, the values the chains are built from and
+— since phase 2 — a `GRAPH_LAYOUT` marker for what comes *out*. It does not
+cover the library versions, which is why an upgrade has to be measured with
+`--rebuild` or it replays the cache and reports everything unchanged without
+executing a line of shapely.
 
 The measurement scripts that produced the figures lived in a session scratchpad
 and are gone. Their methods are below so a figure can be re-derived rather than
@@ -164,6 +181,25 @@ was GPS noise.
 from each end's node position to that end's own coordinate, grouped by source.
 Then, per node, the widest gap between any two edge ends meeting on it — that
 second one is what a stitched route actually sees.
+
+**A chain's elevation series.** Not sampled along the chain — the build samples
+per *edge*, so points taken along the chain miss the store entirely. Take the
+chain's edges, **order them by projecting each edge's first coordinate onto the
+chain**, and concatenate their series with the shared node counted once. Verify
+the ordering before trusting it, by checking that consecutive edges touch: 2,212
+chains do not join up in the frame's own order, so an unordered concatenation
+silently produces a plausible profile of a route nobody could walk.
+
+**Reading the elevation store.** `.cache/elevation/hoydedata_25833.parquet`,
+keyed on `east` and `north` as **integers in centimetres** — `round(x * 100)`,
+not a rounded float. Getting that wrong returns a store full of misses that looks
+like a store full of gaps.
+
+**Payload encoding.** Zigzag varints over deltas, one run per edge, then gzip,
+then base64 — geometry at 1e-6, elevations at 0.1 m. Measure the **edge table
+separately**: as JSON it is 1.98 MB and as sorted delta-encoded columns 0.27,
+which is the whole margin. Do not scale one payload from another; that produced
+both of this phase's budget errors, in opposite directions.
 
 **Provenance.** `malemetode`, `noyaktighet` and `datafangstdato` on N50;
 `measurement_method`, `accuracy`, `origin` on Turrutebasen; FKB has none, and its
@@ -240,6 +276,46 @@ every one was invisible until something was actually run.
   into one area first and intersect once. It is also 8× faster to shortcut the
   two cases that need no merge at all — one mask line covering the whole edge,
   which is 99 % of them, and only one line near it.
+
+## Before handing a phase over
+
+This has been done for 1B, 2, 3, 3B and 4 and **found something every time** — a
+rule that was not implementable, two acceptance figures that would have failed a
+correct implementation, fifteen attributes nobody had counted, a missing layer, a
+forgotten payload, a budget off in both directions. Reading the phase never finds
+these. The check is:
+
+1. **Load the built graph and measure what the phase asserts.** Every figure in a
+   phase should be reproducible from `.cache/objects/` in a few lines. One that
+   is not is either wrong or was never measured.
+2. **Ask what the phase needs that nothing provides.** The popup ascent, the node
+   positions, the per-chain figures and the edge order were each specified for a
+   consumer with no producer.
+3. **Ask which phase receives each requirement of the decisions document.** That
+   is the inverted form and it found the page encoding, which was specified over
+   thirty lines and belonged to nobody.
+4. **Read the phase end to end afterwards.** Patching a phase four times produces
+   four contradictions; phases 2 and 4 both had to be rewritten as one text after
+   being corrected in pieces.
+
+Do not hand over a phase whose acceptance figures were derived rather than
+measured. Two of them — FKB's 173 km and Sjøbergmarsjruta's 996 m — came from a
+different method than the rule they were stated against, and both would have told
+a correct implementation it had failed.
+
+### The prompt that has worked
+
+Five phases in, the shape is stable: point at the three documents and say to read
+all of the phase, not the summary. Name the commit the tree is at. List the traps
+by name — each one cost real time here and none is deducible. State the
+acceptance as measured figures. Say what is **not** to be built and why, because
+that is what stops a helpful agent widening the scope. Require a browser for
+anything visual, with `uv run --with playwright` and no new dependency. End with
+*run a code review, work the findings in or say why not, then stop and report*.
+
+Give an agent an escape hatch — *if this is bigger than it reads, say so and
+stop* — and take it seriously when used. It has been right both times it was
+invoked.
 
 ## Reviewing each phase
 
