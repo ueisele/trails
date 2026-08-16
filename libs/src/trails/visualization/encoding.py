@@ -17,6 +17,13 @@ than the best source in the set, so nothing measurable is lost. Do not coarsen
 it to save space: 1e-5 saves 0.7 MB and costs 1.11 m, which is worse than FKB's
 own survey accuracy and would undo what the graph was careful about.
 
+**What a route sums, beside its length.** The two derived edge fields ride
+in one byte: whether the sources state the ground is waymarked, and whether
+none of them records a path along it. Both are summed in kilometres by a
+planned route, which is why they are here rather than left in Python, and
+the second carries a sentence that has to travel with it — it is ground *no
+source records a path along*, which is not ground with no path.
+
 **Three things are deliberately absent.** ``cost``, because it is
 ``length x source factor`` and the browser has the geometry and the factors —
 the ferry crossings are the exception and their flat cost is in the header. The
@@ -43,6 +50,7 @@ single cursor and never has to seek::
     flags         N x byte            bit 0 runs against its chain, bit 1 begins a new stretch
     nodes         2N x zigzag varint  head against the last edge's tail, then tail against head
     sources       N x byte            index into the header's source table
+    derived       N x byte            bits 0-1 index the header's waymarked table, bit 2 no path recorded
     vertexCounts  N x varint          vertices per edge
     coordinates   2V x zigzag varint  longitude and latitude, delta against the vertex before
     sampleCounts  N x varint          height samples per edge; none at all on a crossing
@@ -60,11 +68,12 @@ import numpy as np
 import pandas as pd
 import shapely
 
+from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED
 from trails.routing.order import CHAIN_ORDER_COLUMNS
 
 #: What the decoder in the page expects. Bump it when the layout changes, so a
 #: stale decoder says so rather than reading nonsense confidently.
-PAYLOAD_VERSION = 1
+PAYLOAD_VERSION = 2
 
 #: The coordinate reference system the payload is written in. Degrees rather
 #: than the metric CRS the graph is built in, because everything that reads it —
@@ -74,7 +83,19 @@ PAYLOAD_EPSG = 4326
 PAYLOAD_CRS = f"EPSG:{PAYLOAD_EPSG}"
 
 #: The binary stream, in the order it is written and read.
-STREAM_SECTIONS = ("chains", "chainEdges", "flags", "nodes", "sources", "vertexCounts", "coordinates", "sampleCounts", "heights")
+STREAM_SECTIONS = ("chains", "chainEdges", "flags", "nodes", "sources", "derived", "vertexCounts", "coordinates", "sampleCounts", "heights")
+
+#: What the low two bits of the derived byte mean, in the order the header
+#: lists them so that a page reads a name rather than a number. ``None`` is
+#: first and is not the same as *unknown*: a crossing and an inferred
+#: connector were never asked, where an edge that came back ``unknown`` was
+#: asked and no source answered. Collapsing the two would be the same mistake
+#: this codebase has made three times already, with ``pd.NA``, with an empty
+#: string and with a register writing the word for *nothing* into a name.
+WAYMARKED_CODES: tuple[str | None, ...] = (None, UNKNOWN, MARKED, UNMARKED)
+
+#: Bit of the derived byte saying no source records a path along the edge.
+NO_PATH_BIT = 0x04
 
 #: How finely a coordinate is written down, in degrees. 1e-6 is 0.11 m of
 #: latitude. Every source here is coarser than that by an order of magnitude:
@@ -238,8 +259,8 @@ def encode_graph(
             chain is and what it says about itself is already in the page, as
             properties on the line the map draws.
         edges: The graph's edges in :data:`PAYLOAD_CRS`, carrying ``from_node``,
-            ``to_node``, ``source``, ``kind``, ``chain_id``, ``elevations`` and
-            their geometry
+            ``to_node``, ``source``, ``kind``, ``chain_id``, ``waymarked``,
+            ``no_path_recorded``, ``elevations`` and their geometry
         order: :data:`~trails.routing.order.CHAIN_ORDER_COLUMNS` per edge, from
             :func:`~trails.routing.order.chain_order`
         costs: What a metre on each source costs a route, by source name, taken
@@ -283,6 +304,7 @@ def encode_graph(
         "flags": (flipped.astype(np.uint8) | (placed["run_start"].to_numpy(dtype=bool).astype(np.uint8) << 1)).tobytes(),
         "nodes": _nodes(laid, flipped),
         "sources": np.array([code_of[name] for name in laid["source"].tolist()], dtype=np.uint8).tobytes(),
+        "derived": _derived(laid),
         "vertexCounts": varints(vertices),
         "coordinates": varints(zigzag(np.diff(coordinates, axis=0, prepend=0).reshape(-1))),
         "sampleCounts": varints(samples),
@@ -302,6 +324,8 @@ def encode_graph(
         "coordinateQuantum": coordinate_quantum,
         "elevationQuantum": elevation_quantum,
         "sources": table,
+        "waymarked": list(WAYMARKED_CODES),
+        "noPathBit": NO_PATH_BIT,
         # Not decoration: this is what lets a page say whether it decoded every
         # one of two million values correctly, having nothing to compare them
         # against.
@@ -418,6 +442,39 @@ def _source_table(edges: gpd.GeoDataFrame, costs: dict[str, dict[str, Any]]) -> 
         raise ValueError(f"a source code is one byte and there are {len(pairs)} sources")
     table = [{"name": name, "kind": kind, **costs[name]} for name, kind in pairs]
     return table, {name: position for position, (name, _) in enumerate(pairs)}
+
+
+def _derived(edges: gpd.GeoDataFrame) -> bytes:
+    """Write the two fields a planned route sums, one byte to an edge.
+
+    Args:
+        edges: The graph's edges, in payload order, carrying ``waymarked`` and
+            ``no_path_recorded``
+
+    Returns:
+        One byte per edge: the low two bits index :data:`WAYMARKED_CODES` and
+        :data:`NO_PATH_BIT` says no source records a path along it
+
+    Raises:
+        ValueError: If ``waymarked`` holds a state the payload cannot name.
+            Silently writing it as code 0 would turn an unrecognised answer into
+            *never asked*, which is the one distinction this byte exists to keep.
+    """
+    stated = edges["waymarked"]
+    codes = np.zeros(len(edges), dtype=np.uint8)
+    named = pd.isna(stated).to_numpy(dtype=bool, copy=True)
+    for code, state in enumerate(WAYMARKED_CODES):
+        if state is None:
+            continue
+        matches = (stated == state).fillna(False).to_numpy(dtype=bool)
+        codes[matches] = code
+        named |= matches
+    if not named.all():
+        unnamed = sorted({str(value) for value, known in zip(stated.tolist(), named.tolist(), strict=True) if not known})
+        raise ValueError(f"the payload names {[state for state in WAYMARKED_CODES if state]}, the edges also say {unnamed}")
+
+    recorded = edges["no_path_recorded"].fillna(False).to_numpy(dtype=bool)
+    return (codes | (recorded.astype(np.uint8) * NO_PATH_BIT)).tobytes()
 
 
 def _strings(values: list[str]) -> bytes:

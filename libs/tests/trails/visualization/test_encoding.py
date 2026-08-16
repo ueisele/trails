@@ -13,8 +13,10 @@ import math
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 from shapely.geometry import LineString
+from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED
 from trails.routing.order import chain_order
 from trails.visualization.encoding import (
     GAP_CHECKSUM_VALUE,
@@ -26,6 +28,19 @@ from trails.visualization.encoding import (
     varints,
     zigzag,
 )
+
+
+def _kind(source: str) -> str:
+    """Say what a source's edges are, the way the build names them.
+
+    Args:
+        source: Dataset name
+
+    Returns:
+        ``ferry``, ``bridge`` or ``path``
+    """
+    return "ferry" if source == "Ferries" else "bridge" if source == "bridge" else "path"
+
 
 COSTS = {"FKB": {"factor": 1.05}, "Ferries": {"flatM": 5000.0}, "bridge": {"factor": 1.3}}
 
@@ -105,6 +120,7 @@ def decode(payload: Payload) -> dict[str, object]:
         to_node.append(head if flags[edge] & 1 else tail)
 
     sources = list(cursor.take(edges))
+    derived = list(cursor.take(edges))
     vertex_at = np.cumsum([0, *(cursor.varint() for _ in range(edges))])
     quantum = header["coordinateQuantum"]
     geometries, longitude, latitude = [], 0, 0
@@ -138,28 +154,48 @@ def decode(payload: Payload) -> dict[str, object]:
         "from_node": from_node,
         "to_node": to_node,
         "sources": sources,
+        "waymarked": [header["waymarked"][code & 0x03] for code in derived],
+        "no_path_recorded": [bool(code & header["noPathBit"]) for code in derived],
         "geometries": geometries,
         "heights": heights,
     }
 
 
-def graph(*items: tuple[LineString, object, int, int, str, list[float]]) -> gpd.GeoDataFrame:
+def graph(
+    *items: tuple[LineString, object, int, int, str, list[float]],
+    waymarked: list[str | None] | None = None,
+    no_path: list[bool | None] | None = None,
+) -> gpd.GeoDataFrame:
     """Build an edge frame from bare parts.
 
     Args:
         *items: ``(geometry, chain_id, from_node, to_node, source, elevations)``
+        waymarked: What the sources state per edge, defaulting the way a real
+            build leaves it — asked and nothing stated on a walked edge, and
+            never asked on a crossing or a connector
+        no_path: Whether no source records a path per edge, defaulting the same
+            way
 
     Returns:
         The edges, in the payload's own CRS
     """
+    kinds = [_kind(source) for _, _, _, _, source, _ in items]
     return gpd.GeoDataFrame(
         {
             "chain_id": [chain for _, chain, _, _, _, _ in items],
             "from_node": [one for _, _, one, _, _, _ in items],
             "to_node": [other for _, _, _, other, _, _ in items],
             "source": [source for _, _, _, _, source, _ in items],
-            "kind": ["ferry" if source == "Ferries" else "bridge" if source == "bridge" else "path" for _, _, _, _, source, _ in items],
+            "kind": kinds,
             "elevations": [np.asarray(values, dtype=float) for _, _, _, _, _, values in items],
+            "waymarked": pd.array(
+                waymarked if waymarked is not None else [UNKNOWN if kind == "path" else None for kind in kinds],
+                dtype="string",
+            ),
+            "no_path_recorded": pd.array(
+                no_path if no_path is not None else [False if kind == "path" else None for kind in kinds],
+                dtype="boolean",
+            ),
         },
         geometry=[geometry for geometry, _, _, _, _, _ in items],
         crs=PAYLOAD_CRS,
@@ -432,3 +468,49 @@ def test_an_empty_graph_encodes_to_an_empty_graph() -> None:
     assert payload.header["vertices"] == 0
     assert payload.header["nodes"] == 0
     assert decode(payload)["geometries"] == []
+
+
+def test_the_derived_byte_carries_what_a_route_sums() -> None:
+    one = LineString([(13.0, 65.6), (13.001, 65.601)])
+    other = LineString([(13.001, 65.601), (13.002, 65.602)])
+    read = decode(
+        encoded(
+            chains((one, "a"), (other, "b")),
+            graph(
+                (one, "a", 0, 1, "FKB", [10.0, 11.0]),
+                (other, "b", 1, 2, "FKB", [11.0, 12.0]),
+                waymarked=[MARKED, UNMARKED],
+                no_path=[False, True],
+            ),
+        )
+    )
+
+    assert read["waymarked"] == [MARKED, UNMARKED]
+    assert read["no_path_recorded"] == [False, True]
+
+
+def test_never_asked_is_not_the_same_as_nothing_stated() -> None:
+    # A crossing was never asked either question; a walked edge that came back
+    # "unknown" was asked and no source answered. Summed together they would say
+    # a ferry is ground of unknown marking.
+    line = LineString([(13.0, 65.6), (13.001, 65.601)])
+    crossing = LineString([(13.0, 65.7), (13.05, 65.75)])
+    read = decode(
+        encoded(
+            chains((line, "a"), (crossing, "f")),
+            graph((line, "a", 0, 1, "FKB", [10.0, 11.0]), (crossing, "f", 2, 3, "Ferries", [])),
+        )
+    )
+
+    assert read["waymarked"] == [UNKNOWN, None]
+    assert read["no_path_recorded"] == [False, False]
+
+
+def test_a_marking_state_the_payload_cannot_name_is_refused() -> None:
+    # Writing it as code 0 would file it under "never asked", which is the one
+    # distinction the byte exists to keep.
+    line = LineString([(13.0, 65.6), (13.001, 65.601)])
+    edges = graph((line, "a", 0, 1, "FKB", [10.0, 11.0]), waymarked=["signposted"])
+
+    with pytest.raises(ValueError, match="signposted"):
+        encoded(chains((line, "a")), edges)

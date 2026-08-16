@@ -1038,6 +1038,21 @@ class _RoutingGraph(MacroElement):
 
                 var sources = cursor.take(edges);
 
+                // What a planned route sums beside its length. waymarked
+                // indexes header.waymarked, whose first entry is null and means
+                // the edge was never asked — a crossing, or a connector nobody
+                // drew. That is not the same as 'unknown', which means it was
+                // asked and no source answered, and the two must not be added
+                // together. noPathRecorded says no source records a path along
+                // the edge; it does NOT say there is no path, and any text
+                // showing it has to say the same.
+                var derived = cursor.take(edges);
+                var waymarked = new Uint8Array(edges), noPathRecorded = new Uint8Array(edges);
+                for (i = 0; i < edges; i += 1) {
+                    waymarked[i] = derived[i] & 0x03;
+                    noPathRecorded[i] = (derived[i] & header.noPathBit) ? 1 : 0;
+                }
+
                 var vertexAt = new Int32Array(edges + 1);
                 for (i = 0; i < edges; i += 1) { vertexAt[i + 1] = vertexAt[i] + cursor.varint(); }
                 var coordinates = new Float64Array(2 * header.vertices);
@@ -1103,6 +1118,7 @@ class _RoutingGraph(MacroElement):
                     // than joining wherever bit 1 says a new stretch begins.
                     chainIds: chainIds, chainOf: chainOf, chainAt: chainAt, flags: flags,
                     fromNode: fromNode, toNode: toNode, sources: sources,
+                    waymarked: waymarked, noPathRecorded: noPathRecorded,
                     vertexAt: vertexAt, coordinates: coordinates,
                     sampleAt: sampleAt, heights: heights,
                     nodeLon: nodeLon, nodeLat: nodeLat,
