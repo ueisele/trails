@@ -138,6 +138,41 @@ The measurement scripts that produced the figures lived in a session scratchpad
 and are gone. Their methods are below so a figure can be re-derived rather than
 taken on trust.
 
+## Verifying a build, concretely
+
+The three commands and the two probes a review starts from. Everything else in
+this document assumes them.
+
+**Rebuild and read the figures.** `command make graph ARGS="--rebuild"`, about
+two minutes. `--rebuild` is not optional after a library or interpreter change:
+the fingerprint does not cover versions, so a plain run replays the cache and
+reports every figure unchanged without executing a line of shapely. Confirm the
+run actually says *Building chains per source*.
+
+**Load the built graph in Python.** The newest `route_graph_lomsdal-visten_*.pkl`
+under `.cache/objects/`, by modification time — the hash is the fingerprint and
+changes with every parameter:
+
+    key = sorted(glob.glob(".cache/objects/route_graph_*.pkl"), key=os.path.getmtime)[-1]
+    net = cache_module.Object(cache_dir=".cache/objects").load(os.path.basename(key)[:-4])["network"]
+    net.chains, net.edges, net.nodes
+
+**Rebuild the map and drive it.** `command make map`, 53 seconds warm.
+`uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
+`analysis/output/lomsdal-visten.html`, and wait ten seconds after load — the page
+is 24 MB. The five probes, with what they read at `122679c`:
+
+| | |
+|---|---|
+| `.leaflet-marker-pane > *` | **198** |
+| `.leaflet-marker-icon` | **0** — folium overwrites the class |
+| `.leaflet-overlay-pane path` | **11,591**, of which exactly **1** has `pointer-events: none` |
+| `.leaflet-control-layers-overlays input` | **25** |
+| children of `.leaflet-top.leaflet-left`, by `getBoundingClientRect().top` | search **10 px**, zoom **60** |
+
+and the wheel over the map, which takes zoom **9 → 11**. Reach the map object
+with `window[Object.keys(window).find(k => k.startsWith('map_'))]`.
+
 ## How each figure was measured
 
 Re-derive rather than believe, if a phase's output disagrees.
