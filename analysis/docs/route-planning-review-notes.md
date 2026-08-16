@@ -8,29 +8,31 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1, 1B, 1C, 1D, 3 and 2 are built and reviewed**, and the map is drawn
-from the graph. `libs/src/trails/routing/`, `libs/src/trails/network/`,
+**Phases 1, 1B, 1C, 1D, 3, 2 and 3B are built and reviewed**, and the map is
+drawn from the graph and carries it. `libs/src/trails/routing/`,
+`libs/src/trails/network/`, `libs/src/trails/visualization/encoding.py`,
 `analysis/scripts/route_graph.py` and `lomsdal_visten.py`. Their output is the
-reference in the decisions document; **3B and 4–8 remain**. The project runs on
+reference in the decisions document; **4–8 remain**. The project runs on
 **Python 3.14** and `uv.lock` is tracked from 1D onwards.
 
 The order these were done in is not the order they are numbered, and that was
 deliberate: 1C → 1D → **3** → 2 → 3B → 4. Phase 3 went before 2 because its
 acceptance is *the map behaves as it did* and 1C and 1D had just measured that in
-a browser; a fresh baseline is perishable and phase 2's API wait is not. 3B waits
+a browser; a fresh baseline is perishable and phase 2's API wait is not. 3B waited
 for 2 because two fifths of its payload is elevation.
 
-**Phase 3B is being implemented, in this same working tree.** While that is
-true: **documents only, no code, no `git commit`** — the hook stashes unstaged
-changes and would pull work out from under it. `command make hooks-run` will fail
-on half-written files; that is not a finding. Check `git status` before assuming
-this has ended.
+**Phase 3B** put the graph in the page: `routing/order.py`,
+`visualization/encoding.py`, a hand-written decoder in `maps.py` and
+`edge_costs` in `norway.py`. **4.11 MB** in the page against an allowance of 5,
+inflating in 0.34 s and reading into arrays in 75 ms, arriving as
+`window.trailsGraph` and read by nothing yet. Every browser figure held and the
+graph did not move. What it cost against the estimate, and the two findings the
+review left, are in *What 3B found* below.
 
-What it should produce, so a wrong figure is recognisable: a payload near
-**3.6 MB** — geometry 2.35, edge table 0.27, elevations 0.98 — the page behaving
-exactly as phase 3 left it, and **the decode time, which nobody has yet**. The
-graph itself must not move at all: 11,290 chains, 234,358 edges, 757 and 747
-components, reach 50.8 km = 94 %, 17 quays, Mosjøen 2.17 m.
+When an agent is working in this tree: **documents only, no code, no
+`git commit`** — the hook stashes unstaged changes and would pull work out from
+under it. `command make hooks-run` will fail on half-written files; that is not
+a finding. Check `git status` before assuming a phase has ended.
 
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
@@ -44,7 +46,7 @@ document now carries both columns.
 **Phase 3** drew the map from the chains and removed the source flags. Every
 browser figure held — 198 markers, one non-interactive path, 25 layers, search at
 10 px above the zoom at 60, wheel 9 → 11 — and the path count fell 12,357 →
-11,591, which is 11,290 chains plus 298 circle markers plus the boundary. It
+11,589, which is 11,290 chains plus 298 circle markers plus the boundary. It
 found that `Ukjent` was being read as a name and deliberately did not fix it,
 because that moves the count it was accepted against; the fix came immediately
 after, as its own change, and moved the reference to 11,290.
@@ -160,18 +162,33 @@ changes with every parameter:
 **Rebuild the map and drive it.** `command make map`, 53 seconds warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and wait ten seconds after load — the page
-is 24 MB. The five probes, with what they read at `122679c`:
+is **29.6 MB** since 3B, and was 25.4 before it. The five probes, with what they
+read after 3B:
 
 | | |
 |---|---|
 | `.leaflet-marker-pane > *` | **198** |
 | `.leaflet-marker-icon` | **0** — folium overwrites the class |
-| `.leaflet-overlay-pane path` | **11,591**, of which exactly **1** has `pointer-events: none` |
+| `.leaflet-overlay-pane path` | **11,589**, of which exactly **1** has `pointer-events: none` |
 | `.leaflet-control-layers-overlays input` | **25** |
 | children of `.leaflet-top.leaflet-left`, by `getBoundingClientRect().top` | search **10 px**, zoom **60** |
 
 and the wheel over the map, which takes zoom **9 → 11**. Reach the map object
-with `window[Object.keys(window).find(k => k.startsWith('map_'))]`.
+with `window[Object.keys(window).find(k => k.startsWith('map_'))]`. There is no
+`#map`; the container is `.leaflet-container`.
+
+**The path count in this document said 11,591 until 3B measured it.** It is
+11,589, which is what the decomposition beside it — 11,290 chains, 298 circle
+markers, the boundary — added up to all along. A figure and its own explanation
+disagreed by two for several days and neither was re-run. **When a figure is
+written next to its decomposition, add the decomposition up.**
+
+**And the graph in the page**, since 3B. `window.trailsGraph.ready` resolves to
+it; `inflateMs` and `decodeMs` say what it cost. The round trip is checkable
+from the page alone — fold the decoded values as `header.checksum` was folded
+and compare. It reads **1,881,995,939 / 2,401,407,269** for the coordinates and
+**814,474,384 / 3,748,383,096** for the heights, over 948,465 vertices and
+1,406,040 samples.
 
 ## How each figure was measured
 
@@ -219,11 +236,20 @@ second one is what a stitched route actually sees.
 
 **A chain's elevation series.** Not sampled along the chain — the build samples
 per *edge*, so points taken along the chain miss the store entirely. Take the
-chain's edges, **order them by projecting each edge's first coordinate onto the
-chain**, and concatenate their series with the shared node counted once. Verify
-the ordering before trusting it, by checking that consecutive edges touch: 2,212
-chains do not join up in the frame's own order, so an unordered concatenation
-silently produces a plausible profile of a route nobody could walk.
+chain's edges, order them, and concatenate their series with the shared node
+counted once. Verify the ordering before trusting it, by checking that
+consecutive edges touch: 2,221 chains do not join up in the frame's own order,
+so an unordered concatenation silently produces a plausible profile of a route
+nobody could walk.
+
+**Order them by walking the graph, not by projecting onto the chain.** This
+document said "project each edge's first coordinate onto the chain" until 3B
+measured it: that leaves 35 chains still not joining, because two edges of a
+chain can project to the same place. It also mis-described phase 2, which walked
+node to node from the start and used projection only to decide which *way* round
+the finished run goes. `trails.routing.order.chain_order` is the walk, and both
+the build and the page now use it — one walk, because two would eventually
+disagree and both would still look like profiles.
 
 **Reading the elevation store.** `.cache/elevation/hoydedata_25833.parquet`,
 keyed on `east` and `north` as **integers in centimetres** — `round(x * 100)`,
@@ -539,7 +565,7 @@ drove the map and it read the same each time: **198** markers in
 of which exactly **1** non-interactive, the search control at **10 px** against
 the zoom at 60, and the wheel taking zoom **9 → 11**. All of those must come out
 identical. The path count is the one figure that should move, roughly halving as
-23,876 objects become 11,290 chains.
+23,876 objects become 11,290 chains — it landed at **11,589**.
 
 **Phase 3B, the page payload.** It exists because reading the decisions document
 against the phases turned up an encoding specified over thirty lines — zigzag
@@ -580,6 +606,18 @@ and the browser has both.
 
 **Budgeting a payload by scaling another payload does not work.** That is what
 produced both errors here, in a document that insists elsewhere on measuring.
+A third followed, and it is the instructive one: see *What 3B found*.
+
+**Built. The check that mattered, kept for the next payload:** the header's
+checksums prove the *page* agrees with the *encoder*, and nothing more. They are
+computed from the same array the encoder writes, so an encoder that laid the
+wrong geometry against an edge would write a checksum for the wrong geometry and
+the page would confirm it. Decode the stream separately — from the format
+description alone, not from the encoder — and compare against the frame. Over
+all 234,358 edges that reads a worst coordinate error of 0.0557 m and a worst
+height error of 0.0500 m, which are exactly half a quantum each and therefore
+rounding and nothing else. **Two implementations agreeing is not a round trip
+when one of them defined the answer.**
 
 **Phase 4, the profile.** Two of its requirements arrived late and by being
 questioned, which is worth knowing when reviewing it.
@@ -717,11 +755,17 @@ of bug has now appeared three times — `pd.NA` as the text `<NA>`, an empty str
 counted by `notna`, and "unknown" read as a name. A sweep of every carried column
 for values that mean absence would be an hour's work and is nobody's phase.
 
-Otherwise nothing is known to be open. **That has now been true three times and
-was wrong all three** — the phase readiness checks found gaps in 1B, in 3, in 2
-and in 3B, the last of which this document had written itself. The check that
-finds them is not reading the phase; it is measuring it against the built graph.
-Phases 4, 5, 6, 7 and 8 have not had it.
+One is open and dated, and belongs to phase 6: the page's payload carries no
+`waymarked` and no `no_path_recorded`, which is what a route would sum to say
+how much of itself is marked and how much is on nothing recorded. 3B was right
+not to add them unasked. They cost about two bits an edge. See *What 3B found*.
+
+Otherwise nothing is known to be open. **That has now been true four times and
+was wrong all four** — the phase readiness checks found gaps in 1B, in 3, in 2
+and in 3B, the last of which this document had written itself, and the 3B review
+then found the payload gap above. The check that finds them is not reading the
+phase; it is measuring it against the built graph. Phases 4, 5, 6, 7 and 8 have
+not had it.
 
 ## What phase 2 found
 
@@ -763,6 +807,65 @@ chains separately would have doubled the requests for the same numbers, because
 every edge already samples both its ends. Two independent constructions agree to
 5 m over a 20 km route, which is what says the walk and the orientation are
 right; the check is worth repeating if either is touched.
+
+## What 3B found
+
+**4.11 MB against an estimate of 3.6, and the estimate was mine.** The three
+lines this document had budgeted all reproduce — the node columns at 0.26
+against 0.27, the heights at 1.02 against 0.98, the sources at nothing. What was
+missing had never been listed: the chain ids at 0.13, and `sampleCounts` at 0.12
+and `vertexCounts` at 0.10, without which a concatenated stream cannot be cut
+back into edges at all. The geometry came in at 2.46 against 2.35.
+
+**That is the third time this payload was under-budgeted, and all three were the
+same mistake.** The edge table was forgotten, then the elevations were scaled
+instead of measured, and now the stream's own structure was left out. Not one of
+them was a figure sized wrongly; every one was a section that was never on the
+list. **Ask what else has to be in the file for the thing you budgeted to be
+readable** — a length, a count, an id — because that is what does not occur to
+anybody, and here it came to half a megabyte.
+
+**Chain order beat `from_node` order, measured both ways.** Sorted by
+`from_node` the node columns are 0.232 MB and this document's 0.27 reproduces —
+but the edges of one chain are then scattered, so the link from a chain to its
+edges costs an index and a sequence per edge, 0.453 MB. Laid out in chain order
+each chain is one contiguous run: the link is one count per chain, 0.009 MB, and
+the node columns cost 0.263 rather than 0.232 because consecutive edges still
+share a node. 0.272 against 0.685. **The cheapest arrangement of a column is not
+the cheapest arrangement of the file.**
+
+**The ordering, measured rather than argued.** Every one of the 11,290 chains
+comes back as a single run — 11,200 walk straight through, 41 are rings and 49
+touch a node twice, and the walk gets through all of them in one pass. 9 edges
+run against their chain. Composed from the payload, all **214,384** joins close
+to **0.0000 m**, in Python and again in the page. So the run-break flag, which
+exists so that two stretches are never laid end to end across a gap, is never
+set here except at a chain's own beginning. It is tested against fixtures, not
+against this map, and a reviewer who goes looking for it will find it dormant.
+
+**Two findings in review, both about a figure or a name being read twice.**
+
+- `order.py` said **91 edges run against their chain**; it is **9**, which
+  `encoding.py` said correctly two files away. The 91 was a different quantity
+  that had drifted onto the wrong sentence — 90 chains reach a node twice. And
+  the walk's own docstring, inherited from phase 2, counted the 41 rings inside
+  its "straight through" total and then added them again, which left 8 chains
+  where there are 49. **Two files disagreeing about one measured number is the
+  cheapest possible signal that neither was re-run.**
+- `_source_table` keyed the byte code by source **name** while the table row is
+  keyed by name *and* kind. Every source here carries exactly one kind, which is
+  measured, so nothing was wrong — but a source that ever carried two would send
+  every one of its edges to whichever row came last, and a path read as a
+  crossing costs a route 5 km. `edge_costs` prices by name alone and assumes the
+  same thing. It now raises, which is what the module does at every other such
+  ambiguity.
+
+**What the payload does not carry, and phase 6 will want.** `waymarked` and
+`no_path_recorded`, which a route sums in kilometres to say how much of itself is
+marked and how much is on nothing recorded. The phase named five edge fields and
+these are not among them, so 3B correctly did not add them. They are two bits per
+edge and the `sources` byte compresses to nothing, so they will cost about the
+same. **Decide it in phase 6 rather than discovering it there.**
 
 ## What 1C found
 
