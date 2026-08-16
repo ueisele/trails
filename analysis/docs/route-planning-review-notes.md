@@ -354,10 +354,11 @@ every one was invisible until something was actually run.
 ## Before handing a phase over
 
 This has been done for 1B, 2, 3, 3B and 4 and **found something every time** — a
-rule that was not implementable, two acceptance figures that would have failed a
+rule that was not implementable, six acceptance figures that would have failed a
 correct implementation, fifteen attributes nobody had counted, a missing layer, a
-forgotten payload, a budget off in both directions. Reading the phase never finds
-these. The check is:
+forgotten payload, a budget off in both directions, a mechanism that does not
+exist, and a rounded label that two languages would round differently. Reading
+the phase never finds these. The check is:
 
 1. **Load the built graph and measure what the phase asserts.** Every figure in a
    phase should be reproducible from `.cache/objects/` in a few lines. One that
@@ -656,6 +657,40 @@ Check it is hand-drawn SVG and nothing is fetched from
 a CDN — a CDN script fails silently on `file://`. Check the map still zooms while
 the panel is open.
 
+**The readiness check found five things, and the phase was rewritten as one text
+rather than patched.** What to check the rewrite kept:
+
+- **Four acceptance figures were stale** and would have failed a correct
+  implementation: 172 chains over nine hundred samples not 186, the 42 km
+  Rundtur at 8,191 not 8,489, **41 rings not 52** — a figure `elevation.py` had
+  said correctly since phase 2 — and 493 strongly wound not 452. What did
+  reproduce, exactly: 36 samples at the median, a third under twenty, 0.93
+  straightness, 34 % off a cardinal axis, and no chain running W, SW or NW.
+- **The mechanism it named does not exist.** *"Phase 3 already puts the chains in
+  the page as GeoJSON and the panel has the clicked feature in hand"* — the page
+  holds **11,290 `L.polyline` and one `L.geoJson`**, the boundary. A polyline has
+  no `feature.properties`. The claim stood three times across two phases and once
+  more in `encoding.py`, and 3B was built without noticing because 3B does not
+  depend on it. What does exist: `className="trail-group-<chain_id>"` on every
+  line, and `SEARCH_NAMES_ATTR` — a side table keyed by that class, already
+  shipped for the search box.
+- **The bearing had no home.** The phase wants it in the popup (Python) and in
+  the arrow (JavaScript) and says all three showings must agree, while
+  forbidding exactly that pattern for ascent two paragraphs earlier. Measured at
+  65.5° N: a flat `atan2(Δlon, Δlat)` instead of a metric bearing moves
+  **4,485 of 11,249 chains — 40 % — into a different one of the eight points**,
+  and 237 lie within half a degree of an octant boundary. **A rounded label is a
+  threshold, and every rule this document has about thresholds applies to it.**
+- **Three kinds of chain, a rule for one.** A ferry's series has length **zero**;
+  two walked stubs, `osm-423700-7272625-5` and `osm-382608-7302481-2` at 5.1 and
+  2.0 m, have **two samples and two gaps**. So `series.length === 0` stops the
+  ferries and lets those two through to draw `M NaN,NaN` — nothing on screen, no
+  error. **Test whether anything was read, not whether anything exists.**
+- **The crosshair belonged to no phase.** The decisions document says the curve
+  is *"one path, two axes and a crosshair"*; the word appeared nowhere in the
+  phases document. That is the third time the inverted question has found
+  something — after the page encoding and the popup ascent.
+
 **Phase 5 and 6, export.** Open the file. A ferry or a water leg must break the
 track into segments, not draw a line across the fjord. Import it somewhere.
 
@@ -768,12 +803,12 @@ of bug has now appeared three times — `pd.NA` as the text `<NA>`, an empty str
 counted by `notna`, and "unknown" read as a name. A sweep of every carried column
 for values that mean absence would be an hour's work and is nobody's phase.
 
-Otherwise nothing is known to be open. **That has now been true four times and
-was wrong all four** — the phase readiness checks found gaps in 1B, in 3, in 2
-and in 3B, the last of which this document had written itself, and the 3B review
-then found the payload gap above. The check that finds them is not reading the
-phase; it is measuring it against the built graph. Phases 4, 5, 6, 7 and 8 have
-not had it.
+Otherwise nothing is known to be open. **That has now been true five times and
+was wrong all five** — the phase readiness checks found gaps in 1B, in 3, in 2,
+in 3B (which this document had written itself) and in 4, and the 3B review then
+found the payload gap above. The check that finds them is not reading the phase;
+it is measuring it against the built graph. **Phase 4 has now had it; phases 5,
+6, 7 and 8 have not.**
 
 ## What phase 2 found
 
