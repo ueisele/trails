@@ -23,11 +23,18 @@ for 2 because two fifths of its payload is elevation.
 
 **Phase 3B** put the graph in the page: `routing/order.py`,
 `visualization/encoding.py`, a hand-written decoder in `maps.py` and
-`edge_costs` in `norway.py`. **4.11 MB** in the page against an allowance of 5,
+`edge_costs` in `norway.py`. **4.12 MB** in the page against an allowance of 5,
 inflating in 0.34 s and reading into arrays in 75 ms, arriving as
 `window.trailsGraph` and read by nothing yet. Every browser figure held and the
 graph did not move. What it cost against the estimate, and the two findings the
 review left, are in *What 3B found* below.
+
+**And then the two fields it had left out**, on the same day and by decision
+rather than by review: `waymarked` and `no_path_recorded` now travel in the
+payload, are summed per chain by `routing/coverage.py`, and are shown in the
+popup of every walked line layer. Nothing was recomputed for the payload; the
+popup cost a `GRAPH_LAYOUT` bump and two offline minutes. Figures in *What 3B
+found*.
 
 When an agent is working in this tree: **documents only, no code, no
 `git commit`** — the hook stashes unstaged changes and would pull work out from
