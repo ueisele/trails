@@ -471,6 +471,38 @@ class TestAddBoundary:
         assert layer.layer_name == "Park"
 
 
+class TestAddRoutingGraph:
+    """Tests for the routing graph the page carries but never draws."""
+
+    def test_the_payload_and_its_header_reach_the_page(self):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_routing_graph(fmap, {"version": 1, "edges": 3}, "H4sIAAAAAAAA")
+
+        html = fmap.get_root().render()
+        assert '"edges": 3' in html
+        assert '"H4sIAAAAAAAA"' in html
+        assert "window.trailsGraph" in html
+
+    def test_it_draws_nothing_and_joins_no_layer_control(self):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_routing_graph(fmap, {"version": 1, "edges": 0}, "")
+        maps.finalize(fmap)
+
+        assert not [child for child in fmap._children.values() if isinstance(child, folium.GeoJson | folium.FeatureGroup)]
+
+    def test_the_decoder_fetches_nothing(self):
+        """A script pulled from a CDN does not load on a file:// page: it fails
+        silently, the way the OpenStreetMap tiles once did."""
+        bounds = (12.4, 65.3, 13.4, 65.7)
+        plain = maps.create_map(bounds=bounds).get_root().render()
+
+        fmap = maps.create_map(bounds=bounds)
+        maps.add_routing_graph(fmap, {"version": 1, "edges": 0}, "")
+        with_graph = fmap.get_root().render()
+
+        assert with_graph.count("://") == plain.count("://")
+
+
 class TestLegendAndFinalize:
     """Tests for legend rendering and layer control."""
 

@@ -54,13 +54,15 @@ from trails.network.norway import (
     UT,
     Params,
     build,
+    edge_costs,
     load_sources,
     masks_from,
     zone_around,
 )
-from trails.routing import parts_of, translate_joined, whole_way_length
+from trails.routing import Network, NetworkSource, chain_order, parts_of, translate_joined, whole_way_length
 from trails.utils.geo import attach_nearest, thin_points
 from trails.visualization import maps
+from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
 
 PARK_NAME = "Lomsdal-Visten"
 
@@ -498,6 +500,36 @@ def summarize(name: str, gdf: gpd.GeoDataFrame) -> None:
     print(f"  {name}: {len(gdf):,} chains, {total_km:,.1f} km")
 
 
+def encode_for_the_page(network: Network, sources: list[NetworkSource], params: Params) -> Payload:
+    """Encode the routing graph and its heights into the page's second payload.
+
+    Two representations of the same ground, and they must not be unified. What
+    is *drawn* is chains, thinned by ``--simplify-m`` because folium writes
+    geometry into the page as JSON coordinate arrays and the network's vertices
+    cost 22 MB written that way. What will be *routed over* is the merged graph
+    at the resolution its sources recorded it, encoded rather than serialised,
+    and never drawn at all. Serving both from one copy loses either the accuracy
+    or the render budget.
+
+    Args:
+        network: The finished graph, in :data:`METRIC_CRS`
+        sources: The datasets it was built from, which say what a route costs
+        params: What decided the build
+
+    Returns:
+        The payload, and its size
+    """
+    return encode_graph(
+        network.chains,
+        network.edges.to_crs(PAYLOAD_CRS),
+        # The frame's own order is not the order a chain's edges lie in — one
+        # chain in five does not even join up in it — and the browser has no
+        # chain geometry to project them onto, so it has to be told.
+        chain_order(network.chains, network.edges),
+        costs=edge_costs(sources, params),
+    )
+
+
 def main() -> int:
     """Build the map and GPX exports.
 
@@ -847,6 +879,18 @@ def main() -> int:
 
     # Added last so the boundary outline stays legible on top of every trail layer.
     maps.add_boundary(fmap, park, name="National park boundary [Naturbase]", weight=3.5)
+
+    # And the graph itself, which nothing draws and nothing yet reads: phase 4
+    # takes the profile off it and phase 6 routes over it, and both of those live
+    # in Python until it is in the page.
+    print("\nEncoding the routing graph for the page...")
+    payload = encode_for_the_page(network, loaded.sources, params)
+    counted = payload.header
+    print(f"  {counted['edges']:,} edges on {counted['nodes']:,} nodes, {counted['vertices']:,} vertices at full source precision")
+    print(f"  {counted['samples']:,} height samples, quantised at {counted['coordinateQuantum']:g}° and {counted['elevationQuantum']:g} m")
+    print(f"  {payload.raw_mb:.2f} MB encoded, {payload.size_mb:.2f} MB gzipped and base64 in the page")
+    print(f"    before compression: {' · '.join(f'{name} {size / 1e6:.2f}' for name, size in payload.sections.items())}")
+    maps.add_routing_graph(fmap, payload.header, payload.data)
 
     if len(highlighted):
         # Diagnostic layer: a ring plus a numbered label at every position the

@@ -50,8 +50,9 @@ from trails.routing import (
     waymarked,
     with_elevation,
 )
+from trails.routing.graph import DEFAULT_BRIDGE_COST_FACTOR
 from trails.routing.noding import clip_lines
-from trails.routing.sources import FERRY
+from trails.routing.sources import BRIDGE, FERRY
 from trails.utils.geo import attach_nearest
 
 #: Metric CRS for Norway. The routing module works in it, so every length and
@@ -487,6 +488,35 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         NetworkSource(FERRIES, ferries, kind=FERRY, attributes=("typeveg", SURVEY_FIELD, SURVEYED_FIELD)),
     ]
     return Loaded(sources=sources, municipalities=codes, turrutebasen_version=turrutebasen.version)
+
+
+def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:
+    """Say what a metre on each dataset costs a route.
+
+    For a consumer that has the geometry but not the cost column, which is the
+    position a browser is in. The cost of a walked edge is its length times its
+    source's factor, and the length is in the geometry already — so what has to
+    travel is these six numbers rather than one per edge.
+
+    A crossing is the exception, and travels as a whole crossing's cost: it is
+    the same decision whether it is 2 km or 20, so its cost is not its length
+    and cannot be recovered from one.
+
+    Args:
+        sources: The datasets, as loaded
+        params: What decides the build, for the crossing cost
+
+    Returns:
+        What each source costs, by source name, including the connectors that
+        belong to no source at all
+    """
+    costs: dict[str, dict[str, float]] = {}
+    for source in sources:
+        costs[source.name] = {"flatM": params.ferry_cost_km * 1000} if source.kind == FERRY else {"factor": source.cost_factor}
+    # Nobody drew a connector, and :func:`build` leaves its factor at the
+    # default, so this is the same number the edges were weighted with.
+    costs[BRIDGE] = {"factor": DEFAULT_BRIDGE_COST_FACTOR}
+    return costs
 
 
 def masks_from(sources: list[NetworkSource]) -> Masks:

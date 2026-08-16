@@ -936,6 +936,253 @@ def add_boundary(
     return layer
 
 
+class _RoutingGraph(MacroElement):
+    """The routing graph, decoded in the page and never drawn.
+
+    Hand-written, like the legend, the search and the click-highlight, and for
+    the same reason: a script pulled from a CDN does not load on a ``file://``
+    page and fails silently, the way the OpenStreetMap tiles once did.
+
+    The decode runs off the load rather than during it. It is a megabyte or two
+    of arithmetic, and nothing on the map waits for it — a reader who never
+    plans a route never notices it happened.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function () {
+            var header = {{ this.header_json }};
+            var encoded = {{ this.data_json }};
+
+            // A cursor over the inflated stream. Every count it needs is either
+            // in the header or in a section it has already read, so it runs
+            // straight through and never seeks.
+            function Cursor(bytes) { this.bytes = bytes; this.at = 0; }
+
+            // Deliberately arithmetic rather than bitwise: JavaScript's shifts
+            // truncate to 32 bits, and a value that overflowed that would come
+            // back quietly wrong instead of loudly.
+            Cursor.prototype.varint = function () {
+                var value = 0, scale = 1, byte;
+                do {
+                    byte = this.bytes[this.at]; this.at += 1;
+                    value += (byte & 0x7f) * scale;
+                    scale *= 128;
+                } while (byte & 0x80);
+                return value;
+            };
+
+            Cursor.prototype.zigzag = function () {
+                var value = this.varint();
+                return value % 2 === 0 ? value / 2 : -(value + 1) / 2;
+            };
+
+            Cursor.prototype.take = function (count) {
+                var out = this.bytes.slice(this.at, this.at + count);
+                this.at += count;
+                return out;
+            };
+
+            function bytesOf(text) {
+                var binary = atob(text);
+                var out = new Uint8Array(binary.length);
+                for (var i = 0; i < binary.length; i += 1) { out[i] = binary.charCodeAt(i); }
+                return out;
+            }
+
+            function inflate(bytes) {
+                if (typeof DecompressionStream === 'undefined') {
+                    return Promise.reject(new Error('this browser cannot inflate gzip'));
+                }
+                var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+                return new Response(stream).arrayBuffer().then(function (buffer) { return new Uint8Array(buffer); });
+            }
+
+            function decode(bytes) {
+                var cursor = new Cursor(bytes);
+                var edges = header.edges, chains = header.chains, i;
+
+                var lengths = new Int32Array(chains);
+                for (i = 0; i < chains; i += 1) { lengths[i] = cursor.varint(); }
+                var text = new TextDecoder('utf-8');
+                var chainIds = new Array(chains);
+                // Without a prototype, so that a lookup answers for the chain
+                // ids and for nothing else. A plain object would hand back
+                // Object's own members for names like "constructor".
+                var chainOf = Object.create(null);
+                for (i = 0; i < chains; i += 1) {
+                    chainIds[i] = text.decode(cursor.take(lengths[i]));
+                    chainOf[chainIds[i]] = i;
+                }
+
+                // Where each chain's edges begin. They are contiguous and in the
+                // chain's own order, which is the whole reason the payload is
+                // laid out this way: the frame order the graph is built in is
+                // not the order the edges lie in, and one chain in five does not
+                // even join up in it.
+                var chainAt = new Int32Array(chains + 1);
+                for (i = 0; i < chains; i += 1) { chainAt[i + 1] = chainAt[i] + cursor.varint(); }
+
+                var flags = cursor.take(edges);
+                var fromNode = new Int32Array(edges), toNode = new Int32Array(edges);
+                var tail = 0;
+                for (i = 0; i < edges; i += 1) {
+                    // The node an edge starts at along its chain, then the one it
+                    // ends at. Which of from and to holds which depends on the
+                    // way round the edge runs, so the flag puts them back.
+                    var head = tail + cursor.zigzag();
+                    tail = head + cursor.zigzag();
+                    fromNode[i] = (flags[i] & 1) ? tail : head;
+                    toNode[i] = (flags[i] & 1) ? head : tail;
+                }
+
+                var sources = cursor.take(edges);
+
+                var vertexAt = new Int32Array(edges + 1);
+                for (i = 0; i < edges; i += 1) { vertexAt[i + 1] = vertexAt[i] + cursor.varint(); }
+                var coordinates = new Float64Array(2 * header.vertices);
+                var quantum = header.coordinateQuantum, lon = 0, lat = 0;
+                for (i = 0; i < header.vertices; i += 1) {
+                    lon += cursor.zigzag();
+                    lat += cursor.zigzag();
+                    coordinates[2 * i] = lon * quantum;
+                    coordinates[2 * i + 1] = lat * quantum;
+                }
+
+                var sampleAt = new Int32Array(edges + 1);
+                for (i = 0; i < edges; i += 1) { sampleAt[i + 1] = sampleAt[i] + cursor.varint(); }
+                // Single precision holds a decimetre exactly to sixteen
+                // kilometres of altitude, which is four orders of magnitude
+                // more than this ground, and halves what the series costs in
+                // memory. The coordinates get double precision, where a
+                // millionth of a degree needs it.
+                var heights = new Float32Array(header.samples);
+                var step = header.elevationQuantum, height = 0;
+                for (i = 0; i < header.samples; i += 1) {
+                    var code = cursor.varint();
+                    if (code === 0) {
+                        // Nothing was read here, and it must not become a number:
+                        // a profile that fills a gap invents ground, and a climb
+                        // counted across one invents a hill.
+                        heights[i] = NaN;
+                        continue;
+                    }
+                    code -= 1;
+                    height += code % 2 === 0 ? code / 2 : -(code + 1) / 2;
+                    heights[i] = height * step;
+                }
+
+                // Reading past the end of the stream yields undefined, which
+                // masks to zero and ends a varint quietly, so a truncated
+                // payload decodes to plausible numbers rather than to an error.
+                // The layout accounts for every byte, so this says the whole of
+                // it was read and nothing beyond it.
+                if (cursor.at !== bytes.length) {
+                    throw new Error('read ' + cursor.at + ' of ' + bytes.length + ' bytes');
+                }
+
+                // Node positions come off the edge endpoints rather than a table
+                // of their own, so they cannot disagree with the geometry and
+                // cost nothing in the payload.
+                var nodeLon = new Float64Array(header.nodes), nodeLat = new Float64Array(header.nodes);
+                for (i = 0; i < edges; i += 1) {
+                    var first = 2 * vertexAt[i], last = 2 * (vertexAt[i + 1] - 1);
+                    nodeLon[fromNode[i]] = coordinates[first];
+                    nodeLat[fromNode[i]] = coordinates[first + 1];
+                    nodeLon[toNode[i]] = coordinates[last];
+                    nodeLat[toNode[i]] = coordinates[last + 1];
+                }
+
+                return {
+                    header: header,
+                    // Composing a chain runs its edges from chainAt[c] to
+                    // chainAt[c + 1], reversing the geometry and the heights of
+                    // any edge whose flag bit 0 is set, dropping the first
+                    // sample and vertex of every edge but the first — the node
+                    // between two edges is sampled by both — and breaking rather
+                    // than joining wherever bit 1 says a new stretch begins.
+                    chainIds: chainIds, chainOf: chainOf, chainAt: chainAt, flags: flags,
+                    fromNode: fromNode, toNode: toNode, sources: sources,
+                    vertexAt: vertexAt, coordinates: coordinates,
+                    sampleAt: sampleAt, heights: heights,
+                    nodeLon: nodeLon, nodeLat: nodeLat,
+                    nearestNode: nearestNode.bind(null, nodeLon, nodeLat)
+                };
+            }
+
+            // A linear scan, and it needs no spatial index: a hundred thousand
+            // nodes is a few milliseconds, once per click. Anything cleverer
+            // here would be a structure to keep in step with the geometry for no
+            // gain a reader could perceive.
+            function nearestNode(nodeLon, nodeLat, lat, lon, withinM) {
+                var scale = Math.cos(lat * Math.PI / 180);
+                var limit = withinM === undefined ? Infinity : Math.pow(withinM / 111320, 2);
+                var best = -1, closest = limit;
+                for (var i = 0; i < nodeLon.length; i += 1) {
+                    var dx = (nodeLon[i] - lon) * scale, dy = nodeLat[i] - lat;
+                    var distance = dx * dx + dy * dy;
+                    if (distance < closest) { closest = distance; best = i; }
+                }
+                return best;
+            }
+
+            var began = performance.now();
+            var graph = {header: header, inflateMs: null, decodeMs: null, totalMs: null, error: null};
+            graph.ready = inflate(bytesOf(encoded)).then(function (bytes) {
+                var inflated = performance.now();
+                var decoded = decode(bytes);
+                graph.inflateMs = inflated - began;
+                graph.decodeMs = performance.now() - inflated;
+                graph.totalMs = performance.now() - began;
+                Object.keys(decoded).forEach(function (key) { graph[key] = decoded[key]; });
+                return graph;
+            }).catch(function (error) {
+                // Loudly, in the one place a reader might look: a graph that
+                // silently failed to arrive looks exactly like one that was
+                // never asked for.
+                graph.error = String(error);
+                console.error('routing graph: ' + error);
+                throw error;
+            });
+            window.trailsGraph = graph;
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, header: dict[str, Any], data: str) -> None:
+        """Initialize the payload.
+
+        Args:
+            header: Everything the decoder needs before it starts
+            data: The binary stream, gzipped and base64-encoded
+        """
+        super().__init__()
+        self._name = "RoutingGraph"
+        self.header_json = _script_json(header)
+        self.data_json = _script_json(data)
+
+
+def add_routing_graph(fmap: folium.Map, header: dict[str, Any], data: str) -> None:
+    """Put the routing graph in the page, at full source precision.
+
+    A second representation beside the drawn one, and the two must not be
+    unified: what the map draws is chains, simplified for rendering, and what a
+    route is found over is the merged graph at the resolution its sources
+    recorded. One copy cannot serve both without losing either the accuracy or
+    the render budget.
+
+    Nothing draws it and nothing yet reads it. It arrives as
+    ``window.trailsGraph``, whose ``ready`` promise resolves once the stream has
+    been inflated and decoded, and whose ``decodeMs`` says what that cost.
+
+    Args:
+        fmap: Map to attach the payload to
+        header: Everything the decoder needs before it starts
+        data: The binary stream, gzipped and base64-encoded
+    """
+    _RoutingGraph(header, data).add_to(fmap)
+
+
 class _Legend(MacroElement):
     """A legend that can be folded away.
 

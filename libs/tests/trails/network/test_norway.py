@@ -20,11 +20,13 @@ from trails.network.norway import (
     Params,
     _join_values,
     _with_capture_date,
+    edge_costs,
     fingerprint,
     masks_from,
     zone_around,
 )
-from trails.routing import IDENTITY_SEPARATOR, NetworkSource
+from trails.routing import DEFAULT_BRIDGE_COST_FACTOR, FERRY, IDENTITY_SEPARATOR, NetworkSource
+from trails.routing.sources import BRIDGE
 
 CATALOGUE = "routes.toml"
 
@@ -216,6 +218,47 @@ class TestMasksFrom:
         """
         with pytest.raises(ValueError, match="not as JA/NEI"):
             masks_from(network(N50_paths=lines(0, 10, marking=("Merket", "Umerket"))))
+
+
+class TestEdgeCosts:
+    """Test edge_costs."""
+
+    def test_a_walked_source_travels_as_its_factor(self):
+        """Test what a browser needs instead of a cost per edge.
+
+        The cost is length times the factor and the length is in the geometry
+        already, so what has to travel is six numbers rather than 234,358.
+        """
+        sources = [NetworkSource("FKB", gpd.GeoDataFrame(geometry=[], crs=METRIC_CRS), cost_factor=1.05)]
+        assert edge_costs(sources, params())["FKB"] == {"factor": 1.05}
+
+    def test_a_crossing_travels_as_a_whole_crossing(self):
+        """Test the one cost that is not length times anything.
+
+        A crossing is the same decision whether it is 2 km or 20, so nothing
+        about its cost can be recovered from its geometry.
+        """
+        sources = [NetworkSource("Ferries", gpd.GeoDataFrame(geometry=[], crs=METRIC_CRS), kind=FERRY)]
+        costs = edge_costs(sources, params(ferry_cost_km=5.0))
+
+        assert costs["Ferries"] == {"flatM": 5000.0}
+        assert "factor" not in costs["Ferries"]
+
+    def test_the_connectors_nobody_drew_are_costed_too(self):
+        """Test that a bridged edge is not left without a weight."""
+        assert edge_costs([], params())[BRIDGE] == {"factor": DEFAULT_BRIDGE_COST_FACTOR}
+
+
+def params(**overrides: object) -> Params:
+    """Build parameters for a build that is never run.
+
+    Args:
+        **overrides: Fields to set
+
+    Returns:
+        The parameters
+    """
+    return Params(cache_dir=".cache", ut_routes=CATALOGUE, **overrides)  # type: ignore[arg-type]
 
 
 def masks() -> Masks:
