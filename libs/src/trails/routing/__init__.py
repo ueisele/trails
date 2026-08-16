@@ -23,12 +23,14 @@ from trails.routing.chains import (
     whole_way_length,
 )
 from trails.routing.coverage import (
+    CHAIN_COVERAGE_COLUMNS,
     DEFAULT_MARKED_M,
     DEFAULT_MIN_SHARE,
     DEFAULT_RECORDED_M,
     MARKED,
     UNKNOWN,
     UNMARKED,
+    chain_coverage,
     no_path_recorded,
     share_within,
     waymarked,
@@ -60,6 +62,7 @@ from trails.routing.sources import BRIDGE, FERRY, PATH, NetworkSource
 
 __all__ = [
     "BRIDGE",
+    "CHAIN_COVERAGE_COLUMNS",
     "CHAIN_ORDER_COLUMNS",
     "DEFAULT_ASCENT_THRESHOLD_M",
     "DEFAULT_BRIDGE_COST_FACTOR",
@@ -86,6 +89,7 @@ __all__ = [
     "ascent",
     "build_chains",
     "build_network",
+    "chain_coverage",
     "chain_order",
     "chain_profiles",
     "chain_series",

@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 import shapely
 from shapely.geometry import LineString
-from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED, no_path_recorded, share_within, waymarked
+from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED, chain_coverage, no_path_recorded, share_within, waymarked
 from trails.routing.sources import BRIDGE, FERRY, PATH
 
 CRS = "EPSG:25833"
@@ -248,3 +248,76 @@ class TestNoPathRecorded:
         answers = no_path_recorded(frame, [LineString([(0, 5), (100, 5)])])
         assert answers.index.tolist() == [3, 4]
         assert bool(answers.loc[4]) is True
+
+
+def summed(*items: tuple[str | None, str | None, bool | None, float]) -> gpd.GeoDataFrame:
+    """Build an edge frame :func:`chain_coverage` can be asked about.
+
+    Args:
+        *items: ``(chain_id, waymarked, no_path_recorded, length_m)`` per edge
+
+    Returns:
+        The edges, with a placeholder geometry nothing here reads
+    """
+    return gpd.GeoDataFrame(
+        {
+            "chain_id": pd.array([chain for chain, _, _, _ in items], dtype="string"),
+            "waymarked": pd.array([state for _, state, _, _ in items], dtype="string"),
+            "no_path_recorded": pd.array([recorded for _, _, recorded, _ in items], dtype="boolean"),
+            "length_m": [length for _, _, _, length in items],
+        },
+        geometry=[LineString([(0, 0), (1, 0)]) for _ in items],
+        crs=CRS,
+    )
+
+
+class TestChainCoverage:
+    """Test chain_coverage."""
+
+    def test_a_chain_marked_along_part_of_its_run_says_so_rather_than_picking_one(self):
+        """Test the case the whole function exists for: a chain of mixed edges."""
+        frame = gpd.GeoDataFrame({"chain_id": pd.array(["a"], dtype="string")}, geometry=[LineString([(0, 0), (1, 0)])], crs=CRS)
+        covered = chain_coverage(frame, summed(("a", MARKED, False, 300.0), ("a", UNKNOWN, False, 700.0)))
+
+        assert covered["marked_m"].tolist() == [300.0]
+        assert covered["unknown_m"].tolist() == [700.0]
+        assert covered["unmarked_m"].tolist() == [0.0]
+
+    def test_nothing_stated_is_never_added_to_unmarked(self):
+        """Test that the two are kept apart, which is the point of three classes."""
+        frame = gpd.GeoDataFrame({"chain_id": pd.array(["a"], dtype="string")}, geometry=[LineString([(0, 0), (1, 0)])], crs=CRS)
+        covered = chain_coverage(frame, summed(("a", UNKNOWN, False, 500.0), ("a", UNMARKED, False, 500.0)))
+
+        assert covered["unknown_m"].tolist() == [500.0]
+        assert covered["unmarked_m"].tolist() == [500.0]
+
+    def test_an_edge_on_no_chain_is_dropped_rather_than_gathered(self):
+        """Test that a connector, which nobody drew, is evidence about nothing."""
+        frame = gpd.GeoDataFrame({"chain_id": pd.array(["a"], dtype="string")}, geometry=[LineString([(0, 0), (1, 0)])], crs=CRS)
+        covered = chain_coverage(frame, summed(("a", MARKED, False, 100.0), (None, None, None, 900.0)))
+
+        assert covered["marked_m"].tolist() == [100.0]
+        assert covered.to_numpy().sum() == 100.0
+
+    def test_a_chain_of_nothing_but_crossings_comes_back_at_zero(self):
+        """Test that neither question having been asked reads as zero, not as NaN."""
+        frame = gpd.GeoDataFrame({"chain_id": pd.array(["f"], dtype="string")}, geometry=[LineString([(0, 0), (1, 0)])], crs=CRS)
+        covered = chain_coverage(frame, summed(("f", None, None, 20_000.0)))
+
+        assert covered.loc[covered.index[0]].tolist() == [0.0, 0.0, 0.0, 0.0]
+
+    def test_a_chain_with_no_edges_at_all_is_not_an_error(self):
+        """Test the empty case, which reindex has to fill rather than drop."""
+        frame = gpd.GeoDataFrame({"chain_id": pd.array(["a", "b"], dtype="string")}, geometry=[LineString([(0, 0), (1, 0)])] * 2, crs=CRS)
+        covered = chain_coverage(frame, summed(("a", MARKED, False, 100.0)))
+
+        assert len(covered) == 2
+        assert covered["marked_m"].tolist() == [100.0, 0.0]
+
+    def test_the_ground_no_source_records_is_summed_apart_from_the_marking(self):
+        """Test that an edge can be both marked and unrecorded, and counts in both."""
+        frame = gpd.GeoDataFrame({"chain_id": pd.array(["a"], dtype="string")}, geometry=[LineString([(0, 0), (1, 0)])], crs=CRS)
+        covered = chain_coverage(frame, summed(("a", MARKED, True, 400.0), ("a", MARKED, False, 600.0)))
+
+        assert covered["marked_m"].tolist() == [1000.0]
+        assert covered["no_path_m"].tolist() == [400.0]

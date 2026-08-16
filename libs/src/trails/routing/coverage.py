@@ -59,6 +59,11 @@ DEFAULT_RECORDED_M = 25.0
 #: How much of an edge has to lie near a mask before the mask decides it.
 DEFAULT_MIN_SHARE = 0.5
 
+#: What :func:`chain_coverage` says about each chain, in metres of its own
+#: length. Metres rather than kilometres because that is what ``length_m``
+#: holds, and unrounded because rounding is a presentation decision.
+CHAIN_COVERAGE_COLUMNS = ("marked_m", "unmarked_m", "unknown_m", "no_path_m")
+
 #: Lines to test an edge against, in the working CRS of the edges.
 Mask = gpd.GeoSeries | Sequence[BaseGeometry] | np.ndarray
 
@@ -250,3 +255,46 @@ def no_path_recorded(
     answers = np.full(len(edges), None, dtype=object)
     answers[walked] = share_within(geometries, recorded, distance_m) < min_share
     return pd.Series(answers, index=edges.index, dtype="boolean")
+
+
+def chain_coverage(chains: gpd.GeoDataFrame, edges: gpd.GeoDataFrame) -> pd.DataFrame:
+    """Sum what the sources state about a chain, along its own length.
+
+    Both derived fields are read per *edge*, because an edge is the unit a mask
+    can be tested against. Nothing is ever shown per edge, though: what a reader
+    selects is a chain and what a route sums is metres. So they are added up
+    along the chain the edges lie on, and a chain that is marked for half its
+    length says exactly that rather than being called one thing or the other.
+
+    Kept in metres and left unrounded. Whether a figure is worth showing, and in
+    what words, is a question for whatever shows it — and there is one sentence
+    that must survive that translation: ``no_path_m`` is ground **no source
+    records a path along**, which is not ground with no path. The sources
+    over-record and disclose little, so only their silence carries information.
+
+    Args:
+        chains: The chains, carrying ``chain_id``
+        edges: The edges, carrying ``chain_id``, ``length_m``, ``waymarked`` and
+            ``no_path_recorded``
+
+    Returns:
+        :data:`CHAIN_COVERAGE_COLUMNS` per chain, in metres, aligned to
+        ``chains``. A chain of nothing but crossings comes back at zero across
+        the board, which is the honest answer: neither question was asked of it.
+    """
+    length = edges["length_m"].to_numpy(dtype=float)
+    stated = edges["waymarked"]
+    counted = pd.DataFrame(
+        {
+            "marked_m": np.where((stated == MARKED).fillna(False).to_numpy(dtype=bool), length, 0.0),
+            "unmarked_m": np.where((stated == UNMARKED).fillna(False).to_numpy(dtype=bool), length, 0.0),
+            "unknown_m": np.where((stated == UNKNOWN).fillna(False).to_numpy(dtype=bool), length, 0.0),
+            "no_path_m": np.where(edges["no_path_recorded"].fillna(False).to_numpy(dtype=bool), length, 0.0),
+        },
+        index=edges.index,
+    )
+    # An edge lying on no chain is an inferred connector, and it is dropped
+    # rather than gathered under a chain of its own: nobody drew it, so there is
+    # nothing it could be evidence about.
+    summed = counted.groupby(edges["chain_id"].to_numpy(), dropna=True).sum()
+    return summed.reindex(chains["chain_id"].to_numpy()).fillna(0.0).set_index(chains.index)

@@ -32,6 +32,7 @@ from trails.io.sources import hoydedata, kommuneinfo, n50, overpass, stedsnavn, 
 from trails.io.sources.geonorge import Source as GeonorgeSource
 from trails.io.sources.language import Language
 from trails.routing import (
+    CHAIN_COVERAGE_COLUMNS,
     DEFAULT_ASCENT_THRESHOLD_M,
     DEFAULT_MARKED_M,
     DEFAULT_MIN_SHARE,
@@ -43,6 +44,7 @@ from trails.routing import (
     NetworkSource,
     build_chains,
     build_network,
+    chain_coverage,
     chains_of,
     no_path_recorded,
     parts_of,
@@ -168,7 +170,7 @@ MARKED_M, RECORDED_M, MIN_SHARE = DEFAULT_MARKED_M, DEFAULT_RECORDED_M, DEFAULT_
 #: *into* a build; this covers what comes out of it. Without it, a graph cached
 #: before a column existed is served to code that reads that column — the
 #: parameters and the sources are unchanged, so nothing else in the key notices.
-GRAPH_LAYOUT = "elevation"
+GRAPH_LAYOUT = "elevation+coverage"
 
 
 @dataclass(frozen=True)
@@ -729,6 +731,11 @@ def build(
 
     print("Asking every edge what the ground it runs over is recorded as...")
     network = replace(network, edges=derive(network.edges, masks))
+
+    # And summed along the chains, because a chain is what gets selected and
+    # shown while an edge is only what a mask can be tested against.
+    covered = chain_coverage(network.chains, network.edges)
+    network = replace(network, chains=network.chains.assign(**{column: covered[column] for column in CHAIN_COVERAGE_COLUMNS}))
 
     print(f"Reading the ground height every {params.elevation_step_m:g} m along every edge but the crossings...")
     network = measure(network, params)
