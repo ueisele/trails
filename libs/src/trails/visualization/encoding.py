@@ -28,8 +28,10 @@ source records a path along*, which is not ground with no path.
 ``length x source factor`` and the browser has the geometry and the factors —
 the ferry crossings are the exception and their flat cost is in the header. The
 **per-edge ascent**, whose only consumer is elevation-aware routing, which is
-not decided. And the four **per-chain** figures, which ride as properties on the
-drawn chains, where anything showing them already has the feature in hand.
+not decided. And the four **per-chain** figures, which belong beside the drawn
+chains rather than in here: the map writes them as polylines carrying a
+``trail-group-<chain_id>`` class, so a table keyed by that class reaches them —
+the same way the search box already ships the text its lines are found by.
 
 **The edges are laid out in chain order**, not in the frame's, because the
 frame's order is not the order they lie in — see :mod:`trails.routing.order`.

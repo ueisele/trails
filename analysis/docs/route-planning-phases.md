@@ -630,7 +630,7 @@ in the browser. The decisions document specifies the encoding in detail under
 *Full source precision*; no phase had claimed it.
 
 **Two representations, and they must not be unified.** Phase 3 draws chains as
-folium GeoJSON, simplified for rendering. This phase adds a *second* payload:
+folium polylines, simplified for rendering. This phase adds a *second* payload:
 the routing graph at full source precision, which is never drawn. Drawing and
 routing are different units — that is the whole point of the chain/edge split —
 and an attempt to serve both from one copy loses either the accuracy or the
@@ -664,10 +664,10 @@ render budget.
   *order* is not, because every sample is still present and still correct. What
   comes out is a profile that looks like a profile.
 - **The four per-chain figures — ascent, descent, high and low** — do not belong
-  in this payload. They ride as properties on the drawn chains, which phase 3
-  already puts in the page as GeoJSON and which the panel has in hand the moment
-  one is clicked. Phase 4 adds them there; this phase carries the routing graph
-  and the elevation series and nothing else.
+  in this payload. They belong beside the drawn chains, which the map writes as
+  polylines carrying a `trail-group-<chain_id>` class; phase 4 ships them as a
+  table keyed by that class, the way the search box already ships its names. This
+  phase carries the routing graph and the elevation series and nothing else.
 - **Node positions**, which phase 6 needs to snap a click to the nearest node
   within 150 m and which nothing above provides. Do not ship a node table:
   derive the positions from the edge endpoints while decoding, so they cannot
@@ -729,15 +729,19 @@ legend, and folded until wanted.
 **Draw it as inline SVG, by hand**, from the 5 m samples phase 3B put in the
 page. No charting library: a script from a CDN does not load on a `file://` page
 and fails silently, the way the OpenStreetMap tiles once did, and the legend, the
-search and the click-highlight are all hand-written for the same reason.
+search and the click-highlight are all hand-written for the same reason. The
+decisions document says what it consists of — **one path, two axes and a
+crosshair**; the crosshair is specified there and had been claimed by no phase
+until now, so it is written out under *The crosshair* below.
 
 Where a series is longer than the panel is wide, reduce it to one point per pixel
 column, keeping that column's minimum and maximum so no spike is lost. **That is
-the exception, not the common case**: measured, the median chain has **36
-samples** and a third have fewer than twenty; only **186 of 11,290** exceed nine
-hundred. The longest, the 42 km Rundtur, has 8,489. So the reduction must not be
-the only path through the code — bucketing 36 samples into 900 columns leaves 864
-of them empty, and a drawing routine that assumes one point per column produces a
+the exception, not the common case**: measured against the built graph, the
+median chain has **36 samples** and 32 % have fewer than twenty; only **172 of
+11,290** exceed nine hundred. The longest, the 42 km Rundtur
+(`ut-no-414306-7244296-42442`), has **8,191**. So the reduction must not be the
+only path through the code — bucketing 36 samples into 900 columns leaves 864 of
+them empty, and a drawing routine that assumes one point per column produces a
 broken path or none. Draw a short series as it is. The reduction touches the
 curve alone, and nothing else smooths it.
 
@@ -758,15 +762,30 @@ decoded for the curve alone.*
 **The popup shows ascent, descent and the high point** — which is what the
 decisions document calls the main thing the build-time sampling buys, and it
 needs nothing from phase 3B: each is one more entry in a field dict reading one
-more chain column.
-
-**The panel reads the same four numbers as properties on the drawn chain**, not
-out of phase 3B's payload. Phase 3 already puts the chains in the page as
-GeoJSON and the panel has the clicked feature in hand, so add ascent, descent,
-high and low there. That is 11,290 chains times four numbers, and it keeps the
-encoded payload to what it is for: the routing graph and the elevation series. The high point earns its place over the low one here, because
-the peaks stand around 1,200 m and whether a stretch stays at 400 m or climbs to
+more chain column. The high point earns its place over the low one, because the
+peaks stand around 1,200 m and whether a stretch stays at 400 m or climbs to
 1,100 decides snow, weather and exposure in a way a low point does not.
+
+### How the panel reaches a chain's numbers
+
+Earlier drafts of this phase and of 3B said the chains are in the page as GeoJSON
+and the panel has the clicked feature in hand. **They are not.** Measured in the
+built page: **11,290 `L.polyline` and exactly one `L.geoJson`**, which is the park
+boundary. A Leaflet polyline has no `feature.properties`, so there is nowhere on
+it to put a number, and converting eleven thousand of them to `GeoJson` would
+change the drawn objects a phase was accepted against.
+
+What does exist is better and is already in use twice. Every drawn line carries
+`className="trail-group-<chain_id>"` from `_group_class`, which is how the
+click-highlight finds all of one route; and the search box already ships its text
+into the page as **a table keyed by exactly that class**, because Leaflet path
+options drop unknown keys — see `SEARCH_NAMES_ATTR` and `_record_search_names`.
+
+**Do the same for the four figures and the bearing.** One table, keyed by the
+chain's class, written at build time beside the layer rather than onto it. Five
+values times 11,290 chains, in the page as JSON. That keeps the encoded payload to
+what it is for — the routing graph and the elevation series — and it keeps the
+panel from having to agree with anything.
 
 ### Which way the figures run
 
@@ -776,7 +795,7 @@ reader cannot see, and this phase has to make it visible — **once, three ways,
 and all three must agree**:
 
 - **In words**, from the bearing between the chain's endpoints, rounded to eight
-  points: *+996 / −850 m towards NE*. Eight and not four, because 35 % of the
+  points: *+996 / −850 m towards NE*. Eight and not four, because 34 % of the
   chains lie more than 30° from a cardinal axis and a four-point label would be
   wrong about a third of the time; at eight nothing is more than 22.5° out.
 - **As an arrow on the selected chain**, hand-drawn like the rest. This is what
@@ -788,40 +807,93 @@ and all three must agree**:
 Do not offer both directions. Two rows of numbers make the reader do the
 matching, and the arrow is what removes the need for them.
 
+**The bearing is computed once, in Python, in the metric CRS, and carried** —
+into the same table as the four figures. It is not recomputed in the browser, for
+exactly the reason ascent is not, and here the trap is sharper than a few metres.
+At this latitude a degree of longitude is 0.41 of a degree of latitude, so a
+bearing taken flat from `atan2(Δlon, Δlat)` is not the same bearing: measured,
+that alone puts **4,485 of the 11,249 chains — 40 % — into a different one of the
+eight points**. A further **237 chains lie within half a degree of an octant
+boundary**, where any difference in method flips the label. Working in
+`EPSG:25833`, where the graph is built, makes the question disappear.
+
 Three things measured beforehand, so none is a surprise:
 
 - **Every chain runs eastward.** `_canonical` orders by coordinate, so the
-  bearing always falls in the eastern half: N 15 %, NE 28 %, E 21 %, SE 23 %,
-  S 13 %, and never W, SW or NW. Not a bug, but it looks like one — put a
+  bearing always falls in the eastern half: N 16 %, NE 28 %, E 21 %, SE 23 %,
+  S 12 %, and never W, SW or NW. Not a bug, but it looks like one — put a
   comment where the bearing is computed.
-- **52 chains are rings**, endpoints together. No direction, and none needed:
-  ascent equals descent whichever way round.
-- **452 are strongly wound**, straight-line distance under half their length.
+- **41 chains are rings**, endpoints together. No bearing at all, and none
+  needed: ascent equals descent whichever way round. They are the reason the five
+  shares above do not add to a hundred.
+- **493 are strongly wound**, straight-line distance under half their length.
   There the endpoint bearing is a simplification and stays one; the alternative
   is turning a label into a route description. The median chain is 0.93 as
   straight as its own length, so this is the exception rather than the rule.
 
-**Ferries carry none of this.** There is no ground under a crossing, phase 2
-samples none, and it has no profile, no ascent and no direction worth stating.
-Its popup keeps what it has.
+### The three kinds of chain, and none of them may crash the panel
+
+A profile exists for most chains and not all, and *most* is where this goes
+wrong. Say what happens in all three cases rather than in the common one:
+
+- **11,267 chains have a profile** and get everything described above.
+- **21 ferries have no series at all** — length **zero**. There is no ground
+  under a crossing and phase 2 samples none, so `ascent`, `descent`, `high_m`
+  and `low_m` are all **`NaN`, not zero**. The popup keeps what it has —
+  `_build_popup` drops a missing value already — and the panel says the crossing
+  has no profile rather than drawing a flat line at zero. A flat line is a claim
+  about the ground.
+- **Two walked chains have a series in which nothing was read.**
+  `osm-423700-7272625-5` and `osm-382608-7302481-2`, stubs of 5.1 m and 2.0 m
+  outside the height model's coverage, each hold **two samples and two gaps**.
+  **This is the case a length check does not catch**: `series.length === 0`
+  stops the ferries and lets these two straight through, and what comes out is
+  `M NaN,NaN` — a path the browser draws as nothing, with no error anywhere. The
+  test is whether any sample was *read*, not whether any sample exists.
+
+### The crosshair
+
+Specified in the decisions document, claimed by no phase until this one. As the
+pointer moves over the curve, a vertical line follows it and reads off the
+distance along the chain and the height there. It reads from the **full** series,
+not the reduced one — the reduction exists so the browser draws 900 points
+instead of 8,191, and a reader hovering over a spike should be told the spike's
+own height rather than the column's.
+
+**Not in this phase:** marking that same position on the map. It is the obvious
+next thing and it is a second mechanism — a marker to place, move and remove in
+step with the pointer — and nothing in the decisions document asks for it. If it
+is wanted, it is its own change.
 
 ### Where the panel sits
 
 The legend already occupies the bottom left. Give the panel the width and leave
 the legend its corner above it, or move the legend — but pick one. Both being
-folded by default makes the clash rare, not absent.
+folded by default makes the clash rare, not absent. This is the one thing here
+left to whoever builds it; everything else above is decided.
 
-**Done when** clicking any chain draws its profile, shows an arrow for the
+**Done when** clicking any chain with a profile draws it, shows an arrow for the
 direction the figures describe, and reads the same ascent, descent, high point
 and bearing in the popup as in the panel — with the panel taking every one of
-them from the chain rather than recomputing it. The map still zooms and pans while the panel is open.
+them from the chain's table rather than recomputing it; and clicking one of the
+twenty-three without a profile says so instead of drawing anything. The map still
+zooms and pans while the panel is open.
 
-Two checks, for the two ways this goes wrong quietly:
+Nothing that phase 3 was accepted against may move: **198** markers, **11,589**
+paths of which exactly **1** non-interactive, **25** layers, the search control
+at **10 px** above the zoom at 60, and the wheel taking zoom **9 → 11**. The
+panel and the arrow are drawn into their own containers; if the path count moves,
+the arrow was drawn as a path on the map and will be counted for ever after.
+
+Three checks, for the three ways this goes wrong quietly:
 
 - a chain along the shore, whose profile must not dive to −276 m where the
   sampling strayed over water;
 - a chain whose arrow points one way while its curve rises the other. That is
-  what a reversed series looks like, and no figure will reveal it.
+  what a reversed series looks like, and no figure will reveal it;
+- a chain whose popup and panel disagree about the bearing by one octant. That is
+  what a second computation looks like, and the 237 chains near a boundary are
+  where to look for it.
 
 ---
 
