@@ -812,16 +812,16 @@ into the same table as the four figures. It is not recomputed in the browser, fo
 exactly the reason ascent is not, and here the trap is sharper than a few metres.
 At this latitude a degree of longitude is 0.41 of a degree of latitude, so a
 bearing taken flat from `atan2(Δlon, Δlat)` is not the same bearing: measured,
-that alone puts **4,485 of the 11,249 chains — 40 % — into a different one of the
-eight points**. A further **237 chains lie within half a degree of an octant
+that alone puts **4,444 of the 11,249 chains — 40 % — into a different one of the
+eight points**. A further **241 chains lie within half a degree of an octant
 boundary**, where any difference in method flips the label. Working in
 `EPSG:25833`, where the graph is built, makes the question disappear.
 
 Three things measured beforehand, so none is a surprise:
 
 - **Every chain runs eastward.** `_canonical` orders by coordinate, so the
-  bearing always falls in the eastern half: N 16 %, NE 28 %, E 21 %, SE 23 %,
-  S 12 %, and never W, SW or NW. Not a bug, but it looks like one — put a
+  bearing always falls in the eastern half: N 15 %, NE 28 %, E 21 %, SE 23 %,
+  S 13 %, and never W, SW or NW. Not a bug, but it looks like one — put a
   comment where the bearing is computed.
 - **41 chains are rings**, endpoints together. No bearing at all, and none
   needed: ascent equals descent whichever way round. They are the reason the five
@@ -892,7 +892,7 @@ Three checks, for the three ways this goes wrong quietly:
 - a chain whose arrow points one way while its curve rises the other. That is
   what a reversed series looks like, and no figure will reveal it;
 - a chain whose popup and panel disagree about the bearing by one octant. That is
-  what a second computation looks like, and the 237 chains near a boundary are
+  what a second computation looks like, and the 241 chains near a boundary are
   where to look for it.
 
 ---

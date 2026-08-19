@@ -8,11 +8,11 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1, 1B, 1C, 1D, 3, 2 and 3B are built and reviewed**, and the map is
+**Phases 1, 1B, 1C, 1D, 3, 2, 3B and 4 are built and reviewed**, and the map is
 drawn from the graph and carries it. `libs/src/trails/routing/`,
 `libs/src/trails/network/`, `libs/src/trails/visualization/encoding.py`,
 `analysis/scripts/route_graph.py` and `lomsdal_visten.py`. Their output is the
-reference in the decisions document; **4–8 remain**. The project runs on
+reference in the decisions document; **5–8 remain**. The project runs on
 **Python 3.14** and `uv.lock` is tracked from 1D onwards.
 
 The order these were done in is not the order they are numbered, and that was
@@ -35,6 +35,15 @@ payload, are summed per chain by `routing/coverage.py`, and are shown in the
 popup of every walked line layer. Nothing was recomputed for the payload; the
 popup cost a `GRAPH_LAYOUT` bump and two offline minutes. Figures in *What 3B
 found*.
+
+**Phase 4** drew the profile panel: hand-written inline SVG, one path, two axes
+and a crosshair, in a Leaflet control that folds itself away whenever nothing is
+selected. The four figures and the compass point reach it as a table keyed by
+each line's `trail-group-<chain_id>` class — the mechanism the search box
+already used, and not the GeoJSON properties three drafts had assumed. The popup
+gained *Ascent / descent* and *High point*, the arrow lives in a pane of its own
+so it is not counted among the map's paths, and the page came to 36.0 MB. What
+the review found is in *What phase 4 found* below.
 
 When an agent is working in this tree: **documents only, no code, no
 `git commit`** — the hook stashes unstaged changes and would pull work out from
@@ -192,9 +201,22 @@ written next to its decomposition, add the decomposition up.**
 **And the graph in the page**, since 3B. `window.trailsGraph.ready` resolves to
 it; `inflateMs` and `decodeMs` say what it cost. The round trip is checkable
 from the page alone — fold the decoded values as `header.checksum` was folded
-and compare. It reads **1,881,995,939 / 2,401,407,269** for the coordinates and
-**814,474,384 / 3,748,383,096** for the heights, over 948,465 vertices and
-1,406,040 samples.
+and compare, over 948,465 vertices and 1,406,040 samples.
+
+**Do not record a checksum as a reference figure.** It verifies that *this*
+build's page decoded *this* build's stream; it is not a property of the network.
+It moved once during the phase 4 review and cost half an hour: Turrutebasen
+re-exported on 2026-08-17, the fingerprint noticed correctly, and the graph
+rebuilt with **identical content in a different row order** — every edge geometry
+the same as a multiset, every chain's geometry the same by id, total ascent and
+descent the same to the cent, 0 chains added or removed. The counts, the lengths
+and the costs are the durable references. A checksum is a decode check.
+
+**And when one does move, read the two accumulators apart.** The first is the
+plain sum and is blind to order; the second is Fletcher's and is not. An
+unchanged first with a changed second says *the same values arrived in a
+different order* — which is what pointed straight at the re-export rather than
+at the phase under review.
 
 **Do not probe the popups with `map.eachLayer`.** It walks the map's top-level
 layers, which are the feature groups, and never reaches the lines inside them —
@@ -677,8 +699,8 @@ rather than patched.** What to check the rewrite kept:
   the arrow (JavaScript) and says all three showings must agree, while
   forbidding exactly that pattern for ascent two paragraphs earlier. Measured at
   65.5° N: a flat `atan2(Δlon, Δlat)` instead of a metric bearing moves
-  **4,485 of 11,249 chains — 40 % — into a different one of the eight points**,
-  and 237 lie within half a degree of an octant boundary. **A rounded label is a
+  **4,444 of 11,249 chains — 40 % — into a different one of the eight points**,
+  and 241 lie within half a degree of an octant boundary. **A rounded label is a
   threshold, and every rule this document has about thresholds applies to it.**
 - **Three kinds of chain, a rule for one.** A ferry's series has length **zero**;
   two walked stubs, `osm-423700-7272625-5` and `osm-382608-7302481-2` at 5.1 and
@@ -849,6 +871,58 @@ chains separately would have doubled the requests for the same numbers, because
 every edge already samples both its ends. Two independent constructions agree to
 5 m over a 20 km route, which is what says the walk and the orientation are
 right; the check is worth repeating if either is touched.
+
+## What phase 4 found
+
+**Everything measurable held.** Payload 4.12 MB, 198 markers, 11,589 paths with
+exactly one non-interactive, 25 layers, wheel 9 → 11, no page errors. The panel's
+series matched Python's `chain_series` over thirteen chains — the longest at
+8,191 samples, a ring, a ferry, both blank stubs — same length, same gap
+positions, worst deviation **0.0500 m**, which is exactly half a quantum. The
+compass point agreed with Python on all **241** chains within half a degree of a
+boundary. The popup reconciles to the entry: **11,267** ascent rows, one per
+chain with a height, and **11,226** direction rows, which is those minus the 41
+rings; the 23 missing bearings are the 21 ferries and the two blank stubs.
+
+**The profile was drawn dashed, and the data was fine.** A user asked why a
+6.5 km chain came out as a dotted line. It has **zero** gaps. `drawCurve` reduces
+to one point per pixel column once the samples outnumber the columns, and it
+lifted the pen on every column no sample happened to land in:
+
+    2,532 samples · 1,977 columns · 285 columns empty · 222 separate strokes
+
+An empty column is **not** a gap. Samples are laid per *edge* — every edge gets
+at least two, whatever its length — so a chain of short edges clumps them and
+leaves holes elsewhere; just above the switchover the ratio is barely one sample
+per column. The phase warned about the neighbouring case, bucketing 36 samples
+into 900 columns, and that corner *was* guarded. **The hole had simply moved to
+the band next to the guard.** Fixed by skipping empty columns and lifting the pen
+only where the model read nothing: 222 strokes → **1**, while a chain with nine
+real gaps still comes back in three pieces.
+
+**Nothing anybody had checked would have caught it.** The agent compared the
+series; I compared the series; both were right. Nobody compared the *path drawn
+from* the series. The probe that catches it is one line — `d.match(/M/g).length`,
+which must be 1 for a chain with no gaps and was 222. **Verifying the data
+reached the page is not verifying what the page drew with it.**
+
+Two more, and one of them was mine:
+
+- **The compass point was named twice**, in Python and again in the page, with
+  the two rounding rules matched by hand and a comment saying why. It worked —
+  0 of 241 boundary chains disagreed. But the phase forbids exactly this shape
+  for ascent, and a rounded label is a threshold like any other. The label now
+  travels as `point` and the page names nothing; a test fails if it starts again.
+  Carrying it is also what makes rounding the numbers safe, so the table dropped
+  from 2.32 to 2.07 MB — it had been writing `17.339999999999996` for a figure
+  shown as whole metres, eleven thousand times.
+- **I broke a figure while correcting figures.** Phase 4 said the bearings run
+  N 15 %, NE 28 %, E 21 %, SE 23 %, S 13 %. The readiness check "corrected" that
+  to N 16 % and S 12 %, measured with a `cos(mean latitude)` approximation
+  instead of the projection — and the *original* was right: 14.7, 28.2, 21.2,
+  22.9, 12.7. Two other figures moved the same way, 237 → **241** and 4,485 →
+  **4,444**. **The shortcut was taken in the very commit that corrected four
+  stale figures for having been derived rather than measured.**
 
 ## What 3B found
 
