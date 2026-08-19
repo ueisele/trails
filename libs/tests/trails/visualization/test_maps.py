@@ -503,6 +503,179 @@ class TestAddRoutingGraph:
         assert with_graph.count("://") == plain.count("://")
 
 
+class TestChainFigures:
+    """Tests for the figures a line carries beside the layer it is drawn in."""
+
+    @pytest.fixture
+    def measured(self) -> gpd.GeoDataFrame:
+        """Two chains, one of them with nothing read along it."""
+        return gpd.GeoDataFrame(
+            {
+                "chain_id": ["ut-no-1-2-3", "ferries-4-5-6"],
+                "ascent": [996.4, float("nan")],
+                "descent": [850.2, float("nan")],
+                "bearing_deg": [47.3, 12.0],
+                "geometry": [
+                    LineString([(12.8, 65.4), (12.81, 65.41)]),
+                    LineString([(12.9, 65.5), (12.91, 65.51)]),
+                ],
+            },
+            crs="EPSG:4326",
+        )
+
+    def fields(self) -> dict[str, str]:
+        """The columns to carry, and the keys they travel under."""
+        return {"ascent": "ascent", "descent": "descent", "bearing_deg": "bearing"}
+
+    def test_figures_travel_beside_the_layer_keyed_by_the_class(self, measured):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, measured, name="Chains", group_field="chain_id", figure_fields=self.fields())
+
+        figures = getattr(group, maps.CHAIN_FIGURES_ATTR)
+        assert figures["trail-group-ut-no-1-2-3"]["ascent"] == pytest.approx(996.4)
+        assert figures["trail-group-ut-no-1-2-3"]["bearing"] == pytest.approx(47.3)
+
+    def test_a_figure_is_rounded_rather_than_carried_at_float_precision(self, measured):
+        """17.339999999999996 is eleven thousand times over, for digits a tenth
+        of a metre already exceeds."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        rough = measured.assign(ascent=[17.339999999999996, float("nan")])
+        group = maps.add_trails(fmap, rough, name="Chains", group_field="chain_id", figure_fields=self.fields())
+
+        assert getattr(group, maps.CHAIN_FIGURES_ATTR)["trail-group-ut-no-1-2-3"]["ascent"] == 17.3
+
+    def test_a_label_travels_as_itself_rather_than_as_a_number(self, measured):
+        """The compass point is a string and is carried, not re-derived."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        labelled = measured.assign(compass=["NE", None])
+        group = maps.add_trails(fmap, labelled, name="Chains", group_field="chain_id", figure_fields={**self.fields(), "compass": "point"})
+
+        figures = getattr(group, maps.CHAIN_FIGURES_ATTR)
+        assert figures["trail-group-ut-no-1-2-3"]["point"] == "NE"
+        assert figures["trail-group-ferries-4-5-6"]["point"] is None
+
+    def test_each_entry_names_the_chain_it_is_about(self, measured):
+        """A class is not an id: _group_class reshapes anything that is not a
+        CSS token, so what the figures describe travels as a value."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, measured, name="Chains", group_field="chain_id", figure_fields=self.fields())
+
+        figures = getattr(group, maps.CHAIN_FIGURES_ATTR)
+        assert figures["trail-group-ut-no-1-2-3"][maps.FIGURE_ID_KEY] == "ut-no-1-2-3"
+
+    def test_a_missing_figure_travels_as_null_rather_than_zero(self, measured):
+        """A crossing has no ground under it. Zero would be a claim about it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, measured, name="Chains", group_field="chain_id", figure_fields=self.fields())
+
+        assert getattr(group, maps.CHAIN_FIGURES_ATTR)["trail-group-ferries-4-5-6"]["ascent"] is None
+
+    def test_without_figure_fields_nothing_is_recorded(self, measured):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, measured, name="Chains", group_field="chain_id")
+
+        assert getattr(group, maps.CHAIN_FIGURES_ATTR) == {}
+
+
+class TestProfilePanel:
+    """Tests for the profile panel."""
+
+    def drawn(self) -> tuple[folium.Map, folium.FeatureGroup]:
+        """A map with one measured chain drawn on it."""
+        gdf = gpd.GeoDataFrame(
+            {
+                "chain_id": ["ut-no-1-2-3"],
+                "ascent": [996.4],
+                "geometry": [LineString([(12.8, 65.4), (12.81, 65.41)])],
+            },
+            crs="EPSG:4326",
+        )
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        return fmap, maps.add_trails(fmap, gdf, name="Chains", group_field="chain_id", figure_fields={"ascent": "ascent"})
+
+    @pytest.fixture
+    def group(self) -> tuple[folium.Map, folium.FeatureGroup]:
+        """The same map, as a fixture."""
+        return self.drawn()
+
+    def test_the_page_names_no_compass_point_of_its_own(self, group):
+        """A rounded label is a threshold, so it is decided once, in Python, and
+        carried. A second rule in the page would name a different direction from
+        the popup on any chain lying near a boundary between two points."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "figure.point" in html
+        for derived in ("octant(", "OCTANTS", "/ 45 + 0.5"):
+            assert derived not in html, f"the page derives the compass point itself: {derived}"
+
+    def test_the_figures_reach_the_page(self, group):
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "trail-group-ut-no-1-2-3" in html
+        assert "996.4" in html
+
+    def test_it_draws_nothing_on_the_map(self, group):
+        """The arrow belongs in a container of its own: anything drawn into the
+        overlay pane is counted among the map's paths for ever after."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+        maps.finalize(fmap)
+
+        assert not [child for child in fmap._children.values() if isinstance(child, folium.GeoJson | folium.Marker)]
+        html = fmap.get_root().render()
+        assert "createPane" in html
+        assert "L.polyline" not in html.split("var figures")[-1]
+
+    def test_it_fetches_nothing(self, group):
+        """A charting library from a CDN does not load on a file:// page: it
+        fails silently, the way the OpenStreetMap tiles once did.
+
+        The one URL the panel does carry is the SVG namespace, which names a
+        language rather than a place and is never fetched — it is what
+        createElementNS takes."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+        with_panel = fmap.get_root().render().replace("http://www.w3.org/2000/svg", "")
+
+        bare, _ = self.drawn()
+        assert with_panel.count("://") == bare.get_root().render().count("://")
+
+    def test_the_wheel_still_reaches_the_map(self, group):
+        """disableClickPropagation, and deliberately not the scroll one: a panel
+        that swallows the wheel reads as a map that has frozen."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "disableClickPropagation" in html
+        assert "disableScrollPropagation" not in html
+
+    def test_without_groups_nothing_is_added(self):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_profile_panel(fmap, [])
+
+        assert "trails-profile-panel" not in fmap.get_root().render()
+
+    def test_without_figures_nothing_is_added(self):
+        """A layer nobody measured has no profile to offer."""
+        gdf = gpd.GeoDataFrame({"chain_id": ["a"], "geometry": [LineString([(12.8, 65.4), (12.81, 65.41)])]}, crs="EPSG:4326")
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        layer = maps.add_trails(fmap, gdf, name="Chains", group_field="chain_id")
+        maps.add_profile_panel(fmap, [layer])
+
+        assert "trails-profile-panel" not in fmap.get_root().render()
+
+    def test_it_starts_folded(self, group):
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        assert "var open = false;" in fmap.get_root().render()
+
+
 class TestLegendAndFinalize:
     """Tests for legend rendering and layer control."""
 

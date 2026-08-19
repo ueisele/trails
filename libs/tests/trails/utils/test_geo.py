@@ -1,11 +1,21 @@
 """Tests for geo module utilities."""
 
+import math
+
 import geopandas as gpd
 import pandas as pd
 import pytest
 from pyproj import CRS
-from shapely.geometry import LineString, Point
-from trails.utils.geo import attach_nearest, calculate_lengths_meters, merge_lines, thin_points
+from shapely.geometry import LineString, MultiLineString, Point
+from trails.utils.geo import (
+    COMPASS_POINTS,
+    attach_nearest,
+    calculate_lengths_meters,
+    compass_points,
+    endpoint_bearings,
+    merge_lines,
+    thin_points,
+)
 
 
 class TestCalculateLengthsMeters:
@@ -498,3 +508,97 @@ class TestThinPoints:
 
         assert result.crs.to_epsg() == 4326
         assert list(result.columns) == list(labels.columns)
+
+
+class TestEndpointBearings:
+    """Tests for endpoint_bearings."""
+
+    def line(self, *coordinates: tuple[float, float]) -> gpd.GeoDataFrame:
+        """One line through the given metric positions."""
+        return gpd.GeoDataFrame(geometry=[LineString(coordinates)], crs="EPSG:25833")
+
+    def test_north_is_zero(self):
+        result = endpoint_bearings(self.line((400000, 7280000), (400000, 7281000)))
+        assert result.iloc[0] == pytest.approx(0.0)
+
+    def test_east_is_ninety(self):
+        result = endpoint_bearings(self.line((400000, 7280000), (401000, 7280000)))
+        assert result.iloc[0] == pytest.approx(90.0)
+
+    def test_west_is_two_hundred_and_seventy(self):
+        result = endpoint_bearings(self.line((400000, 7280000), (399000, 7280000)))
+        assert result.iloc[0] == pytest.approx(270.0)
+
+    def test_only_the_two_ends_count(self):
+        """A chain wanders; the bearing is a simplification and stays one."""
+        wandering = self.line((400000, 7280000), (390000, 7285000), (401000, 7280000))
+        assert endpoint_bearings(wandering).iloc[0] == pytest.approx(90.0)
+
+    def test_a_ring_has_no_bearing(self):
+        ring = self.line((400000, 7280000), (401000, 7281000), (400000, 7280000))
+        assert pd.isna(endpoint_bearings(ring).iloc[0])
+
+    def test_a_multilinestring_is_measured_end_to_end(self):
+        gdf = gpd.GeoDataFrame(
+            geometry=[MultiLineString([[(400000, 7280000), (400500, 7280000)], [(400500, 7280000), (401000, 7280000)]])],
+            crs="EPSG:25833",
+        )
+        assert endpoint_bearings(gdf).iloc[0] == pytest.approx(90.0)
+
+    def test_measured_in_the_metric_crs_not_flat(self):
+        """At 65° N a degree of longitude is 0.41 of one of latitude, so the
+        same two ends give a different bearing taken flat — far enough apart to
+        land in a different one of the eight points."""
+        gdf = gpd.GeoDataFrame(geometry=[LineString([(13.0, 65.5), (13.5, 65.5 + 0.2)])], crs="EPSG:4326")
+        flat = math.degrees(math.atan2(0.5, 0.2)) % 360
+
+        measured = float(endpoint_bearings(gdf).iloc[0])
+        assert flat == pytest.approx(68.2, abs=0.1)
+        assert measured == pytest.approx(47.6, abs=0.5)
+        assert compass_points(pd.Series([measured])).iloc[0] != compass_points(pd.Series([flat])).iloc[0]
+
+    def test_an_empty_geometry_has_none(self):
+        gdf = gpd.GeoDataFrame(geometry=[LineString(), LineString([(400000, 7280000), (401000, 7280000)])], crs="EPSG:25833")
+        result = endpoint_bearings(gdf)
+
+        assert pd.isna(result.iloc[0])
+        assert result.iloc[1] == pytest.approx(90.0)
+
+    def test_features_without_a_crs_are_refused(self):
+        """The wrong answer here reads exactly like a right one: a lon/lat frame
+        measured flat gives 68° where the ground gives 48°, which is a different
+        compass point and no warning."""
+        gdf = gpd.GeoDataFrame(geometry=[LineString([(13.0, 65.5), (13.5, 65.7)])])
+        with pytest.raises(ValueError, match="no CRS"):
+            endpoint_bearings(gdf)
+
+    def test_empty_input_returns_empty(self):
+        assert len(endpoint_bearings(gpd.GeoDataFrame(geometry=[], crs="EPSG:25833"))) == 0
+
+    def test_the_index_is_kept(self):
+        gdf = self.line((400000, 7280000), (401000, 7280000))
+        gdf.index = pd.Index([7])
+        assert list(endpoint_bearings(gdf).index) == [7]
+
+
+class TestCompassPoints:
+    """Tests for compass_points."""
+
+    def test_names_each_octant(self):
+        bearings = pd.Series([0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0])
+        assert list(compass_points(bearings)) == list(COMPASS_POINTS)
+
+    def test_rounds_to_the_nearest_point(self):
+        assert list(compass_points(pd.Series([22.4, 22.6, 359.9]))) == ["N", "NE", "N"]
+
+    def test_a_half_rounds_up_the_way_javascript_does(self):
+        """floor(x + 0.5), not a rint: the panel in the page names the point
+        from the same number with Math.round, and a rint rounds a half to even.
+        Two of the boundaries are the ones where the two would part."""
+        assert list(compass_points(pd.Series([22.5, 67.5, 112.5, 157.5]))) == ["NE", "E", "SE", "S"]
+
+    def test_nothing_is_named_where_there_is_no_bearing(self):
+        assert compass_points(pd.Series([float("nan")])).iloc[0] is None
+
+    def test_empty_input_returns_empty(self):
+        assert len(compass_points(pd.Series([], dtype="float64"))) == 0

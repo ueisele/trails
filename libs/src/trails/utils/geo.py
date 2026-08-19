@@ -1,10 +1,18 @@
 """Basic geometry utilities for trail data."""
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
+import shapely
 from shapely.geometry import MultiLineString
 from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.ops import linemerge, unary_union
+
+#: The points a bearing is rounded to, clockwise from north. Eight rather than
+#: four: a third of a real path network lies more than 30° from a cardinal axis,
+#: where a four-point label is simply wrong, and at eight nothing is more than
+#: 22.5° out.
+COMPASS_POINTS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
 
 
 def calculate_lengths_meters(gdf: gpd.GeoDataFrame) -> pd.Series:
@@ -200,3 +208,92 @@ def merge_lines(gdf: gpd.GeoDataFrame, group_by: str | None = None) -> gpd.GeoDa
 
     data = {group_by: values} if group_by else {}
     return gpd.GeoDataFrame(data, geometry=geometries, crs=gdf.crs)
+
+
+def endpoint_bearings(gdf: gpd.GeoDataFrame, metric_crs: str = "EPSG:25833") -> pd.Series:
+    """Measure which way each line runs, from its first vertex to its last.
+
+    **In a projected CRS, and that is the whole point of the argument.** Taken
+    flat from longitude and latitude the answer is a different one: at 65° N a
+    degree of longitude is 0.41 of a degree of latitude, so ``atan2`` over raw
+    coordinates squashes every bearing towards the meridian. Measured over this
+    park's chains it puts two in five of them into a different one of
+    :data:`COMPASS_POINTS` — not a rounding difference, a wrong label.
+
+    Args:
+        gdf: Features whose ends are to be measured; anything but a line has no
+            direction and comes back NaN
+        metric_crs: Projected CRS to measure in
+
+    Returns:
+        Degrees clockwise from north, aligned to ``gdf``. NaN where a line ends
+        where it began — a ring has no bearing and needs none, since it climbs
+        and falls the same whichever way round it is walked — and where a
+        geometry is missing or empty.
+
+    Raises:
+        ValueError: If the features say nothing about the CRS they are in.
+            Measuring them where they lie would then be measuring lon/lat flat,
+            which is the one answer this function exists to avoid — and it is
+            wrong silently, in a way that reads like a bearing.
+    """
+    if gdf.crs is None and not gdf.empty:
+        raise ValueError(f"the features carry no CRS, so they cannot be measured in {metric_crs}")
+
+    empty = pd.Series(np.nan, index=gdf.index, dtype="float64")
+    if gdf.empty:
+        return empty
+
+    projected = gdf.to_crs(metric_crs)
+    geometries = projected.geometry.to_numpy()
+    counts = np.asarray(shapely.get_num_coordinates(geometries), dtype=np.int64)
+    drawn = counts > 0
+    if not drawn.any():
+        return empty
+
+    # First and last vertex of each geometry, taken off one flat array of
+    # coordinates rather than per feature, so a MultiLineString is handled by
+    # the same code as a LineString: its ends are the ends of its parts.
+    coordinates = shapely.get_coordinates(geometries)
+    ends = np.cumsum(counts)
+    delta = coordinates[ends[drawn] - 1] - coordinates[(ends - counts)[drawn]]
+
+    # Clockwise from north, which is what a compass point means: the x
+    # displacement is the sine and the y the cosine, the reverse of the usual
+    # atan2(y, x).
+    bearing = np.degrees(np.arctan2(delta[:, 0], delta[:, 1])) % 360
+    empty.loc[drawn] = np.where((delta[:, 0] == 0) & (delta[:, 1] == 0), np.nan, bearing)
+    return empty
+
+
+def compass_points(bearings: pd.Series) -> pd.Series:
+    """Name each bearing as one of :data:`COMPASS_POINTS`.
+
+    Args:
+        bearings: Degrees clockwise from north, NaN where there is no bearing
+
+    Returns:
+        The point each bearing rounds to, aligned to ``bearings``, and None
+        where there is none
+    """
+    # **This is the only place a bearing is named**, and it has to stay that
+    # way: a rounded label is a threshold, and a second implementation of one
+    # disagrees with the first exactly on the boundaries. Anything that shows a
+    # direction carries what comes out of here rather than deriving it — see
+    # ``FIGURE_DECIMALS`` and the panel, which is handed the point and has no
+    # rule of its own.
+    #
+    # floor(x + 0.5) rather than numpy's rint, which rounds a half to even. Both
+    # are defensible and neither is now forced by anything, so the reason to keep
+    # this one is simply that it is the one in use: 241 of this park's chains lie
+    # within half a degree of a boundary, and swapping the rule renames the
+    # direction on some of them for no gain.
+    values = bearings.to_numpy(dtype="float64")
+    known = ~np.isnan(values)
+    index = np.zeros(len(values), dtype=np.int64)
+    index[known] = np.floor(values[known] / 45 + 0.5).astype(np.int64) % len(COMPASS_POINTS)
+    return pd.Series(
+        [COMPASS_POINTS[position] if is_known else None for position, is_known in zip(index.tolist(), known.tolist(), strict=True)],
+        index=bearings.index,
+        dtype="object",
+    )

@@ -172,6 +172,67 @@ def _record_search_names(group: folium.FeatureGroup, names: dict[str, str]) -> N
     setattr(group, SEARCH_NAMES_ATTR, names)
 
 
+#: Attribute under which a feature group carries the figures its lines are
+#: described by. The same mechanism as :data:`SEARCH_NAMES_ATTR`, for the same
+#: reason: a Leaflet polyline has no ``feature.properties`` and its path options
+#: drop unknown keys, so a number reaches the browser beside the layer, keyed by
+#: the class every path already carries.
+CHAIN_FIGURES_ATTR = "chain_figures"
+
+#: Key under which the figures of a line name the thing they describe. The class
+#: is what the table is keyed by, but a class is not an id — :func:`_group_class`
+#: reshapes anything that is not a CSS token — so what the figures are *about*
+#: travels as a value rather than being read back out of the key.
+FIGURE_ID_KEY = "id"
+
+#: Decimals a carried figure keeps. A tenth of a metre is ten times finer than
+#: the height model resolves and a hundred times finer than anything shown, and
+#: a tenth of a degree turns an arrow by less than its own stroke width. Written
+#: at full float precision instead, this table costs a third of a megabyte more
+#: for digits nothing can use.
+FIGURE_DECIMALS = 1
+
+
+def _record_chain_figures(group: folium.FeatureGroup, figures: dict[str, dict[str, object]]) -> None:
+    """Attach the per-line figures of a layer to its feature group.
+
+    Args:
+        group: Feature group the figures belong to
+        figures: Mapping of CSS class to the figures of the line carrying it
+    """
+    setattr(group, CHAIN_FIGURES_ATTR, figures)
+
+
+def _figure_values(row: pd.Series, fields: dict[str, str]) -> dict[str, object]:
+    """Read the figures of one feature, in the shape the page reads them.
+
+    Args:
+        row: Row of a GeoDataFrame
+        fields: Mapping of column name to the key it travels under
+
+    Returns:
+        One entry per field. A missing value travels as None and reaches the
+        page as ``null``, which is what a ferry crossing's ascent is and what a
+        ring's bearing is: not zero, and not a number to be drawn. A number is
+        rounded to :data:`FIGURE_DECIMALS`, which is finer than anything shown
+        and ten times finer than the height model resolves — the alternative is
+        writing ``17.339999999999996`` eleven thousand times.
+    """
+    values: dict[str, object] = {}
+    for column, key in fields.items():
+        value = row[column] if column in row else None
+        if value is None or pd.isna(value):
+            values[key] = None
+        elif isinstance(value, str):
+            # Anything already decided here travels as it is. A label must not
+            # be re-derived in the page: that is a second implementation of a
+            # rounding rule, and a rounding rule is a threshold.
+            values[key] = value
+        else:
+            values[key] = round(float(value), FIGURE_DECIMALS)
+    return values
+
+
 def _build_popup(
     row: pd.Series,
     fields: dict[str, str],
@@ -241,6 +302,7 @@ def add_trails(
     tooltip_field: str | None = None,
     group_field: str | None = None,
     search_field: str | None = None,
+    figure_fields: dict[str, str] | None = None,
     source: str | None = None,
     dash_array: str | None = None,
     show: bool = True,
@@ -263,6 +325,10 @@ def add_trails(
             :func:`add_click_highlight` can pick out all of it at once. A route
             split into several lines shares one value.
         search_field: Column holding the text :func:`add_search` matches against
+        figure_fields: Mapping of a numeric column to the key it travels under,
+            for the figures :func:`add_profile_panel` shows. Recorded per
+            ``group_field`` value, beside the layer rather than on it, alongside
+            the value itself under :data:`FIGURE_ID_KEY`.
         source: Dataset the lines came from, shown at the foot of every popup
         dash_array: SVG dash pattern, e.g. ``"8,6"``. Use for connections that
             are not walked, such as ferry crossings.
@@ -276,6 +342,7 @@ def add_trails(
 
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
     search_names: dict[str, str] = {}
+    figures: dict[str, dict[str, object]] = {}
 
     for _, row in gdf.iterrows():
         geometry = row.geometry
@@ -299,6 +366,11 @@ def add_trails(
             class_name = _group_class(row[key_field])
         if class_name and search_field and search_field in row and pd.notna(row[search_field]):
             search_names[class_name] = str(row[search_field])
+        # Keyed by the class and not by the group value, because that is what a
+        # click hands back: a path knows the class it was drawn with and nothing
+        # else about the feature it came from.
+        if class_name and figure_fields and key_field:
+            figures[class_name] = {FIGURE_ID_KEY: str(row[key_field]), **_figure_values(row, figure_fields)}
 
         for line in lines:
             polyline = folium.PolyLine(
@@ -315,6 +387,7 @@ def add_trails(
             polyline.add_to(group)
 
     _record_search_names(group, search_names)
+    _record_chain_figures(group, figures)
     group.add_to(fmap)
     return group
 
@@ -1197,6 +1270,614 @@ def add_routing_graph(fmap: folium.Map, header: dict[str, Any], data: str) -> No
         data: The binary stream, gzipped and base64-encoded
     """
     _RoutingGraph(header, data).add_to(fmap)
+
+
+class _ProfilePanel(MacroElement):
+    """The selected chain's profile, drawn by hand at the foot of the map.
+
+    Hand-written SVG, like the legend, the search and the click-highlight: a
+    charting library pulled from a CDN does not load on a ``file://`` page and
+    fails silently, the way the OpenStreetMap tiles once did.
+
+    **Nothing here recomputes a figure.** The ascent, the descent, the high and
+    low point and the bearing are read off the table this is handed, which the
+    build put beside the layers. The panel decodes the chain's series for one
+    thing only — the curve, and the distance under it — because a number that
+    exists in two languages ends up with two values, and a popup and a panel
+    disagreeing by a few metres about the same chain is worse than either of
+    them being wrong.
+
+    A control rather than a box over the page, and with only
+    ``disableClickPropagation``: a wheel turned over it still has to reach the
+    map, or the map reads as frozen the moment the panel is open.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function () {
+            var map = {{ this._parent.get_name() }};
+            var groups = [{{ this.group_names|join(', ') }}];
+            var figures = {{ this.figures_json }};
+            var title = {{ this.title_json }};
+            var chartHeight = {{ this.chart_height }};
+            var open = {{ 'false' if this.collapsed else 'true' }};
+
+            var SVG = 'http://www.w3.org/2000/svg';
+            // Room for the axes: the left margin holds a four-digit height, the
+            // bottom one a distance.
+            var PAD = {left: 52, right: 16, top: 12, bottom: 22};
+            var CURVE = '#33691e', AXIS = '#9e9e9e', TEXT = '#555', CROSS = '#c62828';
+
+            // ---- what a number reads as ------------------------------------
+            // Math.round is floor(x + 0.5), which is exactly what the popup's
+            // formatter does. Anything else here — a toFixed, a rint — rounds a
+            // half the other way, and the panel and the popup then disagree by
+            // a metre on the chains that land on one.
+            function metres(value) {
+                return String(Math.round(value)).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+            }
+
+            // There is deliberately no rule here for naming a compass point.
+            // It is decided once, in Python, and carried as figure.point.
+            // Deriving it in the page from figure.bearing would be a second
+            // implementation of a rounding rule — and a rounded label IS a
+            // threshold: measured on this network, 241 chains lie within half a
+            // degree of a boundary between two points, and two rules that
+            // disagree by a hair name a different direction in the panel from
+            // the one in the popup.
+
+            // The one phrase that says which way the figures run. The popup
+            // renders the same words from the same numbers in Python; a ring
+            // gets no direction, because it has none and needs none.
+            function climb(figure) {
+                var words = '+' + metres(figure.ascent) + ' / \\u2212' + metres(figure.descent) + ' m';
+                return figure.point ? words + ' towards ' + figure.point : words;
+            }
+
+            // ---- the chain's own series, laid out of its edges --------------
+            // Metres between two positions. Near enough for an axis at this
+            // latitude, and the result is scaled onto the length the chain
+            // carries before anything is shown, so the axis cannot end
+            // somewhere the popup does not.
+            function metresBetween(lon1, lat1, lon2, lat2) {
+                var dx = (lon2 - lon1) * 111320 * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
+                var dy = (lat2 - lat1) * 110574;
+                return Math.sqrt(dx * dx + dy * dy);
+            }
+
+            // The payload holds a chain's edges as one contiguous run in the
+            // chain's own order; bit 0 of an edge's flag says it runs against
+            // the chain, bit 1 that it begins a stretch which does not join what
+            // came before. Two joined edges both sample the node between them,
+            // so the second copy of it is dropped.
+            function compose(graph, index) {
+                var first = graph.chainAt[index], last = graph.chainAt[index + 1];
+                var lon = [], lat = [], along = [], height = [], distance = [];
+                var reached = 0, read = false, crossing = false, joined = false;
+                for (var edge = first; edge < last; edge += 1) {
+                    var flipped = graph.flags[edge] & 1;
+                    var apart = (graph.flags[edge] & 2) && lon.length > 0;
+                    var v0 = graph.vertexAt[edge], v1 = graph.vertexAt[edge + 1];
+                    var began = reached;
+                    crossing = crossing || graph.header.sources[graph.sources[edge]].kind === 'ferry';
+
+                    for (var v = 0; v < v1 - v0; v += 1) {
+                        var at = flipped ? v1 - 1 - v : v0 + v;
+                        var x = graph.coordinates[2 * at], y = graph.coordinates[2 * at + 1];
+                        if (v === 0) {
+                            // The node this edge is joined on is already laid
+                            // down. Where it is not joined, the step across is
+                            // ground nothing was measured along, so it starts
+                            // where it starts and adds no distance.
+                            if (lon.length && !apart) { continue; }
+                            began = reached;
+                        } else {
+                            reached += metresBetween(lon[lon.length - 1], lat[lat.length - 1], x, y);
+                        }
+                        lon.push(x); lat.push(y); along.push(reached);
+                    }
+
+                    var s0 = graph.sampleAt[edge], s1 = graph.sampleAt[edge + 1], samples = s1 - s0;
+                    var length = reached - began;
+                    if (samples && height.length && apart) {
+                        // A break rather than a join: a climb counted across a
+                        // step nothing was measured along is invented.
+                        height.push(NaN); distance.push(began);
+                    }
+                    for (var s = (joined && !apart) ? 1 : 0; s < samples; s += 1) {
+                        var sample = flipped ? s1 - 1 - s : s0 + s;
+                        var value = graph.heights[sample];
+                        height.push(value);
+                        // Every 5 m along the edge means samples spread evenly
+                        // between its two ends, so this is where the sth of them
+                        // lies rather than s * 5.
+                        distance.push(samples > 1 ? began + (length * s) / (samples - 1) : began);
+                        if (!isNaN(value)) { read = true; }
+                    }
+                    joined = samples > 0;
+                }
+                return {lon: lon, lat: lat, along: along, height: height, distance: distance,
+                        total: reached, read: read, crossing: crossing};
+            }
+
+            // The chain's length as the chain carries it, distributed over the
+            // series by the geometry. One length, so the axis, the crosshair and
+            // the popup all end on the same number.
+            function scale(shape, carried) {
+                var factor = (carried > 0 && shape.total > 0) ? carried / shape.total : 1;
+                var i;
+                for (i = 0; i < shape.along.length; i += 1) { shape.along[i] *= factor; }
+                for (i = 0; i < shape.distance.length; i += 1) { shape.distance[i] *= factor; }
+                shape.total = carried > 0 ? carried : shape.total;
+                return shape;
+            }
+
+            // Where to put the arrow: half way along, by distance.
+            function midpoint(shape) {
+                if (!shape.along.length) { return null; }
+                var half = shape.total / 2;
+                for (var i = 1; i < shape.along.length; i += 1) {
+                    if (shape.along[i] >= half) {
+                        var span = shape.along[i] - shape.along[i - 1];
+                        var t = span > 0 ? (half - shape.along[i - 1]) / span : 0;
+                        return L.latLng(shape.lat[i - 1] + t * (shape.lat[i] - shape.lat[i - 1]),
+                                        shape.lon[i - 1] + t * (shape.lon[i] - shape.lon[i - 1]));
+                    }
+                }
+                return L.latLng(shape.lat[0], shape.lon[0]);
+            }
+
+            // ---- the panel -------------------------------------------------
+            var header = document.createElement('div');
+            header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none';
+            var body = document.createElement('div');
+            var summary = document.createElement('div');
+            summary.style.cssText = 'margin:4px 0 2px;color:#333';
+            var chart = document.createElementNS(SVG, 'svg');
+            chart.setAttribute('height', chartHeight);
+            chart.style.cssText = 'display:block;width:100%;height:' + chartHeight + 'px;cursor:crosshair';
+            body.appendChild(summary);
+            body.appendChild(chart);
+
+            var control = L.control({position: 'bottomleft'});
+            var box = null;
+            control.onAdd = function () {
+                box = L.DomUtil.create('div', 'trails-profile-panel');
+                box.style.cssText = 'background:rgba(255,255,255,0.94);padding:6px 10px;border:1px solid #999;' +
+                    'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4;' +
+                    // Clear of the attribution, which sits in the corner opposite
+                    // and would otherwise be covered by a panel this wide.
+                    'margin-bottom:22px';
+                box.appendChild(header);
+                box.appendChild(body);
+                // Clicking and dragging inside the panel must not reach the map;
+                // scrolling must, or the map freezes under an open panel.
+                L.DomEvent.disableClickPropagation(box);
+                return box;
+            };
+            control.addTo(map);
+
+            // Leaflet inserts into a *bottom* corner rather than appending, so
+            // the control added last ends up highest — the opposite of the top
+            // corners, and the opposite of what this one wants. It takes the
+            // foot of the map; the legend and the scale keep the corner above
+            // it, whichever order they were added in.
+            var corner = control.getContainer().parentNode;
+            corner.appendChild(control.getContainer());
+
+            function fold() {
+                var named = open && selected && selected.label ? ' \\u00b7 ' + selected.label : '';
+                header.textContent = (open ? '\\u25be ' : '\\u25b8 ') + title + named;
+                body.style.display = open ? '' : 'none';
+                header.style.marginBottom = open ? '4px' : '0';
+                // Full width only when there is something to show in it: folded
+                // away, a full-width bar would take a strip of the map with it.
+                box.style.width = open ? (map.getSize().x - 20) + 'px' : '';
+            }
+            header.addEventListener('click', function () { open = !open; fold(); render(); });
+
+            // ---- the arrow, in a container of its own -----------------------
+            // Not a layer and not a path on the map: the count of those is what
+            // phase 3 was accepted against, and anything drawn into the overlay
+            // pane joins it for ever.
+            var pane = map.createPane('trailsProfileDirection');
+            pane.style.zIndex = 450;
+            pane.style.pointerEvents = 'none';
+            // Leaflet scales the panes it animates a zoom with; this one is
+            // hidden for the duration and put back where it belongs afterwards.
+            L.DomUtil.addClass(pane, 'leaflet-zoom-hide');
+            var arrow = document.createElementNS(SVG, 'svg');
+            arrow.setAttribute('width', '96');
+            arrow.setAttribute('height', '96');
+            arrow.style.cssText = 'position:absolute;margin:-48px 0 0 -48px;overflow:visible;display:none';
+            // Drawn pointing north and turned to the bearing, so it says the
+            // same thing the words do rather than following the line's local
+            // wanderings. Twice: a pale wide stroke under a dark narrow one, or
+            // it disappears over a dark line.
+            var SHAFT = 'M48 76 L48 28 M38 41 L48 24 L58 41';
+            ['#ffffff', CURVE].forEach(function (colour, index) {
+                var stroke = document.createElementNS(SVG, 'path');
+                stroke.setAttribute('d', SHAFT);
+                stroke.setAttribute('fill', 'none');
+                stroke.setAttribute('stroke', colour);
+                stroke.setAttribute('stroke-width', index ? '3' : '6');
+                stroke.setAttribute('stroke-linecap', 'round');
+                stroke.setAttribute('stroke-linejoin', 'round');
+                arrow.appendChild(stroke);
+            });
+            pane.appendChild(arrow);
+
+            function placeArrow() {
+                // Nothing is drawn for a chain with no profile — a crossing has
+                // no figures for an arrow to point the way of, and an arrow
+                // along it would be the only mark on the map claiming otherwise.
+                var showing = selected && selected.shape && selected.shape.read && selected.mid;
+                var bearing = showing ? selected.figure.bearing : null;
+                if (bearing === null || bearing === undefined) { arrow.style.display = 'none'; return; }
+                arrow.style.display = '';
+                arrow.childNodes.forEach(function (stroke) { stroke.setAttribute('transform', 'rotate(' + bearing + ' 48 48)'); });
+                L.DomUtil.setPosition(arrow, map.latLngToLayerPoint(selected.mid));
+            }
+            map.on('zoomend viewreset moveend resize', placeArrow);
+
+            // ---- drawing ----------------------------------------------------
+            function text(x, y, value, anchor) {
+                var node = document.createElementNS(SVG, 'text');
+                node.setAttribute('x', x); node.setAttribute('y', y);
+                node.setAttribute('font-size', '10'); node.setAttribute('fill', TEXT);
+                node.setAttribute('text-anchor', anchor || 'start');
+                node.textContent = value;
+                return node;
+            }
+
+            function line(x1, y1, x2, y2, colour, width) {
+                var node = document.createElementNS(SVG, 'line');
+                node.setAttribute('x1', x1); node.setAttribute('y1', y1);
+                node.setAttribute('x2', x2); node.setAttribute('y2', y2);
+                node.setAttribute('stroke', colour); node.setAttribute('stroke-width', width || 1);
+                return node;
+            }
+
+            // Round numbers an axis can be read off: 1, 2 or 5 times a power of
+            // ten, whichever first gives about as many steps as asked for.
+            function ticks(low, high, wanted) {
+                if (!(high > low)) { return [low]; }
+                var rough = (high - low) / wanted;
+                var power = Math.pow(10, Math.floor(Math.log(rough) / Math.LN10));
+                var step = 10 * power;
+                [1, 2, 5].some(function (multiple) { if (multiple * power >= rough) { step = multiple * power; return true; } return false; });
+                var out = [];
+                for (var value = Math.ceil(low / step) * step; value <= high + step * 1e-6; value += step) { out.push(value); }
+                return out;
+            }
+
+            var crosshair = null;
+
+            function drawCurve(shape, plot, x, y) {
+                var parts = [], pen = false, i;
+                var columns = Math.max(1, Math.floor(plot.width));
+                if (shape.height.length <= columns) {
+                    // The common case, and it has to be: the median chain here
+                    // holds 36 samples and a third of them fewer than twenty.
+                    // Bucketing those into 900 columns leaves 864 empty and the
+                    // curve full of holes it has no business having.
+                    for (i = 0; i < shape.height.length; i += 1) {
+                        if (isNaN(shape.height[i])) { pen = false; continue; }
+                        parts.push((pen ? 'L' : 'M') + x(shape.distance[i]).toFixed(1) + ' ' + y(shape.height[i]).toFixed(1));
+                        pen = true;
+                    }
+                    return parts.join(' ');
+                }
+                // One point per pixel column for the long ones, keeping that
+                // column's own lowest and highest reading, in the order they
+                // occur, so no spike is lost to the reduction. The crosshair
+                // still reads the full series.
+                var low = new Float64Array(columns), high = new Float64Array(columns);
+                var lowAt = new Int32Array(columns), highAt = new Int32Array(columns), filled = new Uint8Array(columns);
+                var firstAt = new Int32Array(columns), lastAt = new Int32Array(columns);
+                // How many samples up to here the model had no reading for, so
+                // the question "was anything missed between these two columns"
+                // is one subtraction rather than a scan.
+                var missed = new Int32Array(shape.height.length + 1);
+                for (i = 0; i < shape.height.length; i += 1) {
+                    var value = shape.height[i];
+                    missed[i + 1] = missed[i] + (isNaN(value) ? 1 : 0);
+                    if (isNaN(value)) { continue; }
+                    var column = Math.max(0, Math.min(columns - 1, Math.floor((shape.distance[i] / shape.total) * columns)));
+                    if (!filled[column] || value < low[column]) { low[column] = value; lowAt[column] = i; }
+                    if (!filled[column] || value > high[column]) { high[column] = value; highAt[column] = i; }
+                    if (!filled[column]) { firstAt[column] = i; }
+                    lastAt[column] = i;
+                    filled[column] = 1;
+                }
+                var previous = -1;
+                for (var c = 0; c < columns; c += 1) {
+                    // An empty column is NOT a gap. It only says no sample landed
+                    // in that pixel, and the walk carries straight through it —
+                    // which is routine here, because samples are laid per edge
+                    // and a chain of short edges clumps them: 2,532 samples over
+                    // 1,977 columns leave 285 columns empty. Lifting the pen for
+                    // those drew one gapless 6.5 km chain as 222 separate
+                    // strokes. Only ground nothing was read along lifts it.
+                    if (!filled[c]) { continue; }
+                    if (previous >= 0 && missed[firstAt[c]] > missed[lastAt[previous] + 1]) { pen = false; }
+                    var at = x(((c + 0.5) / columns) * shape.total).toFixed(1);
+                    var pair = lowAt[c] <= highAt[c] ? [low[c], high[c]] : [high[c], low[c]];
+                    parts.push((pen ? 'L' : 'M') + at + ' ' + y(pair[0]).toFixed(1));
+                    if (pair[0] !== pair[1]) { parts.push('L' + at + ' ' + y(pair[1]).toFixed(1)); }
+                    pen = true;
+                    previous = c;
+                }
+                return parts.join(' ');
+            }
+
+            function render() {
+                while (chart.firstChild) { chart.removeChild(chart.firstChild); }
+                crosshair = null;
+                if (!open) { return; }
+
+                var width = Math.max(240, body.clientWidth || (map.getSize().x - 40));
+                chart.setAttribute('viewBox', '0 0 ' + width + ' ' + chartHeight);
+                chart.setAttribute('width', width);
+                if (!selected || !selected.shape || !selected.shape.read) { return; }
+
+                var shape = selected.shape;
+                if (!(shape.total > 0)) { return; }
+                var plot = {left: PAD.left, right: width - PAD.right, top: PAD.top, bottom: chartHeight - PAD.bottom};
+                plot.width = plot.right - plot.left;
+                var lowest = Infinity, highest = -Infinity;
+                for (var i = 0; i < shape.height.length; i += 1) {
+                    if (isNaN(shape.height[i])) { continue; }
+                    if (shape.height[i] < lowest) { lowest = shape.height[i]; }
+                    if (shape.height[i] > highest) { highest = shape.height[i]; }
+                }
+                // A stretch of flat ground is flat ground, not a mountain: give
+                // it a range of its own rather than letting the height model's
+                // centimetre wobble fill the panel.
+                if (highest - lowest < 20) {
+                    var middle = (highest + lowest) / 2;
+                    lowest = middle - 10; highest = middle + 10;
+                }
+                var x = function (value) { return plot.left + (shape.total > 0 ? (value / shape.total) * plot.width : 0); };
+                var y = function (value) { return plot.bottom - ((value - lowest) / (highest - lowest)) * (plot.bottom - plot.top); };
+
+                ticks(lowest, highest, 4).forEach(function (value) {
+                    chart.appendChild(line(plot.left, y(value), plot.right, y(value), '#eceff1'));
+                    chart.appendChild(text(plot.left - 6, y(value) + 3, metres(value) + ' m', 'end'));
+                });
+                // One number of decimals for the whole axis, decided by how far
+                // the chain runs: 0.00 beside 1.0 reads as two different scales.
+                var decimals = shape.total < 2000 ? 2 : 1;
+                ticks(0, shape.total, 6).forEach(function (value) {
+                    chart.appendChild(line(x(value), plot.top, x(value), plot.bottom, '#eceff1'));
+                    chart.appendChild(text(x(value), plot.bottom + 14, (value / 1000).toFixed(decimals), 'middle'));
+                });
+                chart.appendChild(text(plot.right, plot.bottom + 14, 'km', 'end'));
+                chart.appendChild(line(plot.left, plot.top, plot.left, plot.bottom, AXIS));
+                chart.appendChild(line(plot.left, plot.bottom, plot.right, plot.bottom, AXIS));
+
+                var curve = document.createElementNS(SVG, 'path');
+                curve.setAttribute('d', drawCurve(shape, plot, x, y));
+                curve.setAttribute('fill', 'none');
+                curve.setAttribute('stroke', CURVE);
+                curve.setAttribute('stroke-width', '1.6');
+                curve.setAttribute('stroke-linejoin', 'round');
+                chart.appendChild(curve);
+
+                // The crosshair's own parts, made once and moved afterwards.
+                // Rebuilding them per mouse move is the mistake that froze this
+                // map twice already, on a layer rather than on a chart.
+                var rule = line(plot.left, plot.top, plot.left, plot.bottom, CROSS);
+                var dot = document.createElementNS(SVG, 'circle');
+                dot.setAttribute('r', '2.5'); dot.setAttribute('fill', CROSS);
+                var reading = text(plot.right, plot.top + 8, '', 'end');
+                reading.setAttribute('fill', CROSS);
+                [rule, dot, reading].forEach(function (node) { node.style.display = 'none'; chart.appendChild(node); });
+                crosshair = {rule: rule, dot: dot, reading: reading, plot: plot, width: width, x: x, y: y, at: -1};
+            }
+
+            // The nearest sample to a distance, over the full series: the
+            // reduction above exists so the browser draws 900 points instead of
+            // eight thousand, not so a reader hovering over a spike is told the
+            // column's height instead of the spike's.
+            function nearest(distance, value) {
+                var low = 0, high = distance.length - 1;
+                while (low < high) {
+                    var middle = (low + high) >> 1;
+                    if (distance[middle] < value) { low = middle + 1; } else { high = middle; }
+                }
+                if (low > 0 && Math.abs(distance[low - 1] - value) <= Math.abs(distance[low] - value)) { return low - 1; }
+                return low;
+            }
+
+            chart.addEventListener('mousemove', function (event) {
+                if (!crosshair || !selected || !selected.shape) { return; }
+                var shape = selected.shape;
+                // The drawing is scaled to whatever width the panel ended up
+                // with, so a pointer position has to go back through the
+                // viewBox before it means anything in the chart's own units.
+                var rect = chart.getBoundingClientRect();
+                var px = ((event.clientX - rect.left) / rect.width) * crosshair.width;
+                var at = nearest(shape.distance, ((px - crosshair.plot.left) / crosshair.plot.width) * shape.total);
+                if (at === crosshair.at) { return; }
+                crosshair.at = at;
+                var here = crosshair.x(shape.distance[at]);
+                crosshair.rule.setAttribute('x1', here); crosshair.rule.setAttribute('x2', here);
+                crosshair.rule.style.display = '';
+                var value = shape.height[at];
+                var read = !isNaN(value);
+                crosshair.dot.style.display = read ? '' : 'none';
+                if (read) {
+                    crosshair.dot.setAttribute('cx', here);
+                    crosshair.dot.setAttribute('cy', crosshair.y(value));
+                }
+                crosshair.reading.style.display = '';
+                crosshair.reading.textContent = (shape.distance[at] / 1000).toFixed(2) + ' km \\u00b7 ' + (read ? metres(value) + ' m' : 'not read');
+            });
+
+            chart.addEventListener('mouseleave', function () {
+                if (!crosshair) { return; }
+                crosshair.at = -1;
+                [crosshair.rule, crosshair.dot, crosshair.reading].forEach(function (node) { node.style.display = 'none'; });
+            });
+
+            // ---- what is selected -------------------------------------------
+            var selected = null;
+
+            // What to call the selected line in the heading: its own hover text
+            // where it has one, and its chain id where it has not. A tooltip is
+            // markup — folium wraps the name in a div — and this is written into
+            // a heading as text, so the tags come out rather than being rendered.
+            function labelOf(layer, className) {
+                var tooltip = layer.getTooltip && layer.getTooltip();
+                var content = tooltip && tooltip.getContent();
+                if (typeof content === 'string') { return content.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim(); }
+                if (content && content.textContent) { return content.textContent.trim(); }
+                return (figures[className] || {}).id;
+            }
+
+            function say(message) {
+                summary.textContent = message;
+            }
+
+            function describe() {
+                if (!selected) { say('Click a line to see its profile.'); return; }
+                var figure = selected.figure, shape = selected.shape;
+                if (!shape) { say('Decoding the network\\u2026'); return; }
+                if (!shape.read) {
+                    // Two kinds of nothing, and they are not the same nothing.
+                    // A flat line at zero would be a claim about ground that was
+                    // never asked about.
+                    say(shape.crossing
+                        ? 'No profile: there is no ground under a crossing.'
+                        : 'No profile: the height model has no reading along this stretch.');
+                    return;
+                }
+                say(climb(figure) + ' \\u00b7 high ' + metres(figure.high) + ' m \\u00b7 low ' + metres(figure.low) +
+                    ' m \\u00b7 ' + (shape.total / 1000).toFixed(2) + ' km' +
+                    (figure.bearing === null ? ' \\u00b7 a loop, so it climbs the same either way' : ''));
+            }
+
+            function show(className, label) {
+                selected = className === null ? null : {className: className, figure: figures[className], label: label, shape: null, mid: null};
+                if (selected && !selected.figure) { selected = null; }
+                // Open on a chain and folded away again the moment there is
+                // none: a panel this wide takes a strip of the map with it, and
+                // it may only do that while it has something to show there.
+                open = selected !== null;
+                // What the panel is showing, the way the graph itself arrives as
+                // window.trailsGraph: the series it laid out and the figures it
+                // was handed, so a browser check can read them rather than a
+                // screenshot.
+                window.trailsProfile = selected;
+                fold();
+                describe();
+                render();
+                placeArrow();
+                if (!selected) { return; }
+                if (!window.trailsGraph) { say('There is no routing graph in this page, so there is no profile to draw.'); return; }
+                var wanted = selected.className;
+                window.trailsGraph.ready.then(function (graph) {
+                    // The reader may well have clicked something else while a
+                    // megabyte of arithmetic was going on.
+                    if (!selected || selected.className !== wanted) { return; }
+                    var index = graph.chainOf[selected.figure.id];
+                    if (index === undefined) { say('This line is not in the routing graph.'); return; }
+                    selected.shape = scale(compose(graph, index), selected.figure.length);
+                    selected.mid = midpoint(selected.shape);
+                    describe();
+                    render();
+                    placeArrow();
+                }).catch(function () { say('The routing graph did not arrive, so there is no profile to draw.'); });
+            }
+
+            groups.forEach(function (group) {
+                group.eachLayer(function (layer) {
+                    if (!layer.setStyle || !layer.options.className) { return; }
+                    layer.on('click', function () {
+                        var className = layer.options.className;
+                        show(selected && selected.className === className ? null : className, labelOf(layer, className));
+                    });
+                });
+            });
+            // Leaflet only fires a map click where the click hit no layer, which
+            // is what clears the selection on empty terrain — the same rule the
+            // click-highlight follows, so the two cannot drift apart.
+            map.on('click', function () { show(null); });
+            // A panel this wide is sized against the map, so a resized window
+            // has to size it again before anything is drawn into it.
+            map.on('resize', function () { fold(); render(); placeArrow(); });
+
+            fold();
+            describe();
+            render();
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(
+        self, groups: list[folium.FeatureGroup], figures: dict[str, dict[str, object]], title: str, chart_height: int, collapsed: bool
+    ) -> None:
+        """Initialize the panel.
+
+        Args:
+            groups: Feature groups whose lines can be selected
+            figures: Mapping of CSS class to the figures of the line carrying it
+            title: Panel heading, doubling as the fold handle
+            chart_height: Height of the drawing area in pixels
+            collapsed: Whether it starts folded away
+        """
+        super().__init__()
+        self._name = "ProfilePanel"
+        self.group_names = [group.get_name() for group in groups]
+        self.figures_json = _script_json(figures)
+        self.title_json = _script_json(title)
+        self.chart_height = int(chart_height)
+        self.collapsed = collapsed
+
+
+def add_profile_panel(
+    fmap: folium.Map,
+    groups: list[folium.FeatureGroup],
+    title: str = "Elevation profile",
+    chart_height: int = 150,
+    collapsed: bool = True,
+) -> None:
+    """Draw the selected chain's profile at the foot of the map.
+
+    Clicking a line opens the panel on its profile: distance against elevation,
+    with the ascent, descent, high and low point the chain carries, and an arrow
+    on the map pointing the way those figures were read. Clicking it again, or
+    clicking empty terrain, closes it. The heading folds it away.
+
+    **Every figure it shows is read, not computed.** They travel with the layers
+    as :data:`CHAIN_FIGURES_ATTR`, put there by :func:`add_trails`; the elevation
+    series is decoded from the payload :func:`add_routing_graph` put in the page,
+    and only the curve and the distance under it come out of that. A chain whose
+    series holds no reading at all — a ferry crossing, or a stretch outside the
+    height model — says so instead of drawing a flat line at zero.
+
+    Call after the layers and after :func:`add_routing_graph`, whose payload it
+    reads. It shares the bottom left with the legend and the scale bar and puts
+    itself under both, so the order it is added in does not matter.
+
+    Args:
+        fmap: Map holding the layers
+        groups: Feature groups returned by :func:`add_trails`
+        title: Panel heading, which doubles as the fold handle
+        chart_height: Height of the drawing area in pixels
+        collapsed: Whether it starts folded away
+    """
+    if not groups:
+        return
+
+    figures: dict[str, dict[str, object]] = {}
+    for group in groups:
+        figures.update(getattr(group, CHAIN_FIGURES_ATTR, {}))
+    if not figures:
+        return
+
+    _ProfilePanel(groups, figures, title, chart_height, collapsed).add_to(fmap)
 
 
 class _Legend(MacroElement):

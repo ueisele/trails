@@ -33,6 +33,7 @@ Usage::
 """
 
 import argparse
+import math
 import re
 from pathlib import Path
 from typing import NamedTuple
@@ -60,7 +61,7 @@ from trails.network.norway import (
     zone_around,
 )
 from trails.routing import Network, NetworkSource, chain_order, parts_of, translate_joined, whole_way_length
-from trails.utils.geo import attach_nearest, thin_points
+from trails.utils.geo import attach_nearest, compass_points, endpoint_bearings, thin_points
 from trails.visualization import maps
 from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
 
@@ -141,6 +142,8 @@ TERRAIN_NAME_LEGEND = (
 FKB_POPUP_FIELDS = {
     "typeveg": "Road type",
     "length_km": "Length (km)",
+    "climb": "Ascent / descent",
+    "high_point": "High point",
     "marking_all": "Marking, all sources",
     "unrecorded": "Unrecorded ground",
 }
@@ -148,6 +151,8 @@ FKB_POPUP_FIELDS = {
 FERRY_POPUP_FIELDS = {
     "typeveg": "Ferry type",
     "length_km": "Crossing (km)",
+    "climb": "Ascent / descent",
+    "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
 }
@@ -174,6 +179,8 @@ ROAD_POPUP_FIELDS = {
     "road_category": "Category",
     "length_km": "This stretch (km)",
     "whole_km": "Road in total (km)",
+    "climb": "Ascent / descent",
+    "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
     "marking_all": "Marking, all sources",
@@ -186,6 +193,8 @@ N50_POPUP_FIELDS = {
     "vedlikeholdsansvarlig": "Maintained by",
     "medium": "Medium",
     "length_km": "Length (km)",
+    "climb": "Ascent / descent",
+    "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
     "marking_all": "Marking, all sources",
@@ -226,6 +235,8 @@ UT_POPUP_FIELDS = {
     "name": "Route",
     "category_label": "Kind",
     "length_km": "Track length (km)",
+    "climb": "Ascent / descent",
+    "high_point": "High point",
     "ut_summary": "UT.no states",
     "marking_all": "Marking, all sources",
     "unrecorded": "Unrecorded ground",
@@ -252,6 +263,8 @@ TRAIL_POPUP_FIELDS = {
     "maintenance_responsible": "Maintained by",
     "length_km": "Length (km)",
     "whole_km": "Route in total (km)",
+    "climb": "Ascent / descent",
+    "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
     # 80 % of this register's geometry here is "Rett i kartet" — entered by the
@@ -270,6 +283,8 @@ OSM_POPUP_FIELDS = {
     "trail_visibility": "Visibility",
     "length_km": "Length (km)",
     "whole_km": "Way in total (km)",
+    "climb": "Ascent / descent",
+    "high_point": "High point",
     # Plural, and it is not pedantry: 64 % of these chains span more than one
     # OSM way — median 2, worst 33 — so a single id would be wrong for most of
     # them. The value is joined like every other multi-valued field.
@@ -303,6 +318,29 @@ SHELTER_POPUP_FIELDS = {
 #: Column identifying which chain a drawn line belongs to. A chain is linear by
 #: construction, so a click can never select a branching network.
 CHAIN_KEY = "chain_id"
+
+#: What the profile panel reads off a chain, and the keys the figures travel
+#: under. A Leaflet polyline has no ``feature.properties``, so these ride beside
+#: the layer keyed by the class every path already carries — the same mechanism
+#: the search box uses for its names.
+#:
+#: Not one of them is computed in the browser, and that includes the compass
+#: point: it is a rounded label, which makes it a threshold. The four figures
+#: come off the chain, where phase 2 put them; the bearing is measured once
+#: here, in the metric CRS, and named once;
+#: and the length is carried so the panel's distance axis ends where the popup
+#: says the chain does rather than a few metres off it.
+CHAIN_FIGURE_FIELDS = {
+    "ascent": "ascent",
+    "descent": "descent",
+    "high_m": "high",
+    "low_m": "low",
+    "compass": "point",
+    # Only the arrow reads this, and it turns by it — a tenth of a degree is
+    # less than the arrow's own stroke. The words come from "point" above.
+    "bearing_deg": "bearing",
+    "length_m": "length",
+}
 
 #: Trailing bracket of a layer label, which by convention holds its dataset.
 SOURCE_IN_LABEL = re.compile(r"\[([^\]]+)\]\s*$")
@@ -436,6 +474,54 @@ def describe_marking(chains: gpd.GeoDataFrame) -> pd.Series:
     return pd.Series(lines, index=chains.index, dtype="string")
 
 
+def describe_climb(chains: gpd.GeoDataFrame, points: pd.Series) -> pd.Series:
+    """Say what a chain climbs and falls, and which way round it was read.
+
+    A chain is oriented so that its id stays stable across builds, not because a
+    walker is obliged to take it that way, so its ascent and descent are true in
+    a direction the reader cannot see. This is one of the three places that make
+    it visible — the arrow on the selected chain and the profile's own left-to-
+    right sense are the other two — and all three read the same carried bearing,
+    so none of them can say something different from the others.
+
+    Args:
+        chains: Chains carrying ``ascent`` and ``descent``
+        points: Compass point each of them runs towards, None for a ring, which
+            has no direction and needs none: it climbs the same either way round
+
+    Returns:
+        One line per chain, empty where nothing was read along it — every ferry
+        crossing, and the two stubs outside the height model. An empty popup row
+        is dropped rather than shown as a claim about ground nobody measured.
+    """
+    lines = []
+    for ascent, descent, point in zip(chains["ascent"], chains["descent"], points, strict=True):
+        if pd.isna(ascent) or pd.isna(descent):
+            lines.append("")
+            continue
+        climbed = f"+{_metres(ascent)} / −{_metres(descent)} m"
+        lines.append(climbed if point is None else f"{climbed} towards {point}")
+    return pd.Series(lines, index=chains.index, dtype="string")
+
+
+def _metres(value: float) -> str:
+    """Round a height to whole metres, the way the panel in the page rounds it.
+
+    ``floor(x + 0.5)`` and not a plain format, because that is how JavaScript's
+    ``Math.round`` is defined and the panel renders the same figures from the
+    same numbers. Python rounds a half to even; disagreeing about that is how a
+    popup and a panel come to differ by a metre on one chain, which is exactly
+    the kind of doubt this phase exists to remove.
+
+    Args:
+        value: Metres
+
+    Returns:
+        The rounded figure, grouped in thousands
+    """
+    return f"{math.floor(value + 0.5):,}"
+
+
 def describe_unrecorded(chains: gpd.GeoDataFrame) -> pd.Series:
     """Say how much of each chain no source records a path along.
 
@@ -482,6 +568,24 @@ def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.
     described["in_park"] = share_inside(described, park) >= IN_PARK_SHARE
     described["marking_all"] = describe_marking(described)
     described["unrecorded"] = describe_unrecorded(described)
+    # In the metric CRS the graph is built in, and once: taken flat from
+    # longitude and latitude the same endpoints give a different bearing, and at
+    # this latitude two chains in five would be labelled with a different one of
+    # the eight points. Every chain here comes out running eastward — never W,
+    # SW or NW — because a chain is canonicalised by coordinate order. That looks
+    # like a bug and is not.
+    described["bearing_deg"] = endpoint_bearings(described, metric_crs=METRIC_CRS)
+    # Named once, here, and carried. The panel must not name it a second time
+    # from the degrees: 241 chains lie within half a degree of a boundary
+    # between two points, and two roundings that disagree by a hair would put
+    # the panel and the popup on different sides of one.
+    described["compass"] = compass_points(described["bearing_deg"])
+    described["climb"] = describe_climb(described, described["compass"])
+    described["high_point"] = pd.Series(
+        [f"{_metres(value)} m" if pd.notna(value) else "" for value in described["high_m"]],
+        index=described.index,
+        dtype="string",
+    )
 
     frames = {name: gpd.GeoDataFrame(described[described["source"] == name].copy(), geometry="geometry", crs=described.crs) for name in SOURCE_NAMES}
 
@@ -846,6 +950,7 @@ def main() -> int:
                 dash_array=layer.dash,
                 group_field=CHAIN_KEY,
                 search_field=layer.search_field,
+                figure_fields=CHAIN_FIGURE_FIELDS,
                 source=source_of(layer.label),
             )
         )
@@ -1004,6 +1109,14 @@ def main() -> int:
             legend[f"{label} ({count})"] = color
 
     maps.add_legend(fmap, f"{PARK_NAME} nasjonalpark", legend)
+
+    # It shares the bottom left with the legend and the scale bar, and puts
+    # itself under both: the panel takes the width, the legend keeps its corner
+    # above it.
+    with_profile = int(network.chains["ascent"].notna().sum())
+    print(f"\nProfile panel: {with_profile:,} of {len(network.chains):,} chains carry one, {len(network.chains) - with_profile} say they have none")
+    maps.add_profile_panel(fmap, highlightable)
+
     maps.finalize(fmap)
 
     map_path = output_dir / "lomsdal-visten.html"
