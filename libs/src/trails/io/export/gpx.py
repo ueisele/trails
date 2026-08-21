@@ -1,6 +1,6 @@
 """GPX export functionality for trail data."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +32,10 @@ def create_gpx_document() -> etree.Element:
     etree.SubElement(metadata, "name").text = "Norwegian Trails Export"
     etree.SubElement(metadata, "desc").text = "Trail data from Geonorge"
     time_elem = etree.SubElement(metadata, "time")
-    time_elem.text = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Timezone-aware: utcnow() returns a naive datetime that claims to be UTC
+    # and is deprecated for exactly that reason, and this value is written
+    # into a file with a Z on the end.
+    time_elem.text = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     return gpx
 
@@ -120,17 +123,27 @@ def export_to_gpx(
     output_path: Path,
     name_field: str = "trail_name",
     desc_fields: list[str] | None = None,
-    simplify_tolerance: float | None = 0.00001,
+    simplify_tolerance: float | None = None,
     max_trails: int | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     """Export GeoDataFrame of trails to GPX file.
+
+    **Nothing is thinned unless a caller asks for it.** An exported track is the
+    one thing that leaves this machine, and it carries the resolution its source
+    recorded — that is a decision, not an oversight, and it is the opposite of
+    what the map does with the copy it draws. The default used to be 1e-5
+    degrees, about 1.1 m, which is under the survey accuracy of the best source
+    here and still dropped 62 % of FKB's vertices and 65 % of UT.no's. On a path
+    that matters: the target platforms do not know these ways and cannot rebuild
+    a line between points they were not given.
 
     Args:
         gdf: GeoDataFrame with trail data
         output_path: Path for output GPX file
         name_field: Field to use for track names
         desc_fields: Fields to include in track descriptions
-        simplify_tolerance: Tolerance for geometry simplification (degrees)
+        simplify_tolerance: Tolerance for geometry simplification, in degrees.
+            None keeps every vertex, which is what an export is for.
         max_trails: Maximum number of trails to export
 
     Returns:
@@ -167,12 +180,11 @@ def export_to_gpx(
             track = trail_to_track(trail, name_field=name_field, desc_fields=desc_fields, simplify_tolerance=simplify_tolerance)
             gpx.append(track)
 
-            # Count points
-            if isinstance(trail.geometry, LineString):
-                stats["total_points"] += len(trail.geometry.coords)
-            elif isinstance(trail.geometry, MultiLineString):
-                for line in trail.geometry.geoms:
-                    stats["total_points"] += len(line.coords)
+            # Counted off the written element, not off the geometry that went
+            # in. Counting the input reports what the file would have held if
+            # nothing thinned it — this file said 305,248 points while holding
+            # 115,655, and the figure is one a reader is meant to trust.
+            stats["total_points"] += len(track.findall("trkseg/trkpt"))
 
         except Exception as e:
             print(f"Warning: Failed to export trail {idx}: {e}")
@@ -190,6 +202,9 @@ def export_to_gpx(
         encoding="UTF-8",
     )
 
-    stats["file_size_mb"] = float(output_path.stat().st_size) / (1024 * 1024)
+    # Millions of bytes, which is what "MB" says and what a file manager
+    # shows. Dividing by 1024**2 and calling it MB reported 7.72 for a file
+    # of 8.09.
+    stats["file_size_mb"] = float(output_path.stat().st_size) / 1e6
 
     return output_path, stats
