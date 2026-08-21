@@ -715,6 +715,39 @@ rather than patched.** What to check the rewrite kept:
 **Phase 5 and 6, export.** Open the file. A ferry or a water leg must break the
 track into segments, not draw a line across the fjord. Import it somewhere.
 
+**Phase 5's readiness check found six things, two of them already live.** The
+phase was rewritten as one text; what to check the rewrite kept:
+
+- **The writer thinned every export and nobody had noticed**, because
+  `export_to_gpx` had **no tests at all**. Its default was 1e-5 degrees, and the
+  six build-time files were losing **62 % of FKB's vertices and 65 % of UT.no's**
+  against a rule saying exports carry full source precision. Fixed, with six
+  tests; FKB goes 8.09 → 20.16 MB, which is what the rule costs.
+- **Its point count was summed from the input**, so it reported 305,248 points
+  for a file holding 115,655 — and phase 5 wants to *show* that count. Counted
+  off the written element now, and the two agree for all six files. The size
+  divided by 1024² and said MB.
+- **The page carries nothing `<metadata>` needs.** Measured: `CC BY 4.0`, `ODbL`
+  and `CC BY-NC` appear **zero times** in the built page, and no source version
+  does either. They exist only in what the build prints to its console, and the
+  browser is the thing asked to write them into the file.
+- **The figures table has no name and no source**, which the `<extensions>` must
+  carry. Same shape as phase 4's GeoJSON: a mechanism assumed rather than
+  checked.
+- **`no_path_recorded` belonged to no phase.** The decisions document lists five
+  things an exported file carries and the phase enumerated four. Worse, two days
+  earlier this document had written that the field was *phase 6's* — measured, it
+  is phase 5's, it is on the chains as `no_path_m`, and it is not in the table.
+- **The acceptance could not be run**: *"imports into Komoot and Outdooractive"*.
+  No account, no network, manual. **A phase whose acceptance its builder cannot
+  execute has no acceptance at all** — the first time that has happened in eight
+  phases. Replaced with seven checks that run here, with the import kept as a
+  person's step afterwards.
+
+And one assumption checked rather than carried: **a blob download from a
+`file://` page works.** Firefox saves it with the offered filename and raises
+nothing. Ten minutes, and the whole phase rested on it.
+
 **Phase 7, editing.** Reorder and watch the numbers; the failure mode is a stale
 leg or a profile that no longer matches the line.
 
@@ -828,7 +861,7 @@ Otherwise nothing is known to be open. **That has now been true five times and
 was wrong all five** — the phase readiness checks found gaps in 1B, in 3, in 2,
 in 3B (which this document had written itself) and in 4, and the 3B review then
 found the payload gap above. The check that finds them is not reading the phase;
-it is measuring it against the built graph. **Phase 4 has now had it; phases 5,
+it is measuring it against the built graph. **Phases 4 and 5 have now had it;
 6, 7 and 8 have not.**
 
 ## What phase 2 found

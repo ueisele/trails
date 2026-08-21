@@ -930,40 +930,111 @@ Three checks, for the three ways this goes wrong quietly:
 
 ## Phase 5 — GPX export of a selection
 
-The selected chain, downloadable, with real elevation.
+The selected chain, downloadable, with real elevation — and the `<extensions>`
+mechanism every later phase writes into, built here where there is one track and
+no waypoints to get wrong.
 
-- One file, dense: every vertex, filled so no gap exceeds 5 m, an `<ele>` on
-  each.
-- **Every file says what it is.** Build the `<extensions>` mechanism here, with
-  the writer, rather than retrofitting it in phase 6 — and give it something to
-  carry straight away: that this is a single chain, its name, its source and its
-  chain id. A file that identifies itself can be recognised on load instead of
-  matched, and an exported stretch becomes something you can bring back in as the
-  start of a plan. Phase 6 then only adds fields to a mechanism that already
-  exists. A sparser variant would be unusable — the target platforms do not know
-  these paths and cannot rebuild the line between distant points. Show the point
-  count and total ascent next to the button.
-- `libs/src/trails/io/export/gpx.py` learns `<ele>` at the same time — it has
-  carried a comment marking the spot since it was written — so the build-time
-  exports gain it too. The browser writes its own GPX; the two cannot share code
-  across that boundary but must agree on structure.
-- **Name the sources in the file, and say which before it leaves.** Put the
-  sources actually used, with their licences, into `<metadata>` — a chain export
-  usually has one, plus Kartverket's height model. Do not fill in a single
-  `<copyright>`: see the decisions document, a route mixing CC0, CC BY 4.0, ODbL
-  and CC BY-NC has no one answer, and inventing one would be worse than listing
-  what is there.
-- Carry the rest of what the decisions document asks for: the source versions
-  the file was built from, the ascent figure with the method that produced it,
-  the named ways the track follows, and `<metadata><time>`. And **no timestamps
-  on the trackpoints** — a track carrying them reads as a recorded activity
-  rather than a plan.
-- Replace the generic licence note at the download with what this file actually
-  contains. A stretch of FKB is unproblematic; a stretch of OSM is share-alike.
-  The reader should know which before pressing the button, not afterwards.
+**One file, dense.** Every vertex the chain has, extra points inserted only where
+a gap exceeds 5 m, an `<ele>` on all of them. Do not resample every 5 m: that
+drops the source's own vertices and rounds off every corner between two samples.
+A sparser variant was considered and refused — Komoot and Outdooractive do not
+know FKB's or N50's paths and cannot rebuild a line between points they were not
+given. Measured: the median chain holds **19 vertices** and comes to **37 points**
+once filled; the largest, the 42 km Rundtur, holds 1,330 and comes to **8,490**.
 
-**Done when** a downloaded file imports into Komoot and Outdooractive and shows
-an elevation profile there.
+`libs/src/trails/io/export/gpx.py` learns `<ele>` at the same time — it has
+carried a comment marking the spot since it was written — so the six build-time
+exports gain it too. The browser writes its own GPX; the two cannot share code
+across that boundary but must agree on structure, and a test should compare them
+on one chain rather than trusting that they do.
+
+**Two faults in that writer were fixed before this phase, and the reason matters
+more than the fix.** It thinned every export by default and reported a point
+count taken from the geometry going in rather than the file coming out. Both had
+lived since it was written, because **it had no tests at all**. It has six now.
+Anything this phase adds to it gets one.
+
+### What has to reach the page first
+
+The browser writes this file, so everything in it has to be in the page. Most of
+it is not, and that is the first work of this phase rather than a detail to
+discover halfway through:
+
+- **The per-chain name and source.** The figures table keyed by
+  `trail-group-<chain_id>` carries `id, ascent, descent, high, low, length,
+  point, bearing` and neither of these. The `<extensions>` need both. Add them to
+  that table — it is the same mechanism, `figure_fields` in `add_trails`.
+- **`no_path_m`**, for the line the decisions document asks for and this phase
+  used to omit: *0.9 km with no path recorded in any source*. It is already on
+  the chains, from `routing/coverage.chain_coverage`. It is not in the table.
+- **The sources with their licences and versions.** Measured in the built page:
+  `CC BY 4.0`, `ODbL` and `CC BY-NC` appear **zero times**, and so does any
+  source version. They exist only in what the build prints to its console. They
+  have to travel into the page as a block of their own — one entry per source,
+  with its licence and the version or order date it was loaded at — because
+  `<metadata>` is where they belong and the browser cannot invent them.
+- **The ascent method as a string**: *DTM1, sampled every 5 m, gains under 5 m
+  ignored*. The figure without it asserts nothing — the same route reads between
+  965 and 1,214 m depending on the rule — and it is also what explains why Komoot
+  will disagree.
+
+### What the file says about itself
+
+- **That it is a single chain**, with its name, its source and its chain id, in
+  `<extensions>`. A file that identifies itself can be recognised on load rather
+  than matched, which is what phase 8 reads; and an exported stretch becomes the
+  start of a plan rather than a dead end.
+- **The sources it draws on, each with its licence**, in `<metadata>`. A chain
+  export usually has one source plus Kartverket's height model. **Do not fill in
+  a single `<copyright>`** — a route mixing CC0, CC BY 4.0, ODbL and CC BY-NC has
+  no one answer, and inventing one is worse than listing what is there.
+- **The versions those sources were loaded at**, so a plan opened months later
+  has a cause for any difference rather than a puzzle.
+- **The ascent, with the method that produced it.**
+- **The named ways the track follows**, in the track's `<desc>` — *via
+  Tveråvegen, Gamle Stavassveg*. For a single chain that is its own identity.
+- **How far it runs where no source records a path.** The wording says
+  *recorded*, and it has to keep saying it: this is ground no register draws
+  anything on, which is not ground with no path.
+- **When it was written**, in `<metadata><time>`.
+- **No `<time>` on the trackpoints**, and no speeds and no durations. A track
+  carrying times reads as a recorded activity rather than a plan, and the rest
+  would be guesses dressed as data.
+
+**At the download, say what this file contains** rather than a generic notice: a
+stretch of FKB is unproblematic, a stretch of OSM is share-alike, and the reader
+should know which before pressing the button. Show the point count and the total
+ascent beside it.
+
+### Done when
+
+**A blob download from a `file://` page works** — measured before this phase was
+written, so it is not an assumption: Firefox saves it, with the offered filename,
+and no error. Nothing here rests on that any more.
+
+The export is finished when, **for a chain chosen in the browser**:
+
+1. The file parses as XML and validates against the **GPX 1.1 schema**, which is
+   ~30 kB and belongs in `libs/tests/fixtures/` rather than being fetched — no
+   test may reach the network.
+2. Its trackpoint count equals what the page said beside the button, and no gap
+   between consecutive points exceeds 5 m.
+3. Every trackpoint carries an `<ele>`, and none carries a `<time>`.
+4. `<metadata>` names the sources this chain actually uses, each with a licence,
+   and holds no `<copyright>`.
+5. Its ascent, read back off the `<ele>` values under the documented rule,
+   matches the chain's stored figure.
+6. The same chain exported by the Python writer and by the browser produces the
+   same trackpoints and the same extension fields.
+7. Nothing phase 4 was accepted against moves: **198** markers, **11,589** paths
+   of which exactly **1** non-interactive, **25** layers, the search at **10 px**
+   above the zoom at 60, and the wheel taking zoom **9 → 11**.
+
+**Importing into Komoot and Outdooractive is a step for a person, and it is not
+this phase's acceptance.** It cannot be run here — no account, no network to
+either — and a phase whose acceptance its builder cannot execute has no
+acceptance at all. The seven checks above are what an agent finishes against; the
+import is the confirmation afterwards, and worth doing once.
 
 ---
 
