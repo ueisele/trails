@@ -787,6 +787,37 @@ values times 11,290 chains, in the page as JSON. That keeps the encoded payload 
 what it is for — the routing graph and the elevation series — and it keeps the
 panel from having to agree with anything.
 
+### How steep it is, in colour
+
+The curve carries its own gradient: **gentle under 15 %, steep 15–25 %, very
+steep 25–40 %, extreme over 40 %**, each a colour and a stroke width, with a key
+under the figures and the reading in the crosshair.
+
+**The gradient is read over a 25 m window, never between neighbouring samples.**
+Samples are laid per edge and every edge gets at least two whatever its length,
+so 2 % of the steps in this network are under a metre apart and 3.4 % under two
+— and a decimetre of model noise divided by a third of a metre is a cliff. Read
+step by step the worst reads **2,754 %**; over the window nothing exceeds 100 %.
+Where a chain is too short for the window, or a gap eats into it, less than 10 m
+of run leaves the stretch uncoloured: no honest gradient comes out of two samples
+and a stretch too short to measure is not thereby steep.
+
+**The lowest boundary was chosen against the model's own noise.** On chains that
+rise under three metres end to end — level ground — the height model reads a
+median of **1.0 %** over the same window, a 99th percentile of 5.8 % and a worst
+case of **9.2 %**. Not one level stretch reaches 15 %. So a coloured stretch is a
+statement about the hill and never about the data, which is the whole reason the
+boundary is not lower. Over the network the four bands hold **81.9 %, 11.5 %,
+5.1 % and 1.5 %** of the ground.
+
+**Smoothing was measured and rejected as unnecessary**: the median gradient reads
+6.8 % between neighbours and 6.0 % over 50 m. Noise would collapse under that;
+this does not, because it is terrain.
+
+The stroke width escalates with the colour, so which stretch is the steep one
+survives a red-green confusion. The crosshair is blue for the same reason — the
+steepest band is red, and a red rule over a red curve reads as data.
+
 ### Which way the figures run
 
 A chain is oriented so that its id stays stable, not because a walker is obliged

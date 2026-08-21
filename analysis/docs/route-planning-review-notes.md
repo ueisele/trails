@@ -924,6 +924,49 @@ Two more, and one of them was mine:
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
 
+## What the gradient bands cost, and the two bugs on the way
+
+Added after phase 4 on request: the curve is coloured by how steep the ground is
+— gentle under 15 %, steep, very steep, extreme over 40 % — read over a 25 m
+window, with a key and a crosshair reading.
+
+**Measured before building anything, and the measurement changed the design
+twice.** The fear was that a gradient off a height model is noise; it is not. On
+level ground the model reads a median of **1.0 %** and a worst case of **9.2 %**
+over the window, so nothing flat can reach the lowest boundary. And smoothing
+barely moves the signal — 6.8 % between neighbours, 6.0 % over 50 m — which is
+what says it is terrain rather than jitter. **The real hazard was the sampling,
+not the model**: samples are laid per edge and a short edge still gets two, so
+2 % of steps are under a metre apart and read up to **2,754 %**. That is why the
+gradient is read over a window and refused below a 10 m run.
+
+Verified against Python over six chains, band share by band share: a level N50
+road comes back **100 % gentle in a single stroke**, a 540 m path climbing 183 m
+comes back 11 / 21 / 32 / 37, and the 42 km Rundtur lands within a point of the
+network average. Worst case 8,191 samples: compose and draw **134 ms**, against
+127 before the colours.
+
+**Two bugs, both mine, and neither visible to a single Python check.**
+`make hooks-run` was green and the map built cleanly with both in place.
+
+- **`CURVE is not defined`.** Removing the constant left one reference behind, in
+  the arrow. The whole panel threw at load, so nothing worked at all.
+- **`scale is not a function`.** The legend was built into a `var scale`, which
+  shadowed the `scale()` the panel already used to fit a series to its box.
+
+**And the thing that hid the second one for three builds**: the selection handler
+ended in `.then(draw).catch(say('the routing graph did not arrive'))`, so an
+error thrown *while drawing* was reported as a graph that never arrived. It sent
+me to look at the payload, which was fine. Split into `then(draw, onReject)` the
+bug named itself on the next run. **A catch that spans the work as well as the
+wait will blame the wait.**
+
+**One probe changed meaning and the notes have to say so.** `d.match(/M/g).length`
+was the check that a gapless chain is drawn in one stroke. With the bands, every
+change of colour legitimately starts a new stroke — the 42 km chain is 572 of
+them. The check is now: **a chain with no gaps and one band** is one stroke, and
+the level road is the case to use for it.
+
 ## What 3B found
 
 **4.11 MB against an estimate of 3.6, and the estimate was mine.** The three
