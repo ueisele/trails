@@ -192,6 +192,37 @@ FIGURE_ID_KEY = "id"
 #: for digits nothing can use.
 FIGURE_DECIMALS = 1
 
+#: Over how much ground a gradient is read, in metres. **Not between neighbouring
+#: samples.** They are laid per edge and every edge gets at least two whatever
+#: its length, so 2 % of the steps in this network are under a metre apart and
+#: 3.4 % under two — and a decimetre of model noise divided by a third of a metre
+#: is a cliff. Read step by step the worst reads **2,754 %**; over this window
+#: nothing exceeds 100 %.
+GRADIENT_WINDOW_M = 25.0
+
+#: The least ground a gradient may be read over. Where a chain is too short for
+#: the window, or a gap eats into it, what is left can be a couple of metres —
+#: and no honest gradient comes out of that. Below this the stretch is left
+#: uncoloured rather than called steep on the strength of two samples.
+GRADIENT_MIN_RUN_M = 10.0
+
+#: How a gradient is banded on the profile: the lower bound in per cent, the
+#: name, the colour and the stroke width. The width escalates with the colour so
+#: the reading survives a red-green confusion.
+#:
+#: **The lowest boundary was chosen against the model's own noise, not by taste.**
+#: On chains that rise under three metres end to end — level ground — the height
+#: model reads a median of 1.0 % over this window, a 99th percentile of 5.8 % and
+#: a worst case of 9.2 %. Not one level stretch reaches 15 %. So a coloured
+#: stretch is a statement about the hill and never about the data. Measured over
+#: the network the bands hold 81.9 %, 11.5 %, 5.1 % and 1.5 % of the ground.
+GRADIENT_BANDS = (
+    (0.0, "gentle", "#33691e", 1.6),
+    (15.0, "steep", "#f9a825", 2.1),
+    (25.0, "very steep", "#ef6c00", 2.6),
+    (40.0, "extreme", "#c62828", 3.2),
+)
+
 
 def _record_chain_figures(group: folium.FeatureGroup, figures: dict[str, dict[str, object]]) -> None:
     """Attach the per-line figures of a layer to its feature group.
@@ -1300,13 +1331,16 @@ class _ProfilePanel(MacroElement):
             var figures = {{ this.figures_json }};
             var title = {{ this.title_json }};
             var chartHeight = {{ this.chart_height }};
+            var GRADE = {{ this.gradient_json }};
             var open = {{ 'false' if this.collapsed else 'true' }};
 
             var SVG = 'http://www.w3.org/2000/svg';
             // Room for the axes: the left margin holds a four-digit height, the
             // bottom one a distance.
             var PAD = {left: 52, right: 16, top: 12, bottom: 22};
-            var CURVE = '#33691e', AXIS = '#9e9e9e', TEXT = '#555', CROSS = '#c62828';
+            // Blue, deliberately: the steepest gradient band is red, and a red rule
+            // over a red stretch of curve reads as part of the data.
+            var AXIS = '#9e9e9e', TEXT = '#555', CROSS = '#1565c0';
 
             // ---- what a number reads as ------------------------------------
             // Math.round is floor(x + 0.5), which is exactly what the popup's
@@ -1436,7 +1470,23 @@ class _ProfilePanel(MacroElement):
             var chart = document.createElementNS(SVG, 'svg');
             chart.setAttribute('height', chartHeight);
             chart.style.cssText = 'display:block;width:100%;height:' + chartHeight + 'px;cursor:crosshair';
+            // What the colours mean, once, beside the figures. A curve that
+            // changes colour is unreadable without it.
+            var key = document.createElement('div');
+            key.style.cssText = 'margin:0 0 2px;color:#666;font-size:11px';
+            GRADE.bands.forEach(function (band, index) {
+                var swatch = document.createElement('span');
+                swatch.style.cssText = 'display:inline-block;width:14px;height:0;vertical-align:middle;margin:0 4px 0 ' +
+                    (index ? '12px' : '0') + ';border-top:' + band.width + 'px solid ' + band.colour;
+                var caption = document.createElement('span');
+                caption.textContent = band.label + (GRADE.bands[index + 1] ? ' ' + band.from + '\u2013' + GRADE.bands[index + 1].from + ' %'
+                    : ' over ' + band.from + ' %');
+                if (!index) { caption.textContent = band.label + ' under ' + GRADE.bands[1].from + ' %'; }
+                key.appendChild(swatch);
+                key.appendChild(caption);
+            });
             body.appendChild(summary);
+            body.appendChild(key);
             body.appendChild(chart);
 
             var control = L.control({position: 'bottomleft'});
@@ -1495,7 +1545,9 @@ class _ProfilePanel(MacroElement):
             // wanderings. Twice: a pale wide stroke under a dark narrow one, or
             // it disappears over a dark line.
             var SHAFT = 'M48 76 L48 28 M38 41 L48 24 L58 41';
-            ['#ffffff', CURVE].forEach(function (colour, index) {
+            // The gentlest band's colour: the arrow says which way, not how
+            // steep, so it takes the curve's base colour rather than a band.
+            ['#ffffff', GRADE.bands[0].colour].forEach(function (colour, index) {
                 var stroke = document.createElementNS(SVG, 'path');
                 stroke.setAttribute('d', SHAFT);
                 stroke.setAttribute('fill', 'none');
@@ -1553,20 +1605,65 @@ class _ProfilePanel(MacroElement):
 
             var crosshair = null;
 
-            function drawCurve(shape, plot, x, y) {
-                var parts = [], pen = false, i;
-                var columns = Math.max(1, Math.floor(plot.width));
+            // How steep the ground is at each sample, read over GRADE.window
+            // rather than between neighbours. Two pointers rather than a search:
+            // both ends only ever move forward, so the whole series costs one
+            // pass however long it is.
+            function gradients(shape) {
+                var n = shape.height.length, out = new Float64Array(n);
+                var half = GRADE.window / 2, lo = 0, hi = 0, i;
+                for (i = 0; i < n; i += 1) {
+                    out[i] = NaN;
+                    if (isNaN(shape.height[i])) { continue; }
+                    while (lo < i && shape.distance[i] - shape.distance[lo] > half) { lo += 1; }
+                    if (hi < i) { hi = i; }
+                    while (hi < n - 1 && shape.distance[hi] - shape.distance[i] < half) { hi += 1; }
+                    // Pull both ends in off any ground nothing was read along:
+                    // a difference across a gap is a difference across invented
+                    // ground.
+                    var a = lo, b = hi;
+                    while (a < i && isNaN(shape.height[a])) { a += 1; }
+                    while (b > i && isNaN(shape.height[b])) { b -= 1; }
+                    var run = shape.distance[b] - shape.distance[a];
+                    if (run >= GRADE.minRun && !isNaN(shape.height[a]) && !isNaN(shape.height[b])) {
+                        out[i] = 100 * (shape.height[b] - shape.height[a]) / run;
+                    }
+                }
+                return out;
+            }
+
+            // Which band a gradient falls in. Anything unmeasurable comes back
+            // as the gentlest — a stretch too short to read a slope along is not
+            // thereby steep, and colouring it would be an assertion nothing
+            // supports.
+            function bandOf(slope) {
+                if (isNaN(slope)) { return 0; }
+                var magnitude = Math.abs(slope), band = 0;
+                for (var i = 0; i < GRADE.bands.length; i += 1) {
+                    if (magnitude >= GRADE.bands[i].from) { band = i; }
+                }
+                return band;
+            }
+
+            // The points the curve is drawn through, in runs that must not be
+            // joined across, each carrying the sample it came from so its band
+            // can be looked up in the full series.
+            function drawPoints(shape, columns) {
+                var runs = [], run = [], i;
                 if (shape.height.length <= columns) {
                     // The common case, and it has to be: the median chain here
                     // holds 36 samples and a third of them fewer than twenty.
                     // Bucketing those into 900 columns leaves 864 empty and the
                     // curve full of holes it has no business having.
                     for (i = 0; i < shape.height.length; i += 1) {
-                        if (isNaN(shape.height[i])) { pen = false; continue; }
-                        parts.push((pen ? 'L' : 'M') + x(shape.distance[i]).toFixed(1) + ' ' + y(shape.height[i]).toFixed(1));
-                        pen = true;
+                        if (isNaN(shape.height[i])) {
+                            if (run.length) { runs.push(run); run = []; }
+                            continue;
+                        }
+                        run.push({d: shape.distance[i], h: shape.height[i], at: i});
                     }
-                    return parts.join(' ');
+                    if (run.length) { runs.push(run); }
+                    return runs;
                 }
                 // One point per pixel column for the long ones, keeping that
                 // column's own lowest and highest reading, in the order they
@@ -1600,15 +1697,35 @@ class _ProfilePanel(MacroElement):
                     // those drew one gapless 6.5 km chain as 222 separate
                     // strokes. Only ground nothing was read along lifts it.
                     if (!filled[c]) { continue; }
-                    if (previous >= 0 && missed[firstAt[c]] > missed[lastAt[previous] + 1]) { pen = false; }
-                    var at = x(((c + 0.5) / columns) * shape.total).toFixed(1);
-                    var pair = lowAt[c] <= highAt[c] ? [low[c], high[c]] : [high[c], low[c]];
-                    parts.push((pen ? 'L' : 'M') + at + ' ' + y(pair[0]).toFixed(1));
-                    if (pair[0] !== pair[1]) { parts.push('L' + at + ' ' + y(pair[1]).toFixed(1)); }
-                    pen = true;
+                    if (previous >= 0 && missed[firstAt[c]] > missed[lastAt[previous] + 1]) {
+                        if (run.length) { runs.push(run); run = []; }
+                    }
+                    var at = ((c + 0.5) / columns) * shape.total;
+                    var lowFirst = lowAt[c] <= highAt[c];
+                    run.push({d: at, h: lowFirst ? low[c] : high[c], at: firstAt[c]});
+                    if (low[c] !== high[c]) { run.push({d: at, h: lowFirst ? high[c] : low[c], at: lastAt[c]}); }
                     previous = c;
                 }
-                return parts.join(' ');
+                if (run.length) { runs.push(run); }
+                return runs;
+            }
+
+            function drawCurve(shape, plot, x, y, slope) {
+                // One stroke per run of segments sharing a band, so the curve is
+                // its own legend: where it turns amber the ground turned steep.
+                var strokes = [], current;
+                drawPoints(shape, Math.max(1, Math.floor(plot.width))).forEach(function (points) {
+                    current = null;
+                    for (var i = 1; i < points.length; i += 1) {
+                        var band = bandOf(slope[points[i - 1].at]);
+                        if (!current || current.band !== band) {
+                            current = {band: band, parts: ['M' + x(points[i - 1].d).toFixed(1) + ' ' + y(points[i - 1].h).toFixed(1)]};
+                            strokes.push(current);
+                        }
+                        current.parts.push('L' + x(points[i].d).toFixed(1) + ' ' + y(points[i].h).toFixed(1));
+                    }
+                });
+                return strokes.map(function (stroke) { return {band: stroke.band, d: stroke.parts.join(' ')}; });
             }
 
             function render() {
@@ -1656,13 +1773,20 @@ class _ProfilePanel(MacroElement):
                 chart.appendChild(line(plot.left, plot.top, plot.left, plot.bottom, AXIS));
                 chart.appendChild(line(plot.left, plot.bottom, plot.right, plot.bottom, AXIS));
 
-                var curve = document.createElementNS(SVG, 'path');
-                curve.setAttribute('d', drawCurve(shape, plot, x, y));
-                curve.setAttribute('fill', 'none');
-                curve.setAttribute('stroke', CURVE);
-                curve.setAttribute('stroke-width', '1.6');
-                curve.setAttribute('stroke-linejoin', 'round');
-                chart.appendChild(curve);
+                var slope = gradients(shape);
+                drawCurve(shape, plot, x, y, slope).forEach(function (stroke) {
+                    var band = GRADE.bands[stroke.band];
+                    var curve = document.createElementNS(SVG, 'path');
+                    curve.setAttribute('d', stroke.d);
+                    curve.setAttribute('fill', 'none');
+                    curve.setAttribute('stroke', band.colour);
+                    // Width escalates with the colour, so which stretch is the
+                    // steep one survives a red-green confusion.
+                    curve.setAttribute('stroke-width', String(band.width));
+                    curve.setAttribute('stroke-linejoin', 'round');
+                    curve.setAttribute('stroke-linecap', 'round');
+                    chart.appendChild(curve);
+                });
 
                 // The crosshair's own parts, made once and moved afterwards.
                 // Rebuilding them per mouse move is the mistake that froze this
@@ -1673,7 +1797,7 @@ class _ProfilePanel(MacroElement):
                 var reading = text(plot.right, plot.top + 8, '', 'end');
                 reading.setAttribute('fill', CROSS);
                 [rule, dot, reading].forEach(function (node) { node.style.display = 'none'; chart.appendChild(node); });
-                crosshair = {rule: rule, dot: dot, reading: reading, plot: plot, width: width, x: x, y: y, at: -1};
+                crosshair = {rule: rule, dot: dot, reading: reading, plot: plot, width: width, x: x, y: y, at: -1, slope: slope};
             }
 
             // The nearest sample to a distance, over the full series: the
@@ -1712,7 +1836,15 @@ class _ProfilePanel(MacroElement):
                     crosshair.dot.setAttribute('cy', crosshair.y(value));
                 }
                 crosshair.reading.style.display = '';
-                crosshair.reading.textContent = (shape.distance[at] / 1000).toFixed(2) + ' km \\u00b7 ' + (read ? metres(value) + ' m' : 'not read');
+                var steep = crosshair.slope[at];
+                var gradient = '';
+                if (!isNaN(steep)) {
+                    var band = GRADE.bands[bandOf(steep)];
+                    gradient = ' \\u00b7 ' + (steep < 0 ? '\\u2212' : '+') + Math.round(Math.abs(steep)) + ' %'
+                        + (bandOf(steep) ? ', ' + band.label : '');
+                }
+                crosshair.reading.textContent = (shape.distance[at] / 1000).toFixed(2) + ' km \\u00b7 '
+                    + (read ? metres(value) + ' m' : 'not read') + gradient;
             });
 
             chart.addEventListener('mouseleave', function () {
@@ -1788,7 +1920,12 @@ class _ProfilePanel(MacroElement):
                     describe();
                     render();
                     placeArrow();
-                }).catch(function () { say('The routing graph did not arrive, so there is no profile to draw.'); });
+                // Two handlers rather than a .catch: a catch would also swallow
+                // anything thrown while drawing and report it as a graph that
+                // never arrived, which is the wrong cause and sends the next
+                // reader looking in the wrong place. A drawing fault belongs in
+                // the console, loudly.
+                }, function () { say('The routing graph did not arrive, so there is no profile to draw.'); });
             }
 
             groups.forEach(function (group) {
@@ -1834,6 +1971,16 @@ class _ProfilePanel(MacroElement):
         self.title_json = _script_json(title)
         self.chart_height = int(chart_height)
         self.collapsed = collapsed
+        # The bands travel rather than being written into the template, so the
+        # measurement that chose them and the colours that show them sit in one
+        # documented place.
+        self.gradient_json = _script_json(
+            {
+                "window": GRADIENT_WINDOW_M,
+                "minRun": GRADIENT_MIN_RUN_M,
+                "bands": [{"from": lower, "label": label, "colour": colour, "width": width} for lower, label, colour, width in GRADIENT_BANDS],
+            }
+        )
 
 
 def add_profile_panel(

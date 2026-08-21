@@ -598,6 +598,41 @@ class TestProfilePanel:
         """The same map, as a fixture."""
         return self.drawn()
 
+    def test_the_gradient_bands_and_their_rule_reach_the_page(self, group):
+        """The bands are a measurement, not a taste: 15 % sits above the worst
+        gradient the height model reads on ground that is level."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        for lower, label, colour, _ in maps.GRADIENT_BANDS:
+            assert label in html
+            assert colour in html
+            assert str(lower) in html
+        assert str(maps.GRADIENT_WINDOW_M) in html
+        assert str(maps.GRADIENT_MIN_RUN_M) in html
+
+    def test_the_lowest_band_clears_what_the_model_reads_on_level_ground(self):
+        """Measured: level chains read a median of 1.0 % over a 25 m window and
+        never more than 9.2 %. A boundary under that would colour the data."""
+        assert maps.GRADIENT_BANDS[0][0] == 0.0
+        assert maps.GRADIENT_BANDS[1][0] > 9.2
+
+    def test_the_gradient_is_never_read_between_neighbouring_samples(self):
+        """Samples are laid per edge, so two of them can be a third of a metre
+        apart, where a decimetre of model noise reads as a cliff — 2,754 % at
+        the worst. The window and its floor are what stop that."""
+        assert maps.GRADIENT_MIN_RUN_M >= 10.0
+        assert maps.GRADIENT_WINDOW_M >= 2 * maps.GRADIENT_MIN_RUN_M
+
+    def test_the_crosshair_is_not_the_colour_of_the_steepest_band(self):
+        """A red rule over a red stretch of curve reads as part of the data."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert f"CROSS = '{maps.GRADIENT_BANDS[-1][2]}'" not in html
+
     def test_the_page_names_no_compass_point_of_its_own(self, group):
         """A rounded label is a threshold, so it is decided once, in Python, and
         carried. A second rule in the page would name a different direction from
