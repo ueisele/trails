@@ -8,12 +8,14 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1, 1B, 1C, 1D, 3, 2, 3B, 4, 5 and 6 are built and reviewed.** The map is
-drawn from the graph, carries it, profiles it and exports it.
-`libs/src/trails/routing/`, `libs/src/trails/network/`,
-`visualization/encoding.py`, `io/export/gpx.py`, `routing/track.py`,
-`analysis/scripts/route_graph.py` and `lomsdal_visten.py`. **6B, 6C, 7 and 8
-remain.** The project runs on **Python 3.14** and `uv.lock` is tracked from 1D.
+**Phases 1, 1B, 1C, 1D, 3, 2, 3B, 4, 5, 6 and 6B are built and reviewed.** The
+map is drawn from the graph, carries it, profiles it, exports it, and plans a
+route on it that becomes a file. `libs/src/trails/routing/`,
+`libs/src/trails/network/`, `visualization/encoding.py`, `io/export/gpx.py`,
+`routing/track.py`, `analysis/scripts/route_graph.py` and `lomsdal_visten.py`.
+**6C is checked and rewritten but not built; 7 and 8 remain and neither has had
+a readiness check.** The project runs on **Python 3.14** and `uv.lock` is tracked
+from 1D.
 
 **When an agent is working here the standing rule applies** — **documents only,
 no code, no `git commit`**, because the pre-commit hook stashes unstaged changes
@@ -75,6 +77,20 @@ leg kinds, a Dijkstra over the carried graph, undo, and the route's own profile.
 The route is drawn into a pane of its own, so the page's **11,589** paths do not
 move. Its review is in *What phase 6's review found* — everything reproduced, and
 the finding that came out of it lands on phase 5 rather than on 6.
+
+**Phase 6B** makes that route a file. `composeRoute` now lays coordinates beside
+the heights in one pass rather than in a second walk; both writers learned
+`<wpt>`, before the track and carrying `origin`; each leg's mode travels on the
+track as `<trails:legs>`, because four routed legs are one segment; and a
+crossing is written as the gap it is, since GPX cannot say a segment is a boat.
+Its review is in *What phase 6B's review found* — everything reproduced, and the
+one finding was that a correction had landed in the decisions document and not
+in the phase.
+
+**And the popups now say whose GPX they offer.** *Download GPX* stood 36 times in
+the page and meant two things; it stands once. Measured on the 42 km Rundtur, the
+two files disagree by 262 m of ascent and one of them carries a timestamp on
+every point.
 
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
@@ -446,12 +462,14 @@ every one was invisible until something was actually run.
 
 ## Before handing a phase over
 
-This has been done for 1B, 2, 3, 3B and 4 and **found something every time** — a
-rule that was not implementable, six acceptance figures that would have failed a
-correct implementation, fifteen attributes nobody had counted, a missing layer, a
-forgotten payload, a budget off in both directions, a mechanism that does not
-exist, and a rounded label that two languages would round differently. Reading
-the phase never finds these. The check is:
+This has been done for 1B, 2, 3, 3B, 4, 5, 6, 6B and 6C — **nine times, and it
+found something every time.** A rule that was not implementable, six acceptance
+figures that would have failed a correct implementation, fifteen attributes
+nobody had counted, a missing layer, a forgotten payload, a budget off in both
+directions, a rounded label that two languages would round differently, an
+acceptance its own builder could not execute, a phase that was three phases, two
+central premises that were false, and a claim in the decisions document that no
+one had measured. Reading the phase never finds these. The check is:
 
 1. **Load the built graph and measure what the phase asserts.** Every figure in a
    phase should be reproducible from `.cache/objects/` in a few lines. One that
@@ -879,11 +897,28 @@ inside popup HTML; a free leg cannot answer from its samples at all; and the
 phase has to set a threshold before it can report anything, because one of the
 nineteen areas the network touches is met over ten metres.
 
-**Phase 7, editing.** Reorder and watch the numbers; the failure mode is a stale
-leg or a profile that no longer matches the line.
+**Phase 7, editing — no readiness check yet, and its text is the shortest in the
+phases document.** Ten lines, which by the pattern of the last two checks is
+itself worth noting: 6B read as *"little more than wiring"* and was not. What is
+already measurable: `window.trailsPlan` exposes **`place`, `undo`, `toggle` and
+`state` and nothing else** — no insert, no remove, no move. Phase 6 says so
+deliberately, *"undo is the only edit this phase owns"*, so all three edits and
+the surface they are reached through are new work rather than wiring onto an
+existing model. Review it by reordering and watching the numbers; the failure
+mode is a stale leg or a profile that no longer matches the line.
 
-**Phase 8, loading.** Round-trip one of this map's own exports and check it comes
-back identical — that is what the `<extensions>` exist for. Then load a foreign
+**Phase 8, loading — no readiness check yet, and one figure in it is already
+known to be soft.** The phase says the two easy modes are cheap because only the
+matching is real work. Measured, **the only GPX reader in this project is
+`ut.py`**, and its own docstring says *"Only `trk/trkseg/trkpt` is read.
+Elevation and timestamps are dropped."* It reads coordinates and nothing else, so
+it is a reader for a foreign track and not for what this map writes: phase 8 has
+to read `<wpt>`, the `origin` that says set or generated, and the leg list 6B
+puts on the track. *The ends are cheap* holds for parsing a track and not for
+restoring a plan.
+
+Round-trip one of this map's own exports and check it comes back identical —
+that is what the `<extensions>` exist for. Then load a foreign
 track and watch the middle mode: a track running beside a parallel path will snap
 to the wrong one if only distance is checked. And confirm that generated
 waypoints — boundary crossings and the like — are *not* read back as waypoints
@@ -988,12 +1023,20 @@ of bug has now appeared three times — `pd.NA` as the text `<NA>`, an empty str
 counted by `notna`, and "unknown" read as a name. A sweep of every carried column
 for values that mean absence would be an hour's work and is nobody's phase.
 
-Otherwise nothing is known to be open. **That has now been true five times and
-was wrong all five** — the phase readiness checks found gaps in 1B, in 3, in 2,
-in 3B (which this document had written itself) and in 4, and the 3B review then
-found the payload gap above. The check that finds them is not reading the phase;
-it is measuring it against the built graph. **Phases 4, 5 and 6 have now had
-it; 6B, 6C, 7 and 8 have not.**
+Otherwise nothing is known to be open. **That has now been true nine times and
+was wrong all nine** — the readiness checks found gaps in 1B, in 3, in 2, in 3B
+(which this document had written itself), in 4, in 5, in 6, in 6B and in 6C, and
+the 3B review then found the payload gap above. The check that finds them is not
+reading the phase; it is measuring it against the built graph. **Only 7 and 8
+have not had it.**
+
+And the shape has moved. The early checks found *figures* that had drifted; the
+last two found **premises** — 6B's *"the composed geometry already exists"* and
+6C's *"a free leg gets it from the samples it fetches anyway"*, the second of
+them written in the decisions document rather than in the phase. A wrong figure
+fails an implementation loudly. A wrong premise sends it in the wrong direction
+quietly, and it is the sentence that sounds most like background that is worth
+measuring.
 
 ## What phase 2 found
 
@@ -1087,94 +1130,6 @@ Two more, and one of them was mine:
   22.9, 12.7. Two other figures moved the same way, 237 → **241** and 4,485 →
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
-
-## What phase 6's review found
-
-**Every figure the phase reported reproduces**, checked against the built graph
-and a driven browser rather than against the report. The graph is untouched —
-11,290 chains, 234,358 edges, 116,967 nodes — the page holds at 198 markers,
-**11,589** paths with exactly one non-interactive, 25 layers and 10 px above 60,
-and the planned route lives in a pane of its own: **0 paths before, 13 with a
-five-point route, 0 again** once every point is taken back. No page errors.
-
-**The crossing carries no curve, and that was measured rather than looked at.** A
-route from a quay only a ferry reaches comes back as `ferry 7,386 m / 0 samples`
-beside `routed 62,225 m / 12,486 samples`, the two reported apart. In the composed
-series **nothing sits at height zero** and the minimum is 0.46 m, so the curve
-breaks where the ground stops instead of flattening across the fjord. Same rule a
-ferry gets in phase 4 — and the failure it guards against would have looked like
-data.
-
-**The router had the defect that killed the phase's first session, and it is
-fixed in the shipped code rather than only in the probe.** The back-walk was
-`while (walk !== from)`, unbounded and appending, with `viaEdge` starting at −1 —
-where a typed array answers `undefined` rather than raising, so it would have
-laid `undefined` into the geometry and carried on. It now has a bound of
-`header.edges`, an explicit `used < 0 || before < 0` throw, and a bound on the
-search itself. Direction is read off a separate `viaNode` predecessor rather than
-off the edge's own ends, which is what makes the **14 self-loop edges** safe. The
-heap's sift carries a note on why it terminates instead of a bound, because it
-moves over the array and not over the graph — the right distinction to draw.
-
-**Three review findings, all real, all fixed.** A multi-edge ferry was charged the
-flat cost per *edge*: 15 of the 21 ferry chains are cut into pieces and the
-longest into seven, so that one was priced at 35 km of walking instead of 5. Now
-split in proportion, as `graph.py::_cost` splits it — verified in both files, not
-taken on trust. A misclick could ask the height service for an unbounded number of
-points; now refused at 20 km and **said**, rather than coarsened, because
-coarsening would make the two halves of a profile disagree invisibly. And a failed
-batch left the other workers running.
-
-**And one the phase found itself, which is the instructive one.** The page's metre
-was a sphere at 110,574 m per degree — the *equatorial* figure — and read **0.56 %
-short** at 65.6°N. It cancelled for a chain, which is scaled onto its carried
-length, so nothing had ever shown it; a planned route has nothing to scale onto,
-and it came to 900 m of stated distance on the traverse. Replaced with the WGS84
-meridian series. Measured against the Python writer, the Rundtur's export went
-from **16,339 to 16,415 points against Python's 16,421** — the gap closed from 82
-to 6. **A constant that cancels in every case you have looked at is not a constant
-that is right.**
-
-### And the finding that lands on phase 5
-
-**The 123 trackpoints with no `<ele>` are not a phase 6 regression, and phase 5's
-acceptance contradicts itself.** The graph holds 1,831 unread samples of 1,406,040
-(0.130 %) on 637 edges across 250 chains; the Rundtur has 53, which the
-vertex/sample merge spreads to 123 written points. Both writers produce the same
-123 — Python at 16,421 points, the browser at 16,415 — and the lines that omit the
-element, `gpx.py:209` and `maps.py:1816`, are identical in HEAD.
-
-Phase 5's done-when item 3 said *every trackpoint carries an `<ele>`*, and item 5
-says the ascent must read back to the stored figure. **They cannot both hold**:
-read as if every point had a height, the Rundtur gives 1,718.96 against a stated
-1,721.80. The shipped code resolved it the right way and `gpx.py` says why —
-*"the point is written without an `<ele>` rather than with an invented one.
-Nothing downstream can tell an invented height from a read one."* Item 3 is
-struck.
-
-**And this document carried the false half of it.** *"Every point heighted"* was
-written here as a verified result of the phase 5 review, and it was never true.
-What the check actually establishes is that a file agrees with the figure it
-states — and reading an ascent back means **breaking the run at every point
-carrying no height**, which is exactly what `ascentMethod` describes. Read that
-way the Rundtur lands on 1,721.80 against 1,721.80; read the lazy way it is 2.84 m
-out. I made that mistake myself while checking this phase and was corrected by the
-file.
-
-**Two figures I reported as discrepancies were my own errors.** 251 chains against
-the phase's 250 — the extra "chain" is the group of **8,684 bridge edges**, which
-is not a chain. And 59 unread samples on the Rundtur against 53 — the raw
-per-edge sum counts a shared node twice, and this document already says to compose
-a chain's series with the shared node counted once. **Check a measurement against
-this document's own methods before reporting a phase's figure as wrong.**
-
-**What was not re-run**, nothing having contradicted it: the 20 km refusal, the
-workers stopping after a failed batch, the click timings, the leg through a sound,
-and the metre's own before-and-after.
-
-**Two things deliberately not built**, and both are right: the plan is not
-exportable, which is 6B, and switching plan mode off keeps the route drawn rather
-than discarding it, since undo is the only edit this phase owns.
 
 ## What phase 6C's readiness check found
 
@@ -1387,6 +1342,94 @@ rule drops exactly the shared node and nothing else.
 **Everything was re-driven after the fixes** and nothing moved: 198 · 11,589 · 1
 · 25 · 10/60 · 9 → 11, the plan's pane 0 → 13 → 0, the chain still at 16,415
 points, and both routes still validating with their breaks only at crossings.
+
+## What phase 6's review found
+
+**Every figure the phase reported reproduces**, checked against the built graph
+and a driven browser rather than against the report. The graph is untouched —
+11,290 chains, 234,358 edges, 116,967 nodes — the page holds at 198 markers,
+**11,589** paths with exactly one non-interactive, 25 layers and 10 px above 60,
+and the planned route lives in a pane of its own: **0 paths before, 13 with a
+five-point route, 0 again** once every point is taken back. No page errors.
+
+**The crossing carries no curve, and that was measured rather than looked at.** A
+route from a quay only a ferry reaches comes back as `ferry 7,386 m / 0 samples`
+beside `routed 62,225 m / 12,486 samples`, the two reported apart. In the composed
+series **nothing sits at height zero** and the minimum is 0.46 m, so the curve
+breaks where the ground stops instead of flattening across the fjord. Same rule a
+ferry gets in phase 4 — and the failure it guards against would have looked like
+data.
+
+**The router had the defect that killed the phase's first session, and it is
+fixed in the shipped code rather than only in the probe.** The back-walk was
+`while (walk !== from)`, unbounded and appending, with `viaEdge` starting at −1 —
+where a typed array answers `undefined` rather than raising, so it would have
+laid `undefined` into the geometry and carried on. It now has a bound of
+`header.edges`, an explicit `used < 0 || before < 0` throw, and a bound on the
+search itself. Direction is read off a separate `viaNode` predecessor rather than
+off the edge's own ends, which is what makes the **14 self-loop edges** safe. The
+heap's sift carries a note on why it terminates instead of a bound, because it
+moves over the array and not over the graph — the right distinction to draw.
+
+**Three review findings, all real, all fixed.** A multi-edge ferry was charged the
+flat cost per *edge*: 15 of the 21 ferry chains are cut into pieces and the
+longest into seven, so that one was priced at 35 km of walking instead of 5. Now
+split in proportion, as `graph.py::_cost` splits it — verified in both files, not
+taken on trust. A misclick could ask the height service for an unbounded number of
+points; now refused at 20 km and **said**, rather than coarsened, because
+coarsening would make the two halves of a profile disagree invisibly. And a failed
+batch left the other workers running.
+
+**And one the phase found itself, which is the instructive one.** The page's metre
+was a sphere at 110,574 m per degree — the *equatorial* figure — and read **0.56 %
+short** at 65.6°N. It cancelled for a chain, which is scaled onto its carried
+length, so nothing had ever shown it; a planned route has nothing to scale onto,
+and it came to 900 m of stated distance on the traverse. Replaced with the WGS84
+meridian series. Measured against the Python writer, the Rundtur's export went
+from **16,339 to 16,415 points against Python's 16,421** — the gap closed from 82
+to 6. **A constant that cancels in every case you have looked at is not a constant
+that is right.**
+
+### And the finding that lands on phase 5
+
+**The 123 trackpoints with no `<ele>` are not a phase 6 regression, and phase 5's
+acceptance contradicts itself.** The graph holds 1,831 unread samples of 1,406,040
+(0.130 %) on 637 edges across 250 chains; the Rundtur has 53, which the
+vertex/sample merge spreads to 123 written points. Both writers produce the same
+123 — Python at 16,421 points, the browser at 16,415 — and the lines that omit the
+element, `gpx.py:209` and `maps.py:1816`, are identical in HEAD.
+
+Phase 5's done-when item 3 said *every trackpoint carries an `<ele>`*, and item 5
+says the ascent must read back to the stored figure. **They cannot both hold**:
+read as if every point had a height, the Rundtur gives 1,718.96 against a stated
+1,721.80. The shipped code resolved it the right way and `gpx.py` says why —
+*"the point is written without an `<ele>` rather than with an invented one.
+Nothing downstream can tell an invented height from a read one."* Item 3 is
+struck.
+
+**And this document carried the false half of it.** *"Every point heighted"* was
+written here as a verified result of the phase 5 review, and it was never true.
+What the check actually establishes is that a file agrees with the figure it
+states — and reading an ascent back means **breaking the run at every point
+carrying no height**, which is exactly what `ascentMethod` describes. Read that
+way the Rundtur lands on 1,721.80 against 1,721.80; read the lazy way it is 2.84 m
+out. I made that mistake myself while checking this phase and was corrected by the
+file.
+
+**Two figures I reported as discrepancies were my own errors.** 251 chains against
+the phase's 250 — the extra "chain" is the group of **8,684 bridge edges**, which
+is not a chain. And 59 unread samples on the Rundtur against 53 — the raw
+per-edge sum counts a shared node twice, and this document already says to compose
+a chain's series with the shared node counted once. **Check a measurement against
+this document's own methods before reporting a phase's figure as wrong.**
+
+**What was not re-run**, nothing having contradicted it: the 20 km refusal, the
+workers stopping after a failed batch, the click timings, the leg through a sound,
+and the metre's own before-and-after.
+
+**Two things deliberately not built**, and both are right: the plan is not
+exportable, which is 6B, and switching plan mode off keeps the route drawn rather
+than discarding it, since undo is the only edit this phase owns.
 
 ## What phase 6's readiness check found
 
