@@ -101,6 +101,7 @@ from trails.routing import (
     NetworkSource,
     chain_order,
     chain_tracks,
+    elevation,
     parts_of,
     translate_joined,
     whole_way_length,
@@ -187,6 +188,7 @@ FKB_POPUP_FIELDS = {
     "typeveg": "Road type",
     "length_km": "Length (km)",
     "climb": "Ascent / descent",
+    "steepness": "Steepest",
     "high_point": "High point",
     "marking_all": "Marking, all sources",
     "unrecorded": "Unrecorded ground",
@@ -196,6 +198,7 @@ FERRY_POPUP_FIELDS = {
     "typeveg": "Ferry type",
     "length_km": "Crossing (km)",
     "climb": "Ascent / descent",
+    "steepness": "Steepest",
     "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
@@ -224,6 +227,7 @@ ROAD_POPUP_FIELDS = {
     "length_km": "This stretch (km)",
     "whole_km": "Road in total (km)",
     "climb": "Ascent / descent",
+    "steepness": "Steepest",
     "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
@@ -238,6 +242,7 @@ N50_POPUP_FIELDS = {
     "medium": "Medium",
     "length_km": "Length (km)",
     "climb": "Ascent / descent",
+    "steepness": "Steepest",
     "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
@@ -280,6 +285,7 @@ UT_POPUP_FIELDS = {
     "category_label": "Kind",
     "length_km": "Track length (km)",
     "climb": "Ascent / descent",
+    "steepness": "Steepest",
     "high_point": "High point",
     "ut_summary": "UT.no states",
     "marking_all": "Marking, all sources",
@@ -321,6 +327,7 @@ TRAIL_POPUP_FIELDS = {
     "length_km": "Length (km)",
     "whole_km": "Route in total (km)",
     "climb": "Ascent / descent",
+    "steepness": "Steepest",
     "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
@@ -341,6 +348,7 @@ OSM_POPUP_FIELDS = {
     "length_km": "Length (km)",
     "whole_km": "Way in total (km)",
     "climb": "Ascent / descent",
+    "steepness": "Steepest",
     "high_point": "High point",
     # Plural, and it is not pedantry: 64 % of these chains span more than one
     # OSM way — median 2, worst 33 — so a single id would be wrong for most of
@@ -1074,6 +1082,58 @@ def describe_climb(chains: gpd.GeoDataFrame, points: pd.Series) -> pd.Series:
     return pd.Series(lines, index=chains.index, dtype="string")
 
 
+def describe_steepness(chains: gpd.GeoDataFrame) -> pd.Series:
+    """Say the steepest ground a chain covers, over two lengths of it.
+
+    **Absolute, and two figures rather than one.** Absolute because the hard
+    part of a mountain path is as often the way down — the steepest chain in
+    this park climbs 9 m and drops 816, so a signed maximum would report it as
+    flat. Two figures because one invites the confusion this row exists to end:
+    on that same chain the steepest 25 m is 74 % and it is *ten metres long*,
+    while the steepest 100 m is 62 % and the whole descent averages 27 %. The
+    first is what surprises a walker once; the second is what their legs are in
+    for.
+
+    Args:
+        chains: Chains carrying ``steepest_pct`` and ``sustained_pct``
+
+    Returns:
+        One line per chain, empty where no slope could be read along it — a
+        ferry crossing, or a stretch too short for the window to open in
+    """
+    lines = []
+    for steepest, sustained in zip(chains["steepest_pct"], chains["sustained_pct"], strict=True):
+        if pd.isna(steepest):
+            lines.append("")
+            continue
+        # ``floor(x + 0.5)`` for the same reason :func:`_metres` uses it, and
+        # caught the same way: the crosshair on the panel reads this chain at
+        # 73 % where a plain format wrote 72, because the figure is 72.5 and
+        # Python rounds a half to even while JavaScript's ``Math.round`` takes
+        # it up. Two places asking one question, two answers.
+        said = f"{_percent(steepest)} % over {int(elevation.GRADIENT_WINDOW_M)} m"
+        if not pd.isna(sustained):
+            said += f" · {_percent(sustained)} % over {int(elevation.SUSTAINED_WINDOW_M)} m"
+        lines.append(said)
+    return pd.Series(lines, index=chains.index, dtype="string")
+
+
+def _percent(value: float) -> str:
+    """Round a gradient the way the profile panel rounds it.
+
+    The same ``floor(x + 0.5)`` as :func:`_metres` and for the same reason: the
+    panel's crosshair reads a slope with ``Math.round``, and the steepest a
+    chain reaches is stated in two places that must not disagree.
+
+    Args:
+        value: Per cent
+
+    Returns:
+        The rounded figure
+    """
+    return f"{math.floor(value + 0.5):,}"
+
+
 def _metres(value: float) -> str:
     """Round a height to whole metres, the way the panel in the page rounds it.
 
@@ -1151,6 +1211,7 @@ def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.
     # the panel and the popup on different sides of one.
     described["compass"] = compass_points(described["bearing_deg"])
     described["climb"] = describe_climb(described, described["compass"])
+    described["steepness"] = describe_steepness(described)
     # The name a track is written under, in one column for every source, because
     # an exported file asks the same question of all of them. It is the chain's
     # identity everywhere but the roads, where the identity is the register id

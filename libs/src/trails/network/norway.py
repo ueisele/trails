@@ -173,7 +173,7 @@ MARKED_M, RECORDED_M, MIN_SHARE = DEFAULT_MARKED_M, DEFAULT_RECORDED_M, DEFAULT_
 #: *into* a build; this covers what comes out of it. Without it, a graph cached
 #: before a column existed is served to code that reads that column — the
 #: parameters and the sources are unchanged, so nothing else in the key notices.
-GRAPH_LAYOUT = "elevation+coverage+protection"
+GRAPH_LAYOUT = "elevation+coverage+protection+steepness"
 
 #: What names a protected area, on every edge that lies in one and in every
 #: figure about it. The register's own stable identifier rather than a row

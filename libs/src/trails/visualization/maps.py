@@ -23,6 +23,8 @@ import pandas as pd
 from branca.element import MacroElement
 from jinja2 import Template
 
+from trails.routing import elevation
+
 #: Bounding box as (min_lon, min_lat, max_lon, max_lat), matching GeoPandas.
 Bounds = tuple[float, float, float, float]
 
@@ -216,19 +218,12 @@ FIGURE_ID_KEY = "id"
 #: for digits nothing can use.
 FIGURE_DECIMALS = 1
 
-#: Over how much ground a gradient is read, in metres. **Not between neighbouring
-#: samples.** They are laid per edge and every edge gets at least two whatever
-#: its length, so 2 % of the steps in this network are under a metre apart and
-#: 3.4 % under two — and a decimetre of model noise divided by a third of a metre
-#: is a cliff. Read step by step the worst reads **2,754 %**; over this window
-#: nothing exceeds 100 %.
-GRADIENT_WINDOW_M = 25.0
-
-#: The least ground a gradient may be read over. Where a chain is too short for
-#: the window, or a gap eats into it, what is left can be a couple of metres —
-#: and no honest gradient comes out of that. Below this the stretch is left
-#: uncoloured rather than called steep on the strength of two samples.
-GRADIENT_MIN_RUN_M = 10.0
+#: The gradient rule, taken from :mod:`trails.routing.elevation` rather than
+#: kept here as well. The panel colours by it and a chain's popup states the
+#: steepest it reaches, so the page and the build have to be reading one rule:
+#: two copies of a threshold drift, and this project has paid for that twice.
+GRADIENT_WINDOW_M = elevation.GRADIENT_WINDOW_M
+GRADIENT_MIN_RUN_M = elevation.GRADIENT_MIN_RUN_M
 
 #: How a gradient is banded on the profile: the lower bound in per cent, the
 #: name, the colour and the stroke width. The width escalates with the colour so

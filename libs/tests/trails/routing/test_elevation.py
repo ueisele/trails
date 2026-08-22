@@ -7,14 +7,19 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString
 from trails.routing.elevation import (
+    GRADIENT_MIN_RUN_M,
     PROFILE_COLUMNS,
+    _series_of,
+    _steps_of,
     ascent,
     chain_profiles,
     chain_series,
     descent,
+    gradient_series,
     profile_of,
     sample_along,
     sample_count,
+    steepest_of,
     with_elevation,
 )
 from trails.routing.graph import Network
@@ -412,3 +417,106 @@ class TestWithElevation:
         measured = with_elevation(self.network(), heights, step_m=5.0, threshold_m=5.0)
         assert measured.edges["ascent"].iloc[0] == pytest.approx(100.0)
         assert measured.edges["descent"].iloc[0] == pytest.approx(40.0)
+
+
+class TestGradient:
+    """The rule the profile colours by and a popup states."""
+
+    def test_reads_a_steady_ramp_as_its_own_slope(self):
+        distance = np.arange(0.0, 101.0, 5.0)
+        assert steepest_of(distance, distance * 0.5) == pytest.approx(50.0)
+
+    def test_a_descent_is_reported_as_steeply_as_a_climb(self):
+        """The hard part of a mountain path is as often the way down.
+
+        This park's steepest chain climbs 9 m and drops 816: a signed maximum
+        would report it as flat ground.
+        """
+        distance = np.arange(0.0, 101.0, 5.0)
+        assert steepest_of(distance, -distance * 0.7) == pytest.approx(70.0)
+
+    def test_reads_nothing_over_a_run_shorter_than_the_floor(self):
+        distance = np.array([0.0, GRADIENT_MIN_RUN_M / 4])
+        assert math.isnan(steepest_of(distance, np.array([0.0, 10.0])))
+
+    def test_does_not_read_a_slope_across_a_gap(self):
+        """A difference measured across a gap is a difference across invented
+        ground: the ends of the window are pulled in off it."""
+        distance = np.array([0.0, 20.0, 40.0, 60.0])
+        heights = np.array([0.0, math.nan, math.nan, 100.0])
+        assert math.isnan(steepest_of(distance, heights))
+
+    def test_a_sustained_window_reads_lower_than_a_short_one(self):
+        """A spike is a spike, and that is the whole reason two windows are
+        carried rather than one. Thirty metres at 80 % laid inside two hundred
+        at 10 % reads as 80 % over a short window and about 30 over a long one,
+        so a reader is told both what will surprise them and what to expect.
+        """
+        distance = np.arange(0.0, 201.0, 5.0)
+        rise = np.where((distance > 100) & (distance <= 130), 0.8, 0.1)
+        heights = np.concatenate([[0.0], np.cumsum(rise[1:] * np.diff(distance))])
+        assert steepest_of(distance, heights, 25.0) == pytest.approx(80.0)
+        assert steepest_of(distance, heights, 100.0) == pytest.approx(31.0, abs=3.0)
+
+    def test_leaves_a_sample_it_could_not_read_unmeasured(self):
+        distance = np.array([0.0, 20.0, 40.0])
+        read = gradient_series(distance, np.array([0.0, math.nan, 40.0]))
+        assert math.isnan(read[1])
+
+
+class TestSteps:
+    """The distance of every sample the series walk returns."""
+
+    @staticmethod
+    def _walk(values, geometries):
+        pairs = [(index, index + 1) for index in range(len(values))]
+        members = list(range(len(values)))
+        chain = LineString([(0.0, 0.0), (float(sum(g.length for g in geometries)), 0.0)])
+        heights = _series_of(members, pairs, values, np.array(geometries, dtype=object), chain)
+        steps = _steps_of(
+            members,
+            pairs,
+            [len(v) for v in values],
+            [g.length for g in geometries],
+            np.array(geometries, dtype=object),
+            chain,
+        )
+        return heights, steps
+
+    def test_gives_every_height_a_distance(self):
+        values = [np.array([0.0, 5.0, 10.0]), np.array([10.0, 20.0])]
+        geometries = [LineString([(0, 0), (100, 0)]), LineString([(100, 0), (150, 0)])]
+        heights, steps = self._walk(values, geometries)
+        assert len(steps) == len(heights)
+
+    def test_an_edge_nobody_sampled_does_not_shift_the_rest(self):
+        """Every ferry crossing carries an empty series, and the two walks have
+        to treat it the same way or they come apart by one sample — which reads
+        as a slope rather than as a bug."""
+        values = [np.array([0.0, 10.0, 20.0]), np.empty(0)]
+        geometries = [LineString([(0, 0), (100, 0)]), LineString([(100, 0), (200, 0)])]
+        heights, steps = self._walk(values, geometries)
+        assert len(steps) == len(heights)
+        assert list(steps) == [0.0, 50.0, 100.0]
+
+    def test_spaces_a_sample_evenly_along_its_own_edge(self):
+        values = [np.array([0.0, 1.0, 2.0, 3.0, 4.0])]
+        geometries = [LineString([(0, 0), (40, 0)])]
+        _, steps = self._walk(values, geometries)
+        assert list(steps) == [0.0, 10.0, 20.0, 30.0, 40.0]
+
+
+class TestProfileSteepness:
+    """What ``profile_of`` says about slope, and when it says nothing."""
+
+    def test_says_nothing_without_the_distances(self):
+        """A slope is a height over a distance and there is no honest way to
+        guess the second."""
+        read = profile_of(np.array([0.0, 50.0, 100.0]))
+        assert math.isnan(read["steepest_pct"])
+        assert math.isnan(read["sustained_pct"])
+
+    def test_reads_both_windows_when_given_them(self):
+        read = profile_of(np.array([0.0, 50.0, 100.0]), 5.0, np.array([0.0, 100.0, 200.0]))
+        assert read["steepest_pct"] == pytest.approx(50.0)
+        assert read["sustained_pct"] == pytest.approx(50.0)

@@ -80,11 +80,41 @@ DEFAULT_ASCENT_THRESHOLD_M = 5.0
 #: read. In the CRS the network was built in.
 Heights = Callable[[np.ndarray], np.ndarray]
 
-#: What a chain's series says about it beyond the series itself. Four figures
-#: rather than one, and computed together because they are read together: a
-#: popup and the profile panel both show all of them, and two places asking the
-#: same question must not get two answers.
-PROFILE_COLUMNS = ("ascent", "descent", "high_m", "low_m")
+#: Over how much ground a gradient is read, in metres. **Not between
+#: neighbouring samples.** They are laid per edge and every edge gets at least
+#: two whatever its length, so 2 % of the steps in this network are under a
+#: metre apart and 3.4 % under two — and a decimetre of model noise divided by a
+#: third of a metre is a cliff. Read step by step the worst reads **2,754 %**.
+#: **Over this window it was once written that nothing exceeds 100 %; measured
+#: across all 11,290 chains, 21 do and the worst reads 231 %** — on an N50 road
+#: that climbs 65 m over thirty metres of ground, steadily and over six
+#: consecutive samples, so it is what the model says rather than a spike. The
+#: window tames the sampling, not the terrain. **This lives here rather than beside
+#: the drawing** because the panel colours by it and a popup states it, and two
+#: places asking the same question must not each keep their own answer.
+GRADIENT_WINDOW_M = 25.0
+
+#: The least ground a gradient may be read over. Where a chain is too short for
+#: the window, or a gap eats into it, what is left can be a couple of metres —
+#: and no honest gradient comes out of that. Below this nothing is reported
+#: rather than a slope being claimed on the strength of two samples.
+GRADIENT_MIN_RUN_M = 10.0
+
+#: The second window a chain's steepness is read over, in metres. One figure is
+#: not enough and the reason is measurable: on the 3 km path off Øyfjellet the
+#: steepest 25 m is **74 %** and it is **ten metres long**, while the steepest
+#: 100 m is 62 % and the whole descent averages 27 %. A reader told only the
+#: first learns what will surprise them once; told both, they also learn what
+#: their legs are in for.
+SUSTAINED_WINDOW_M = 100.0
+
+#: What a chain's series says about it beyond the series itself. Computed
+#: together because they are read together: a popup and the profile panel both
+#: show them, and two places asking the same question must not get two answers.
+#: The steepness figures are **absolute** — the hard thing about a mountain path
+#: is as often the way down, and this park's steepest chain climbs 9 m and drops
+#: 816.
+PROFILE_COLUMNS = ("ascent", "descent", "high_m", "low_m", "steepest_pct", "sustained_pct")
 
 #: What separates two stretches of a chain that do not join. A single NaN is
 #: enough: an ascent run breaks at it, which is the whole point.
@@ -194,12 +224,19 @@ def descent(elevations: Sequence[float] | np.ndarray, threshold_m: float = DEFAU
     return ascent(-np.asarray(elevations, dtype=float), threshold_m)
 
 
-def profile_of(elevations: Sequence[float] | np.ndarray, threshold_m: float = DEFAULT_ASCENT_THRESHOLD_M) -> dict[str, float]:
+def profile_of(
+    elevations: Sequence[float] | np.ndarray,
+    threshold_m: float = DEFAULT_ASCENT_THRESHOLD_M,
+    distances: Sequence[float] | np.ndarray | None = None,
+) -> dict[str, float]:
     """Read everything a series says about the line it was taken along.
 
     Args:
         elevations: Heights along one line, NaN where nothing was read
         threshold_m: Gains and losses under this are not counted
+        distances: How far along the line each height was read. Without it the
+            two steepness figures come back NaN, because a slope is a height
+            over a distance and there is no honest way to guess the second
 
     Returns:
         :data:`PROFILE_COLUMNS`, every one of them NaN where nothing was read.
@@ -208,12 +245,144 @@ def profile_of(elevations: Sequence[float] | np.ndarray, threshold_m: float = DE
     """
     series = np.asarray(elevations, dtype=float)
     read = bool((~np.isnan(series)).any())
+    along = np.asarray(distances, dtype=float) if distances is not None else None
+    steep = along is not None and len(along) == len(series)
     return {
         "ascent": ascent(series, threshold_m),
         "descent": descent(series, threshold_m),
         "high_m": float(np.nanmax(series)) if read else math.nan,
         "low_m": float(np.nanmin(series)) if read else math.nan,
+        "steepest_pct": steepest_of(np.asarray(along), series, GRADIENT_WINDOW_M) if steep and along is not None else math.nan,
+        "sustained_pct": steepest_of(np.asarray(along), series, SUSTAINED_WINDOW_M) if steep and along is not None else math.nan,
     }
+
+
+def gradient_series(
+    distances: np.ndarray,
+    heights: np.ndarray,
+    window_m: float = GRADIENT_WINDOW_M,
+    min_run_m: float = GRADIENT_MIN_RUN_M,
+) -> np.ndarray:
+    """Read the slope at every sample, over a window centred on it.
+
+    The rule the profile panel colours by, written once here and handed to the
+    page as numbers rather than implemented twice. Both ends of the window are
+    pulled in off any ground nothing was read along: a difference measured
+    across a gap is a difference across invented ground.
+
+    Args:
+        distances: Distance along the line of each sample
+        heights: Height at each sample, NaN where nothing was read
+        window_m: Ground the slope is read over, centred on the sample
+        min_run_m: Least ground a slope may be read over
+
+    Returns:
+        Per cent per sample, signed, NaN wherever no honest slope comes out
+    """
+    distance = np.asarray(distances, dtype=float)
+    height = np.asarray(heights, dtype=float)
+    count = len(height)
+    out = np.full(count, math.nan)
+    half, low, high = window_m / 2, 0, 0
+    for i in range(count):
+        if math.isnan(height[i]):
+            continue
+        while low < i and distance[i] - distance[low] > half:
+            low += 1
+        high = max(high, i)
+        while high < count - 1 and distance[high] - distance[i] < half:
+            high += 1
+        a, b = low, high
+        while a < i and math.isnan(height[a]):
+            a += 1
+        while b > i and math.isnan(height[b]):
+            b -= 1
+        run = distance[b] - distance[a]
+        if run >= min_run_m and not math.isnan(height[a]) and not math.isnan(height[b]):
+            out[i] = 100.0 * (height[b] - height[a]) / run
+    return out
+
+
+def steepest_of(
+    distances: np.ndarray,
+    heights: np.ndarray,
+    window_m: float = GRADIENT_WINDOW_M,
+    min_run_m: float = GRADIENT_MIN_RUN_M,
+) -> float:
+    """The steepest slope along a line, however it is tilted.
+
+    Args:
+        distances: Distance along the line of each sample
+        heights: Height at each sample, NaN where nothing was read
+        window_m: Ground each slope is read over
+        min_run_m: Least ground a slope may be read over
+
+    Returns:
+        Per cent, never negative, or NaN where no slope could be read at all
+    """
+    slope = np.abs(gradient_series(distances, heights, window_m, min_run_m))
+    return float(np.nanmax(slope)) if bool((~np.isnan(slope)).any()) else math.nan
+
+
+def _steps_of(
+    members: Sequence[int],
+    pairs: Sequence[tuple[int, int]],
+    counts: Sequence[int],
+    lengths: Sequence[float],
+    geometries: np.ndarray,
+    geometry: BaseGeometry | None,
+) -> np.ndarray:
+    """Lay the distance of every sample :func:`_series_of` returns.
+
+    The same walk, sample for sample, because a distance that does not line up
+    with its height is worse than no distance: it reads as a slope. Samples are
+    spread evenly along their own edge, so the step within one is its length
+    over one less than its count.
+
+    Args:
+        members: Positions of the edges lying on this chain
+        pairs: ``(from_node, to_node)`` per edge
+        counts: How many samples each edge carries
+        lengths: Length of each edge
+        geometries: Geometry per edge
+        geometry: The chain, to orient the result by
+
+    Returns:
+        Distance along the chain of each sample, restarting from the chain's
+        own zero at a stretch that does not join the one before it
+    """
+    parts: list[np.ndarray] = []
+    walked = 0.0
+    for run in lay_out(members, pairs):
+        steps: list[np.ndarray] = []
+        for position, _ in run:
+            count = int(counts[position])
+            if count == 0:
+                # An edge nobody sampled — every ferry crossing. It is appended
+                # empty rather than skipped, because :func:`_joined` appends its
+                # empty heights too, and what decides whether the next edge
+                # drops its shared first sample is whether anything came before
+                # it. Skipping here and not there is how the two walks would
+                # come apart by one sample, which reads as a slope.
+                steps.append(np.empty(0, dtype=float))
+                continue
+            piece = np.full(count, (lengths[position] / (count - 1)) if count > 1 else 0.0)
+            piece[0] = 0.0
+            steps.append(piece[1:] if steps else piece)
+        laid = np.cumsum(np.concatenate(steps)) if steps else np.empty(0, dtype=float)
+        if len(laid) and runs_backwards(run, geometries, geometry):
+            # Reversing the samples reverses the distances, which then run
+            # downwards; re-based off their own end they run up again and the
+            # spacing between any two is untouched.
+            laid = laid[0] + laid[-1] - laid[::-1]
+        if parts:
+            # The gap sample sits where the stretch before it ended: it carries
+            # no height, so nothing is read across it, and giving it ground of
+            # its own would invent distance nobody walked.
+            parts.append(np.array([walked]))
+        parts.append(walked + laid)
+        walked += float(laid[-1]) if len(laid) else 0.0
+    return np.concatenate(parts) if parts else np.empty(0, dtype=float)
 
 
 def _stretches(known: np.ndarray) -> list[tuple[int, int]]:
@@ -337,11 +506,21 @@ def chain_profiles(chains: gpd.GeoDataFrame, edges: gpd.GeoDataFrame, *, thresho
     pairs = list(zip(edges["from_node"].to_numpy(dtype=np.int64).tolist(), edges["to_node"].to_numpy(dtype=np.int64).tolist(), strict=True))
     values = list(edges["elevations"])
     geometries = edges.geometry.to_numpy()
+    # Taken off the geometry rather than off ``length_m``: the two agree, and
+    # the one that has to agree with the samples is the line they were laid on.
+    lengths = [float(line.length) for line in geometries]
+    counts = [len(series) for series in values]
 
     read: list[dict[str, float]] = []
     for chain_id, geometry in zip(chains["chain_id"].tolist(), chains.geometry.tolist(), strict=True):
         members = lying_on.get(chain_id, [])
-        read.append(profile_of(_series_of(members, pairs, values, geometries, geometry), threshold_m))
+        read.append(
+            profile_of(
+                _series_of(members, pairs, values, geometries, geometry),
+                threshold_m,
+                _steps_of(members, pairs, counts, lengths, geometries, geometry),
+            )
+        )
     return pd.DataFrame(read, index=chains.index, columns=list(PROFILE_COLUMNS)).astype("float64")
 
 

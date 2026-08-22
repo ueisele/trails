@@ -107,6 +107,33 @@ the page and meant two things; it stands once. Measured on the 42 km Rundtur, th
 two files disagree by 262 m of ascent and one of them carries a timestamp on
 every point.
 
+**And a chain's popup says the steepest ground it covers**, over 25 m and over
+100 m, absolute. Absolute because this park's steepest chain climbs 9 m and drops
+816, so a signed maximum would call it flat; two windows because one invites the
+confusion the row exists to end — on that chain the steepest 25 m is 72 % and it
+is **ten metres long**, the steepest 100 m is 62 %, and the whole descent
+averages 27 %. The gradient rule moved to `routing/elevation.py` and `maps.py`
+imports it, so the panel's colours and the popup's figure cannot drift apart.
+Cost: a distance axis for a chain's series, which Python did not have, a new
+`GRAPH_LAYOUT` and a rebuild that asked the height service nothing.
+
+**Two things it turned up, and both are corrections to this documentation.**
+It was written that over the 25 m window nothing exceeds 100 %; measured across
+all 11,290 chains, **21 do and the worst reads 231 %** — an N50 road climbing
+65 m over thirty metres of ground, steadily, over six consecutive samples. The
+window tames the sampling, not the terrain.
+
+And **the popup and the crosshair can differ by one per cent, for a reason worth
+keeping.** Python spaces a chain's samples by the **arc length** of each edge;
+the page sums the **chords** between the sample points, and a chord cuts the
+corner of a bend. Measured on that chain the two axes run to the same total,
+3,017.10 m, and differ by at most **0.128 m** along the way — enough to read
+72.4640 % against 72.5631 % and land either side of a rounded 72.5. Scaling the
+page's distances to the carried total fixes the total and not the distribution,
+which this document already says about a different figure. **Where two
+measurements of one thing straddle a rounding boundary, the boundary is the
+finding, not the disagreement.**
+
 **And the profile is now true to scale**, after a reader asked how a curve that
 looks gentle can read −73 %. It could: the chain drops 808 m to 1 m over 3.0 km,
 a quarter of it over 40 %, and the crosshair was right. The *picture* was not —
