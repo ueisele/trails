@@ -8,12 +8,23 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1, 1B, 1C, 1D, 3, 2, 3B and 4 are built and reviewed**, and the map is
-drawn from the graph and carries it. `libs/src/trails/routing/`,
-`libs/src/trails/network/`, `libs/src/trails/visualization/encoding.py`,
-`analysis/scripts/route_graph.py` and `lomsdal_visten.py`. Their output is the
-reference in the decisions document; **5–8 remain**. The project runs on
-**Python 3.14** and `uv.lock` is tracked from 1D onwards.
+**Phases 1, 1B, 1C, 1D, 3, 2, 3B, 4 and 5 are built and reviewed.** The map is
+drawn from the graph, carries it, profiles it and exports it.
+`libs/src/trails/routing/`, `libs/src/trails/network/`,
+`visualization/encoding.py`, `io/export/gpx.py`, `routing/track.py`,
+`analysis/scripts/route_graph.py` and `lomsdal_visten.py`. **6, 6B, 6C, 7 and 8
+remain.** The project runs on **Python 3.14** and `uv.lock` is tracked from 1D.
+
+**The tree is at `dd1a426` and clean.** Phase 6 has been split out and handed
+over; when its agent is working here the standing rule applies — **documents
+only, no code, no `git commit`**, because the pre-commit hook stashes unstaged
+changes and would pull work out from under it. Check `git status` first.
+
+**Committing needs the user.** Commits are GPG-signed and the passphrase prompt
+opens on their terminal, not here; it times out unsuccessfully more often than
+not. Write the message to a file under the scratchpad, try once, and if it times
+out say so and offer the `! git commit -F <path>` line rather than retrying
+blindly.
 
 The order these were done in is not the order they are numbered, and that was
 deliberate: 1C → 1D → **3** → 2 → 3B → 4. Phase 3 went before 2 because its
@@ -41,14 +52,20 @@ and a crosshair, in a Leaflet control that folds itself away whenever nothing is
 selected. The four figures and the compass point reach it as a table keyed by
 each line's `trail-group-<chain_id>` class — the mechanism the search box
 already used, and not the GeoJSON properties three drafts had assumed. The popup
-gained *Ascent / descent* and *High point*, the arrow lives in a pane of its own
-so it is not counted among the map's paths, and the page came to 36.0 MB. What
-the review found is in *What phase 4 found* below.
+gained *Ascent / descent* and *High point*, and the arrow lives in a pane of its
+own so it is not counted among the map's paths. The curve is then **coloured by
+gradient** — gentle under 15 %, steep, very steep, extreme over 40 %, read over
+a 25 m window — added on request afterwards. What the review found is in *What
+phase 4 found* below, and the bands in *What the gradient bands cost*.
 
-When an agent is working in this tree: **documents only, no code, no
-`git commit`** — the hook stashes unstaged changes and would pull work out from
-under it. `command make hooks-run` will fail on half-written files; that is not
-a finding. Check `git status` before assuming a phase has ended.
+**Phase 5** exports a selected chain: `routing/track.py` composes the dense
+height-carrying line, `io/export/gpx.py` gained `<ele>`, `<extensions>` and a
+`<metadata>` source list with no `<copyright>`, and the browser writes the same
+file from the same walk. The page gained every source's licence and version, and
+`name`, `source` and `noPath` per chain. Its review moved the payload's height
+quantum from a decimetre to the **centimetre the service actually answers at**,
+so that a downloaded file reproduces the ascent it states — see *What phase 5's
+review found*.
 
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
@@ -174,11 +191,11 @@ changes with every parameter:
     net = cache_module.Object(cache_dir=".cache/objects").load(os.path.basename(key)[:-4])["network"]
     net.chains, net.edges, net.nodes
 
-**Rebuild the map and drive it.** `command make map`, 53 seconds warm.
+**Rebuild the map and drive it.** `command make map`, about a minute warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
-`analysis/output/lomsdal-visten.html`, and wait ten seconds after load — the page
-is **31.1 MB** since 3B and the two coverage rows, and was 25.4 before either.
-The five probes, with what they read after both:
+`analysis/output/lomsdal-visten.html`, and **wait twenty seconds after load** —
+the page is **37.4 MB** as of phase 5. It was 25.4 before 3B, 31.1 after the
+coverage rows, 36.0 after phase 4. The five probes, with what they read now:
 
 | | |
 |---|---|
@@ -199,9 +216,22 @@ disagreed by two for several days and neither was re-run. **When a figure is
 written next to its decomposition, add the decomposition up.**
 
 **And the graph in the page**, since 3B. `window.trailsGraph.ready` resolves to
-it; `inflateMs` and `decodeMs` say what it cost. The round trip is checkable
-from the page alone — fold the decoded values as `header.checksum` was folded
-and compare, over 948,465 vertices and 1,406,040 samples.
+it; `inflateMs` and `decodeMs` say what it cost — **229 ms and 50 ms** at 4.93 MB.
+The round trip is checkable from the page alone: fold the decoded values as
+`header.checksum` was folded and compare, over 948,465 vertices and 1,406,040
+samples. Heights come back in **centimetres** since phase 5, so fold
+`Math.round(h / header.elevationQuantum)` and not `h / 0.1`.
+
+**And the panel and the export, since 4 and 5.** `window.trailsProfile` is the
+selection — `figure` and the composed `shape` — and it is there to be read by a
+probe rather than screenshotted. The panel's container is
+`.trails-profile-panel`; **do not fall back to `document.body`** when looking for
+its text, or a probe reads the first of eleven thousand popups instead and
+reports nonsense confidently. That cost an hour.
+
+A download is drivable: `browser.new_page(accept_downloads=True)`, then
+`page.expect_download()` around a click on the panel's GPX control. Measured, a
+blob download from a `file://` page works and keeps its offered filename.
 
 **Do not record a checksum as a reference figure.** It verifies that *this*
 build's page decoded *this* build's stream; it is not a property of the network.
@@ -363,6 +393,28 @@ every one was invisible until something was actually run.
   So the vectorised path is no longer a safe way to summarise a column, and the
   scalar path was never one. Neither is a substitute for `pd.isna`. What this
   costs `_values_digest` is written up under *What 1C found*.
+- **A `var` silently overwrites a function of the same name in the same
+  closure.** The panel's legend was built into `var scale`, which replaced the
+  `scale()` it used to fit a series to its box. Nothing raised at parse time and
+  the page looked fine until a chain was clicked. The page's script is one long
+  IIFE, so every name in it shares one scope.
+- **A `catch` spanning the wait *and* the work blames the wait.** The panel ended
+  in `.then(draw).catch(say('the routing graph did not arrive'))`, so a fault
+  while *drawing* was reported as a payload that never arrived. It sent me to the
+  payload twice. Two handlers — `then(onValue, onReject)` — and the next run
+  named the real fault itself.
+- **Anything drawn into the overlay pane is counted among the map's paths for
+  ever after.** 11,589 is an acceptance figure for every phase from 3 onwards, so
+  the direction arrow and, from phase 6, the planned route belong in panes of
+  their own. `map.createPane` plus `leaflet-zoom-hide`.
+- **`map.eachLayer` does not reach the lines.** It walks the map's top-level
+  layers, which are the feature groups; a probe using it reported **zero** popups
+  on a page holding eleven thousand. Recurse into each group, or count the label
+  in the built HTML instead.
+- **A removed constant is invisible to every Python check.** Dropping `CURVE`
+  left one reference behind in the arrow, and the whole panel threw at load —
+  with `make hooks-run` green and the map building cleanly. Only a browser says
+  so, which is why anything visual is driven before it is believed.
 - **Merging pieces of a line does not deduplicate them.** Measuring how much of
   an edge lies near a mask, the natural form is to intersect the edge with each
   nearby line's buffer and merge the pieces. Those pieces overlap where the mask
@@ -753,6 +805,42 @@ phase was rewritten as one text; what to check the rewrite kept:
 And one assumption checked rather than carried: **a blob download from a
 `file://` page works.** Firefox saves it with the offered filename and raises
 nothing. Ten minutes, and the whole phase rested on it.
+
+**Phase 6, plan mode — handed over, not yet reviewed.** What to check, and the
+figures to check it against:
+
+- **The graph must not move**: 11,290 chains, 234,358 edges, 116,967 nodes,
+  757/747 components, reach 50.8 km = 94 %, 17 quays, Mosjøen 2.17 m. **The
+  payload must not move**: 4.93 MB, both checksums, heights at 0.01 m.
+- **The page must not move**: 198 markers, **11,589** paths of which exactly one
+  non-interactive, 25 layers, 10 px above 60, wheel 9 → 11. **If the path count
+  moved, the route was drawn into the overlay pane** — that is the first thing to
+  look at, and the arrow in phase 4 is the precedent.
+- **A chain's own export still reproduces its stated ascent to 0.00 m.** Phase 5
+  bought that with 0.8 MB; a change to how a series is composed can lose it
+  without anything else looking wrong.
+- **All four leg kinds, in one model.** The seam between routed and free legs was
+  where the first split of this phase went, and it was moved precisely because a
+  model knowing one kind would have to be widened. If the code has a routed-leg
+  path and a free-leg path that do not meet, that is the finding.
+- **Cost comes out of the header, not out of a second table.** Length times the
+  source's factor, a crossing at the flat `flatM`. A cost column in the payload
+  would be the thing 3B deliberately left out.
+- **The on-demand heights are sampled at 5 m and read by the same ascent rule as
+  the build.** Two halves of one profile answering differently is the failure,
+  and it will not look like one.
+- **A crossing carries no curve.** Not a flat line at zero — that is a claim
+  about ground that is not there. Same rule as a ferry in phase 4.
+- Ask what it needs that nothing provides, and grep the built page rather than
+  assuming. **Three phases in a row assumed a mechanism that did not exist** —
+  GeoJSON properties, the licences, the point table.
+
+**Phase 6B, the plan as a file, and 6C, protected areas.** Both are specified and
+both carry a warning found before handover: 6C needs a spatial query
+`naturbase.Source` does not have, a **new per-edge field and therefore a
+`GRAPH_LAYOUT` bump**, and a machine-readable table of the named points — which
+the page does not have either, they are 1,410 `circleMarker` and 865 `marker`
+with their names inside popup HTML.
 
 **Phase 7, editing.** Reorder and watch the numbers; the failure mode is a stale
 leg or a profile that no longer matches the line.
