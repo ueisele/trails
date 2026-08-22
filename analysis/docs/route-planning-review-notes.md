@@ -8,17 +8,20 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1, 1B, 1C, 1D, 3, 2, 3B, 4 and 5 are built and reviewed.** The map is
+**Phases 1, 1B, 1C, 1D, 3, 2, 3B, 4, 5 and 6 are built and reviewed.** The map is
 drawn from the graph, carries it, profiles it and exports it.
 `libs/src/trails/routing/`, `libs/src/trails/network/`,
 `visualization/encoding.py`, `io/export/gpx.py`, `routing/track.py`,
-`analysis/scripts/route_graph.py` and `lomsdal_visten.py`. **6, 6B, 6C, 7 and 8
+`analysis/scripts/route_graph.py` and `lomsdal_visten.py`. **6B, 6C, 7 and 8
 remain.** The project runs on **Python 3.14** and `uv.lock` is tracked from 1D.
 
-**The tree is at `dd1a426` and clean.** Phase 6 has been split out and handed
-over; when its agent is working here the standing rule applies — **documents
-only, no code, no `git commit`**, because the pre-commit hook stashes unstaged
-changes and would pull work out from under it. Check `git status` first.
+**When an agent is working here the standing rule applies** — **documents only,
+no code, no `git commit`**, because the pre-commit hook stashes unstaged changes
+and would pull work out from under it. Check `git status` first.
+
+**And launch that agent in a memory cage.** Phase 6's first session took 42 GiB
+and the kernel's OOM killer ended it; the rule and the incident are in the trap
+list, and the cage is under *The prompt that has worked*.
 
 **Committing needs the user.** Commits are GPG-signed and the passphrase prompt
 opens on their terminal, not here; it times out unsuccessfully more often than
@@ -66,6 +69,12 @@ file from the same walk. The page gained every source's licence and version, and
 quantum from a decimetre to the **centimetre the service actually answers at**,
 so that a downloaded file reproduces the ascent it states — see *What phase 5's
 review found*.
+
+**Phase 6** put plan mode in the page: clicking a route together out of all four
+leg kinds, a Dijkstra over the carried graph, undo, and the route's own profile.
+The route is drawn into a pane of its own, so the page's **11,589** paths do not
+move. Its review is in *What phase 6's review found* — everything reproduced, and
+the finding that came out of it lands on phase 5 rather than on 6.
 
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
@@ -423,6 +432,17 @@ every one was invisible until something was actually run.
   into one area first and intersect once. It is also 8× faster to shortcut the
   two cases that need no merge at all — one mask line covering the whole edge,
   which is 99 % of them, and only one line near it.
+- **An unbounded walk over the graph takes the machine down, not the script.** A
+  Dijkstra's path reconstruction — `while walk != a: used.append(edge)` — grew to
+  **42 GiB in 376 seconds** and reached the kernel's OOM killer, which chose the
+  terminal the session was running in. Two doors into it and both stand open in
+  this graph: **14 edges have `from_node == to_node`** (UT.no and FKB), where
+  stepping back across the edge does not leave the node; and `via[node]` starts
+  at `-1`, which numpy reads as the **last edge** — `to[-1]` is node 116,353 —
+  rather than raising. `timeout` does not help: it was set to 1200 s and the
+  memory was gone after 376. Cap the script instead, with
+  `resource.setrlimit(resource.RLIMIT_AS, (8 * 1024**3,) * 2)`, which turns
+  exactly this into a `MemoryError` naming the line.
 
 ## Before handing a phase over
 
@@ -464,6 +484,21 @@ anything visual, with `uv run --with playwright` and no new dependency. End with
 Give an agent an escape hatch — *if this is bigger than it reads, say so and
 stop* — and take it seriously when used. It has been right both times it was
 invoked.
+
+**And launch it in a memory cage**, because an instruction can be forgotten and a
+cgroup cannot:
+
+    systemd-run --user --scope -p MemoryMax=16G -p MemorySwapMax=0 claude ...
+
+Phase 6's first attempt died that way on 2026-08-22, taking 64 GB with it. The
+agent's 1,102 lines survived in the working tree; the session did not.
+
+**The cage and the script's own `RLIMIT_AS` do different jobs, and neither
+replaces the other.** Measured here: a cgroup at its ceiling delivers SIGKILL and
+exit 137 with **no traceback** — the machine survives and the agent learns
+nothing — while `setrlimit` makes the allocation fail so Python raises
+`MemoryError` and names the line. Set both: the cage protects the desktop from an
+agent that forgot the rule, the rlimit is what lets it debug itself.
 
 ## Reviewing each phase
 
@@ -806,8 +841,8 @@ And one assumption checked rather than carried: **a blob download from a
 `file://` page works.** Firefox saves it with the offered filename and raises
 nothing. Ten minutes, and the whole phase rested on it.
 
-**Phase 6, plan mode — handed over, not yet reviewed.** What to check, and the
-figures to check it against:
+**Phase 6, plan mode — built and reviewed**; see *What phase 6's review found*.
+What it was checked against, kept for 6B and 6C:
 
 - **The graph must not move**: 11,290 chains, 234,358 edges, 116,967 nodes,
   757/747 components, reach 50.8 km = 94 %, 17 quays, Mosjøen 2.17 m. **The
@@ -956,7 +991,7 @@ was wrong all five** — the phase readiness checks found gaps in 1B, in 3, in 2
 in 3B (which this document had written itself) and in 4, and the 3B review then
 found the payload gap above. The check that finds them is not reading the phase;
 it is measuring it against the built graph. **Phases 4, 5 and 6 have now had
-it; 7 and 8 have not.**
+it; 6B, 6C, 7 and 8 have not.**
 
 ## What phase 2 found
 
@@ -1050,6 +1085,94 @@ Two more, and one of them was mine:
   22.9, 12.7. Two other figures moved the same way, 237 → **241** and 4,485 →
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
+
+## What phase 6's review found
+
+**Every figure the phase reported reproduces**, checked against the built graph
+and a driven browser rather than against the report. The graph is untouched —
+11,290 chains, 234,358 edges, 116,967 nodes — the page holds at 198 markers,
+**11,589** paths with exactly one non-interactive, 25 layers and 10 px above 60,
+and the planned route lives in a pane of its own: **0 paths before, 13 with a
+five-point route, 0 again** once every point is taken back. No page errors.
+
+**The crossing carries no curve, and that was measured rather than looked at.** A
+route from a quay only a ferry reaches comes back as `ferry 7,386 m / 0 samples`
+beside `routed 62,225 m / 12,486 samples`, the two reported apart. In the composed
+series **nothing sits at height zero** and the minimum is 0.46 m, so the curve
+breaks where the ground stops instead of flattening across the fjord. Same rule a
+ferry gets in phase 4 — and the failure it guards against would have looked like
+data.
+
+**The router had the defect that killed the phase's first session, and it is
+fixed in the shipped code rather than only in the probe.** The back-walk was
+`while (walk !== from)`, unbounded and appending, with `viaEdge` starting at −1 —
+where a typed array answers `undefined` rather than raising, so it would have
+laid `undefined` into the geometry and carried on. It now has a bound of
+`header.edges`, an explicit `used < 0 || before < 0` throw, and a bound on the
+search itself. Direction is read off a separate `viaNode` predecessor rather than
+off the edge's own ends, which is what makes the **14 self-loop edges** safe. The
+heap's sift carries a note on why it terminates instead of a bound, because it
+moves over the array and not over the graph — the right distinction to draw.
+
+**Three review findings, all real, all fixed.** A multi-edge ferry was charged the
+flat cost per *edge*: 15 of the 21 ferry chains are cut into pieces and the
+longest into seven, so that one was priced at 35 km of walking instead of 5. Now
+split in proportion, as `graph.py::_cost` splits it — verified in both files, not
+taken on trust. A misclick could ask the height service for an unbounded number of
+points; now refused at 20 km and **said**, rather than coarsened, because
+coarsening would make the two halves of a profile disagree invisibly. And a failed
+batch left the other workers running.
+
+**And one the phase found itself, which is the instructive one.** The page's metre
+was a sphere at 110,574 m per degree — the *equatorial* figure — and read **0.56 %
+short** at 65.6°N. It cancelled for a chain, which is scaled onto its carried
+length, so nothing had ever shown it; a planned route has nothing to scale onto,
+and it came to 900 m of stated distance on the traverse. Replaced with the WGS84
+meridian series. Measured against the Python writer, the Rundtur's export went
+from **16,339 to 16,415 points against Python's 16,421** — the gap closed from 82
+to 6. **A constant that cancels in every case you have looked at is not a constant
+that is right.**
+
+### And the finding that lands on phase 5
+
+**The 123 trackpoints with no `<ele>` are not a phase 6 regression, and phase 5's
+acceptance contradicts itself.** The graph holds 1,831 unread samples of 1,406,040
+(0.130 %) on 637 edges across 250 chains; the Rundtur has 53, which the
+vertex/sample merge spreads to 123 written points. Both writers produce the same
+123 — Python at 16,421 points, the browser at 16,415 — and the lines that omit the
+element, `gpx.py:209` and `maps.py:1816`, are identical in HEAD.
+
+Phase 5's done-when item 3 said *every trackpoint carries an `<ele>`*, and item 5
+says the ascent must read back to the stored figure. **They cannot both hold**:
+read as if every point had a height, the Rundtur gives 1,718.96 against a stated
+1,721.80. The shipped code resolved it the right way and `gpx.py` says why —
+*"the point is written without an `<ele>` rather than with an invented one.
+Nothing downstream can tell an invented height from a read one."* Item 3 is
+struck.
+
+**And this document carried the false half of it.** *"Every point heighted"* was
+written here as a verified result of the phase 5 review, and it was never true.
+What the check actually establishes is that a file agrees with the figure it
+states — and reading an ascent back means **breaking the run at every point
+carrying no height**, which is exactly what `ascentMethod` describes. Read that
+way the Rundtur lands on 1,721.80 against 1,721.80; read the lazy way it is 2.84 m
+out. I made that mistake myself while checking this phase and was corrected by the
+file.
+
+**Two figures I reported as discrepancies were my own errors.** 251 chains against
+the phase's 250 — the extra "chain" is the group of **8,684 bridge edges**, which
+is not a chain. And 59 unread samples on the Rundtur against 53 — the raw
+per-edge sum counts a shared node twice, and this document already says to compose
+a chain's series with the shared node counted once. **Check a measurement against
+this document's own methods before reporting a phase's figure as wrong.**
+
+**What was not re-run**, nothing having contradicted it: the 20 km refusal, the
+workers stopping after a failed batch, the click timings, the leg through a sound,
+and the metre's own before-and-after.
+
+**Two things deliberately not built**, and both are right: the plan is not
+exportable, which is 6B, and switching plan mode off keeps the route drawn rather
+than discarding it, since undo is the only edit this phase owns.
 
 ## What phase 6's readiness check found
 
@@ -1165,8 +1288,10 @@ ascent read back off the composed heights matches the stored figure to
 The page carries what the file needs: eight sources with the licences of the
 decisions table, **Turrutebasen as CC0**, and `name`, `source` and `noPath` in
 the figures table. A chain downloads from `file://` in Firefox — the 42 km
-Rundtur at **1.19 MB**, schema-valid, every point heighted, none timed, no
-`<copyright>`. Nothing phase 4 was accepted against moved.
+Rundtur at **1.19 MB**, schema-valid, none timed, no `<copyright>`. It was
+written here that every point is heighted; **that was never true** and phase 6's
+review measured it — see *And the finding that lands on phase 5*. Nothing phase 4
+was accepted against moved.
 
 **The licence disagreement the phase flagged is not one.**
 `geonorge.Metadata.license` is a generic default for every Geonorge dataset, not

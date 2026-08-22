@@ -1056,7 +1056,10 @@ The export is finished when, **for a chain chosen in the browser**:
    test may reach the network.
 2. Its trackpoint count equals what the page said beside the button, and no gap
    between consecutive points exceeds 5 m.
-3. Every trackpoint carries an `<ele>`, and none carries a `<time>`.
+3. No trackpoint carries a `<time>`, and a point the height model was never read
+   at carries **no `<ele>`** rather than an invented one — 123 of the Rundtur's
+   16,421. A reader breaks its run there; forcing an element onto every point
+   contradicts item 5 below, which is what this phase is actually for.
 4. `<metadata>` names the sources this chain actually uses, each with a licence,
    and holds no `<copyright>`.
 5. Its ascent, read back off the `<ele>` values under the documented rule,

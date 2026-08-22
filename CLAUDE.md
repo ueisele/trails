@@ -130,6 +130,20 @@ command make check                # Run all checks at once
 - Use geopandas spatial indexing for geometry operations
 - Cache expensive computations (elevation matching, route calculations)
 
+### Exploratory Scripts
+Ad-hoc scripts that load the routing graph must cap their own memory, so that a
+defect raises `MemoryError` with a traceback instead of reaching the kernel's
+OOM killer — which kills the terminal, not the script:
+```python
+import resource
+resource.setrlimit(resource.RLIMIT_AS, (8 * 1024**3,) * 2)
+```
+A `timeout` is not a substitute: it bounds seconds, not bytes.
+
+Any loop walking the graph needs an explicit bound and must raise when it is
+exceeded. Never index a numpy array with a sentinel — `-1` is a valid index and
+silently returns the last element instead of failing.
+
 ### Data Sources
 - Primary: User-provided GPX files
 - External: OpenStreetMap, USGS elevation data
@@ -163,6 +177,8 @@ command make check                # Run all checks at once
 - Create notebooks without proper documentation
 - Write analysis code directly in notebooks (use src/trails/)
 - Assume specific data structure without validation
+- Run an unbounded `while` loop over graph data
+- Index a numpy array with a sentinel value such as `-1`
 
 ## Git Workflow
 - Branch from main for features
