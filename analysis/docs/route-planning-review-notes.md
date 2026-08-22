@@ -969,9 +969,21 @@ Two more, and one of them was mine:
 mechanisms that do not exist, and an acceptance spanning everything from a first
 click to protected-area reporting. For comparison, phase 4 was *draw a profile
 panel* and phase 5 *export one chain*, and each took an agent a full session plus
-a review. Split into **6** (plan mode, snap, Dijkstra, undo, the route's profile),
-**6B** (free legs, on-demand heights, water), **6C** (the export and everything it
-reports) and **6D** (protected areas and naming waypoints). Nothing dropped.
+a review. Split into **6** (plan mode, all four leg kinds, Dijkstra, undo, the
+route's profile), **6B** (the export and everything it reports) and **6C**
+(protected areas and naming waypoints). Nothing dropped.
+
+**The first split had four parts and the seam was in the wrong place.** It put
+the free legs in a phase of their own, which meant building a route model that
+knows one leg kind plus a stub refusing every click the graph cannot reach, then
+widening the one and deleting the other in the next phase. **Throwaway work at a
+seam is the seam telling you it is wrong** — phases 2 and 4 both had to be
+rewritten as one text after being corrected in pieces, and this was the same
+shape, caught before it cost anything. The size argument that produced it was
+also weak: phase 4 was 1,171 lines and phase 5 was **3,299 across 27 files**, and
+5 went through fine, so the ceiling was set lower than the evidence supports.
+The export and the protected areas stay separate because they *read* a finished
+route rather than shape it, and each brings a mechanism of its own.
 
 **The assumption that could have sunk it holds.** A free leg needs heights
 fetched from the page, and the page is a `file://` document — so the first thing

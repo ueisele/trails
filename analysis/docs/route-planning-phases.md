@@ -1087,8 +1087,25 @@ that is phase 7.
 
 **This used to be one phase covering everything through the export, the protected
 areas and the naming of waypoints.** It was seventeen requirements and three
-mechanisms that do not exist. Split into 6, 6B, 6C and 6D, each of which can be
-finished and reviewed on its own; nothing was dropped.
+mechanisms that do not exist. The export is 6B and the protected areas are 6C;
+nothing was dropped.
+
+**A leg has four kinds and this phase builds all four**, because the one thing
+worth not doing is shipping a route model that knows one of them. An earlier
+split put the free legs in a phase of their own, which would have meant building
+a model for routed legs, a stub refusing every click the graph cannot reach, and
+then widening the one and deleting the other. Phases 2 and 4 both had to be
+rewritten as one text after being corrected in pieces; this is the same shape,
+seen in time.
+
+| leg | distance counts as | profile | in the GPX |
+|---|---|---|---|
+| routed over the network | on foot | yes | one segment |
+| free, over land | on foot | yes, sampled on demand | one segment |
+| free, over water | **crossing** | none | ends the segment |
+| a ferry crossing | **crossing** | none | ends the segment |
+
+### Routing
 
 - Snap a click to the nearest node within about 150 m; beyond that keep the raw
   point. The payload's decoder already offers `nearestNode`, and phase 3B
@@ -1099,34 +1116,11 @@ finished and reviewed on its own; nothing was dropped.
   weighted — elevation-aware routing is a separate decision nobody has taken.
 - **Take back the last point.** Without it one misclick ruins a route, and
   popping the final leg is trivial; everything beyond that is phase 7.
-- Draw the route, show its **distance and ascent**. Both are summed off the
-  edges the route uses — read, never recomputed, the rule phase 4 set.
-- **Show the route's profile** in the panel from phase 4. It is the same panel,
-  but the series is now *composed* rather than read off one chain: the edges the
-  route uses, laid end to end. The panel takes a chain's class today, so it needs
-  a second way in — one that is handed a series and a length rather than a class.
-  The gradient bands, the crosshair and the reduction all apply unchanged.
+- Draw the route, show its **distance and ascent**, the crossings reported apart
+  from the walking total. Both are summed off the edges the route uses — read,
+  never recomputed, the rule phase 4 set.
 
-**Where no connection exists, the leg is a problem for 6B, not for this phase.**
-Until then, a click the graph cannot reach from the last waypoint is refused with
-a word saying so. That is not the finished behaviour; it is what keeps this phase
-finishable.
-
-**Done when** a north-south traverse of the park can be planned by clicking a
-handful of points along it, on routed legs, with its distance, ascent and profile
-shown; and the last point can be taken back. Check an approach from the coast
-too — Bønå or Visthus — since those only exist through a ferry. The case is known
-to be possible: the main component spans **94 %** of the park and reaches all
-**17** quays.
-
-Nothing phase 4 and 5 were accepted against may move: **198** markers, **11,589**
-paths of which exactly **1** non-interactive, **25** layers, the search at
-**10 px** above the zoom at 60, the wheel taking zoom **9 → 11**, and a chain's
-own export still reproducing its stated ascent to 0.00 m.
-
----
-
-## Phase 6B — Legs the network cannot carry
+### Legs the network cannot carry
 
 A route that may only follow recorded ways is not a plan for this park: 19.9 km
 of UT.no's own routes run where no source records anything, and the three-day
@@ -1138,30 +1132,50 @@ Rundtur reads **10.3 of its 42 km** that way.
   Measured before this was written: `ws.geonorge.no/hoydedata/v1/punkt` answers
   a `file://` page directly — `{"datakilde":"dtm1","terreng":"Skog","z":131.55}` —
   so no proxy and no CORS workaround is needed. Fifty points a request, the
-  endpoint's own cap. Sample at the same 5 m the build uses, and use the same
-  rule for the ascent, or the two halves of one profile answer differently.
+  endpoint's own cap. Sample at the same 5 m the build uses and read the ascent
+  by the same rule, or the two halves of one profile answer differently.
 - **A free leg over water is not walking.** A private boat transfer of the kind
   UT.no's descriptions rely on: the samples classify it, `terreng: "Havflate"`
-  instead of ground. Its length goes to the crossings, not the walking total; it
-  carries no profile; it ends a GPX segment. **A leg crossing a strait splits at
-  the shoreline** into walked and crossed parts — the samples alternate, so the
-  split falls out of them rather than needing a coastline.
-- **Splice the on-demand samples into the profile** at the right place, and mark
-  the straight stretches in the curve, so it says what the map says. A crossing
-  contributes no curve at all: there is no ground under it, and a flat line at
-  zero is a claim.
+  instead of ground — the same field, in the same response, so the rule costs
+  nothing beyond reading it. Its length goes to the crossings; it carries no
+  profile; it ends a GPX segment. **A leg crossing a strait splits at the
+  shoreline** into walked and crossed parts — the samples alternate, so the split
+  falls out of them rather than needing a coastline.
 
-Crossings — ferries and free legs over water alike — are reported apart from the
-walking distance and break the GPX track into segments, so neither reads as
-though it was swum.
+### The profile
 
-**Done when** a leg drawn across ground no source records shows a profile fetched
-on demand, a leg across water shows none and counts as a crossing, and a leg
-crossing a strait comes back as both.
+**Show the route's profile** in the panel from phase 4. It is the same panel, but
+the series is now *composed* rather than read off one chain: the edges the route
+uses, laid end to end, with the on-demand samples of any free leg spliced in at
+the right place. The panel takes a chain's class today, so it needs a second way
+in — one handed a series and a length rather than a class. The gradient bands,
+the crosshair and the reduction all apply unchanged.
+
+**Mark the straight stretches in the curve**, so the profile says the same thing
+the map does. A crossing contributes no curve at all: there is no ground under
+it, and a flat line at zero is a claim about the ground.
+
+### Done when
+
+A north-south traverse of the park can be planned by clicking a handful of points
+along it, with its distance, ascent and profile shown and its crossings counted
+apart; the last point can be taken back; a leg drawn across ground no source
+records shows a profile fetched on demand; a leg across water shows none; and a
+leg crossing a strait comes back as both. Check an approach from the coast —
+Bønå or Visthus — since those only exist through a ferry. The case is known to be
+possible: the main component spans **94 %** of the park and reaches all **17**
+quays.
+
+Nothing phases 4 and 5 were accepted against may move: **198** markers, **11,589**
+paths of which exactly **1** non-interactive, **25** layers, the search at
+**10 px** above the zoom at 60, the wheel taking zoom **9 → 11**, and a chain's
+own export still reproducing its stated ascent to 0.00 m. **The route belongs in
+a pane of its own** — anything drawn into the overlay pane is counted among the
+map's paths for ever after.
 
 ---
 
-## Phase 6C — A plan becomes a file
+## Phase 6B — A plan becomes a file
 
 Export through the writer phase 5 built. Little more than wiring — the composed
 geometry and its elevations already exist, because the profile needs them — and
@@ -1172,7 +1186,7 @@ without it the feature stops one step short of its own point.
   crossing. Do it here rather than in phase 8, because everything exported from
   now on should be loadable, and a file written before its description existed
   can never be restored exactly, only matched. Phase 8 adds the reading side.
-- **Mark every `<wpt>` as set or generated.** Nothing generates one yet — 6D
+- **Mark every `<wpt>` as set or generated.** Nothing generates one yet — 6C
   does — but the field goes in now, because phase 8 must never read a marker the
   map placed as a station somebody chose. The rule covers any marker the map adds
   by itself, now or later.
@@ -1201,7 +1215,7 @@ licences the file actually carries.
 
 ---
 
-## Phase 6D — Where the route is, and what it passes
+## Phase 6C — Where the route is, and what it passes
 
 Two lookups the page cannot do today, and both are about naming ground rather
 than finding it.
@@ -1223,7 +1237,7 @@ than finding it.
   - Put the figure in the exported description, and a **generated waypoint** at
     each crossing so a reader sees where the route enters and leaves. GPX holds
     waypoints, routes and tracks, and no polygons; the marker is the only way to
-    carry a boundary at all. Mark them generated — 6C put the field in.
+    carry a boundary at all. Mark them generated — 6B put the field in.
 - **Name a waypoint after what is there.** When one lands within about 50 m of a
   named point the map already draws — a hut, a quay, a trailhead, a farm — take
   that point's name, type and position for the `<wpt>`, while the route stays on
