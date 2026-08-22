@@ -203,8 +203,8 @@ changes with every parameter:
 **Rebuild the map and drive it.** `command make map`, about a minute warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and **wait twenty seconds after load** —
-the page is **37.4 MB** as of phase 5. It was 25.4 before 3B, 31.1 after the
-coverage rows, 36.0 after phase 4. The five probes, with what they read now:
+the page is **37.5 MB** as of phase 6B. It was 25.4 before 3B, 31.1 after the
+coverage rows, 36.0 after phase 4, 37.4 after phase 5. The five probes, with what they read now:
 
 | | |
 |---|---|
@@ -1173,6 +1173,154 @@ and the metre's own before-and-after.
 **Two things deliberately not built**, and both are right: the plan is not
 exportable, which is 6B, and switching plan mode off keeps the route drawn rather
 than discarding it, since undo is the only edit this phase owns.
+
+## What phase 6B found
+
+**The phase's own premise held, and it was the rewritten one.** `composeRoute`
+returned `height`, `distance`, `free` and the totals and **no coordinates at
+all**, so the first work was a track composer — and it is not a second walk. The
+profile wants heights against distance and the file wants vertices, and laying
+those out separately would be two walks over one route that could disagree while
+each still looked like a route. `composeRoute` now produces the shape a chain's
+series has — `lon`, `lat`, `along`, `height`, `distance`, `stretches` — which
+`runsOf` and `denseOf` read unchanged. **The rewrite of this phase was worth
+what it cost**: written against the earlier draft it would have been built as
+wiring and found the geometry missing halfway through.
+
+**Every acceptance figure reproduces, in one run of one probe.** 198 markers,
+**11,589** paths with exactly one non-interactive, 25 layers, the search 10 px
+above the zoom at 60, the wheel taking zoom **9 → 11**, and the plan's own pane
+**0 → 13 with five points → 0** once every point is taken back. The graph is
+untouched at 11,290 chains, 234,358 edges, 116,967 nodes. No page errors on any
+run. The chain export still holds at **16,415 points**, 123 of them without an
+`<ele>`, and its ascent still reads back off its own values to **0.00 m**.
+
+**Four routes, one per leg kind, all exported and validated against the shipped
+schema.**
+
+| route | legs | segments | trackpoints |
+|---|---|---:|---:|
+| a five-point traverse of UT.no's own ways | 4 × `routed` | 1 | 14,821 |
+| across a chain the height model has holes in | `routed` | 1 | 348, **16 without `<ele>`** |
+| from a quay only a ferry reaches | `routed 2,027 m · ferry 5,057 m · routed 1,737 m` | **2** | 1,496 |
+| between two components the network cannot join | `land 301 m` | 1 | 121 |
+
+**The two kinds of NaN come apart correctly, and that is the check worth
+keeping.** The crossing route breaks its track **once, at the crossing, and
+nowhere else** — one crossing against one break. The route over unread ground
+breaks **not at all** and keeps all sixteen of its unread points, each without an
+`<ele>` and with its position intact. Both are the same NaN in `height`; what
+tells them apart is the stretch boundary the composer records where it happens,
+never a distance that repeats.
+
+**A fifth route turned up the shoreline split without being asked for it.** Two
+clicks on open ground off the coast came back as `land 248 m · water 835 m` —
+the samples classified themselves and the leg split at the water's edge, so the
+walked stretch ends and the crossing carries no curve. All hundred points the
+file would hold are the land part; the crossing contributes none.
+
+**The three marking buckets read as the network says they should.** Over the
+walked network without its inferred connectors — **5,853.3 km** — the graph gives
+**63.4 %** unknown, marked **17.8 %**, unmarked **18.8 %**, and FKB the largest
+single source at **33.8 %**. On a route the same rule reads per edge: the 37 km
+traverse comes back *marked 0.00 km · unmarked 0.39 km · unknown 37.00 km ·
+0.3 m on connectors nobody drew · 5.97 km where no source records a path*. A
+connector is its own answer and not folded into unknown, which is what the
+payload has said since 3B and what would otherwise have been a fourth silent
+bucket.
+
+**A figure under a kilometre is written in metres.** *0.00 km on connectors
+nobody drew* was the first version of that line and it reads as a figure that is
+not there; the number was 0.26 m.
+
+**One bug, and only the browser could have shown it.** `routeGpxOf` was handed
+the plan's own description where it wanted what the panel had been told, so the
+file's `<desc>` silently dropped the route's crossings while the panel above the
+button went on showing them — a file that is plausible and silent about the one
+thing it breaks its track for. Two lines, and a test now pins the two sentences
+together. Nothing in Python could have caught it: both sides render, both are
+strings, and the missing clause is missing rather than wrong.
+
+**And a probe that lied for three runs.** The wheel read **9 → 9** in the full
+run while reading 9 → 11 in a probe of its own. The cause is not the map:
+`layer.fire('click')` opens the chain's popup, a Leaflet popup calls
+`disableScrollPropagation` on its own content so the content can scroll, and the
+popup sat over the middle of the map where the probe wheeled. `map.closePopup()`
+before the wheel, and it reads 9 → 11 in the same run as everything else. The
+tell was `document.elementFromPoint` returning a `<b>` — which only exists in
+this page inside a popup table.
+
+**A route's stated ascent reads back to within 0.03 m rather than 0.00**, and
+that is the figure's own decimal rather than a disagreement. A chain's ascent is
+rounded to a decimetre in Python before it reaches the page, so the file states
+exactly what it holds; a route's is computed in the page at full precision and
+written to one place. Half a decimetre is the whole of the gap, by construction.
+
+**Two things deliberately not built.** The named ways a route follows — *via
+Tveråvegen, Gamle Stavassveg* — which a chain's file carries as its identity: for
+a route that is naming ground rather than measuring it, and naming ground is 6C.
+And any survey-quality figure beside the unrecorded length, for the reason the
+decisions document gives: FKB discloses nothing, so it would read *30 km not
+disclosed*.
+
+### What phase 6B's review found
+
+**Eight findings, seven worked in and one declined.** Three were worth the
+review on their own:
+
+- **The dash table still spelled `'ferry'`** while `routedParts` had moved to the
+  name the header hands in. Renaming `FERRY` in `trails.routing.sources` would
+  have left `DASH[part.kind]` undefined, and a fjord crossing would have been
+  drawn as a **solid line indistinguishable from walked ground** — the one thing
+  this page must never draw, and nothing about it would have looked wrong.
+  Keyed off the name that arrives, and a browser now reads the crossing's
+  `stroke-dasharray` back as `2,8`.
+- **The check that refuses an incomplete `export` did not reach inside it.**
+  `route` and `waypoint` are dicts of eleven and three names; only the two keys
+  were tested, so a `route` short of `partLength` built without a word and the
+  page wrote `<trails:part kind="routed" undefined="2027.0"/>`. Now checked as
+  their own lists and reported as `route.partLength`, so a caller is told where
+  to look.
+- **The `<desc>` and the `<extensions>` had stopped saying the same thing.**
+  `metres` went into `SOURCE_CREDIT_FIELDS`, so the Python writer wrote it as an
+  attribute while `_credit_line` still ignored it — two recordings of one list
+  that disagree, in a module whose docstring says they are the same list twice.
+  The page had it right; Python now writes the length first as well, with a test.
+
+**And one claim in this documentation was over-reaching**, which is the finding
+worth keeping. *A route's track holds one segment more than it has crossings*
+is false at the ends: a crossing only adds a segment where it lies **between**
+two walked stretches. Driven in a browser, the straight leg that split at the
+shoreline — `land 248 m · water 835 m` — is one crossing and **one** stretch,
+because the crossing is last. A phase-8 reader implementing `segments =
+crossings + 1` would mis-map every leg of a route starting from a quay, which is
+this document's own worked example. What is true is the narrower statement: every
+break is a crossing.
+
+**Two smaller ones fixed**: an unreachable branch that would have filed an edge's
+metres as *on a connector nobody drew* while also crediting a named dataset —
+two contradictory claims about one edge — now throws instead; and `add_plan_mode`
+now documents the two settings it will refuse a page for.
+
+**One declined, with the reason recorded so it is not reopened.** The review
+argued that a leg the reader drew belongs in `undrawn` rather than `unmarked`,
+since `undrawn` means *never asked* and nobody asked about a line somebody drew.
+The decisions document settles it the other way and says why — *nobody marks a
+line you drew across open ground*, so it is unmarked by construction rather than
+unknown — and the file states the same metres separately as
+`<trails:straight>`, with the panel saying *0.30 km drawn straight, not a path*.
+A reader can tell the two apart without inference. What the review is right about
+is that `undrawn` and a free leg are neighbours; if phase 8 ever finds the
+distinction thin in practice, this paragraph is where to come back.
+
+**What the review confirmed rather than found**, having driven the page's own
+JavaScript in a harness: no NaN leaks into a `<trkseg>`; the vertex and sample
+series stay in one coordinate across a routed-to-land boundary; and the `joined`
+rule drops exactly the shared node and nothing else.
+
+**Everything was re-driven after the fixes** and nothing moved: 198 · 11,589 · 1
+· 25 · 10/60 · 9 → 11, the plan's pane 0 → 13 → 0, the chain still at 16,415
+points, and both routes still validating with their breaks only at crossings.
 
 ## What phase 6's readiness check found
 

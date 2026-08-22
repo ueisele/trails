@@ -1178,10 +1178,15 @@ map's paths for ever after.
 
 ---
 
-## Phase 6B — A plan becomes a file
+## Phase 6B — A plan becomes a file — **built**
 
 Phase 6 leaves the route on the screen. This makes it a file, through the writer
 phase 5 built, and without it the feature stops one step short of its own point.
+
+**Built, and what it decided is in the decisions document** under *What a route's
+file says that a chain's cannot*: the leg modes go on the track and not on a
+`<trkseg>`, a crossing's own line is never written, and a route with a hole in it
+is refused rather than written. What the review found is in the review notes.
 
 **It is not wiring, and an earlier draft of this phase said it was.** Measured
 against the built page: `composeRoute` returns `height`, `distance`, `free` and
@@ -1263,13 +1268,26 @@ or cuts a route into dozens of pieces, and both look right on a chart.
   for a composed series. Restoring it is this phase's visible outcome.
 
 **Done when** a planned route downloads as a GPX that validates against the
-shipped schema, carries its waypoints and each leg's mode, breaks its track at
-every crossing and nowhere else, keeps a point the height model never read while
-omitting only its `<ele>`, and states its own ascent, its sources with their
-lengths and licences, its three marking buckets and its unrecorded length — with
-the download line naming the licences the file actually carries. Nothing phase 6
-was accepted against moves: **198** markers, **11,589** paths with exactly one
-non-interactive, **25** layers, and the route in a pane of its own.
+shipped schema, carries its waypoints and each leg's mode, keeps a point the
+height model never read while omitting only its `<ele>`, and states its own
+ascent, its sources with their lengths and licences, its three marking buckets
+and its unrecorded length — with the download line naming the licences the file
+actually carries.
+
+**Every break in the track is a crossing, and the rule runs only that way.** An
+earlier draft of this paragraph asked for a break *at* every crossing, which is
+false wherever one lies at either end: a route starting from a quay only a ferry
+reaches has one crossing and **one** segment, and two crossings back to back
+still yield two. Read the leg list for the order, and a break only as *a crossing
+was here*. The decisions document carries the reasoning.
+
+Nothing phase 6 was accepted against moves: **198** markers, **11,589** paths
+with exactly one non-interactive, **25** layers, and the route in a pane of its
+own.
+
+**All of that was driven and measured**, on four routes covering all four leg
+kinds. The figures are in the review notes; the shape of the file is in the
+decisions document.
 
 ---
 
