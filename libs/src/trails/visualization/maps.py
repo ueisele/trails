@@ -172,6 +172,30 @@ def _record_search_names(group: folium.FeatureGroup, names: dict[str, str]) -> N
     setattr(group, SEARCH_NAMES_ATTR, names)
 
 
+#: Attribute under which a feature group carries the named things it draws, as
+#: a table rather than as popup HTML. The same mechanism as
+#: :data:`SEARCH_NAMES_ATTR` and :data:`CHAIN_FIGURES_ATTR`, and needed for the
+#: same reason: a Leaflet marker's name lives in the popup it was given, which
+#: is a string of markup and not a lookup. Over two thousand points are drawn
+#: here — huts, quays, trailheads, farms, settlements — and until this existed
+#: nothing in the page could answer *what is at this position*.
+#:
+#: Opt-in per layer, through the ``point_type`` a caller passes: a place name
+#: drawn as text rather than as a marker asserts no single position — a valley
+#: has none — and a waypoint must not be named after one.
+NAMED_POINTS_ATTR = "named_points"
+
+
+def _record_named_points(group: folium.FeatureGroup, points: list[dict[str, object]]) -> None:
+    """Attach the named things a layer draws to its feature group.
+
+    Args:
+        group: Feature group the points belong to
+        points: One entry per point, with its name, type and position
+    """
+    setattr(group, NAMED_POINTS_ATTR, points)
+
+
 #: Attribute under which a feature group carries the figures its lines are
 #: described by. The same mechanism as :data:`SEARCH_NAMES_ATTR`, for the same
 #: reason: a Leaflet polyline has no ``feature.properties`` and its path options
@@ -232,6 +256,7 @@ GRADIENT_BANDS = (
 EXPORT_SETTINGS = (
     "credits",
     "heights",
+    "protected",
     "fields",
     "creditFields",
     "sourceLength",
@@ -269,11 +294,23 @@ EXPORT_ROUTE_SETTINGS = (
     "part",
     "partKind",
     "partLength",
+    "areas",
+    "area",
+    "areaId",
+    "areaName",
+    "areaForm",
+    "areaLength",
 )
 
 #: What ``waypoint`` holds, checked for the same reason as
 #: :data:`EXPORT_ROUTE_SETTINGS`.
-EXPORT_WAYPOINT_SETTINGS = ("name", "origin", "set")
+#:
+#: ``generated`` is the other value ``origin`` takes, and the three words after
+#: it are what a marker the map placed says it is: a boundary crossing names the
+#: area it enters or leaves, and ``area`` is the field its id travels under, so
+#: a reader loading the file back can tell which boundary was meant without
+#: parsing a sentence.
+EXPORT_WAYPOINT_SETTINGS = ("name", "origin", "set", "generated", "enters", "leaves", "area")
 
 
 #: Everything the page has to be handed before it can plan a route. As with
@@ -295,6 +332,8 @@ PLAN_SETTINGS = (
     "maxStraightM",
     "crossingKind",
     "connectorKind",
+    "touchedM",
+    "namedM",
 )
 
 
@@ -876,6 +915,7 @@ def add_points(
     label_field: str | None = "name",
     search_field: str | None = None,
     source: str | None = None,
+    point_type: str | None = None,
     show: bool = True,
 ) -> folium.FeatureGroup:
     """Add point features (huts, shelters, info points) as a toggleable layer.
@@ -892,6 +932,10 @@ def add_points(
         search_field: Column holding the text :func:`add_search` matches against;
             defaults to ``label_field``
         source: Dataset the points came from, shown at the foot of every popup
+        point_type: What these points are — a hut, a quay, a trailhead. Given
+            one, the layer carries a table of what it draws and where, which is
+            how a waypoint set beside one of them comes to be named after it.
+            Left out, the layer draws itself and answers no questions.
         show: Whether the layer starts visible
 
     Returns:
@@ -901,6 +945,7 @@ def add_points(
         gdf = gdf.to_crs(epsg=4326)
 
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
+    named: list[dict[str, object]] = []
 
     for _, row in gdf.iterrows():
         geometry = row.geometry
@@ -929,6 +974,10 @@ def add_points(
             marker.add_child(folium.Popup(popup_html, max_width=320))
         marker.add_to(group)
 
+        if point_type and tooltip:
+            named.append({"name": tooltip, "type": point_type, "lat": round(geometry.y, 6), "lon": round(geometry.x, 6)})
+
+    _record_named_points(group, named)
     group.add_to(fmap)
     return group
 
@@ -944,6 +993,7 @@ def add_labelled_points(
     kind_field: str = "kind",
     popup_fields: dict[str, str] | None = None,
     source: str | None = None,
+    point_type: str | None = None,
     searchable: bool = True,
     show: bool = True,
 ) -> folium.FeatureGroup:
@@ -966,6 +1016,8 @@ def add_labelled_points(
         popup_fields: Mapping of column name to popup label. Without it a marker
             only names itself on hover, which reads as a dead click.
         source: Dataset the points came from, shown at the foot of every popup
+        point_type: What these points are — a trailhead, a farm, a settlement.
+            See :func:`add_points`; the same table, for the same reason.
         searchable: Whether :func:`add_search` can find these by their label
         show: Whether the layer starts visible
 
@@ -977,6 +1029,7 @@ def add_labelled_points(
 
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
     search_names: dict[str, str] = {}
+    named: list[dict[str, object]] = []
 
     for _, row in gdf.iterrows():
         geometry = row.geometry
@@ -1010,7 +1063,11 @@ def add_labelled_points(
             marker.add_child(folium.Popup(popup_html, max_width=320))
         marker.add_to(group)
 
+        if point_type:
+            named.append({"name": label, "type": point_type, "lat": round(geometry.y, 6), "lon": round(geometry.x, 6)})
+
     _record_search_names(group, search_names)
+    _record_named_points(group, named)
     group.add_to(fmap)
     return group
 
@@ -1247,6 +1304,33 @@ class _RoutingGraph(MacroElement):
                     noPathRecorded[i] = (derived[i] & header.noPathBit) ? 1 : 0;
                 }
 
+                // The third field, which is a length and not a flag: how much of
+                // the edge lies inside each protected area it meets, in the
+                // order header.protected lists them. Most edges say 'none' in
+                // one byte. **A crossing says 'none' as well and means
+                // something else** — there is no walking distance under a
+                // ferry, so it was never asked — and nothing here may read this
+                // for one; the kind is what tells them apart, as it does for
+                // waymarked, where the payload can afford a code of its own and
+                // here it cannot.
+                var protectedAt = new Int32Array(edges + 1);
+                var areaOf = [], areaShare = [];
+                var shareStep = header.protectedShareQuantum;
+                for (i = 0; i < edges; i += 1) {
+                    var meets = cursor.varint();
+                    for (var a = 0; a < meets; a += 1) {
+                        areaOf.push(cursor.take(1)[0]);
+                        // A share of the edge, not a length. Python measured
+                        // these metres in the projection the graph is built in
+                        // and this page measures its own from the ellipsoid;
+                        // multiplied by the length measured here, a route can
+                        // never state more ground inside an area than it walked.
+                        areaShare.push(cursor.varint() * shareStep);
+                    }
+                    protectedAt[i + 1] = protectedAt[i] + meets;
+                }
+                var protectedArea = Uint8Array.from(areaOf), protectedShare = Float64Array.from(areaShare);
+
                 var vertexAt = new Int32Array(edges + 1);
                 for (i = 0; i < edges; i += 1) { vertexAt[i + 1] = vertexAt[i] + cursor.varint(); }
                 var coordinates = new Float64Array(2 * header.vertices);
@@ -1314,11 +1398,53 @@ class _RoutingGraph(MacroElement):
                     chainIds: chainIds, chainOf: chainOf, chainAt: chainAt, flags: flags,
                     fromNode: fromNode, toNode: toNode, sources: sources,
                     waymarked: waymarked, noPathRecorded: noPathRecorded,
+                    protectedAt: protectedAt, protectedArea: protectedArea, protectedShare: protectedShare,
                     vertexAt: vertexAt, coordinates: coordinates,
                     sampleAt: sampleAt, heights: heights,
                     nodeLon: nodeLon, nodeLat: nodeLat,
                     nearestNode: nearestNode.bind(null, nodeLon, nodeLat)
                 };
+            }
+
+            // Nothing lies in a protected area far more often than something
+            // does, so the answer for that case is one shared array rather than
+            // a new one per position: this is asked once per height sample
+            // along a leg drawn straight, and once per point of an exported
+            // track.
+            var NOWHERE = [];
+
+            // Which protected areas a position lies in, by their place in
+            // header.protected. **Even-odd over every ring of an area, its
+            // holes among them**: in a valid multipolygon a point inside a hole
+            // is enclosed by an even number of rings and so comes out outside,
+            // and a point in any of several disjoint parts comes out inside. So
+            // there is no outer-and-inner structure here to keep in step with
+            // itself, and a boundary that gains an island needs no new case.
+            //
+            // The box first, because it settles thirty of the thirty-one areas
+            // in four comparisons, and only then the four thousand vertices.
+            function areasAt(areas, lon, lat) {
+                var found = null;
+                for (var a = 0; a < areas.length; a += 1) {
+                    var box = areas[a].bounds;
+                    if (lon < box[0] || lon > box[2] || lat < box[1] || lat > box[3]) { continue; }
+                    var rings = areas[a].rings, crossings = 0;
+                    for (var r = 0; r < rings.length; r += 1) {
+                        var ring = rings[r];
+                        for (var i = 0, k = ring.length - 1; i < ring.length; k = i, i += 1) {
+                            var yi = ring[i][1], yk = ring[k][1];
+                            // The half-open rule: a vertex exactly at this
+                            // latitude is counted by the segment below it and
+                            // not by the one above, so a ray through a corner
+                            // is counted once rather than twice or not at all.
+                            if ((yi > lat) === (yk > lat)) { continue; }
+                            var t = (lat - yi) / (yk - yi);
+                            if (lon < ring[i][0] + t * (ring[k][0] - ring[i][0])) { crossings += 1; }
+                        }
+                    }
+                    if (crossings % 2 === 1) { (found = found || []).push(a); }
+                }
+                return found || NOWHERE;
             }
 
             // A linear scan, and it needs no spatial index: a hundred thousand
@@ -1339,6 +1465,13 @@ class _RoutingGraph(MacroElement):
 
             var began = performance.now();
             var graph = {header: header, inflateMs: null, decodeMs: null, totalMs: null, error: null};
+            // Bound to the graph before the stream is inflated rather than
+            // inside the decode, because it needs nothing from the stream: the
+            // outlines travel in the header, and a caller asking what protects
+            // a position should not have to wait for two million coordinates
+            // it is not going to look at.
+            graph.protectedAreas = header.protected || [];
+            graph.areasAt = areasAt.bind(null, graph.protectedAreas);
             graph.ready = inflate(bytesOf(encoded)).then(function (bytes) {
                 var inflated = performance.now();
                 var decoded = decode(bytes);
@@ -1785,6 +1918,79 @@ class _ProfilePanel(MacroElement):
                 return shape.stretches.map(function (stretch) { return denseOf(shape, stretch); });
             }
 
+            // Where the selection crosses a protected boundary, worked out the
+            // first time something asks and then kept against that selection.
+            //
+            // **Asked for rather than computed on every refresh, and measured.**
+            // The walk below is 45 ms of a 50 ms panel refresh over a 37 km
+            // route and it grows with the route, while the only thing that needs
+            // it is the button — which a reader may never press. Cached, so the
+            // file and any check that reads them get one answer rather than two
+            // walks that could differ. The cache dies with the selection, which
+            // is a fresh object on every change.
+            function crossings() {
+                if (!selected || !selected.composed || !selected.shape || !selected.runs) { return []; }
+                if (!selected.crossings) { selected.crossings = crossingsOf(selected.shape, selected.runs); }
+                return selected.crossings;
+            }
+
+            // Where the route crosses into a protected area and where it leaves
+            // one again, as the markers the file carries. **Read off the runs
+            // the file is written from**, which is the one series in this page
+            // with a point every few metres over the whole route — the vertices
+            // alone are a source's own corners and a leg drawn straight has two
+            // of them for twenty kilometres.
+            //
+            // Two things this deliberately does not do. It puts no marker where
+            // the route *begins* inside an area or ends inside one: that is not
+            // a crossing and there is nothing there to see. And it looks only
+            // for the areas the route already reports — the threshold is
+            // applied once, where the figures are — so a boundary grazed for
+            // ten metres cannot bring a pair of markers in through this door
+            // after the sentence above declined to mention it.
+            //
+            // The boundary this walks is the page's own copy, simplified to
+            // five metres, so a marker sits within that of the line the
+            // register draws. The *lengths* beside it are not measured here:
+            // they come from the build, which measured them against the
+            // register's full precision.
+            function crossingsOf(shape, runs) {
+                var graph = window.trailsGraph;
+                if (!graph || !graph.areasAt) { return []; }
+                var reported = Object.create(null);
+                (shape.protected || []).forEach(function (area) { reported[area.id] = area; });
+
+                var out = [];
+                function mark(area, entering, first, second) {
+                    out.push({id: area.id, name: area.name, form: area.form, entering: entering,
+                              lat: (first.lat + second.lat) / 2, lon: (first.lon + second.lon) / 2});
+                }
+                function named(indices) {
+                    var ids = [];
+                    for (var i = 0; i < indices.length; i += 1) { ids.push(graph.protectedAreas[indices[i]].id); }
+                    return ids;
+                }
+
+                runs.forEach(function (run) {
+                    var before = [];
+                    for (var i = 0; i < run.lon.length; i += 1) {
+                        var here = named(graph.areasAt(run.lon[i], run.lat[i]));
+                        if (i > 0) {
+                            var from = {lon: run.lon[i - 1], lat: run.lat[i - 1]};
+                            var to = {lon: run.lon[i], lat: run.lat[i]};
+                            here.forEach(function (id) {
+                                if (reported[id] && before.indexOf(id) < 0) { mark(reported[id], true, from, to); }
+                            });
+                            before.forEach(function (id) {
+                                if (reported[id] && here.indexOf(id) < 0) { mark(reported[id], false, from, to); }
+                            });
+                        }
+                        before = here;
+                    }
+                });
+                return out;
+            }
+
             function pointsIn(runs) {
                 return runs.reduce(function (total, run) { return total + run.lon.length; }, 0);
             }
@@ -1821,7 +2027,12 @@ class _ProfilePanel(MacroElement):
                         out.push(carried);
                     });
                 });
-                return out.concat(heightsWritten(runs) ? EXPORT.heights : []);
+                // And the register the protected figures come from, wherever
+                // the file states one. A file naming a source it did not draw on
+                // is exactly as wrong as one leaving a source out, and this
+                // route's description carries a number that came from Naturbase.
+                return out.concat(heightsWritten(runs) ? EXPORT.heights : [])
+                    .concat((shape.protected || []).length ? EXPORT.protected : []);
             }
 
             function creditLine(credit) {
@@ -2006,7 +2217,7 @@ class _ProfilePanel(MacroElement):
             // series — its crossings, its stretches drawn straight — and it is
             // handed in for the same reason `planned` takes it: the sentence
             // above the button and the one in the file are one sentence.
-            function routeGpxOf(figure, shape, runs, plan, extra) {
+            function routeGpxOf(figure, shape, runs, plan, extra, crossings) {
                 var credits = routeCredits(shape, runs);
                 var told = planned(figure, shape, extra).concat([markingLine(shape.tally)]);
                 var figures = routeFigures(figure, shape);
@@ -2019,20 +2230,49 @@ class _ProfilePanel(MacroElement):
                 // 1.1 puts a waypoint: it is a top-level element of its own and
                 // **not** part of the extensions mechanism, and a file placing
                 // it anywhere else parses and fails the schema.
-                plan.waypoints.forEach(function (point, index) {
+                // The order GPX 1.1 fixes inside a <wpt> as well: name, then
+                // desc, then type, then the extensions. A file that writes them
+                // in the order they were thought of parses and fails the schema,
+                // which is the whole reason phase 6B's file is checked against
+                // one.
+                function waypoint(point, name, described, kind, origin, area) {
                     out.push('  <wpt lat="' + point.lat.toFixed(EXPORT.coordinateDecimals) +
                         '" lon="' + point.lon.toFixed(EXPORT.coordinateDecimals) + '">');
-                    out.push('    <name>' + escaped(EXPORT.waypoint.name + ' ' + (index + 1)) + '</name>');
-                    // Set or generated, on every one. Nothing generates a
-                    // waypoint yet, and the field goes in before anything does:
-                    // a reader loading this file back must never take a marker
-                    // the map placed for a station somebody chose, and a file
-                    // written before the field existed could only ever be
-                    // matched afterwards, never restored.
+                    out.push('    <name>' + escaped(name) + '</name>');
+                    if (described) { out.push('    <desc>' + escaped(described) + '</desc>'); }
+                    if (kind) { out.push('    <type>' + escaped(kind) + '</type>'); }
+                    // Set or generated, on every one: a reader loading this file
+                    // back must never take a marker the map placed for a station
+                    // somebody chose, or the route would gain stations nobody
+                    // put down and start routing through them.
                     out.push('    <extensions>');
-                    out.push('      ' + element(EXPORT.waypoint.origin, EXPORT.waypoint.set));
+                    out.push('      ' + element(EXPORT.waypoint.origin, origin));
+                    if (area) { out.push('      ' + element(EXPORT.waypoint.area, area)); }
                     out.push('    </extensions>');
                     out.push('  </wpt>');
+                }
+
+                plan.waypoints.forEach(function (point, index) {
+                    // Named after what is there where the map draws something
+                    // named within reach, and after its number otherwise. The
+                    // naming is decided where the points are, not here, so that
+                    // what the panel reports and what the file says are one
+                    // answer.
+                    waypoint(point, point.name || (EXPORT.waypoint.name + ' ' + (index + 1)),
+                             null, point.kind || null, EXPORT.waypoint.set, null);
+                });
+
+                // And the boundaries, which are the only way GPX can carry one
+                // at all: it holds waypoints, routes and tracks, and no
+                // polygons. **After the points the reader placed rather than
+                // among them.** Their order in the file says nothing — every
+                // one of them names its origin — and interleaving them would
+                // make the sequence of set points depend on where the route
+                // happens to run, which is a decision phase 7 owns.
+                (crossings || []).forEach(function (crossing) {
+                    var verb = crossing.entering ? EXPORT.waypoint.enters : EXPORT.waypoint.leaves;
+                    waypoint(crossing, verb + ' ' + crossing.name + ' ' + crossing.form,
+                             null, crossing.form, EXPORT.waypoint.generated, crossing.id);
                 });
 
                 out.push('  <trk>');
@@ -2066,6 +2306,23 @@ class _ProfilePanel(MacroElement):
                     out.push('        </' + EXPORT.prefix + ':' + EXPORT.route.leg + '>');
                 });
                 out.push('      </' + EXPORT.prefix + ':' + EXPORT.route.legs + '>');
+                // And what protects the ground it covers, as figures rather
+                // than as a sentence to be parsed back: which areas, in which
+                // form, and how much of the route lies in each. **Nothing here
+                // says what may be done in one.** That is in each area's
+                // verneforskrift, none has been read, and a file that guessed
+                // would be read as advice.
+                if ((shape.protected || []).length) {
+                    out.push('      <' + EXPORT.prefix + ':' + EXPORT.route.areas + '>');
+                    shape.protected.forEach(function (area) {
+                        out.push('        <' + EXPORT.prefix + ':' + EXPORT.route.area +
+                            ' ' + EXPORT.route.areaId + '="' + escaped(area.id) + '"' +
+                            ' ' + EXPORT.route.areaName + '="' + escaped(area.name) + '"' +
+                            ' ' + EXPORT.route.areaForm + '="' + escaped(area.form) + '"' +
+                            ' ' + EXPORT.route.areaLength + '="' + fixed(area.metres) + '"/>');
+                    });
+                    out.push('      </' + EXPORT.prefix + ':' + EXPORT.route.areas + '>');
+                }
                 out.push('    </extensions>');
                 segmentsOf(out, runs);
                 out.push('  </trk>');
@@ -2577,11 +2834,28 @@ class _ProfilePanel(MacroElement):
                 if (shape.read) { told.push(climb(figure)); }
                 told.push((shape.total / 1000).toFixed(2) + ' km on foot');
                 if (shape.read) { told.push('high ' + metres(figure.high) + ' m', 'low ' + metres(figure.low) + ' m'); }
-                told = told.concat(extra || []);
+                told = told.concat(extra || []).concat(protectedIn(shape));
                 if (!shape.read) {
                     told.push(shape.total > 0 ? 'no height was read along it' : 'no ground under any of it');
                 }
                 return told;
+            }
+
+            // Which protected areas the route runs through and how far through
+            // each. Read off the list whatever composed the route already
+            // filtered, never re-filtered here: the sentence above the button,
+            // the sentence in the file and the markers the file carries have to
+            // name the same areas, and a second application of a threshold is a
+            // second threshold.
+            //
+            // **It says where the route is and nothing about what may be done
+            // there.** The rules inside a Norwegian protected area differ from
+            // outside, but how they differ is in each area's verneforskrift and
+            // not one has been read. This is a fact about the route.
+            function protectedIn(shape) {
+                return (shape.protected || []).map(function (area) {
+                    return (area.metres / 1000).toFixed(2) + ' km in ' + area.name + ' ' + area.form;
+                });
             }
 
             function describe() {
@@ -2657,7 +2931,7 @@ class _ProfilePanel(MacroElement):
                     if (selected.composed) {
                         if (!selected.plan || selected.plan.why) { return; }
                         saveFile(fileNameOf(EXPORT.route.fileStem),
-                                 routeGpxOf(selected.figure, selected.shape, selected.runs, selected.plan, selected.told));
+                                 routeGpxOf(selected.figure, selected.shape, selected.runs, selected.plan, selected.told, crossings()));
                         return;
                     }
                     saveFile(fileNameOf(selected.figure.id), gpxOf(selected.figure, selected.shape, selected.runs));
@@ -2711,7 +2985,12 @@ class _ProfilePanel(MacroElement):
                 // measures distance with. A route composed by a second walk
                 // would still look like a route.
                 layEdges: layEdges,
-                metresBetween: metresBetween
+                metresBetween: metresBetween,
+                // And where the selection crosses a protected boundary, which
+                // is a method rather than a field because asking costs 45 ms
+                // over a 37 km route. The file is written from what this
+                // returns, so a check reads the same list the file carries.
+                crossings: crossings
             };
 
             function show(className, label) {
@@ -2977,6 +3256,13 @@ class _PlanMode(MacroElement):
             var map = {{ this._parent.get_name() }};
             var PLAN = {{ this.plan_json }};
 
+            // Everything named that the map draws at a position, as a table:
+            // name, what it is and where. The markers themselves cannot answer
+            // this — their names are inside popup HTML — and a route's file
+            // reading 'Lavasshytta -> Sæterskaret skogstue -> Bønå ferjekai'
+            // rather than three coordinates is the whole of what it buys.
+            var NAMED = {{ this.points_json }};
+
             // The route's own colours. Near-black over the pale topo backdrop,
             // which nothing else on this map uses: a plan is the reader's own
             // and should not read as another dataset. A pale wide stroke under
@@ -3213,18 +3499,40 @@ class _PlanMode(MacroElement):
             var MARKING = ['marked', 'unmarked', 'unknown'];
             var TALLIED = MARKING.concat(['undrawn', 'unrecorded']);
 
+            // Two things counted by name rather than into a fixed bucket: which
+            // dataset drew each metre, and which protected areas the metres lie
+            // in. Both are keyed without a prototype, so a register that names
+            // an area "constructor" answers about that area rather than about
+            // Object's own member.
             function blankTally() {
-                var out = {sources: Object.create(null)};
+                var out = {sources: Object.create(null), protected: Object.create(null)};
                 TALLIED.forEach(function (field) { out[field] = 0; });
                 return out;
             }
 
             function addTally(into, from) {
                 if (!from) { return; }
-                Object.keys(from.sources).forEach(function (name) {
-                    into.sources[name] = (into.sources[name] || 0) + from.sources[name];
+                ['sources', 'protected'].forEach(function (kind) {
+                    Object.keys(from[kind]).forEach(function (name) {
+                        into[kind][name] = (into[kind][name] || 0) + from[kind][name];
+                    });
                 });
                 TALLIED.forEach(function (field) { into[field] += from[field]; });
+            }
+
+            // What protects the ground under one edge, added to a tally. **The
+            // payload carries a share and this multiplies it by the length this
+            // page measured**, so a route can never state more ground inside an
+            // area than it walked altogether: Python measured those metres in
+            // the projection the graph is built in, and 0.03 % of a long route
+            // is enough for a subtotal to overtake its own total.
+            function addProtected(out, graph, edge, metres) {
+                var areas = graph.header.protected;
+                for (var p = graph.protectedAt[edge]; p < graph.protectedAt[edge + 1]; p += 1) {
+                    var area = areas[graph.protectedArea[p]];
+                    if (!area) { throw new Error('edge ' + edge + ' lies in an area the page has no entry for'); }
+                    out.protected[area.id] = (out.protected[area.id] || 0) + graph.protectedShare[p] * metres;
+                }
             }
 
             // Which dataset drew each edge, whether anything says it is
@@ -3236,6 +3544,14 @@ class _PlanMode(MacroElement):
                 for (var i = 0; i < list.length; i += 1) {
                     var edge = list[i], source = graph.header.sources[graph.sources[edge]];
                     var metres = work.length[edge];
+                    // Before the two lines below take a connector and a crossing
+                    // out, because the three questions have different answers
+                    // for them. A connector was never drawn, so no register says
+                    // whether it is waymarked — but a walker covers its ground,
+                    // and that ground lies inside a boundary or outside it. A
+                    // crossing is the other way round: there is no walking
+                    // distance under a ferry, so it is asked neither.
+                    if (source.kind !== CROSSING) { addProtected(out, graph, edge, metres); }
                     // An inferred connector is not a dataset — nobody drew it,
                     // which is what a connector is — so it names no source and
                     // answers nothing about marking. Its ground is walked and
@@ -3274,9 +3590,27 @@ class _PlanMode(MacroElement):
             // asserts nothing about whether a path is recorded there: that rule
             // is a spatial test against every source's lines, which the page
             // cannot run. Its length is reported as drawn straight instead.
-            function straightTally(length) {
+            //
+            // **What protects it, it can answer**, and this is the one figure
+            // on a straight leg that is measured rather than asserted. The
+            // boundaries are in the page and the leg has a height sample every
+            // few metres, so each sample says what it is standing in and a
+            // sample's own stretch runs half way to each of its neighbours —
+            // the same halfway rule the shoreline split above is decided by, and
+            // there is no second rule to disagree with it.
+            function straightTally(graph, laid, standing, first, last, began, ended) {
                 var out = blankTally();
-                out.unmarked = length;
+                out.unmarked = ended - began;
+                for (var s = first; s < last; s += 1) {
+                    var here = standing[s];
+                    if (!here.length) { continue; }
+                    var low = s === first ? began : (laid.along[s - 1] + laid.along[s]) / 2;
+                    var high = s === last - 1 ? ended : (laid.along[s] + laid.along[s + 1]) / 2;
+                    for (var a = 0; a < here.length; a += 1) {
+                        var id = graph.header.protected[here[a]].id;
+                        out.protected[id] = (out.protected[id] || 0) + (high - low);
+                    }
+                }
                 return out;
             }
 
@@ -3460,8 +3794,14 @@ class _PlanMode(MacroElement):
             // where two neighbours disagree the shoreline lies between, and half
             // way between is as near as sampling every few metres can put it. No
             // coastline is consulted and none is needed.
-            function straightParts(from, to, answered) {
+            function straightParts(graph, from, to, answered) {
                 var laid = answered.laid, points = answered.points, count = points.length;
+                // What each sample is standing in, worked out once: a leg is
+                // classified here and its shoreline split is read off the same
+                // list, and asking the polygons twice for one position is the
+                // shape a disagreement takes.
+                var standing = new Array(count);
+                for (var s = 0; s < count; s += 1) { standing[s] = graph.areasAt(laid.lon[s], laid.lat[s]); }
                 // Where the samples change their mind about what is under them.
                 // Named for what it is: in this file `edges` means edges of the
                 // graph, and these are the ends of the runs.
@@ -3500,7 +3840,7 @@ class _PlanMode(MacroElement):
                     parts.push({kind: 'land', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
                                 along: [0, ended - began], length: ended - began,
                                 height: height, distance: distance, read: read,
-                                tally: straightTally(ended - began)});
+                                tally: straightTally(graph, laid, standing, first, last, began, ended)});
                 }
                 return parts;
             }
@@ -3514,7 +3854,7 @@ class _PlanMode(MacroElement):
                     var found = route(graph, from.node, to.node);
                     if (found) { return Promise.resolve(routedParts(graph, found)); }
                 }
-                return heightsFor(from, to).then(function (answered) { return straightParts(from, to, answered); });
+                return heightsFor(from, to).then(function (answered) { return straightParts(graph, from, to, answered); });
             }
 
             // ---- the route's own series ---------------------------------------
@@ -3599,7 +3939,50 @@ class _PlanMode(MacroElement):
                 close();
                 return {lon: lon, lat: lat, along: along, height: height, distance: distance, free: free,
                         stretches: stretches, tally: tally, total: walked, read: read,
+                        // Filtered once, here, and read by the sentence above
+                        // the button, by the file's description and by the
+                        // markers the file carries. Three readings of one list,
+                        // rather than three places applying one threshold.
+                        protected: reportedAreas(tally),
                         crossing: crossings > 0, crossings: crossings, crossed: crossed, straight: straight};
+            }
+
+            // Which protected areas the route actually passes through, in the
+            // order a reader wants them: the most ground first.
+            //
+            // **The threshold is the decision this makes, and it is a decision
+            // rather than a measurement.** Under it a route that clips the
+            // corner of a boundary would report an area it never entered and
+            // generate a pair of waypoints for it, metres apart, in the file
+            // somebody takes into the terrain. Why it is where it is, and what
+            // it is measured against, is in trails.routing.protection; it
+            // arrives here rather than being spelled, so that the report the
+            // build prints and the sentence this page writes cannot come to
+            // disagree about what counts as passing through somewhere.
+            function reportedAreas(tally) {
+                var table = graphAreas(), out = [];
+                Object.keys(tally.protected).forEach(function (id) {
+                    var metres = tally.protected[id];
+                    if (metres < PLAN.touchedM) { return; }
+                    var area = table[id];
+                    if (!area) { throw new Error('the route lies in ' + id + ', which the page has no entry for'); }
+                    out.push({id: id, name: area.name, form: area.form, metres: metres});
+                });
+                return out.sort(function (a, b) { return b.metres - a.metres; });
+            }
+
+            // The areas by their own id rather than by their place in the
+            // header's list, built once. The tally counts by id because an id
+            // is what an edge names and what outlives the list it was read from.
+            var areasById = null;
+
+            function graphAreas() {
+                if (!areasById) {
+                    areasById = Object.create(null);
+                    var table = (window.trailsGraph && window.trailsGraph.protectedAreas) || [];
+                    table.forEach(function (area) { areasById[area.id] = area; });
+                }
+                return areasById;
             }
 
             // Read off the composed series by the build's own rule: a climb
@@ -3822,6 +4205,30 @@ class _PlanMode(MacroElement):
                 }, function () { settling -= 1; refresh(); });
             }
 
+            // What a waypoint is called, and where the file puts it. Where the
+            // map already draws something named within reach — a hut, a quay, a
+            // trailhead, a farm — the waypoint takes that thing's name, what it
+            // is and **its position**, while the route itself stays on the
+            // network: the file's track runs where a walker can walk and its
+            // marker sits on the hut.
+            //
+            // Nearest wins rather than first, so two registers naming the same
+            // hut a few metres apart cannot make the answer depend on the order
+            // the layers were added in. Beyond reach the point keeps its own
+            // position and is numbered, which is what it did before this
+            // existed.
+            function nameOf(point, index) {
+                var best = null, closest = Infinity;
+                for (var i = 0; i < NAMED.length; i += 1) {
+                    var away = panel().metresBetween(point.lon, point.lat, NAMED[i].lon, NAMED[i].lat);
+                    if (away < closest) { closest = away; best = NAMED[i]; }
+                }
+                if (!best || closest > PLAN.namedM) {
+                    return {lat: point.lat, lon: point.lon, name: null, kind: null, away: null, number: index + 1};
+                }
+                return {lat: best.lat, lon: best.lon, name: best.name, kind: best.type, away: closest, number: index + 1};
+            }
+
             // One misclick should not cost a route. Everything beyond taking the
             // last point back — moving one, inserting one, dropping one from the
             // middle — is a later phase.
@@ -3901,7 +4308,7 @@ class _PlanMode(MacroElement):
                         : refused ? refused + (refused === 1 ? ' leg has' : ' legs have') +
                             ' no way and no heights, so the route has a gap that is not a crossing.'
                         : '',
-                    waypoints: points.map(function (point) { return {lat: point.lat, lon: point.lon}; }),
+                    waypoints: points.map(nameOf),
                     legs: legs.map(function (leg) {
                         return (leg.parts || []).map(function (part) { return {kind: part.kind, length: part.length}; });
                     })
@@ -4025,12 +4432,13 @@ class _PlanMode(MacroElement):
         {% endmacro %}
     """)
 
-    def __init__(self, plan: dict[str, Any]) -> None:
+    def __init__(self, plan: dict[str, Any], points: list[dict[str, object]]) -> None:
         """Initialize plan mode.
 
         Args:
             plan: What the page needs to route and to sample. See
                 :func:`add_plan_mode`.
+            points: The named things the map draws, as name, type and position
         """
         super().__init__()
         self._name = "PlanMode"
@@ -4038,9 +4446,13 @@ class _PlanMode(MacroElement):
         # block: a service URL or a terrain name carrying a '<' would otherwise
         # close it, and json.dumps leaves that character alone.
         self.plan_json = _script_json(plan)
+        # And these especially: every one of them is a name out of somebody
+        # else's register, and one of them holding '</script>' would end the
+        # page's whole script block.
+        self.points_json = _script_json(points)
 
 
-def add_plan_mode(fmap: folium.Map, plan: dict[str, Any]) -> None:
+def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.FeatureGroup] | None = None) -> None:
     """Let a reader click a route together over the graph in the page.
 
     Switch it on and every click appends a waypoint, snapping to the network
@@ -4082,9 +4494,16 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any]) -> None:
             ``connectorKind`` are what the payload's header calls a crossing and
             an inferred connector, which the page tests every edge it routes over
             against — spelled in the page instead, a rename would leave it
-            reading a ferry as walked ground. The names come from
-            :mod:`trails.io.sources.hoydedata`, :mod:`trails.routing.elevation`
-            and :mod:`trails.routing.sources`.
+            reading a ferry as walked ground; ``touchedM`` is how much of a
+            route has to lie inside a protected area before it says so, and
+            ``namedM`` how near a waypoint has to land to a named thing to be
+            called after it. The names come from
+            :mod:`trails.io.sources.hoydedata`, :mod:`trails.routing.elevation`,
+            :mod:`trails.routing.protection` and :mod:`trails.routing.sources`.
+        points: Feature groups whose named points a waypoint may be called
+            after, from :func:`add_points` and :func:`add_labelled_points` given
+            a ``point_type``. Without them a route's waypoints are numbered,
+            which is what they were before this existed.
 
     Raises:
         ValueError: If ``plan`` leaves out something the page cannot route or
@@ -4096,7 +4515,10 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any]) -> None:
     if missing:
         raise ValueError(f"the page cannot plan a route without {', '.join(missing)}")
 
-    _PlanMode(plan).add_to(fmap)
+    named: list[dict[str, object]] = []
+    for group in points or []:
+        named.extend(getattr(group, NAMED_POINTS_ATTR, []))
+    _PlanMode(plan, named).add_to(fmap)
 
 
 class _Legend(MacroElement):

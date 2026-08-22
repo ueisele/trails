@@ -12,20 +12,27 @@ import argparse
 import geopandas as gpd
 import pandas as pd
 import pytest
+import shapely
 from shapely.geometry import LineString, Polygon
 from trails.network.norway import (
     METRIC_CRS,
+    PROTECTED_FORM,
+    PROTECTED_ID,
+    PROTECTED_NAME,
+    PROTECTED_SIMPLIFY_M,
     SURVEYED_FIELD,
     Masks,
     Params,
     _join_values,
     _with_capture_date,
+    derive,
     edge_costs,
     fingerprint,
     masks_from,
+    protected_table,
     zone_around,
 )
-from trails.routing import DEFAULT_BRIDGE_COST_FACTOR, FERRY, IDENTITY_SEPARATOR, NetworkSource
+from trails.routing import DEFAULT_BRIDGE_COST_FACTOR, FERRY, IDENTITY_SEPARATOR, PROTECTED_COLUMN, NetworkSource
 from trails.routing.sources import BRIDGE
 
 CATALOGUE = "routes.toml"
@@ -270,6 +277,25 @@ def masks() -> Masks:
     return masks_from(network(Turrutebasen=lines(0), N50_paths=lines(10, marking=("JA",)), FKB=lines(20)))
 
 
+def protected(*outlines: tuple[str, float]) -> gpd.GeoDataFrame:
+    """Build protected areas to fingerprint against.
+
+    Args:
+        *outlines: ``(id, size)`` per area, the size being the side of a square
+
+    Returns:
+        The areas, in the CRS the network is built in
+    """
+    return gpd.GeoDataFrame(
+        {PROTECTED_ID: [identity for identity, _ in outlines]},
+        geometry=[Polygon([(0, 0), (side, 0), (side, side), (0, side)]) for _, side in outlines],
+        crs=METRIC_CRS,
+    )
+
+
+AREAS = (("VV0001", 100.0),)
+
+
 def source(name: str = "FKB", identity: str | None = "route_name", values: tuple[str | None, ...] = ("A", None)) -> NetworkSource:
     """Build a source whose identity column can be varied.
 
@@ -295,13 +321,13 @@ class TestFingerprint:
     def test_the_same_inputs_give_the_same_key(self):
         """Test that an unchanged rebuild reads its own cache back."""
         params = Params(cache_dir=".cache", ut_routes=CATALOGUE)
-        assert fingerprint([source()], masks(), params) == fingerprint([source()], masks(), params)
+        assert fingerprint([source()], masks(), params, protected(*AREAS)) == fingerprint([source()], masks(), params, protected(*AREAS))
 
     def test_a_parameter_that_shapes_the_graph_moves_it(self):
         """Test that a cached graph cannot answer for other parameters."""
         one = Params(cache_dir=".cache", ut_routes=CATALOGUE)
         other = Params(cache_dir=".cache", ut_routes=CATALOGUE, stroke_deg=30.0)
-        assert fingerprint([source()], masks(), one) != fingerprint([source()], masks(), other)
+        assert fingerprint([source()], masks(), one, protected(*AREAS)) != fingerprint([source()], masks(), other, protected(*AREAS))
 
     def test_a_name_arriving_from_another_register_moves_it(self):
         """Test the case the values digest exists for.
@@ -311,7 +337,9 @@ class TestFingerprint:
         it moves where a chain ends.
         """
         params = Params(cache_dir=".cache", ut_routes=CATALOGUE)
-        assert fingerprint([source(values=("A", None))], masks(), params) != fingerprint([source(values=("A", "B"))], masks(), params)
+        assert fingerprint([source(values=("A", None))], masks(), params, protected(*AREAS)) != fingerprint(
+            [source(values=("A", "B"))], masks(), params, protected(*AREAS)
+        )
 
     def test_a_name_moving_between_two_rows_moves_it(self):
         """Test that the digest sees position, not only which values are there.
@@ -321,12 +349,39 @@ class TestFingerprint:
         *hit*: the graph is replayed for identities it was not built from.
         """
         params = Params(cache_dir=".cache", ut_routes=CATALOGUE)
-        assert fingerprint([source(values=("A", None))], masks(), params) != fingerprint([source(values=(None, "A"))], masks(), params)
+        assert fingerprint([source(values=("A", None))], masks(), params, protected(*AREAS)) != fingerprint(
+            [source(values=(None, "A"))], masks(), params, protected(*AREAS)
+        )
 
     def test_a_source_carrying_nothing_still_has_a_key(self):
         """Test that a source with neither identity nor attributes is handled."""
         params = Params(cache_dir=".cache", ut_routes=CATALOGUE)
-        assert fingerprint([source(identity=None)], masks(), params)
+        assert fingerprint([source(identity=None)], masks(), params, protected(*AREAS))
+
+    def test_a_boundary_the_edges_are_measured_against_moves_it(self):
+        """Test the input that sits in neither of the other digests.
+
+        The protected areas are not a source and not a mask, so a boundary
+        redrawn by a revision changes what every edge under it says without
+        changing a line of the network — and a cached graph would answer for
+        the old one.
+        """
+        settings = Params(cache_dir=".cache", ut_routes=CATALOGUE)
+        assert fingerprint([source()], masks(), settings, protected(*AREAS)) != fingerprint(
+            [source()], masks(), settings, protected(("VV0001", 120.0))
+        )
+
+    def test_an_area_the_register_added_moves_it(self):
+        """Test that a new area is noticed even where none of them moved."""
+        settings = Params(cache_dir=".cache", ut_routes=CATALOGUE)
+        assert fingerprint([source()], masks(), settings, protected(*AREAS)) != fingerprint(
+            [source()], masks(), settings, protected(*AREAS, ("VV0002", 50.0))
+        )
+
+    def test_an_empty_register_still_has_a_key(self):
+        """Test that a build over ground nothing protects is fingerprintable."""
+        settings = Params(cache_dir=".cache", ut_routes=CATALOGUE)
+        assert fingerprint([source()], masks(), settings, protected())
 
     def test_reading_the_ground_differently_moves_it(self):
         """Test that a graph sampled at one step cannot answer for another.
@@ -338,5 +393,121 @@ class TestFingerprint:
         one = Params(cache_dir=".cache", ut_routes=CATALOGUE)
         coarse = Params(cache_dir=".cache", ut_routes=CATALOGUE, elevation_step_m=15.0)
         louder = Params(cache_dir=".cache", ut_routes=CATALOGUE, ascent_threshold_m=10.0)
-        assert fingerprint([source()], masks(), one) != fingerprint([source()], masks(), coarse)
-        assert fingerprint([source()], masks(), one) != fingerprint([source()], masks(), louder)
+        assert fingerprint([source()], masks(), one, protected(*AREAS)) != fingerprint([source()], masks(), coarse, protected(*AREAS))
+        assert fingerprint([source()], masks(), one, protected(*AREAS)) != fingerprint([source()], masks(), louder, protected(*AREAS))
+
+
+class TestDerive:
+    """Test derive."""
+
+    def edges(self) -> gpd.GeoDataFrame:
+        """One walked edge in the CRS the network is built in.
+
+        Returns:
+            The edges
+        """
+        return gpd.GeoDataFrame({"kind": ["path"], "length_m": [100.0]}, geometry=[LineString([(0, 0), (100, 0)])], crs=METRIC_CRS)
+
+    def masks(self) -> Masks:
+        """Three empty masks, so only the third field is under test.
+
+        Returns:
+            The masks
+        """
+        empty = gpd.GeoSeries([], crs=METRIC_CRS)
+        return Masks(marked=empty, unmarked=empty, recorded=empty)
+
+    def test_ground_nothing_protects_still_builds(self):
+        """Test the path `load_protected` is written to support.
+
+        An empty frame left in the register's own degrees still states a CRS,
+        and the measurement refuses a mismatch — so this failed after every
+        source had been loaded, which is the expensive place to fail.
+        """
+        empty = gpd.GeoDataFrame({PROTECTED_ID: [], PROTECTED_NAME: [], PROTECTED_FORM: []}, geometry=[], crs="EPSG:4326")
+        derived = derive(self.edges(), self.masks(), empty)
+
+        assert derived[PROTECTED_COLUMN].tolist() == [()]
+
+    def test_areas_in_the_register_s_own_degrees_are_reprojected(self):
+        """Test that the caller need not know which CRS the edges are in."""
+        area = gpd.GeoDataFrame(
+            {PROTECTED_ID: ["VV0001"], PROTECTED_NAME: ["Somewhere"], PROTECTED_FORM: ["Naturreservat"]},
+            geometry=[Polygon([(0, -10), (100, -10), (100, 10), (0, 10)])],
+            crs=METRIC_CRS,
+        ).to_crs("EPSG:4326")
+        derived = derive(self.edges(), self.masks(), area)
+
+        assert derived[PROTECTED_COLUMN].iloc[0][0][0] == "VV0001"
+
+
+class TestProtectedTable:
+    """Test protected_table."""
+
+    def area(self, geometry: object, identity: str = "VV0001", name: str = "Somewhere", form: str = "Landskapsvernomraade") -> gpd.GeoDataFrame:
+        """Build one protected area as the register hands it over.
+
+        Args:
+            geometry: Its outline, in the metric CRS
+            identity: The register's own id
+            name: What it is called
+            form: Which of the register's forms it is, spelled as it spells it
+
+        Returns:
+            The area, in EPSG:4326
+        """
+        frame = gpd.GeoDataFrame({PROTECTED_ID: [identity], PROTECTED_NAME: [name], PROTECTED_FORM: [form]}, geometry=[geometry], crs=METRIC_CRS)
+        return frame.to_crs("EPSG:4326")
+
+    def test_it_says_what_the_area_is_in_the_words_a_sign_uses(self):
+        """The register spells its forms without the letters they are said with,
+        and the page shows what this hands it."""
+        table = protected_table(self.area(Polygon([(0, 0), (1000, 0), (1000, 1000), (0, 1000)])))
+
+        assert table[0]["id"] == "VV0001"
+        assert table[0]["name"] == "Somewhere"
+        assert table[0]["form"] == "landskapsvernområde"
+
+    def test_a_hole_is_another_ring_and_not_another_structure(self):
+        """A point inside a hole is enclosed by an even number of rings and so
+        comes out outside, which needs no outer-and-inner structure to keep in
+        step with itself."""
+        outer = Polygon([(0, 0), (1000, 0), (1000, 1000), (0, 1000)], [[(200, 200), (400, 200), (400, 400), (200, 400)]])
+        table = protected_table(self.area(outer), simplify_m=0.0)
+
+        assert len(table[0]["rings"]) == 2
+
+    def test_every_part_of_a_multipolygon_is_a_ring(self):
+        outer = shapely.MultiPolygon([Polygon([(0, 0), (100, 0), (100, 100), (0, 100)]), Polygon([(500, 500), (600, 500), (600, 600), (500, 600)])])
+        table = protected_table(self.area(outer), simplify_m=0.0)
+
+        assert len(table[0]["rings"]) == 2
+
+    def test_the_box_encloses_the_outline(self):
+        """It is tested before the rings are, so a point out on the coast is
+        thirty cheap comparisons rather than four thousand."""
+        table = protected_table(self.area(Polygon([(0, 0), (1000, 0), (1000, 1000), (0, 1000)])))
+        west, south, east, north = table[0]["bounds"]
+
+        for longitude, latitude in table[0]["rings"][0]:
+            assert west <= longitude <= east
+            assert south <= latitude <= north
+
+    def test_simplifying_drops_vertices_a_boundary_does_not_need(self):
+        """0.66 MB of coordinates against 0.09, on a 37.5 MB page."""
+        # Three metres of wiggle: under the five the tolerance drops and well
+        # over the 0.11 m the coordinates are written on.
+        wiggly = Polygon([(offset, (offset % 4) * 1.5) for offset in range(0, 400, 2)] + [(400, 1000), (0, 1000)])
+        assert len(protected_table(self.area(wiggly))[0]["rings"][0]) < len(protected_table(self.area(wiggly), simplify_m=0.0)[0]["rings"][0])
+
+    def test_the_default_tolerance_is_the_one_the_sampling_already_accepts(self):
+        """Ten metres was the figure this phase arrived with, on the argument
+        that it lies inside the ±5 m each crossing already carries. Measured, at
+        10 m this register's boundaries move by up to 16.1 m and at 5 m by 5.9,
+        for 0.02 MB — so the tolerance is set where the claim is true."""
+        assert PROTECTED_SIMPLIFY_M == 5.0
+
+    def test_an_empty_register_gives_an_empty_table(self):
+        empty = gpd.GeoDataFrame({PROTECTED_ID: [], PROTECTED_NAME: [], PROTECTED_FORM: []}, geometry=[], crs="EPSG:4326")
+
+        assert protected_table(empty) == []

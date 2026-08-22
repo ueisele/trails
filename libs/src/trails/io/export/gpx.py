@@ -122,6 +122,34 @@ WAYPOINT_SET = "set"
 #: What ``origin`` says of a point the map placed by itself.
 WAYPOINT_GENERATED = "generated"
 
+#: What a generated point at a boundary names the area by. The register's own
+#: id, beside the words in ``<name>``: a sentence has to be parsed back and an
+#: id does not, and phase 8 has to know *which* boundary was meant rather than
+#: which words were written.
+WAYPOINT_AREA_FIELD = "area"
+
+#: What a generated point at a boundary says the route is doing there. Two
+#: words rather than one field with a direction in it, because this is what a
+#: reader sees in a list of waypoints on a device with no map in it.
+WAYPOINT_ENTERS, WAYPOINT_LEAVES = "Enters", "Leaves"
+
+#: Where a route's protected areas are listed, and what each of them says.
+#:
+#: **A figure and never a rule.** How the rules inside a Norwegian protected
+#: area differ from outside is in that area's verneforskrift, not one has been
+#: read here, and a file that guessed would be read as advice by somebody
+#: standing in the terrain. What is written down is where the route is and how
+#: far it goes there.
+AREAS_ELEMENT = "protected"
+
+#: One protected area a route passes through.
+AREA_ELEMENT = "area"
+
+#: What one says about itself: the register's id, its name, the words for its
+#: protection form, and how many metres of the route lie inside it.
+AREA_ID_ATTR, AREA_NAME_ATTR, AREA_FORM_ATTR = "id", "name", "form"
+AREA_LENGTH_ATTR = "m"
+
 #: What a planned route's track ``<extensions>`` carry beyond
 #: :data:`DEFAULT_EXTENSION_FIELDS`, as the key the page holds a figure under to
 #: the name it is written down as. Every one is a scalar of the whole route,
@@ -287,9 +315,13 @@ def waypoint_element(waypoint: dict[str, Any]) -> etree.Element:
     a waypoint is for is *where* a reader chose to go.
 
     Args:
-        waypoint: ``lat`` and ``lon``, an optional ``name``, and
-            :data:`WAYPOINT_ORIGIN_FIELD` saying whether a reader put the point
-            down (:data:`WAYPOINT_SET`) or the map did (:data:`WAYPOINT_GENERATED`)
+        waypoint: ``lat`` and ``lon``, an optional ``name``, an optional
+            ``type`` — what is there, where the point took its name from
+            something the map draws, or which protection form a boundary marker
+            stands on — :data:`WAYPOINT_ORIGIN_FIELD` saying whether a reader
+            put the point down (:data:`WAYPOINT_SET`) or the map did
+            (:data:`WAYPOINT_GENERATED`), and on a boundary marker
+            :data:`WAYPOINT_AREA_FIELD`, the id of the area it stands on
 
     Returns:
         GPX waypoint element
@@ -299,14 +331,23 @@ def waypoint_element(waypoint: dict[str, Any]) -> etree.Element:
             waypoint, and writing one at 0/0 would put it in the Gulf of Guinea.
     """
     element = etree.Element("wpt", attrib={"lat": str(waypoint["lat"]), "lon": str(waypoint["lon"])})
-    # The order GPX 1.1 fixes for what a <wpt> holds: <name> well before
-    # <extensions>, which is last of the twenty-odd it allows.
+    # The order GPX 1.1 fixes for what a <wpt> holds: <name>, then <desc>, then
+    # <type>, and <extensions> last of the twenty-odd it allows. Written in the
+    # order they were thought of instead, the file parses and fails the schema.
     if waypoint.get("name"):
         etree.SubElement(element, "name").text = str(waypoint["name"])
+    if waypoint.get("desc"):
+        etree.SubElement(element, "desc").text = str(waypoint["desc"])
+    if waypoint.get("type"):
+        etree.SubElement(element, "type").text = str(waypoint["type"])
     origin = waypoint.get(WAYPOINT_ORIGIN_FIELD)
-    if origin:
+    area = waypoint.get(WAYPOINT_AREA_FIELD)
+    if origin or area:
         block = etree.SubElement(element, "extensions")
-        etree.SubElement(block, f"{{{TRAILS_NAMESPACE}}}{WAYPOINT_ORIGIN_FIELD}").text = str(origin)
+        if origin:
+            etree.SubElement(block, f"{{{TRAILS_NAMESPACE}}}{WAYPOINT_ORIGIN_FIELD}").text = str(origin)
+        if area:
+            etree.SubElement(block, f"{{{TRAILS_NAMESPACE}}}{WAYPOINT_AREA_FIELD}").text = str(area)
     return element
 
 

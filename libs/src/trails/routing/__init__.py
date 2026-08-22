@@ -58,6 +58,13 @@ from trails.routing.graph import (
 )
 from trails.routing.noding import DEFAULT_METRIC_CRS, NODE_TOLERANCE_M
 from trails.routing.order import CHAIN_ORDER_COLUMNS, chain_order
+from trails.routing.protection import (
+    DEFAULT_TOUCHED_M,
+    PROTECTED_COLUMN,
+    protected_metres,
+    protected_within,
+    touched,
+)
 from trails.routing.sources import BRIDGE, FERRY, PATH, NetworkSource
 from trails.routing.track import DEFAULT_GAP_M, EXPORT_CRS, chain_tracks
 
@@ -77,6 +84,7 @@ __all__ = [
     "DEFAULT_RECORDED_M",
     "DEFAULT_STEP_M",
     "DEFAULT_STROKE_ANGLE_DEG",
+    "DEFAULT_TOUCHED_M",
     "EXPORT_CRS",
     "FERRY",
     "IDENTITY_SEPARATOR",
@@ -84,6 +92,7 @@ __all__ = [
     "NODE_TOLERANCE_M",
     "PATH",
     "PROFILE_COLUMNS",
+    "PROTECTED_COLUMN",
     "UNKNOWN",
     "UNMARKED",
     "ChainRule",
@@ -103,10 +112,13 @@ __all__ = [
     "no_path_recorded",
     "parts_of",
     "profile_of",
+    "protected_metres",
+    "protected_within",
     "sample_along",
     "sample_count",
     "share_within",
     "split_source",
+    "touched",
     "translate_joined",
     "waymarked",
     "whole_way_length",

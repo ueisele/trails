@@ -28,10 +28,12 @@ from shapely.geometry import LineString, MultiLineString
 from trails.io.export.gpx import (
     EXTENSION_DECIMALS,
     SOURCE_LENGTH_FIELD,
+    WAYPOINT_AREA_FIELD,
     WAYPOINT_GENERATED,
     WAYPOINT_ORIGIN_FIELD,
     WAYPOINT_SET,
     export_to_gpx,
+    waypoint_element,
 )
 
 #: A line whose vertices sit far closer together than any simplification
@@ -380,3 +382,54 @@ def test_the_description_records_a_source_the_way_the_extensions_do(tmp_path: Pa
     described = parsed(path).find(".//{*}metadata/{*}desc").text
     assert "3.20 km FKB (CC BY 4.0" in described
     assert "3.20 km OSM" not in described
+
+
+def test_a_waypoint_writes_its_parts_in_the_order_gpx_fixes() -> None:
+    # name, then desc, then type, and extensions last of the twenty-odd a <wpt>
+    # allows. Written in the order they were thought of, the file parses and
+    # fails the schema — which is what a boundary marker made possible, since
+    # nothing before it wrote a <type> at all.
+    element = waypoint_element(
+        {
+            "lat": 65.32801,
+            "lon": 13.12861,
+            "name": "Enters Lomsdal-Visten nasjonalpark",
+            "desc": "a boundary",
+            "type": "nasjonalpark",
+            WAYPOINT_ORIGIN_FIELD: WAYPOINT_GENERATED,
+            WAYPOINT_AREA_FIELD: "VV00002750",
+        }
+    )
+
+    assert [child.tag.split("}")[-1] for child in element] == ["name", "desc", "type", "extensions"]
+
+
+def test_a_generated_waypoint_names_the_area_by_its_id_and_not_only_in_words() -> None:
+    # A sentence has to be parsed back and an id does not, and phase 8 has to
+    # know which boundary was meant rather than which words were written.
+    element = waypoint_element(
+        {
+            "lat": 65.3,
+            "lon": 13.1,
+            "name": "Leaves Sirijorda naturreservat",
+            WAYPOINT_ORIGIN_FIELD: WAYPOINT_GENERATED,
+            WAYPOINT_AREA_FIELD: "VV00003295",
+        }
+    )
+    written_fields = {child.tag.split("}")[-1]: child.text for child in element.find("extensions")}
+
+    assert written_fields == {WAYPOINT_ORIGIN_FIELD: WAYPOINT_GENERATED, WAYPOINT_AREA_FIELD: "VV00003295"}
+
+
+def test_a_point_a_reader_put_down_names_no_area() -> None:
+    element = waypoint_element({"lat": 65.3, "lon": 13.1, "name": "Lavasshytta", "type": "hut", WAYPOINT_ORIGIN_FIELD: WAYPOINT_SET})
+    written_fields = {child.tag.split("}")[-1]: child.text for child in element.find("extensions")}
+
+    assert written_fields == {WAYPOINT_ORIGIN_FIELD: WAYPOINT_SET}
+    assert element.findtext("type") == "hut"
+
+
+def test_a_waypoint_with_nothing_to_say_about_itself_writes_no_extensions() -> None:
+    element = waypoint_element({"lat": 65.3, "lon": 13.1})
+
+    assert [child.tag.split("}")[-1] for child in element] == []

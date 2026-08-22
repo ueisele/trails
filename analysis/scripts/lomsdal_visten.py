@@ -41,6 +41,12 @@ from typing import NamedTuple, Protocol
 import geopandas as gpd
 import pandas as pd
 from trails.io.export.gpx import (
+    AREA_ELEMENT,
+    AREA_FORM_ATTR,
+    AREA_ID_ATTR,
+    AREA_LENGTH_ATTR,
+    AREA_NAME_ATTR,
+    AREAS_ELEMENT,
     DEFAULT_EXTENSION_FIELDS,
     ELEVATION_DECIMALS,
     EXTENSION_DECIMALS,
@@ -56,6 +62,10 @@ from trails.io.export.gpx import (
     SOURCE_LENGTH_FIELD,
     TRAILS_NAMESPACE,
     TRAILS_PREFIX,
+    WAYPOINT_AREA_FIELD,
+    WAYPOINT_ENTERS,
+    WAYPOINT_GENERATED,
+    WAYPOINT_LEAVES,
     WAYPOINT_ORIGIN_FIELD,
     WAYPOINT_SET,
     export_to_gpx,
@@ -77,11 +87,13 @@ from trails.network.norway import (
     edge_costs,
     load_sources,
     masks_from,
+    protected_table,
     zone_around,
 )
 from trails.routing import (
     BRIDGE,
     DEFAULT_GAP_M,
+    DEFAULT_TOUCHED_M,
     FERRY,
     IDENTITY_SEPARATOR,
     Network,
@@ -490,8 +502,8 @@ ROUTE_DESCRIPTION = f"A route planned on the {PARK_NAME} map"
 ROUTE_FILE_STEM = "route"
 
 #: What the points of a route are called in the file, before the number they are
-#: in the order they were placed. Nothing names them after the ground yet; that
-#: is the next phase, and this is what a file written before it says.
+#: in the order they were placed — where there is nothing named within reach to
+#: call them after.
 WAYPOINT_NAME = "Point"
 
 
@@ -623,6 +635,30 @@ def height_credit() -> list[dict[str, str]]:
     ]
 
 
+def protected_credit() -> list[dict[str, str]]:
+    """Say where a route's protected-area figures came from.
+
+    In every file that states one and in none that does not, exactly as the
+    height model is named. The register publishes no version and is not ordered
+    — it is queried over an extent, and the answer reaches a file through the
+    graph — so the field is left empty rather than filled with a date that would
+    describe the download and not the data.
+
+    Returns:
+        A single entry for Naturbase
+    """
+    return [
+        credit(
+            naturbase.METADATA.name,
+            naturbase.METADATA.license,
+            "",
+            naturbase.METADATA.attribution,
+            naturbase.METADATA.url,
+            None,
+        )
+    ]
+
+
 def ascent_method(params: Params) -> str:
     """Say how the heights and the ascent figure were reached.
 
@@ -660,6 +696,17 @@ SNAP_M = 150.0
 #: no source records a path along is 10.3 km, and that is spread over a 42 km
 #: trip rather than being one leg.
 MAX_STRAIGHT_M = 20_000.0
+
+#: How near a waypoint has to land to something the map draws by name before it
+#: is called after it. The same fifty metres ``--hut-name-m`` already joins N50's
+#: cabins to the place-name register by, and for the same reason: two registers
+#: recording one hut put it within that of each other, and a reader clicking a
+#: hut aims at the symbol rather than at the building.
+#:
+#: It is a judgement and not a measurement, and it is one that shows: a waypoint
+#: named after the wrong hut is worse than one called *Point 3*, so the nearest
+#: named thing wins and only that one, rather than everything within reach.
+NAMED_POINT_M = 50.0
 
 
 def plan_settings(params: Params) -> dict[str, object]:
@@ -699,6 +746,12 @@ def plan_settings(params: Params) -> dict[str, object]:
         # ferry as walked ground with nothing looking wrong.
         "crossingKind": FERRY,
         "connectorKind": BRIDGE,
+        # How much of a route has to lie inside a protected area before it says
+        # so. Handed over rather than spelled in the page, so that the figure
+        # this build prints and the sentence the page writes cannot come to
+        # disagree about what counts as passing through somewhere.
+        "touchedM": DEFAULT_TOUCHED_M,
+        "namedM": NAMED_POINT_M,
     }
 
 
@@ -764,12 +817,27 @@ def export_settings(versions: dict[str, str | None], params: Params) -> dict[str
             "part": PART_ELEMENT,
             "partKind": PART_KIND_ATTR,
             "partLength": PART_LENGTH_ATTR,
+            "areas": AREAS_ELEMENT,
+            "area": AREA_ELEMENT,
+            "areaId": AREA_ID_ATTR,
+            "areaName": AREA_NAME_ATTR,
+            "areaForm": AREA_FORM_ATTR,
+            "areaLength": AREA_LENGTH_ATTR,
         },
         "waypoint": {
             "name": WAYPOINT_NAME,
             "origin": WAYPOINT_ORIGIN_FIELD,
             "set": WAYPOINT_SET,
+            "generated": WAYPOINT_GENERATED,
+            "enters": WAYPOINT_ENTERS,
+            "leaves": WAYPOINT_LEAVES,
+            "area": WAYPOINT_AREA_FIELD,
         },
+        # Named wherever a file states how far the route runs inside a protected
+        # area, and in no file that does not — the same rule the height model is
+        # credited by. That figure came from Naturbase, and a file that reports
+        # it without saying so names every party with a claim on it but one.
+        "protected": protected_credit(),
     }
 
 
@@ -1066,7 +1134,7 @@ def summarize(name: str, gdf: gpd.GeoDataFrame) -> None:
     print(f"  {name}: {len(gdf):,} chains, {total_km:,.1f} km")
 
 
-def encode_for_the_page(network: Network, sources: list[NetworkSource], params: Params, order: pd.DataFrame) -> Payload:
+def encode_for_the_page(network: Network, sources: list[NetworkSource], params: Params, order: pd.DataFrame, protected: gpd.GeoDataFrame) -> Payload:
     """Encode the routing graph and its heights into the page's second payload.
 
     Two representations of the same ground, and they must not be unified. What
@@ -1085,6 +1153,10 @@ def encode_for_the_page(network: Network, sources: list[NetworkSource], params: 
             them runs. Handed in rather than rebuilt here, because the exported
             tracks are laid out of the same walk and the two writers of a GPX
             file agree only for as long as they compose from one order.
+        protected: The areas every edge was measured against, whose outlines go
+            into the page as well as their names: a leg drawn straight across
+            ground no edge covers has to answer the same question, and only the
+            polygons can answer it there.
 
     Returns:
         The payload, and its size
@@ -1097,6 +1169,7 @@ def encode_for_the_page(network: Network, sources: list[NetworkSource], params: 
         # chain geometry to project them onto, so it has to be told.
         order,
         costs=edge_costs(sources, params),
+        areas=protected_table(protected),
     )
 
 
@@ -1144,7 +1217,7 @@ def main() -> int:
     zone = zone_around(park, params.approach_km)
 
     loaded = load_sources(params, zone)
-    network, _ = build(loaded.sources, masks_from(loaded.sources), zone, params, name=PARK_NAME.lower())
+    network, _ = build(loaded.sources, masks_from(loaded.sources), zone, params, name=PARK_NAME.lower(), protected=loaded.protected)
     by_source = describe(network.chains, park)
 
     # The line an export writes, which is a third thing beside the one the map
@@ -1367,7 +1440,14 @@ def main() -> int:
     if len(terminals):
         searchable.append(
             maps.add_points(
-                fmap, terminals, name="Ferry quays [OSM]", color="cadetblue", icon="ship", popup_fields=TERMINAL_POPUP_FIELDS, source="OSM"
+                fmap,
+                terminals,
+                name="Ferry quays [OSM]",
+                color="cadetblue",
+                icon="ship",
+                popup_fields=TERMINAL_POPUP_FIELDS,
+                source="OSM",
+                point_type="ferry quay",
             )
         )
     if len(cabins):
@@ -1381,6 +1461,7 @@ def main() -> int:
                 popup_fields=CABIN_POPUP_FIELDS,
                 label_field="navn",
                 source="N50",
+                point_type="cabin",
             )
         )
     if len(terrain_names):
@@ -1401,17 +1482,40 @@ def main() -> int:
         # them; as their own layer none of the register's huts is lost.
         searchable.append(
             maps.add_points(
-                fmap, ssr_huts, name="Named huts [SSR]", color="purple", icon="house-chimney", popup_fields=SSR_POINT_POPUP_FIELDS, source="SSR"
+                fmap,
+                ssr_huts,
+                name="Named huts [SSR]",
+                color="purple",
+                icon="house-chimney",
+                popup_fields=SSR_POINT_POPUP_FIELDS,
+                source="SSR",
+                point_type="hut",
             )
         )
     if len(ssr_quays):
         searchable.append(
-            maps.add_points(fmap, ssr_quays, name="Quays [SSR]", color="blue", icon="anchor", popup_fields=SSR_POINT_POPUP_FIELDS, source="SSR")
+            maps.add_points(
+                fmap,
+                ssr_quays,
+                name="Quays [SSR]",
+                color="blue",
+                icon="anchor",
+                popup_fields=SSR_POINT_POPUP_FIELDS,
+                source="SSR",
+                point_type="quay",
+            )
         )
     if len(shelters):
         searchable.append(
             maps.add_points(
-                fmap, shelters, name="Huts and shelters [OSM]", color="darkblue", icon="campground", popup_fields=SHELTER_POPUP_FIELDS, source="OSM"
+                fmap,
+                shelters,
+                name="Huts and shelters [OSM]",
+                color="darkblue",
+                icon="campground",
+                popup_fields=SHELTER_POPUP_FIELDS,
+                source="OSM",
+                point_type="shelter",
             )
         )
     if len(trailheads):
@@ -1424,17 +1528,28 @@ def main() -> int:
                 radius=5.5,
                 popup_fields=PLACE_POPUP_FIELDS,
                 source="OSM",
+                point_type="trailhead",
             )
         )
     if len(places):
         # Names appear on hover only, like every other point layer. Drawing 165
         # settlement names permanently competes with the topo backdrop, which
         # already labels them.
-        searchable.append(maps.add_labelled_points(fmap, places, name="Towns and villages [OSM]", popup_fields=PLACE_POPUP_FIELDS, source="OSM"))
+        searchable.append(
+            maps.add_labelled_points(
+                fmap, places, name="Towns and villages [OSM]", popup_fields=PLACE_POPUP_FIELDS, source="OSM", point_type="settlement"
+            )
+        )
     if len(settlements):
         searchable.append(
             maps.add_labelled_points(
-                fmap, settlements, name="Towns and villages [SSR]", color="#263238", popup_fields=SSR_POINT_POPUP_FIELDS, source="SSR"
+                fmap,
+                settlements,
+                name="Towns and villages [SSR]",
+                color="#263238",
+                popup_fields=SSR_POINT_POPUP_FIELDS,
+                source="SSR",
+                point_type="settlement",
             )
         )
     if len(farms):
@@ -1450,6 +1565,7 @@ def main() -> int:
                 radius=4.5,
                 popup_fields=SSR_POINT_POPUP_FIELDS,
                 source="SSR",
+                point_type="farm",
                 show=False,
             )
         )
@@ -1465,7 +1581,7 @@ def main() -> int:
     # takes the profile off it and phase 6 routes over it, and both of those live
     # in Python until it is in the page.
     print("\nEncoding the routing graph for the page...")
-    payload = encode_for_the_page(network, loaded.sources, params, order)
+    payload = encode_for_the_page(network, loaded.sources, params, order, loaded.protected)
     counted = payload.header
     print(f"  {counted['edges']:,} edges on {counted['nodes']:,} nodes, {counted['vertices']:,} vertices at full source precision")
     print(f"  {counted['samples']:,} height samples, quantised at {counted['coordinateQuantum']:g}° and {counted['elevationQuantum']:g} m")
@@ -1526,7 +1642,11 @@ def main() -> int:
     # And a route can now be clicked together over the graph, leg by leg, with
     # its profile drawn in the same panel. After the panel, whose walk it lays
     # its route out with, and after the graph it routes over.
-    maps.add_plan_mode(fmap, plan_settings(params))
+    # And the named points every one of these layers draws, so a waypoint set
+    # beside a hut comes back called after the hut. The line layers go in too
+    # and carry nothing: only a layer given a point_type has a table, and a
+    # place name drawn as text asserts no single position to be named after.
+    maps.add_plan_mode(fmap, plan_settings(params), searchable)
 
     maps.finalize(fmap)
 
@@ -1582,7 +1702,11 @@ def main() -> int:
         for entry in entries:
             print(f"Source: {entry['name']} — {entry['licence']}{', ' + entry['note'] if entry['note'] else ''} — {entry['version'] or 'no version'}")
     print(f"Heights: {heights[0]['name']} — {heights[0]['licence']} — {ascent_method(params)}")
-    print("        Naturbase (NLOD, Miljødirektoratet) draws the boundary and goes into no exported track")
+    entry = protected_credit()[0]
+    # It is in a route's file and in none of the six above: a route states how
+    # far it runs inside each protected area and a chain states nothing of the
+    # kind, so the register has a claim on one and not the other.
+    print(f"Protected: {entry['name']} — {entry['licence']} — in a planned route's file, in no chain's, and in the boundary drawn")
     print("=" * 70)
     return 0
 

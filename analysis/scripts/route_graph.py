@@ -30,6 +30,9 @@ from trails.network.norway import (
     MARKED_M,
     METRIC_CRS,
     MIN_SHARE,
+    PROTECTED_FORM,
+    PROTECTED_ID,
+    PROTECTED_NAME,
     RECORDED_M,
     RECORDED_SOURCES,
     ROUTE_REGISTERS,
@@ -40,7 +43,18 @@ from trails.network.norway import (
     masks_from,
     zone_around,
 )
-from trails.routing import MARKED, UNKNOWN, UNMARKED, Network, NetworkSource, label_components
+from trails.routing import (
+    DEFAULT_TOUCHED_M,
+    MARKED,
+    PROTECTED_COLUMN,
+    UNKNOWN,
+    UNMARKED,
+    Network,
+    NetworkSource,
+    label_components,
+    protected_metres,
+    touched,
+)
 from trails.routing.sources import BRIDGE, FERRY, PATH
 
 PARK_NAME = "Lomsdal-Visten"
@@ -123,6 +137,7 @@ def report(
     landmarks: Landmarks,
     params: Params,
     reach_m: float,
+    protected: gpd.GeoDataFrame,
 ) -> None:
     """Print everything the phase is checked against.
 
@@ -134,6 +149,7 @@ def report(
         landmarks: Points to check the main component against
         params: What decided the build
         reach_m: How close a component must pass a quay to count as reaching it
+        protected: The protected areas the edges were measured against
     """
     edges = network.edges
     on_land = edges[edges["kind"] != FERRY]
@@ -188,6 +204,7 @@ def report(
 
     report_attributes(network.chains, sources)
     report_derived(network)
+    report_protection(network, protected)
     report_elevation(network, params)
 
 
@@ -278,6 +295,81 @@ def report_derived(network: Network) -> None:
         print(f"      {str(name)[:52]:<52} {distance / 1000:>5,.1f} of {whole[name] / 1000:>5,.1f} km")
     if len(per_route) > 8:
         print(f"      {'the other ' + str(len(per_route) - 8) + ' together':<52} {per_route.iloc[8:].sum() / 1000:>5,.1f} km")
+
+
+def report_protection(network: Network, protected: gpd.GeoDataFrame) -> None:
+    """Print which protected areas the network runs through, and for how far.
+
+    **The extent is named because the figures cannot be re-derived without it.**
+    Over the *walked* network — every edge but the crossings, so the inferred
+    connectors are in it: nobody drew them, but a walker covers their ground and
+    that ground lies inside a boundary or outside it. Beside it, the same figure
+    over the drawn paths alone, since the two differ by the 46.6 km of connector
+    and a reader comparing them needs to know which is which.
+
+    Args:
+        network: The finished network
+        protected: The areas the edges were measured against
+    """
+    edges = network.edges
+    walked = edges[edges["kind"] != FERRY]
+    drawn = edges[edges["kind"] == PATH]
+    metres = protected_metres(walked[PROTECTED_COLUMN])
+    named = dict(zip(protected[PROTECTED_ID].astype(str), protected[PROTECTED_NAME].astype(str), strict=True))
+    # In the words a sign in the terrain uses, which is also what the page
+    # writes: the register spells its own forms without the letters they are
+    # said with, and two spellings of one thing in two places is a puzzle.
+    forms = {
+        identity: naturbase.verneform_label(form)
+        for identity, form in zip(protected[PROTECTED_ID].astype(str), protected[PROTECTED_FORM].astype(str), strict=True)
+    }
+    over = touched(metres, DEFAULT_TOUCHED_M)
+
+    print("\n" + "=" * 78)
+    print("WHAT PROTECTS THE GROUND, PER EDGE")
+    print("=" * 78)
+    print("  Measured against the boundaries themselves rather than sampled: a protected")
+    print("  area is a legal line with a published geometry, so how much of an edge lies")
+    print("  inside one is a length and not a share. A crossing is asked nothing — there")
+    print("  is no walking distance under a ferry — and a connector is asked.")
+    print(f"\n  register       {len(protected)} areas meeting the park and its approach zone")
+    print(f"  walked         {walked['length_m'].sum() / 1000:,.1f} km, of which {drawn['length_m'].sum() / 1000:,.1f} on ground a source drew")
+    print(f"  touched        {len(metres)} of them, {sum(metres.values()) / 1000:,.1f} km")
+    print(f"  over {DEFAULT_TOUCHED_M:g} m       {len(over)} of them, {sum(over.values()) / 1000:,.1f} km   <- what a route reports")
+
+    if not metres:
+        return
+    print(f"\n    {'area':<38} {'verneform':<22} {'km':>9} {'m':>12}")
+    for identity, value in metres.items():
+        mark = "" if identity in over else "   under the threshold"
+        print(f"    {named[identity][:38]:<38} {forms[identity]:<22} {value / 1000:>9,.2f} {value:>12,.1f}{mark}")
+
+    # Whether the reserves and the park overlap decides whether their figures
+    # may be added up, and it was written here for a long time that none of them
+    # touched the park. Measured, three do — sharing a boundary, which is not
+    # overlapping — so the figures still add up and the premise was wrong.
+    metric = protected.to_crs(METRIC_CRS)
+    park_row = metric[metric[PROTECTED_NAME].astype(str) == PARK_NAME]
+    if len(park_row) == 1:
+        park_shape = park_row.geometry.iloc[0]
+        meeting = []
+        overlapping = []
+        for identity, shape in zip(metric[PROTECTED_ID].astype(str), metric.geometry, strict=True):
+            if identity == str(park_row[PROTECTED_ID].iloc[0]):
+                continue
+            if shape.distance(park_shape) <= 0:
+                meeting.append(named[identity])
+            if shape.intersection(park_shape).area > 0:
+                overlapping.append(named[identity])
+        print(f"\n    share a boundary with {PARK_NAME}: {', '.join(sorted(meeting)) or 'none'}")
+        # The annotation goes on the answer that earns it and not on the line.
+        # Written unconditionally it would name the areas that overlap and then
+        # say the figures may be added up — which is the one thing an overlap
+        # means they may not be, and the whole reason this is measured.
+        if overlapping:
+            print(f"    overlap it in area:    {', '.join(sorted(overlapping))}   <- so the figures above double-count that ground")
+        else:
+            print("    overlap it in area:    none   <- so the figures above may be added up")
 
 
 def report_elevation(network: Network, params: Params) -> None:
@@ -442,8 +534,8 @@ def main() -> int:
     loaded = load_sources(params, zone)
     landmarks = load_landmarks(params, loaded.municipalities, zone)
     masks = masks_from(loaded.sources)
-    network, chains = build(loaded.sources, masks, zone, params, name=PARK_NAME.lower())
-    report(network, chains, loaded.sources, park, landmarks, params, args.reach_m)
+    network, chains = build(loaded.sources, masks, zone, params, name=PARK_NAME.lower(), protected=loaded.protected)
+    report(network, chains, loaded.sources, park, landmarks, params, args.reach_m, loaded.protected)
 
     print("\n" + "=" * 78)
     print(f"Sources: Turrutebasen {loaded.versions[TURRUTEBASEN]} (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)")

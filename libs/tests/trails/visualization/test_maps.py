@@ -406,6 +406,50 @@ class TestAddPoints:
         assert tooltips[1] is None
 
 
+class TestNamedPoints:
+    """Tests for the table a waypoint takes its name from.
+
+    The markers themselves cannot answer *what is at this position*: their names
+    are inside the popup HTML they were given, which is markup and not a lookup.
+    """
+
+    @pytest.fixture
+    def huts(self) -> gpd.GeoDataFrame:
+        """A named hut and an unnamed one."""
+        return gpd.GeoDataFrame(
+            {"name": ["Lavasshytta", None], "geometry": [Point(12.98079, 65.77416), Point(12.9, 65.5)]},
+            crs="EPSG:4326",
+        )
+
+    def test_a_layer_given_a_type_carries_what_it_draws(self, huts):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_points(fmap, huts, name="Huts", point_type="hut")
+
+        assert getattr(group, maps.NAMED_POINTS_ATTR) == [{"name": "Lavasshytta", "type": "hut", "lat": 65.77416, "lon": 12.98079}]
+
+    def test_a_layer_without_one_answers_nothing(self, huts):
+        # Opt-in per layer: a place name drawn as text asserts no single
+        # position — a valley has none — and a waypoint must not take one.
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_points(fmap, huts, name="Huts")
+
+        assert getattr(group, maps.NAMED_POINTS_ATTR) == []
+
+    def test_circles_carry_the_same_table_as_pins(self):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        farms = gpd.GeoDataFrame({"name": ["Strompdalen"], "geometry": [Point(13.05, 65.45)]}, crs="EPSG:4326")
+        group = maps.add_labelled_points(fmap, farms, name="Farms", point_type="farm")
+
+        assert getattr(group, maps.NAMED_POINTS_ATTR) == [{"name": "Strompdalen", "type": "farm", "lat": 65.45, "lon": 13.05}]
+
+    def test_text_labels_never_carry_one(self):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        valleys = gpd.GeoDataFrame({"name": ["Lomsdalen"], "geometry": [Point(13.05, 65.45)]}, crs="EPSG:4326")
+        group = maps.add_text_labels(fmap, valleys, name="Terrain names")
+
+        assert not hasattr(group, maps.NAMED_POINTS_ATTR)
+
+
 class TestAddLabelledPoints:
     """Tests for add_labelled_points."""
 
@@ -770,8 +814,23 @@ class TestProfilePanel:
                 "part": "part",
                 "partKind": "kind",
                 "partLength": "m",
+                "areas": "protected",
+                "area": "area",
+                "areaId": "id",
+                "areaName": "name",
+                "areaForm": "form",
+                "areaLength": "m",
             },
-            "waypoint": {"name": "Point", "origin": "origin", "set": "set"},
+            "waypoint": {
+                "name": "Point",
+                "origin": "origin",
+                "set": "set",
+                "generated": "generated",
+                "enters": "Enters",
+                "leaves": "Leaves",
+                "area": "area",
+            },
+            "protected": [{"name": "Naturvernområder", "licence": "NLOD", "note": ""}],
         }
         settings.update(changed)
         return {name: value for name, value in settings.items() if value is not None}
@@ -906,6 +965,8 @@ class TestPlanMode:
             "maxStraightM": 20000.0,
             "crossingKind": "ferry",
             "connectorKind": "bridge",
+            "touchedM": 100.0,
+            "namedM": 50.0,
         }
         settings.update(changed)
         return {name: value for name, value in settings.items() if value is not None}
@@ -976,6 +1037,90 @@ class TestPlanMode:
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "L.marker(" not in planning
         assert "L.circleMarker(" in planning
+
+    def test_the_named_points_reach_the_page_as_a_table(self):
+        """A waypoint set beside a hut can only be called after it if the page
+        holds a table of what is where. 1,411 circle markers and 865 markers
+        keep their names inside popup HTML, which is markup and not a lookup."""
+        fmap, _ = self.drawn()
+        huts = gpd.GeoDataFrame({"name": ["Lavasshytta"], "geometry": [Point(12.98079, 65.77416)]}, crs="EPSG:4326")
+        layer = maps.add_points(fmap, huts, name="Huts", point_type="hut")
+        maps.add_plan_mode(fmap, self.planned(), [layer])
+
+        planning = fmap.get_root().render().split("var NAMED =")[-1]
+        assert '"name": "Lavasshytta"' in planning or '"name":"Lavasshytta"' in planning
+        assert '"type": "hut"' in planning or '"type":"hut"' in planning
+
+    def test_a_name_carrying_a_script_tag_cannot_close_the_block(self):
+        """Every one of these is a name out of somebody else's register, and
+        json.dumps does not escape '<'."""
+        fmap, _ = self.drawn()
+        nasty = gpd.GeoDataFrame({"name": ["</script><script>alert(1)</script>"], "geometry": [Point(12.98, 65.77)]}, crs="EPSG:4326")
+        layer = maps.add_points(fmap, nasty, name="Huts", point_type="hut")
+        maps.add_plan_mode(fmap, self.planned(), [layer])
+
+        planning = fmap.get_root().render().split("var NAMED =")[-1]
+        assert "</script><script>" not in planning.split("})();")[0]
+
+    def test_without_a_table_a_waypoint_is_numbered(self):
+        """Which is what it did before this existed."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var NAMED =")[-1]
+        assert planning.lstrip().startswith("[]")
+
+    def test_the_threshold_is_applied_once_and_carried_rather_than_spelled(self):
+        """A rounded label is a threshold and so is a reported one. Applied in
+        two places it becomes two thresholds, and the sentence above the button
+        would name areas the file's markers do not."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned(touchedM=250.0))
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert planning.count("PLAN.touchedM") == 1
+        assert "250" in fmap.get_root().render()
+
+    def test_what_protects_the_ground_is_summed_per_edge_like_the_rest(self):
+        """A part keeps its geometry and its heights and nothing downstream can
+        get back to the edge a metre came from."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "graph.protectedAt[edge]" in planning
+        assert "graph.protectedShare[p] * metres" in planning
+
+    def test_a_crossing_is_asked_nothing_about_what_protects_it(self):
+        """There is no walking distance under a ferry, so there is no protected
+        walking distance either."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "if (source.kind !== CROSSING) { addProtected(out, graph, edge, metres); }" in planning
+
+    def test_a_connector_is_asked(self):
+        """Nobody drew it, but a walker covers its ground and that ground lies
+        inside a boundary or outside it — so the protected question is put
+        before the connector is taken out of the other two."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        protecting = planning.index("addProtected(out, graph, edge, metres)")
+        connector = planning.index("if (source.kind === CONNECTOR) { out.undrawn += metres; continue; }")
+        assert protecting < connector
+
+    def test_a_leg_drawn_straight_reads_its_areas_off_its_own_samples(self):
+        """The page has one protected area of the nineteen drawn and the height
+        service answers ground cover, not protection — so the boundaries have to
+        be carried, and a straight leg is decided at the samples it fetched."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "graph.areasAt(laid.lon[s], laid.lat[s])" in planning
 
     def test_the_wheel_still_reaches_the_map(self):
         """disableClickPropagation, and deliberately not the scroll one: a
@@ -1185,6 +1330,49 @@ class TestPlanMode:
         assert "console.error('plan mode: there is no profile panel" in html
 
 
+class TestRoutingGraphAreas:
+    """Tests for the boundaries the page is handed with the graph."""
+
+    def rendered(self, areas: list[dict[str, object]]) -> str:
+        """A page carrying a graph header with these areas in it.
+
+        Args:
+            areas: What the header says is protected
+
+        Returns:
+            The rendered page
+        """
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_routing_graph(fmap, {"version": 3, "edges": 0, "protected": areas}, "")
+        return fmap.get_root().render()
+
+    def test_the_test_is_bound_before_the_stream_is_inflated(self):
+        """It needs nothing from the stream — the outlines are in the header —
+        and a caller asking what protects a position should not wait for two
+        million coordinates it is not going to look at."""
+        html = self.rendered([])
+
+        assert "graph.areasAt = areasAt.bind(null, graph.protectedAreas)" in html
+        assert html.index("graph.areasAt = areasAt") < html.index("graph.ready = inflate")
+
+    def test_an_area_carries_its_outline_and_its_box(self):
+        """The box settles thirty of thirty-one areas in four comparisons, and
+        only then are four thousand vertices walked."""
+        area = {"id": "VV0001", "name": "Somewhere", "form": "naturreservat", "bounds": [12.0, 65.0, 13.0, 66.0], "rings": [[[12.0, 65.0]]]}
+        html = self.rendered([area])
+
+        assert "VV0001" in html
+        assert "areas[a].bounds" in html
+        assert "areas[a].rings" in html
+
+    def test_a_page_without_a_protected_list_still_answers(self):
+        """An older payload, or a build over ground nothing protects."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_routing_graph(fmap, {"version": 3, "edges": 0}, "")
+
+        assert "header.protected || []" in fmap.get_root().render()
+
+
 class TestComposedProfile:
     """Tests for the second way into the panel, which a planned route uses."""
 
@@ -1215,7 +1403,7 @@ class TestComposedProfile:
         """Phase 6 withheld the button because writing a plan out was its own
         phase. This is that phase, and restoring it is its visible outcome."""
         html = self.drawn().get_root().render()
-        assert "function routeGpxOf(figure, shape, runs, plan, extra)" in html
+        assert "function routeGpxOf(figure, shape, runs, plan, extra, crossings)" in html
         assert "saveFile(fileNameOf(EXPORT.route.fileStem)," in html
 
     def test_the_file_says_what_the_panel_above_the_button_says(self):
@@ -1225,7 +1413,7 @@ class TestComposedProfile:
         plausible and silent about the one thing it breaks its track for."""
         html = self.drawn().get_root().render()
         assert "planned(figure, shape, extra).concat([markingLine(shape.tally)])" in html
-        assert "routeGpxOf(selected.figure, selected.shape, selected.runs, selected.plan, selected.told)" in html
+        assert "routeGpxOf(selected.figure, selected.shape, selected.runs, selected.plan, selected.told, crossings())" in html
 
     def test_a_series_composed_without_a_description_is_not_offered(self):
         """The file has to say what its legs are and where its waypoints went. A
@@ -1253,6 +1441,62 @@ class TestComposedProfile:
         assert "FREE_DASH" in html
         assert "current.free !== free" in html
         assert "drawn straight, not a path" in html
+
+    def test_the_crossings_are_read_off_the_series_the_file_is_written_from(self):
+        """The one series in this page with a point every few metres over the
+        whole route. The vertices alone are a source's own corners, and a leg
+        drawn straight has two of them for twenty kilometres."""
+        html = self.drawn().get_root().render()
+        assert "function crossingsOf(shape, runs)" in html
+        assert "routeGpxOf(selected.figure, selected.shape, selected.runs, selected.plan, selected.told, crossings())" in html
+
+    def test_the_crossings_are_asked_for_rather_than_worked_out_every_refresh(self):
+        """Measured: the boundary walk is 45 ms of a 50 ms refresh over a 37 km
+        route and it grows with the route, while the only thing that needs it is
+        a button a reader may never press. Cached against the selection, so the
+        file and a check still get one answer."""
+        html = self.drawn().get_root().render()
+        assert "if (!selected.crossings) { selected.crossings = crossingsOf(selected.shape, selected.runs); }" in html
+        assert "crossings: crossings" in html
+        # And not in the row that is rebuilt on every click.
+        assert "selected.runs = runsOf(selected.shape);\n                var points = pointsIn(selected.runs);" in html
+
+    def test_only_the_areas_the_route_reports_get_a_marker(self):
+        """The threshold is applied once, where the figures are, so a boundary
+        grazed for ten metres cannot bring a pair of markers in through this
+        door after the sentence above declined to mention it."""
+        html = self.drawn().get_root().render()
+        assert "(shape.protected || []).forEach(function (area) { reported[area.id] = area; });" in html
+        assert "if (reported[id] && before.indexOf(id) < 0)" in html
+
+    def test_a_boundary_marker_says_it_was_generated(self):
+        """Phase 8 loads a file back and must never read a marker the map placed
+        as a station somebody chose, or a loaded route gains points nobody put
+        down and starts routing through them."""
+        html = self.drawn().get_root().render()
+        assert "EXPORT.waypoint.generated, crossing.id" in html
+        assert "EXPORT.waypoint.set, null" in html
+
+    def test_the_areas_are_written_as_figures_and_not_as_a_sentence(self):
+        """A sentence has to be parsed back, and phase 8 has to know which
+        boundary was meant rather than which words were written."""
+        html = self.drawn().get_root().render()
+        assert "EXPORT.route.areas" in html
+        assert "EXPORT.route.areaId" in html
+        assert "EXPORT.route.areaLength" in html
+
+    def test_the_register_is_credited_wherever_a_file_states_one_of_its_figures(self):
+        """A file naming a source it did not draw on is exactly as wrong as one
+        leaving a source out."""
+        html = self.drawn().get_root().render()
+        assert ".concat((shape.protected || []).length ? EXPORT.protected : []);" in html
+
+    def test_what_protects_the_route_is_said_once_and_shown_twice(self):
+        """The sentence above the button and the sentence in the file are one
+        sentence, so the areas go into `planned` rather than beside it."""
+        html = self.drawn().get_root().render()
+        assert ".concat(extra || []).concat(protectedIn(shape));" in html
+        assert "function protectedIn(shape)" in html
 
     def test_the_metre_is_the_ellipsoid_and_not_a_sphere(self):
         """Measured over 4,000 real edges: the sphere read 0.56 % short, which

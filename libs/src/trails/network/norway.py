@@ -15,7 +15,8 @@ worse fault than either of them being wrong, because nothing would say so.
     >>> params = Params(cache_dir=cache, ut_routes=catalogue)
     >>> zone = zone_around(park, params.approach_km)
     >>> loaded = load_sources(params, zone)
-    >>> network, chains = build(loaded.sources, masks_from(loaded.sources), zone, params, name="lomsdal-visten")
+    >>> masks = masks_from(loaded.sources)
+    >>> network, chains = build(masks=masks, sources=loaded.sources, clip=zone, params=params, name="lomsdal-visten", protected=loaded.protected)
 """
 
 import argparse
@@ -28,7 +29,7 @@ import geopandas as gpd
 import pandas as pd
 
 from trails.io import cache as cache_module
-from trails.io.sources import hoydedata, kommuneinfo, n50, overpass, stedsnavn, traktorvegsti, ut
+from trails.io.sources import hoydedata, kommuneinfo, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
 from trails.io.sources.geonorge import Source as GeonorgeSource
 from trails.io.sources.language import Language
 from trails.routing import (
@@ -39,6 +40,7 @@ from trails.routing import (
     DEFAULT_RECORDED_M,
     DEFAULT_STEP_M,
     IDENTITY_SEPARATOR,
+    PROTECTED_COLUMN,
     ChainRule,
     Network,
     NetworkSource,
@@ -48,6 +50,7 @@ from trails.routing import (
     chains_of,
     no_path_recorded,
     parts_of,
+    protected_within,
     split_source,
     waymarked,
     with_elevation,
@@ -170,7 +173,17 @@ MARKED_M, RECORDED_M, MIN_SHARE = DEFAULT_MARKED_M, DEFAULT_RECORDED_M, DEFAULT_
 #: *into* a build; this covers what comes out of it. Without it, a graph cached
 #: before a column existed is served to code that reads that column — the
 #: parameters and the sources are unchanged, so nothing else in the key notices.
-GRAPH_LAYOUT = "elevation+coverage"
+GRAPH_LAYOUT = "elevation+coverage+protection"
+
+#: What names a protected area, on every edge that lies in one and in every
+#: figure about it. The register's own stable identifier rather than a row
+#: number: an edge's answer outlives the frame the areas were read into, and a
+#: position in that frame is not something a cached graph and a later reader can
+#: be trusted to agree about.
+PROTECTED_ID = "naturvernId"
+
+#: What a protected area is called, and which of the register's forms it is.
+PROTECTED_NAME, PROTECTED_FORM = "navn", "verneform"
 
 
 @dataclass(frozen=True)
@@ -279,11 +292,16 @@ class Loaded(NamedTuple):
             file records all of them, so that a route differing months later has
             a cause rather than a puzzle, and a source that can say neither
             comes back None rather than as a date made up for it.
+        protected: Every protected area meeting the zone, whole rather than cut
+            to it. An edge lies in one or it does not, and a boundary trimmed
+            at the edge of the zone would give a route a crossing to report
+            where the register draws none.
     """
 
     sources: list[NetworkSource]
     municipalities: list[str]
     versions: dict[str, str | None]
+    protected: gpd.GeoDataFrame
 
 
 def zone_around(area: gpd.GeoDataFrame, distance_km: float) -> gpd.GeoDataFrame:
@@ -298,6 +316,47 @@ def zone_around(area: gpd.GeoDataFrame, distance_km: float) -> gpd.GeoDataFrame:
     """
     metric = area.to_crs(METRIC_CRS)
     return gpd.GeoDataFrame(geometry=metric.buffer(distance_km * 1000), crs=METRIC_CRS).to_crs("EPSG:4326")
+
+
+def load_protected(params: Params, zone: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Load every protected area the ground under this network can lie in.
+
+    One request over the zone's bounding box, then the areas that actually meet
+    the zone. Both figures are worth naming, because neither can be re-derived
+    without its extent: over Lomsdal-Visten and its 15 km approach the box
+    returns 44 areas and 31 of them meet the zone.
+
+    **Every form counts, and each says which it is.** The register separates
+    five, and this keeps all of them: whether the rules inside a marine
+    protected area matter to a walker is a reading of that area's
+    verneforskrift, and none has been read here. What a walker needs in order to
+    tell a national park from a nature reserve is the *form*, which every figure
+    carries, and leaving one out would be the judgement this phase declines to
+    make.
+
+    Args:
+        params: What decides the build, for the cache and the download
+        zone: Park and approach zone, in EPSG:4326
+
+    Returns:
+        The areas meeting the zone, whole, in EPSG:4326, ordered by
+        :data:`PROTECTED_ID` so two builds of the same ground list them alike
+    """
+    source = naturbase.Source(cache_dir=params.cache_dir)
+    west, south, east, north = (float(value) for value in zone.total_bounds)
+    over_the_box = source.within((west, south, east, north), force_download=params.force_download)
+    if not len(over_the_box):
+        return over_the_box
+
+    # Meeting the zone, not clipped to it. A boundary cut at the edge of the
+    # zone would hand a route an entry and an exit the register never drew.
+    metric = over_the_box.to_crs(METRIC_CRS)
+    meets = metric.intersects(zone.to_crs(METRIC_CRS).geometry.union_all())
+    kept = over_the_box[meets.to_numpy()].sort_values(PROTECTED_ID).reset_index(drop=True)
+    forms = kept[PROTECTED_FORM].value_counts().to_dict()
+    print(f"  protected areas: {len(kept)} meeting the zone, of {len(over_the_box)} over its box")
+    print(f"    {' · '.join(f'{naturbase.verneform_label(form)} {count}' for form, count in sorted(forms.items()))}")
+    return kept
 
 
 def _join_values(values: pd.Series) -> str | None:
@@ -509,7 +568,13 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         FERRIES: ordered,
         OSM: osm_source.loaded_at,
     }
-    return Loaded(sources=sources, municipalities=codes, versions=versions)
+    # And the ground the network runs over, which is the third thing an edge
+    # says about itself. Loaded here rather than beside the caller's own park
+    # lookup, so that the graph and the report ask the same register over the
+    # same extent and cannot answer differently.
+    print("\nLoading protected areas (Naturbase)...")
+    protected = load_protected(params, zone)
+    return Loaded(sources=sources, municipalities=codes, versions=versions, protected=protected)
 
 
 def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:
@@ -539,6 +604,74 @@ def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[s
     # default, so this is the same number the edges were weighted with.
     costs[BRIDGE] = {"factor": DEFAULT_BRIDGE_COST_FACTOR}
     return costs
+
+
+#: How finely the outlines the page carries are drawn, in metres.
+#:
+#: The page needs them for ground no edge covers — a leg drawn straight across
+#: open terrain, whose share is decided at its own height samples — and for
+#: saying where a route crosses a boundary. Neither wants the register's full
+#: precision: measured over this zone the 31 areas come to 30,105 vertices and
+#: 0.66 MB of coordinates, and at five metres to 4,195 and 0.09 MB against a
+#: 37.5 MB page.
+#:
+#: **Five and not ten.** Ten was the figure this phase arrived with, on the
+#: argument that it lies inside the ±5 m the sampling already accepts at each
+#: crossing. Measured, it does not: Douglas-Peucker at 10 m moves this register's
+#: boundaries by up to 16.1 m, and at 5 m by 5.9 m. The saving between the two is
+#: 0.02 MB. So the tolerance is set where the claim about it is true.
+PROTECTED_SIMPLIFY_M = 5.0
+
+
+def protected_table(protected: gpd.GeoDataFrame, *, simplify_m: float = PROTECTED_SIMPLIFY_M) -> list[dict[str, Any]]:
+    """Say what each protected area is and where its boundary runs, for a page.
+
+    The sibling of :func:`edge_costs`: what a consumer needs that has the edges
+    but not the polygons the edges were measured against, which is the position
+    a browser is in. It travels as **one** list, because the codes on the edges
+    and the outlines a click is tested against must not be able to mean two
+    different areas.
+
+    Every ring of an area goes in one flat list, its holes among them, and a
+    point is inside where it is enclosed by an odd number of them. That is exact
+    for a valid multipolygon and needs no outer-and-inner structure to keep in
+    step with itself.
+
+    Args:
+        protected: The areas, from :func:`load_protected`, in EPSG:4326
+        simplify_m: Vertex tolerance for the outlines, in metres
+
+    Returns:
+        One entry per area, in the order the edges name them, each with its id,
+        its name, the words for its form, its bounding box and its rings
+    """
+    simplified = protected.to_crs(METRIC_CRS).geometry.simplify(simplify_m).to_crs("EPSG:4326") if len(protected) else protected.geometry
+    table: list[dict[str, Any]] = []
+    for (_, area), shape in zip(protected.iterrows(), simplified, strict=True):
+        rings = []
+        # A MultiPolygon is what the register hands back for every area here,
+        # even the ones drawn in one piece, and a Polygon has no `geoms`.
+        outline: Any = shape
+        parts: list[Any] = list(outline.geoms) if outline.geom_type == "MultiPolygon" else [outline]
+        for polygon in parts:
+            for ring in (polygon.exterior, *polygon.interiors):
+                # Six places is 0.11 m of latitude, the grid the payload's own
+                # coordinates are written on, and a third of what the outline
+                # was just simplified by.
+                rings.append([[round(x, 6), round(y, 6)] for x, y in ring.coords])
+        west, south, east, north = shape.bounds
+        table.append(
+            {
+                "id": str(area[PROTECTED_ID]),
+                "name": str(area[PROTECTED_NAME]),
+                "form": naturbase.verneform_label(area[PROTECTED_FORM]),
+                # Tested before the rings are, so a point out on the coast is
+                # thirty cheap comparisons rather than four thousand.
+                "bounds": [round(west, 6), round(south, 6), round(east, 6), round(north, 6)],
+                "rings": rings,
+            }
+        )
+    return table
 
 
 def masks_from(sources: list[NetworkSource]) -> Masks:
@@ -574,13 +707,14 @@ def masks_from(sources: list[NetworkSource]) -> Masks:
     )
 
 
-def fingerprint(sources: list[NetworkSource], masks: Masks, params: Params) -> str:
+def fingerprint(sources: list[NetworkSource], masks: Masks, params: Params, protected: gpd.GeoDataFrame) -> str:
     """Summarise what went into a build, so a cached one can be recognised.
 
     Args:
         sources: The datasets
         masks: What the derived edge fields were decided against
         params: What shaped the result
+        protected: The protected areas every edge is measured against
 
     Returns:
         Short hash naming this build
@@ -601,6 +735,11 @@ def fingerprint(sources: list[NetworkSource], masks: Masks, params: Params) -> s
         # subset of its sources, so a change in which features go into one shows
         # up in no source's row count or length.
         f"{_mask_digest(masks.marked)}|{_mask_digest(masks.unmarked)}|{_mask_digest(masks.recorded)}|{MARKED_M}|{RECORDED_M}|{MIN_SHARE}",
+        # And the protected areas, which are not a mask and not a source: they
+        # sit in neither of the digests above, and a boundary moved by a
+        # revision changes what every edge under it says without changing a
+        # line of the network.
+        _protected_digest(protected),
     ]
     for source in sources:
         length = source.gdf.to_crs(METRIC_CRS).length.sum() if len(source.gdf) else 0.0
@@ -622,6 +761,27 @@ def _mask_digest(mask: gpd.GeoSeries) -> str:
         Its size and total length
     """
     return f"{len(mask)}:{mask.length.sum():.0f}"
+
+
+def _protected_digest(protected: gpd.GeoDataFrame) -> str:
+    """Summarise the protected areas, so a graph is not read back for others.
+
+    Args:
+        protected: The areas every edge is measured against
+
+    Returns:
+        Their ids and their outlines, as one short digest
+    """
+    if not len(protected):
+        return "0"
+    metric = protected.to_crs(METRIC_CRS)
+    digest = hashlib.sha256()
+    for identity, shape in zip(protected[PROTECTED_ID].astype(str).tolist(), metric.geometry.tolist(), strict=True):
+        # Its area and its outline together: an area redrawn keeping its size
+        # would move every boundary an edge is measured against and leave one
+        # of the two figures standing.
+        digest.update(f"{identity}:{shape.area:.0f}:{shape.length:.0f}\n".encode())
+    return f"{len(protected)}:{digest.hexdigest()[:12]}"
 
 
 def _values_digest(source: NetworkSource) -> str:
@@ -704,6 +864,7 @@ def build(
     params: Params,
     *,
     name: str,
+    protected: gpd.GeoDataFrame,
 ) -> tuple[Network, pd.DataFrame]:
     """Build the network, or read back the last build of the same inputs.
 
@@ -719,6 +880,8 @@ def build(
         clip: Extent to cut them to
         params: What decides the build
         name: Area the graph is of, which names its cache entry
+        protected: The protected areas every walked edge is measured against,
+            from :func:`load_protected`
 
     Returns:
         The network and the per-source chain counts
@@ -728,7 +891,7 @@ def build(
             built in
     """
     store = cache_module.Object(cache_dir=str(Path(params.cache_dir) / "objects"))
-    key = f"route_graph_{name}_{fingerprint(sources, masks, params)}"
+    key = f"route_graph_{name}_{fingerprint(sources, masks, params, protected)}"
 
     if not params.rebuild and store.exists(key):
         print(f"\nReading the graph back from the cache ({key})...")
@@ -749,8 +912,8 @@ def build(
         ferry_cost_m=params.ferry_cost_km * 1000,
     )
 
-    print("Asking every edge what the ground it runs over is recorded as...")
-    network = replace(network, edges=derive(network.edges, masks))
+    print("Asking every edge what the ground it runs over is recorded as, and what protects it...")
+    network = replace(network, edges=derive(network.edges, masks, protected))
 
     # And summed along the chains, because a chain is what gets selected and
     # shown while an edge is only what a mask can be tested against.
@@ -791,22 +954,40 @@ def measure(network: Network, params: Params) -> Network:
     return with_elevation(network, heights.elevations, step_m=params.elevation_step_m, threshold_m=params.ascent_threshold_m)
 
 
-def derive(edges: gpd.GeoDataFrame, masks: Masks) -> gpd.GeoDataFrame:
-    """Add the two fields an edge cannot read off the chain it lies on.
+def derive(edges: gpd.GeoDataFrame, masks: Masks, protected: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Add the three fields an edge cannot read off the chain it lies on.
 
-    Both are summed in kilometres by a planned route, which is what earns them a
-    place on the edge rather than on the chain: a chain takes one value along its
-    whole length, and both of these change along it.
+    All three are summed in kilometres by a planned route, which is what earns
+    them a place on the edge rather than on the chain: a chain takes one value
+    along its whole length, and every one of these changes along it.
+
+    The third is decided differently from the first two, and deliberately. A
+    mask answers *how near* — how much of an edge runs along something a
+    register drew — because two datasets disagreeing about where a path lies is
+    the subject. A protected boundary is a legal line with a published geometry,
+    so the answer is a length rather than a share, and an edge that lies ten
+    metres inside one says ten metres.
 
     Args:
         edges: The graph's edges
-        masks: Raw source geometry to decide them against
+        masks: Raw source geometry to decide the first two against
+        protected: The protected areas to measure the third against, in
+            EPSG:4326 or in the CRS of the edges
 
     Returns:
-        The edges carrying ``waymarked`` and ``no_path_recorded``, both of them
-        empty on a crossing and on an inferred connector
+        The edges carrying ``waymarked``, ``no_path_recorded`` and
+        :data:`~trails.routing.protection.PROTECTED_COLUMN`. The first two are
+        empty on a crossing and on an inferred connector; the third is empty on
+        a crossing alone, because a walker covers a connector's ground and that
+        ground lies inside a boundary or outside it.
     """
+    # Reprojected whether or not it holds anything. An *empty* frame left in the
+    # register's own degrees still states a CRS, and the measurement refuses a
+    # mismatch — so a build over ground nothing protects would fail after every
+    # source had been loaded, on the one path this is written to support.
+    areas = protected.to_crs(edges.crs) if edges.crs is not None else protected
     return edges.assign(
         waymarked=waymarked(edges, masks.marked, masks.unmarked, distance_m=MARKED_M, min_share=MIN_SHARE),
         no_path_recorded=no_path_recorded(edges, masks.recorded, distance_m=RECORDED_M, min_share=MIN_SHARE),
+        **{PROTECTED_COLUMN: protected_within(edges, areas, id_field=PROTECTED_ID)},
     )

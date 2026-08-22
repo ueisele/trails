@@ -18,12 +18,19 @@ than the best source in the set, so nothing measurable is lost. Do not coarsen
 it to save space: 1e-5 saves 0.7 MB and costs 1.11 m, which is worse than FKB's
 own survey accuracy and would undo what the graph was careful about.
 
-**What a route sums, beside its length.** The two derived edge fields ride
-in one byte: whether the sources state the ground is waymarked, and whether
+**What a route sums, beside its length.** Two of the three derived edge fields
+ride in one byte: whether the sources state the ground is waymarked, and whether
 none of them records a path along it. Both are summed in kilometres by a
 planned route, which is why they are here rather than left in Python, and
 the second carries a sentence that has to travel with it — it is ground *no
 source records a path along*, which is not ground with no path.
+
+The third is a length rather than a flag — how much of the edge lies inside each
+protected area it meets — so it takes a section of its own, and most edges spend
+one byte there saying they lie in none. The areas themselves travel in the
+header, boundary and all: the page needs the outlines for the ground a route
+crosses that no edge covers, and one list serves both so that the codes on the
+edges and the polygons on the screen cannot come to mean different areas.
 
 **Three things are deliberately absent.** ``cost``, because it is
 ``length x source factor`` and the browser has the geometry and the factors —
@@ -54,6 +61,7 @@ single cursor and never has to seek::
     nodes         2N x zigzag varint  head against the last edge's tail, then tail against head
     sources       N x byte            index into the header's source table
     derived       N x byte            bits 0-1 index the header's waymarked table, bit 2 no path recorded
+    protected     N x (varint k, k x (byte, varint))  areas the edge lies in, and its share inside each
     vertexCounts  N x varint          vertices per edge
     coordinates   2V x zigzag varint  longitude and latitude, delta against the vertex before
     sampleCounts  N x varint          height samples per edge; none at all on a crossing
@@ -73,10 +81,12 @@ import shapely
 
 from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED
 from trails.routing.order import CHAIN_ORDER_COLUMNS
+from trails.routing.protection import PROTECTED_COLUMN
+from trails.routing.sources import FERRY
 
 #: What the decoder in the page expects. Bump it when the layout changes, so a
 #: stale decoder says so rather than reading nonsense confidently.
-PAYLOAD_VERSION = 2
+PAYLOAD_VERSION = 3
 
 #: The coordinate reference system the payload is written in. Degrees rather
 #: than the metric CRS the graph is built in, because everything that reads it —
@@ -86,7 +96,19 @@ PAYLOAD_EPSG = 4326
 PAYLOAD_CRS = f"EPSG:{PAYLOAD_EPSG}"
 
 #: The binary stream, in the order it is written and read.
-STREAM_SECTIONS = ("chains", "chainEdges", "flags", "nodes", "sources", "derived", "vertexCounts", "coordinates", "sampleCounts", "heights")
+STREAM_SECTIONS = (
+    "chains",
+    "chainEdges",
+    "flags",
+    "nodes",
+    "sources",
+    "derived",
+    "protected",
+    "vertexCounts",
+    "coordinates",
+    "sampleCounts",
+    "heights",
+)
 
 #: What the low two bits of the derived byte mean, in the order the header
 #: lists them so that a page reads a name rather than a number. ``None`` is
@@ -99,6 +121,26 @@ WAYMARKED_CODES: tuple[str | None, ...] = (None, UNKNOWN, MARKED, UNMARKED)
 
 #: Bit of the derived byte saying no source records a path along the edge.
 NO_PATH_BIT = 0x04
+
+#: What each protected area entry in the header has to say about itself before
+#: anything in the page may use it. ``id`` is what the edges name it by, ``name``
+#: and ``form`` are what a figure calls it, ``rings`` is its outline and
+#: ``bounds`` the box a point is tested against before its rings are.
+PROTECTED_FIELDS = ("id", "name", "form", "rings", "bounds")
+
+#: How finely the *share* of an edge lying inside an area is written down.
+#:
+#: **A share and not a length, and that is the whole point.** Python measures
+#: these metres in the projection the graph is built in; the page measures its
+#: own distances from the ellipsoid, and the two differ by 0.03 %. Carried as
+#: metres, a route lying wholly inside one area would state more ground inside
+#: it than it walked altogether — a figure and its own subtotal disagreeing, in
+#: the sentence a reader trusts most. Carried as a share, the page multiplies by
+#: the length it measured itself, so the two can never cross.
+#:
+#: A ten-thousandth is 0.2 m on the longest road edge here and a tenth of a
+#: millimetre on the shortest, which is finer than the boundary is surveyed.
+PROTECTED_SHARE_UNITS = 10_000
 
 #: How finely a coordinate is written down, in degrees. 1e-6 is 0.11 m of
 #: latitude. Every source here is coarser than that by an order of magnitude:
@@ -226,6 +268,41 @@ def varints(values: np.ndarray) -> bytes:
     return out.tobytes()
 
 
+def varint(value: int) -> bytes:
+    """Write one unsigned integer as a varint.
+
+    The scalar sibling of :func:`varints`, which writes a whole array at once
+    and pays a numpy call to do it. This exists because one section interleaves
+    single numbers with single bytes and cannot be written column by column;
+    the two are checked against each other in the tests, since a stream written
+    by one and read as if written by the other is unrecoverable.
+
+    Args:
+        value: A whole number, not negative
+
+    Returns:
+        Its varint, one to nine bytes
+
+    Raises:
+        ValueError: If it is negative, which two's complement would otherwise
+            write out as a very large number without complaint
+    """
+    if value < 0:
+        raise ValueError(f"a varint holds unsigned values; zigzag a signed one first, got {value}")
+    out = bytearray()
+    remaining = int(value)
+    # Bounded rather than `while True`: nine groups is everything a 63-bit value
+    # can hold, and the loop ending by exhausting its range instead of by its
+    # own arithmetic is what keeps a bad value from spinning.
+    for _ in range(_VARINT_GROUPS):
+        group = remaining & 0x7F
+        remaining >>= 7
+        out.append(group | (0x80 if remaining else 0))
+        if not remaining:
+            return bytes(out)
+    raise ValueError(f"{value} does not fit in {_VARINT_GROUPS} varint groups")
+
+
 def checksum(values: np.ndarray) -> tuple[int, int]:
     """Summarise a stream of integers in a way a browser can reproduce.
 
@@ -264,6 +341,7 @@ def encode_graph(
     order: pd.DataFrame,
     *,
     costs: dict[str, dict[str, Any]],
+    areas: list[dict[str, Any]],
     coordinate_quantum: float = DEFAULT_COORDINATE_QUANTUM,
     elevation_quantum: float = DEFAULT_ELEVATION_QUANTUM,
 ) -> Payload:
@@ -275,12 +353,22 @@ def encode_graph(
             properties on the line the map draws.
         edges: The graph's edges in :data:`PAYLOAD_CRS`, carrying ``from_node``,
             ``to_node``, ``source``, ``kind``, ``chain_id``, ``waymarked``,
-            ``no_path_recorded``, ``elevations`` and their geometry
+            ``no_path_recorded``,
+            :data:`~trails.routing.protection.PROTECTED_COLUMN`, ``elevations``
+            and their geometry
         order: :data:`~trails.routing.order.CHAIN_ORDER_COLUMNS` per edge, from
             :func:`~trails.routing.order.chain_order`
         costs: What a metre on each source costs a route, by source name, taken
             verbatim into the header. The weighting stays with the caller who
             chose it; this module only carries it across.
+        areas: The protected areas, in the order the edges' codes index them,
+            each with :data:`PROTECTED_FIELDS`. Carried across like ``costs``:
+            which register they came from, which of its forms count and how
+            finely their outlines are drawn are all the caller's decisions. Their
+            **outlines travel with them** because the page has ground to answer
+            for that no edge covers — a leg drawn straight across open terrain —
+            and one list is what keeps a code on an edge and a polygon on the
+            screen from meaning two different areas.
         coordinate_quantum: Grid a coordinate is rounded onto, in degrees
         elevation_quantum: Grid a height is rounded onto, in metres
 
@@ -289,7 +377,8 @@ def encode_graph(
 
     Raises:
         ValueError: If the edges are not in :data:`PAYLOAD_CRS`, if the order
-            does not describe these edges, or if a source has no cost
+            does not describe these edges, if a source has no cost, or if an
+            edge names a protected area the table does not carry
     """
     if edges.crs is not None and edges.crs.to_epsg() != PAYLOAD_EPSG:
         raise ValueError(f"the payload is written in {PAYLOAD_CRS}, the edges are in {edges.crs}")
@@ -312,6 +401,7 @@ def encode_graph(
 
     coordinates, vertices = _coordinates(laid, coordinate_quantum)
     heights, samples = _heights(laid, elevation_quantum)
+    area_table, area_code = _area_table(areas)
 
     sections = {
         "chains": _strings(chain_ids),
@@ -320,6 +410,7 @@ def encode_graph(
         "nodes": _nodes(laid, flipped),
         "sources": np.array([code_of[name] for name in laid["source"].tolist()], dtype=np.uint8).tobytes(),
         "derived": _derived(laid),
+        "protected": _protected(laid, area_code),
         "vertexCounts": varints(vertices),
         "coordinates": varints(zigzag(np.diff(coordinates, axis=0, prepend=0).reshape(-1))),
         "sampleCounts": varints(samples),
@@ -341,6 +432,8 @@ def encode_graph(
         "sources": table,
         "waymarked": list(WAYMARKED_CODES),
         "noPathBit": NO_PATH_BIT,
+        "protected": area_table,
+        "protectedShareQuantum": 1.0 / PROTECTED_SHARE_UNITS,
         # Not decoration: this is what lets a page say whether it decoded every
         # one of two million values correctly, having nothing to compare them
         # against.
@@ -490,6 +583,90 @@ def _derived(edges: gpd.GeoDataFrame) -> bytes:
 
     recorded = edges["no_path_recorded"].fillna(False).to_numpy(dtype=bool)
     return (codes | (recorded.astype(np.uint8) * NO_PATH_BIT)).tobytes()
+
+
+def _area_table(areas: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Check the protected areas over, and say which byte each is written as.
+
+    Args:
+        areas: The areas, in the order the edges' codes index them
+
+    Returns:
+        The table for the header and the byte code per area id
+
+    Raises:
+        ValueError: If an area is short of any of :data:`PROTECTED_FIELDS`, if
+            two of them carry the same id, or if there are more than a byte
+            holds. Each of the three would put one area's outline and another
+            area's name on the same figure, quietly.
+    """
+    for position, area in enumerate(areas):
+        missing = sorted(set(PROTECTED_FIELDS) - set(area))
+        if missing:
+            raise ValueError(f"protected area {position} is short of {', '.join(missing)}")
+    identities = [str(area["id"]) for area in areas]
+    repeated = sorted({value for value in identities if identities.count(value) > 1})
+    if repeated:
+        raise ValueError(f"an area is one row of the table and one code; {repeated} name themselves more than once")
+    if len(areas) > 256:
+        raise ValueError(f"a protected area code is one byte and there are {len(areas)}")
+    return list(areas), {identity: position for position, identity in enumerate(identities)}
+
+
+def _protected(edges: gpd.GeoDataFrame, area_code: dict[str, int]) -> bytes:
+    """Write what share of each edge lies inside each protected area.
+
+    A count first, then that many pairs, so an edge lying in nothing costs one
+    byte and nothing has to be reserved for the edges that lie in two.
+
+    **A crossing is written as lying in nothing, and it means neither.** It was
+    never asked — there is no walking distance under a ferry — and the page must
+    not read this section for one. That distinction is kept where it can be
+    kept, in Python: an edge that carries no answer at all and is not a crossing
+    is a defect and says so here, rather than travelling as a zero that reads
+    like an answer.
+
+    Args:
+        edges: The graph's edges, in payload order, carrying ``length_m``,
+            ``kind`` and :data:`~trails.routing.protection.PROTECTED_COLUMN`
+        area_code: The byte each area id is written as
+
+    Returns:
+        One count and that many ``(code, share)`` pairs per edge, the share in
+        units of one :data:`PROTECTED_SHARE_UNITS`-th
+
+    Raises:
+        ValueError: If a walked edge carries no answer, if an edge names an area
+            the table does not hold, or if more of an edge lies inside an area
+            than the edge is long
+    """
+    entries = edges[PROTECTED_COLUMN].tolist()
+    crossing = (edges["kind"] == FERRY).tolist()
+    lengths = edges["length_m"].to_numpy(dtype=float).tolist()
+    out = bytearray()
+    for position, (entry, is_crossing, length) in enumerate(zip(entries, crossing, lengths, strict=True)):
+        if entry is None:
+            if not is_crossing:
+                raise ValueError(f"edge {position} is walked ground that was never measured against the protected areas")
+            out.append(0)
+            continue
+        if is_crossing:
+            raise ValueError(f"edge {position} is a crossing and yet carries {len(entry)} protected area(s)")
+        unknown = sorted({str(identity) for identity, _ in entry if str(identity) not in area_code})
+        if unknown:
+            raise ValueError(f"edge {position} lies in {unknown}, which the payload's area table does not carry")
+        pairs = sorted(entry, key=lambda pair: area_code[str(pair[0])])
+        out += varint(len(pairs))
+        for identity, metres in pairs:
+            # A share over one is not a rounding: it is an edge measured against
+            # a boundary in one CRS and a length taken in another, and it would
+            # travel as a plausible number. Half a millimetre of tolerance,
+            # because an intersection and a length are not computed the same way.
+            if length <= 0 or metres > length + 0.0005:
+                raise ValueError(f"edge {position} is {length:.3f} m long and {metres:.3f} m of it lie inside {identity}")
+            out.append(area_code[str(identity)])
+            out += varint(int(round(metres / length * PROTECTED_SHARE_UNITS)))
+    return bytes(out)
 
 
 def _strings(values: list[str]) -> bytes:

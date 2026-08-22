@@ -1,5 +1,6 @@
 """Tests for the Naturbase protected area source."""
 
+import json
 from unittest.mock import Mock, patch
 
 import geopandas as gpd
@@ -161,3 +162,101 @@ class TestFindOne:
 
         with patch("requests.get", return_value=_mock_response(payload)), pytest.raises(LookupError, match="ambiguous"):
             source.find_one("Lomsdal")
+
+
+class TestVerneformLabel:
+    """Tests for the words a protection form is said in."""
+
+    def test_the_register_s_own_spelling_becomes_the_one_a_sign_uses(self):
+        # The register writes its values without the letters they are said with.
+        assert naturbase.verneform_label("Landskapsvernomraade") == "landskapsvernområde"
+        assert naturbase.verneform_label("Nasjonalpark") == "nasjonalpark"
+
+    def test_it_is_the_whole_of_the_service_s_own_coded_value_domain(self):
+        # Written from memory it was seven entries, three of them wrong and
+        # fourteen missing — including the compound forms within a day's drive
+        # of Lomsdal-Visten. This is what `{layer}?f=json` publishes.
+        assert len(naturbase.VERNEFORM_LABELS) == 24
+        assert naturbase.VERNEFORM_LABELS["Dyrefredningsomrade"] == "dyrefredningsområde"
+        assert naturbase.VERNEFORM_LABELS["LandskapsvernomraadePlantelivsfredning"] == "landskapsvernområde med plantelivsfredning"
+        # And a code that was invented rather than read is not in it.
+        assert "AnnetVern" not in naturbase.VERNEFORM_LABELS
+
+    def test_a_form_it_does_not_know_falls_through_as_it_was_written(self):
+        # Renamed to the nearest one it would say something the register does
+        # not: a protection type nobody here has seen is not a nature reserve.
+        assert naturbase.verneform_label("Kulturmiljoefredning") == "Kulturmiljoefredning"
+
+
+class TestWithin:
+    """Tests for Source.within."""
+
+    def test_it_asks_by_envelope_rather_than_by_name(self, tmp_path, park_response):
+        source = naturbase.Source(cache_dir=str(tmp_path))
+
+        with patch("requests.get", return_value=_mock_response(park_response)) as get:
+            source.within((12.0, 65.1, 13.7, 65.9))
+
+        params = get.call_args.kwargs["params"]
+        assert "where" not in params
+        assert params["geometryType"] == "esriGeometryEnvelope"
+        assert params["spatialRel"] == "esriSpatialRelIntersects"
+        # Without inSR the service reads the box in the layer's own projection
+        # and answers about somewhere else.
+        assert params["inSR"] == "4326"
+        assert json.loads(params["geometry"]) == {"xmin": 12.0, "ymin": 65.1, "xmax": 13.7, "ymax": 65.9, "spatialReference": {"wkid": 4326}}
+
+    def test_it_returns_what_the_box_holds_in_wgs84(self, tmp_path, park_response):
+        source = naturbase.Source(cache_dir=str(tmp_path))
+
+        with patch("requests.get", return_value=_mock_response(park_response)):
+            found = source.within((12.0, 65.1, 13.7, 65.9))
+
+        assert isinstance(found, gpd.GeoDataFrame)
+        assert found.crs.to_epsg() == 4326
+        assert found["navn"].tolist() == ["Lomsdal-Visten"]
+
+    def test_a_second_call_over_the_same_box_asks_nothing(self, tmp_path, park_response):
+        source = naturbase.Source(cache_dir=str(tmp_path))
+
+        with patch("requests.get", return_value=_mock_response(park_response)) as get:
+            source.within((12.0, 65.1, 13.7, 65.9))
+            source.within((12.0, 65.1, 13.7, 65.9))
+
+        assert get.call_count == 1
+
+    def test_another_box_is_another_answer(self, tmp_path, park_response):
+        source = naturbase.Source(cache_dir=str(tmp_path))
+
+        with patch("requests.get", return_value=_mock_response(park_response)) as get:
+            source.within((12.0, 65.1, 13.7, 65.9))
+            source.within((12.0, 65.1, 13.7, 66.0))
+
+        assert get.call_count == 2
+
+    def test_a_truncated_answer_is_refused_rather_than_taken(self, tmp_path, park_response):
+        # ArcGIS reports a partial answer as a successful one with a flag.
+        # Taking the first page would build a network that knows about some of
+        # the protected ground it runs over and not the rest.
+        source = naturbase.Source(cache_dir=str(tmp_path))
+        truncated = {**park_response, "exceededTransferLimit": True}
+
+        with patch("requests.get", return_value=_mock_response(truncated)):
+            with pytest.raises(ValueError, match="smaller box"):
+                source.within((12.0, 65.1, 13.7, 65.9))
+
+    def test_an_empty_box_comes_back_as_an_empty_frame(self, tmp_path):
+        source = naturbase.Source(cache_dir=str(tmp_path))
+
+        with patch("requests.get", return_value=_mock_response({"type": "FeatureCollection", "features": []})):
+            found = source.within((12.0, 65.1, 13.7, 65.9))
+
+        assert len(found) == 0
+        assert "verneform" in found.columns
+
+    def test_an_arcgis_error_body_raises(self, tmp_path):
+        source = naturbase.Source(cache_dir=str(tmp_path))
+
+        with patch("requests.get", return_value=_mock_response({"error": {"code": 400}})):
+            with pytest.raises(ValueError, match="query failed"):
+                source.within((12.0, 65.1, 13.7, 65.9))
