@@ -3191,12 +3191,38 @@ def add_profile_panel(
 
 
 class _PlanMode(MacroElement):
-    """Plan mode: clicking a route together, leg by leg.
+    """Plan mode: clicking a route together, leg by leg, and then working on it.
 
     Switch it on and every click appends a waypoint and works out the way from
-    the one before, so a route grows as far as a reader cares to take it. Taking
-    the last point back is the only edit there is; changing an existing sequence
-    is a different problem and a later phase.
+    the one before, so a route grows as far as a reader cares to take it. Four
+    edits then make it something to work on rather than to restart: **insert**
+    into the middle, which splits a leg; **remove**, which merges two; **move a
+    point earlier or later**, which changes which legs there are at all; and
+    **drag**, which moves one where it stands.
+
+    **The legs follow from the waypoints rather than being edited beside them.**
+    Every edit rewrites the list of points and nothing else; a leg survives
+    exactly when it still runs between the same two waypoints, and a waypoint
+    that has moved is a new object rather than a mutated one. What each edit
+    costs falls out of that, and so does the cancellation: a reply about ground
+    a waypoint has since left arrives to find its leg no longer on the route.
+
+    **One click, three meanings, decided in one place.** A click on a pin selects
+    it, a click within a few pixels of the drawn route puts a point into that
+    leg, and a click on anything else puts one on the end. Nothing the route
+    draws is interactive — the leg a click landed on is found by hit-testing the
+    geometry the page already holds — because a line that catches clicks would
+    have to stop catching them the moment plan mode is switched off, which is the
+    mistake the park boundary made for a fortnight.
+
+    **A drag is throttled and asks the height service nothing until it ends.**
+    Placing a point costs 19-76 ms including its Dijkstra, so the two legs a
+    dragged waypoint moves are 40 to 160 ms and are settled every 120 ms rather
+    than at the rate a pointer reports. A leg the network cannot carry is carried
+    at its own straight length with no heights while the pointer is down: its
+    ground is new at every position, the endpoint cache answers only for ends
+    already visited, and asking anyway is an uncapped stream of requests to
+    somebody else's service.
 
     **A leg has four kinds and they are parts of a leg, not legs.** That is what
     they are on the ground: a routed leg that takes a ferry is walked, then
@@ -3651,19 +3677,28 @@ class _PlanMode(MacroElement):
             // never fewer than two, spread evenly between the two ends. Two
             // halves of one profile read under two rules answer differently, and
             // nothing about the answer looks wrong.
-            function straightSamples(from, to) {
-                var length = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
-                // **Refused rather than quietly coarsened.** Sampling is fixed
-                // at the build's step, so the only way to bound the work is to
-                // bound the leg: at 5 m and fifty points a request, the width
-                // of this map is some 180 requests to somebody else's service,
-                // from one misclick out to sea. Coarsening instead would make
-                // the two halves of a profile answer differently and nothing
-                // would look wrong, so the leg says what it will not do.
+            // **Refused rather than quietly coarsened.** Sampling is fixed at
+            // the build's step, so the only way to bound the work is to bound
+            // the leg: at 5 m and fifty points a request, the width of this map
+            // is some 180 requests to somebody else's service, from one misclick
+            // out to sea. Coarsening instead would make the two halves of a
+            // profile answer differently and nothing would look wrong, so the
+            // leg says what it will not do.
+            //
+            // Asked here rather than inside the sampling, because a leg carried
+            // through a drag without heights is refused for its length too — and
+            // a ceiling that only applied where the samples are laid out would
+            // let a drag draw across the whole map and refuse it on release.
+            function refuseLong(length) {
                 if (length > PLAN.maxStraightM) {
                     throw new Error((length / 1000).toFixed(1) + ' km is further than a leg may be drawn straight (' +
                                     (PLAN.maxStraightM / 1000).toFixed(1) + ' km)');
                 }
+            }
+
+            function straightSamples(from, to) {
+                var length = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
+                refuseLong(length);
                 var count = Math.max(2, Math.floor(length / PLAN.sampleStepM) + 1);
                 var lon = [], lat = [], along = [];
                 for (var i = 0; i < count; i += 1) {
@@ -3756,11 +3791,46 @@ class _PlanMode(MacroElement):
 
             // Cached by the leg's two ends, so taking a point back and putting
             // it down in the same place does not ask the service twice.
+            //
+            // **Keyed on the pair and not on the order it was given in.** Moving
+            // a waypoint one place past its neighbour turns exactly one leg
+            // round — it is what a reorder always does — and a cache that
+            // treated A to B and B to A as different ground would fetch a leg
+            // the page is already holding. The samples run one way and are read
+            // back the other by ``mirrored``, so nothing downstream knows or
+            // needs to.
             var asked = Object.create(null);
+            var askedKeys = [];
+            // And bounded, which it did not have to be while a leg could only be
+            // added and taken back: a drag leaves one leg's samples behind every
+            // time the pointer is let go, and a leg is up to twenty kilometres
+            // of them. Oldest out first — the ends a reader is working between
+            // are the ones they come back to.
+            var ASKED_MOST = 64;
 
-            function heightsFor(from, to) {
-                var key = [from.lon, from.lat, to.lon, to.lat].map(function (value) { return value.toFixed(7); }).join(',');
-                if (asked[key]) { return asked[key]; }
+            function endKey(point) { return point.lon.toFixed(7) + ',' + point.lat.toFixed(7); }
+
+            // Which way round the pair is asked for. Any consistent order does,
+            // and this one is a comparison of the very strings the key is built
+            // from, so the order and the key cannot come apart.
+            function forwards(from, to) { return endKey(from) <= endKey(to); }
+
+            // The same ground read from the other end: the coordinates reversed
+            // and every distance measured from the far end instead. What comes
+            // out is what the service would have answered had it been asked this
+            // way round.
+            function mirrored(answered) {
+                var laid = answered.laid, count = laid.lon.length;
+                var lon = [], lat = [], along = [], points = [];
+                for (var i = count - 1; i >= 0; i -= 1) {
+                    lon.push(laid.lon[i]); lat.push(laid.lat[i]);
+                    along.push(laid.length - laid.along[i]);
+                    points.push(answered.points[i]);
+                }
+                return {laid: {lon: lon, lat: lat, along: along, length: laid.length}, points: points};
+            }
+
+            function beginHeights(from, to) {
                 var laid;
                 // A leg refused for its length is a leg with no heights, which
                 // the route already knows how to say. Thrown from here it would
@@ -3782,12 +3852,40 @@ class _PlanMode(MacroElement):
                     }
                     batches.push(slice);
                 }
-                var answering = inWaves(batches).then(function (points) { return {laid: laid, points: points}; });
+                return inWaves(batches).then(function (points) { return {laid: laid, points: points}; });
+            }
+
+            function remember(key, answering) {
                 asked[key] = answering;
+                askedKeys.push(key);
+                while (askedKeys.length > ASKED_MOST) { delete asked[askedKeys.shift()]; }
                 // A refusal must not be remembered as one for ever: the next
-                // click on the same ground should ask again.
-                answering.catch(function () { if (asked[key] === answering) { delete asked[key]; } });
-                return answering;
+                // click on the same ground should ask again. Two handlers rather
+                // than a catch, so that this one sees only the refusal.
+                answering.then(null, function () { if (asked[key] === answering) { forget(key); } });
+            }
+
+            function forget(key) {
+                delete asked[key];
+                var at = askedKeys.indexOf(key);
+                if (at >= 0) { askedKeys.splice(at, 1); }
+            }
+
+            // The heights for a leg drawn straight: out of the cache if this
+            // ground is already in hand, and otherwise out of the service —
+            // unless nothing may be asked, which is what a live drag says, and
+            // then there are none.
+            function heightsFor(from, to, mayAsk) {
+                var forward = forwards(from, to);
+                var a = forward ? from : to, b = forward ? to : from;
+                var key = endKey(a) + '|' + endKey(b);
+                var answering = asked[key];
+                if (!answering) {
+                    if (!mayAsk) { return null; }
+                    answering = beginHeights(a, b);
+                    remember(key, answering);
+                }
+                return forward ? answering : answering.then(mirrored);
             }
 
             // The samples classify the ground and the split falls out of them:
@@ -3849,12 +3947,47 @@ class _PlanMode(MacroElement):
             // park: 19.9 km of UT.no's own routes run where no source records
             // anything. So where the network cannot carry a leg it is drawn
             // straight rather than refused.
-            function resolve(graph, from, to) {
+            // **A leg the network cannot carry is not fetched while a drag is
+            // live.** Its heights are seconds of somebody else's service, the
+            // ground under a waypoint being dragged is new at every position,
+            // and the endpoint cache answers only for ends already visited — so
+            // asking at the rate a pointer moves is the uncapped request stream
+            // this phase exists not to build. It is carried at its own straight
+            // length with nothing read along it instead: the walked distance
+            // under the reader's hand stays right, the route says the leg is
+            // still being worked out, and the one request goes out when the
+            // pointer is let go. Ground already in hand is used either way,
+            // which is what makes dragging a point back where it came from cost
+            // nothing at all.
+            function resolve(graph, from, to, mayAsk) {
                 if (from.node >= 0 && to.node >= 0) {
                     var found = route(graph, from.node, to.node);
                     if (found) { return Promise.resolve(routedParts(graph, found)); }
                 }
-                return heightsFor(from, to).then(function (answered) { return straightParts(graph, from, to, answered); });
+                var answering = heightsFor(from, to, mayAsk);
+                if (!answering) { return Promise.resolve(waitingParts(from, to)); }
+                return answering.then(function (answered) { return straightParts(graph, from, to, answered); });
+            }
+
+            // What such a leg is in the meantime: its own straight line, its own
+            // length, and no heights. **It counts as walked and as drawn
+            // straight**, which is what keeps the distance honest under the
+            // hand, and it counts as unsettled, which is what keeps the file
+            // from being written out of it. What it does not carry is a
+            // protected-area tally: that is read off the height samples at the
+            // same halfway rule the shoreline split uses, and there are no
+            // samples yet. Under-reporting it for as long as the panel says the
+            // leg is still being worked out is the honest half of that; making
+            // one up at a coarser spacing would be a second rule to disagree
+            // with the first.
+            function waitingParts(from, to) {
+                var length = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
+                refuseLong(length);
+                var tally = blankTally();
+                tally.unmarked = length;
+                return [{kind: 'land', lon: [from.lon, to.lon], lat: [from.lat, to.lat],
+                         along: [0, length], length: length, height: [NaN, NaN], distance: [0, length],
+                         read: false, tally: tally, provisional: true}];
             }
 
             // ---- the route's own series ---------------------------------------
@@ -3974,13 +4107,27 @@ class _PlanMode(MacroElement):
             // The areas by their own id rather than by their place in the
             // header's list, built once. The tally counts by id because an id
             // is what an edge names and what outlives the list it was read from.
-            var areasById = null;
+            //
+            // **Built once there is something to build it from, not once.** The
+            // guard used to be `if (!areasById)`, and an empty lookup is an
+            // object like any other: asked before the graph's own block had run
+            // — which `state()` alone can do, since it composes the route
+            // whether or not a point is down — it would stay empty for the life
+            // of the page, and every route through an area would then throw
+            // about an id the page 'has no entry for'. It is not reachable in
+            // the page this builds, where `protectedAreas` is assigned in the
+            // graph's block before its stream is even inflated. The count is
+            // what the guard tests, rather than a flag beside the table: the
+            // keys here are somebody else's register names, and a register that
+            // names an area 'built' would answer about the flag.
+            var areasById = null, areasFrom = -1;
 
             function graphAreas() {
-                if (!areasById) {
+                var table = (window.trailsGraph && window.trailsGraph.protectedAreas) || [];
+                if (!areasById || areasFrom !== table.length) {
                     areasById = Object.create(null);
-                    var table = (window.trailsGraph && window.trailsGraph.protectedAreas) || [];
                     table.forEach(function (area) { areasById[area.id] = area; });
+                    areasFrom = table.length;
                 }
                 return areasById;
             }
@@ -4073,7 +4220,14 @@ class _PlanMode(MacroElement):
             // about whether a route is finished.
             function unsettled() {
                 return {
-                    waiting: legs.filter(function (leg) { return !leg.parts && !leg.failed; }).length,
+                    // A leg carried through a live drag without its heights
+                    // counts here too. Its length is real and is walked, so the
+                    // distance under the reader's hand is right; its profile and
+                    // what protects it are not there yet, and a file written
+                    // from it would state ground nothing had been read along.
+                    waiting: legs.filter(function (leg) {
+                        return leg.provisional || (!leg.parts && !leg.failed);
+                    }).length,
                     refused: legs.filter(function (leg) { return leg.failed; })
                 };
             }
@@ -4085,19 +4239,24 @@ class _PlanMode(MacroElement):
             // layer without depending on the order the layers were added in.
             var pane = map.createPane('trailsPlanRoute');
             pane.style.zIndex = 460;
-            // Nothing here is ever a click target. In plan mode a click places a
-            // waypoint wherever it lands, and out of it the route must not stand
-            // between a reader and the line underneath — the mistake the park
-            // boundary made for a fortnight.
+            // **Nothing the route draws is ever a click target, and phase 7 did
+            // not change that.** Clicking the route means one thing now — put a
+            // waypoint into that leg — and it is decided by hit-testing the
+            // geometry this page is already holding, in the one handler every
+            // click goes through. An interactive line would have to be turned
+            // off again the moment plan mode is, or the route would stand
+            // between a reader and the trail underneath it: that is the mistake
+            // the park boundary made for a fortnight, and one switch is one
+            // switch too many to have to remember.
             pane.style.pointerEvents = 'none';
 
-            function draw(parts) {
+            function draw(parts, waiting) {
                 var layers = [];
                 parts.forEach(function (part) {
                     var corners = [];
                     for (var i = 0; i < part.lon.length; i += 1) { corners.push([part.lat[i], part.lon[i]]); }
                     if (corners.length < 2) { return; }
-                    var colour = part.kind === 'waiting' ? WAITING : ROUTE;
+                    var colour = (waiting || part.kind === 'waiting') ? WAITING : ROUTE;
                     // The casing first, so it lies under. Dashed identically, or
                     // white would show through every gap.
                     [[CASING, 6], [colour, 2.6]].forEach(function (stroke) {
@@ -4108,13 +4267,6 @@ class _PlanMode(MacroElement):
                     });
                 });
                 return layers;
-            }
-
-            function pin(point) {
-                return L.circleMarker([point.lat, point.lon], {
-                    pane: 'trailsPlanRoute', radius: 5, weight: 2, color: ROUTE,
-                    fillColor: CASING, fillOpacity: 1, interactive: false
-                }).addTo(map);
             }
 
             function undraw(layers) {
@@ -4131,22 +4283,146 @@ class _PlanMode(MacroElement):
             var legs = [];
             var pins = [];
             var settling = 0;
+            // Which waypoint the reader has hold of, as an index into points.
+            // **A click on a pin selects it; it does not delete it.** The same
+            // click is a few pixels away from one that places a point, there is
+            // no way back from a deletion, and everything a selection makes
+            // possible — take this one out, move it one place earlier or later —
+            // has to be somewhere a reader can find it whatever the gesture is.
+            var chosen = -1;
+            // The graph once it has arrived, because a drag settles inside a
+            // pointer event and cannot wait a microtask for a payload that has
+            // been in the page since it loaded.
+            var held = null;
+            var dragging = null;
 
-            function addLeg(graph, from, to) {
-                var leg = {from: from, to: to, parts: null, failed: null, layers: []};
-                legs.push(leg);
-                // Something on the map the instant the click lands, replaced when
-                // the leg is worked out. **Only this leg is redrawn**, then and
-                // later: rebuilding the route on every click is what froze this
-                // map twice already, on a layer rather than on a route.
+            // ---- the pins ---------------------------------------------------------
+            // **A waypoint is an L.marker and no longer an L.circleMarker, and
+            // that is what this phase costs in figures every review checks
+            // first.** Measured before it was built: a circle marker added to
+            // this map has no `dragging` at all and `draggable: true` on one is
+            // silently ignored, while a marker gets a live handler. So a
+            // waypoint that can be dragged is a marker — which draws no path and
+            // lives in the marker pane — and a five-point route's plan pane goes
+            // from 13 paths to 8 while the marker pane goes from 198 to 203.
+            // `.leaflet-marker-icon` moves with them, from 0 to 5: folium
+            // overwrites that class on its own markers and these are Leaflet's
+            // own, so the probe that has always read 0 is reading the same fact
+            // as the 203 through a second lens.
+            //
+            // Drawn as a div rather than an image so that its number is the
+            // element's own text and selecting it is one attribute: a route
+            // whose points can be reordered cannot be read without the numbers,
+            // and rewriting five spans is a write nothing can feel.
+            var PIN_PX = 18;
+
+            function pinStyle(picked) {
+                return 'display:block;width:100%;height:100%;box-sizing:border-box;border-radius:50%;' +
+                    'border:2px solid ' + ROUTE + ';background:' + (picked ? ROUTE : CASING) + ';' +
+                    'color:' + (picked ? CASING : ROUTE) + ';text-align:center;' +
+                    'font:bold 10px/' + (PIN_PX - 4) + 'px sans-serif';
+            }
+
+            function pin(point) {
+                var marker = L.marker([point.lat, point.lon], {
+                    icon: L.divIcon({className: 'trails-plan-pin', iconSize: [PIN_PX, PIN_PX],
+                                     iconAnchor: [PIN_PX / 2, PIN_PX / 2],
+                                     html: '<span style="' + pinStyle(false) + '"></span>'}),
+                    draggable: true, keyboard: false,
+                    // Above every other marker on the map. Leaflet stacks
+                    // markers within the pane by latitude, so a hut drawn at
+                    // the same place as a waypoint covers it — measured: at the
+                    // first waypoint of a route along a chain, the topmost
+                    // element was folium's own `awesome-marker`, which would
+                    // take the click that was meant for the pin and be read as
+                    // a click on the route under it. The offset is far larger
+                    // than the pixel spread of this map's markers at any zoom,
+                    // because the term it is added to is a pixel position.
+                    zIndexOffset: 100000
+                }).addTo(map);
+                marker.on('dragstart', beginDrag);
+                marker.on('drag', overDrag);
+                marker.on('dragend', endDrag);
+                // What was last written to it, kept here rather than read back
+                // off the element: a style set to '#111111' reads back as
+                // 'rgb(17, 17, 17)', so an element cannot be asked whether it
+                // already says what is about to be written to it.
+                return {marker: marker, label: null, picked: null, live: null};
+            }
+
+            function pinAt(marker) {
+                for (var i = 0; i < pins.length; i += 1) { if (pins[i].marker === marker) { return i; } }
+                return -1;
+            }
+
+            function pinFor(element) {
+                for (var i = 0; i < pins.length; i += 1) {
+                    if (pins[i].marker.getElement() === element) { return i; }
+                }
+                return -1;
+            }
+
+            // Applied as differences, never rewritten wholesale. This runs on
+            // every edit and, while a waypoint is being dragged, several times a
+            // second — and writing a style that is already set is one of the two
+            // things that have frozen this map outright.
+            function dressPins() {
+                var most = Math.min(pins.length, points.length);
+                for (var i = 0; i < most; i += 1) {
+                    var record = pins[i], element = record.marker.getElement();
+                    var label = String(i + 1), picked = i === chosen;
+                    if (element && record.label !== label) {
+                        element.firstChild.textContent = label;
+                        record.label = label;
+                    }
+                    if (element && record.picked !== picked) {
+                        element.firstChild.setAttribute('style', pinStyle(picked));
+                        record.picked = picked;
+                    }
+                    // Out of plan mode a pin must no more stand between a reader
+                    // and the line underneath than the route does, so it stops
+                    // taking pointer events at all — and stops being draggable
+                    // with them.
+                    if (element && record.live !== on) {
+                        element.style.pointerEvents = on ? 'auto' : 'none';
+                        record.live = on;
+                    }
+                    if (record.marker.dragging) {
+                        if (on) { record.marker.dragging.enable(); } else { record.marker.dragging.disable(); }
+                    }
+                    // The marker the pointer is holding is where the pointer put
+                    // it. Writing a snapped position under it mid-drag would
+                    // make it fight the hand moving it.
+                    if (dragging && dragging.at === i) { continue; }
+                    var where = record.marker.getLatLng();
+                    if (where.lat !== points[i].lat || where.lng !== points[i].lon) {
+                        record.marker.setLatLng([points[i].lat, points[i].lon]);
+                    }
+                }
+            }
+
+            function syncPins() {
+                while (pins.length > points.length) { map.removeLayer(pins.pop().marker); }
+                while (pins.length < points.length) { pins.push(pin(points[pins.length])); }
+                dressPins();
+            }
+
+            // ---- the legs ---------------------------------------------------------
+            function newLeg(graph, from, to, mayAsk) {
+                var leg = {from: from, to: to, parts: null, failed: null, provisional: false, layers: []};
+                // Something on the map the instant the gesture lands, replaced
+                // when the leg is worked out. **Only this leg is drawn**, then
+                // and later: rebuilding the whole route on every change is what
+                // froze this map twice already, on a layer rather than on a
+                // route, and a drag would do it eight times a second.
                 leg.layers = draw(straightAcross(from, to));
                 settling += 1;
-                refresh();
                 // Wrapped, so that a fault thrown on the way *into* the work
                 // is a rejection like any other rather than an exception that
                 // leaves the count of outstanding legs standing for ever.
-                Promise.resolve().then(function () { return resolve(graph, from, to); }).then(function (parts) {
+                Promise.resolve().then(function () { return resolve(graph, from, to, mayAsk); }).then(function (parts) {
                     leg.parts = parts;
+                    leg.provisional = parts.some(function (part) { return part.provisional; });
                 }, function (failure) {
                     leg.failed = String(failure && failure.message ? failure.message : failure);
                 // A third handler rather than a catch over the two above: a
@@ -4155,14 +4431,48 @@ class _PlanMode(MacroElement):
                 // wrong place. It belongs in the console, loudly.
                 }).then(function () {
                     settling -= 1;
-                    // The point may have been taken back while this was in
-                    // flight, in which case the leg is off the route and nothing
-                    // it has to say matters any more.
+                    // **This one line is the whole of the cancellation.** Every
+                    // edit that changes what a leg runs between replaces it with
+                    // a new object, so a reply about ground a waypoint has since
+                    // left arrives here and finds itself off the route — and no
+                    // leg is ever drawn from an answer that is no longer wanted.
+                    // A drag settling eight times a second leans on it hardest.
                     if (legs.indexOf(leg) < 0) { return; }
                     undraw(leg.layers);
-                    leg.layers = draw(leg.parts || straightAcross(from, to));
+                    leg.layers = draw(leg.parts || straightAcross(from, to), leg.provisional);
                     refresh();
                 });
+                return leg;
+            }
+
+            // **The legs follow from the waypoints rather than being edited
+            // beside them.** Insert, remove, reorder and drag each rewrite the
+            // list of points and nothing else; a leg survives exactly when it
+            // still runs between the same two waypoints it already ran between,
+            // and what an edit costs falls out of that — two legs for an insert,
+            // one for a removal, the three that touch a point for a move.
+            // Nothing here has to work out which legs an edit invalidated, which
+            // is the arithmetic all four of them would otherwise get wrong in
+            // four different ways.
+            //
+            // A waypoint that has moved is a *new* object rather than a mutated
+            // one, so a drag needs no case of its own: the legs beside it stop
+            // matching and are rebuilt, and everything beyond them is untouched.
+            function relink(graph, mayAsk) {
+                var kept = legs, i, k;
+                legs = [];
+                for (i = 0; i + 1 < points.length; i += 1) { legs.push(null); }
+                for (i = 0; i < legs.length; i += 1) {
+                    for (k = 0; k < kept.length; k += 1) {
+                        if (kept[k] && kept[k].from === points[i] && kept[k].to === points[i + 1]) {
+                            legs[i] = kept[k]; kept[k] = null; break;
+                        }
+                    }
+                }
+                kept.forEach(function (leg) { if (leg) { undraw(leg.layers); } });
+                for (i = 0; i < legs.length; i += 1) {
+                    if (!legs[i]) { legs[i] = newLeg(graph, points[i], points[i + 1], mayAsk); }
+                }
             }
 
             function withGraph(run, always) {
@@ -4176,6 +4486,7 @@ class _PlanMode(MacroElement):
                 // work must be counted as over whether it succeeded or threw,
                 // and a throw still reaches the console, loudly.
                 window.trailsGraph.ready.then(function (graph) {
+                    held = graph;
                     try { run(graph); } finally { always(); }
                 }, function () {
                     say('The routing graph did not arrive, so nothing can be routed.');
@@ -4183,26 +4494,210 @@ class _PlanMode(MacroElement):
                 });
             }
 
-            function place(lat, lon) {
-                // Counted as outstanding from the click, not from the moment
+            // ---- the five edits ---------------------------------------------------
+            // Every one of them runs through here. The graph is what turns a
+            // position into a waypoint and a pair of waypoints into a leg, and a
+            // route half-edited while it arrives would be a second state to keep
+            // in step with this one.
+            function applyEdit(change) {
+                // Counted as outstanding from the gesture, not from the moment
                 // the graph answers. A reader who has clicked is waiting, and a
                 // state that reads 'nothing in hand' for the microtask in
                 // between is one a check would believe.
                 settling += 1;
                 refresh();
                 withGraph(function (graph) {
-                    // Snapped to the network where there is any within reach, so
-                    // a route can start from where the reader meant rather than
-                    // from a metre beside it; beyond that the raw point stands
-                    // and the leg is drawn straight.
-                    var node = graph.nearestNode(lat, lon, PLAN.snapM);
-                    var point = node >= 0
-                        ? {lat: graph.nodeLat[node], lon: graph.nodeLon[node], node: node}
-                        : {lat: lat, lon: lon, node: -1};
-                    points.push(point);
-                    pins.push(pin(point));
-                    if (points.length > 1) { addLeg(graph, points[points.length - 2], point); }
+                    change(graph);
+                    relink(graph, true);
+                    syncPins();
                 }, function () { settling -= 1; refresh(); });
+            }
+
+            // Snapped to the network where there is any within reach, so a route
+            // can start from where the reader meant rather than from a metre
+            // beside it; beyond that the raw point stands and the leg is drawn
+            // straight.
+            function snapped(graph, lat, lon) {
+                var node = graph.nearestNode(lat, lon, PLAN.snapM);
+                return node >= 0
+                    ? {lat: graph.nodeLat[node], lon: graph.nodeLon[node], node: node}
+                    : {lat: lat, lon: lon, node: -1};
+            }
+
+            function place(lat, lon) {
+                applyEdit(function (graph) {
+                    points.push(snapped(graph, lat, lon));
+                    chosen = points.length - 1;
+                });
+            }
+
+            // **Inserting is this phase's own addition and not one of the
+            // numbered requirements**, which say only that waypoints can be
+            // reordered and removed. Without it a route can be corrected only
+            // from the end, which is how a fifteen-point plan gets thrown away
+            // over a mistake at point three.
+            //
+            // **The index is checked inside the edit and not before it.** An
+            // edit runs when the graph answers, which is a microtask later, so
+            // two asked for in one turn would both be checked against the route
+            // as it was before either — and the second would splice against a
+            // list that had already moved under it.
+            function insert(at, lat, lon) {
+                applyEdit(function (graph) {
+                    if (at < 1 || at > points.length - 1) { return; }
+                    points.splice(at, 0, snapped(graph, lat, lon));
+                    chosen = at;
+                });
+            }
+
+            // And removing merges the two legs that met at the point, which
+            // falls out of the rule above rather than being arranged here.
+            function remove(at) {
+                applyEdit(function () {
+                    if (at < 0 || at >= points.length) { return; }
+                    points.splice(at, 1);
+                    chosen = -1;
+                });
+            }
+
+            // Reordering, one place at a time. The requirement is that the
+            // points can be reordered and the route follows; a point moved past
+            // its neighbour is the smallest gesture that does that, it composes
+            // into any order at all, and it needs no second way of pointing at a
+            // waypoint — the reader is already holding one.
+            function moveBy(at, step) {
+                applyEdit(function () {
+                    var to = at + step;
+                    if (at < 0 || at >= points.length || to < 0 || to >= points.length) { return; }
+                    var moved = points[at];
+                    points[at] = points[to];
+                    points[to] = moved;
+                    chosen = to;
+                });
+            }
+
+            // One misclick should not cost a route, and taking the last point
+            // back is the gesture a reader reaches for before they know the rest
+            // of these are there.
+            function undo() {
+                applyEdit(function () {
+                    if (!points.length) { return; }
+                    points.pop();
+                    if (chosen >= points.length) { chosen = points.length - 1; }
+                });
+            }
+
+            // ---- dragging ---------------------------------------------------------
+            // **Throttled, because a drag is not a click.** Placing a point
+            // costs 19-76 ms including its Dijkstra and composing the whole
+            // route another 3, so the two legs a dragged waypoint moves are 40
+            // to 160 ms of work; run at the rate a pointer reports its position
+            // that is three of them queued per frame and a map that has stopped
+            // answering. Every 120 ms it is six or eight settles a second, which
+            // is the route following the hand. There was no throttle and no
+            // cancellation anywhere in plan mode before this: the only
+            // setTimeout near it belonged to the search box.
+            var DRAG_EVERY_MS = 120;
+
+            function beginDrag(event) {
+                var at = pinAt(event.target);
+                if (at < 0) { return; }
+                dragging = {at: at, ran: 0, timer: null};
+                chosen = at;
+                refresh();
+            }
+
+            function overDrag(event) {
+                if (!dragging || !held) { return; }
+                var now = performance.now();
+                var due = dragging.ran + DRAG_EVERY_MS - now;
+                if (due > 0) {
+                    // The trailing settle, so the position the pointer came to
+                    // rest at is worked out even if it stops between two ticks.
+                    if (dragging.timer === null) {
+                        dragging.timer = setTimeout(function () {
+                            dragging.timer = null;
+                            overDrag(event);
+                        }, due);
+                    }
+                    return;
+                }
+                dragging.ran = now;
+                // The index was taken when the pointer went down and the array
+                // is not shortened under a live drag, but a waypoint written
+                // past the end of the list would be a route with a hole in it
+                // that nothing raised about.
+                if (dragging.at >= points.length) { return; }
+                var where = event.target.getLatLng();
+                points[dragging.at] = snapped(held, where.lat, where.lng);
+                // Nothing may be asked of the height service while the pointer
+                // is down: see `resolve`.
+                relink(held, false);
+                refresh();
+            }
+
+            function endDrag(event) {
+                if (!dragging) { return; }
+                if (dragging.timer !== null) { clearTimeout(dragging.timer); dragging.timer = null; }
+                var at = dragging.at, where = event.target.getLatLng();
+                dragging = null;
+                // The same path every other edit takes, which is what makes a
+                // drag that began before the payload arrived say so rather than
+                // leave a pin somewhere its waypoint is not.
+                applyEdit(function (graph) {
+                    if (at >= points.length) { return; }
+                    points[at] = snapped(graph, where.lat, where.lng);
+                });
+            }
+
+            // ---- where a click lands ----------------------------------------------
+            // How near a click has to fall to the drawn route to be taken as a
+            // point going into it rather than one going on the end. Read as
+            // pixels and turned into metres at the zoom the reader is looking
+            // at, so it means near the line *as drawn* wherever the map is.
+            var ON_ROUTE_PX = 8;
+
+            // The distance from a position to a segment, and the point on that
+            // segment nearest to it. Flat and local: a degree of latitude is
+            // 111,320 m and a degree of longitude that times the cosine, which
+            // is the approximation nearestNode is already written with and is
+            // exact to well under a metre over the tens of metres this is ever
+            // asked about.
+            function nearSegment(lat, lon, cosine, aLat, aLon, bLat, bLon) {
+                var ax = (aLon - lon) * cosine, ay = aLat - lat;
+                var bx = (bLon - lon) * cosine, by = bLat - lat;
+                var dx = bx - ax, dy = by - ay, span = dx * dx + dy * dy;
+                var t = span > 0 ? -(ax * dx + ay * dy) / span : 0;
+                t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                var cx = ax + t * dx, cy = ay + t * dy;
+                return {away: Math.sqrt(cx * cx + cy * cy) * 111320,
+                        lat: aLat + t * (bLat - aLat), lon: aLon + t * (bLon - aLon)};
+            }
+
+            // Which leg a click landed on, and where along it — or nothing.
+            // Every vertex of the route is walked, which is thousands of them
+            // over a long one and a millisecond or two against the 19 to 76 a
+            // click already costs. A leg still being worked out is hit-tested
+            // as the straight line it is drawn as, so a point can be put into
+            // one before it settles.
+            function onRoute(lat, lon) {
+                var cosine = Math.cos(lat * Math.PI / 180);
+                var withinM = ON_ROUTE_PX * 40075016.686 * cosine / Math.pow(2, map.getZoom() + 8);
+                var best = null;
+                for (var i = 0; i < legs.length; i += 1) {
+                    var parts = legs[i].parts || straightAcross(legs[i].from, legs[i].to);
+                    for (var p = 0; p < parts.length; p += 1) {
+                        var part = parts[p];
+                        for (var v = 0; v + 1 < part.lon.length; v += 1) {
+                            var near = nearSegment(lat, lon, cosine, part.lat[v], part.lon[v],
+                                                   part.lat[v + 1], part.lon[v + 1]);
+                            if (near.away > withinM) { continue; }
+                            if (best && near.away >= best.away) { continue; }
+                            best = {leg: i, away: near.away, lat: near.lat, lon: near.lon};
+                        }
+                    }
+                }
+                return best;
             }
 
             // What a waypoint is called, and where the file puts it. Where the
@@ -4229,18 +4724,6 @@ class _PlanMode(MacroElement):
                 return {lat: best.lat, lon: best.lon, name: best.name, kind: best.type, away: closest, number: index + 1};
             }
 
-            // One misclick should not cost a route. Everything beyond taking the
-            // last point back — moving one, inserting one, dropping one from the
-            // middle — is a later phase.
-            function undo() {
-                if (!points.length) { return; }
-                points.pop();
-                undraw([pins.pop()]);
-                var leg = legs.pop();
-                if (leg) { undraw(leg.layers); }
-                refresh();
-            }
-
             // ---- the control ------------------------------------------------------
             var toggle = document.createElement('button');
             toggle.type = 'button';
@@ -4252,6 +4735,49 @@ class _PlanMode(MacroElement):
             var status = document.createElement('div');
             status.style.cssText = 'margin-top:4px;color:#555';
 
+            // What can be done to the waypoint the reader has hold of, and only
+            // while they have hold of one: a row of buttons that is always there
+            // and usually does nothing is a row a reader stops reading. It is
+            // also where reordering lives — dragging a pin moves it on the
+            // ground and says nothing about where it comes in the sequence, so
+            // the two need different gestures and only one of them can be a
+            // drag.
+            var edits = document.createElement('div');
+            edits.style.cssText = 'margin-top:4px;display:none';
+            var holding = document.createElement('div');
+            holding.style.cssText = 'margin-bottom:2px;color:#333';
+            var buttons = document.createElement('div');
+            edits.appendChild(holding);
+            edits.appendChild(buttons);
+
+            function button(label, explains, act) {
+                var made = document.createElement('button');
+                made.type = 'button';
+                made.textContent = label;
+                made.title = explains;
+                made.style.cssText = 'font:inherit;font-size:12px;padding:2px 6px;margin-right:4px;cursor:pointer';
+                made.addEventListener('click', act);
+                return made;
+            }
+
+            var earlier = button('\u25c0', 'Move this point one place earlier in the route',
+                                 function () { moveBy(chosen, -1); });
+            var later = button('\u25b6', 'Move this point one place later in the route',
+                               function () { moveBy(chosen, 1); });
+            var drop = button('Remove', 'Take this point out and join the two legs that met at it',
+                              function () { remove(chosen); });
+            buttons.appendChild(earlier);
+            buttons.appendChild(later);
+            buttons.appendChild(drop);
+
+            // Said rather than discovered. Three gestures share one click here
+            // and none of them is guessable from a map that has never had more
+            // than one.
+            var hint = document.createElement('div');
+            hint.style.cssText = 'margin-top:2px;color:#777;max-width:16em';
+            hint.textContent = 'Drag a point to move it \u00b7 click one to work on it \u00b7 ' +
+                'click the route to put one in';
+
             var control = L.control({position: 'topright'});
             var box = null;
             control.onAdd = function () {
@@ -4260,7 +4786,9 @@ class _PlanMode(MacroElement):
                     'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4';
                 box.appendChild(toggle);
                 box.appendChild(back);
+                box.appendChild(edits);
                 box.appendChild(status);
+                box.appendChild(hint);
                 // Clicking inside the control must not reach the map, and the
                 // wheel must, or the map reads as frozen under it.
                 L.DomEvent.disableClickPropagation(box);
@@ -4284,11 +4812,23 @@ class _PlanMode(MacroElement):
                 toggle.textContent = on ? 'Stop planning' : 'Plan a route';
                 back.style.display = on ? 'block' : 'none';
                 back.disabled = !points.length;
+                var holds = on && chosen >= 0 && chosen < points.length;
+                edits.style.display = holds ? 'block' : 'none';
+                if (holds) {
+                    holding.textContent = 'Point ' + (chosen + 1) + ' of ' + points.length;
+                    earlier.disabled = chosen === 0;
+                    later.disabled = chosen === points.length - 1;
+                }
                 status.style.display = on ? '' : 'none';
+                hint.style.display = on ? '' : 'none';
                 if (on) {
                     say(points.length === 0 ? 'Click the map to place the first point.'
                         : points.length + (points.length === 1 ? ' point' : ' points') + (settling ? ' \\u00b7 working\\u2026' : ''));
                 }
+                // The pins say which point is which and which one is held, and
+                // both change with every edit. Applied here as differences, so
+                // that a refresh in the middle of a drag writes nothing.
+                dressPins();
                 present();
             }
 
@@ -4338,6 +4878,14 @@ class _PlanMode(MacroElement):
                 // way, because switching off to look at something is not
                 // throwing a plan away.
                 if (showing) { showing.suspend(on); }
+                // Warmed here rather than at the first drag: a drag settles
+                // inside a pointer event and cannot wait a microtask for a
+                // payload that has been in the page since it loaded. Quietly,
+                // because switching plan mode on is not yet a request to route
+                // anything, and a page without a graph says so at the click.
+                if (on && !held && window.trailsGraph) {
+                    window.trailsGraph.ready.then(function (graph) { held = graph; }, function () { held = null; });
+                }
                 refresh();
             }
 
@@ -4370,7 +4918,29 @@ class _PlanMode(MacroElement):
                 // travelled is what tells the two apart.
                 if (pressed && Math.max(Math.abs(event.clientX - pressed.x), Math.abs(event.clientY - pressed.y)) > 3) { return; }
                 event.stopPropagation();
+                // **Three things one click can mean, and they are told apart
+                // here because nothing else ever sees the click.** The handler
+                // is on the container in the capture phase and stops it there,
+                // so a pin's own Leaflet click would never run and a mode or a
+                // modifier would be a second thing for a reader to hold in mind.
+                //
+                // A pin first, because a pin sits on the route and the route
+                // runs under it; then the route itself, within a few pixels of
+                // the line as drawn; and anything else is a point on the end,
+                // which is what a click has meant here since plan mode existed.
+                var element = event.target && event.target.closest
+                    ? event.target.closest('.trails-plan-pin') : null;
+                var at = element ? pinFor(element) : -1;
+                if (at >= 0) {
+                    // Clicking the one already held lets go of it, so there is a
+                    // way out that is not an edit.
+                    chosen = chosen === at ? -1 : at;
+                    refresh();
+                    return;
+                }
                 var where = map.mouseEventToLatLng(event);
+                var hit = onRoute(where.lat, where.lng);
+                if (hit) { insert(hit.leg + 1, hit.lat, hit.lon); return; }
                 place(where.lat, where.lng);
             }, true);
 
@@ -4387,15 +4957,38 @@ class _PlanMode(MacroElement):
             window.trailsPlan = {
                 place: place,
                 undo: undo,
+                // The four edits, each as the entry the gesture uses, so a
+                // browser check can drive them and read what came out rather
+                // than screenshot it. `dragTo` is what a drag does once the
+                // pointer has been let go; that a waypoint can be dragged at all
+                // is a thing only a real pointer over the icon proves, and the
+                // check does both.
+                insert: insert,
+                remove: remove,
+                moveBy: moveBy,
+                dragTo: function (at, lat, lon) {
+                    applyEdit(function (graph) {
+                        if (at < 0 || at >= points.length) { return; }
+                        points[at] = snapped(graph, lat, lon);
+                        chosen = at;
+                    });
+                },
+                select: function (at) {
+                    chosen = (at === null || at === undefined || at < 0 || at >= points.length) ? -1 : at;
+                    refresh();
+                },
+                // Which leg a position falls on, and where along it — the same
+                // answer the click uses to decide that it means an insertion.
+                onRoute: onRoute,
                 toggle: function (want) { switchTo(want === undefined ? !on : !!want); },
                 state: function () {
                     var shape = composeRoute();
                     return {
-                        on: on, working: settling > 0,
+                        on: on, working: settling > 0, chosen: chosen, dragging: !!dragging,
                         points: points.map(function (point) { return {lat: point.lat, lon: point.lon, node: point.node}; }),
                         legs: legs.map(function (leg) {
                             return {
-                                settled: !!leg.parts, failed: leg.failed,
+                                settled: !!leg.parts, failed: leg.failed, provisional: leg.provisional,
                                 parts: (leg.parts || []).map(function (part) {
                                     return {kind: part.kind, length: part.length, read: !!part.read,
                                             samples: part.height ? part.height.length : 0};
@@ -4425,6 +5018,8 @@ class _PlanMode(MacroElement):
                 toggle.disabled = true;
                 toggle.textContent = 'Plan a route';
                 back.style.display = 'none';
+                edits.style.display = 'none';
+                hint.style.display = 'none';
                 status.style.display = '';
                 say('There is no profile panel in this page, so nothing can be planned.');
             }
@@ -4456,7 +5051,10 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
     """Let a reader click a route together over the graph in the page.
 
     Switch it on and every click appends a waypoint, snapping to the network
-    where one is within ``snapM`` and keeping the raw point beyond that. The way
+    where one is within ``snapM`` and keeping the raw point beyond that. A
+    waypoint can then be selected, removed, moved a place earlier or later in the
+    sequence, dragged where it stands, or put into the middle of a leg by
+    clicking the route; the route, its figures and its profile follow. The way
     from the point before is found with Dijkstra over the weighted graph — the
     cost of an edge is its length times its source's factor, both out of the
     payload's header, and a crossing costs the header's flat figure instead.
@@ -4471,10 +5069,13 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
 
     The route's profile goes to the panel :func:`add_profile_panel` put in the
     page, through the second way in that panel offers — so call this after both
-    that and :func:`add_routing_graph`. Nothing is drawn into the overlay or
-    marker panes: the route, its waypoints and everything else here live in a
-    pane of their own, because what goes into either of those is counted among
-    the map's markers and paths for ever after.
+    that and :func:`add_routing_graph`. The route is drawn into a pane of its
+    own rather than the overlay pane, because what goes in there is counted among
+    the map's paths for ever after. **A waypoint is a marker and does go into the
+    marker pane**: a circle marker cannot be dragged — added to the map its
+    ``dragging`` is undefined and ``draggable`` is ignored — so a five-point
+    route costs five markers there and, drawing no path, gives eight back in its
+    own pane.
 
     Args:
         fmap: Map holding the graph and the panel

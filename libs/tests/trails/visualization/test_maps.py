@@ -1029,14 +1029,37 @@ class TestPlanMode:
         # the overlay pane by default, which is the whole thing being avoided.
         assert planning.count("L.polyline(") == planning.count("pane: 'trailsPlanRoute'") - planning.count("L.circleMarker(")
 
-    def test_the_waypoints_are_not_markers(self):
-        """198 is the other acceptance figure, and a marker joins it for ever."""
+    def test_a_waypoint_is_a_marker_because_a_circle_cannot_be_dragged(self):
+        """198 markers and 13 plan-pane paths were both acceptance figures, and
+        phase 7 moves them on purpose. Measured in the built page: a
+        ``circleMarker`` added to the map has no ``dragging`` at all and
+        ``draggable: true`` on one is silently ignored, while an ``L.marker``
+        gets a live handler and lands in the marker pane. So a draggable
+        waypoint is a marker — 198 becomes 203 — and it draws no path, so the
+        plan pane's 13 becomes 8."""
         fmap, _ = self.drawn()
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "L.marker(" not in planning
-        assert "L.circleMarker(" in planning
+        assert "L.marker(" in planning
+        assert "L.circleMarker(" not in planning
+        # A div rather than an image, so the number is the element's own text
+        # and selecting one is a single attribute rather than a second layer.
+        assert "L.divIcon({className: 'trails-plan-pin'" in planning
+        assert "draggable: true" in planning
+
+    def test_a_pin_is_dead_to_the_pointer_out_of_plan_mode(self):
+        """A pin has to catch clicks to be selected and dragged, and everything
+        this page draws over the trails is otherwise deliberately not a click
+        target: the park boundary swallowing every click inside it cost a
+        fortnight. So the pointer events go off with plan mode, and dragging
+        with them."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "element.style.pointerEvents = on ? 'auto' : 'none';" in planning
+        assert "record.marker.dragging.enable(); } else { record.marker.dragging.disable();" in planning
 
     def test_the_named_points_reach_the_page_as_a_table(self):
         """A waypoint set beside a hut can only be called after it if the page
@@ -1319,6 +1342,131 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "if (stopped || next >= batches.length)" in planning
+
+    def test_the_legs_follow_from_the_waypoints_rather_than_being_edited(self):
+        """Four edits and one rule. A leg survives exactly when it still runs
+        between the same two waypoint objects, so inserting costs the two legs
+        that replace one, removing costs the one that replaces two, and moving a
+        point costs the three that touch it — and nothing has to work out which
+        legs an edit invalidated, which is the arithmetic all four would
+        otherwise get wrong in four different ways."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function relink(graph, mayAsk)" in planning
+        assert "kept[k].from === points[i] && kept[k].to === points[i + 1]" in planning
+        for edit in ("function insert(at, lat, lon)", "function remove(at)", "function moveBy(at, step)"):
+            assert edit in planning, edit
+        # And a waypoint that has moved is a new object, so a drag needs no
+        # case of its own in the rule above.
+        assert "points[dragging.at] = snapped(held, where.lat, where.lng);" in planning
+
+    def test_a_reply_about_ground_a_waypoint_has_left_is_dropped(self):
+        """The whole of the cancellation, and it has to be: a drag settles eight
+        times a second and every settle replaces the legs beside the point. A
+        leg drawn from an answer that is no longer wanted is a route that
+        disagrees with its own waypoints."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "if (legs.indexOf(leg) < 0) { return; }" in planning
+
+    def test_a_live_drag_asks_the_height_service_for_nothing(self):
+        """The cache is keyed on ends already visited and the ground under a
+        dragged waypoint is new at every position, so a free leg fetched per
+        mouse move is an uncapped stream of requests to somebody else's service
+        — the shape 6B's review already found once and capped at 20 km. The leg
+        is carried at its own straight length instead, and counts as unsettled
+        so no file is written from it."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function heightsFor(from, to, mayAsk)" in planning
+        assert "if (!mayAsk) { return null; }" in planning
+        assert "relink(held, false);" in planning
+        assert "function waitingParts(from, to)" in planning
+        assert "provisional: true" in planning
+        assert "return leg.provisional || (!leg.parts && !leg.failed);" in planning
+
+    def test_a_drag_is_throttled_and_settles_where_the_pointer_stopped(self):
+        """Placing a point costs 19-76 ms with its Dijkstra, so two legs is 40
+        to 160 ms; run at the rate a pointer reports, that is three of them
+        queued per frame. There was no throttle anywhere in plan mode before
+        this — the only setTimeout near it was the search box's."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "var DRAG_EVERY_MS = 120;" in planning
+        # A trailing settle, or the position the hand came to rest at is never
+        # the one the route is worked out from.
+        assert "dragging.timer = setTimeout(" in planning
+        assert "clearTimeout(dragging.timer)" in planning
+
+    def test_the_free_leg_cache_is_keyed_on_the_pair_and_bounded(self):
+        """Moving a point one place past its neighbour turns exactly one leg
+        round, so a cache that told A-to-B from B-to-A would fetch ground the
+        page is already holding. And a drag leaves one leg's samples behind
+        every time the pointer is let go, which is what a cache kept for the
+        life of the page could not do before."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function forwards(from, to) { return endKey(from) <= endKey(to); }" in planning
+        assert "function mirrored(answered)" in planning
+        assert "var ASKED_MOST = 64;" in planning
+        assert "while (askedKeys.length > ASKED_MOST) { delete asked[askedKeys.shift()]; }" in planning
+
+    def test_a_click_on_the_route_is_hit_tested_and_never_caught(self):
+        """An interactive route would have to stop catching clicks the moment
+        plan mode is switched off, or it would stand between a reader and the
+        trail underneath it — the mistake the park boundary made for a
+        fortnight. The leg a click landed on is found in the geometry the page
+        already holds instead, in the one handler every click goes through."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "pane.style.pointerEvents = 'none';" in planning
+        assert planning.count("interactive: false") == 1
+        assert "function onRoute(lat, lon)" in planning
+        assert "var ON_ROUTE_PX = 8;" in planning
+        # Pin, then route, then a point on the end: a pin sits on the route.
+        decided = planning.split("container.addEventListener('click'")[-1]
+        assert decided.index("closest('.trails-plan-pin')") < decided.index("onRoute(where.lat")
+        assert decided.index("onRoute(where.lat") < decided.index("place(where.lat")
+
+    def test_a_click_on_a_pin_selects_it_rather_than_deleting_it(self):
+        """The same click is a few pixels from one that places a point and
+        there is no way back from a deletion. What a selection makes possible
+        has to be visible anyway: dragging a pin says nothing about where it
+        comes in the sequence, so reordering needs a gesture of its own."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "chosen = chosen === at ? -1 : at;" in planning
+        assert "moveBy(chosen, -1)" in planning and "moveBy(chosen, 1)" in planning
+        assert "remove(chosen)" in planning
+
+    def test_the_pins_are_written_as_differences(self):
+        """Rebuilding a layer per keystroke and writing a style already set have
+        each frozen this map on their own, and a drag does it several times a
+        second. What was written is kept beside the pin rather than read back:
+        an element answers 'rgb(17, 17, 17)' to a '#111111' just set to it."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "if (element && record.label !== label)" in planning
+        assert "if (element && record.picked !== picked)" in planning
+        # And the marker under the pointer is never written back to, or it
+        # fights the hand moving it.
+        assert "if (dragging && dragging.at === i) { continue; }" in planning
 
     def test_a_page_without_a_panel_says_so_rather_than_throwing(self):
         """Plan mode composes with the walk the panel owns, so a page carrying
