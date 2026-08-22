@@ -1075,90 +1075,170 @@ import is the confirmation afterwards, and worth doing once.
 
 ---
 
-## Phase 6 — Setting waypoints and routing between them
+## Phase 6 — Plan mode: clicking a route together
 
-Plan mode proper: switch it on and click. Every click appends a waypoint and
-routes from the one before, so a route grows as far as you care to take it.
+Switch it on and click. Every click appends a waypoint and routes from the one
+before, so a route grows as far as you care to take it.
 
 Appending is barely more work than a single pair — a route is a sequence of legs
 and a click adds one — while restricting the phase to two points would leave it
 too thin to use. What is genuinely harder is *changing* an existing sequence, and
 that is phase 7.
 
+**This used to be one phase covering everything through the export, the protected
+areas and the naming of waypoints.** It was seventeen requirements and three
+mechanisms that do not exist. Split into 6, 6B, 6C and 6D, each of which can be
+finished and reviewed on its own; nothing was dropped.
+
 - Snap a click to the nearest node within about 150 m; beyond that keep the raw
-  point.
-- Dijkstra with a binary heap over the weighted graph, once per new leg.
-- Take back the last point. Without it one misclick ruins a route, and popping
-  the final leg is trivial — everything beyond that is phase 7.
-- Draw the route, show its distance and ascent.
-- Where no connection exists, a dashed straight leg, counted separately and
-  labelled as not a path. Fetch its elevations on demand and cache them by the
-  leg's endpoints.
-- A free leg **over water** — a private boat transfer, of the kind UT.no's route
-  descriptions rely on — is not walking. The elevation samples classify it:
-  `terreng: "Havflate"` instead of ground. Its length goes to the crossings, not
-  the walking total; it carries no profile; it ends a GPX segment. A leg that
-  crosses a strait splits at the shoreline into walked and crossed parts.
+  point. The payload's decoder already offers `nearestNode`, and phase 3B
+  measured it at **0.15 ms over 116,967 nodes** — a linear scan, no index.
+- **Dijkstra with a binary heap over the weighted graph**, once per new leg. The
+  cost of an edge is its length times its source's factor, both in the payload's
+  header; a crossing costs the header's flat `flatM` instead. Nothing else is
+  weighted — elevation-aware routing is a separate decision nobody has taken.
+- **Take back the last point.** Without it one misclick ruins a route, and
+  popping the final leg is trivial; everything beyond that is phase 7.
+- Draw the route, show its **distance and ascent**. Both are summed off the
+  edges the route uses — read, never recomputed, the rule phase 4 set.
 - **Show the route's profile** in the panel from phase 4. It is the same panel,
-  but the series is now composed rather than read off one chain: the edges the
-  route uses, laid end to end, with the on-demand samples of any straight leg
-  spliced in at the right place. Mark the straight stretches in the curve too, so
-  the profile says the same thing the map does.
-- **Export it**, through the writer from phase 5. Little more than wiring — the
-  composed geometry and its elevations already exist, because the profile needs
-  them — and without it the phase stops one step short of the point of the whole
-  feature.
-- The sources list now spans several: report the length contributed by each and
-  the licence that comes with it, so *3.2 km OSM (ODbL) · 1.1 km UT.no (CC BY-NC)*
-  is visible before the download rather than a blanket warning.
-- **Say which protected areas the route touches and how far** — *38 km, of which
-  22 in the national park and 3 in Strauman landskapsvernområde*. Not the park
-  alone: the zone holds 26 nature reserves besides, none touching the park but
-  every approach crossing the ground they sit on. `naturbase.Source` needs a
-  spatial query for this; it searches by name today. The boundary has been drawn all along and the plan made no use of
-  it, yet the rules inside differ from those outside. Decide it at the 5 m
-  samples, as the decisions document sets out, so edges carry it from build time
-  and free legs get it from the samples they fetch anyway.
-- Put the figure in the exported description, and a **generated waypoint** at
-  each crossing so a reader sees where the route enters and leaves.
-- **Mark every `<wpt>` as set or generated.** A boundary marker is not a waypoint
-  anyone chose, and phase 8 must not read it back as one — a loaded route would
-  otherwise gain stations nobody placed and route through them. The rule covers
-  any marker the map adds by itself, now or later.
-- **Say how much of it is waymarked**, as length and in three buckets — marked,
-  unmarked, unknown. FKB is the largest source and carries no marking data at
-  all, so calling those stretches unmarked would assert what the data does not
-  say. See the decisions document. The edges carry the field from phase 1B.
-- **And how much of it runs where no source records a path** — *8 km with no
-  path recorded*. Also from phase 1B, also summed off the edges, and for this
-  park it says more about the day ahead than any other single figure: the
-  three-day Rundtur reads 11 of its 42 km that way. State it as recorded, not as
-  fact: the sources over-record, so their silence is evidence and their lines are
-  not. Do **not** add a survey-quality breakdown beside it — FKB is 90 % of the
-  network and discloses nothing, so it would read *30 km not disclosed*. That
-  belongs in the popup, where the question is about one line, and it is there.
-- **Name a waypoint after what is there.** When one lands within about 50 m of
-  a named point the map already draws — a hut, a quay, a trailhead, a farm —
-  take that point's name, type and position for the `<wpt>`, while the route
-  itself stays on the network. It costs a nearest-lookup against layers already
-  in the page, and it is the difference between a file that reads *Lavasshytta →
-  Sæterskaret skogstue → Bønå ferjekai* and one that reads as three coordinates.
-- **Extend what phase 5 started.** The `<extensions>` mechanism is already
-  there; a plan adds the clicked waypoints as `<wpt>` and each leg's mode —
-  routed, free over land, crossing. Do it here, not in phase 8: everything
-  exported from now on should be loadable, and a file written before its
-  description existed can never be restored exactly, only matched. Phase 8 adds
-  the reading side and nothing else.
+  but the series is now *composed* rather than read off one chain: the edges the
+  route uses, laid end to end. The panel takes a chain's class today, so it needs
+  a second way in — one that is handed a series and a length rather than a class.
+  The gradient bands, the crosshair and the reduction all apply unchanged.
+
+**Where no connection exists, the leg is a problem for 6B, not for this phase.**
+Until then, a click the graph cannot reach from the last waypoint is refused with
+a word saying so. That is not the finished behaviour; it is what keeps this phase
+finishable.
+
+**Done when** a north-south traverse of the park can be planned by clicking a
+handful of points along it, on routed legs, with its distance, ascent and profile
+shown; and the last point can be taken back. Check an approach from the coast
+too — Bønå or Visthus — since those only exist through a ferry. The case is known
+to be possible: the main component spans **94 %** of the park and reaches all
+**17** quays.
+
+Nothing phase 4 and 5 were accepted against may move: **198** markers, **11,589**
+paths of which exactly **1** non-interactive, **25** layers, the search at
+**10 px** above the zoom at 60, the wheel taking zoom **9 → 11**, and a chain's
+own export still reproducing its stated ascent to 0.00 m.
+
+---
+
+## Phase 6B — Legs the network cannot carry
+
+A route that may only follow recorded ways is not a plan for this park: 19.9 km
+of UT.no's own routes run where no source records anything, and the three-day
+Rundtur reads **10.3 of its 42 km** that way.
+
+- **A dashed straight leg** where no connection exists, counted apart from the
+  routed distance and labelled as not a path.
+- **Fetch its elevations on demand**, and cache them by the leg's endpoints.
+  Measured before this was written: `ws.geonorge.no/hoydedata/v1/punkt` answers
+  a `file://` page directly — `{"datakilde":"dtm1","terreng":"Skog","z":131.55}` —
+  so no proxy and no CORS workaround is needed. Fifty points a request, the
+  endpoint's own cap. Sample at the same 5 m the build uses, and use the same
+  rule for the ascent, or the two halves of one profile answer differently.
+- **A free leg over water is not walking.** A private boat transfer of the kind
+  UT.no's descriptions rely on: the samples classify it, `terreng: "Havflate"`
+  instead of ground. Its length goes to the crossings, not the walking total; it
+  carries no profile; it ends a GPX segment. **A leg crossing a strait splits at
+  the shoreline** into walked and crossed parts — the samples alternate, so the
+  split falls out of them rather than needing a coastline.
+- **Splice the on-demand samples into the profile** at the right place, and mark
+  the straight stretches in the curve, so it says what the map says. A crossing
+  contributes no curve at all: there is no ground under it, and a flat line at
+  zero is a claim.
 
 Crossings — ferries and free legs over water alike — are reported apart from the
 walking distance and break the GPX track into segments, so neither reads as
 though it was swum.
 
-**Done when** a north-south traverse of the park can be planned by clicking a
-handful of points along it, on routed legs, with its distance, ascent and profile
-shown, and the result imports into Komoot. Check an approach from the coast too —
-Bønå or Visthus — since those only exist through a ferry. That case is known to be possible —
-the main component spans 94 % of the park.
+**Done when** a leg drawn across ground no source records shows a profile fetched
+on demand, a leg across water shows none and counts as a crossing, and a leg
+crossing a strait comes back as both.
+
+---
+
+## Phase 6C — A plan becomes a file
+
+Export through the writer phase 5 built. Little more than wiring — the composed
+geometry and its elevations already exist, because the profile needs them — and
+without it the feature stops one step short of its own point.
+
+- **Extend the `<extensions>` mechanism**, do not rebuild it. A plan adds the
+  clicked waypoints as `<wpt>` and each leg's mode: routed, free over land,
+  crossing. Do it here rather than in phase 8, because everything exported from
+  now on should be loadable, and a file written before its description existed
+  can never be restored exactly, only matched. Phase 8 adds the reading side.
+- **Mark every `<wpt>` as set or generated.** Nothing generates one yet — 6D
+  does — but the field goes in now, because phase 8 must never read a marker the
+  map placed as a station somebody chose. The rule covers any marker the map adds
+  by itself, now or later.
+- **The sources list now spans several.** Report the length contributed by each
+  and the licence that comes with it, so *3.2 km OSM (ODbL) · 1.1 km UT.no
+  (CC BY-NC)* is visible before the download rather than a blanket warning. The
+  page carries every source's licence and version since phase 5.
+- **Say how much of it is waymarked**, as length in three buckets — marked,
+  unmarked, unknown. The edges carry the field from phase 1B and it is in the
+  payload. **Unknown is its own bucket and is never folded into unmarked**:
+  measured over this network, **63.4 %** of the walked length is unknown, and
+  FKB — the largest source at **33.8 %** — carries no marking information at all.
+  Calling that unmarked asserts what no source says.
+- **And how much runs where no source records a path** — *8 km with no path
+  recorded*. Also from phase 1B, also in the payload. **State it as recorded, not
+  as fact**: the sources over-record, so their silence is evidence and their lines
+  are not. Do **not** add a survey-quality breakdown beside it — FKB discloses
+  nothing about how it captured anything, so it would read *30 km not disclosed*.
+  That question belongs to one line and is answered in its popup.
+
+**Done when** a planned route downloads as a GPX that validates against the
+shipped schema, carries its waypoints and each leg's mode, breaks its track at
+every crossing, and states its own ascent, its sources with licences, its three
+marking buckets and its unrecorded length — with the download line saying which
+licences the file actually carries.
+
+---
+
+## Phase 6D — Where the route is, and what it passes
+
+Two lookups the page cannot do today, and both are about naming ground rather
+than finding it.
+
+- **Say which protected areas the route touches and how far** — *38 km, of which
+  22 in the national park and 3 in Strauman landskapsvernområde*. Not the park
+  alone: the zone holds **26 nature reserves** besides, none touching the park,
+  but every approach crosses ground they sit on. The boundary has been drawn all
+  along and the plan made no use of it, and the rules inside differ from those
+  outside.
+  - `naturbase.Source` **searches by name and needs a spatial query**, which it
+    does not have. That is the first work of this phase.
+  - **Nothing on any edge or chain says which area it lies in.** Measured: the
+    edges carry `waymarked`, `no_path_recorded`, `elevations`, `ascent` and
+    `descent`, and nothing else about where they are. Deciding it at the 5 m
+    samples, as the decisions document sets out, means a new field from build
+    time — and therefore a `GRAPH_LAYOUT` bump and a rebuild. A free leg gets it
+    from the samples it fetches anyway.
+  - Put the figure in the exported description, and a **generated waypoint** at
+    each crossing so a reader sees where the route enters and leaves. GPX holds
+    waypoints, routes and tracks, and no polygons; the marker is the only way to
+    carry a boundary at all. Mark them generated — 6C put the field in.
+- **Name a waypoint after what is there.** When one lands within about 50 m of a
+  named point the map already draws — a hut, a quay, a trailhead, a farm — take
+  that point's name, type and position for the `<wpt>`, while the route stays on
+  the network. It is the difference between a file reading *Lavasshytta →
+  Sæterskaret skogstue → Bønå ferjekai* and one reading as three coordinates.
+  - **Those points are not machine-readable in the page.** They are drawn as
+    1,410 `L.circleMarker` and 865 `L.marker` with their names inside popup HTML.
+    A lookup needs a table of name, type and position, keyed the way the chain
+    figures already are. **This is the third time a phase has assumed a mechanism
+    that does not exist** — after phase 4's GeoJSON properties and phase 5's
+    licences — so check for the table before planning around it.
+
+**Done when** a route through the park reports the length it spends in each
+protected area, its exported file carries a generated waypoint at every crossing
+of one, and a waypoint set beside Lavasshytta comes back named after it.
 
 ---
 

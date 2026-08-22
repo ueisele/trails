@@ -867,8 +867,8 @@ Otherwise nothing is known to be open. **That has now been true five times and
 was wrong all five** — the phase readiness checks found gaps in 1B, in 3, in 2,
 in 3B (which this document had written itself) and in 4, and the 3B review then
 found the payload gap above. The check that finds them is not reading the phase;
-it is measuring it against the built graph. **Phases 4 and 5 have now had it;
-6, 7 and 8 have not.**
+it is measuring it against the built graph. **Phases 4, 5 and 6 have now had
+it; 7 and 8 have not.**
 
 ## What phase 2 found
 
@@ -962,6 +962,52 @@ Two more, and one of them was mine:
   22.9, 12.7. Two other figures moved the same way, 237 → **241** and 4,485 →
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
+
+## What phase 6's readiness check found
+
+**Phase 6 was not a phase.** Seventeen requirements, three of which needed
+mechanisms that do not exist, and an acceptance spanning everything from a first
+click to protected-area reporting. For comparison, phase 4 was *draw a profile
+panel* and phase 5 *export one chain*, and each took an agent a full session plus
+a review. Split into **6** (plan mode, snap, Dijkstra, undo, the route's profile),
+**6B** (free legs, on-demand heights, water), **6C** (the export and everything it
+reports) and **6D** (protected areas and naming waypoints). Nothing dropped.
+
+**The assumption that could have sunk it holds.** A free leg needs heights
+fetched from the page, and the page is a `file://` document — so the first thing
+measured was whether that is even allowed. It is: `ws.geonorge.no` answers
+directly, `{"datakilde":"dtm1","terreng":"Skog","z":131.55}`, no CORS error and
+no proxy. And `terreng` is exactly the field the water classification needs, so
+that rule costs nothing extra. **Ten minutes, and three later phases rested on
+it.**
+
+**Two figures were wrong, and one of them was an argument.**
+
+- The phase said **FKB is 90 % of the network** and used that to justify keeping
+  *unknown* out of *unmarked*. FKB is **33.8 %** by walked length — the largest
+  single source, but not 90. The 90 % is a different measurement entirely: the
+  share of *UT.no's routes* that have an FKB line within 25 m. The conclusion
+  survives and the reason had to be replaced by the measured one: **63.4 % of the
+  walked network is `unknown`**, which is a stronger argument than the one it
+  replaced. **A wrong number under a right conclusion is still a wrong number,
+  and it is the one someone will quote.**
+- The Rundtur reads **10.3** of its 42 km with no path recorded, not 11.
+
+**Two mechanisms assumed and absent** — the third and fourth time this has
+happened:
+
+- **Nothing on any edge or chain says which protected area it lies in.** The
+  phase said edges carry it "from build time"; measured, they carry `waymarked`,
+  `no_path_recorded`, `elevations`, `ascent` and `descent` and nothing about
+  where they are. It is a new build field and a `GRAPH_LAYOUT` bump.
+- **The named points are not machine-readable.** Naming a waypoint after a hut
+  needs name, type and position; they exist as 1,410 `L.circleMarker` and 865
+  `L.marker` with the names inside popup HTML. After phase 4's GeoJSON
+  properties and phase 5's licences, **assume nothing about what the page can
+  read — grep the built file.**
+
+Credit where it is due: the phase said itself that `naturbase.Source` searches by
+name and needs a spatial query. That one was known.
 
 ## Where the 5 MB went
 
