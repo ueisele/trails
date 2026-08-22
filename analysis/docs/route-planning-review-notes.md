@@ -107,6 +107,15 @@ the page and meant two things; it stands once. Measured on the 42 km Rundtur, th
 two files disagree by 262 m of ascent and one of them carries a timestamp on
 every point.
 
+**And the popup rows cost 175 times what the payload does, again.** 3B measured
+that once — the two coverage rows were 1.57 MB of popup HTML against 0.009 in the
+payload — and the steepness rows repeat it to the decimal: the payload is
+**unchanged at 4.93 MB**, and the page went **37.7 to 39.4 MB**, of which about
+1.4 is 11,064 popups each gaining thirty-one characters. Popup text is written
+out per feature and compresses against nothing. **Showing a figure is the
+expensive half; carrying it is nearly free.** Neither budget is threatened, and
+the ratio is the thing to remember before adding the next row.
+
 **And the profile's height is a reader's to drag**, which on a steep chain is
 resolution rather than taste. The scale is the coarser of length-per-width and
 relief-per-height, so where the height binds every pixel given is a finer scale.
@@ -287,8 +296,10 @@ changes with every parameter:
 **Rebuild the map and drive it.** `command make map`, about a minute warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and **wait twenty seconds after load** —
-the page is **37.7 MB** as of phase 6C. It was 25.4 before 3B, 31.1 after the
-coverage rows, 36.0 after phase 4, 37.4 after phase 5, 37.5 after 6B. The five probes, with what they read now:
+the page is **39.4 MB**. It was 25.4 before 3B, 31.1 after the coverage rows,
+36.0 after phase 4, 37.4 after phase 5, 37.5 after 6B, 37.7 after 6C, and 39.4
+once every chain carried its two steepness figures into its popup. The five
+probes, with what they read now:
 
 | | |
 |---|---|
@@ -331,6 +342,20 @@ probe rather than screenshotted. The panel's container is
 `.trails-profile-panel`; **do not fall back to `document.body`** when looking for
 its text, or a probe reads the first of eleven thousand popups instead and
 reports nonsense confidently. That cost an hour.
+
+**The panel itself is now three things to check rather than one.** It draws
+**true to scale** — one metres-per-pixel for both axes — so the test is the drawn
+bounding box against the ground's own ratio, and it holds within **0.2 %**, which
+is the stroke's half-pixel. It stands in **two rows above the chart**, title with
+the figures right of it and the button with the colour key right of that. And its
+height is **a reader's to drag**, from a grip on the top edge, floor 60 px and
+ceiling the map's height less 80 — so `chartHeight` is not a constant and a probe
+that assumes 205 px is assuming a default nobody promised.
+
+The crosshair now stops where the curve does. At a true scale a steep chain
+leaves width unused — 638 px of 1,170 on the 3 km one — and there is no ground
+out there to report, so a probe reading the panel past that point correctly gets
+nothing.
 
 A download is drivable: `browser.new_page(accept_downloads=True)`, then
 `page.expect_download()` around a click on the panel's GPX control. Measured, a
@@ -546,6 +571,15 @@ every one was invisible until something was actually run.
   one-directional: 67.5 m in 647.8 km, on five edges of 60,576. Measure a long
   line segment by segment, and treat a cross-check as a measurement that needs
   checking like any other.
+- **A patch that matched nothing wrote nothing, and the build said yes anyway.**
+  Editing this page's script by exact string replacement, one anchor turned out
+  to appear **twice** — the plan panel and the profile panel assemble their boxes
+  with the same two lines — so the guard tripped, the script exited before
+  writing, and `make map` then rebuilt the *unchanged* file and printed its tick.
+  Two minutes went into reading a feature that was never in the page. **A green
+  build proves that a build ran, not that it built what you wrote.** Assert the
+  count before replacing, and check the thing you added is in the output rather
+  than checking that the command succeeded.
 - **A driven click or drag lands on whatever is on top, not on what you meant.**
   Probing phase 7's drag read **one** recompute where there are eighteen, three
   times running, and it nearly went into a review as a broken throttle. Each time
@@ -726,7 +760,7 @@ Budgets worth stating, so "too large" is testable:
 - ~~the graph's whole contribution to the page stays under about 5 MB~~ —
   **struck out after phase 5.** It was never measured, and measured it guards
   nothing: quadrupling the payload costs about thirty milliseconds of a 1.6 s
-  load, and the payload is 4.93 MB of a 37.4 MB page. What it did do was force
+  load, and the payload is 4.93 MB of a 39.4 MB page. What it did do was force
   the edge table to be encoded, worth 1.7 MB. **A ceiling nobody can justify is
   still useful if it makes the right question unavoidable, and useless as a
   fact.** The load time replaces it
@@ -2399,7 +2433,7 @@ Measured, on the built page:
 | decoding base64: 5 / 10 / 20 MB | 7 / 18 / 34 ms |
 
 **Quadrupling the payload would cost about thirty milliseconds of a 1.6 second
-load.** It guards nothing. And the payload is 4.93 MB of a 37.4 MB page — the
+load.** It guards nothing. And the payload was then 4.93 MB of a 37.4 MB page —
 rest is popup HTML and the coordinate arrays Folium writes for the drawn lines,
 where nothing counts anything and where the two coverage rows cost **1.57 MB
 against 0.009 in the payload**.
