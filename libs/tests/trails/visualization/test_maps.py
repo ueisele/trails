@@ -1658,7 +1658,7 @@ class TestComposedProfile:
         """The file has to say what its legs are and where its waypoints went. A
         button this panel could not honour is worse than no button at all."""
         html = self.drawn().get_root().render()
-        assert "offer.style.display = (selected && (!selected.composed || selected.plan)) ? '' : 'none';" in html
+        assert "offer.style.display = (selected && (!selected.composed || selected.plan)) ? 'flex' : 'none';" in html
 
     def test_a_route_with_a_hole_in_it_is_refused_and_said(self):
         """The file states that it breaks its track only at crossings. A leg

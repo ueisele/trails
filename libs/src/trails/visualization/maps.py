@@ -2415,11 +2415,27 @@ class _ProfilePanel(MacroElement):
             }
 
             // ---- the panel -------------------------------------------------
+            // **Two rows above the chart rather than five.** The panel is a
+            // control over the map and every row it takes is map a reader
+            // cannot see — and on a steep chain the rows cost more than space:
+            // the scale is the coarser of length-per-width and relief-per-
+            // height, so where the height binds, a row given back is resolution.
+            // Measured on the 3 km chain below, 55 px of freed height take it
+            // from 6.96 to 4.72 metres a pixel, which is where its readings
+            // already are. Where the width binds — a long gentle route — it
+            // changes nothing, and only zooming would.
             var header = document.createElement('div');
-            header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none';
+            header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none;' +
+                'display:flex;gap:12px;align-items:baseline;justify-content:space-between';
+            var name = document.createElement('span');
             var body = document.createElement('div');
-            var summary = document.createElement('div');
-            summary.style.cssText = 'margin:4px 0 2px;color:#333';
+            // Right of the title, not under it. It reads as what the title is
+            // about rather than as a second thing to look at, and when nothing
+            // is selected the whole panel is one line.
+            var summary = document.createElement('span');
+            summary.style.cssText = 'font-weight:400;color:#333;text-align:right';
+            header.appendChild(name);
+            header.appendChild(summary);
             var chart = document.createElementNS(SVG, 'svg');
             chart.setAttribute('height', chartHeight);
             chart.style.cssText = 'display:block;width:100%;height:' + chartHeight + 'px;cursor:crosshair';
@@ -2457,28 +2473,35 @@ class _ProfilePanel(MacroElement):
             // non-commercial, and the reader should know which before pressing
             // the button rather than afterwards.
             var offer = document.createElement('div');
-            offer.style.cssText = 'margin:4px 0 2px;display:none';
+            offer.style.cssText = 'margin:4px 0 2px;display:none;gap:8px;align-items:baseline;flex-wrap:wrap';
             var download = document.createElement('button');
             download.type = 'button';
             download.textContent = 'Download GPX';
             download.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-right:8px;cursor:pointer';
             var carries = document.createElement('span');
             carries.style.cssText = 'color:#333';
-            var licensed = document.createElement('div');
-            licensed.style.cssText = 'margin:2px 0 0;color:#666;font-size:11px';
+            var licensed = document.createElement('span');
+            licensed.style.cssText = 'color:#666;font-size:11px';
             // What kind of ground the file covers, which only a route states:
             // its three marking buckets, and the length no source records a path
             // along. A chain leaves this row empty.
-            var noted = document.createElement('div');
-            noted.style.cssText = 'margin:2px 0 0;color:#666;font-size:11px';
+            var noted = document.createElement('span');
+            noted.style.cssText = 'color:#666;font-size:11px';
             offer.appendChild(download);
             offer.appendChild(carries);
             offer.appendChild(licensed);
             offer.appendChild(noted);
+            // The button and what the file carries on the left, the colour key
+            // on the right: one row of things about the drawing rather than
+            // three stacked above it. `key` keeps its own margins, so it is
+            // pushed rather than padded apart.
+            var meta = document.createElement('div');
+            meta.style.cssText = 'display:flex;gap:16px;align-items:baseline;justify-content:space-between;flex-wrap:wrap';
+            key.style.marginLeft = 'auto';
+            meta.appendChild(offer);
+            meta.appendChild(key);
 
-            body.appendChild(summary);
-            body.appendChild(offer);
-            body.appendChild(key);
+            body.appendChild(meta);
             body.appendChild(chart);
 
             var control = L.control({position: 'bottomleft'});
@@ -2509,7 +2532,7 @@ class _ProfilePanel(MacroElement):
 
             function fold() {
                 var named = open && selected && selected.label ? ' \\u00b7 ' + selected.label : '';
-                header.textContent = (open ? '\\u25be ' : '\\u25b8 ') + title + named;
+                name.textContent = (open ? '\\u25be ' : '\\u25b8 ') + title + named;
                 body.style.display = open ? '' : 'none';
                 header.style.marginBottom = open ? '4px' : '0';
                 // Full width only when there is something to show in it: folded
@@ -2998,7 +3021,7 @@ class _ProfilePanel(MacroElement):
                 // what it composed cannot be written out: the file has to say
                 // what its legs are and where its waypoints went, and a button
                 // this panel could not honour is worse than no button at all.
-                offer.style.display = (selected && (!selected.composed || selected.plan)) ? '' : 'none';
+                offer.style.display = (selected && (!selected.composed || selected.plan)) ? 'flex' : 'none';
                 noted.textContent = '';
                 if (!selected || (selected.composed && !selected.plan)) { return; }
                 if (!selected.shape) {
@@ -3020,19 +3043,22 @@ class _ProfilePanel(MacroElement):
                     // that would break it somewhere else and nothing in the file
                     // would say so.
                     download.disabled = points < 2 || !!selected.plan.why;
+                    // Only what the header does not already say. It carried
+                    // the climb, the crossings and the distance a second time,
+                    // word for word, in the row underneath the row that said
+                    // them — five rows where two will do.
                     carries.textContent = selected.plan.why ? selected.plan.why
-                        : [points.toLocaleString('en-GB') + ' points'].concat(
-                            planned(selected.figure, selected.shape, selected.told)).join(' \\u00b7 ');
+                        : points.toLocaleString('en-GB') + ' points';
                     licensed.textContent = routeCredits(selected.shape, selected.runs).map(licenceLine).join(' \\u00b7 ');
                     noted.textContent = markingLine(selected.shape.tally);
                     return;
                 }
                 download.disabled = points < 2;
-                carries.textContent = [
-                    points.toLocaleString('en-GB') + ' points',
-                    heightsWritten(selected.runs) ? climb(selected.figure) : 'no height along this stretch',
-                    (selected.figure.length / 1000).toFixed(2) + ' km',
-                ].join(' \\u00b7 ');
+                // The climb and the distance are in the header. What belongs
+                // here is what only the file has — how many points it holds —
+                // and the one case the header cannot show, a stretch the height
+                // model never read, because then the header says so instead.
+                carries.textContent = points.toLocaleString('en-GB') + ' points';
                 licensed.textContent = creditsOf(selected.figure, selected.runs).map(licenceLine).join(' \\u00b7 ');
             }
 
@@ -3218,7 +3244,14 @@ def add_profile_panel(
     fmap: folium.Map,
     groups: list[folium.FeatureGroup],
     title: str = "Elevation profile",
-    chart_height: int = 150,
+    #: Raised from 150 when the panel's five rows above the chart became two.
+    #: Not decoration: the scale is the coarser of length-per-width and
+    #: relief-per-height, so on a chain steep enough for the height to bind, a
+    #: row given back is resolution. Measured on a 3 km chain dropping 807 m,
+    #: these 55 px take it from 6.96 to 4.72 metres a pixel — its readings are
+    #: 4.5 m apart, so that is as fine as the data goes. On a long gentle route
+    #: the width binds and this changes nothing.
+    chart_height: int = 205,
     collapsed: bool = True,
     export: dict[str, Any] | None = None,
 ) -> None:
