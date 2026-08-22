@@ -669,12 +669,17 @@ class TestProfilePanel:
         """A charting library from a CDN does not load on a file:// page: it
         fails silently, the way the OpenStreetMap tiles once did.
 
-        The one URL the panel does carry is the SVG namespace, which names a
-        language rather than a place and is never fetched — it is what
-        createElementNS takes."""
+        Every URL the panel does carry is a **namespace**, and a namespace names
+        a language rather than a place: the SVG one, which is what
+        createElementNS takes, and GPX's own, which the panel writes into the
+        file it produces. Nothing resolves either, and the schema location
+        beside the second is a hint to a validator that will never see this
+        page."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
-        with_panel = fmap.get_root().render().replace("http://www.w3.org/2000/svg", "")
+        with_panel = fmap.get_root().render()
+        for namespace in ("http://www.w3.org/2000/svg", "http://www.topografix.com/GPX/1/1", "http://www.w3.org/2001/XMLSchema-instance"):
+            with_panel = with_panel.replace(namespace, "")
 
         bare, _ = self.drawn()
         assert with_panel.count("://") == bare.get_root().render().count("://")
@@ -688,6 +693,102 @@ class TestProfilePanel:
         html = fmap.get_root().render()
         assert "disableClickPropagation" in html
         assert "disableScrollPropagation" not in html
+
+    def exported(self, **changed: object) -> dict[str, object]:
+        """What the page has to be handed before it can write a GPX file.
+
+        Args:
+            **changed: Settings to override or, with a value of None, to drop
+
+        Returns:
+            A complete set, minus anything set to None
+        """
+        settings: dict[str, object] = {
+            "credits": {"UT.no": [{"name": "UT.no", "licence": "CC BY-NC 4.0", "note": "non-commercial", "version": "downloaded 2026-08-12"}]},
+            "heights": [{"name": "Høydedata DTM1", "licence": "CC BY 4.0", "note": ""}],
+            "fields": [["id", "chain"], ["ascent", "ascent"]],
+            "creditFields": ["name", "licence", "version"],
+            "gapM": 5.0,
+            "decimals": 1,
+            "elevationDecimals": 2,
+            "coordinateDecimals": 7,
+            "namespace": "https://github.com/ueisele/trails/gpx/1",
+            "prefix": "trails",
+            "creator": "trails-analysis",
+            "description": "One chain",
+            "ascentMethod": "DTM1, sampled every 5 m, gains under 5 m ignored",
+            "identitySeparator": " / ",
+            "filePrefix": "lomsdal-visten",
+        }
+        settings.update(changed)
+        return {name: value for name, value in settings.items() if value is not None}
+
+    def test_the_licences_and_the_versions_reach_the_page(self, group):
+        """The browser writes the exported file, so everything in it has to be
+        in the page. Measured before this: CC BY 4.0, ODbL and CC BY-NC appeared
+        **zero times** in the built page, and so did any source version — they
+        existed only in what the build printed to its console."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer], export=self.exported())
+
+        html = fmap.get_root().render()
+        assert "CC BY-NC 4.0" in html
+        assert "downloaded 2026-08-12" in html
+        assert "DTM1, sampled every 5 m, gains under 5 m ignored" in html
+
+    def test_a_panel_given_no_export_offers_no_download(self, group):
+        """Phase 4's panel, unchanged: it draws and says nothing about files."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "var EXPORT = null" in html
+        # The words about licences that remain are the ones explaining why no
+        # <copyright> is written; none of them is a licence the page carries.
+        assert "CC BY-NC 4.0" not in html
+        assert "Høydedata" not in html
+
+    def test_an_export_missing_a_setting_is_refused(self, group):
+        """A page that quietly wrote 'undefined' into a licence is worse than
+        one that was never built."""
+        fmap, layer = group
+
+        with pytest.raises(ValueError, match="licence|credits|ascentMethod"):
+            maps.add_profile_panel(fmap, [layer], export=self.exported(credits=None, ascentMethod=None))
+
+    def test_every_setting_the_template_reads_is_one_it_insists_on(self, group):
+        """The two lists are the same list. A setting the template reads and the
+        check does not require is one a caller can leave out and find missing in
+        a browser, which is the expensive place to find it."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer], export=self.exported())
+
+        html = fmap.get_root().render()
+        for setting in maps.EXPORT_SETTINGS:
+            assert f"EXPORT.{setting}" in html, setting
+
+    def test_the_figures_a_file_is_written_from_travel_as_the_page_names_them(self, group):
+        """Every field the export writes has to be a key the figures table
+        actually carries; one that is not is a field the browser would write as
+        'undefined' into the file that leaves the machine."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer], export=self.exported())
+
+        html = fmap.get_root().render()
+        assert '["id", "chain"]' in html or '["id","chain"]' in html
+
+    def test_the_offer_says_nothing_where_the_panel_has_said_what_went_wrong(self, group):
+        """Three things can stop a chain reaching the panel — no graph in the
+        page, a graph that never arrived, a line the graph does not hold — and
+        each is said once, by the line that knows which it was. A row under it
+        still reading 'decoding' would contradict it, and a reader believes what
+        is next to the button they were about to press."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer], export=self.exported())
+
+        html = fmap.get_root().render()
+        assert html.count("selected.missing = true") == 3
+        assert "selected.missing ? '' :" in html
 
     def test_without_groups_nothing_is_added(self):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))

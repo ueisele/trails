@@ -194,6 +194,25 @@ class TestObject:
         object_cache.save("data_only", "some data")
         assert object_cache.get_metadata("data_only") is None
 
+    # When what is stored was stored
+    def test_cached_at_reports_when_an_entry_was_written(self, object_cache):
+        """An exported file records the version of every source it draws on, and
+        most of them publish none: what they have instead is the moment their
+        answer was read and stored."""
+        object_cache.save("dated", "data", metadata={"count": 1})
+
+        stamped = object_cache.cached_at("dated")
+        assert stamped == object_cache.get_metadata("dated")["cached_at"]
+        assert stamped.startswith("20")
+
+    def test_cached_at_says_nothing_where_nothing_was_recorded(self, object_cache):
+        """None and not a date standing in for one: a version nobody published
+        must not read as one that was."""
+        object_cache.save("undated", "data")
+
+        assert object_cache.cached_at("undated") is None
+        assert object_cache.cached_at("never_stored") is None
+
     # Exists Checks
     def test_exists_for_existing_key(self, object_cache):
         """Returns True for cached data."""
@@ -348,6 +367,26 @@ class TestDownload:
 
         assert dl_cache.cache_dir == custom_dir
         assert custom_dir.exists()
+
+    # When what was fetched was fetched
+    @patch("trails.io.cache.requests")
+    def test_downloaded_at_reports_when_a_file_was_fetched(self, mock_requests, download_cache):
+        """N50 and SSR publish no version at all; the date their archives were
+        ordered is what an exported file records in place of one."""
+        mock_response = Mock()
+        mock_response.headers = {"content-length": "4"}
+        mock_response.iter_content.return_value = [b"data"]
+        mock_response.raise_for_status.return_value = None
+        mock_requests.get.return_value = mock_response
+
+        download_cache.download("http://example.com/n50.zip", "n50_1811.zip", version="Basisdata_1811.zip")
+
+        stamped = download_cache.downloaded_at("n50_1811.zip")
+        assert stamped is not None
+        assert stamped.startswith("20")
+
+    def test_downloaded_at_says_nothing_for_a_file_that_is_not_there(self, download_cache):
+        assert download_cache.downloaded_at("never_fetched.zip") is None
 
     # Download Behavior
     @patch("trails.io.cache.requests")

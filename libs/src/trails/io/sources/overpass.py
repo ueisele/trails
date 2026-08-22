@@ -123,6 +123,10 @@ class Source:
                 doubled after each subsequent round
         """
         self.cache = ObjectCache(f"{cache_dir}/objects")
+        #: When the answer this source last served was read, ISO, or None
+        #: before it has served one. An exported file records the version of
+        #: every source it draws on, and this service publishes none.
+        self.loaded_at: str | None = None
         self.mirrors = mirrors
         self.timeout = timeout
         self.max_rounds = max_rounds
@@ -194,6 +198,7 @@ class Source:
             print("Loading OSM paths from cache...")
             cached = self.cache.load(cache_key)
             assert isinstance(cached, gpd.GeoDataFrame)
+            self.loaded_at = self.cache.cached_at(cache_key)
             return cached
 
         pattern = "|".join(highway_types)
@@ -229,6 +234,7 @@ class Source:
         print(f"Fetched {len(gdf)} OSM ways")
 
         self.cache.save(cache_key, gdf, metadata={"bbox": bbox, "highway_types": list(highway_types), "count": len(gdf)})
+        self.loaded_at = self.cache.cached_at(cache_key)
         return gdf
 
     def fetch_shelters(

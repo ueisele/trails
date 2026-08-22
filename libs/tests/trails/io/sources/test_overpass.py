@@ -180,6 +180,22 @@ class TestFetchPaths:
 
         assert mock_post.call_count == 1
 
+    def test_it_says_when_what_it_served_was_read(self, tmp_path, ways_response):
+        """Overpass publishes no version of the extract it answers from, so an
+        exported file records when the answer was read. A cache hit has to
+        answer too, or a rebuilt map records nothing for a source it used."""
+        source = overpass.Source(cache_dir=str(tmp_path))
+        assert source.loaded_at is None
+
+        with patch("requests.post", return_value=_mock_response(ways_response)):
+            source.fetch_paths((12.4, 65.3, 13.3, 65.7))
+            fetched = source.loaded_at
+            source.fetch_paths((12.4, 65.3, 13.3, 65.7))
+
+        assert fetched is not None
+        assert fetched.startswith("20")
+        assert source.loaded_at == fetched
+
     def test_different_bbox_is_cached_separately(self, tmp_path, ways_response):
         source = overpass.Source(cache_dir=str(tmp_path))
 

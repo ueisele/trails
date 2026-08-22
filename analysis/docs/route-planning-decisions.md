@@ -529,8 +529,13 @@ Two smaller things the build turned up about this route:
 
 #### What it costs in the page
 
-1.1 million elevations, delta-encoded at 0.1 m next to the geometry, land around
-a megabyte. Measured against the built graph, the count holds: 1,017,876 unique
+1.1 million elevations, delta-encoded at 0.01 m next to the geometry, land under
+two megabytes. A decimetre would save 0.8 MB and was what this said until an
+exported file stopped agreeing with itself: the height service answers in
+centimetres, the GPX states an ascent computed from them, and with the last digit
+dropped a reader recomputing it off the file's own values got up to 10.5 m —
+9.2 % on a short climb — away from the figure the same file states. The digit is
+not precision anyone invented; it is what was measured. Measured against the built graph, the count holds: 1,017,876 unique
 coordinates once they are rounded to the centimetre, which is 28 % fewer than the
 1.41 million samples taken, because edge ends meet at nodes. Phase 2, built,
 lands two apart: **1,406,040 samples, 1,017,874 distinct**.

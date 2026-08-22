@@ -291,7 +291,7 @@ not a rounded float. Getting that wrong returns a store full of misses that look
 like a store full of gaps.
 
 **Payload encoding.** Zigzag varints over deltas, one run per edge, then gzip,
-then base64 — geometry at 1e-6, elevations at 0.1 m. Measure the **edge table
+then base64 — geometry at 1e-6, elevations at 0.01 m. Measure the **edge table
 separately**: as JSON it is 1.98 MB and as sorted delta-encoded columns 0.27,
 which is the whole margin. Do not scale one payload from another; that produced
 both of this phase's budget errors, in opposite directions.
@@ -957,6 +957,64 @@ Two more, and one of them was mine:
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
 
+## What phase 5's review found
+
+**Everything the phase claimed reproduces**, and one of its checks holds more
+widely than it was claimed to. The composed track goes from 541,060 vertices to
+2,391,046 points, the median chain from **19 to 76** and the 42 km Rundtur from
+1,330 to **16,421** — all three exactly. The widest gap is 4.992 m. And the
+ascent read back off the composed heights matches the stored figure to
+**0.000000 m** over **all 11,267** chains, not only the 5,254 longer than 200 m.
+
+The page carries what the file needs: eight sources with the licences of the
+decisions table, **Turrutebasen as CC0**, and `name`, `source` and `noPath` in
+the figures table. A chain downloads from `file://` in Firefox — the 42 km
+Rundtur at **1.19 MB**, schema-valid, every point heighted, none timed, no
+`<copyright>`. Nothing phase 4 was accepted against moved.
+
+**The licence disagreement the phase flagged is not one.**
+`geonorge.Metadata.license` is a generic default for every Geonorge dataset, not
+a statement about Turrutebasen, and every source with a module of its own matches
+the table. Checked before deciding.
+
+**The one finding: the file a reader downloads did not reproduce its own
+figure.** It stated 1,721.8 m of ascent and its own `<ele>` values read 1,732.1.
+Not the writers disagreeing — the payload's height quantum:
+
+| heights at | worst deviation | over 1 m | over 5 m |
+|---|---|---|---|
+| 0.1 m | 10.30 m | 53 | 22 |
+| 0.05 m | 9.93 m | 22 | 7 |
+| 0.01 m | **0.00 m** | 0 | 0 |
+
+Relative, on chains climbing more than 50 m, the decimetre was out by up to
+**9.19 %**. **A rounded label is a threshold** — that was phase 4's lesson — and
+so is a rounded *input* to a thresholded sum: the ascent rule counts a climb once
+it clears 5 m, and shifting samples by half a decimetre flips borderline runs
+either way, thousands of times along a route.
+
+**What settled it was asking what the data actually holds**, which nobody had:
+99.87 % of the 1,352,455 readings in the store lie exactly on a centimetre and
+none between two. **There is no "exact" beyond 0.01 m** — the service answers in
+centimetres. So the decimetre was not a modest claim about an uncertain model, it
+was throwing away a digit that had been measured. The payload now carries it:
+4.12 → **4.93 MB** of an allowance of 5, and the downloaded file reads
+**+0.00 m** against what it states.
+
+The argument that nearly stopped this was mine, and it was a category error:
+*a decimetre already asserts more than the model resolves*. True of the ground —
+DTM1 is good to about half a metre under canopy — and irrelevant to whether a
+file agrees with itself, which is a question about **stored** precision. Both
+sentences are about "accuracy" and they are about different things.
+
+Two smaller consequences, both now constants of their own:
+
+- `EXTENSION_DECIMALS` and the `<ele>` precision had been one number. A figure
+  shown as whole metres wants one decimal; a height is what the figure was
+  *computed from* and wants what the service gave. `ELEVATION_DECIMALS = 2`.
+- The payload margin is worth less than it looks. Phases 6, 7 and 8 route,
+  edit and load — none of them puts data into it. It was finished at 3B.
+
 ## What the gradient bands cost, and the two bugs on the way
 
 Added after phase 4 on request: the curve is coloured by how steep the ground is
@@ -999,6 +1057,71 @@ was the check that a gapless chain is drawn in one stroke. With the bands, every
 change of colour legitimately starts a new stroke — the 42 km chain is 572 of
 them. The check is now: **a chain with no gaps and one band** is one stroke, and
 the level road is the case to use for it.
+
+## What phase 5 found
+
+**The two figures the phase gave for the filled file were measured under the
+wrong rule** — the seventh finding of that kind, after the six the readiness
+check turned up. *37 points* for the median chain and *8,490* for the 42 km
+Rundtur are `length / 5`: a plain resample, which the same paragraph forbids in
+the sentence above them. Under the rule as written they are 48 and 9,234. **Add
+a figure's own decomposition up before quoting it**, and check that a predicted
+figure was measured under the rule it is predicting.
+
+**Keeping the vertices and interpolating the heights between them is not
+enough**, and only a read-back showed it. A track built that way carries an
+`<ele>` on every point and looks right on a chart, but the ascent read back off
+those values comes out **47 m under** the figure the same file states for the
+Rundtur, and 2,637 of 5,254 chains disagree with their own extensions. The fix
+is to lay every sample into the track as the reading it is and space out only
+what is still wider than 5 m; all 5,254 then reproduce their stored ascent
+exactly. **Read a file's own numbers back out of the file.**
+
+**"Sampled every 5 m" is 5 to 10 m.** `sample_count` gives `floor(length / 5) +
+1` points spread evenly over the edge, so the step is `length / floor(length /
+5)` — a 12 m edge gets three samples 6 m apart. Anything reasoning from a 5 m
+step, including a gap rule written against it, has to know that.
+
+**The two writers do not agree to the last point, and both reasons are the
+page's payload rather than either writer.** On a 3.78 km chain, 1,373 points in
+Python against 1,365 in the browser: nine pairs of vertices lie closer together
+than the millionth of a degree the payload quantises to, and one sample gap
+reads 9.98 m in one and 10.01 in the other, which `ceil(gap / 5)` turns into one
+point or two. That second one matters beyond itself: **the page's flat-degree
+metre and a projected metre differ by 1.28 m over 3.8 km after the scaling** —
+three parts in ten thousand, not the parts per million a scaling argument
+suggests, because scaling fixes the total and not the distribution. Compare the
+two as curves, not by index, and account for the count difference rather than
+tolerating it.
+
+**The two writers cannot be compared by the test suite, and saying they are
+compared is not the same as comparing them.** The suite runs no JavaScript and
+should not start — so the claim belongs where it is true: the two are exported
+on a real chain and compared **in a browser**, at acceptance, to a tolerance the
+payload sets. Measured: the same extension fields exactly, every point of each
+file within 5.6 cm of the other's line, and **no height apart at all** over the
+points both put in one place — the payload carries the same centimetres the
+height service answered with, so the page loses nothing on the way.
+
+**Two different rounding rules agree only because of something invisible.**
+``_figure`` rounds a half to even, the page's ``toFixed`` rounds one up, and
+given ``17.25`` they would write ``17.2`` and ``17.3``. They never are given it:
+``_figure_values`` has already rounded every figure before it leaves Python, so
+what ``toFixed`` sees is on the grid and no longer a half. That coupling is now
+written down in both places and held by a test over exact halves. **Where two
+implementations agree, check *why* they agree.**
+
+**A licence disagreed with itself in three places.** The decisions document's
+table and this script's console line both say Turrutebasen is **CC0**;
+`geonorge.Metadata.license` carries the class default of CC BY 4.0 and says
+otherwise. The export takes the table's answer and says so where it does it, but
+the disagreement is still there and belongs at the source.
+
+**The height model publishes no version and is not ordered.** Every other source
+answers with one or with the date its answer was read; DTM1 is asked point by
+point and reaches a file through the graph. Its entry carries no version rather
+than a date describing something else, and what a reader actually needs — the
+rule the ascent was read under — is on every track as `ascentMethod`.
 
 ## What 3B found
 

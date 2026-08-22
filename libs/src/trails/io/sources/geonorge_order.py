@@ -105,6 +105,26 @@ class KommuneOrderClient:
             raise ValueError(f"Geonorge order returned no downloadable files for {kommune_codes}")
         return files
 
+    def ordered_at(self, kommune_codes: list[str]) -> str | None:
+        """Say when this dataset was last ordered for these municipalities.
+
+        The register publishes no version string, so the order date is what an
+        exported file has to record instead: a plan opened months later then has
+        a cause for any difference rather than a puzzle.
+
+        Args:
+            kommune_codes: Municipality numbers the answer covers
+
+        Returns:
+            ISO timestamp of the **oldest** archive in the cache, since that is
+            the age of the answer as a whole — a set of files ordered on
+            different days is only as current as the one that was not
+            re-ordered. None where nothing is cached for any of them.
+        """
+        dates = [self.downloads.downloaded_at(self.local_name(code)) for code in kommune_codes]
+        present = sorted(date for date in dates if date)
+        return present[0] if present else None
+
     def fetch(self, kommune_codes: list[str], force_download: bool = False) -> dict[str, str]:
         """Ensure each municipality's archive is present in the cache.
 

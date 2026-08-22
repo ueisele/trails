@@ -36,12 +36,20 @@ import argparse
 import math
 import re
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Protocol
 
 import geopandas as gpd
 import pandas as pd
-from trails.io.export.gpx import export_to_gpx
-from trails.io.sources import n50, naturbase, overpass, stedsnavn, ut
+from trails.io.export.gpx import (
+    DEFAULT_EXTENSION_FIELDS,
+    ELEVATION_DECIMALS,
+    EXTENSION_DECIMALS,
+    SOURCE_CREDIT_FIELDS,
+    TRAILS_NAMESPACE,
+    TRAILS_PREFIX,
+    export_to_gpx,
+)
+from trails.io.sources import geonorge, hoydedata, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
 from trails.network.norway import (
     FERRIES,
     FKB,
@@ -60,7 +68,17 @@ from trails.network.norway import (
     masks_from,
     zone_around,
 )
-from trails.routing import Network, NetworkSource, chain_order, parts_of, translate_joined, whole_way_length
+from trails.routing import (
+    DEFAULT_GAP_M,
+    IDENTITY_SEPARATOR,
+    Network,
+    NetworkSource,
+    chain_order,
+    chain_tracks,
+    parts_of,
+    translate_joined,
+    whole_way_length,
+)
 from trails.utils.geo import attach_nearest, compass_points, endpoint_bearings, thin_points
 from trails.visualization import maps
 from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
@@ -330,6 +348,12 @@ CHAIN_KEY = "chain_id"
 #: here, in the metric CRS, and named once;
 #: and the length is carried so the panel's distance axis ends where the popup
 #: says the chain does rather than a few metres off it.
+#: The three the browser needs in order to *write* a file rather than to draw
+#: one, and none of them was in this table before phase 5: the name and the
+#: source go into the track's ``<extensions>`` and decide which sources the file
+#: names, and ``no_path_m`` is the one figure about a route that changes the
+#: character of a day more than any other. All three are strings or metres the
+#: chain already carries — nothing here is computed twice.
 CHAIN_FIGURE_FIELDS = {
     "ascent": "ascent",
     "descent": "descent",
@@ -340,10 +364,91 @@ CHAIN_FIGURE_FIELDS = {
     # less than the arrow's own stroke. The words come from "point" above.
     "bearing_deg": "bearing",
     "length_m": "length",
+    "track_name": "name",
+    "source": "source",
+    "no_path_m": "noPath",
 }
 
 #: Trailing bracket of a layer label, which by convention holds its dataset.
 SOURCE_IN_LABEL = re.compile(r"\[([^\]]+)\]\s*$")
+
+#: Per dataset: its licence, the one word saying what it asks of a reader
+#: passing the file on, and how to read the date recorded beside it — because
+#: those dates are not the same kind of fact. Turrutebasen publishes a version
+#: and takes no word; N50 arrives as an order and carries the day it was placed;
+#: the rest answer a query, and what is recorded is when the answer was read.
+#:
+#: **The licences are out of the decisions document's own table, not off the
+#: source modules' metadata**: those carry a class default, and
+#: ``geonorge.Metadata.license`` says CC BY 4.0 for Turrutebasen where that
+#: table and this script's own console line both say CC0. Two of the three
+#: agree and the third is a default nobody set — but a licence is not a thing
+#: to settle by majority in passing. It is written down here, where an export
+#: reads it, and the disagreement is worth closing at the source.
+SOURCE_TERMS = {
+    UT: ("CC BY-NC 4.0", "non-commercial", "downloaded"),
+    TURRUTEBASEN: ("CC0", "", ""),
+    FKB: ("CC BY 4.0", "", "read"),
+    N50_PATHS: ("CC BY 4.0", "", "ordered"),
+    N50_ROADS: ("CC BY 4.0", "", "ordered"),
+    OSM: ("ODbL 1.0", "share-alike", "read"),
+    FERRIES: ("CC BY 4.0", "", "ordered"),
+}
+
+
+class Described(Protocol):
+    """What every source module says about the dataset it loads.
+
+    Each of them declares its own frozen ``SourceMetadata`` rather than sharing
+    one, so the four fields an exported file needs are a shape rather than a
+    type. Naming that shape here is what lets one table hold all of them.
+    """
+
+    @property
+    def name(self) -> str:
+        """Human-readable name of the dataset."""
+
+    @property
+    def url(self) -> str:
+        """Where it is described or served from."""
+
+    @property
+    def license(self) -> str:
+        """Its terms, as the module states them."""
+
+    @property
+    def attribution(self) -> str:
+        """Whom to credit."""
+
+
+#: Where each dataset says what it is. Turrutebasen is the odd one: it arrives
+#: through the Geonorge order API, whose metadata object names a dataset rather
+#: than a service, so it is spelled out here instead of reached for.
+SOURCE_METADATA: dict[str, Described] = {
+    UT: ut.METADATA,
+    FKB: traktorvegsti.METADATA,
+    N50_PATHS: n50.METADATA,
+    N50_ROADS: n50.METADATA,
+    OSM: overpass.METADATA,
+    FERRIES: n50.METADATA,
+}
+
+#: What a chain's own name was taken from, per source. Named here only to say
+#: that **it costs the exported file nothing**: FKB's names come from
+#: Turrutebasen, which is CC0 and asks for nothing, and a road's name comes from
+#: SSR, which is Kartverket's own CC BY 4.0 under the same attribution N50
+#: already carries. So a file naming its geometry's source and the height model
+#: names every party with a claim on it, and naming a register a particular
+#: track took no name from would be a statement nobody can check.
+IDENTITY_REGISTERS = {FKB: "Turrutebasen", N50_ROADS: "Stedsnavn (SSR)"}
+
+#: What every exported file says it was written by.
+EXPORT_CREATOR = "trails-analysis"
+
+#: The line an exported file opens its description with, before it lists what it
+#: draws on. It says which map wrote the file, because that is what makes the
+#: chain id in the track's extensions mean anything at all.
+EXPORT_DESCRIPTION = f"One chain of the {PARK_NAME} routing network"
 
 
 class TrailLayer(NamedTuple):
@@ -389,6 +494,150 @@ def source_of(label: str) -> str | None:
     """
     match = SOURCE_IN_LABEL.search(label)
     return match.group(1) if match else None
+
+
+def credit(name: str, licence: str, note: str, attribution: str, url: str, version: str | None) -> dict[str, str]:
+    """Say what one dataset is, what it is licensed under and what was read.
+
+    Args:
+        name: What the map calls the dataset, so a file, a popup and a legend
+            entry all name it the same way
+        licence: Its terms
+        note: The one word saying what those terms ask of a reader passing the
+            file on, or empty where they ask nothing
+        attribution: Whom to credit
+        url: Where the dataset is described
+        version: Its published version, or the date it was read at, or None
+            where it can say neither
+
+    Returns:
+        One entry of an export's source list. A field with nothing in it is left
+        empty rather than filled with a placeholder: both writers drop an empty
+        field, and a version nobody published must not read as one that was.
+    """
+    return {"name": name, "licence": licence, "note": note, "attribution": attribution, "url": url, "version": version or ""}
+
+
+def source_credits(versions: dict[str, str | None]) -> dict[str, list[dict[str, str]]]:
+    """Say what a file drawn from each dataset has to name.
+
+    Args:
+        versions: The version or the date read, per source, from
+            :func:`~trails.network.norway.load_sources`
+
+    Returns:
+        The sources a chain of each dataset draws on, keyed by the value the
+        chain carries in its ``source`` column — which is what a click hands
+        back and all the page has to go on
+    """
+    credits: dict[str, list[dict[str, str]]] = {}
+    for name, (licence, note, word) in SOURCE_TERMS.items():
+        metadata = SOURCE_METADATA.get(name)
+        described = metadata.name if metadata else geonorge.TURRUTEBASEN_METADATA.dataset_name
+        version = versions.get(name)
+        credits[name] = [
+            credit(
+                name if described == name else f"{name} ({described})",
+                licence,
+                note,
+                metadata.attribution if metadata else geonorge.TURRUTEBASEN_METADATA.attribution,
+                metadata.url if metadata else geonorge.TURRUTEBASEN_METADATA.catalog_url,
+                f"{word} {version[:10]}".strip() if version and word else version,
+            )
+        ]
+    return credits
+
+
+def height_credit() -> list[dict[str, str]]:
+    """Say what the ``<ele>`` on every trackpoint came from.
+
+    In every exported file that carries a height and in none that does not: a
+    ferry crossing has no ground under it, and naming the height model in a file
+    holding no height would be a claim about nothing.
+
+    Returns:
+        A single entry for the height model, and **it carries no version**. The
+        endpoint publishes none and is not ordered — it answers point by point,
+        and the answers reach a file through the graph rather than through a
+        dated download — so the field is left empty rather than filled with a
+        date that would describe something else. What a reader needs in order to
+        compare the ascent figure with another platform's is not a version but
+        the rule it was read under, and every track carries that in its own
+        ``ascentMethod``.
+    """
+    return [
+        credit(
+            hoydedata.METADATA.name,
+            hoydedata.METADATA.license,
+            "",
+            hoydedata.METADATA.attribution,
+            hoydedata.METADATA.url,
+            None,
+        )
+    ]
+
+
+def ascent_method(params: Params) -> str:
+    """Say how the heights and the ascent figure were reached.
+
+    The figure without it asserts nothing: the same route here reads anywhere
+    between 965 and 1,214 m depending on the rule, and it is also what explains
+    why the number Komoot computes from its own model will not match.
+
+    Args:
+        params: What decided the build
+
+    Returns:
+        The rule, in the words the popup and the panel use for it
+    """
+    return f"DTM1, sampled every {params.elevation_step_m:g} m, gains under {params.ascent_threshold_m:g} m ignored"
+
+
+def export_settings(versions: dict[str, str | None], params: Params) -> dict[str, object]:
+    """Hand the page everything it needs to write a GPX file.
+
+    The browser writes that file, so every last thing in it has to be in the
+    page — the licences, the versions, the field names and the rule the heights
+    were read under. Measured before this phase: ``CC BY 4.0``, ``ODbL`` and
+    ``CC BY-NC`` appeared **zero times** in the built page, and so did any
+    source version. They existed only in what this script prints to its console,
+    and a browser cannot invent them.
+
+    Args:
+        versions: The version or the date read, per source
+        params: What decided the build
+
+    Returns:
+        The ``export`` argument of :func:`~trails.visualization.maps.add_profile_panel`
+
+    Raises:
+        KeyError: If a chain figure the file is written from is not in
+            :data:`CHAIN_FIGURE_FIELDS`, which would leave the browser writing a
+            field it was never given
+    """
+    keys = {CHAIN_KEY: maps.FIGURE_ID_KEY, **CHAIN_FIGURE_FIELDS}
+    return {
+        "credits": source_credits(versions),
+        "heights": height_credit(),
+        # The one list, in the one order, that both writers work from: the
+        # column the Python writer reads, the key the page carries it under, and
+        # the name it is written down as.
+        "fields": [[keys[column], written] for column, written in DEFAULT_EXTENSION_FIELDS.items()],
+        "creditFields": list(SOURCE_CREDIT_FIELDS),
+        "gapM": DEFAULT_GAP_M,
+        "decimals": EXTENSION_DECIMALS,
+        "elevationDecimals": ELEVATION_DECIMALS,
+        # A millionth of a degree is what the payload is quantised at and 11 cm
+        # of latitude; a seventh place says the page is not rounding further.
+        "coordinateDecimals": 7,
+        "namespace": TRAILS_NAMESPACE,
+        "prefix": TRAILS_PREFIX,
+        "creator": EXPORT_CREATOR,
+        "description": EXPORT_DESCRIPTION,
+        "ascentMethod": ascent_method(params),
+        "identitySeparator": IDENTITY_SEPARATOR,
+        "filePrefix": PARK_NAME.lower(),
+    }
 
 
 def load_park_boundary(cache_dir: str) -> gpd.GeoDataFrame:
@@ -581,6 +830,12 @@ def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.
     # the panel and the popup on different sides of one.
     described["compass"] = compass_points(described["bearing_deg"])
     described["climb"] = describe_climb(described, described["compass"])
+    # The name a track is written under, in one column for every source, because
+    # an exported file asks the same question of all of them. It is the chain's
+    # identity everywhere but the roads, where the identity is the register id
+    # that reunites two fragments of one road and the *name* is a separate
+    # column — a road id is not a thing to write into a <trk><name>.
+    described["track_name"] = described["identity"].where(described["source"] != N50_ROADS, described["road_name"])
     described["high_point"] = pd.Series(
         [f"{_metres(value)} m" if pd.notna(value) else "" for value in described["high_m"]],
         index=described.index,
@@ -678,7 +933,7 @@ def summarize(name: str, gdf: gpd.GeoDataFrame) -> None:
     print(f"  {name}: {len(gdf):,} chains, {total_km:,.1f} km")
 
 
-def encode_for_the_page(network: Network, sources: list[NetworkSource], params: Params) -> Payload:
+def encode_for_the_page(network: Network, sources: list[NetworkSource], params: Params, order: pd.DataFrame) -> Payload:
     """Encode the routing graph and its heights into the page's second payload.
 
     Two representations of the same ground, and they must not be unified. What
@@ -693,6 +948,10 @@ def encode_for_the_page(network: Network, sources: list[NetworkSource], params: 
         network: The finished graph, in :data:`METRIC_CRS`
         sources: The datasets it was built from, which say what a route costs
         params: What decided the build
+        order: Which of a chain's edges comes first and which way round each of
+            them runs. Handed in rather than rebuilt here, because the exported
+            tracks are laid out of the same walk and the two writers of a GPX
+            file agree only for as long as they compose from one order.
 
     Returns:
         The payload, and its size
@@ -703,7 +962,7 @@ def encode_for_the_page(network: Network, sources: list[NetworkSource], params: 
         # The frame's own order is not the order a chain's edges lie in — one
         # chain in five does not even join up in it — and the browser has no
         # chain geometry to project them onto, so it has to be told.
-        chain_order(network.chains, network.edges),
+        order,
         costs=edge_costs(sources, params),
     )
 
@@ -754,6 +1013,15 @@ def main() -> int:
     loaded = load_sources(params, zone)
     network, _ = build(loaded.sources, masks_from(loaded.sources), zone, params, name=PARK_NAME.lower())
     by_source = describe(network.chains, park)
+
+    # The line an export writes, which is a third thing beside the one the map
+    # draws and the one a route is found over: every vertex, a point wherever
+    # two are more than 5 m apart, and a height on each. Laid out once, off the
+    # same edge order the page's payload is encoded from — the browser writes
+    # the same file, and the two agree only because they walk the same walk.
+    order = chain_order(network.chains, network.edges)
+    tracks = chain_tracks(network.chains, network.edges, order)
+    print(f"\nExport tracks: {int(tracks.count_coordinates().sum()):,} points over {int(network.chains['length_m'].sum() / 1000):,} km")
 
     print(f"\nChains from the graph: {len(network.chains):,} drawn, over {len(network.edges):,} routing edges")
     routes = by_source[UT]
@@ -1063,7 +1331,7 @@ def main() -> int:
     # takes the profile off it and phase 6 routes over it, and both of those live
     # in Python until it is in the page.
     print("\nEncoding the routing graph for the page...")
-    payload = encode_for_the_page(network, loaded.sources, params)
+    payload = encode_for_the_page(network, loaded.sources, params, order)
     counted = payload.header
     print(f"  {counted['edges']:,} edges on {counted['nodes']:,} nodes, {counted['vertices']:,} vertices at full source precision")
     print(f"  {counted['samples']:,} height samples, quantised at {counted['coordinateQuantum']:g}° and {counted['elevationQuantum']:g} m")
@@ -1115,7 +1383,11 @@ def main() -> int:
     # above it.
     with_profile = int(network.chains["ascent"].notna().sum())
     print(f"\nProfile panel: {with_profile:,} of {len(network.chains):,} chains carry one, {len(network.chains) - with_profile} say they have none")
-    maps.add_profile_panel(fmap, highlightable)
+    # And the panel writes the selected chain out. Everything the file says
+    # about itself travels with it: the browser is what produces that file, and
+    # a licence, a version or a field name it was not given is one it would have
+    # to invent.
+    maps.add_profile_panel(fmap, highlightable, export=export_settings(loaded.versions, params))
 
     maps.finalize(fmap)
 
@@ -1128,26 +1400,50 @@ def main() -> int:
     # simplified copy above is the drawn one and goes nowhere near this.
     print("\nExporting GPX...")
     exports = [
-        ("lomsdal-visten-turrutebasen.gpx", trails, "trail_name", ["maintenance_responsible", "difficulty", "marking", "length_km"]),
-        ("lomsdal-visten-fkb.gpx", by_source[FKB], "typeveg", ["typeveg", "length_km"]),
-        ("lomsdal-visten-n50.gpx", by_source[N50_PATHS], "typeveg", ["typeveg", "rutemerking", "length_km"]),
-        ("lomsdal-visten-osm.gpx", by_source[OSM], "name", ["highway", "surface", "sac_scale", "length_km"]),
+        ("lomsdal-visten-turrutebasen.gpx", TURRUTEBASEN, trails, "trail_name", ["maintenance_responsible", "difficulty", "marking", "length_km"]),
+        ("lomsdal-visten-fkb.gpx", FKB, by_source[FKB], "typeveg", ["typeveg", "length_km"]),
+        ("lomsdal-visten-n50.gpx", N50_PATHS, by_source[N50_PATHS], "typeveg", ["typeveg", "rutemerking", "length_km"]),
+        ("lomsdal-visten-osm.gpx", OSM, by_source[OSM], "name", ["highway", "surface", "sac_scale", "length_km"]),
         # One file with all catalogued routes, named, instead of 35 downloads.
-        ("lomsdal-visten-ut.gpx", routes, "name", ["category_label", "length_km", "ut_url"]),
+        ("lomsdal-visten-ut.gpx", UT, routes, "name", ["category_label", "length_km", "ut_url"]),
         # The chain's own length, not the whole road's: a track in this file
         # *is* one chain, and a figure about other tracks would not describe it.
-        ("lomsdal-visten-roads.gpx", roads, "road_name", ["road_category", "length_km"]),
+        ("lomsdal-visten-roads.gpx", N50_ROADS, roads, "road_name", ["road_category", "length_km"]),
     ]
-    for filename, chains, name_field, desc_fields in exports:
+    credits_of = source_credits(loaded.versions)
+    heights = height_credit()
+    for filename, source, chains, name_field, desc_fields in exports:
         if not len(chains):
             continue
-        path, stats = export_to_gpx(chains, output_dir / filename, name_field=name_field, desc_fields=desc_fields)
+        path, stats = export_to_gpx(
+            # The dense, height-carrying line rather than the chain's own: the
+            # heights were sampled along the edges and not at the vertices, and
+            # the geometry a file is written from is the one the two were laid
+            # against each other on.
+            chains.assign(track=tracks),
+            output_dir / filename,
+            name_field=name_field,
+            desc_fields=desc_fields,
+            title=f"{PARK_NAME}: {source}",
+            description=f"Every {source} chain of the {PARK_NAME} routing network",
+            # The height model only where the file actually carries a height,
+            # which is the rule the page follows chain by chain. A file of
+            # crossings would name a source it never read a value from.
+            sources=credits_of[source] + (heights if bool(chains["ascent"].notna().any()) else []),
+            extension_fields=DEFAULT_EXTENSION_FIELDS,
+            ascent_method=ascent_method(params),
+            track_field="track",
+        )
         print(f"  {path.name}: {stats['total_trails']} tracks, {stats['total_points']:,} points, {stats['file_size_mb']:.2f} MB")
 
     print("\n" + "=" * 70)
-    print(f"Sources: Turrutebasen {loaded.turrutebasen_version} (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)")
-    print("         all Kartverket | Naturbase (NLOD, Miljødirektoratet) | OpenStreetMap (ODbL)")
-    print(f"         {ut.METADATA.attribution} ({ut.METADATA.license}) — non-commercial, unlike the rest")
+    # What every exported file now carries in its own <metadata>, printed here
+    # as well because a build's own log is where a discrepancy gets noticed.
+    for entries in credits_of.values():
+        for entry in entries:
+            print(f"Source: {entry['name']} — {entry['licence']}{', ' + entry['note'] if entry['note'] else ''} — {entry['version'] or 'no version'}")
+    print(f"Heights: {heights[0]['name']} — {heights[0]['licence']} — {ascent_method(params)}")
+    print("        Naturbase (NLOD, Miljødirektoratet) draws the boundary and goes into no exported track")
     print("=" * 70)
     return 0
 

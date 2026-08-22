@@ -197,6 +197,11 @@ class Source:
             timeout: HTTP timeout in seconds per request
         """
         self.downloads = DownloadCache(f"{cache_dir}/downloads/ut", timeout=timeout)
+        #: When the routes this source last served were downloaded, ISO, or None
+        #: before it has served any. The **oldest** of them: a catalogue fetched
+        #: over several days is only as current as the trip nobody re-fetched,
+        #: and an exported file has to say what it was built from.
+        self.loaded_at: str | None = None
 
     def fetch_gpx(self, route: Route, force_download: bool = False) -> Path:
         """Download a route's GPX export, or return the cached copy.
@@ -245,6 +250,9 @@ class Source:
                 }
             )
             geometries.append(geometry)
+
+        fetched = sorted(date for date in (self.downloads.downloaded_at(f"trip_{route.trip_id}.gpx") for route in routes) if date)
+        self.loaded_at = fetched[0] if fetched else None
 
         gdf = gpd.GeoDataFrame(records, geometry=geometries, crs="EPSG:4326")
         # UT.no records a track as walked, so its length is the walked distance

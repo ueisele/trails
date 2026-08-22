@@ -258,7 +258,7 @@ def test_the_checksum_of_nothing_is_where_a_reader_starts() -> None:
 
 
 def test_a_height_below_sea_level_checksums_the_way_a_browser_folds_it() -> None:
-    # -439 decimetres is a real reading here: an N50 road descending into a
+    # -4,390 centimetres is a real reading here: an N50 road descending into a
     # quarry. Python and JavaScript have to agree about its 32-bit pattern.
     assert checksum(np.array([-439])) == ((1 + (-439 & 0xFFFFFFFF)) % (1 << 32), (1 + (-439 & 0xFFFFFFFF)) % (1 << 32))
 
@@ -370,7 +370,9 @@ def test_the_checksums_are_over_what_the_page_should_decode() -> None:
     payload = encoded(chains((line, "a")), graph((line, "a", 0, 1, "FKB", [10.0, math.nan])))
 
     assert payload.header["checksum"]["coordinates"] == checksum(np.array([13_000_000, 65_600_000, 13_001_000, 65_601_000]))
-    assert payload.header["checksum"]["heights"] == checksum(np.array([100, GAP_CHECKSUM_VALUE]))
+    # 10.0 m on the centimetre grid the height service answers at, which is
+    # what the payload carries.
+    assert payload.header["checksum"]["heights"] == checksum(np.array([1_000, GAP_CHECKSUM_VALUE]))
 
 
 def test_two_encodings_of_one_graph_are_the_same_bytes() -> None:

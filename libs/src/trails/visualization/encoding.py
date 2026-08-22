@@ -105,10 +105,22 @@ NO_PATH_BIT = 0x04
 #: tracks are consumer GPS.
 DEFAULT_COORDINATE_QUANTUM = 1e-6
 
-#: How finely a height is written down, in metres. The height model's own
-#: vertical uncertainty is around half a metre under forest canopy, so a
-#: decimetre already asserts more than the data does and costs almost nothing.
-DEFAULT_ELEVATION_QUANTUM = 0.1
+#: How finely a height is written down, in metres. **This is the resolution the
+#: height service answers at, not a choice about accuracy**: 99.87 % of the
+#: 1,352,455 readings in this park's store lie exactly on a centimetre and none
+#: lies between two, so there is nothing finer to keep and nothing here is
+#: rounded away.
+#:
+#: It used to be a decimetre, on the argument that the model's real vertical
+#: uncertainty is around half a metre under forest canopy and a decimetre
+#: already asserts more than that. True about the ground, and beside the point:
+#: what a *file* must do is agree with itself. A GPX written from this payload
+#: states the chain's ascent and carries the heights it was read from, and with
+#: the last digit gone the reader recomputing it got a different number — up to
+#: 10.5 m, and 9.2 % on a short climb, on 43 % of the chains. Writing the digit
+#: we already have costs 0.8 MB and makes every exported file reproduce its own
+#: figure exactly.
+DEFAULT_ELEVATION_QUANTUM = 0.01
 
 #: What a sample nothing could be read at contributes to the height checksum.
 #: The stream marks it with a code of its own; this is only so that a consumer

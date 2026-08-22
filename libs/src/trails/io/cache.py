@@ -85,6 +85,24 @@ class Object:
                 return dict(json.load(f))
         return None
 
+    def cached_at(self, key: str) -> str | None:
+        """Say when what is stored under a key was put there.
+
+        An exported file records the version of every source it draws on, and
+        most of these publish none: what they have instead is the moment their
+        answer was read and stored. Load a plan months later and the route may
+        differ; without this there is a difference and no cause.
+
+        Args:
+            key: Cache key
+
+        Returns:
+            ISO timestamp, or None where nothing is stored under the key or it
+            was stored without metadata
+        """
+        metadata = self.get_metadata(key)
+        return str(metadata["cached_at"]) if metadata and metadata.get("cached_at") else None
+
     def get_path(self, key: str) -> Path:
         """Get path for raw file storage.
 
@@ -273,6 +291,26 @@ class Download:
         """
         file_path = self.cache_dir / filename
         return file_path if file_path.exists() else None
+
+    def downloaded_at(self, filename: str) -> str | None:
+        """Say when a cached file was fetched.
+
+        The counterpart of :meth:`Object.cached_at`, for the sources that arrive
+        as an archive rather than as an object: what an exported file records as
+        the date those were ordered at.
+
+        Args:
+            filename: Name of the cached file
+
+        Returns:
+            ISO timestamp, or None where the file is absent or has no sidecar
+        """
+        meta_file = self.cache_dir / f"{filename}.meta.json"
+        if not meta_file.exists():
+            return None
+        with open(meta_file) as f:
+            metadata = json.load(f)
+        return str(metadata["downloaded_at"]) if metadata.get("downloaded_at") else None
 
     def clear(self) -> None:
         """Clear all cached downloads."""

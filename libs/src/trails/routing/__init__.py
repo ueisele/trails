@@ -59,6 +59,7 @@ from trails.routing.graph import (
 from trails.routing.noding import DEFAULT_METRIC_CRS, NODE_TOLERANCE_M
 from trails.routing.order import CHAIN_ORDER_COLUMNS, chain_order
 from trails.routing.sources import BRIDGE, FERRY, PATH, NetworkSource
+from trails.routing.track import DEFAULT_GAP_M, EXPORT_CRS, chain_tracks
 
 __all__ = [
     "BRIDGE",
@@ -68,6 +69,7 @@ __all__ = [
     "DEFAULT_BRIDGE_COST_FACTOR",
     "DEFAULT_BRIDGE_M",
     "DEFAULT_FERRY_COST_M",
+    "DEFAULT_GAP_M",
     "DEFAULT_MARKED_M",
     "DEFAULT_METRIC_CRS",
     "DEFAULT_MIN_SHARE",
@@ -75,6 +77,7 @@ __all__ = [
     "DEFAULT_RECORDED_M",
     "DEFAULT_STEP_M",
     "DEFAULT_STROKE_ANGLE_DEG",
+    "EXPORT_CRS",
     "FERRY",
     "IDENTITY_SEPARATOR",
     "MARKED",
@@ -93,6 +96,7 @@ __all__ = [
     "chain_order",
     "chain_profiles",
     "chain_series",
+    "chain_tracks",
     "chains_of",
     "descent",
     "label_components",

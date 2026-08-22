@@ -62,6 +62,10 @@ class Source:
         self.cache = ObjectCache(f"{cache_dir}/objects")
         self.timeout = timeout
         self.page_size = page_size
+        #: When the answer this source last served was read, ISO, or None
+        #: before it has served one. An exported file records the version of
+        #: every source it draws on, and this service publishes none.
+        self.loaded_at: str | None = None
 
     def _bbox_parameter(self, bounds: Bounds) -> str:
         """Build the WFS bbox parameter for a WGS84 extent.
@@ -139,6 +143,7 @@ class Source:
             print("Loading detailed paths from cache...")
             cached = self.cache.load(cache_key)
             assert isinstance(cached, gpd.GeoDataFrame)
+            self.loaded_at = self.cache.cached_at(cache_key)
             return cached
 
         bbox = self._bbox_parameter(bounds)
@@ -178,4 +183,5 @@ class Source:
         print(f"  kept {len(result):,} walkable ({', '.join(road_types)})")
 
         self.cache.save(cache_key, result, metadata={"bounds": list(bounds), "road_types": list(road_types), "count": len(result)})
+        self.loaded_at = self.cache.cached_at(cache_key)
         return result

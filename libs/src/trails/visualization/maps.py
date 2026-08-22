@@ -223,6 +223,30 @@ GRADIENT_BANDS = (
     (40.0, "extreme", "#c62828", 3.2),
 )
 
+#: Everything the page has to be handed before it can write a GPX file. There is
+#: no default for any of it and none may be missing: a licence, a version or a
+#: field name the browser had to invent would be a claim nobody made, written
+#: into the one file that leaves this machine. :func:`add_profile_panel` refuses
+#: an ``export`` that is short of any of them rather than building a page that
+#: writes ``undefined`` into a source's terms.
+EXPORT_SETTINGS = (
+    "credits",
+    "heights",
+    "fields",
+    "creditFields",
+    "gapM",
+    "decimals",
+    "elevationDecimals",
+    "coordinateDecimals",
+    "namespace",
+    "prefix",
+    "creator",
+    "description",
+    "ascentMethod",
+    "identitySeparator",
+    "filePrefix",
+)
+
 
 def _record_chain_figures(group: folium.FeatureGroup, figures: dict[str, dict[str, object]]) -> None:
     """Attach the per-line figures of a layer to its feature group.
@@ -356,10 +380,13 @@ def add_trails(
             :func:`add_click_highlight` can pick out all of it at once. A route
             split into several lines shares one value.
         search_field: Column holding the text :func:`add_search` matches against
-        figure_fields: Mapping of a numeric column to the key it travels under,
-            for the figures :func:`add_profile_panel` shows. Recorded per
+        figure_fields: Mapping of a column to the key it travels under, for what
+            :func:`add_profile_panel` shows and writes. Recorded per
             ``group_field`` value, beside the layer rather than on it, alongside
-            the value itself under :data:`FIGURE_ID_KEY`.
+            the value itself under :data:`FIGURE_ID_KEY`. A number is rounded on
+            the way (see :func:`_figure_values`); a string travels as it is,
+            which is what carries a chain's name and its source into a page that
+            has to write both into an exported file.
         source: Dataset the lines came from, shown at the foot of every popup
         dash_array: SVG dash pattern, e.g. ``"8,6"``. Use for connections that
             are not walked, such as ferry crossings.
@@ -1170,11 +1197,12 @@ class _RoutingGraph(MacroElement):
 
                 var sampleAt = new Int32Array(edges + 1);
                 for (i = 0; i < edges; i += 1) { sampleAt[i + 1] = sampleAt[i] + cursor.varint(); }
-                // Single precision holds a decimetre exactly to sixteen
-                // kilometres of altitude, which is four orders of magnitude
-                // more than this ground, and halves what the series costs in
-                // memory. The coordinates get double precision, where a
-                // millionth of a degree needs it.
+                // Single precision, and the bound is worth stating because the
+                // grid is a centimetre: a float32 near v is wrong by at most
+                // v / 2**24, so a centimetre stays recoverable up to 83 km of
+                // altitude — four orders of magnitude above this ground. That
+                // halves what the series costs in memory. The coordinates get
+                // double precision, where a millionth of a degree needs it.
                 var heights = new Float32Array(header.samples);
                 var step = header.elevationQuantum, height = 0;
                 for (i = 0; i < header.samples; i += 1) {
@@ -1321,6 +1349,12 @@ class _ProfilePanel(MacroElement):
     A control rather than a box over the page, and with only
     ``disableClickPropagation``: a wheel turned over it still has to reach the
     map, or the map reads as frozen the moment the panel is open.
+
+    **It also writes the chain out as GPX**, from the same composed series it
+    draws the curve from — which is the reason the two live in one closure
+    rather than in two controls. A second composition in the page would be a
+    third implementation of the same walk, and the file would eventually
+    disagree with the profile drawn above the button that produced it.
     """
 
     _template = Template("""
@@ -1388,12 +1422,26 @@ class _ProfilePanel(MacroElement):
                 var first = graph.chainAt[index], last = graph.chainAt[index + 1];
                 var lon = [], lat = [], along = [], height = [], distance = [];
                 var reached = 0, read = false, crossing = false, joined = false;
+                // Where each stretch that joins up begins, in both series. The
+                // profile does not need them — it reads the NaN the break
+                // leaves behind — but an export writes one track segment per
+                // stretch, and a segment drawn across the step between two of
+                // them is a route nobody can walk.
+                var stretches = [];
                 for (var edge = first; edge < last; edge += 1) {
                     var flipped = graph.flags[edge] & 1;
                     var apart = (graph.flags[edge] & 2) && lon.length > 0;
                     var v0 = graph.vertexAt[edge], v1 = graph.vertexAt[edge + 1];
+                    var s0 = graph.sampleAt[edge], s1 = graph.sampleAt[edge + 1], samples = s1 - s0;
                     var began = reached;
                     crossing = crossing || graph.header.sources[graph.sources[edge]].kind === 'ferry';
+
+                    if (apart || !lon.length) {
+                        // The separator pushed below closes the stretch that
+                        // ended; it is not the first sample of this one.
+                        var separated = !!(samples && height.length && apart);
+                        stretches.push({from: lon.length, sampleFrom: height.length + (separated ? 1 : 0), separated: separated});
+                    }
 
                     for (var v = 0; v < v1 - v0; v += 1) {
                         var at = flipped ? v1 - 1 - v : v0 + v;
@@ -1411,7 +1459,6 @@ class _ProfilePanel(MacroElement):
                         lon.push(x); lat.push(y); along.push(reached);
                     }
 
-                    var s0 = graph.sampleAt[edge], s1 = graph.sampleAt[edge + 1], samples = s1 - s0;
                     var length = reached - began;
                     if (samples && height.length && apart) {
                         // A break rather than a join: a climb counted across a
@@ -1424,14 +1471,24 @@ class _ProfilePanel(MacroElement):
                         height.push(value);
                         // Every 5 m along the edge means samples spread evenly
                         // between its two ends, so this is where the sth of them
-                        // lies rather than s * 5.
-                        distance.push(samples > 1 ? began + (length * s) / (samples - 1) : began);
+                        // lies rather than s * 5 — and the last of them sits on
+                        // the edge's far end, which is a vertex, so it takes
+                        // that vertex's own distance rather than one a hair
+                        // away: began + (reached - began) is not reached, and
+                        // an export merging the two writes a pair of points at
+                        // a single position.
+                        distance.push(samples < 2 ? began : (s === samples - 1 ? reached : began + (length * s) / (samples - 1)));
                         if (!isNaN(value)) { read = true; }
                     }
                     joined = samples > 0;
                 }
+                for (var s = 0; s < stretches.length; s += 1) {
+                    var next = stretches[s + 1];
+                    stretches[s].to = next ? next.from : lon.length;
+                    stretches[s].sampleTo = next ? next.sampleFrom - (next.separated ? 1 : 0) : height.length;
+                }
                 return {lon: lon, lat: lat, along: along, height: height, distance: distance,
-                        total: reached, read: read, crossing: crossing};
+                        stretches: stretches, total: reached, read: read, crossing: crossing};
             }
 
             // The chain's length as the chain carries it, distributed over the
@@ -1461,6 +1518,254 @@ class _ProfilePanel(MacroElement):
                 return L.latLng(shape.lat[0], shape.lon[0]);
             }
 
+            // ---- the file this panel writes ---------------------------------
+            // Hand-written, like everything else here: a library from a CDN
+            // does not load on a page opened off the disk. It writes what
+            // libs/src/trails/io/export/gpx.py writes, from the same graph and
+            // the same edge order. Nothing here can import that module and no
+            // test can run this, so the two are exported on a real chain and
+            // compared in a browser whenever the work is accepted — to a
+            // tolerance the payload sets rather than to equality. What they
+            // agree on exactly is the field names, and those are handed in.
+            var EXPORT = {{ this.export_json }};
+
+            function escaped(value) {
+                return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+            }
+
+            // Written to as many places as the page's own figures carry, and to
+            // exactly that many: '500' in one file against '500.0' in the other
+            // is two writers disagreeing about a number both of them got right.
+            function fixed(value) {
+                return Number(value).toFixed(EXPORT.decimals);
+            }
+
+            // A height keeps more places than a figure does: it is what the
+            // figure was computed from, and a file whose <ele> values do not
+            // reproduce the ascent it states has no use for stating one.
+            function fixedEle(value) {
+                return Number(value).toFixed(EXPORT.elevationDecimals);
+            }
+
+            // The height model read at a set of distances along one stretch.
+            // Both series only ever move forward, so one pointer serves the
+            // whole of it. A position *between* two samples one of which says
+            // nothing gets nothing — a height interpolated across a gap is
+            // invented ground, and nothing downstream can tell the two apart —
+            // while a position landing on a sample takes that sample and asks
+            // nothing of its neighbour.
+            function heightsAt(positions, shape, from, to) {
+                var out = new Array(positions.length), below = from, i;
+                for (i = 0; i < positions.length; i += 1) { out[i] = NaN; }
+                if (to - from < 2) { return out; }
+                for (i = 0; i < positions.length; i += 1) {
+                    while (below < to - 2 && shape.distance[below + 1] <= positions[i]) { below += 1; }
+                    var span = shape.distance[below + 1] - shape.distance[below];
+                    var t = span > 0 ? (positions[i] - shape.distance[below]) / span : 0;
+                    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                    var low = shape.height[below], high = shape.height[below + 1];
+                    out[i] = t <= 0 ? low : (t >= 1 ? high : (isNaN(low) || isNaN(high)) ? NaN : low + t * (high - low));
+                }
+                return out;
+            }
+
+            // Every vertex the chain has, every sample the height model gave,
+            // and a point wherever two of those are still further apart than
+            // the gap. **Not** a resampling every 5 m: that drops the source's
+            // own vertices and rounds off every corner between two samples, and
+            // those vertices are the whole reason the geometry is carried at
+            // full precision. And **not** the vertices alone with the heights
+            // interpolated between them: measured that way, the ascent read
+            // back off the file's own values came out 47 m under the figure the
+            // same file states for the 42 km Rundtur. Where nothing was read
+            // along the stretch there is nothing to fill it for either — a
+            // point every 5 m across a fjord says nothing its two ends do not.
+            function denseOf(shape, stretch) {
+                var lon = [], lat = [], read = false, i, k;
+                for (i = stretch.sampleFrom; i < stretch.sampleTo; i += 1) {
+                    if (!isNaN(shape.height[i])) { read = true; break; }
+                }
+                var along = shape.along, first = stretch.from, last = stretch.to;
+                if (!read || last - first < 2) {
+                    for (i = first; i < last; i += 1) { lon.push(shape.lon[i]); lat.push(shape.lat[i]); }
+                    return {lon: lon, lat: lat, ele: lon.map(function () { return NaN; })};
+                }
+
+                // The two lists merged, each distance once. An edge's first and
+                // last sample sit on its end vertices and are the same number
+                // here, so the merge drops the copy rather than writing a step
+                // of no length.
+                var merged = [], sample = stretch.sampleFrom;
+                function keep(value) {
+                    if (!merged.length || merged[merged.length - 1] !== value) { merged.push(value); }
+                }
+                while (sample < stretch.sampleTo && shape.distance[sample] <= along[first]) { sample += 1; }
+                for (i = first; i < last; i += 1) {
+                    while (sample < stretch.sampleTo && shape.distance[sample] < along[i]) { keep(shape.distance[sample]); sample += 1; }
+                    if (sample < stretch.sampleTo && shape.distance[sample] === along[i]) { sample += 1; }
+                    keep(along[i]);
+                }
+
+                // And the samples are not as close together as their step
+                // suggests: an edge of 12 m gets three of them, 6 m apart.
+                var positions = [merged[0]];
+                for (i = 1; i < merged.length; i += 1) {
+                    var step = merged[i] - merged[i - 1];
+                    var intervals = Math.max(Math.ceil(step / EXPORT.gapM), 1);
+                    for (k = 1; k < intervals; k += 1) { positions.push(merged[i - 1] + (k / intervals) * step); }
+                    // A position already in the list is written as itself and
+                    // never as a fraction of the way to itself: a + 1 * (b - a)
+                    // is not b, and a sample that misses its own distance by an
+                    // ulp is interpolated instead of read.
+                    positions.push(merged[i]);
+                }
+
+                var below = first;
+                for (i = 0; i < positions.length; i += 1) {
+                    while (below < last - 2 && along[below + 1] <= positions[i]) { below += 1; }
+                    var span = along[below + 1] - along[below];
+                    var t = span > 0 ? (positions[i] - along[below]) / span : 0;
+                    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                    // A vertex is the coordinate the surveyor recorded, not a
+                    // point computed between it and its neighbour.
+                    var at = t >= 1 ? below + 1 : below;
+                    if (t <= 0 || t >= 1) {
+                        lon.push(shape.lon[at]); lat.push(shape.lat[at]);
+                    } else {
+                        lon.push(shape.lon[below] + t * (shape.lon[below + 1] - shape.lon[below]));
+                        lat.push(shape.lat[below] + t * (shape.lat[below + 1] - shape.lat[below]));
+                    }
+                }
+                return {lon: lon, lat: lat, ele: heightsAt(positions, shape, stretch.sampleFrom, stretch.sampleTo)};
+            }
+
+            function runsOf(shape) {
+                return shape.stretches.map(function (stretch) { return denseOf(shape, stretch); });
+            }
+
+            function pointsIn(runs) {
+                return runs.reduce(function (total, run) { return total + run.lon.length; }, 0);
+            }
+
+            function heightsWritten(runs) {
+                return runs.some(function (run) { return run.ele.some(function (value) { return !isNaN(value); }); });
+            }
+
+            // What the file draws on: the chain's own source, and the height
+            // model wherever the file carries a height. Naming a source a file
+            // does not draw on is exactly as wrong as leaving one out.
+            function creditsOf(figure, runs) {
+                return (EXPORT.credits[figure.source] || []).concat(heightsWritten(runs) ? EXPORT.heights : []);
+            }
+
+            function creditLine(credit) {
+                var inside = ['licence', 'version', 'attribution'].filter(function (field) { return credit[field]; })
+                    .map(function (field) { return credit[field]; });
+                return inside.length ? credit.name + ' (' + inside.join(', ') + ')' : credit.name;
+            }
+
+            // The named ways the track follows. A chain running over several of
+            // them carries them joined, and that is its own identity: 'via
+            // Tveråvegen, Gamle Stavassveg' is how a person describes a route.
+            function waysOf(figure) {
+                if (!figure.name) { return ''; }
+                return 'via ' + String(figure.name).split(EXPORT.identitySeparator).map(function (part) { return part.trim(); })
+                    .filter(function (part) { return part; }).join(', ');
+            }
+
+            // The silence is the whole of the statement, and the wording has to
+            // keep saying so: this is ground no register draws anything on, not
+            // ground with no path. The popup's own words, off the same field.
+            function unrecordedOf(figure) {
+                return figure.noPath > 0 ? (figure.noPath / 1000).toFixed(2) + ' km where no source records a path' : '';
+            }
+
+            function fileNameOf(figure) {
+                return (EXPORT.filePrefix + '-' + (figure.id || 'track')).replace(/[^A-Za-z0-9._-]+/g, '-') + '.gpx';
+            }
+
+            function gpxOf(figure, shape, runs) {
+                var credits = creditsOf(figure, runs);
+                var told = [waysOf(figure), shape.read ? climb(figure) : '', unrecordedOf(figure)]
+                    .filter(function (part) { return part; });
+
+                var out = ['<?xml version="1.0" encoding="UTF-8"?>'];
+                out.push('<gpx version="1.1" creator="' + escaped(EXPORT.creator) + '"' +
+                    ' xmlns="http://www.topografix.com/GPX/1/1"' +
+                    ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"' +
+                    ' xmlns:' + EXPORT.prefix + '="' + escaped(EXPORT.namespace) + '"' +
+                    ' xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">');
+                // The order GPX 1.1 fixes for what <metadata> holds, and there
+                // is deliberately no <copyright>: it takes exactly one licence,
+                // and a file mixing CC0, CC BY, ODbL and CC BY-NC has no single
+                // one to put there. Listing what is present is the honest form.
+                out.push('  <metadata>');
+                out.push('    <name>' + escaped(figure.name || figure.id) + '</name>');
+                out.push('    <desc>' + escaped(EXPORT.description + '. Sources: ' + credits.map(creditLine).join(' \\u00b7 ')) + '</desc>');
+                out.push('    <time>' + new Date().toISOString().replace(/\\.\\d+Z$/, 'Z') + '</time>');
+                out.push('    <extensions>');
+                credits.forEach(function (credit) {
+                    var written = EXPORT.creditFields.filter(function (field) { return credit[field]; })
+                        .map(function (field) { return ' ' + field + '="' + escaped(credit[field]) + '"'; });
+                    out.push('      <' + EXPORT.prefix + ':source' + written.join('') + '/>');
+                });
+                out.push('    </extensions>');
+                out.push('  </metadata>');
+
+                out.push('  <trk>');
+                out.push('    <name>' + escaped(figure.name || figure.id) + '</name>');
+                if (told.length) { out.push('    <desc>' + escaped(told.join(' \\u00b7 ')) + '</desc>'); }
+                out.push('    <extensions>');
+                EXPORT.fields.forEach(function (pair) {
+                    var value = figure[pair[0]];
+                    if (value === null || value === undefined || value === '') { return; }
+                    out.push('      <' + EXPORT.prefix + ':' + pair[1] + '>' +
+                        escaped(typeof value === 'number' ? fixed(value) : value) +
+                        '</' + EXPORT.prefix + ':' + pair[1] + '>');
+                });
+                if (heightsWritten(runs) && EXPORT.ascentMethod) {
+                    out.push('      <' + EXPORT.prefix + ':ascentMethod>' + escaped(EXPORT.ascentMethod) +
+                        '</' + EXPORT.prefix + ':ascentMethod>');
+                }
+                out.push('    </extensions>');
+                // One segment per stretch that joins up. A track drawn straight
+                // across the step between two of them is a route nobody can
+                // walk; no chain in this park has such a step, and the file says
+                // so by holding one segment rather than by asserting it.
+                runs.forEach(function (run) {
+                    out.push('    <trkseg>');
+                    for (var i = 0; i < run.lon.length; i += 1) {
+                        var point = '      <trkpt lat="' + run.lat[i].toFixed(EXPORT.coordinateDecimals) +
+                            '" lon="' + run.lon[i].toFixed(EXPORT.coordinateDecimals) + '">';
+                        // No <time> on a trackpoint, ever: a track carrying
+                        // timestamps reads as a recorded activity rather than a
+                        // plan, and the rest would be guesses dressed as data.
+                        out.push(point + (isNaN(run.ele[i]) ? '</trkpt>' : '<ele>' + fixedEle(run.ele[i]) + '</ele></trkpt>'));
+                    }
+                    out.push('    </trkseg>');
+                });
+                out.push('  </trk>');
+                out.push('</gpx>');
+                return out.join('\\n') + '\\n';
+            }
+
+            function saveFile(name, body) {
+                var blob = new Blob([body], {type: 'application/gpx+xml'});
+                var url = URL.createObjectURL(blob);
+                var anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = name;
+                // Firefox saves a blob offered by a page opened off the disk
+                // under the name given, and raises nothing — measured before
+                // this was written rather than assumed. The anchor has to be in
+                // the document for the click to count as one.
+                document.body.appendChild(anchor);
+                anchor.click();
+                document.body.removeChild(anchor);
+                setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+            }
+
             // ---- the panel -------------------------------------------------
             var header = document.createElement('div');
             header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none';
@@ -1485,7 +1790,27 @@ class _ProfilePanel(MacroElement):
                 key.appendChild(swatch);
                 key.appendChild(caption);
             });
+            // The download, and beside it what the file will actually contain
+            // rather than a generic notice: a stretch of FKB is unproblematic, a
+            // stretch of OSM is share-alike and a stretch of UT.no is
+            // non-commercial, and the reader should know which before pressing
+            // the button rather than afterwards.
+            var offer = document.createElement('div');
+            offer.style.cssText = 'margin:4px 0 2px;display:none';
+            var download = document.createElement('button');
+            download.type = 'button';
+            download.textContent = 'Download GPX';
+            download.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-right:8px;cursor:pointer';
+            var carries = document.createElement('span');
+            carries.style.cssText = 'color:#333';
+            var licensed = document.createElement('div');
+            licensed.style.cssText = 'margin:2px 0 0;color:#666;font-size:11px';
+            offer.appendChild(download);
+            offer.appendChild(carries);
+            offer.appendChild(licensed);
+
             body.appendChild(summary);
+            body.appendChild(offer);
             body.appendChild(key);
             body.appendChild(chart);
 
@@ -1890,6 +2215,44 @@ class _ProfilePanel(MacroElement):
                     (figure.bearing === null ? ' \\u00b7 a loop, so it climbs the same either way' : ''));
             }
 
+            // What pressing the button would get you, worked out from the same
+            // series the file is written from rather than estimated beside it.
+            // The points are counted here and written there, so the figure a
+            // reader is shown is the one the file holds.
+            function offered() {
+                if (!EXPORT) { return; }
+                offer.style.display = selected ? '' : 'none';
+                if (!selected) { return; }
+                if (!selected.shape) {
+                    download.disabled = true;
+                    // Whatever went wrong with the graph is said once, above,
+                    // by the line that knows what it was. Saying 'decoding' here
+                    // as well would contradict it — and a reader believes the
+                    // thing next to the button they were about to press.
+                    carries.textContent = selected.missing ? '' : 'Decoding the network\\u2026';
+                    licensed.textContent = '';
+                    return;
+                }
+                selected.runs = runsOf(selected.shape);
+                var points = pointsIn(selected.runs);
+                download.disabled = points < 2;
+                carries.textContent = [
+                    points.toLocaleString('en-GB') + ' points',
+                    heightsWritten(selected.runs) ? climb(selected.figure) : 'no height along this stretch',
+                    (selected.figure.length / 1000).toFixed(2) + ' km',
+                ].join(' \\u00b7 ');
+                licensed.textContent = creditsOf(selected.figure, selected.runs).map(function (credit) {
+                    return credit.name + ' \\u2014 ' + credit.licence + (credit.note ? ', ' + credit.note : '');
+                }).join(' \\u00b7 ');
+            }
+
+            if (EXPORT) {
+                download.addEventListener('click', function () {
+                    if (!selected || !selected.runs) { return; }
+                    saveFile(fileNameOf(selected.figure), gpxOf(selected.figure, selected.shape, selected.runs));
+                });
+            }
+
             function show(className, label) {
                 selected = className === null ? null : {className: className, figure: figures[className], label: label, shape: null, mid: null};
                 if (selected && !selected.figure) { selected = null; }
@@ -1904,20 +2267,32 @@ class _ProfilePanel(MacroElement):
                 window.trailsProfile = selected;
                 fold();
                 describe();
+                offered();
                 render();
                 placeArrow();
                 if (!selected) { return; }
-                if (!window.trailsGraph) { say('There is no routing graph in this page, so there is no profile to draw.'); return; }
+                if (!window.trailsGraph) {
+                    selected.missing = true;
+                    say('There is no routing graph in this page, so there is no profile to draw.');
+                    offered();
+                    return;
+                }
                 var wanted = selected.className;
                 window.trailsGraph.ready.then(function (graph) {
                     // The reader may well have clicked something else while a
                     // megabyte of arithmetic was going on.
                     if (!selected || selected.className !== wanted) { return; }
                     var index = graph.chainOf[selected.figure.id];
-                    if (index === undefined) { say('This line is not in the routing graph.'); return; }
+                    if (index === undefined) {
+                        selected.missing = true;
+                        say('This line is not in the routing graph.');
+                        offered();
+                        return;
+                    }
                     selected.shape = scale(compose(graph, index), selected.figure.length);
                     selected.mid = midpoint(selected.shape);
                     describe();
+                    offered();
                     render();
                     placeArrow();
                 // Two handlers rather than a .catch: a catch would also swallow
@@ -1925,7 +2300,11 @@ class _ProfilePanel(MacroElement):
                 // never arrived, which is the wrong cause and sends the next
                 // reader looking in the wrong place. A drawing fault belongs in
                 // the console, loudly.
-                }, function () { say('The routing graph did not arrive, so there is no profile to draw.'); });
+                }, function () {
+                    if (selected && selected.className === wanted) { selected.missing = true; }
+                    say('The routing graph did not arrive, so there is no profile to draw.');
+                    offered();
+                });
             }
 
             groups.forEach(function (group) {
@@ -1947,13 +2326,20 @@ class _ProfilePanel(MacroElement):
 
             fold();
             describe();
+            offered();
             render();
         })();
         {% endmacro %}
     """)
 
     def __init__(
-        self, groups: list[folium.FeatureGroup], figures: dict[str, dict[str, object]], title: str, chart_height: int, collapsed: bool
+        self,
+        groups: list[folium.FeatureGroup],
+        figures: dict[str, dict[str, object]],
+        title: str,
+        chart_height: int,
+        collapsed: bool,
+        export: dict[str, Any] | None,
     ) -> None:
         """Initialize the panel.
 
@@ -1963,6 +2349,8 @@ class _ProfilePanel(MacroElement):
             title: Panel heading, doubling as the fold handle
             chart_height: Height of the drawing area in pixels
             collapsed: Whether it starts folded away
+            export: What the page needs to write a GPX file, or None for a panel
+                that only draws. See :func:`add_profile_panel`.
         """
         super().__init__()
         self._name = "ProfilePanel"
@@ -1971,6 +2359,10 @@ class _ProfilePanel(MacroElement):
         self.title_json = _script_json(title)
         self.chart_height = int(chart_height)
         self.collapsed = collapsed
+        # Through _script_json like everything else that lands inside a script
+        # block: a licence or a source name carrying a '<' would otherwise close
+        # it, and json.dumps leaves that character alone.
+        self.export_json = _script_json(export)
         # The bands travel rather than being written into the template, so the
         # measurement that chose them and the colours that show them sit in one
         # documented place.
@@ -1989,8 +2381,9 @@ def add_profile_panel(
     title: str = "Elevation profile",
     chart_height: int = 150,
     collapsed: bool = True,
+    export: dict[str, Any] | None = None,
 ) -> None:
-    """Draw the selected chain's profile at the foot of the map.
+    """Draw the selected chain's profile at the foot of the map, and offer it.
 
     Clicking a line opens the panel on its profile: distance against elevation,
     with the ascent, descent, high and low point the chain carries, and an arrow
@@ -2004,6 +2397,15 @@ def add_profile_panel(
     series holds no reading at all — a ferry crossing, or a stretch outside the
     height model — says so instead of drawing a flat line at zero.
 
+    **And it writes the chain out.** Given ``export``, the panel offers the
+    selected chain as a GPX file — every vertex, a point wherever two are
+    further apart than ``gapM``, an ``<ele>`` on each and no ``<time>`` on any —
+    and says what the file will contain before the button is pressed rather than
+    after: how many points, what it climbs, and which licence each source it
+    draws on carries. The browser is the only thing that can write that file, so
+    everything in it has to be in the page: the sources, their licences and
+    their versions come through here, because nothing in a page can invent them.
+
     Call after the layers and after :func:`add_routing_graph`, whose payload it
     reads. It shares the bottom left with the legend and the scale bar and puts
     itself under both, so the order it is added in does not matter.
@@ -2014,6 +2416,24 @@ def add_profile_panel(
         title: Panel heading, which doubles as the fold handle
         chart_height: Height of the drawing area in pixels
         collapsed: Whether it starts folded away
+        export: What the page needs to write a GPX file, or None for a panel
+            that only draws one. It carries ``credits`` — the sources a chain of
+            each dataset draws on, each with its licence and the version it was
+            read at — ``heights``, the same for the height model every ``<ele>``
+            comes from, ``fields``, the figure keys a track's ``<extensions>``
+            are written from and the names they travel under, and the writer's
+            own settings: ``gapM``, ``decimals``, ``elevationDecimals``,
+            ``coordinateDecimals``,
+            ``namespace``, ``prefix``, ``creator``, ``description``,
+            ``ascentMethod``, ``identitySeparator`` and ``filePrefix``. The
+            names come from :mod:`trails.io.export.gpx`, which writes the same
+            file from Python; that module's docstring says what the two agree
+            on, how closely, and where the difference comes from.
+
+    Raises:
+        ValueError: If ``export`` leaves out something the page cannot write the
+            file without. A page that quietly wrote ``undefined`` into a licence
+            is worse than one that was never built.
     """
     if not groups:
         return
@@ -2024,7 +2444,12 @@ def add_profile_panel(
     if not figures:
         return
 
-    _ProfilePanel(groups, figures, title, chart_height, collapsed).add_to(fmap)
+    if export is not None:
+        missing = sorted(set(EXPORT_SETTINGS) - set(export))
+        if missing:
+            raise ValueError(f"the page cannot write a GPX file without {', '.join(missing)}")
+
+    _ProfilePanel(groups, figures, title, chart_height, collapsed, export).add_to(fmap)
 
 
 class _Legend(MacroElement):

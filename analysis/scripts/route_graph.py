@@ -33,6 +33,7 @@ from trails.network.norway import (
     RECORDED_M,
     RECORDED_SOURCES,
     ROUTE_REGISTERS,
+    TURRUTEBASEN,
     Params,
     build,
     load_sources,
@@ -445,7 +446,7 @@ def main() -> int:
     report(network, chains, loaded.sources, park, landmarks, params, args.reach_m)
 
     print("\n" + "=" * 78)
-    print(f"Sources: Turrutebasen {loaded.turrutebasen_version} (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)")
+    print(f"Sources: Turrutebasen {loaded.versions[TURRUTEBASEN]} (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)")
     # Every figure in the ELEVATION section comes out of this one, and CC BY
     # asks to be named for it.
     print(f"         Stedsnavn/SSR (CC BY 4.0) | {hoydedata.METADATA.name} ({hoydedata.METADATA.license}), all Kartverket")

@@ -36,8 +36,13 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+      # A vendored artefact is kept as its publisher wrote it: normalising
+      # whitespace in a schema makes it no longer the file it claims to be a
+      # copy of, and nobody can check it against the original any more.
       - id: trailing-whitespace
+        exclude: ^libs/tests/fixtures/
       - id: end-of-file-fixer
+        exclude: ^libs/tests/fixtures/
       - id: check-yaml
       - id: check-added-large-files
         args: ['--maxkb=1000']
@@ -46,6 +51,7 @@ repos:
       - id: check-merge-conflict
       - id: mixed-line-ending
         args: ['--fix=lf']
+        exclude: ^libs/tests/fixtures/
 
   # Clear Jupyter notebook outputs before commit
   - repo: https://github.com/kynan/nbstripout

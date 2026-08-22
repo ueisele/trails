@@ -1,5 +1,6 @@
 """Tests for the shared Geonorge per-municipality order client."""
 
+import json
 from unittest.mock import Mock, patch
 
 import pytest
@@ -112,3 +113,36 @@ class TestFetch:
 
         with patch("requests.post", return_value=_mock_response(payload)), pytest.raises(LookupError, match="no file for municipality 1824"):
             client.fetch(["1824"])
+
+
+class TestOrderedAt:
+    """Tests for saying when the cached archives were ordered."""
+
+    def stamp(self, client: KommuneOrderClient, code: str, when: str) -> None:
+        """Write the sidecar a download would have left.
+
+        Args:
+            client: The client whose cache to write into
+            code: Municipality number
+            when: The moment to record
+        """
+        sidecar = client.downloads.cache_dir / f"{client.local_name(code)}.meta.json"
+        sidecar.write_text(json.dumps({"url": "https://example.test/x", "version": "x.zip", "downloaded_at": when}))
+
+    def test_it_reports_the_oldest_archive_in_the_cache(self, client):
+        """A set of files ordered on different days is only as current as the
+        one nobody re-ordered, and that is the age of the answer as a whole."""
+        self.stamp(client, "1824", "2026-08-10T22:01:46")
+        self.stamp(client, "1813", "2026-08-14T09:12:00")
+
+        assert client.ordered_at(["1824", "1813"]) == "2026-08-10T22:01:46"
+
+    def test_a_municipality_with_nothing_cached_is_passed_over(self, client):
+        self.stamp(client, "1824", "2026-08-10T22:01:46")
+
+        assert client.ordered_at(["1824", "9999"]) == "2026-08-10T22:01:46"
+
+    def test_nothing_cached_at_all_answers_with_nothing(self, client):
+        """None and not today: a date invented for an order nobody placed would
+        be written into an exported file as though it were a fact."""
+        assert client.ordered_at(["1824"]) is None

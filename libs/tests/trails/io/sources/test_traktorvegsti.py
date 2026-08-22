@@ -123,6 +123,24 @@ class TestFetchPaths:
 
         assert mock_get.call_count == 2
 
+    def test_it_says_when_what_it_served_was_read(self, tmp_path, features):
+        """The WFS publishes no version, so an exported file records the moment
+        the answer in the cache was read instead. Both ways of serving one — a
+        fresh query and a cache hit — have to answer, or a rebuilt map would
+        record nothing for a source it certainly used."""
+        source = traktorvegsti.Source(cache_dir=str(tmp_path))
+        assert source.loaded_at is None
+
+        with patch("requests.get", side_effect=[_hits_response(3), _geojson_response(features)]):
+            source.fetch_paths(BOUNDS)
+        fetched = source.loaded_at
+
+        source.fetch_paths(BOUNDS)
+
+        assert fetched is not None
+        assert fetched.startswith("20")
+        assert source.loaded_at == fetched
+
     def test_bbox_is_sent_in_request_projection(self, tmp_path, features):
         source = traktorvegsti.Source(cache_dir=str(tmp_path))
 

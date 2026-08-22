@@ -674,7 +674,9 @@ render budget.
   disagree with the geometry and cost nothing in payload. A linear scan over
   116,970 points answers a click in a few milliseconds, so no spatial index is
   needed in the browser — say so, or someone will build one.
-- The elevation series, delta-encoded at 0.1 m.
+- The elevation series, delta-encoded at **0.01 m** — the resolution the height
+  service answers at, so that a file written from this payload reproduces the
+  ascent it states. See phase 5.
 - A JavaScript decoder in the page, inflating with `DecompressionStream`. Hand
   written, like the legend, the search and the profile — a CDN script does not
   load from `file://` and fails silently.
@@ -695,8 +697,18 @@ wrong:
 | geometry, 948,465 vertices, varint + gzip + base64 | **2.35 MB** |
 | edge table, sorted by `from_node`, both columns delta-encoded | **0.27 MB** |
 | source per edge, one byte | under 0.01 MB |
-| elevations, 1,406,040 samples at 0.1 m | **0.98 MB** |
-| **total** | **≈ 3.6 MB** against an allowance of 5 |
+| elevations, 1,406,040 samples at 0.01 m | **1.80 MB** |
+| the two derived fields, one byte an edge | under 0.01 MB |
+| the chain ids and the four count sections | **0.37 MB** |
+| **total, as built** | **4.93 MB** against an allowance of 5 |
+
+The estimate above this table said 3.6 MB and was wrong twice over, both worth
+keeping. It left out the stream's own structure — the chain ids and the counts
+without which a concatenated stream cannot be cut back into edges, 0.37 MB — and
+it budgeted the elevations at a decimetre. Phase 5 moved them to the centimetre
+the height service actually answers at, so that an exported file reproduces the
+ascent it states; that is the 0.8 MB between 4.12 and 4.93. **Ask what else has
+to be in a file for the thing you budgeted to be readable.**
 
 **The edge table has to be encoded, not serialised.** An earlier draft listed it
 without budgeting it, and as JSON it is 1.98 MB, which puts the total at 6.5 MB
@@ -939,8 +951,26 @@ a gap exceeds 5 m, an `<ele>` on all of them. Do not resample every 5 m: that
 drops the source's own vertices and rounds off every corner between two samples.
 A sparser variant was considered and refused — Komoot and Outdooractive do not
 know FKB's or N50's paths and cannot rebuild a line between points they were not
-given. Measured: the median chain holds **19 vertices** and comes to **37 points**
-once filled; the largest, the 42 km Rundtur, holds 1,330 and comes to **8,490**.
+given.
+
+**The two figures this paragraph carried were wrong, and wrong in the way this
+document warns about.** It said the median chain comes to *37 points* and the
+42 km Rundtur to *8,490* — those are `length / 5`, a plain resample of the very
+kind the sentence above forbids, measured under a different rule from the one
+they were stated against. Under the rule as written they are **48** and
+**9,234**; under the rule as built, which lays the height samples in as well for
+the reason below, they are **76** and **16,421**. A correct implementation would
+have been told it had failed.
+
+**And the fill has to land on the samples, not between them.** Keeping the
+vertices and interpolating a height for each from the samples on either side
+reads as the same curve and is not the same track: the ascent read back off the
+file's own `<ele>` values then comes out **47 m under** the figure the same file
+states for the Rundtur, and 2,637 chains disagree with their own extensions. Lay
+every sample into the track as the reading it is, then space out whatever is
+still wider than 5 m — the samples are laid per edge at `length / floor(length /
+5)`, which is 5 to 10 m and not 5, so there is still work for that pass to do.
+All 5,254 chains over 200 m then reproduce their stored ascent exactly.
 
 `libs/src/trails/io/export/gpx.py` learns `<ele>` at the same time — it has
 carried a comment marking the spot since it was written — so the six build-time

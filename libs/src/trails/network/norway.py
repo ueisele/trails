@@ -273,14 +273,17 @@ class Loaded(NamedTuple):
         sources: The datasets the network is built from
         municipalities: The codes they were ordered per, which the caller needs
             for anything else it draws from the same per-municipality datasets
-        turrutebasen_version: The version string the register publishes, which
-            an export has to record so a route that differs months later has a
-            cause rather than a puzzle
+        versions: What each source was read at, by name: the version where the
+            register publishes one — Turrutebasen does — and otherwise the
+            moment the answer in the cache was ordered or fetched. An exported
+            file records all of them, so that a route differing months later has
+            a cause rather than a puzzle, and a source that can say neither
+            comes back None rather than as a date made up for it.
     """
 
     sources: list[NetworkSource]
     municipalities: list[str]
-    turrutebasen_version: str
+    versions: dict[str, str | None]
 
 
 def zone_around(area: gpd.GeoDataFrame, distance_km: float) -> gpd.GeoDataFrame:
@@ -370,7 +373,8 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
 
     print("\nLoading UT.no routes...")
     catalogue = ut.load_catalogue(params.ut_routes)
-    ut_routes = ut.Source(cache_dir=params.cache_dir).load_routes(catalogue, force_download=download)
+    ut_source = ut.Source(cache_dir=params.cache_dir)
+    ut_routes = ut_source.load_routes(catalogue, force_download=download)
 
     print("\nLoading Turrutebasen...")
     turrutebasen = GeonorgeSource(cache_dir=params.cache_dir).load_turrutebasen(target_crs="EPSG:4326", language=Language.EN, force_download=download)
@@ -386,7 +390,8 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     print(f"  {len(marked):,} marked route segments in the zone, {len(named):,} of them named")
 
     print("\nLoading detailed FKB paths...")
-    fkb = traktorvegsti.Source(cache_dir=params.cache_dir).fetch_paths(bounds, force_download=download)
+    fkb_source = traktorvegsti.Source(cache_dir=params.cache_dir)
+    fkb = fkb_source.fetch_paths(bounds, force_download=download)
     fkb = clip_lines(fkb, extent)
 
     # FKB carries no names at all, and the angle rule only has to guess where
@@ -426,7 +431,8 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     print(f"  {int(roads['road_id'].notna().sum()):,} of {len(roads):,} road fragments named from SSR")
 
     print("\nLoading OpenStreetMap paths...")
-    osm = clip_lines(overpass.Source(cache_dir=params.cache_dir).fetch_paths(bounds, force_download=download), extent)
+    osm_source = overpass.Source(cache_dir=params.cache_dir)
+    osm = clip_lines(osm_source.fetch_paths(bounds, force_download=download), extent)
 
     sources = [
         # Published as whole trips, and a trip is already linear and already the
@@ -489,7 +495,21 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         # the UT.no routes start — cannot be reached at all.
         NetworkSource(FERRIES, ferries, kind=FERRY, attributes=("typeveg", SURVEY_FIELD, SURVEYED_FIELD)),
     ]
-    return Loaded(sources=sources, municipalities=codes, turrutebasen_version=turrutebasen.version)
+    # One order covers all three N50 layers, so all three carry its date. The
+    # height model is not here: it is read per point rather than ordered, and
+    # what an exported file says about it is the rule it was sampled under
+    # rather than a version it does not publish.
+    ordered = n50_source.orders.ordered_at(codes)
+    versions = {
+        UT: ut_source.loaded_at,
+        TURRUTEBASEN: turrutebasen.version,
+        FKB: fkb_source.loaded_at,
+        N50_PATHS: ordered,
+        N50_ROADS: ordered,
+        FERRIES: ordered,
+        OSM: osm_source.loaded_at,
+    }
+    return Loaded(sources=sources, municipalities=codes, versions=versions)
 
 
 def edge_costs(sources: list[NetworkSource], params: Params) -> dict[str, dict[str, float]]:

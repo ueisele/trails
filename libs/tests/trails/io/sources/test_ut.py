@@ -1,5 +1,6 @@
 """Tests for the UT.no route source."""
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -196,6 +197,32 @@ class TestLoadRoutes:
 
         # The fixture track spans roughly half a kilometre.
         assert 0.3 < gdf["length_km"].iloc[0] < 0.9
+
+    def test_it_says_when_the_oldest_trip_it_served_was_downloaded(self, tmp_path, catalogue_path, gpx_path):
+        """A catalogue fetched over several days is only as current as the trip
+        nobody re-fetched, and an exported file has to say what it was built
+        from. UT.no publishes no version of a trip at all."""
+        source = ut.Source(cache_dir=str(tmp_path))
+        routes = ut.load_catalogue(catalogue_path)
+        for route, when in zip(routes, ["2026-08-14T09:00:00", "2026-08-12T07:30:00"], strict=True):
+            sidecar = source.downloads.cache_dir / f"trip_{route.trip_id}.gpx.meta.json"
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            sidecar.write_text(json.dumps({"url": route.gpx_url, "downloaded_at": when}))
+
+        with patch.object(ut.Source, "fetch_gpx", return_value=gpx_path):
+            source.load_routes(routes)
+
+        assert source.loaded_at == "2026-08-12T07:30:00"
+
+    def test_a_trip_with_no_sidecar_leaves_the_date_to_the_others(self, tmp_path, catalogue_path, gpx_path):
+        source = ut.Source(cache_dir=str(tmp_path))
+        assert source.loaded_at is None
+
+        with patch.object(ut.Source, "fetch_gpx", return_value=gpx_path):
+            source.load_routes(ut.load_catalogue(catalogue_path))
+
+        # Nothing was really downloaded here, so nothing is claimed.
+        assert source.loaded_at is None
 
     def test_empty_input_yields_an_empty_frame_with_columns(self, tmp_path):
         gdf = ut.Source(cache_dir=str(tmp_path)).load_routes([])
