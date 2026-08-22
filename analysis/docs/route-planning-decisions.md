@@ -1353,9 +1353,14 @@ page draws **one** protected area of the nineteen the walked network touches.
 The height service answers `datakilde`, `terreng` and `z`, and `terreng` is
 ground cover — *Havflate*, *Skog*, *InnsjøRegulert* — not a protected area. So
 the page has to carry the boundaries. Measured, that is cheap: the nineteen come
-to 25,144 vertices, 1.03 MB of GeoJSON and 0.37 gzipped, and simplified to 10 m
-— well inside the ±5 m the sampling already accepts at each crossing — **0.08 MB
-raw and 0.03 gzipped**, against a 37.5 MB page.
+to 25,331 vertices, 1.03 MB of GeoJSON and 0.37 gzipped, and simplified they
+cost a fraction of that against a 37.5 MB page. **The tolerance is 5 m and not
+the 10 this said**, on the argument that 10 lies inside the ±5 m each crossing
+already carries — measured, at 10 m this register's boundaries move by up to
+16.1 m and at 5 m by 5.9, and the difference costs 0.02 MB. What the page
+carries is the **31 areas that meet the zone** rather than the 19 the network
+touches, since a leg drawn straight can enter one no edge reaches: 4,195
+vertices, 0.09 MB.
 
 In the exported file this appears twice:
 
@@ -1381,17 +1386,23 @@ national parks, one landscape protection area and one marine protected area.
 An earlier count of 26 reserves was taken over the smaller drawn zone; neither
 is wrong and a figure without its extent cannot be reproduced.
 
-**Nineteen of them are actually touched by the network**, 741.2 km of 5,853.3.
-Lomsdal-Visten holds 647.8 km of that, Holmvassdalen naturreservat 25.7,
-Strauman landskapsvernområde 24.9, Stavvassdalen 17.1 and Sirijorda 11.9; the
-remaining fourteen share 13.8 km, and the smallest is **10 m of Innervisten
-marine protected area**.
+**Nineteen of them are actually touched by the network**, 741.2 km — of 5,899.9
+walked, or of 5,853.3 on ground a source drew; the two differ by the connectors
+and the block below says which belongs where. Lomsdal-Visten holds 647.8 km of
+it, Holmvassdalen naturreservat 25.7, Strauman landskapsvernområde 24.9,
+Stavvassdalen 17.1 and Sirijorda 11.9; the remaining fourteen share 13.8 km, and
+the smallest is **5 m of Innervisten marine protected area**.
 
 It was written here that no reserve touches the park. **Measured, Sirijorda
-does** — they share a boundary at 0.0 m — and so does Innervisten. The
+does** — they share a boundary at 0.0 m — and so do Innervisten and Strauman. The
 conclusion it was used for still holds, since sharing a boundary is not
-overlapping and a route strictly inside the park is still outside Sirijorda; the
-premise was simply wrong.
+overlapping: measured over all thirty-one, **no two of them overlap in area at
+all**, which is what lets the figures be added up. The premise was simply wrong.
+
+A route can therefore leave one area and enter another at one step, and one
+does: a 5.5 km route out of the park across the shared boundary writes *Leaves
+Lomsdal-Visten nasjonalpark* and *Enters Sirijorda naturreservat* and no other
+marker, because it began inside the park and ends inside the reserve.
 
 So report **protected areas**, not the national park alone: *38 km, of which 22
 in Lomsdal-Visten nasjonalpark and 3 in Strauman landskapsvernområde*. Reserves
@@ -1402,19 +1413,124 @@ The work is small, and it was measured rather than guessed: `naturbase.Source`
 searches by name today and needs a spatial query — the same endpoint with
 `geometry`, `geometryType=esriGeometryEnvelope` and
 `spatialRel=esriSpatialRelIntersects` instead of a `where` clause. One request
-answers. The samples then carry which area they fell in rather than a yes or no.
+answers. **And an `inSR`**, or the service reads a box given in degrees in the
+layer's own projection and answers about somewhere else; and a check on
+`exceededTransferLimit`, which is how ArcGIS reports a truncated answer — as a
+successful one with a flag.
+
+**The samples are not what carries it, and the built version does not use them.**
+A boundary is a legal line with a published geometry, so how much of an edge lies
+inside one is a *length* rather than a count of samples times a step, and that is
+what makes a figure of five metres worth writing down instead of an artefact of
+the step size. The samples decide it only where there is no edge — a leg the
+reader drew straight — which is the one place nothing else can.
 
 **Two things have to be decided rather than discovered.** *Which* `verneform`
 count — `naturbase.Layer` already separates the five, and a walker reading that
 a route passes a marine protected area learns something different from a nature
-reserve. And **how little counts as touching**: five of the nineteen are met over
-less than 400 m and one over ten. Without a threshold a route that brushes a
-boundary reports an area it never entered and generates a pair of waypoints for
+reserve. And **how little counts as touching**: seven of the nineteen are met
+over less than 400 m and one over five. Without a threshold a route that brushes
+a boundary reports an area it never entered and generates a pair of waypoints for
 it — and a rounded label is a threshold like any other.
 
 One thing is deliberately not claimed: the rules inside a Norwegian protected
 area differ from outside, but *how* they differ is in each area's verneforskrift
 and none has been read. The figure is a fact about the route, not advice.
+
+### Which protected areas count, and how much counts as passing through one
+
+The two decisions phase 6C owned, both taken against the measurement rather than
+against the text.
+
+**Every one of the register's forms counts, and every figure names the form.**
+Dropping the marine one is the obvious move — a walker does not walk in the sea —
+and it is exactly the judgement this work declines to make: *which* rules matter
+to a walker is a reading of each area's verneforskrift, and not one has been
+read. What tells a national park from a nature reserve is the **form**, and every
+figure carries it, in the words a sign in the terrain uses rather than the
+register's own `MarintVerneomraade`. The threshold below settles the practical
+question anyway: the only marine ground the network touches is 5 m of Innervisten,
+which no route will ever report.
+
+**A route reports an area it spends at least 100 m in.** Three reasons, each
+checkable:
+
+- It is more than six times the worst error the measurement can carry — a
+  boundary the page carries simplified to 5 m, plus half a sampling step at each
+  of the two crossings of a leg drawn straight.
+- It is about a minute's walking, which is the shortest passage for which *the
+  route runs through here* describes the walk rather than the geometry.
+- Measured, it is not a knife edge. Of the nineteen areas the walked network
+  touches, the nearest below is Olaåsen at 67 m and the nearest above Storhaugen
+  at 146 m; moving the threshold by half either way changes nothing.
+
+Under it a route says nothing and generates no waypoint. Driven in the browser: a
+437 m route over the one edge that clips Olaåsen tallies 67.3 m of it, reports
+none, writes no `<wpt>` and **names Naturbase in no credit** — the register is
+credited exactly where a file states one of its figures.
+
+**Which extent, and it has to be said.** Over the bounding box of the park and
+its 15 km approach zone the register returns 44 areas; **31 of them meet the
+zone**, and those are the 31 the edges are measured against and the page carries.
+The nineteen the network touches are all among them. The earlier pair — 43 over
+the network's own box, 26 over the drawn zone — were measured over other extents,
+and none of the three is wrong.
+
+**741.2 km of 5,899.9, not of 5,853.3.** The two are the walked network with and
+without its 8,684 inferred connectors, which come to 46.6 km. A connector belongs
+in the numerator — nobody drew it, which is what a connector is, but a walker
+covers its ground and that ground lies inside a boundary or outside it — so the
+denominator has to be the same population. Reported as both, each saying which.
+
+**A crossing is asked nothing**, for the reason the elevation sampling skips one:
+there is no walking distance under a ferry, so there is no protected walking
+distance either.
+
+### What the page carries, and what it measures for itself
+
+The build measures the network's ground against the register at full precision.
+The page cannot: a leg drawn straight crosses ground no edge covers, and a marker
+has to be put somewhere. So three mechanisms, each doing only what only it can:
+
+- **Routed ground comes from the build**, per edge, exact.
+- **Ground drawn straight is decided at its own height samples**, every 5 m,
+  against the boundaries the page carries — the same halfway rule the shoreline
+  split already uses, so there is no second rule to disagree with it.
+- **The markers come from the boundaries**, walked along the very series the file
+  is written from, which is the one series in the page with a point every few
+  metres over the whole route.
+
+**The edge carries a share and not a length.** Python measures those metres in
+EPSG:25833 and the page measures its own distances from the ellipsoid; the two
+differ by 0.03 %. Carried as metres, a route lying wholly inside one area would
+state more ground inside it than it walked altogether — a figure and its own
+subtotal disagreeing, in the sentence a reader trusts most. Carried as a share,
+the page multiplies by the length it measured itself and the two can never cross.
+Measured against the exported track: 34,014.2 m stated, 34,001.9 measured in
+Python off the file's own points, **12.3 m apart over 34 km**.
+
+**Simplified to 5 m and not to 10.** Ten was the figure this arrived with, on the
+argument that it lies inside the ±5 m the sampling accepts at each crossing.
+Measured, Douglas-Peucker at 10 m moves this register's boundaries by up to
+**16.1 m** and at 5 m by **5.9 m**, and the difference between them is 0.02 MB on
+a 37.5 MB page. So the tolerance is set where the claim about it is true.
+Measured on the built page: the two generated markers of a route through the park
+sit **0.01 m and 0.42 m** from the boundary at full precision.
+
+**And nothing new is drawn.** The boundaries are data in the page and never
+rendered. Anything drawn into the overlay pane joins the 11,589 paths for ever,
+and the plan pane's 13 at five points is an acceptance figure of its own; a
+reading page is phase 8, and that is where a boundary on the screen belongs.
+
+**One measured limit, written down because it only ever goes one way.**
+Intersecting a line with a polygon nodes the line first, so where a GPS track
+doubles back along ground it has already covered the overlay counts that ground
+once. It costs **67.5 m in the 647.8 km** the walked network spends inside
+Lomsdal-Visten — five edges of 60,576, the worst a 120.9 m UT.no edge with ten
+repeated vertices coming out 40 m short — and every other area of the nineteen
+agrees with a segment-by-segment measurement to under a millimetre. What an edge
+carries is therefore a lower bound. Closing it costs forty times the time for a
+hundredth of a per cent.
 
 ### What a route's file says that a chain's cannot
 

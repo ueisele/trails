@@ -8,14 +8,21 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1, 1B, 1C, 1D, 3, 2, 3B, 4, 5, 6 and 6B are built and reviewed.** The
-map is drawn from the graph, carries it, profiles it, exports it, and plans a
-route on it that becomes a file. `libs/src/trails/routing/`,
-`libs/src/trails/network/`, `visualization/encoding.py`, `io/export/gpx.py`,
-`routing/track.py`, `analysis/scripts/route_graph.py` and `lomsdal_visten.py`.
-**6C is checked and rewritten but not built; 7 and 8 remain and neither has had
-a readiness check.** The project runs on **Python 3.14** and `uv.lock` is tracked
-from 1D.
+**Phases 1, 1B, 1C, 1D, 3, 2, 3B, 4, 5, 6, 6B and 6C are built and reviewed.**
+The map is drawn from the graph, carries it, profiles it, exports it, and plans a
+route on it that becomes a file saying which protected areas it passes and how
+far through each. `libs/src/trails/routing/`, `libs/src/trails/network/`,
+`visualization/encoding.py`, `io/export/gpx.py`, `routing/track.py`,
+`analysis/scripts/route_graph.py` and `lomsdal_visten.py`.
+**7 and 8 remain and neither has had a readiness check.** The project runs on
+**Python 3.14** and `uv.lock` is tracked from 1D.
+
+**Phase 6C** added the third thing an edge says about the ground it runs over:
+`routing/protection.py`, `naturbase.Source.within`, a section of its own in the
+payload, and the boundaries themselves in the page. It is the first phase since
+2 to touch the graph — `GRAPH_LAYOUT` is `elevation+coverage+protection`,
+`PAYLOAD_VERSION` is 3 — and the rebuild moved no figure and made no height
+request. Figures in *What phase 6C found*.
 
 **When an agent is working here the standing rule applies** — **documents only,
 no code, no `git commit`**, because the pre-commit hook stashes unstaged changes
@@ -219,8 +226,8 @@ changes with every parameter:
 **Rebuild the map and drive it.** `command make map`, about a minute warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and **wait twenty seconds after load** —
-the page is **37.5 MB** as of phase 6B. It was 25.4 before 3B, 31.1 after the
-coverage rows, 36.0 after phase 4, 37.4 after phase 5. The five probes, with what they read now:
+the page is **37.7 MB** as of phase 6C. It was 25.4 before 3B, 31.1 after the
+coverage rows, 36.0 after phase 4, 37.4 after phase 5, 37.5 after 6B. The five probes, with what they read now:
 
 | | |
 |---|---|
@@ -239,6 +246,16 @@ with `window[Object.keys(window).find(k => k.startsWith('map_'))]`. There is no
 markers, the boundary — added up to all along. A figure and its own explanation
 disagreed by two for several days and neither was re-run. **When a figure is
 written next to its decomposition, add the decomposition up.**
+
+**And what protects the ground**, since 6C. `window.trailsGraph.protectedAreas`
+is the 31 areas with their outlines, available **before** the stream inflates
+because they travel in the header, and `graph.areasAt(lon, lat)` says which of
+them a position lies in. A route's own list is `window.trailsProfile.shape.protected`
+— already filtered by the threshold — and
+`window.trailsProfilePanel.crossings()` returns the generated waypoints. That one
+is a **method and not a field**: the walk costs 45 ms over a 37 km route, so it
+happens when something asks and is then cached against the selection.
+`window.trailsProfile.crossings` is that cache and is `undefined` until asked.
 
 **And the graph in the page**, since 3B. `window.trailsGraph.ready` resolves to
 it; `inflateMs` and `decodeMs` say what it cost — **229 ms and 50 ms** at 4.93 MB.
@@ -448,6 +465,15 @@ every one was invisible until something was actually run.
   into one area first and intersect once. It is also 8× faster to shortcut the
   two cases that need no merge at all — one mask line covering the whole edge,
   which is 99 % of them, and only one line near it.
+- **`shapely.intersection` on a long line loses the ground it retraces.** GEOS
+  nodes a line before it overlays it, so where a track doubles back the repeated
+  pass is counted once. Measured: a 14,681-point exported route intersected with
+  the park as one line read **31,023.8 m** where midpoint containment per step
+  and a segment-by-segment intersection both read **34,000** — 3 km, and it looks
+  exactly like a bug in whatever produced the 34,000. Per *edge* it is small and
+  one-directional: 67.5 m in 647.8 km, on five edges of 60,576. Measure a long
+  line segment by segment, and treat a cross-check as a measurement that needs
+  checking like any other.
 - **An unbounded walk over the graph takes the machine down, not the script.** A
   Dijkstra's path reconstruction — `while walk != a: used.append(edge)` — grew to
   **42 GiB in 376 seconds** and reached the kernel's OOM killer, which chose the
@@ -1130,6 +1156,137 @@ Two more, and one of them was mine:
   22.9, 12.7. Two other figures moved the same way, 237 → **241** and 4,485 →
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
+
+## What phase 6C found
+
+**The readiness check was right about all three missing mechanisms and wrong
+about one figure it did not name the extent of.** 741.2 km reproduced to the
+decimal, and so did every per-area kilometre; but the numerator is measured over
+the walked network **with** its 8,684 inferred connectors, at 5,899.9 km, and
+5,853.3 is the same network without them. A figure and its denominator drawn from
+two populations, one line below the paragraph correcting 26 against 39 for
+exactly that. Both are printed now, each saying which. **The lesson keeps needing
+relearning in a new place: when a figure is written next to another figure, check
+they are about the same thing.**
+
+**Three claims in the specification were measurably wrong, and one of them would
+have shipped.** *10 m lies inside the ±5 m the sampling accepts* — it does not:
+Douglas-Peucker at 10 m moves this register's boundaries by up to **16.1 m**, at
+5 m by **5.9 m**, and the difference is 0.02 MB on a 37.5 MB page. Built at 5 m,
+and the two generated markers of a route through the park then sit **0.01 m and
+0.42 m** from the boundary at full precision. *Five of the nineteen are met over
+less than 400 m* — seven are. *No reserve touches the park* had already been
+corrected to two; there are **three**, Strauman as well, and measured over all
+thirty-one **no two overlap in area**, which is the property that lets the
+figures be added up and which nothing had checked.
+
+**The samples were the wrong instrument, and the decisions document had named
+them.** *Decide it at the 5 m samples, the park share is how many fell inside
+times five metres* — that is a count times a step where a length is available: a
+boundary is a legal line with a published geometry, and the answer is
+`shapely.intersection`. It is also what makes 5 m of Innervisten a figure rather
+than an artefact. The samples decide it in exactly one place, a leg the reader
+drew straight, where there is no edge and nothing else can.
+
+**And a real distinction the readiness check did not reach: a share, not a
+length.** Python measures these metres in EPSG:25833 and the page measures its
+own distances from the ellipsoid, 0.03 % apart. Carried as metres a route lying
+wholly inside one area states more ground inside it than it walked altogether —
+a figure and its own subtotal disagreeing, in the sentence a reader trusts most.
+The payload carries the share of each edge and the page multiplies by the length
+it measured itself. Measured against the exported track: **34,014.2 m stated,
+34,001.9 measured in Python off the file's own points.**
+
+**The check that lied, and it took an hour.** Intersecting the 14,681-point
+exported track with the park as one line reads **31,023.8 m** where two
+independent measurements of the same thing — midpoint containment per step, and
+segment by segment — both read **34,000**. GEOS nodes a line before it overlays
+it, and a track that retraces itself loses the repeated pass. It sent me to look
+for a 3 km bug in the page that was not there. **A cross-check is a measurement
+and needs checking like one.**
+
+The same artefact bites the build, and by how much was measured: **67.5 m in the
+647.8 km** the walked network spends inside Lomsdal-Visten, five edges of 60,576,
+the worst a 120.9 m UT.no edge with ten repeated vertices coming out 40 m short.
+Every other area of the nineteen agrees to under a millimetre. The error only
+goes one way, so an edge's figure is a lower bound; closing it costs forty times
+the time.
+
+**Every acceptance figure reproduced, in one run of one probe.** 198 markers,
+**11,589** paths with exactly one non-interactive, 25 layers, the search 10 px
+above the zoom at 60, the wheel taking zoom **9 → 11**, and the plan's own pane
+**0 → 13 with five points → 0** once every point is taken back. The graph is
+unchanged at 11,290 chains, 234,358 edges, 116,967 nodes, 948,465 vertices,
+1,406,040 samples, 757/747 components, reach 50.8 km, 17 quays, Mosjøen 2.17 m.
+The chain export still holds at **16,415 points**, 123 without an `<ele>`, its
+ascent reading back to **0.00 m**. No page errors on any run.
+
+**The rebuild asked the height service nothing.** `.cache/elevation/` is
+byte-identical either side — 15,558,926 bytes, mtime untouched — which is what
+20,183 requests would not have left. The point store is keyed on east and north
+as integers in centimetres and nothing here moved a sample.
+
+**What the phase cost the payload and the page.** The `protected` section is
+0.43 MB of 6.59 raw and the page stays at **4.93 MB** encoded; the header gained
+0.105 MB, being 31 areas at 4,195 ring vertices; the page went from 37.5 MB to
+**37.7**. 64,736 edge-area pairs over 234,358 edges.
+
+**Three routes were driven, one per thing the phase claims.** A five-point route
+over UT.no's 42 km Rundtur — three routed legs and one drawn straight — reports
+*34.01 km in Lomsdal-Visten nasjonalpark* of 36.89 walked, and its file carries
+two generated `<wpt>`. A 5.5 km route out of the park across the shared boundary
+writes *Enters Sirijorda naturreservat* and *Leaves Lomsdal-Visten nasjonalpark*
+and nothing else, because it began inside one and ends inside the other. And a
+437 m route over the single edge that clips Olaåsen tallies **67.3 m** of it,
+reports none, writes no `<wpt>`, no `<protected>` block and **no Naturbase
+credit** — the register is named exactly where a file states one of its figures.
+All three validate against the shipped GPX 1.1 schema, `<wpt>` before `<trk>`.
+
+**Nothing new is drawn, and that was a decision.** Anything in the overlay pane
+joins the 11,589 for ever and the plan pane's 13 is an acceptance figure of its
+own, so the boundaries are data in the page and never rendered. A boundary on
+the screen belongs to phase 8, which has a reading page to put it on.
+
+**A `<wpt>` gained a `<type>`, and GPX fixes where that goes**: name, then desc,
+then type, then extensions, last of the twenty-odd a waypoint allows. Nothing
+before this phase wrote one, so nothing had exercised the order.
+
+### What phase 6C's review found
+
+Four, and three were taken.
+
+**A build over ground nothing protects crashed, after loading every source.**
+`derive` reprojected the areas only `if len(protected)`, so an *empty* frame
+stayed in the register's degrees while the edges were in EPSG:25833 — and the
+measurement refuses a CRS mismatch, correctly, because a mask in degrees is near
+nothing and would answer *outside everywhere*. The one path `load_protected` is
+written to support was the one path that failed. `to_crs` works on an empty
+frame; the guard was the whole bug. Regression test added.
+
+**The overlap check printed the opposite of what it measured.** *overlap it in
+area: none ← so the figures above may be added up* — with the annotation on the
+line rather than on the answer, so a register that ever did overlap would have
+named the offending areas and then said the figures add up, which is the one
+thing an overlap means they do not. It has always read *none* here, which is why
+nothing noticed. **An annotation belongs on the branch that earns it.**
+
+**The boundary walk was 45 ms of a 50 ms panel refresh, on every click, for a
+button that may never be pressed.** Measured on the 37 km route: 14,681 dense
+points against 31 areas, run on each of the two refreshes a click causes and
+growing with the route. Moved behind
+`window.trailsProfilePanel.crossings()`, cached against the selection — so the
+file and any check still get one answer, and a refresh now costs **3 ms**. A
+method rather than a field, because asking costs something and the shape of the
+interface should say so.
+
+**And the verneform table was seven entries written from memory.** Three were
+wrong — `AnnetVern` is not a code the register uses — and fourteen were missing,
+including `Dyrefredningsomrade` and two `Landskapsvernomraade…` compounds that
+exist within a day's drive of this park. The service publishes its own
+`Kode_Verneform` **coded-value domain** at `{layer}?f=json`, twenty-four codes
+with the names it gives them; that is now the table, verbatim. **A code table is
+something to read, not to remember** — and the one place this was checked, the
+44 areas over the zone's box, uses only four of the twenty-four.
 
 ## What phase 6C's readiness check found
 

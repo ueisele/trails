@@ -1291,18 +1291,33 @@ decisions document.
 
 ---
 
-## Phase 6C — Where the route is, and what it passes
+## Phase 6C — Where the route is, and what it passes — **built**
 
 Two lookups the page cannot do today, and both are about naming ground rather
 than finding it. The decisions document carries the reasoning; this is what was
 measured before handing it over.
+
+**Built.** The two decisions it owned are in the decisions document under *Which
+protected areas count, and how much counts as passing through one*: **every one
+of the register's five forms counts and every figure names the form**, and a
+route reports an area it spends at least **100 m** in. What the build found is in
+the review notes.
+
+**Every reference figure below reproduced, and one of them was measured over an
+extent it did not name.** The nineteen areas and the per-area kilometres came out
+to the decimal — but 741.2 km is measured over the walked network *including* its
+8,684 inferred connectors, at **5,899.9 km**, and 5,853.3 is the same network
+without them. Both are printed now, each said which. It is the same fault the
+26-against-39 correction below was written about, one line further down.
 
 ### What the network actually touches
 
 The acceptance needs reference figures, so here they are. Over the bounding box
 of the walked network Naturbase returns **43** protected areas — 39 nature
 reserves, two national parks, one landscape protection area and one marine
-protected area. **Nineteen are touched by the network**, 741.2 km of 5,853.3:
+protected area. **Nineteen are touched by the network**, 741.2 km — of the
+5,899.9 km it walks, connectors and all, or of the 5,853.3 on ground a source
+drew:
 
 | area | verneform | km |
 |---|---|---:|
@@ -1322,7 +1337,12 @@ of every figure.
 **And it said no reserve touches the park.** Measured, **Sirijorda does** — they
 share a boundary at 0.0 m — and so does Innervisten. What that claim was used
 for still holds, since sharing a boundary is not overlapping, but the premise
-was wrong.
+was wrong. Building it found a third: **Strauman** shares one too, and no two of
+the thirty-one overlap in area, which is what lets the figures be added up.
+
+**Seven are met over less than 400 m, not five** — 394.7, 323.7, 194.3, 150.8,
+146.3, 67.3 and 5.1 m. The count was off; what it was used for, that a threshold
+has to be decided, was not.
 
 ### Say which protected areas the route touches, and how far
 
@@ -1346,10 +1366,17 @@ those outside, and every approach to this one crosses ground reserves sit on.
   answer needs the polygons, and the browser has **one of the nineteen** — the
   height service returns `datakilde`, `terreng` and `z`, and `terreng` is ground
   cover, *Havflate* or *Skog*, not a protected area. So the page has to carry the
-  boundaries. Measured: the nineteen come to 25,144 vertices, 1.03 MB of GeoJSON
-  and 0.37 gzipped; simplified to 10 m — inside the ±5 m the sampling already
-  accepts at each crossing — **0.08 MB raw and 0.03 gzipped**, against a 37.5 MB
-  page. Cheap, and it still has to be decided rather than discovered.
+  boundaries. Measured: the nineteen come to 25,331 vertices, 1.03 MB of GeoJSON
+  and 0.37 gzipped; simplified to 10 m, **0.08 MB raw and 0.03 gzipped**, against
+  a 37.5 MB page. Cheap, and it still has to be decided rather than discovered.
+
+  **The claim that 10 m lies inside the ±5 m the sampling accepts is false, and
+  building it measured that.** Douglas-Peucker at 10 m moves this register's
+  boundaries by up to **16.1 m**; at 5 m by **5.9 m**, which is the tolerance the
+  claim is true at, and the difference between the two is 0.02 MB. Built at 5 m.
+  What the page carries is the **31 areas that meet the zone**, not the 19 the
+  network touches — a leg drawn straight can enter one no edge reaches — at 4,195
+  vertices and 0.09 MB.
 
 **Two decisions this phase owns.** *Which `verneform` count*: `naturbase.Layer`
 already separates the five, and a walker reading that a route passes a marine
@@ -1389,6 +1416,22 @@ beside Lavasshytta comes back named after it. The graph is rebuilt, so every
 phase 1 figure must come out unchanged — 11,290 chains, 234,358 edges, 116,967
 nodes, 757/747 components, reach 50.8 km = 94 %, 17 quays, Mosjøen 2.17 m — and
 nothing phase 6B was accepted against moves.
+
+**Done.** A five-point route over UT.no's 42 km Rundtur reports *34.01 km in
+Lomsdal-Visten nasjonalpark* of 36.89 km walked, its file carries a generated
+`<wpt>` where it enters and where it leaves, both **within 0.42 m** of the
+boundary the register draws at full precision, and a point set beside
+Lavasshytta comes back named *Lavasshytta*, type *hut*, 3.8 m away. Every phase 1
+figure is unchanged, the rebuild made **no** height request — the point store is
+byte-identical — and the page still reads 198 markers, 11,589 paths with one
+non-interactive, 25 layers, 10 px over 60, zoom 9 → 11, the plan's own pane
+0 → 13 → 0, and the Rundtur's chain export still 16,415 points whose ascent reads
+back to 0.00 m.
+
+**Nothing new is drawn.** The boundaries are carried as data and never rendered:
+anything in the overlay pane joins the 11,589 for ever, and the plan pane's 13
+paths at five points is an acceptance figure of its own. Showing a boundary on
+the map is phase 8's business, where there is a reading page to put it on.
 
 ---
 
