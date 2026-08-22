@@ -1435,7 +1435,7 @@ the map is phase 8's business, where there is a reading page to put it on.
 
 ---
 
-## Phase 7 — Editing the waypoints
+## Phase 7 — Editing the waypoints — **built**
 
 Phase 6 can only append and undo. This is what makes a route something you can
 work on rather than restart.
@@ -1512,6 +1512,22 @@ a drag over a free leg issues no request for ground it has left; and the exporte
 GPX matches what is drawn. The graph is untouched, so every figure holds —
 11,290 chains, 234,358 edges, 116,967 nodes — and of the page's figures only the
 two named above may move, in the direction named.
+
+### Built, and what it came to
+
+Every acceptance figure reproduced and the two named ones moved as predicted:
+the plan pane **13 → 8** paths and the marker pane **198 → 203**. A third moved
+with them, `.leaflet-marker-icon` from **0 to 5**, and it is the same fact
+through a second lens — folium overwrites that class on its own markers and
+these are Leaflet's own. Figures and the three decisions in *What phase 7 found*.
+
+The shape it took: **the legs follow from the waypoints rather than being edited
+beside them.** Every edit rewrites the list of points and nothing else; a leg
+survives exactly when it still runs between the same two waypoint objects, and a
+waypoint that has moved is a new object. Insert costs two legs, remove one, a
+move the three that touch the point — and the cancellation is the same rule read
+backwards: a reply about ground a waypoint has left arrives to find its leg off
+the route.
 
 ---
 

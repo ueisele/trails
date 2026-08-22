@@ -8,14 +8,22 @@ what to look at in each phase.
 
 ## Where things stand
 
-**Phases 1, 1B, 1C, 1D, 3, 2, 3B, 4, 5, 6, 6B and 6C are built and reviewed.**
-The map is drawn from the graph, carries it, profiles it, exports it, and plans a
-route on it that becomes a file saying which protected areas it passes and how
-far through each. `libs/src/trails/routing/`, `libs/src/trails/network/`,
+**Phases 1, 1B, 1C, 1D, 3, 2, 3B, 4, 5, 6, 6B, 6C and 7 are built and
+reviewed.** The map is drawn from the graph, carries it, profiles it, exports it,
+and plans a route on it that can be worked on and becomes a file saying which
+protected areas it passes and how far through each.
+`libs/src/trails/routing/`, `libs/src/trails/network/`,
 `visualization/encoding.py`, `io/export/gpx.py`, `routing/track.py`,
 `analysis/scripts/route_graph.py` and `lomsdal_visten.py`.
-**7 is checked and rewritten; 8 remains and has not had a readiness check.** The project runs on
+**8 remains and has not had a readiness check.** The project runs on
 **Python 3.14** and `uv.lock` is tracked from 1D.
+
+**Phase 7** makes a route something to work on: insert into the middle, remove,
+move a point earlier or later, and drag. It is all in `_PlanMode` and touched no
+Python outside it. **Two acceptance figures moved by design and a third with
+them** — the plan pane 13 → 8 paths, the marker pane 198 → 203, and
+`.leaflet-marker-icon` 0 → 5 — because a waypoint that can be dragged is an
+`L.marker` and not an `L.circleMarker`. Figures in *What phase 7 found*.
 
 **Phase 6C** added the third thing an edge says about the ground it runs over:
 `routing/protection.py`, `naturbase.Source.within`, a section of its own in the
@@ -231,8 +239,8 @@ coverage rows, 36.0 after phase 4, 37.4 after phase 5, 37.5 after 6B. The five p
 
 | | |
 |---|---|
-| `.leaflet-marker-pane > *` | **198** |
-| `.leaflet-marker-icon` | **0** — folium overwrites the class |
+| `.leaflet-marker-pane > *` | **198** with no route down, **203** with five waypoints |
+| `.leaflet-marker-icon` | **0** with no route down, **5** with five waypoints — folium overwrites the class on its own markers, and phase 7's are Leaflet's own |
 | `.leaflet-overlay-pane path` | **11,589**, of which exactly **1** has `pointer-events: none` |
 | `.leaflet-control-layers-overlays input` | **25** |
 | children of `.leaflet-top.leaflet-left`, by `getBoundingClientRect().top` | search **10 px**, zoom **60** |
@@ -474,6 +482,18 @@ every one was invisible until something was actually run.
   one-directional: 67.5 m in 647.8 km, on five edges of 60,576. Measure a long
   line segment by segment, and treat a cross-check as a measurement that needs
   checking like any other.
+- **A driven click or drag lands on whatever is on top, not on what you meant.**
+  Probing phase 7's drag read **one** recompute where there are eighteen, three
+  times running, and it nearly went into a review as a broken throttle. Each time
+  the mousedown had landed on an element covering the pin —
+  `elementFromPoint` at the pin's own bounding-box centre returned a `div` that
+  was not it, so Leaflet's drag never began and the waypoint never moved. Two
+  clicks aimed at "empty ground" landed on the search box and on the profile
+  panel, both of which are Leaflet controls covering a good part of the viewport.
+  **Before driving a gesture, assert that `elementFromPoint` returns the thing
+  you are aiming at**, and pick the target that way rather than by index. This is
+  the twin of the `document.body` warning: that one is about reading the wrong
+  element, this one about writing to it.
 - **An unbounded walk over the graph takes the machine down, not the script.** A
   Dijkstra's path reconstruction — `while walk != a: used.append(edge)` — grew to
   **42 GiB in 376 seconds** and reached the kernel's OOM killer, which chose the
@@ -923,14 +943,33 @@ inside popup HTML; a free leg cannot answer from its samples at all; and the
 phase has to set a threshold before it can report anything, because one of the
 nineteen areas the network touches is met over ten metres.
 
-**Phase 7, editing — checked and rewritten, not yet built.** What the check found
-is in *What phase 7's readiness check found*. The short of it: drag was in the
-acceptance and in neither list of requirements; a waypoint is an `L.circleMarker`
-and cannot be dragged at all, so making it one moves **two acceptance figures**
-(plan pane 13 → 8, markers 198 → 203) and that has to be said in advance;
-nothing the plan draws is clickable, so deleting a waypoint collides with the
-click that adds one; and there is no throttle or cancellation anywhere in plan
-mode, which turns a drag over a free leg into an uncapped request stream.
+**Phase 7, editing — handed over, being built.** What the readiness check found
+is in *What phase 7's readiness check found*. When it reports, review it like
+this:
+
+**Two figures are allowed to move, and only these two.** This is the first phase
+where that is true, and it inverts the habit of every review since 3. A
+draggable waypoint is an `L.marker`, so a five-point route goes **plan pane
+13 → 8** and **markers 198 → 203**. Anything else moving is a finding, and
+**11,589 paths with exactly one non-interactive** is still the first thing to
+look at. If the pins stayed `L.circleMarker` and the drag was written by hand,
+then *neither* figure may move and the click question below got harder, not
+easier — check which of the two was built before checking the numbers.
+
+**Then the three decisions the phase told it to make rather than discover**, and
+whether the reasoning was written down: how a click on a waypoint is told apart
+from a click on the map, which today adds one; what throttles a drag and what
+cancels a settle whose waypoint has moved on; and where the recompute was
+narrowed. That last one has a right answer — free legs and the drag, not routed
+legs, which cost 19–76 ms each against 3 ms for composing the whole route.
+
+**Drive a drag, do not read the code for it.** Count the requests a drag over a
+free leg issues, not whether a throttle exists: the failure is a leg drawn from a
+reply that is no longer wanted, and it looks like a route until you measure it.
+
+**And check the numbers keep up rather than that they are right at rest.** The
+distance and the profile have to follow a live drag; a value correct only once
+the mouse stops is the failure this phase exists to prevent.
 
 **Phase 8, loading — no readiness check yet, and one figure in it is already
 known to be soft.** The phase says the two easy modes are cheap because only the
@@ -1027,6 +1066,25 @@ That has since been checked and answered: the zone holds 26 nature reserves and
 one landscape protection area. None of the reserves touches the park, one —
 Strauman — borders it. Phase 6 therefore reports protected areas rather than the
 park alone, and `naturbase.Source` needs a spatial query to find them.
+
+**Two came out of phase 7's review, in 6C's and 3B's code rather than in its
+own.**
+
+- **A boundary crossed inside a break gets one marker, not a pair.**
+  `crossingsOf` restarts its "what was I in" list at every stretch, and a stretch
+  ends at every crossing, not only at the route's ends. Walk into a reserve,
+  take a ferry out of it, carry on outside: the file says *Enters Sirijorda
+  naturreservat* and never says the route left. The rule 6C wrote — no marker
+  where a route begins or ends inside an area — reads either way here, and the
+  alternative is a generated waypoint at a position on water the track does not
+  draw. It wants a decision about what such a marker claims, and then a figure.
+- **`PAYLOAD_VERSION` is written and never checked.** `encode_graph` puts it in
+  the header and the page's decoder never compares it, so a stale stream would
+  be read as a current one and produce a confidently wrong graph rather than an
+  error — which is the one thing the constant exists to prevent. Harmless while
+  header and stream always come out of one `encode_graph` call. The fix is not
+  the obvious one: the header cannot verify itself, so the decoder has to be
+  handed the layout it was written for.
 
 One thing is open, and it is open by decision rather than by oversight:
 
@@ -1154,6 +1212,184 @@ Two more, and one of them was mine:
   22.9, 12.7. Two other figures moved the same way, 237 → **241** and 4,485 →
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
+
+## What phase 7 found
+
+**Every acceptance figure reproduced, and the two the phase said would move
+moved as it said.** With no route down: 198 markers, **11,589** paths with
+exactly one non-interactive, 25 layers, the search 10 px above the zoom at 60,
+the wheel 9 → 11. With five waypoints down: the plan pane **13 paths → 8** and
+the marker pane **198 → 203**. The graph is unchanged at 11,290 chains, 234,358
+edges, 116,967 nodes; the chain export still holds at **16,415 points**, 123
+without an `<ele>`, its ascent reading back to **0.00 m**; `.cache/elevation/`
+is byte-identical at 15,558,926 bytes with its mtime untouched. No page errors
+on any run. The page went from **37,747,960 to 37,780,664 bytes** — 33 kB, all
+of it script, and it stays 37.7 MB.
+
+**A third figure moved with them, and it has to be said rather than found.**
+`.leaflet-marker-icon` reads **5** with a five-point route where it has always
+read 0. It is the same fact as the 203 seen through a second probe: that entry
+exists in the table because *folium* overwrites Leaflet's class on its own
+markers, and phase 7's pins are Leaflet's own `L.divIcon`s, which carry it.
+Keeping the probe at 0 would mean stripping a framework class off our own
+markers to make a number come out, which is exactly the kind of thing that bites
+two phases later.
+
+### The three decisions, and what decided them
+
+**One click, three meanings, and no mode and no modifier.** A click on a pin
+selects it, a click within **8 px** of the drawn route puts a waypoint into that
+leg, and a click on anything else puts one on the end. All three are decided in
+the one capture-phase handler on the container that already sees every click —
+Leaflet never gets to see it, so a pin's own click handler could not have been
+used even if it were wanted.
+
+Two things follow and both were chosen against the alternative. **Nothing the
+route draws became interactive**: the leg a click landed on is found by
+hit-testing the geometry the page is already holding, because a line that
+catches clicks would have to be switched off again the moment plan mode is, or
+the route would stand between a reader and the trail underneath — the mistake
+the park boundary made for a fortnight, and one switch too many to remember. And
+**a click on a pin selects rather than deletes**: the same click is a few pixels
+from one that places a point, there is no way back from a deletion, and what a
+selection makes possible — remove, move a place earlier, move a place later —
+has to be visible somewhere anyway, because dragging a pin moves it on the
+ground and says nothing about where it comes in the sequence. Reordering needs a
+gesture of its own and only one of the two can be a drag.
+
+**The pins had to be lifted above every other marker, and only the browser said
+so.** Leaflet stacks markers within the pane by latitude, so a hut drawn where a
+waypoint stands covers it: measured at the first waypoint of a route along a
+chain, `document.elementFromPoint` returned folium's own `awesome-marker`. That
+click would have missed the pin, fallen through to the route under it, and
+**inserted a waypoint where the reader meant to select one**. `zIndexOffset` is
+100,000 rather than a small number because the term it is added to is a pixel
+position, not an index.
+
+**A live drag asks the height service for nothing, and that is measured.**
+Driven with a real pointer over the icon and every request to the endpoint
+intercepted and counted: **0 requests while the pointer is down**, 99 the moment
+it is let go over open ground. There is no abort — the requests are simply not
+issued — because aborting would have to poison the endpoint cache the decisions
+document asks for, and a cancelled promise sitting in it would answer the next
+identical leg with a failure.
+
+A leg the network cannot carry is carried through the drag at its own straight
+length with no heights read along it. That keeps the walked distance right under
+the reader's hand — measured over one drag: 23.2, 21.8, 22.1, 25.5, 29.8,
+34.3 km, following the pointer — while the leg counts as **unsettled**, so the
+sentence above the button says *Still working out 2 legs* and the file stays
+refused. What it does not carry is a protected-area tally: that is read off the
+height samples at the halfway rule the shoreline split already uses, and there
+are no samples yet. Inventing one at a coarser spacing would be a second rule to
+disagree with the first.
+
+**And the throttle, timed in the page rather than by the probe.** 80 mouse
+moves over 1,443 ms settled the route **12 times**, and the gaps between them
+read 117, 123, 114, 124, 115, 115, 122, 118, 123 ms — the constant, measured. The
+trailing timer is what puts the last settle where the pointer came to rest.
+Before this there was no throttle and no cancellation anywhere in plan mode.
+
+**Each settle is two panel updates and only the second is ever seen.** The first
+comes when the legs beside the waypoint are replaced and have no parts yet, and
+it composes a route missing them — 9,948 m of the 20,213. The second comes 3 to
+7 ms later when they resolve. It never reaches the screen: a leg settles in a
+microtask, and microtasks drain before the browser paints. That holds only
+because a live drag fetches nothing — a leg waiting on the network would paint
+the hole. It is another reason for the rule, and worth knowing before somebody
+moves the fetch back into the drag to make the profile "more responsive".
+
+**The optimisation went where the phase said and nowhere else.** Routed legs
+recompute in full — a five-point route's four legs are about 200 ms and nobody
+notices. The free-leg cache is where the work went, and it gained two things: it
+is **keyed on the pair rather than on the order**, and it is **bounded at 64
+entries**. Measured: a free leg costs 4 requests the first time; moving its two
+waypoints past each other, which turns it round, costs **0**; leaving it and
+coming back to the same ground costs **0**. Every reorder of one place turns
+exactly one leg round, which is why this is worth having and reversing a *routed*
+leg's parts is not.
+
+### One rule, four edits, and the cancellation for free
+
+**The legs follow from the waypoints rather than being edited beside them.**
+Every edit rewrites the list of points and nothing else; a leg survives exactly
+when it still runs between the same two waypoint *objects*, and a waypoint that
+has moved is a new object rather than a mutated one. Insert costs the two legs
+that replace one, remove the one that replaces two, a move the three that touch
+the point, and a drag needs no case of its own.
+
+The cancellation is that rule read backwards, and it is one line: a reply about
+ground a waypoint has since left arrives to find `legs.indexOf(leg) < 0`. There
+is no token and no generation counter, because there is nothing for one to
+disambiguate.
+
+### What the edits actually did to a route
+
+Along one chain, five waypoints, 20,212.893 m:
+
+| | | |
+|---|---|---|
+| insert on the drawn route | 5 → 6 points, 4 → 5 legs | **20,212.878 m** |
+| remove it again | back to 5 | **20,212.893 m**, bit for bit |
+| move a point one place later | order changes | 31,720.9 m |
+| move it back | | **20,212.893 m**, bit for bit |
+| drag a point and let go | | follows, and the pin sits on the waypoint to the pixel |
+
+**The 1.5 cm the insert costs is not float noise and is worth knowing.** An
+inserted waypoint snaps to the nearest *node*, by the same rule a click has
+always used — a route can only be split at one. Clicked at a vertex of the drawn
+route, `12.817694, 65.637221`, it snapped to node 35382 at `12.817693,
+65.637221`: one unit of the payload's 1e-6 quantum apart, which at this latitude
+is **4.6 cm**. Diffed vertex by vertex, the route through the node drops that one
+vertex and its neighbour 3.8 m back and is **2.9 cm shorter** over the
+4.2 km leg; everything either side is identical. It is the right answer rather
+than a rounding — the waypoint is on the network, which is where a waypoint goes
+— and removing it again returns the route bit for bit.
+
+### The file, against the route it was drawn from
+
+After an insert, a remove, a reorder and a drag on one route: 5 set `<wpt>`
+before the `<trk>`, each carrying `origin`, the 4 legs on the track, one segment
+because there are no crossings, 12,203 trackpoints. The track's own points
+measured back in Python with the page's own metre come to **29,921.38 m against
+the 29,921.34 the page states — 3.8 cm over 29.9 km** — and every set waypoint
+matches its position to seven decimals. A separate route validates against the
+shipped GPX 1.1 schema with 6 set and 2 generated waypoints and its protected
+area reported at 28,179 m, over the 100 m threshold.
+
+The export needed nothing, as the phase said: it is written from `composeRoute`
+and follows whatever is drawn.
+
+### What the review found, and what was done with each
+
+**Three findings, all in code phase 7 did not write, and one was taken.**
+
+**Taken: a lookup memoised before there was anything to memoise.** `graphAreas()`
+guarded on `if (!areasById)`, and an empty lookup is an object like any other —
+asked once before the graph's own block had run, it would have stayed empty for
+the life of the page and every route through a protected area would then have
+thrown *the route lies in X, which the page has no entry for*, out of
+`composeRoute` and so out of every refresh. It is **not reachable in this page**:
+`protectedAreas` is assigned in the graph's block before its stream is inflated,
+and the one entry that composes a route with nothing down — `state()` — runs
+after it. The guard now tests the table it is built from rather than the memo,
+which costs a length comparison and closes the class.
+
+**Not taken, and recorded instead: `crossingsOf` restarts at every stretch.** A
+route that walks into a reserve, boards a ferry that carries it out, and
+continues outside gets an `Enters` waypoint and no `Leaves`. That is 6C's rule
+applied per stretch rather than per route, and it is arguable *either* way — a
+walker never crosses that boundary on the ground, and the only place a closing
+marker could go is a position on water the file deliberately draws nothing at.
+Changing it moves 6C's measured marker counts and is a decision about what a
+generated waypoint asserts, not a defect in this phase. Under *Known open*.
+
+**Not taken: `PAYLOAD_VERSION` is written into the header and never read.** True,
+and the constant's own docstring promises otherwise. Honouring it needs the
+*decoder* to carry the version it was written for, independently of the header it
+is checking — the header cannot verify itself. That is a change to the payload
+contract, and this phase's acceptance is that the graph is not touched. Under
+*Known open*.
 
 ## What phase 7's readiness check found
 
