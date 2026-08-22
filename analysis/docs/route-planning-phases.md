@@ -1440,15 +1440,78 @@ the map is phase 8's business, where there is a reading page to put it on.
 Phase 6 can only append and undo. This is what makes a route something you can
 work on rather than restart.
 
-- Insert into the middle, which splits a leg; delete, which merges two; reorder,
-  which changes which legs exist at all. The route, its numbers and its profile
-  follow.
-- Recompute only the legs a change actually touches — and only redraw the part of
-  the profile that changed with them. The export follows whatever is currently
-  drawn, without needing to know how it got there.
+**Insert into the middle**, which splits a leg; **delete**, which merges two;
+**reorder**, which changes which legs exist at all; and **drag**, which moves one
+where it stands. The route, its numbers and its profile follow.
 
-**Done when** reordering waypoints changes the route consistently, the distance
-keeps up while dragging, and the exported GPX matches what is drawn.
+Two of those need saying plainly. **Insert is this phase's own addition** — the
+decisions document's numbered requirement is *"waypoints can be reordered and
+removed"* and says nothing about inserting; it is worth having and it is not in
+the contract. And **drag was in the acceptance and in neither list of
+requirements**, appearing only in an aside about caching. It is a requirement
+here now, because the acceptance already tested it.
+
+### Two acceptance figures will move, and that is not a regression
+
+A waypoint today is an `L.circleMarker` in the `trailsPlanRoute` pane with
+`interactive: false`. Measured in the built page: on the map its `dragging` is
+**undefined** and `draggable: true` is silently ignored, while an `L.marker` gets
+a live dragging handler and lands in the marker pane. So a draggable waypoint is
+a marker, and for a five-point route the plan pane goes from **13 paths to 8**
+while the marker pane goes from **198 to 203**.
+
+Those two numbers are what every review since phase 3 checks first. Say which way
+they moved and why, or the next one reports a regression. If the pins stay
+circles and dragging is written by hand on the path, say that instead — but then
+the paragraph below applies twice over.
+
+### Clicking a waypoint and clicking the map are the same gesture
+
+Everything the plan draws is non-interactive: measured, **all 13 paths** of a
+five-point route. Selecting or deleting a waypoint needs the opposite, and the
+moment a pin becomes interactive it catches the clicks that fall through to the
+map today — where a click **places a new waypoint**. Decide it here and write the
+decision down: a modifier, a mode, a hit only on the pin's centre, something. The
+trap list already carries the shape, *a boundary polygon swallows clicks*, and it
+cost this project a week of trails that could not be clicked.
+
+### Dragging over a free leg is an uncapped request stream
+
+There is no debounce and no cancellation anywhere in plan mode — measured, the
+only `setTimeout` near it belongs to the search box. The decisions document
+anticipates half of this: *"cache them by their two endpoints so dragging a
+waypoint back and forth does not fetch the same ground twice."* The cache only
+helps for ends already visited; dragged across new ground, every position fetches
+new ground. **6B's own review found exactly this shape** — an unbounded number of
+requests from one misclick — and capped it at 20 km. Dragging brings it back per
+mouse move.
+
+So this phase owns a **throttle while a drag is live and cancellation of a settle
+whose waypoint has already moved on**, and a leg must not be drawn from a reply
+that is no longer wanted.
+
+### Recompute what changed, for the reason that holds
+
+Measured: placing a point costs **19–76 ms** including its Dijkstra, and
+`state()` with the whole route composed costs **3 ms**. Recomputing all four legs
+of a five-point route is therefore about **200 ms** — perceptible and not a
+problem. So *recompute only what changed* is not worth writing for routed legs.
+
+It is worth everything for **free legs**, where one leg is seconds of network,
+and for a drag, where the recompute happens many times a second. That is the
+reason to give, and the redraw follows the same rule: the profile is composed in
+3 ms, so redrawing all of it is fine, and it is the fetching that must be
+avoided.
+
+The export needs nothing: since 6B it is written from `composeRoute`, so it
+already follows whatever is currently drawn without knowing how it got there.
+
+**Done when** inserting, deleting, reordering and dragging each change the route
+consistently; the distance and the profile keep up while a waypoint is dragged;
+a drag over a free leg issues no request for ground it has left; and the exported
+GPX matches what is drawn. The graph is untouched, so every figure holds —
+11,290 chains, 234,358 edges, 116,967 nodes — and of the page's figures only the
+two named above may move, in the direction named.
 
 ---
 

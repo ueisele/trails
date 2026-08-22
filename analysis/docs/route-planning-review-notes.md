@@ -14,7 +14,7 @@ route on it that becomes a file saying which protected areas it passes and how
 far through each. `libs/src/trails/routing/`, `libs/src/trails/network/`,
 `visualization/encoding.py`, `io/export/gpx.py`, `routing/track.py`,
 `analysis/scripts/route_graph.py` and `lomsdal_visten.py`.
-**7 and 8 remain and neither has had a readiness check.** The project runs on
+**7 is checked and rewritten; 8 remains and has not had a readiness check.** The project runs on
 **Python 3.14** and `uv.lock` is tracked from 1D.
 
 **Phase 6C** added the third thing an edge says about the ground it runs over:
@@ -488,7 +488,7 @@ every one was invisible until something was actually run.
 
 ## Before handing a phase over
 
-This has been done for 1B, 2, 3, 3B, 4, 5, 6, 6B and 6C — **nine times, and it
+This has been done for 1B, 2, 3, 3B, 4, 5, 6, 6B, 6C and 7 — **ten times, and it
 found something every time.** A rule that was not implementable, six acceptance
 figures that would have failed a correct implementation, fifteen attributes
 nobody had counted, a missing layer, a forgotten payload, a budget off in both
@@ -923,15 +923,14 @@ inside popup HTML; a free leg cannot answer from its samples at all; and the
 phase has to set a threshold before it can report anything, because one of the
 nineteen areas the network touches is met over ten metres.
 
-**Phase 7, editing — no readiness check yet, and its text is the shortest in the
-phases document.** Ten lines, which by the pattern of the last two checks is
-itself worth noting: 6B read as *"little more than wiring"* and was not. What is
-already measurable: `window.trailsPlan` exposes **`place`, `undo`, `toggle` and
-`state` and nothing else** — no insert, no remove, no move. Phase 6 says so
-deliberately, *"undo is the only edit this phase owns"*, so all three edits and
-the surface they are reached through are new work rather than wiring onto an
-existing model. Review it by reordering and watching the numbers; the failure
-mode is a stale leg or a profile that no longer matches the line.
+**Phase 7, editing — checked and rewritten, not yet built.** What the check found
+is in *What phase 7's readiness check found*. The short of it: drag was in the
+acceptance and in neither list of requirements; a waypoint is an `L.circleMarker`
+and cannot be dragged at all, so making it one moves **two acceptance figures**
+(plan pane 13 → 8, markers 198 → 203) and that has to be said in advance;
+nothing the plan draws is clickable, so deleting a waypoint collides with the
+click that adds one; and there is no throttle or cancellation anywhere in plan
+mode, which turns a drag over a free leg into an uncapped request stream.
 
 **Phase 8, loading — no readiness check yet, and one figure in it is already
 known to be soft.** The phase says the two easy modes are cheap because only the
@@ -1053,8 +1052,7 @@ Otherwise nothing is known to be open. **That has now been true nine times and
 was wrong all nine** — the readiness checks found gaps in 1B, in 3, in 2, in 3B
 (which this document had written itself), in 4, in 5, in 6, in 6B and in 6C, and
 the 3B review then found the payload gap above. The check that finds them is not
-reading the phase; it is measuring it against the built graph. **Only 7 and 8
-have not had it.**
+reading the phase; it is measuring it against the built graph. **Only 8 has not had it.**
 
 And the shape has moved. The early checks found *figures* that had drifted; the
 last two found **premises** — 6B's *"the composed geometry already exists"* and
@@ -1156,6 +1154,58 @@ Two more, and one of them was mine:
   22.9, 12.7. Two other figures moved the same way, 237 → **241** and 4,485 →
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
+
+## What phase 7's readiness check found
+
+**The first finding was what the phase did not say.** Thirteen lines and **not
+one figure** — every other phase carries measured numbers its implementation is
+held to, and this one carried none, so a review would have had nothing to check
+it against. *A phase with no figures cannot fail, which is not the same as being
+right.*
+
+**The acceptance tested a mechanism the requirements never asked for.** *"The
+distance keeps up while dragging"* — and the body listed insert, delete and
+reorder. The decisions document's own numbered requirement is *"waypoints can be
+reordered and removed"*, with dragging appearing nowhere but an aside about
+caching. This is the inverted question run the other way: not *which phase
+receives this requirement*, but **where did this acceptance criterion come
+from**. Worth running on every phase's done-when.
+
+**A waypoint cannot be dragged as it is drawn, and fixing it moves two figures
+every review checks first.** Measured in the built page: a waypoint is an
+`L.circleMarker` in the plan's pane with `interactive: false`; added to the map
+its `dragging` is **undefined** and `draggable: true` is silently ignored, while
+an `L.marker` gets a live handler with `enabled() === true` and lands in the
+marker pane. So a draggable waypoint is a marker, and a five-point route goes
+from **13 paths to 8** in the plan pane and from **198 to 203** markers. Both
+have been reference figures since phase 3. **A phase that will move an acceptance
+figure has to say so before it is built**, or the review that follows reports a
+regression and is right to.
+
+**Nothing the plan draws can be clicked** — measured, all 13 paths of a
+five-point route are non-interactive. Deleting a waypoint needs the opposite, and
+an interactive pin catches the click that currently falls through to the map,
+where a click *places a new waypoint*. Two gestures, one event. The trap list
+already holds the shape from phase 3's boundary polygon.
+
+**Dragging over a free leg is an uncapped request stream, and nothing in plan
+mode throttles or cancels.** Measured: the only `setTimeout` near it is the
+search box's 150 ms debounce and a retry backoff. The decisions document
+anticipated half — *cache them by their two endpoints* — but a cache only helps
+for ends already visited, and a drag crosses new ground continuously. **6B's
+review had already found this shape once**, an unbounded number of requests from
+one misclick, and capped it at 20 km.
+
+**And the optimisation the phase asked for was right for the wrong reason.**
+Measured: placing a point costs **19–76 ms** including its Dijkstra, and
+`state()` with the whole route composed costs **3 ms**. A full four-leg recompute
+is about 200 ms — perceptible, not a problem. *Recompute only what changed* buys
+nothing worth writing down for routed legs; it is essential for free legs, which
+are seconds of network, and for a drag, which recomputes many times a second.
+**An optimisation with the wrong justification gets applied in the wrong place.**
+
+What is already there and needs nothing: the free-leg cache by endpoints, and an
+export that follows what is drawn because 6B writes it from `composeRoute`.
 
 ## What phase 6C found
 
