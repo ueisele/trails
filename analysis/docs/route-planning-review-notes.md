@@ -107,6 +107,16 @@ the page and meant two things; it stands once. Measured on the 42 km Rundtur, th
 two files disagree by 262 m of ascent and one of them carries a timestamp on
 every point.
 
+**And the profile is now true to scale**, after a reader asked how a curve that
+looks gentle can read −73 %. It could: the chain drops 808 m to 1 m over 3.0 km,
+a quarter of it over 40 %, and the crosshair was right. The *picture* was not —
+each axis was fitted to its own range, so the vertical ran 2.2 times coarser than
+the horizontal on that chain and 7.5 times on the 42 km one, and a 36° descent
+drew as 18°. One metres-per-pixel now serves both axes. Verified by comparing the
+drawn bounding box against the ground: **within 0.2 %** on three chains, which is
+the stroke's own half-pixel. A steep chain leaves width unused — 433 px of 1,238
+— and the crosshair is hidden out there, because there is no ground to report.
+
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
 chain. 20,183 requests in 13.6 minutes, none at all on a second build or on a

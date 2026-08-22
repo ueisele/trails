@@ -2746,8 +2746,7 @@ class _ProfilePanel(MacroElement):
 
                 var shape = selected.shape;
                 if (!(shape.total > 0)) { return; }
-                var plot = {left: PAD.left, right: width - PAD.right, top: PAD.top, bottom: chartHeight - PAD.bottom};
-                plot.width = plot.right - plot.left;
+                var box = {left: PAD.left, right: width - PAD.right, top: PAD.top, bottom: chartHeight - PAD.bottom};
                 var lowest = Infinity, highest = -Infinity;
                 for (var i = 0; i < shape.height.length; i += 1) {
                     if (isNaN(shape.height[i])) { continue; }
@@ -2756,28 +2755,57 @@ class _ProfilePanel(MacroElement):
                 }
                 // A stretch of flat ground is flat ground, not a mountain: give
                 // it a range of its own rather than letting the height model's
-                // centimetre wobble fill the panel.
+                // centimetre wobble fill the panel. Under the scale below it no
+                // longer changes any angle — one metres-per-pixel serves both
+                // axes — but it still caps how far a metre of wobble is blown up.
                 if (highest - lowest < 20) {
                     var middle = (highest + lowest) / 2;
                     lowest = middle - 10; highest = middle + 10;
                 }
+
+                // **One metres-per-pixel for both axes, so the angle drawn is
+                // the angle on the ground.** Fitting each axis to its own range
+                // is what an elevation profile usually does, and it is why a
+                // 73 % descent read as 18 degrees here: measured on this panel,
+                // the vertical was 2.2 times coarser than the horizontal on a
+                // 3 km chain and 7.5 times on a 42 km one, so the shape said
+                // gentle where the crosshair said extreme. Taking the coarser of
+                // the two fits the whole chain in the box at a single scale. A
+                // steep chain then leaves width unused — 561 px of 1,238 for the
+                // 3 km one — and a long gentle chain draws as the ribbon it is,
+                // 20 px tall over 42 km. Both are the truth about the ground.
+                var span = highest - lowest;
+                var metresPerPixel = Math.max(shape.total / (box.right - box.left),
+                                              span / (box.bottom - box.top));
+                var centre = (box.top + box.bottom) / 2;
+                var plot = {left: box.left, right: box.left + shape.total / metresPerPixel,
+                            top: centre - span / metresPerPixel / 2,
+                            bottom: centre + span / metresPerPixel / 2};
+                plot.width = plot.right - plot.left;
                 var x = function (value) { return plot.left + (shape.total > 0 ? (value / shape.total) * plot.width : 0); };
                 var y = function (value) { return plot.bottom - ((value - lowest) / (highest - lowest)) * (plot.bottom - plot.top); };
 
-                ticks(lowest, highest, 4).forEach(function (value) {
+                // As many labels as the drawn band can hold rather than a fixed
+                // four: a gentle chain is twenty pixels tall at a true scale,
+                // and four heights stacked in twenty pixels is one smear.
+                var heights = Math.max(2, Math.min(4, Math.round((plot.bottom - plot.top) / 34)));
+                ticks(lowest, highest, heights).forEach(function (value) {
                     chart.appendChild(line(plot.left, y(value), plot.right, y(value), '#eceff1'));
                     chart.appendChild(text(plot.left - 6, y(value) + 3, metres(value) + ' m', 'end'));
                 });
                 // One number of decimals for the whole axis, decided by how far
                 // the chain runs: 0.00 beside 1.0 reads as two different scales.
+                // The gridlines run the box's full height rather than the band's,
+                // so a twenty-pixel ribbon still has something to be read against.
                 var decimals = shape.total < 2000 ? 2 : 1;
-                ticks(0, shape.total, 6).forEach(function (value) {
-                    chart.appendChild(line(x(value), plot.top, x(value), plot.bottom, '#eceff1'));
-                    chart.appendChild(text(x(value), plot.bottom + 14, (value / 1000).toFixed(decimals), 'middle'));
+                var alongs = Math.max(2, Math.min(6, Math.round(plot.width / 110)));
+                ticks(0, shape.total, alongs).forEach(function (value) {
+                    chart.appendChild(line(x(value), box.top, x(value), box.bottom, '#eceff1'));
+                    chart.appendChild(text(x(value), box.bottom + 14, (value / 1000).toFixed(decimals), 'middle'));
                 });
-                chart.appendChild(text(plot.right, plot.bottom + 14, 'km', 'end'));
-                chart.appendChild(line(plot.left, plot.top, plot.left, plot.bottom, AXIS));
-                chart.appendChild(line(plot.left, plot.bottom, plot.right, plot.bottom, AXIS));
+                chart.appendChild(text(plot.right, box.bottom + 14, 'km', 'end'));
+                chart.appendChild(line(plot.left, box.top, plot.left, box.bottom, AXIS));
+                chart.appendChild(line(plot.left, box.bottom, plot.right, box.bottom, AXIS));
 
                 var slope = gradients(shape);
                 var strokes = drawCurve(shape, plot, x, y, slope);
@@ -2803,10 +2831,12 @@ class _ProfilePanel(MacroElement):
                 // The crosshair's own parts, made once and moved afterwards.
                 // Rebuilding them per mouse move is the mistake that froze this
                 // map twice already, on a layer rather than on a chart.
-                var rule = line(plot.left, plot.top, plot.left, plot.bottom, CROSS);
+                var rule = line(plot.left, box.top, plot.left, box.bottom, CROSS);
                 var dot = document.createElementNS(SVG, 'circle');
                 dot.setAttribute('r', '2.5'); dot.setAttribute('fill', CROSS);
-                var reading = text(plot.right, plot.top + 8, '', 'end');
+                // Against the box rather than the band: the reading has to sit
+                // in the same place whether the chain drew 150 pixels tall or 20.
+                var reading = text(box.right, box.top + 8, '', 'end');
                 reading.setAttribute('fill', CROSS);
                 [rule, dot, reading].forEach(function (node) { node.style.display = 'none'; chart.appendChild(node); });
                 crosshair = {rule: rule, dot: dot, reading: reading, plot: plot, width: width, x: x, y: y, at: -1, slope: slope};
@@ -2834,6 +2864,19 @@ class _ProfilePanel(MacroElement):
                 // viewBox before it means anything in the chart's own units.
                 var rect = chart.getBoundingClientRect();
                 var px = ((event.clientX - rect.left) / rect.width) * crosshair.width;
+                // At a true scale a steep chain leaves width unused — 433 px of
+                // 1,238 on the 3 km one — and there is no ground out there to
+                // report. Before this the curve always filled the box, so the
+                // pointer could not be past its end; now it can, and clamping
+                // would pin the reading to the last sample while the pointer
+                // sits a third of a panel away from it.
+                if (px < crosshair.plot.left - 1 || px > crosshair.plot.right + 1) {
+                    if (crosshair.at !== -1) {
+                        crosshair.at = -1;
+                        [crosshair.rule, crosshair.dot, crosshair.reading].forEach(function (node) { node.style.display = 'none'; });
+                    }
+                    return;
+                }
                 var at = nearest(shape.distance, ((px - crosshair.plot.left) / crosshair.plot.width) * shape.total);
                 if (at === crosshair.at) { return; }
                 crosshair.at = at;
