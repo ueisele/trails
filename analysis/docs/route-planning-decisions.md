@@ -1341,11 +1341,21 @@ worth more to a planner than any category computed from it.
 Decide it **at the 5 m samples** — the same ones that carry elevation. The park
 share is then simply how many fell inside, times five metres.
 
-That gives one mechanism instead of two: an edge's share is computed once at
-build time and sits on the edge beside its length and its ascent, while a free
-leg over land gets it from the samples it fetches anyway. The error is ±5 m at
-each boundary crossing, which on a 38 km route is noise. Water crossings are
-excluded, since they are not walking distance and so not park distance either.
+An edge's share is computed once at build time and sits on the edge beside its
+length and its ascent. The error is ±5 m at each boundary crossing, which on a
+38 km route is noise. Water crossings are excluded, since they are not walking
+distance and so not park distance either.
+
+**A free leg does not get this from the samples it fetches**, and an earlier
+draft here said it did. The samples give a *position*; the answer needs the
+polygons, and at build time Python has them while the browser does not — the
+page draws **one** protected area of the nineteen the walked network touches.
+The height service answers `datakilde`, `terreng` and `z`, and `terreng` is
+ground cover — *Havflate*, *Skog*, *InnsjøRegulert* — not a protected area. So
+the page has to carry the boundaries. Measured, that is cheap: the nineteen come
+to 25,144 vertices, 1.03 MB of GeoJSON and 0.37 gzipped, and simplified to 10 m
+— well inside the ±5 m the sampling already accepts at each crossing — **0.08 MB
+raw and 0.03 gzipped**, against a 37.5 MB page.
 
 In the exported file this appears twice:
 
@@ -1364,21 +1374,43 @@ in the extensions, and loading ignores the generated ones. The rule is general:
 any marker the map adds by itself, at a crossing, a hut or anywhere else, falls
 under it.
 
-**It is not only the park.** Naturbase was queried for the rest, and the zone
-holds **26 nature reserves** and one landscape protection area. None of the
-reserves touches the park itself, so a route that stays inside is unaffected —
-but every approach crosses the zone, where one of the 26 may lie. Strauman
-landskapsvernområde borders the park directly.
+**It is not only the park**, and the numbers depend on the extent they are
+measured over — so this one names it. Over the bounding box of the walked
+network, Naturbase returns 43 protected areas: **39 nature reserves**, two
+national parks, one landscape protection area and one marine protected area.
+An earlier count of 26 reserves was taken over the smaller drawn zone; neither
+is wrong and a figure without its extent cannot be reproduced.
+
+**Nineteen of them are actually touched by the network**, 741.2 km of 5,853.3.
+Lomsdal-Visten holds 647.8 km of that, Holmvassdalen naturreservat 25.7,
+Strauman landskapsvernområde 24.9, Stavvassdalen 17.1 and Sirijorda 11.9; the
+remaining fourteen share 13.8 km, and the smallest is **10 m of Innervisten
+marine protected area**.
+
+It was written here that no reserve touches the park. **Measured, Sirijorda
+does** — they share a boundary at 0.0 m — and so does Innervisten. The
+conclusion it was used for still holds, since sharing a boundary is not
+overlapping and a route strictly inside the park is still outside Sirijorda; the
+premise was simply wrong.
 
 So report **protected areas**, not the national park alone: *38 km, of which 22
 in Lomsdal-Visten nasjonalpark and 3 in Strauman landskapsvernområde*. Reserves
 carry their own, sometimes stricter, rules, and a figure that counts only the
 park would be silent about them.
 
-The work is small. `naturbase.Source` searches by name today and needs a spatial
-query — the same endpoint with a geometry parameter instead of a `where` clause,
-and the layers are already enumerated. The samples then carry which area they
-fell in rather than a yes or no.
+The work is small, and it was measured rather than guessed: `naturbase.Source`
+searches by name today and needs a spatial query — the same endpoint with
+`geometry`, `geometryType=esriGeometryEnvelope` and
+`spatialRel=esriSpatialRelIntersects` instead of a `where` clause. One request
+answers. The samples then carry which area they fell in rather than a yes or no.
+
+**Two things have to be decided rather than discovered.** *Which* `verneform`
+count — `naturbase.Layer` already separates the five, and a walker reading that
+a route passes a marine protected area learns something different from a nature
+reserve. And **how little counts as touching**: five of the nineteen are met over
+less than 400 m and one over ten. Without a threshold a route that brushes a
+boundary reports an area it never entered and generates a pair of waypoints for
+it — and a rounded label is a threshold like any other.
 
 One thing is deliberately not claimed: the rules inside a Norwegian protected
 area differ from outside, but *how* they differ is in each area's verneforskrift
