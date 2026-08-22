@@ -234,6 +234,9 @@ EXPORT_SETTINGS = (
     "heights",
     "fields",
     "creditFields",
+    "sourceLength",
+    "route",
+    "waypoint",
     "gapM",
     "decimals",
     "elevationDecimals",
@@ -246,6 +249,31 @@ EXPORT_SETTINGS = (
     "identitySeparator",
     "filePrefix",
 )
+
+
+#: What ``route`` holds, which is every name a planned route's own file is
+#: written with. Checked as its own list rather than by the presence of the key
+#: above it: a ``route`` short of ``partLength`` builds without a word and the
+#: page writes ``<trails:part kind="routed" undefined="2027.0"/>``, and one short
+#: of ``kindField`` writes an element called ``undefined`` — a file that fails
+#: the schema, out of a check whose whole point is that it does not happen.
+EXPORT_ROUTE_SETTINGS = (
+    "name",
+    "description",
+    "fileStem",
+    "kindField",
+    "kind",
+    "fields",
+    "legs",
+    "leg",
+    "part",
+    "partKind",
+    "partLength",
+)
+
+#: What ``waypoint`` holds, checked for the same reason as
+#: :data:`EXPORT_ROUTE_SETTINGS`.
+EXPORT_WAYPOINT_SETTINGS = ("name", "origin", "set")
 
 
 #: Everything the page has to be handed before it can plan a route. As with
@@ -265,6 +293,8 @@ PLAN_SETTINGS = (
     "ascentThresholdM",
     "snapM",
     "maxStraightM",
+    "crossingKind",
+    "connectorKind",
 )
 
 
@@ -1385,6 +1415,32 @@ class _ProfilePanel(MacroElement):
     ``suspend``, for while something else owns the map's clicks, and the two
     things a second consumer must not write again: the walk that lays a run of
     edges end to end, and the metre this page measures distance with.
+
+    **A route composed that way is written out here too**, from the same series
+    the curve was drawn from, and it is a second kind of file rather than the
+    same file with different numbers in it. What is different about it:
+
+    - Its points travel as ``<wpt>`` elements before the track, each saying
+      whether a reader set it or the map generated it. A waypoint is a GPX 1.1
+      top-level element and not an extension, so it goes in its own place.
+    - Its legs are listed on the track, each with its parts in order. **They
+      cannot go on a ``<trkseg>``**: a segment is a stretch and a stretch breaks
+      only where the ground stops, so four routed legs laid end to end are one
+      segment.
+    - Its track breaks at every crossing and nowhere else, because a crossing
+      ends the stretch it was in and a crossing's own line is never written —
+      there is no way in GPX to say a segment is a boat, and every reader would
+      import one as a walked line across a fjord.
+    - Its sources are as many as it runs over, each with the length it
+      contributed and the licence that comes with it.
+    - It says how much of it is waymarked in three buckets, and how much runs
+      where no source records a path.
+
+    The series a composed route arrives with carries both kinds of nothing —
+    ground with no reading of it, and no ground at all — and they must not be
+    confused: the first only drops an ``<ele>``, the second breaks the track.
+    They are told apart by the stretch boundaries the composer records, never by
+    inference from the series.
     """
 
     _template = Template("""
@@ -1724,17 +1780,87 @@ class _ProfilePanel(MacroElement):
                 return runs.some(function (run) { return run.ele.some(function (value) { return !isNaN(value); }); });
             }
 
-            // What the file draws on: the chain's own source, and the height
-            // model wherever the file carries a height. Naming a source a file
-            // does not draw on is exactly as wrong as leaving one out.
+            // What a chain's file draws on: the chain's own source, and the
+            // height model wherever the file carries a height. Naming a source a
+            // file does not draw on is exactly as wrong as leaving one out.
             function creditsOf(figure, runs) {
                 return (EXPORT.credits[figure.source] || []).concat(heightsWritten(runs) ? EXPORT.heights : []);
+            }
+
+            // And a route's, each with the length it contributed. **The terms
+            // are not the same for every route**: one running on FKB and
+            // Turrutebasen alone is unencumbered, one that picks up a kilometre
+            // of OSM is share-alike and one that picks up UT.no is
+            // non-commercial, so the figure belongs beside the licence rather
+            // than in a blanket warning nobody reads.
+            function routeCredits(shape, runs) {
+                var metres = shape.tally.sources;
+                var names = Object.keys(metres).sort(function (a, b) { return metres[b] - metres[a]; });
+                var out = [];
+                names.forEach(function (name) {
+                    (EXPORT.credits[name] || []).forEach(function (credit) {
+                        // A copy. EXPORT.credits is the page's one description of
+                        // each dataset, and writing a length onto it would leave
+                        // this route's metres on the next route's file.
+                        var carried = {};
+                        Object.keys(credit).forEach(function (field) { carried[field] = credit[field]; });
+                        carried[EXPORT.sourceLength] = fixed(metres[name]);
+                        out.push(carried);
+                    });
+                });
+                return out.concat(heightsWritten(runs) ? EXPORT.heights : []);
             }
 
             function creditLine(credit) {
                 var inside = ['licence', 'version', 'attribution'].filter(function (field) { return credit[field]; })
                     .map(function (field) { return credit[field]; });
-                return inside.length ? credit.name + ' (' + inside.join(', ') + ')' : credit.name;
+                var named = inside.length ? credit.name + ' (' + inside.join(', ') + ')' : credit.name;
+                // The height model contributes no metres of line, so it carries
+                // none and is named without one rather than with a zero.
+                var metres = credit[EXPORT.sourceLength];
+                return metres ? (Number(metres) / 1000).toFixed(2) + ' km ' + named : named;
+            }
+
+            // The same entry as the reader sees it before pressing the button.
+            function licenceLine(credit) {
+                var metres = credit[EXPORT.sourceLength];
+                return (metres ? (Number(metres) / 1000).toFixed(2) + ' km ' : '') +
+                    credit.name + ' \\u2014 ' + credit.licence + (credit.note ? ', ' + credit.note : '');
+            }
+
+            // A length in the unit it can be read in. The three buckets below
+            // are always in kilometres because they are read against one
+            // another; the two beside them are not, and a connector run of a
+            // quarter of a metre written as '0.00 km' reads as a figure that is
+            // not there.
+            function span(value) {
+                return value >= 1000 ? (value / 1000).toFixed(2) + ' km' : (Math.round(value * 10) / 10) + ' m';
+            }
+
+            // How much of the route is waymarked, in length and in three
+            // buckets. **Unknown is its own bucket and is never folded into
+            // unmarked**: measured over the walked network without its inferred
+            // connectors, 63.4 % of the length is unknown, and FKB — the largest
+            // source at 33.8 % — carries no marking field at all, so calling it
+            // unmarked would assert what no source says. All three are shown
+            // even at zero, because which of them a route avoids is the reading.
+            //
+            // Two more only where there is any: ground on a connector nobody
+            // drew, which was never asked rather than asked and unanswered, and
+            // ground no source records a path along — **recorded, not fact**.
+            // The sources over-record, so their silence is evidence and their
+            // lines are not.
+            function markingLine(tally) {
+                var said = ['marked', 'unmarked', 'unknown'].map(function (bucket) {
+                    return bucket + ' ' + (tally[bucket] / 1000).toFixed(2) + ' km';
+                });
+                if (tally.undrawn > 0) {
+                    said.push(span(tally.undrawn) + ' on connectors nobody drew');
+                }
+                if (tally.unrecorded > 0) {
+                    said.push(span(tally.unrecorded) + ' where no source records a path');
+                }
+                return said.join(' \\u00b7 ');
             }
 
             // The named ways the track follows. A chain running over several of
@@ -1753,28 +1879,31 @@ class _ProfilePanel(MacroElement):
                 return figure.noPath > 0 ? (figure.noPath / 1000).toFixed(2) + ' km where no source records a path' : '';
             }
 
-            function fileNameOf(figure) {
-                return (EXPORT.filePrefix + '-' + (figure.id || 'track')).replace(/[^A-Za-z0-9._-]+/g, '-') + '.gpx';
+            function fileNameOf(stem) {
+                return (EXPORT.filePrefix + '-' + (stem || 'track')).replace(/[^A-Za-z0-9._-]+/g, '-') + '.gpx';
             }
 
-            function gpxOf(figure, shape, runs) {
-                var credits = creditsOf(figure, runs);
-                var told = [waysOf(figure), shape.read ? climb(figure) : '', unrecordedOf(figure)]
-                    .filter(function (part) { return part; });
+            function element(name, value) {
+                return '<' + EXPORT.prefix + ':' + name + '>' + escaped(value) + '</' + EXPORT.prefix + ':' + name + '>';
+            }
 
-                var out = ['<?xml version="1.0" encoding="UTF-8"?>'];
+            function openGpx(out) {
+                out.push('<?xml version="1.0" encoding="UTF-8"?>');
                 out.push('<gpx version="1.1" creator="' + escaped(EXPORT.creator) + '"' +
                     ' xmlns="http://www.topografix.com/GPX/1/1"' +
                     ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"' +
                     ' xmlns:' + EXPORT.prefix + '="' + escaped(EXPORT.namespace) + '"' +
                     ' xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">');
-                // The order GPX 1.1 fixes for what <metadata> holds, and there
-                // is deliberately no <copyright>: it takes exactly one licence,
-                // and a file mixing CC0, CC BY, ODbL and CC BY-NC has no single
-                // one to put there. Listing what is present is the honest form.
+            }
+
+            // The order GPX 1.1 fixes for what <metadata> holds, and there is
+            // deliberately no <copyright>: it takes exactly one licence, and a
+            // file mixing CC0, CC BY, ODbL and CC BY-NC has no single one to put
+            // there. Listing what is present is the honest form.
+            function metadataOf(out, name, described, credits) {
                 out.push('  <metadata>');
-                out.push('    <name>' + escaped(figure.name || figure.id) + '</name>');
-                out.push('    <desc>' + escaped(EXPORT.description + '. Sources: ' + credits.map(creditLine).join(' \\u00b7 ')) + '</desc>');
+                out.push('    <name>' + escaped(name) + '</name>');
+                out.push('    <desc>' + escaped(described + '. Sources: ' + credits.map(creditLine).join(' \\u00b7 ')) + '</desc>');
                 out.push('    <time>' + new Date().toISOString().replace(/\\.\\d+Z$/, 'Z') + '</time>');
                 out.push('    <extensions>');
                 credits.forEach(function (credit) {
@@ -1784,27 +1913,14 @@ class _ProfilePanel(MacroElement):
                 });
                 out.push('    </extensions>');
                 out.push('  </metadata>');
+            }
 
-                out.push('  <trk>');
-                out.push('    <name>' + escaped(figure.name || figure.id) + '</name>');
-                if (told.length) { out.push('    <desc>' + escaped(told.join(' \\u00b7 ')) + '</desc>'); }
-                out.push('    <extensions>');
-                EXPORT.fields.forEach(function (pair) {
-                    var value = figure[pair[0]];
-                    if (value === null || value === undefined || value === '') { return; }
-                    out.push('      <' + EXPORT.prefix + ':' + pair[1] + '>' +
-                        escaped(typeof value === 'number' ? fixed(value) : value) +
-                        '</' + EXPORT.prefix + ':' + pair[1] + '>');
-                });
-                if (heightsWritten(runs) && EXPORT.ascentMethod) {
-                    out.push('      <' + EXPORT.prefix + ':ascentMethod>' + escaped(EXPORT.ascentMethod) +
-                        '</' + EXPORT.prefix + ':ascentMethod>');
-                }
-                out.push('    </extensions>');
-                // One segment per stretch that joins up. A track drawn straight
-                // across the step between two of them is a route nobody can
-                // walk; no chain in this park has such a step, and the file says
-                // so by holding one segment rather than by asserting it.
+            // One segment per stretch that joins up. A track drawn straight
+            // across the step between two of them is a route nobody can walk:
+            // no chain in this park has such a step and a plan has one at every
+            // crossing, and the file says which by where it breaks rather than
+            // by asserting anything.
+            function segmentsOf(out, runs) {
                 runs.forEach(function (run) {
                     out.push('    <trkseg>');
                     for (var i = 0; i < run.lon.length; i += 1) {
@@ -1813,10 +1929,132 @@ class _ProfilePanel(MacroElement):
                         // No <time> on a trackpoint, ever: a track carrying
                         // timestamps reads as a recorded activity rather than a
                         // plan, and the rest would be guesses dressed as data.
+                        //
+                        // And a point the height model was never read at keeps
+                        // its place and loses only its <ele>. That is the second
+                        // of the two kinds of nothing this file has to tell
+                        // apart: there is ground here and no reading of it,
+                        // where a crossing is no ground at all and ended the
+                        // segment above.
                         out.push(point + (isNaN(run.ele[i]) ? '</trkpt>' : '<ele>' + fixedEle(run.ele[i]) + '</ele></trkpt>'));
                     }
                     out.push('    </trkseg>');
                 });
+            }
+
+            function gpxOf(figure, shape, runs) {
+                var credits = creditsOf(figure, runs);
+                var told = [waysOf(figure), shape.read ? climb(figure) : '', unrecordedOf(figure)]
+                    .filter(function (part) { return part; });
+
+                var out = [];
+                openGpx(out);
+                metadataOf(out, figure.name || figure.id, EXPORT.description, credits);
+
+                out.push('  <trk>');
+                out.push('    <name>' + escaped(figure.name || figure.id) + '</name>');
+                if (told.length) { out.push('    <desc>' + escaped(told.join(' \\u00b7 ')) + '</desc>'); }
+                out.push('    <extensions>');
+                EXPORT.fields.forEach(function (pair) {
+                    var value = figure[pair[0]];
+                    if (value === null || value === undefined || value === '') { return; }
+                    out.push('      ' + element(pair[1], typeof value === 'number' ? fixed(value) : value));
+                });
+                if (heightsWritten(runs) && EXPORT.ascentMethod) {
+                    out.push('      ' + element('ascentMethod', EXPORT.ascentMethod));
+                }
+                out.push('    </extensions>');
+                segmentsOf(out, runs);
+                out.push('  </trk>');
+                out.push('</gpx>');
+                return out.join('\\n') + '\\n';
+            }
+
+            // Everything a planned route states about itself as one number.
+            // Read off the composed series and the figures already read from
+            // it, never recomputed here: the panel above the button and the file
+            // under it have to be the same claim.
+            function routeFigures(figure, shape) {
+                return {
+                    ascent: shape.read ? figure.ascent : null,
+                    descent: shape.read ? figure.descent : null,
+                    walked: shape.total,
+                    crossed: shape.crossed,
+                    straight: shape.straight,
+                    unrecorded: shape.tally.unrecorded,
+                    marked: shape.tally.marked,
+                    unmarked: shape.tally.unmarked,
+                    unknown: shape.tally.unknown,
+                    undrawn: shape.tally.undrawn
+                };
+            }
+
+            // `extra` is what the panel was told about the route beside its own
+            // series — its crossings, its stretches drawn straight — and it is
+            // handed in for the same reason `planned` takes it: the sentence
+            // above the button and the one in the file are one sentence.
+            function routeGpxOf(figure, shape, runs, plan, extra) {
+                var credits = routeCredits(shape, runs);
+                var told = planned(figure, shape, extra).concat([markingLine(shape.tally)]);
+                var figures = routeFigures(figure, shape);
+
+                var out = [];
+                openGpx(out);
+                metadataOf(out, EXPORT.route.name, EXPORT.route.description, credits);
+
+                // After the metadata and before the track, which is where GPX
+                // 1.1 puts a waypoint: it is a top-level element of its own and
+                // **not** part of the extensions mechanism, and a file placing
+                // it anywhere else parses and fails the schema.
+                plan.waypoints.forEach(function (point, index) {
+                    out.push('  <wpt lat="' + point.lat.toFixed(EXPORT.coordinateDecimals) +
+                        '" lon="' + point.lon.toFixed(EXPORT.coordinateDecimals) + '">');
+                    out.push('    <name>' + escaped(EXPORT.waypoint.name + ' ' + (index + 1)) + '</name>');
+                    // Set or generated, on every one. Nothing generates a
+                    // waypoint yet, and the field goes in before anything does:
+                    // a reader loading this file back must never take a marker
+                    // the map placed for a station somebody chose, and a file
+                    // written before the field existed could only ever be
+                    // matched afterwards, never restored.
+                    out.push('    <extensions>');
+                    out.push('      ' + element(EXPORT.waypoint.origin, EXPORT.waypoint.set));
+                    out.push('    </extensions>');
+                    out.push('  </wpt>');
+                });
+
+                out.push('  <trk>');
+                out.push('    <name>' + escaped(EXPORT.route.name) + '</name>');
+                out.push('    <desc>' + escaped(told.join(' \\u00b7 ')) + '</desc>');
+                out.push('    <extensions>');
+                out.push('      ' + element(EXPORT.route.kindField, EXPORT.route.kind));
+                EXPORT.route.fields.forEach(function (pair) {
+                    var value = figures[pair[0]];
+                    if (value === null || value === undefined || isNaN(value)) { return; }
+                    out.push('      ' + element(pair[1], fixed(value)));
+                });
+                if (heightsWritten(runs) && EXPORT.ascentMethod) {
+                    out.push('      ' + element('ascentMethod', EXPORT.ascentMethod));
+                }
+                // The legs, in the order they were clicked, each holding its
+                // parts in the order they are walked. **This cannot go on a
+                // <trkseg>**: a segment is a stretch and a stretch breaks only
+                // where the ground stops, so four routed legs laid end to end
+                // are one segment and could carry one mode between them. Leg n
+                // runs from waypoint n to waypoint n + 1, which is what makes
+                // the list readable without an index on either.
+                out.push('      <' + EXPORT.prefix + ':' + EXPORT.route.legs + '>');
+                plan.legs.forEach(function (parts) {
+                    out.push('        <' + EXPORT.prefix + ':' + EXPORT.route.leg + '>');
+                    parts.forEach(function (part) {
+                        out.push('          <' + EXPORT.prefix + ':' + EXPORT.route.part +
+                            ' ' + EXPORT.route.partKind + '="' + escaped(part.kind) + '"' +
+                            ' ' + EXPORT.route.partLength + '="' + fixed(part.length) + '"/>');
+                    });
+                    out.push('        </' + EXPORT.prefix + ':' + EXPORT.route.leg + '>');
+                });
+                out.push('      </' + EXPORT.prefix + ':' + EXPORT.route.legs + '>');
+                out.push('    </extensions>');
+                segmentsOf(out, runs);
                 out.push('  </trk>');
                 out.push('</gpx>');
                 return out.join('\\n') + '\\n';
@@ -1890,9 +2128,15 @@ class _ProfilePanel(MacroElement):
             carries.style.cssText = 'color:#333';
             var licensed = document.createElement('div');
             licensed.style.cssText = 'margin:2px 0 0;color:#666;font-size:11px';
+            // What kind of ground the file covers, which only a route states:
+            // its three marking buckets, and the length no source records a path
+            // along. A chain leaves this row empty.
+            var noted = document.createElement('div');
+            noted.style.cssText = 'margin:2px 0 0;color:#666;font-size:11px';
             offer.appendChild(download);
             offer.appendChild(carries);
             offer.appendChild(licensed);
+            offer.appendChild(noted);
 
             body.appendChild(summary);
             body.appendChild(offer);
@@ -2312,12 +2556,15 @@ class _ProfilePanel(MacroElement):
             // beside it in `told`. A flat line at zero would be a claim about
             // ground that is not there, and so would a total that swallowed a
             // crossing.
-            function planned(figure, shape) {
+            // `extra` is handed in rather than read off the selection: the
+            // panel says this above the button and the file says it in the
+            // track's <desc>, and the two must be one sentence written once.
+            function planned(figure, shape, extra) {
                 var told = [];
                 if (shape.read) { told.push(climb(figure)); }
                 told.push((shape.total / 1000).toFixed(2) + ' km on foot');
                 if (shape.read) { told.push('high ' + metres(figure.high) + ' m', 'low ' + metres(figure.low) + ' m'); }
-                told = told.concat(selected.told || []);
+                told = told.concat(extra || []);
                 if (!shape.read) {
                     told.push(shape.total > 0 ? 'no height was read along it' : 'no ground under any of it');
                 }
@@ -2328,7 +2575,7 @@ class _ProfilePanel(MacroElement):
                 if (!selected) { say(suspended ? 'Plan mode: click the map to place a point.' : 'Click a line to see its profile.'); return; }
                 var figure = selected.figure, shape = selected.shape;
                 if (!shape) { say(selected.saying || 'Decoding the network\\u2026'); return; }
-                if (selected.composed) { say(planned(figure, shape).join(' \\u00b7 ')); return; }
+                if (selected.composed) { say(planned(figure, shape, selected.told).join(' \\u00b7 ')); return; }
                 if (!shape.read) {
                     // Two kinds of nothing, and they are not the same nothing.
                     // A flat line at zero would be a claim about ground that was
@@ -2349,11 +2596,13 @@ class _ProfilePanel(MacroElement):
             // reader is shown is the one the file holds.
             function offered() {
                 if (!EXPORT) { return; }
-                // A composed route is not offered here. Writing a plan out is
-                // its own phase, and a button this panel could not honour is
-                // worse than no button at all.
-                offer.style.display = (selected && !selected.composed) ? '' : 'none';
-                if (!selected || selected.composed) { return; }
+                // A series composed by something that offered no description of
+                // what it composed cannot be written out: the file has to say
+                // what its legs are and where its waypoints went, and a button
+                // this panel could not honour is worse than no button at all.
+                offer.style.display = (selected && (!selected.composed || selected.plan)) ? '' : 'none';
+                noted.textContent = '';
+                if (!selected || (selected.composed && !selected.plan)) { return; }
                 if (!selected.shape) {
                     download.disabled = true;
                     // Whatever went wrong with the graph is said once, above,
@@ -2366,21 +2615,39 @@ class _ProfilePanel(MacroElement):
                 }
                 selected.runs = runsOf(selected.shape);
                 var points = pointsIn(selected.runs);
+                if (selected.composed) {
+                    // **Refused while any leg is unsettled, and said.** The file
+                    // states that it breaks only at crossings; a leg still being
+                    // worked out, or one the height service refused, is a hole
+                    // that would break it somewhere else and nothing in the file
+                    // would say so.
+                    download.disabled = points < 2 || !!selected.plan.why;
+                    carries.textContent = selected.plan.why ? selected.plan.why
+                        : [points.toLocaleString('en-GB') + ' points'].concat(
+                            planned(selected.figure, selected.shape, selected.told)).join(' \\u00b7 ');
+                    licensed.textContent = routeCredits(selected.shape, selected.runs).map(licenceLine).join(' \\u00b7 ');
+                    noted.textContent = markingLine(selected.shape.tally);
+                    return;
+                }
                 download.disabled = points < 2;
                 carries.textContent = [
                     points.toLocaleString('en-GB') + ' points',
                     heightsWritten(selected.runs) ? climb(selected.figure) : 'no height along this stretch',
                     (selected.figure.length / 1000).toFixed(2) + ' km',
                 ].join(' \\u00b7 ');
-                licensed.textContent = creditsOf(selected.figure, selected.runs).map(function (credit) {
-                    return credit.name + ' \\u2014 ' + credit.licence + (credit.note ? ', ' + credit.note : '');
-                }).join(' \\u00b7 ');
+                licensed.textContent = creditsOf(selected.figure, selected.runs).map(licenceLine).join(' \\u00b7 ');
             }
 
             if (EXPORT) {
                 download.addEventListener('click', function () {
                     if (!selected || !selected.runs) { return; }
-                    saveFile(fileNameOf(selected.figure), gpxOf(selected.figure, selected.shape, selected.runs));
+                    if (selected.composed) {
+                        if (!selected.plan || selected.plan.why) { return; }
+                        saveFile(fileNameOf(EXPORT.route.fileStem),
+                                 routeGpxOf(selected.figure, selected.shape, selected.runs, selected.plan, selected.told));
+                        return;
+                    }
+                    saveFile(fileNameOf(selected.figure.id), gpxOf(selected.figure, selected.shape, selected.runs));
                 });
             }
 
@@ -2414,7 +2681,13 @@ class _ProfilePanel(MacroElement):
                 series: function (spec) {
                     present(spec === null ? null : {
                         composed: true, label: spec.label, figure: spec.figure, shape: spec.shape,
-                        told: spec.told || [], saying: spec.saying, mid: null});
+                        told: spec.told || [], saying: spec.saying, mid: null,
+                        // What the panel cannot work out from a series alone and
+                        // the file cannot be written without: where the reader
+                        // put its points down, what each leg is made of, and
+                        // whether the route has a hole in it. Absent, the series
+                        // still draws and is not offered as a file.
+                        plan: spec.plan || null});
                 },
                 suspend: function (taken) {
                     suspended = !!taken;
@@ -2584,7 +2857,10 @@ def add_profile_panel(
             each dataset draws on, each with its licence and the version it was
             read at — ``heights``, the same for the height model every ``<ele>``
             comes from, ``fields``, the figure keys a track's ``<extensions>``
-            are written from and the names they travel under, and the writer's
+            are written from and the names they travel under,
+            ``sourceLength``, the credit field a route states each source's
+            contributed metres in, ``route`` and ``waypoint``, the names a
+            planned route's own file is written with, and the writer's
             own settings: ``gapM``, ``decimals``, ``elevationDecimals``,
             ``coordinateDecimals``,
             ``namespace``, ``prefix``, ``creator``, ``description``,
@@ -2609,8 +2885,15 @@ def add_profile_panel(
 
     if export is not None:
         missing = sorted(set(EXPORT_SETTINGS) - set(export))
+        # And into the two that are dicts of names rather than single values.
+        # Reported under the key they sit in, so a caller is told where to look
+        # rather than that something called "partLength" is missing.
+        for key, wanted in (("route", EXPORT_ROUTE_SETTINGS), ("waypoint", EXPORT_WAYPOINT_SETTINGS)):
+            inside = export.get(key)
+            if isinstance(inside, dict):
+                missing += sorted(f"{key}.{name}" for name in set(wanted) - set(inside))
         if missing:
-            raise ValueError(f"the page cannot write a GPX file without {', '.join(missing)}")
+            raise ValueError(f"the page cannot write a GPX file without {', '.join(sorted(missing))}")
 
     _ProfilePanel(groups, figures, title, chart_height, collapsed, export).add_to(fmap)
 
@@ -2655,6 +2938,21 @@ class _PlanMode(MacroElement):
     adjacency are all here, and they are cheap — the adjacency is derived from
     the payload's own columns rather than shipped beside them.
 
+    **The route's series is laid out in one walk, not two.** The profile wants
+    heights against distance and the exported file wants coordinates, and
+    composing those separately would be two walks over one route that could
+    disagree — each still looking like a route. So ``composeRoute`` produces the
+    shape a chain's series has, which is what the panel's writer already knows
+    how to read, and the geometry that existed per part but was never composed
+    is what made this more than wiring.
+
+    **What a route is made of is summed per edge**, where the edges are still in
+    hand: which dataset drew each metre, whether anything says it is waymarked,
+    and whether any source records a path along it. A part keeps its geometry
+    and its heights and nothing downstream can get back to the edge a metre came
+    from. Unknown is its own bucket and is never folded into unmarked, and a
+    connector nobody drew was never asked rather than asked and unanswered.
+
     It arrives as ``window.trailsPlan``, whose ``state()`` says what the route is
     and whose ``place()`` is the entry a click uses, so a browser check can drive
     it and read it rather than screenshot it.
@@ -2672,11 +2970,25 @@ class _PlanMode(MacroElement):
             // a dark narrow one, or it disappears over a dark line.
             var ROUTE = '#111111', CASING = '#ffffff', WAITING = '#9e9e9e';
 
+            // What the payload's own header calls a crossing and an inferred
+            // connector, handed in rather than spelled here: renaming either in
+            // trails.routing.sources would otherwise leave this page reading
+            // every ferry as walked ground, and nothing would look wrong.
+            var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind;
+
             // How each kind is drawn. Routed is a line; ground drawn straight
             // across is dashed exactly as the profile dashes it; a crossing is a
             // wider gap still, because it is not walked at all. A leg not yet
             // worked out is neither, and says so by being grey.
-            var DASH = {routed: null, land: '5,4', water: '2,8', ferry: '2,8', waiting: '1,6'};
+            //
+            // **The crossing's key is the name that arrived, not the word
+            // 'ferry'.** Spelled out, a rename in trails.routing.sources would
+            // leave this table without an entry for the kind routedParts emits,
+            // and an undefined dashArray draws a fjord crossing as a solid line
+            // indistinguishable from walked ground — which is the one thing this
+            // page must never draw, and nothing about it would look wrong.
+            var DASH = {routed: null, land: '5,4', water: '2,8', waiting: '1,6'};
+            DASH[CROSSING] = '2,8';
 
             // ---- what the panel owns and this must not write again ----------
             // Laying a run of edges end to end and the metre this page measures
@@ -2875,6 +3187,86 @@ class _PlanMode(MacroElement):
                 return {edges: edges, reversed: reversed, cost: best[to]};
             }
 
+            // ---- what a route's metres are made of ----------------------------
+            // Summed per edge while the edges are still in hand. A part keeps
+            // its geometry and its heights and nothing downstream can get back
+            // to which edge a metre came from, so anything to be reported by
+            // length has to be counted here.
+            // The three buckets an edge's own sources answer with, and then the
+            // two that are not answers at all: ground on a connector nobody drew
+            // and so never asked about, and ground no source records a path
+            // along. Kept apart, because a bucket that quietly absorbed one of
+            // the others would be a claim nothing supports.
+            var MARKING = ['marked', 'unmarked', 'unknown'];
+            var TALLIED = MARKING.concat(['undrawn', 'unrecorded']);
+
+            function blankTally() {
+                var out = {sources: Object.create(null)};
+                TALLIED.forEach(function (field) { out[field] = 0; });
+                return out;
+            }
+
+            function addTally(into, from) {
+                if (!from) { return; }
+                Object.keys(from.sources).forEach(function (name) {
+                    into.sources[name] = (into.sources[name] || 0) + from.sources[name];
+                });
+                TALLIED.forEach(function (field) { into[field] += from[field]; });
+            }
+
+            // Which dataset drew each edge, whether anything says it is
+            // waymarked, and whether any source records a path along it. All
+            // three are on the payload per edge since it was first put in the
+            // page, put there for exactly this.
+            function tallyOf(graph, list) {
+                var work = router(graph), out = blankTally();
+                for (var i = 0; i < list.length; i += 1) {
+                    var edge = list[i], source = graph.header.sources[graph.sources[edge]];
+                    var metres = work.length[edge];
+                    // An inferred connector is not a dataset — nobody drew it,
+                    // which is what a connector is — so it names no source and
+                    // answers nothing about marking. Its ground is walked and
+                    // counted, apart, under its own name.
+                    if (source.kind === CONNECTOR) { out.undrawn += metres; continue; }
+                    out.sources[source.name] = (out.sources[source.name] || 0) + metres;
+                    // A crossing is not walking and no register marks water, so
+                    // it is credited for its metres and counted in none of the
+                    // buckets. Its length is reported apart, as a crossing.
+                    if (source.kind === CROSSING) { continue; }
+                    // header.waymarked[0] is null and means the edge was never
+                    // asked. That is not 'unknown', which means it was asked and
+                    // no source answered, and the two must not be added together.
+                    // Every edge left here is walked ground the build asked
+                    // about, so it has an answer. One that did not would be
+                    // reported as ground on a connector *and* credited to a
+                    // named dataset — two contradictory claims about one edge —
+                    // so it is a defect rather than a fourth bucket.
+                    var state = graph.header.waymarked[graph.waymarked[edge]];
+                    if (state === null || state === undefined) {
+                        throw new Error('edge ' + edge + ' is walked ground on ' + source.name + ' that was never asked about');
+                    }
+                    if (MARKING.indexOf(state) < 0) {
+                        throw new Error('the payload names a marking state this page has no bucket for: ' + state);
+                    }
+                    out[state] += metres;
+                    // Recorded, never fact: the sources over-record, so their
+                    // silence is evidence and their lines are not.
+                    if (graph.noPathRecorded[edge]) { out.unrecorded += metres; }
+                }
+                return out;
+            }
+
+            // A leg drawn straight is unmarked by construction rather than
+            // unknown — nobody marks a line you drew across open ground — and it
+            // asserts nothing about whether a path is recorded there: that rule
+            // is a spatial test against every source's lines, which the page
+            // cannot run. Its length is reported as drawn straight instead.
+            function straightTally(length) {
+                var out = blankTally();
+                out.unmarked = length;
+                return out;
+            }
+
             // ---- the four kinds ----------------------------------------------
             // A routed leg, cut at every change between walking and crossing, so
             // the ferry inside it is a crossing rather than 8 km of walking with
@@ -2886,15 +3278,20 @@ class _PlanMode(MacroElement):
                     if (!run.length) { return; }
                     var breaks = run.map(function () { return false; });
                     var laid = panel().layEdges(graph, run, reversed, breaks);
-                    parts.push(kind === 'ferry'
-                        ? {kind: 'ferry', lon: laid.lon, lat: laid.lat, length: laid.total, height: null, distance: null, read: false}
-                        : {kind: 'routed', lon: laid.lon, lat: laid.lat, length: laid.total,
-                           height: laid.height, distance: laid.distance, read: laid.read});
+                    var tally = tallyOf(graph, run);
+                    // `along` travels with the part because the file is written
+                    // from the vertices and the profile from the samples, and
+                    // the two are different series over the same ground.
+                    parts.push(kind === CROSSING
+                        ? {kind: CROSSING, lon: laid.lon, lat: laid.lat, along: laid.along, length: laid.total,
+                           height: null, distance: null, read: false, tally: tally}
+                        : {kind: 'routed', lon: laid.lon, lat: laid.lat, along: laid.along, length: laid.total,
+                           height: laid.height, distance: laid.distance, read: laid.read, tally: tally});
                     run = []; reversed = [];
                 }
 
                 for (var i = 0; i < found.edges.length; i += 1) {
-                    var here = graph.header.sources[graph.sources[found.edges[i]]].kind === 'ferry' ? 'ferry' : 'routed';
+                    var here = graph.header.sources[graph.sources[found.edges[i]]].kind === CROSSING ? CROSSING : 'routed';
                     if (here !== kind) { flush(); kind = here; }
                     run.push(found.edges[i]); reversed.push(found.reversed[i]);
                 }
@@ -3074,7 +3471,8 @@ class _PlanMode(MacroElement):
                     var head = positionAt(began), tail = positionAt(ended);
                     if (points[first].sea) {
                         parts.push({kind: 'water', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
-                                    length: ended - began, height: null, distance: null, read: false});
+                                    along: [0, ended - began], length: ended - began,
+                                    height: null, distance: null, read: false, tally: blankTally()});
                         continue;
                     }
                     var height = [], distance = [], read = false;
@@ -3083,8 +3481,13 @@ class _PlanMode(MacroElement):
                         distance.push(laid.along[s] - began);
                         if (!isNaN(points[s].height)) { read = true; }
                     }
+                    // Two vertices and no more: the reader drew a straight line,
+                    // so the two ends are every corner it has. The file's 5 m
+                    // fill lays its points along it from these.
                     parts.push({kind: 'land', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
-                                length: ended - began, height: height, distance: distance, read: read});
+                                along: [0, ended - began], length: ended - began,
+                                height: height, distance: distance, read: read,
+                                tally: straightTally(ended - began)});
                 }
                 return parts;
             }
@@ -3108,42 +3511,81 @@ class _PlanMode(MacroElement):
             // nothing was read. Two walked parts meeting at a waypoint both
             // sample it, so the second copy is dropped, exactly as two edges
             // meeting at a node are.
+            //
+            // **The coordinates are laid here too, in the same walk.** The
+            // profile is drawn from heights against distance and the file is
+            // written from vertices, and composing those in two passes would be
+            // two walks over one route that could disagree — each still looking
+            // like a route. What comes out is the shape a chain's series has:
+            // lon, lat, along, height, distance and stretches, which is what the
+            // writer's runsOf and denseOf already know how to read. That the
+            // geometry existed per part and was never composed is the whole
+            // reason this phase is not wiring.
+            //
+            // **The two kinds of NaN are carried apart rather than told apart
+            // afterwards.** A crossing pushes one because there is no ground
+            // under it; an unread sample is one because the model had no reading
+            // for ground that is there. The first has to break the track and the
+            // second may only drop an <ele>, and in this series both are a NaN
+            // in `height` — distinguishable, if at all, by a distance that
+            // repeats. So the boundary is recorded where it happens, as a
+            // stretch that ends: getting it wrong draws a line across a fjord or
+            // cuts a route into dozens of pieces, and both look right on a chart.
             function composeRoute() {
-                var height = [], distance = [], free = [];
+                var lon = [], lat = [], along = [], height = [], distance = [], free = [];
+                var stretches = [], stretch = null, tally = blankTally();
                 var walked = 0, crossings = 0, crossed = 0, straight = 0, read = false, joined = false;
+
+                function close() {
+                    if (!stretch) { return; }
+                    stretch.to = lon.length;
+                    stretch.sampleTo = height.length;
+                    stretches.push(stretch);
+                    stretch = null;
+                }
+
+                // A crossing, a leg still being worked out and a leg the height
+                // service refused all leave the same hole: ground the route does
+                // not connect. A curve drawn through it would count a climb
+                // across it and a track drawn through it would assert a way
+                // across, and neither was measured. The NaN pushed here sits
+                // between two stretches and inside neither, so nothing writes it
+                // as a point.
+                function breakHere() {
+                    close();
+                    if (height.length) { height.push(NaN); distance.push(walked); free.push(0); }
+                    joined = false;
+                }
+
                 legs.forEach(function (leg) {
-                    // A leg still being worked out, or one the height service
-                    // refused, breaks the series rather than being stepped over.
-                    // Its ground is not known to be anything, and a curve drawn
-                    // straight through the hole would join two stretches the
-                    // route does not yet connect — the same invention as a climb
-                    // counted across a gap.
-                    if (!leg.parts) {
-                        if (height.length) { height.push(NaN); distance.push(walked); free.push(0); }
-                        joined = false;
-                        return;
-                    }
+                    if (!leg.parts) { breakHere(); return; }
                     leg.parts.forEach(function (part) {
+                        addTally(tally, part.tally);
                         if (part.height === null) {
                             crossings += 1;
                             crossed += part.length;
-                            if (height.length) { height.push(NaN); distance.push(walked); free.push(0); }
-                            joined = false;
+                            breakHere();
                             return;
                         }
                         if (part.kind === 'land') { straight += part.length; }
-                        var mark = part.kind === 'land' ? 1 : 0;
-                        for (var s = (joined ? 1 : 0); s < part.height.length; s += 1) {
-                            height.push(part.height[s]);
-                            distance.push(walked + part.distance[s]);
-                            free.push(mark);
-                            if (!isNaN(part.height[s])) { read = true; }
+                        if (!stretch) { stretch = {from: lon.length, sampleFrom: height.length}; }
+                        var mark = part.kind === 'land' ? 1 : 0, at;
+                        for (at = (joined ? 1 : 0); at < part.lon.length; at += 1) {
+                            lon.push(part.lon[at]); lat.push(part.lat[at]); along.push(walked + part.along[at]);
                         }
-                        joined = part.height.length > 0;
+                        for (at = (joined ? 1 : 0); at < part.height.length; at += 1) {
+                            height.push(part.height[at]);
+                            distance.push(walked + part.distance[at]);
+                            free.push(mark);
+                            if (!isNaN(part.height[at])) { read = true; }
+                        }
+                        joined = part.height.length > 0 && part.lon.length > 0;
                         walked += part.length;
                     });
                 });
-                return {height: height, distance: distance, free: free, total: walked, read: read,
+                close();
+                return {lon: lon, lat: lat, along: along, height: height, distance: distance, free: free,
+                        stretches: stretches, tally: tally, total: walked, read: read,
                         crossing: crossings > 0, crossings: crossings, crossed: crossed, straight: straight};
             }
 
@@ -3218,14 +3660,26 @@ class _PlanMode(MacroElement):
                 if (shape.straight > 0) {
                     said.push((shape.straight / 1000).toFixed(2) + ' km drawn straight, not a path');
                 }
-                var waiting = legs.filter(function (leg) { return !leg.parts && !leg.failed; }).length;
-                if (waiting) { said.push(waiting + (waiting === 1 ? ' leg' : ' legs') + ' still being worked out'); }
-                var refused = legs.filter(function (leg) { return leg.failed; });
-                if (refused.length) {
-                    said.push(refused.length + (refused.length === 1 ? ' leg' : ' legs') +
-                              ' with no heights: ' + refused[0].failed);
+                var outstanding = unsettled();
+                if (outstanding.waiting) {
+                    said.push(outstanding.waiting + (outstanding.waiting === 1 ? ' leg' : ' legs') + ' still being worked out');
+                }
+                if (outstanding.refused.length) {
+                    said.push(outstanding.refused.length + (outstanding.refused.length === 1 ? ' leg' : ' legs') +
+                              ' with no heights: ' + outstanding.refused[0].failed);
                 }
                 return said;
+            }
+
+            // What the route is still missing. One count, read by the sentence
+            // the reader sees and by the refusal that keeps the file from being
+            // written: two counts of the same thing would eventually disagree
+            // about whether a route is finished.
+            function unsettled() {
+                return {
+                    waiting: legs.filter(function (leg) { return !leg.parts && !leg.failed; }).length,
+                    refused: legs.filter(function (leg) { return leg.failed; })
+                };
             }
 
             // ---- drawing --------------------------------------------------------
@@ -3418,15 +3872,40 @@ class _PlanMode(MacroElement):
                 present();
             }
 
+            // What only this side knows and the file cannot be written without:
+            // where the reader put its points down, what each leg is made of,
+            // and whether there is a hole in the route.
+            //
+            // **A hole refuses the file rather than being written into it.** The
+            // file says it breaks its track only at crossings, and a leg still
+            // being worked out or one the height service refused would break it
+            // somewhere else with nothing in the file to say so.
+            function writable() {
+                var outstanding = unsettled(), waiting = outstanding.waiting, refused = outstanding.refused.length;
+                return {
+                    why: points.length < 2 ? 'Place a second point and there is a route to write.'
+                        : waiting ? 'Still working out ' + waiting + (waiting === 1 ? ' leg.' : ' legs.')
+                        : refused ? refused + (refused === 1 ? ' leg has' : ' legs have') +
+                            ' no way and no heights, so the route has a gap that is not a crossing.'
+                        : '',
+                    waypoints: points.map(function (point) { return {lat: point.lat, lon: point.lon}; }),
+                    legs: legs.map(function (leg) {
+                        return (leg.parts || []).map(function (part) { return {kind: part.kind, length: part.length}; });
+                    })
+                };
+            }
+
             // What the panel is shown. The route's series is composed here and
             // handed over; the panel draws the curve, the bands, the crosshair
-            // and the reduction exactly as it does for a chain.
+            // and the reduction exactly as it does for a chain, and writes the
+            // file from the same series it drew.
             function present() {
                 var showing = panel();
                 if (!showing) { return; }
                 if (!points.length) { showing.series(null); return; }
                 var shape = composeRoute();
-                showing.series({label: 'planned route', figure: figuresOf(shape), shape: shape, told: told(shape)});
+                showing.series({label: 'planned route', figure: figuresOf(shape), shape: shape,
+                                told: told(shape), plan: writable()});
             }
 
             function switchTo(want) {
@@ -3504,7 +3983,14 @@ class _PlanMode(MacroElement):
                             };
                         }),
                         walked: shape.total, crossings: shape.crossings, crossed: shape.crossed,
-                        straight: shape.straight, read: shape.read, figure: figuresOf(shape)
+                        straight: shape.straight, read: shape.read, figure: figuresOf(shape),
+                        // What the file states about the ground it covers, and
+                        // the shape it is written from: a check can read these
+                        // rather than parsing the file back, and then read the
+                        // file to see that it says the same.
+                        tally: shape.tally, stretches: shape.stretches.length,
+                        vertices: shape.lon.length, samples: shape.height.length,
+                        writable: writable()
                     };
                 }
             };
@@ -3579,9 +4065,13 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any]) -> None:
             two halves of one profile answer differently; ``snapM`` is how near
             a click has to land to be taken as a node; ``maxStraightM`` is how
             far a leg may be drawn straight before it is refused, which bounds
-            what one misclick can ask of a public service. The names come from
-            :mod:`trails.io.sources.hoydedata` and
-            :mod:`trails.routing.elevation`.
+            what one misclick can ask of a public service; ``crossingKind`` and
+            ``connectorKind`` are what the payload's header calls a crossing and
+            an inferred connector, which the page tests every edge it routes over
+            against — spelled in the page instead, a rename would leave it
+            reading a ferry as walked ground. The names come from
+            :mod:`trails.io.sources.hoydedata`, :mod:`trails.routing.elevation`
+            and :mod:`trails.routing.sources`.
 
     Raises:
         ValueError: If ``plan`` leaves out something the page cannot route or

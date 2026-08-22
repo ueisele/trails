@@ -25,7 +25,14 @@ import geopandas as gpd
 import pytest
 from lxml import etree
 from shapely.geometry import LineString, MultiLineString
-from trails.io.export.gpx import EXTENSION_DECIMALS, export_to_gpx
+from trails.io.export.gpx import (
+    EXTENSION_DECIMALS,
+    SOURCE_LENGTH_FIELD,
+    WAYPOINT_GENERATED,
+    WAYPOINT_ORIGIN_FIELD,
+    WAYPOINT_SET,
+    export_to_gpx,
+)
 
 #: A line whose vertices sit far closer together than any simplification
 #: tolerance worth applying, so thinning it is visible in a count.
@@ -292,3 +299,84 @@ def test_a_figure_is_rounded_the_way_the_page_will_format_it(tmp_path: Path) -> 
         path, _ = export_to_gpx(frame, tmp_path / "rounded.gpx", extension_fields={"ascent": "ascent"})
 
         assert parsed(path).findtext("{*}trk/{*}extensions/{*}ascent") == page
+
+
+#: Two points of a route, one a reader put down and one the map did.
+WAYPOINTS = [
+    {"lat": 65.5, "lon": 13.0, "name": "Point 1", WAYPOINT_ORIGIN_FIELD: WAYPOINT_SET},
+    {"lat": 65.6, "lon": 13.1, "name": "Enters Lomsdal-Visten", WAYPOINT_ORIGIN_FIELD: WAYPOINT_GENERATED},
+]
+
+
+def test_a_waypoint_is_written_before_the_track_and_not_inside_it(tmp_path: Path) -> None:
+    """A waypoint is a GPX 1.1 top-level element and **not** part of the
+    extensions mechanism. Written anywhere else the file parses and fails the
+    schema, and neither writer could write one at all before this."""
+    path, _ = export_to_gpx(trails(HEIGHTED), tmp_path / "wpt.gpx", waypoints=WAYPOINTS)
+
+    children = [etree.QName(child).localname for child in parsed(path)]
+    assert children == ["metadata", "wpt", "wpt", "trk"]
+
+
+def test_a_file_carrying_waypoints_validates_against_the_schema(tmp_path: Path) -> None:
+    path, _ = export_to_gpx(trails(HEIGHTED), tmp_path / "wpt-valid.gpx", sources=CREDITS, waypoints=WAYPOINTS)
+
+    schema = etree.XMLSchema(etree.parse(str(SCHEMA)))
+    schema.assertValid(etree.parse(str(path)))
+
+
+def test_every_waypoint_says_whether_it_was_set_or_generated(tmp_path: Path) -> None:
+    """Phase 8 must never read a marker the map placed as a station somebody
+    chose: a loaded route would gain points nobody put down and start routing
+    through them."""
+    path, _ = export_to_gpx(trails(HEIGHTED), tmp_path / "origin.gpx", waypoints=WAYPOINTS)
+
+    origins = [element.text for element in parsed(path).findall(f".//{{*}}wpt/{{*}}extensions/{{*}}{WAYPOINT_ORIGIN_FIELD}")]
+    assert origins == [WAYPOINT_SET, WAYPOINT_GENERATED]
+
+
+def test_a_waypoint_carries_no_height_of_its_own(tmp_path: Path) -> None:
+    """The track carries every height that was read and the file states the rule
+    they were read under. A fourth copy of one of those numbers on the waypoint
+    could only ever disagree with them."""
+    path, _ = export_to_gpx(trails(HEIGHTED), tmp_path / "wpt-ele.gpx", waypoints=WAYPOINTS)
+
+    assert parsed(path).findall(".//{*}wpt/{*}ele") == []
+
+
+def test_a_waypoint_with_no_position_is_refused(tmp_path: Path) -> None:
+    """Writing one at 0/0 would put it in the Gulf of Guinea."""
+    with pytest.raises(KeyError):
+        export_to_gpx(trails(HEIGHTED), tmp_path / "nowhere.gpx", waypoints=[{"name": "nowhere"}])
+
+
+def test_a_chain_export_writes_no_waypoints(tmp_path: Path) -> None:
+    """A waypoint is a place somebody chose, and nobody chose anything about a
+    line read out of a register."""
+    path, _ = export_to_gpx(trails(HEIGHTED), tmp_path / "none.gpx")
+
+    assert parsed(path).findall(".//{*}wpt") == []
+
+
+def test_a_source_states_its_length_only_where_one_was_worked_out(tmp_path: Path) -> None:
+    """A chain has one source and the length is the track's; a planned route
+    runs over several and states each, so *3.20 km OSM (ODbL)* is readable
+    before the file is passed on."""
+    measured = [dict(CREDITS[0], **{SOURCE_LENGTH_FIELD: "3200.0"}), CREDITS[1]]
+    path, _ = export_to_gpx(trails(HEIGHTED), tmp_path / "lengths.gpx", sources=measured)
+
+    written_sources = parsed(path).findall(".//{*}metadata/{*}extensions/{*}source")
+    assert [element.get(SOURCE_LENGTH_FIELD) for element in written_sources] == ["3200.0", None]
+
+
+def test_the_description_records_a_source_the_way_the_extensions_do(tmp_path: Path) -> None:
+    """``<metadata>`` records its sources twice, once for a person and once for
+    a program. A field carried in one and left out of the other is two
+    recordings of one thing that disagree — and the page writes the phrase with
+    the length in it."""
+    measured = [dict(CREDITS[0], **{SOURCE_LENGTH_FIELD: "3200.0"}), CREDITS[1]]
+    path, _ = export_to_gpx(trails(HEIGHTED), tmp_path / "desc.gpx", sources=measured)
+
+    described = parsed(path).find(".//{*}metadata/{*}desc").text
+    assert "3.20 km FKB (CC BY 4.0" in described
+    assert "3.20 km OSM" not in described

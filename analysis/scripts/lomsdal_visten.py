@@ -44,9 +44,20 @@ from trails.io.export.gpx import (
     DEFAULT_EXTENSION_FIELDS,
     ELEVATION_DECIMALS,
     EXTENSION_DECIMALS,
+    LEG_ELEMENT,
+    LEGS_ELEMENT,
+    PART_ELEMENT,
+    PART_KIND_ATTR,
+    PART_LENGTH_ATTR,
+    ROUTE_EXTENSION_FIELDS,
+    ROUTE_KIND,
+    ROUTE_KIND_FIELD,
     SOURCE_CREDIT_FIELDS,
+    SOURCE_LENGTH_FIELD,
     TRAILS_NAMESPACE,
     TRAILS_PREFIX,
+    WAYPOINT_ORIGIN_FIELD,
+    WAYPOINT_SET,
     export_to_gpx,
 )
 from trails.io.sources import geonorge, hoydedata, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
@@ -69,7 +80,9 @@ from trails.network.norway import (
     zone_around,
 )
 from trails.routing import (
+    BRIDGE,
     DEFAULT_GAP_M,
+    FERRY,
     IDENTITY_SEPARATOR,
     Network,
     NetworkSource,
@@ -450,6 +463,24 @@ EXPORT_CREATOR = "trails-analysis"
 #: chain id in the track's extensions mean anything at all.
 EXPORT_DESCRIPTION = f"One chain of the {PARK_NAME} routing network"
 
+#: What a planned route's file calls itself, in ``<metadata>`` and on its track.
+ROUTE_NAME = f"Planned route in {PARK_NAME}"
+
+#: The line a planned route's file opens its description with. It names the map
+#: rather than the route, for the same reason a chain's does: what the legs and
+#: the waypoints in its extensions mean is a property of the map that wrote them.
+ROUTE_DESCRIPTION = f"A route planned on the {PARK_NAME} map"
+
+#: What a planned route's file is called, after the map's own prefix. Not a
+#: chain id, because a plan has none — a plan is coordinates and nothing else,
+#: which is what makes it survive the next rebuild of the graph.
+ROUTE_FILE_STEM = "route"
+
+#: What the points of a route are called in the file, before the number they are
+#: in the order they were placed. Nothing names them after the ground yet; that
+#: is the next phase, and this is what a file written before it says.
+WAYPOINT_NAME = "Point"
+
 
 class TrailLayer(NamedTuple):
     """One line layer of the map, in draw order.
@@ -647,6 +678,12 @@ def plan_settings(params: Params) -> dict[str, object]:
         "ascentThresholdM": params.ascent_threshold_m,
         "snapM": SNAP_M,
         "maxStraightM": MAX_STRAIGHT_M,
+        # What the payload's header calls a crossing and an inferred connector.
+        # The page reads both off the header for every edge it routes over, and
+        # renaming either here without telling it would leave it counting every
+        # ferry as walked ground with nothing looking wrong.
+        "crossingKind": FERRY,
+        "connectorKind": BRIDGE,
     }
 
 
@@ -694,6 +731,30 @@ def export_settings(versions: dict[str, str | None], params: Params) -> dict[str
         "ascentMethod": ascent_method(params),
         "identitySeparator": IDENTITY_SEPARATOR,
         "filePrefix": PARK_NAME.lower(),
+        "sourceLength": SOURCE_LENGTH_FIELD,
+        # What a planned route's file is made of, and every name in it comes
+        # from the writer's own module rather than being spelled in the page:
+        # nothing here can import that module across the browser boundary, so
+        # the constants travelling through this dict are the whole of what keeps
+        # the two files' vocabularies from drifting apart.
+        "route": {
+            "name": ROUTE_NAME,
+            "description": ROUTE_DESCRIPTION,
+            "fileStem": ROUTE_FILE_STEM,
+            "kindField": ROUTE_KIND_FIELD,
+            "kind": ROUTE_KIND,
+            "fields": [[key, written] for key, written in ROUTE_EXTENSION_FIELDS.items()],
+            "legs": LEGS_ELEMENT,
+            "leg": LEG_ELEMENT,
+            "part": PART_ELEMENT,
+            "partKind": PART_KIND_ATTR,
+            "partLength": PART_LENGTH_ATTR,
+        },
+        "waypoint": {
+            "name": WAYPOINT_NAME,
+            "origin": WAYPOINT_ORIGIN_FIELD,
+            "set": WAYPOINT_SET,
+        },
     }
 
 

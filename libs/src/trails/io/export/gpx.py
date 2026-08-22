@@ -7,6 +7,13 @@ read; it carries a height on every trackpoint and the rule that height figure
 was reached under; and it says which chain it is, so a file this map wrote can
 be recognised on being loaded again rather than matched against the network.
 
+**A route is a second kind of thing this file can be**, and it is described
+rather than merely drawn: the points a reader put down travel as ``<wpt>``
+elements before the track, each saying whether it was set or generated, and the
+legs between them are listed on the track with the kind and length of every part
+— because a segment breaks where the ground stops and four routed legs laid end
+to end are one segment, so a segment cannot say which leg it belongs to.
+
 **A browser writes the same file from the same graph**, and the two cannot share
 a line of code across that boundary. What holds them together is that every name
 a field travels under is a constant here rather than a literal in two places —
@@ -78,10 +85,100 @@ EXTENSION_DECIMALS = 1
 #: :data:`~trails.visualization.encoding.DEFAULT_ELEVATION_QUANTUM` carries.
 ELEVATION_DECIMALS = 2
 
+#: How many metres *this file states* were drawn from one source, and it is
+#: written only where a caller worked them out. A chain has one source and
+#: leaves it unset, because the length is the track's; a planned route runs over
+#: several and states each, so that *3.20 km OSM (ODbL)* is readable before the
+#: file is passed on rather than a blanket warning nobody reads.
+#:
+#: **Stated, not written**, and the two come apart in exactly one place: a
+#: crossing's own line is never laid into the track, but its length is a figure
+#: in the file and that figure came from somebody's geometry. So a route over a
+#: ferry credits the ferry dataset for metres no ``<trkpt>`` holds, and the
+#: credited kilometres do not sum to the track's length. Crediting a source
+#: whose measurement the file repeats is the point; summing to the track was
+#: never the claim.
+SOURCE_LENGTH_FIELD = "metres"
+
 #: What each entry of ``sources`` says. ``licence`` is spelled the way the rest
 #: of this codebase spells it; the source modules it is read from call the same
-#: field ``license``, and the translation happens where they are read.
-SOURCE_CREDIT_FIELDS = ("name", "licence", "version", "attribution", "url")
+#: field ``license``, and the translation happens where they are read. A field
+#: with nothing in it is left out, which is what lets a chain and a route share
+#: one list.
+SOURCE_CREDIT_FIELDS = ("name", "licence", "version", "attribution", "url", SOURCE_LENGTH_FIELD)
+
+#: What one clicked or generated point of a route travels under. ``origin`` is
+#: the field that matters and it is not decoration: phase 8 loads a file back
+#: and must never read a marker *the map* placed — at a park boundary, at a hut
+#: — as a station somebody chose, or a loaded route gains points nobody placed
+#: and starts routing through them. Nothing generates one yet; the field goes in
+#: now because a file written before its description existed can never be
+#: restored exactly, only matched.
+WAYPOINT_ORIGIN_FIELD = "origin"
+
+#: What ``origin`` says of a point a reader put down.
+WAYPOINT_SET = "set"
+
+#: What ``origin`` says of a point the map placed by itself.
+WAYPOINT_GENERATED = "generated"
+
+#: What a planned route's track ``<extensions>`` carry beyond
+#: :data:`DEFAULT_EXTENSION_FIELDS`, as the key the page holds a figure under to
+#: the name it is written down as. Every one is a scalar of the whole route,
+#: which is what the extensions mechanism is for; the per-leg detail is
+#: :data:`LEGS_ELEMENT` below, because it is a list and not a scalar.
+#:
+#: **Unknown is its own bucket and is never folded into unmarked.** Measured
+#: over the walked network without its inferred connectors, 63.4 % of the length
+#: is unknown and FKB — the largest source at 33.8 % — carries no marking
+#: information at all. Calling that unmarked asserts what no source says.
+#: ``undrawn`` is a fourth thing again: ground on a connector nobody drew, which
+#: was never asked rather than asked and unanswered.
+ROUTE_EXTENSION_FIELDS = {
+    "ascent": "ascent",
+    "descent": "descent",
+    "walked": "walked",
+    "crossed": "crossed",
+    "straight": "straight",
+    "unrecorded": "unrecorded",
+    "marked": "marked",
+    "unmarked": "unmarked",
+    "unknown": "unknown",
+    "undrawn": "undrawn",
+}
+
+#: The element saying what kind of thing a track is, and the value a planned
+#: route writes into it. A file that says what it is can be recognised on being
+#: loaded rather than matched against the network, which is what phase 8 reads.
+ROUTE_KIND_FIELD = "kind"
+
+#: What :data:`ROUTE_KIND_FIELD` holds on a planned route.
+ROUTE_KIND = "route"
+
+#: Where a route's legs are listed, in order.
+#:
+#: **A leg's mode cannot go on a ``<trkseg>``, and that is a fact about the
+#: geometry rather than a preference.** A segment is a stretch of track and a
+#: stretch breaks only where the ground stops, so four routed legs laid end to
+#: end are **one** segment and a segment-level extension could carry one mode
+#: for all four. The legs are therefore listed on the track, in the order they
+#: were clicked, each holding its parts in the order they are walked — which is
+#: also the form phase 8 needs, since a leg runs between two waypoints and a
+#: waypoint is what a reader put down.
+LEGS_ELEMENT = "legs"
+
+#: One leg of a route, holding :data:`PART_ELEMENT` children in order.
+LEG_ELEMENT = "leg"
+
+#: One part of a leg: a run of one kind. A routed leg that takes a ferry is
+#: walked, then crossed, then walked, and those are three parts of one leg.
+PART_ELEMENT = "part"
+
+#: What a part says it is — ``routed``, ``land``, ``water`` or ``ferry``.
+PART_KIND_ATTR = "kind"
+
+#: How long a part is, in metres.
+PART_LENGTH_ATTR = "m"
 
 
 def create_gpx_document(
@@ -157,14 +254,60 @@ def create_gpx_document(
 def _credit_line(credit: dict[str, str]) -> str:
     """Say what one source is and what may be done with it, in a phrase.
 
+    The ``<desc>`` and the ``<extensions>`` below it record the same list twice,
+    once for a person and once for a program, so a field carried in one and left
+    out of the other would be two recordings of one thing that disagree. The
+    page's own ``creditLine`` writes this phrase the same way, length first.
+
     Args:
         credit: One entry of ``sources``, carrying :data:`SOURCE_CREDIT_FIELDS`
 
     Returns:
-        The source's name, its licence and the version it was read at
+        The source's name, its licence and the version it was read at, after the
+        kilometres it contributed where a caller worked them out
     """
     inside = [str(credit[field]) for field in ("licence", "version", "attribution") if credit.get(field)]
-    return f"{credit.get('name', 'unknown')} ({', '.join(inside)})" if inside else str(credit.get("name", "unknown"))
+    named = f"{credit.get('name', 'unknown')} ({', '.join(inside)})" if inside else str(credit.get("name", "unknown"))
+    metres = credit.get(SOURCE_LENGTH_FIELD)
+    return f"{float(metres) / 1000:.2f} km {named}" if metres else named
+
+
+def waypoint_element(waypoint: dict[str, Any]) -> etree.Element:
+    """Write one point of a route down as a GPX waypoint.
+
+    **A waypoint is not part of the ``<extensions>`` mechanism.** It is a GPX
+    1.1 top-level element in its own right, written *before* the first ``<trk>``
+    — the extensions are a block inside it — and a file that puts it anywhere
+    else parses and fails the schema.
+
+    **No ``<ele>``, deliberately.** The track carries every height that was read
+    and the file states the rule they were read under; a height on the waypoint
+    as well would be the same number in a fourth place, and where the route
+    happens to break at that point there is no reading to put there at all. What
+    a waypoint is for is *where* a reader chose to go.
+
+    Args:
+        waypoint: ``lat`` and ``lon``, an optional ``name``, and
+            :data:`WAYPOINT_ORIGIN_FIELD` saying whether a reader put the point
+            down (:data:`WAYPOINT_SET`) or the map did (:data:`WAYPOINT_GENERATED`)
+
+    Returns:
+        GPX waypoint element
+
+    Raises:
+        KeyError: If the point has no position. A waypoint at no place is not a
+            waypoint, and writing one at 0/0 would put it in the Gulf of Guinea.
+    """
+    element = etree.Element("wpt", attrib={"lat": str(waypoint["lat"]), "lon": str(waypoint["lon"])})
+    # The order GPX 1.1 fixes for what a <wpt> holds: <name> well before
+    # <extensions>, which is last of the twenty-odd it allows.
+    if waypoint.get("name"):
+        etree.SubElement(element, "name").text = str(waypoint["name"])
+    origin = waypoint.get(WAYPOINT_ORIGIN_FIELD)
+    if origin:
+        block = etree.SubElement(element, "extensions")
+        etree.SubElement(block, f"{{{TRAILS_NAMESPACE}}}{WAYPOINT_ORIGIN_FIELD}").text = str(origin)
+    return element
 
 
 def linestring_to_track_segment(geometry: LineString, simplify_tolerance: float | None = None) -> etree.Element:
@@ -363,6 +506,7 @@ def export_to_gpx(
     extension_fields: dict[str, str] | None = None,
     ascent_method: str | None = None,
     track_field: str | None = None,
+    waypoints: list[dict[str, Any]] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     """Export GeoDataFrame of trails to GPX file.
 
@@ -396,6 +540,10 @@ def export_to_gpx(
             geometry does not: the heights were sampled along the edges rather
             than at the vertices, and laying the two against each other is not
             this module's job.
+        waypoints: Points to write before the tracks, each as
+            :func:`waypoint_element` takes them. A chain export has none: a
+            waypoint is a place somebody chose, and nobody chose anything about
+            a line read out of a register.
 
     Returns:
         Tuple of (output_path, statistics_dict)
@@ -424,6 +572,12 @@ def export_to_gpx(
 
     # Create GPX document
     gpx = create_gpx_document(name=title, description=description, sources=sources)
+
+    # Before every track and after the metadata, which is the order GPX 1.1
+    # fixes for what a <gpx> holds. Written here rather than by the caller so
+    # that the one place that knows the order is the one that writes it.
+    for waypoint in waypoints or ():
+        gpx.append(waypoint_element(waypoint))
 
     # Statistics
     stats: dict[str, Any] = {

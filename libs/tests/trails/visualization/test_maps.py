@@ -4,6 +4,7 @@ import folium
 import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
+from trails.routing.sources import BRIDGE, FERRY
 from trails.visualization import maps
 
 
@@ -719,6 +720,21 @@ class TestProfilePanel:
             "ascentMethod": "DTM1, sampled every 5 m, gains under 5 m ignored",
             "identitySeparator": " / ",
             "filePrefix": "lomsdal-visten",
+            "sourceLength": "metres",
+            "route": {
+                "name": "Planned route in Lomsdal-Visten",
+                "description": "A route planned on the Lomsdal-Visten map",
+                "fileStem": "route",
+                "kindField": "kind",
+                "kind": "route",
+                "fields": [["ascent", "ascent"], ["walked", "walked"], ["unknown", "unknown"]],
+                "legs": "legs",
+                "leg": "leg",
+                "part": "part",
+                "partKind": "kind",
+                "partLength": "m",
+            },
+            "waypoint": {"name": "Point", "origin": "origin", "set": "set"},
         }
         settings.update(changed)
         return {name: value for name, value in settings.items() if value is not None}
@@ -766,6 +782,22 @@ class TestProfilePanel:
         html = fmap.get_root().render()
         for setting in maps.EXPORT_SETTINGS:
             assert f"EXPORT.{setting}" in html, setting
+        for setting in maps.EXPORT_ROUTE_SETTINGS:
+            assert f"EXPORT.route.{setting}" in html, setting
+        for setting in maps.EXPORT_WAYPOINT_SETTINGS:
+            assert f"EXPORT.waypoint.{setting}" in html, setting
+
+    def test_a_route_setting_missing_from_inside_its_own_block_is_refused(self, group):
+        """Checking only the top-level key lets a `route` short of `partLength`
+        build without a word, and the page then writes
+        `<trails:part kind="routed" undefined="2027.0"/>`."""
+        fmap, layer = group
+        short = dict(self.exported())
+        short["route"] = {name: value for name, value in short["route"].items() if name != "partLength"}
+        short["waypoint"] = {name: value for name, value in short["waypoint"].items() if name != "origin"}
+
+        with pytest.raises(ValueError, match="route.partLength.*waypoint.origin"):
+            maps.add_profile_panel(fmap, [layer], export=short)
 
     def test_the_figures_a_file_is_written_from_travel_as_the_page_names_them(self, group):
         """Every field the export writes has to be a key the figures table
@@ -835,6 +867,8 @@ class TestPlanMode:
             "ascentThresholdM": 5.0,
             "snapM": 150.0,
             "maxStraightM": 20000.0,
+            "crossingKind": "ferry",
+            "connectorKind": "bridge",
         }
         settings.update(changed)
         return {name: value for name, value in settings.items() if value is not None}
@@ -988,10 +1022,77 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "kind: 'ferry'" in planning
+        assert "kind: CROSSING" in planning
         assert "kind: 'water'" in planning
         # Both are written with no series at all rather than with an empty one.
         assert planning.count("height: null, distance: null, read: false") == 2
+
+    def test_the_kinds_it_classifies_by_come_from_the_build(self):
+        """A ferry and an inferred connector are named in
+        :mod:`trails.routing.sources`, and the page tests every edge it routes
+        over against both names. Spelled in the page, a rename there would leave
+        it counting a crossing as walked ground and nothing would look wrong."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned(crossingKind=FERRY, connectorKind=BRIDGE))
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind;" in planning
+        assert f'"crossingKind": "{FERRY}"' in fmap.get_root().render()
+        assert f'"connectorKind": "{BRIDGE}"' in fmap.get_root().render()
+
+    def test_the_route_is_laid_out_in_one_walk_and_not_two(self):
+        """The profile is drawn from heights against distance and the file is
+        written from vertices, and two walks over one route would eventually
+        disagree while each still looked like a route."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert planning.count("function composeRoute()") == 1
+        # The shape a chain's series has, which is what the writer reads.
+        for field in ("lon:", "lat:", "along:", "height:", "distance:", "stretches:"):
+            assert field in planning.split("function composeRoute()")[-1], field
+
+    def test_a_crossing_ends_a_stretch_and_an_unread_sample_does_not(self):
+        """The two kinds of NaN mean opposite things: no ground under a
+        crossing, against ground with no reading of it. The first has to break
+        the track and the second may only drop an ``<ele>``, so the boundary is
+        recorded where it happens rather than inferred from a repeated
+        distance."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function breakHere()" in planning
+        # A crossing closes the stretch; a NaN height inside one is only a NaN.
+        assert "crossed += part.length;" in planning
+        assert "breakHere();" in planning
+
+    def test_what_a_route_is_made_of_is_summed_per_edge(self):
+        """A part keeps its geometry and its heights, and nothing downstream can
+        get back to which edge a metre came from."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function tallyOf(graph, list)" in planning
+        assert "graph.header.waymarked[graph.waymarked[edge]]" in planning
+        assert "graph.noPathRecorded[edge]" in planning
+
+    def test_unknown_is_never_folded_into_unmarked(self):
+        """Measured over the walked network without its connectors, 63.4 % of
+        the length is unknown and FKB — the largest source at 33.8 % — carries
+        no marking field at all. Calling that unmarked asserts what no source
+        says, and a connector nobody drew was never asked at all."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "var MARKING = ['marked', 'unmarked', 'unknown'];" in planning
+        assert "var TALLIED = MARKING.concat(['undrawn', 'unrecorded']);" in planning
+        # A state the payload names and this page has no bucket for is a defect,
+        # not a fourth silent bucket created by an index into an object.
+        assert "the payload names a marking state this page has no bucket for" in planning
 
     def test_the_four_kinds_are_all_there_from_the_first_line(self):
         """A model that knew only routed legs would have to be widened the first
@@ -1073,11 +1174,35 @@ class TestComposedProfile:
         assert "layEdges: layEdges" in html
         assert "metresBetween: metresBetween" in html
 
-    def test_a_composed_route_is_not_offered_as_a_file(self):
-        """Writing a plan out is its own phase, and a button this panel could
-        not honour is worse than no button."""
+    def test_a_composed_route_is_offered_as_a_file(self):
+        """Phase 6 withheld the button because writing a plan out was its own
+        phase. This is that phase, and restoring it is its visible outcome."""
         html = self.drawn().get_root().render()
-        assert "if (!selected || selected.composed) { return; }" in html
+        assert "function routeGpxOf(figure, shape, runs, plan, extra)" in html
+        assert "saveFile(fileNameOf(EXPORT.route.fileStem)," in html
+
+    def test_the_file_says_what_the_panel_above_the_button_says(self):
+        """One sentence written once. Handed `plan` instead of what the panel was
+        told, the file quietly dropped the route's crossings from its own
+        description while the panel went on showing them — a file that is
+        plausible and silent about the one thing it breaks its track for."""
+        html = self.drawn().get_root().render()
+        assert "planned(figure, shape, extra).concat([markingLine(shape.tally)])" in html
+        assert "routeGpxOf(selected.figure, selected.shape, selected.runs, selected.plan, selected.told)" in html
+
+    def test_a_series_composed_without_a_description_is_not_offered(self):
+        """The file has to say what its legs are and where its waypoints went. A
+        button this panel could not honour is worse than no button at all."""
+        html = self.drawn().get_root().render()
+        assert "offer.style.display = (selected && (!selected.composed || selected.plan)) ? '' : 'none';" in html
+
+    def test_a_route_with_a_hole_in_it_is_refused_and_said(self):
+        """The file states that it breaks its track only at crossings. A leg
+        still being worked out, or one the height service refused, would break
+        it somewhere else with nothing in the file to say so."""
+        html = self.drawn().get_root().render()
+        assert "download.disabled = points < 2 || !!selected.plan.why;" in html
+        assert "if (!selected.plan || selected.plan.why) { return; }" in html
 
     def test_the_panel_stops_answering_clicks_while_something_else_owns_them(self):
         html = self.drawn().get_root().render()
