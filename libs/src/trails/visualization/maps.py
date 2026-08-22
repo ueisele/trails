@@ -248,6 +248,26 @@ EXPORT_SETTINGS = (
 )
 
 
+#: Everything the page has to be handed before it can plan a route. As with
+#: :data:`EXPORT_SETTINGS` there is no default for any of it: a sampling step,
+#: an ascent threshold or the name of the answer that means *sea* are all things
+#: the build already decided, and a page that quietly picked its own would draw
+#: a profile that disagrees with every other figure on the map without anything
+#: looking wrong. :func:`add_plan_mode` refuses a ``plan`` short of any of them.
+PLAN_SETTINGS = (
+    "heightsUrl",
+    "heightsCrs",
+    "heightsBatch",
+    "heightsWorkers",
+    "terrainModel",
+    "seaTerrain",
+    "sampleStepM",
+    "ascentThresholdM",
+    "snapM",
+    "maxStraightM",
+)
+
+
 def _record_chain_figures(group: folium.FeatureGroup, figures: dict[str, dict[str, object]]) -> None:
     """Attach the per-line figures of a layer to its feature group.
 
@@ -1355,6 +1375,16 @@ class _ProfilePanel(MacroElement):
     rather than in two controls. A second composition in the page would be a
     third implementation of the same walk, and the file would eventually
     disagree with the profile drawn above the button that produced it.
+
+    **And it takes a second way in**, for a series composed rather than read off
+    one chain. A planned route has no chain and no row in the figures table, so
+    ``window.trailsProfilePanel.series`` is handed the series and the figures
+    already read from it; the gradient bands, the crosshair and the reduction
+    all apply unchanged, and a stretch drawn straight across unrecorded ground
+    is dashed in the curve as it is dashed on the map. The same object carries
+    ``suspend``, for while something else owns the map's clicks, and the two
+    things a second consumer must not write again: the walk that lays a run of
+    edges end to end, and the metre this page measures distance with.
     """
 
     _template = Template("""
@@ -1375,6 +1405,9 @@ class _ProfilePanel(MacroElement):
             // Blue, deliberately: the steepest gradient band is red, and a red rule
             // over a red stretch of curve reads as part of the data.
             var AXIS = '#9e9e9e', TEXT = '#555', CROSS = '#1565c0';
+            // The dash a stretch nobody recorded a way along is drawn with,
+            // here and on the map. One pattern, so the two read as one thing.
+            var FREE_DASH = '5,4';
 
             // ---- what a number reads as ------------------------------------
             // Math.round is floor(x + 0.5), which is exactly what the popup's
@@ -1403,23 +1436,47 @@ class _ProfilePanel(MacroElement):
             }
 
             // ---- the chain's own series, laid out of its edges --------------
-            // Metres between two positions. Near enough for an axis at this
-            // latitude, and the result is scaled onto the length the chain
-            // carries before anything is shown, so the axis cannot end
-            // somewhere the popup does not.
+            // Metres between two positions, from the metres-per-degree of the
+            // ellipsoid at the latitude between them.
+            //
+            // **This used to be a sphere and it read 0.56 % short.** Measured
+            // over 4,000 real edges against the projection the graph is built
+            // in: 110,309 m where the projection says 110,933, because
+            // 110,574 m to a degree of latitude is the figure at the *equator*
+            // and this park sits at 65.6 N, where it is 111,500. That did not
+            // matter while the only consumer was a chain, whose series is
+            // scaled onto the length the chain carries before anything is
+            // shown — a uniform factor cancels exactly. It matters the moment a
+            // planned route states its own distance, because there is no
+            // carried length to scale onto and nothing in the payload to read
+            // one from: 0.56 % is 900 m on a 160 km traverse, against a map
+            // whose every popup was measured in the projection.
+            //
+            // The series below is the standard one for WGS84 and reads +0.034 %
+            // over the same 4,000 edges, sixteen times nearer. A degree of
+            // longitude carries its own series rather than a bare cosine of the
+            // equatorial radius, which is the other half of the old error.
             function metresBetween(lon1, lat1, lon2, lat2) {
-                var dx = (lon2 - lon1) * 111320 * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
-                var dy = (lat2 - lat1) * 110574;
+                var phi = ((lat1 + lat2) / 2) * Math.PI / 180;
+                var perLat = 111132.92 - 559.82 * Math.cos(2 * phi) + 1.175 * Math.cos(4 * phi) - 0.0023 * Math.cos(6 * phi);
+                var perLon = 111412.84 * Math.cos(phi) - 93.5 * Math.cos(3 * phi) + 0.118 * Math.cos(5 * phi);
+                var dx = (lon2 - lon1) * perLon;
+                var dy = (lat2 - lat1) * perLat;
                 return Math.sqrt(dx * dx + dy * dy);
             }
 
-            // The payload holds a chain's edges as one contiguous run in the
-            // chain's own order; bit 0 of an edge's flag says it runs against
-            // the chain, bit 1 that it begins a stretch which does not join what
-            // came before. Two joined edges both sample the node between them,
-            // so the second copy of it is dropped.
-            function compose(graph, index) {
-                var first = graph.chainAt[index], last = graph.chainAt[index + 1];
+            // Lay a run of edges end to end, in the order and the directions
+            // given. **One walk, and every consumer in the page uses it**: the
+            // panel lays a chain's edges out of the payload's own order, plan
+            // mode lays a route's out of what the router returned. Two walks
+            // would eventually disagree, and each would still look like a
+            // profile — which is the reason the Python side keeps its one in
+            // trails.routing.order rather than one per caller.
+            //
+            // Two joined edges both sample the node between them, so the second
+            // copy of it is dropped; where `breaks` says an edge does not join
+            // what came before, the series is broken rather than joined.
+            function layEdges(graph, list, reversed, breaks) {
                 var lon = [], lat = [], along = [], height = [], distance = [];
                 var reached = 0, read = false, crossing = false, joined = false;
                 // Where each stretch that joins up begins, in both series. The
@@ -1428,9 +1485,10 @@ class _ProfilePanel(MacroElement):
                 // stretch, and a segment drawn across the step between two of
                 // them is a route nobody can walk.
                 var stretches = [];
-                for (var edge = first; edge < last; edge += 1) {
-                    var flipped = graph.flags[edge] & 1;
-                    var apart = (graph.flags[edge] & 2) && lon.length > 0;
+                for (var index = 0; index < list.length; index += 1) {
+                    var edge = list[index];
+                    var flipped = reversed[index];
+                    var apart = breaks[index] && lon.length > 0;
                     var v0 = graph.vertexAt[edge], v1 = graph.vertexAt[edge + 1];
                     var s0 = graph.sampleAt[edge], s1 = graph.sampleAt[edge + 1], samples = s1 - s0;
                     var began = reached;
@@ -1489,6 +1547,20 @@ class _ProfilePanel(MacroElement):
                 }
                 return {lon: lon, lat: lat, along: along, height: height, distance: distance,
                         stretches: stretches, total: reached, read: read, crossing: crossing};
+            }
+
+            // The payload holds a chain's edges as one contiguous run in the
+            // chain's own order; bit 0 of an edge's flag says it runs against
+            // the chain, bit 1 that it begins a stretch which does not join
+            // what came before.
+            function compose(graph, index) {
+                var list = [], reversed = [], breaks = [];
+                for (var edge = graph.chainAt[index]; edge < graph.chainAt[index + 1]; edge += 1) {
+                    list.push(edge);
+                    reversed.push(!!(graph.flags[edge] & 1));
+                    breaks.push(!!(graph.flags[edge] & 2));
+                }
+                return layEdges(graph, list, reversed, breaks);
             }
 
             // The chain's length as the chain carries it, distributed over the
@@ -1790,6 +1862,19 @@ class _ProfilePanel(MacroElement):
                 key.appendChild(swatch);
                 key.appendChild(caption);
             });
+            // And what the dash means, shown only while something in the panel
+            // is dashed. A chain is never drawn straight across anything, so on
+            // the phase-4 panel this row never appears.
+            var freeKey = document.createElement('span');
+            freeKey.style.display = 'none';
+            var freeSwatch = document.createElement('span');
+            freeSwatch.style.cssText = 'display:inline-block;width:14px;height:0;vertical-align:middle;margin:0 4px 0 12px;' +
+                'border-top:1.6px dashed ' + GRADE.bands[0].colour;
+            var freeCaption = document.createElement('span');
+            freeCaption.textContent = 'drawn straight, not a path';
+            freeKey.appendChild(freeSwatch);
+            freeKey.appendChild(freeCaption);
+            key.appendChild(freeKey);
             // The download, and beside it what the file will actually contain
             // rather than a generic notice: a stretch of FKB is unproblematic, a
             // stretch of OSM is share-alike and a stretch of UT.no is
@@ -2035,27 +2120,41 @@ class _ProfilePanel(MacroElement):
                 return runs;
             }
 
+            // Whether a sample lies on ground the route was drawn straight
+            // across rather than routed over a recorded way. A chain is never
+            // any of it and carries no such series at all.
+            function freeAt(shape, sample) {
+                return shape.free && shape.free[sample] ? 1 : 0;
+            }
+
             function drawCurve(shape, plot, x, y, slope) {
                 // One stroke per run of segments sharing a band, so the curve is
                 // its own legend: where it turns amber the ground turned steep.
+                // And per run sharing a *drawing*, so a stretch the plan drew
+                // straight is dashed here as it is dashed on the map — the
+                // profile has to say the same thing the map does about the same
+                // ground.
                 var strokes = [], current;
                 drawPoints(shape, Math.max(1, Math.floor(plot.width))).forEach(function (points) {
                     current = null;
                     for (var i = 1; i < points.length; i += 1) {
-                        var band = bandOf(slope[points[i - 1].at]);
-                        if (!current || current.band !== band) {
-                            current = {band: band, parts: ['M' + x(points[i - 1].d).toFixed(1) + ' ' + y(points[i - 1].h).toFixed(1)]};
+                        var band = bandOf(slope[points[i - 1].at]), free = freeAt(shape, points[i - 1].at);
+                        if (!current || current.band !== band || current.free !== free) {
+                            current = {band: band, free: free, parts: ['M' + x(points[i - 1].d).toFixed(1) + ' ' + y(points[i - 1].h).toFixed(1)]};
                             strokes.push(current);
                         }
                         current.parts.push('L' + x(points[i].d).toFixed(1) + ' ' + y(points[i].h).toFixed(1));
                     }
                 });
-                return strokes.map(function (stroke) { return {band: stroke.band, d: stroke.parts.join(' ')}; });
+                return strokes.map(function (stroke) { return {band: stroke.band, free: stroke.free, d: stroke.parts.join(' ')}; });
             }
 
             function render() {
                 while (chart.firstChild) { chart.removeChild(chart.firstChild); }
                 crosshair = null;
+                // Cleared before every early return below, so the row never
+                // outlives the curve that explained it.
+                freeKey.style.display = 'none';
                 if (!open) { return; }
 
                 var width = Math.max(240, body.clientWidth || (map.getSize().x - 40));
@@ -2099,7 +2198,9 @@ class _ProfilePanel(MacroElement):
                 chart.appendChild(line(plot.left, plot.bottom, plot.right, plot.bottom, AXIS));
 
                 var slope = gradients(shape);
-                drawCurve(shape, plot, x, y, slope).forEach(function (stroke) {
+                var strokes = drawCurve(shape, plot, x, y, slope);
+                if (strokes.some(function (stroke) { return stroke.free; })) { freeKey.style.display = ''; }
+                strokes.forEach(function (stroke) {
                     var band = GRADE.bands[stroke.band];
                     var curve = document.createElementNS(SVG, 'path');
                     curve.setAttribute('d', stroke.d);
@@ -2110,6 +2211,10 @@ class _ProfilePanel(MacroElement):
                     curve.setAttribute('stroke-width', String(band.width));
                     curve.setAttribute('stroke-linejoin', 'round');
                     curve.setAttribute('stroke-linecap', 'round');
+                    // Dashed where the ground was crossed rather than followed.
+                    // The gradient still bands it: the hill is real even where
+                    // the line across it is a straight one somebody drew.
+                    if (stroke.free) { curve.setAttribute('stroke-dasharray', FREE_DASH); }
                     chart.appendChild(curve);
                 });
 
@@ -2180,6 +2285,10 @@ class _ProfilePanel(MacroElement):
 
             // ---- what is selected -------------------------------------------
             var selected = null;
+            // Whether something else owns the map's clicks. Plan mode does
+            // while it is on: a click there places a waypoint, and a panel that
+            // also answered it would select a chain out from under the route.
+            var suspended = false;
 
             // What to call the selected line in the heading: its own hover text
             // where it has one, and its chain id where it has not. A tooltip is
@@ -2197,10 +2306,29 @@ class _ProfilePanel(MacroElement):
                 summary.textContent = message;
             }
 
+            // What a composed series says about itself. The distance is the
+            // **walking** distance and says so: a crossing is never counted
+            // into it, and whatever composed the series reports the crossings
+            // beside it in `told`. A flat line at zero would be a claim about
+            // ground that is not there, and so would a total that swallowed a
+            // crossing.
+            function planned(figure, shape) {
+                var told = [];
+                if (shape.read) { told.push(climb(figure)); }
+                told.push((shape.total / 1000).toFixed(2) + ' km on foot');
+                if (shape.read) { told.push('high ' + metres(figure.high) + ' m', 'low ' + metres(figure.low) + ' m'); }
+                told = told.concat(selected.told || []);
+                if (!shape.read) {
+                    told.push(shape.total > 0 ? 'no height was read along it' : 'no ground under any of it');
+                }
+                return told;
+            }
+
             function describe() {
-                if (!selected) { say('Click a line to see its profile.'); return; }
+                if (!selected) { say(suspended ? 'Plan mode: click the map to place a point.' : 'Click a line to see its profile.'); return; }
                 var figure = selected.figure, shape = selected.shape;
-                if (!shape) { say('Decoding the network\\u2026'); return; }
+                if (!shape) { say(selected.saying || 'Decoding the network\\u2026'); return; }
+                if (selected.composed) { say(planned(figure, shape).join(' \\u00b7 ')); return; }
                 if (!shape.read) {
                     // Two kinds of nothing, and they are not the same nothing.
                     // A flat line at zero would be a claim about ground that was
@@ -2221,8 +2349,11 @@ class _ProfilePanel(MacroElement):
             // reader is shown is the one the file holds.
             function offered() {
                 if (!EXPORT) { return; }
-                offer.style.display = selected ? '' : 'none';
-                if (!selected) { return; }
+                // A composed route is not offered here. Writing a plan out is
+                // its own phase, and a button this panel could not honour is
+                // worse than no button at all.
+                offer.style.display = (selected && !selected.composed) ? '' : 'none';
+                if (!selected || selected.composed) { return; }
                 if (!selected.shape) {
                     download.disabled = true;
                     // Whatever went wrong with the graph is said once, above,
@@ -2253,10 +2384,13 @@ class _ProfilePanel(MacroElement):
                 });
             }
 
-            function show(className, label) {
-                selected = className === null ? null : {className: className, figure: figures[className], label: label, shape: null, mid: null};
-                if (selected && !selected.figure) { selected = null; }
-                // Open on a chain and folded away again the moment there is
+            // Everything that happens whatever is selected. Two things reach
+            // the panel — a chain, whose figures are read off the table this
+            // was handed, and a series composed elsewhere — and they differ
+            // only in how they arrive.
+            function present(given) {
+                selected = given;
+                // Open on a selection and folded away again the moment there is
                 // none: a panel this wide takes a strip of the map with it, and
                 // it may only do that while it has something to show there.
                 open = selected !== null;
@@ -2270,6 +2404,34 @@ class _ProfilePanel(MacroElement):
                 offered();
                 render();
                 placeArrow();
+            }
+
+            // The panel's second way in. A planned route has no chain and no
+            // row in the figures table, so what arrives is the composed series
+            // itself and the figures already read off it; the bands, the
+            // crosshair and the reduction all apply unchanged.
+            window.trailsProfilePanel = {
+                series: function (spec) {
+                    present(spec === null ? null : {
+                        composed: true, label: spec.label, figure: spec.figure, shape: spec.shape,
+                        told: spec.told || [], saying: spec.saying, mid: null});
+                },
+                suspend: function (taken) {
+                    suspended = !!taken;
+                    if (suspended) { present(null); }
+                },
+                // The two things a second consumer must not write for itself:
+                // the walk that lays edges end to end, and the metre this page
+                // measures distance with. A route composed by a second walk
+                // would still look like a route.
+                layEdges: layEdges,
+                metresBetween: metresBetween
+            };
+
+            function show(className, label) {
+                var chosen = className === null ? null : {className: className, figure: figures[className], label: label, shape: null, mid: null};
+                if (chosen && !chosen.figure) { chosen = null; }
+                present(chosen);
                 if (!selected) { return; }
                 if (!window.trailsGraph) {
                     selected.missing = true;
@@ -2311,6 +2473,7 @@ class _ProfilePanel(MacroElement):
                 group.eachLayer(function (layer) {
                     if (!layer.setStyle || !layer.options.className) { return; }
                     layer.on('click', function () {
+                        if (suspended) { return; }
                         var className = layer.options.className;
                         show(selected && selected.className === className ? null : className, labelOf(layer, className));
                     });
@@ -2319,7 +2482,7 @@ class _ProfilePanel(MacroElement):
             // Leaflet only fires a map click where the click hit no layer, which
             // is what clears the selection on empty terrain — the same rule the
             // click-highlight follows, so the two cannot drift apart.
-            map.on('click', function () { show(null); });
+            map.on('click', function () { if (!suspended) { show(null); } });
             // A panel this wide is sized against the map, so a resized window
             // has to size it again before anything is drawn into it.
             map.on('resize', function () { fold(); render(); placeArrow(); });
@@ -2450,6 +2613,987 @@ def add_profile_panel(
             raise ValueError(f"the page cannot write a GPX file without {', '.join(missing)}")
 
     _ProfilePanel(groups, figures, title, chart_height, collapsed, export).add_to(fmap)
+
+
+class _PlanMode(MacroElement):
+    """Plan mode: clicking a route together, leg by leg.
+
+    Switch it on and every click appends a waypoint and works out the way from
+    the one before, so a route grows as far as a reader cares to take it. Taking
+    the last point back is the only edit there is; changing an existing sequence
+    is a different problem and a later phase.
+
+    **A leg has four kinds and they are parts of a leg, not legs.** That is what
+    they are on the ground: a routed leg that takes a ferry is walked, then
+    crossed, then walked again, and a leg drawn straight across a strait splits
+    at the shoreline into the same two things. A model that knew only whole legs
+    would have to be widened the first time either happened, and both happen
+    here.
+
+    ======= ==================== ==============================
+    kind    distance counts as   profile
+    ======= ==================== ==============================
+    routed  on foot              read off the payload
+    land    on foot              sampled on demand
+    water   a **crossing**       none
+    ferry   a **crossing**       none
+    ======= ==================== ==============================
+
+    **A crossing is never added to the walking distance and never to an ascent.**
+    It is reported beside them — *42 km on foot · 2 crossings, 31 km* — and it
+    contributes no curve at all, because a flat line at zero is a claim about
+    ground that is not there.
+
+    **Nothing here is drawn into the overlay pane.** The route, its waypoints and
+    everything else this adds live in a pane of their own: what goes into the
+    overlay pane is counted among the map's paths for ever after, and that count
+    is an acceptance figure for every phase from the third.
+
+    Hand-written, like the panel, the legend and the search: a routing library
+    pulled from a CDN does not load on a ``file://`` page and fails silently, the
+    way the OpenStreetMap tiles once did. So the heap, the search and the
+    adjacency are all here, and they are cheap — the adjacency is derived from
+    the payload's own columns rather than shipped beside them.
+
+    It arrives as ``window.trailsPlan``, whose ``state()`` says what the route is
+    and whose ``place()`` is the entry a click uses, so a browser check can drive
+    it and read it rather than screenshot it.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function () {
+            var map = {{ this._parent.get_name() }};
+            var PLAN = {{ this.plan_json }};
+
+            // The route's own colours. Near-black over the pale topo backdrop,
+            // which nothing else on this map uses: a plan is the reader's own
+            // and should not read as another dataset. A pale wide stroke under
+            // a dark narrow one, or it disappears over a dark line.
+            var ROUTE = '#111111', CASING = '#ffffff', WAITING = '#9e9e9e';
+
+            // How each kind is drawn. Routed is a line; ground drawn straight
+            // across is dashed exactly as the profile dashes it; a crossing is a
+            // wider gap still, because it is not walked at all. A leg not yet
+            // worked out is neither, and says so by being grey.
+            var DASH = {routed: null, land: '5,4', water: '2,8', ferry: '2,8', waiting: '1,6'};
+
+            // ---- what the panel owns and this must not write again ----------
+            // Laying a run of edges end to end and the metre this page measures
+            // distance with both live in the profile panel. A second walk here
+            // would eventually disagree with the one the panel draws and the
+            // export writes, and a route composed by the wrong walk still looks
+            // like a route. Read late rather than at load, so the two scripts
+            // need no order between them beyond the one the builder gives.
+            var owned = null;
+
+            function panel() {
+                if (!owned) { owned = window.trailsProfilePanel || null; }
+                return owned;
+            }
+
+            // ---- the router --------------------------------------------------
+            // Built on the first route asked for and then kept. The payload
+            // carries edges, nodes and geometry and nothing else — no cost
+            // column, deliberately, because a cost is length times the source's
+            // factor and the page has both. Deriving it here is a pass over the
+            // geometry; shipping it would be a megabyte of numbers the browser
+            // can work out for itself.
+            var routing = null;
+
+            function router(graph) {
+                if (routing) { return routing; }
+                var edges = graph.header.edges, nodes = graph.header.nodes, i;
+                // Hoisted out of a loop that runs once per vertex, of which
+                // there are 948,465.
+                var between = panel().metresBetween;
+
+                var length = new Float64Array(edges), cost = new Float64Array(edges);
+                for (i = 0; i < edges; i += 1) {
+                    var run = 0;
+                    for (var v = graph.vertexAt[i] + 1; v < graph.vertexAt[i + 1]; v += 1) {
+                        run += between(graph.coordinates[2 * v - 2], graph.coordinates[2 * v - 1],
+                                       graph.coordinates[2 * v], graph.coordinates[2 * v + 1]);
+                    }
+                    length[i] = run;
+                }
+
+                // How long the chain each edge lies on is, which only a crossing
+                // needs. The payload lays a chain's edges out as one contiguous
+                // run, so this is one pass and no index.
+                var whole = new Float64Array(edges);
+                for (var chain = 0; chain < graph.header.chains; chain += 1) {
+                    var first = graph.chainAt[chain], last = graph.chainAt[chain + 1], along = 0;
+                    for (i = first; i < last; i += 1) { along += length[i]; }
+                    for (i = first; i < last; i += 1) { whole[i] = along; }
+                }
+
+                for (i = 0; i < edges; i += 1) {
+                    var source = graph.header.sources[graph.sources[i]];
+                    if (source.flatM === undefined) { cost[i] = length[i] * source.factor; }
+                    // A crossing costs the header's flat figure rather than its
+                    // length: taking a ferry is the same decision whether it is
+                    // 2 km or 20, so weighting it by distance means nothing and
+                    // would send a route across a fjord to save two hundred
+                    // metres.
+                    //
+                    // **And the flat figure is the whole crossing's, not each
+                    // piece's.** A crossing is a chain, and noding cuts it
+                    // wherever something meets it: 15 of the 21 ferry chains
+                    // here are in several pieces and the longest is in seven.
+                    // Charging the flat cost per edge priced that one at 35 km
+                    // of walking instead of 5, and a page that does so refuses
+                    // crossings the build priced as affordable — the route the
+                    // reader is shown would then disagree with the network the
+                    // rest of the map was measured on. Split in proportion, as
+                    // trails.routing.graph._cost splits it.
+                    else { cost[i] = source.flatM * (whole[i] > 0 ? length[i] / whole[i] : 1); }
+                }
+
+                // Compressed adjacency: count what meets each node, prefix-sum,
+                // then fill. An array of arrays over 116,967 nodes costs more in
+                // allocation alone than every search a reader will ever run.
+                var at = new Int32Array(nodes + 2);
+                for (i = 0; i < edges; i += 1) { at[graph.fromNode[i] + 2] += 1; at[graph.toNode[i] + 2] += 1; }
+                for (i = 2; i < at.length; i += 1) { at[i] += at[i - 1]; }
+                var arc = new Int32Array(2 * edges);
+                for (i = 0; i < edges; i += 1) {
+                    arc[at[graph.fromNode[i] + 1]] = i; at[graph.fromNode[i] + 1] += 1;
+                    arc[at[graph.toNode[i] + 1]] = i; at[graph.toNode[i] + 1] += 1;
+                }
+                // Filling leaves at[v + 1] at the end of node v's arcs, which is
+                // where node v + 1's begin, so afterwards node v owns
+                // arc[at[v] .. at[v + 1]).
+                routing = {length: length, cost: cost, at: at, arc: arc,
+                           best: new Float64Array(nodes), viaEdge: new Int32Array(nodes), viaNode: new Int32Array(nodes)};
+                return routing;
+            }
+
+            // A binary heap over two parallel arrays. Entries are never removed
+            // when a node is reached more cheaply — the stale one is popped and
+            // recognised by its cost, which is the usual trade and the cheaper
+            // one here.
+            function Heap() { this.node = []; this.cost = []; }
+
+            Heap.prototype.swap = function (a, b) {
+                var node = this.node[a], cost = this.cost[a];
+                this.node[a] = this.node[b]; this.cost[a] = this.cost[b];
+                this.node[b] = node; this.cost[b] = cost;
+            };
+
+            Heap.prototype.push = function (node, cost) {
+                var at = this.node.length;
+                this.node.push(node); this.cost.push(cost);
+                while (at > 0) {
+                    var parent = (at - 1) >> 1;
+                    if (this.cost[parent] <= this.cost[at]) { break; }
+                    this.swap(parent, at); at = parent;
+                }
+            };
+
+            // Sifting down ends because the position it moves to is always a
+            // child of the one it was at, so it strictly increases and the loop
+            // runs at most as deep as the heap. That is a property of the array
+            // and not of the graph, which is why it carries no bound.
+            Heap.prototype.pop = function () {
+                var top = {node: this.node[0], cost: this.cost[0]}, last = this.node.length - 1;
+                this.node[0] = this.node[last]; this.cost[0] = this.cost[last];
+                this.node.pop(); this.cost.pop();
+                var at = 0, size = this.node.length;
+                while (true) {
+                    var left = 2 * at + 1, right = left + 1, least = at;
+                    if (left < size && this.cost[left] < this.cost[least]) { least = left; }
+                    if (right < size && this.cost[right] < this.cost[least]) { least = right; }
+                    if (least === at) { break; }
+                    this.swap(least, at); at = least;
+                }
+                return top;
+            };
+
+            // Dijkstra over the weighted graph, once per new leg. Nothing but
+            // the source factors weighs an edge: elevation-aware routing is a
+            // decision nobody has taken, and the per-edge ascent it would need
+            // is deliberately not in the payload.
+            function route(graph, from, to) {
+                var work = router(graph);
+                var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
+                if (from === to) { return {edges: [], reversed: [], cost: 0}; }
+                best.fill(Infinity); viaEdge.fill(-1); viaNode.fill(-1);
+                best[from] = 0;
+
+                // Every loop over this graph is bounded and throws when it
+                // reaches the bound. A settled node is never settled twice and
+                // every stale entry was pushed by a relaxation, so the pops
+                // cannot exceed one per node plus one per arc; anything past
+                // that is a defect, and a defect that runs for ever in a page
+                // is indistinguishable from a page that has hung.
+                var heap = new Heap();
+                var pops = 0, mostPops = graph.header.nodes + 2 * graph.header.edges + 1;
+                heap.push(from, 0);
+                while (heap.node.length) {
+                    pops += 1;
+                    if (pops > mostPops) { throw new Error('the search took more than ' + mostPops + ' steps'); }
+                    var taken = heap.pop();
+                    if (taken.cost > best[taken.node]) { continue; }
+                    if (taken.node === to) { break; }
+                    for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
+                        var edge = work.arc[a];
+                        var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
+                        var reached = taken.cost + work.cost[edge];
+                        if (reached < best[other]) {
+                            best[other] = reached; viaEdge[other] = edge; viaNode[other] = taken.node;
+                            heap.push(other, reached);
+                        }
+                    }
+                }
+                if (!isFinite(best[to])) { return null; }
+
+                // Walking the path back out. **Bounded, and the sentinel is
+                // tested for rather than indexed with**: a typed array answers
+                // a negative index with undefined rather than raising, so an
+                // unset predecessor would put undefined into the geometry and
+                // carry on, and a walk that never reached its start would
+                // append for ever. The Python sibling of this loop, written
+                // without either guard, took 42 GB and the kernel killed it.
+                var edges = [], reversed = [], walk = to, steps = 0;
+                while (walk !== from) {
+                    steps += 1;
+                    if (steps > graph.header.edges) { throw new Error('the way back is longer than the graph'); }
+                    var used = viaEdge[walk], before = viaNode[walk];
+                    if (used < 0 || before < 0) { throw new Error('node ' + walk + ' was reached by nothing'); }
+                    edges.push(used);
+                    // An edge's geometry and its heights run from its own
+                    // from-node to its own to-node, and the walk can arrive at
+                    // it from either end. Read off the predecessor rather than
+                    // off the edge's own ends, which say nothing about
+                    // direction on the fourteen edges here that begin and end
+                    // at the same node.
+                    reversed.push(graph.fromNode[used] !== before);
+                    walk = before;
+                }
+                edges.reverse(); reversed.reverse();
+                return {edges: edges, reversed: reversed, cost: best[to]};
+            }
+
+            // ---- the four kinds ----------------------------------------------
+            // A routed leg, cut at every change between walking and crossing, so
+            // the ferry inside it is a crossing rather than 8 km of walking with
+            // no ground under it.
+            function routedParts(graph, found) {
+                var parts = [], run = [], reversed = [], kind = null;
+
+                function flush() {
+                    if (!run.length) { return; }
+                    var breaks = run.map(function () { return false; });
+                    var laid = panel().layEdges(graph, run, reversed, breaks);
+                    parts.push(kind === 'ferry'
+                        ? {kind: 'ferry', lon: laid.lon, lat: laid.lat, length: laid.total, height: null, distance: null, read: false}
+                        : {kind: 'routed', lon: laid.lon, lat: laid.lat, length: laid.total,
+                           height: laid.height, distance: laid.distance, read: laid.read});
+                    run = []; reversed = [];
+                }
+
+                for (var i = 0; i < found.edges.length; i += 1) {
+                    var here = graph.header.sources[graph.sources[found.edges[i]]].kind === 'ferry' ? 'ferry' : 'routed';
+                    if (here !== kind) { flush(); kind = here; }
+                    run.push(found.edges[i]); reversed.push(found.reversed[i]);
+                }
+                flush();
+                return parts;
+            }
+
+            // ---- heights for a leg the network cannot carry -------------------
+            // Sampled by the build's own rule: floor(length / step) + 1 samples,
+            // never fewer than two, spread evenly between the two ends. Two
+            // halves of one profile read under two rules answer differently, and
+            // nothing about the answer looks wrong.
+            function straightSamples(from, to) {
+                var length = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
+                // **Refused rather than quietly coarsened.** Sampling is fixed
+                // at the build's step, so the only way to bound the work is to
+                // bound the leg: at 5 m and fifty points a request, the width
+                // of this map is some 180 requests to somebody else's service,
+                // from one misclick out to sea. Coarsening instead would make
+                // the two halves of a profile answer differently and nothing
+                // would look wrong, so the leg says what it will not do.
+                if (length > PLAN.maxStraightM) {
+                    throw new Error((length / 1000).toFixed(1) + ' km is further than a leg may be drawn straight (' +
+                                    (PLAN.maxStraightM / 1000).toFixed(1) + ' km)');
+                }
+                var count = Math.max(2, Math.floor(length / PLAN.sampleStepM) + 1);
+                var lon = [], lat = [], along = [];
+                for (var i = 0; i < count; i += 1) {
+                    var t = i / (count - 1);
+                    lon.push(from.lon + t * (to.lon - from.lon));
+                    lat.push(from.lat + t * (to.lat - from.lat));
+                    along.push(t * length);
+                }
+                return {lon: lon, lat: lat, along: along, length: length};
+            }
+
+            // The same two rules the build reads an answer by, and they are two
+            // rules rather than one. `datakilde` says whether the number is a
+            // ground height at all: over water the service answers with a depth
+            // from the depth contours — a metre offshore reads -276 m — and
+            // outside its coverage with nothing. `terreng` says what the point
+            // is *on*, and that is what tells a straight leg whether it is
+            // walking or crossing. A lake answers with neither: a real height
+            // from a lake model, which is not a terrain model, so it is walked
+            // ground with nothing read along it.
+            function reading(point) {
+                var from = point.datakilde;
+                var ground = typeof from === 'string' && from.toLowerCase().indexOf(PLAN.terrainModel) === 0;
+                var height = point.z;
+                return {
+                    height: (ground && height !== null && height !== undefined) ? Number(height) : NaN,
+                    sea: point.terreng === PLAN.seaTerrain
+                };
+            }
+
+            function askOnce(points) {
+                return fetch(PLAN.heightsUrl + '?punkter=' + encodeURIComponent(JSON.stringify(points)) +
+                             '&koordsys=' + encodeURIComponent(PLAN.heightsCrs))
+                    .then(function (response) {
+                        if (!response.ok) { throw new Error('the height model answered ' + response.status); }
+                        return response.json();
+                    })
+                    .then(function (body) {
+                        var answered = body && body.punkter;
+                        // The answer is read by position, so one that does not
+                        // line up with the question would put each point's
+                        // neighbour's height on it and raise nothing.
+                        if (!answered || answered.length !== points.length) {
+                            throw new Error('asked about ' + points.length + ' points and got ' +
+                                            (answered ? answered.length : 'no list'));
+                        }
+                        return answered.map(reading);
+                    });
+            }
+
+            // Retried the way the build retries: this endpoint is shared and a
+            // busy server has been seen to answer moments later. After that the
+            // leg says it has no heights rather than drawing flat ground.
+            var ATTEMPTS = 3;
+
+            function ask(points, attempt) {
+                return askOnce(points).catch(function (failure) {
+                    if (attempt >= ATTEMPTS) { throw failure; }
+                    return new Promise(function (resolve) { setTimeout(resolve, 500 * attempt); })
+                        .then(function () { return ask(points, attempt + 1); });
+                });
+            }
+
+            // The build's concurrency, not a faster one: this is somebody else's
+            // endpoint and restraint counts for more than speed.
+            function inWaves(batches) {
+                var out = new Array(batches.length), next = 0, stopped = false;
+
+                function pull() {
+                    // Once one batch has given up, the leg has no heights and
+                    // nothing the others fetch will be used. Without this the
+                    // reader is told the leg failed while the page carries on
+                    // asking the service for the rest of it — the opposite of
+                    // the restraint the concurrency is set for.
+                    if (stopped || next >= batches.length) { return Promise.resolve(); }
+                    var mine = next;
+                    next += 1;
+                    return ask(batches[mine], 1).then(function (answers) { out[mine] = answers; return pull(); },
+                        function (failure) { stopped = true; throw failure; });
+                }
+
+                var running = [];
+                for (var i = 0; i < Math.min(PLAN.heightsWorkers, batches.length); i += 1) { running.push(pull()); }
+                return Promise.all(running).then(function () {
+                    var flat = [];
+                    out.forEach(function (part) { part.forEach(function (one) { flat.push(one); }); });
+                    return flat;
+                });
+            }
+
+            // Cached by the leg's two ends, so taking a point back and putting
+            // it down in the same place does not ask the service twice.
+            var asked = Object.create(null);
+
+            function heightsFor(from, to) {
+                var key = [from.lon, from.lat, to.lon, to.lat].map(function (value) { return value.toFixed(7); }).join(',');
+                if (asked[key]) { return asked[key]; }
+                var laid;
+                // A leg refused for its length is a leg with no heights, which
+                // the route already knows how to say. Thrown from here it would
+                // escape the click instead.
+                try {
+                    laid = straightSamples(from, to);
+                } catch (refused) {
+                    return Promise.reject(refused);
+                }
+                var batches = [];
+                for (var i = 0; i < laid.lon.length; i += PLAN.heightsBatch) {
+                    var slice = [];
+                    for (var k = i; k < Math.min(i + PLAN.heightsBatch, laid.lon.length); k += 1) {
+                        // Asked in the page's own coordinates. The service takes
+                        // longitude and latitude as readily as the metric grid
+                        // the build uses — measured, not assumed — so nothing
+                        // here reprojects anything.
+                        slice.push([Number(laid.lon[k].toFixed(7)), Number(laid.lat[k].toFixed(7))]);
+                    }
+                    batches.push(slice);
+                }
+                var answering = inWaves(batches).then(function (points) { return {laid: laid, points: points}; });
+                asked[key] = answering;
+                // A refusal must not be remembered as one for ever: the next
+                // click on the same ground should ask again.
+                answering.catch(function () { if (asked[key] === answering) { delete asked[key]; } });
+                return answering;
+            }
+
+            // The samples classify the ground and the split falls out of them:
+            // where two neighbours disagree the shoreline lies between, and half
+            // way between is as near as sampling every few metres can put it. No
+            // coastline is consulted and none is needed.
+            function straightParts(from, to, answered) {
+                var laid = answered.laid, points = answered.points, count = points.length;
+                // Where the samples change their mind about what is under them.
+                // Named for what it is: in this file `edges` means edges of the
+                // graph, and these are the ends of the runs.
+                var changes = [0];
+                for (var i = 1; i < count; i += 1) {
+                    if (points[i].sea !== points[i - 1].sea) { changes.push(i); }
+                }
+                changes.push(count);
+
+                function positionAt(distance) {
+                    var t = laid.length > 0 ? distance / laid.length : 0;
+                    return {lon: from.lon + t * (to.lon - from.lon), lat: from.lat + t * (to.lat - from.lat)};
+                }
+
+                var parts = [];
+                for (var run = 0; run + 1 < changes.length; run += 1) {
+                    var first = changes[run], last = changes[run + 1];
+                    var began = run === 0 ? 0 : (laid.along[first - 1] + laid.along[first]) / 2;
+                    var ended = last === count ? laid.length : (laid.along[last - 1] + laid.along[last]) / 2;
+                    var head = positionAt(began), tail = positionAt(ended);
+                    if (points[first].sea) {
+                        parts.push({kind: 'water', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
+                                    length: ended - began, height: null, distance: null, read: false});
+                        continue;
+                    }
+                    var height = [], distance = [], read = false;
+                    for (var s = first; s < last; s += 1) {
+                        height.push(points[s].height);
+                        distance.push(laid.along[s] - began);
+                        if (!isNaN(points[s].height)) { read = true; }
+                    }
+                    parts.push({kind: 'land', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
+                                length: ended - began, height: height, distance: distance, read: read});
+                }
+                return parts;
+            }
+
+            // A route that may only follow recorded ways is not a plan for this
+            // park: 19.9 km of UT.no's own routes run where no source records
+            // anything. So where the network cannot carry a leg it is drawn
+            // straight rather than refused.
+            function resolve(graph, from, to) {
+                if (from.node >= 0 && to.node >= 0) {
+                    var found = route(graph, from.node, to.node);
+                    if (found) { return Promise.resolve(routedParts(graph, found)); }
+                }
+                return heightsFor(from, to).then(function (answered) { return straightParts(from, to, answered); });
+            }
+
+            // ---- the route's own series ---------------------------------------
+            // Laid out of the parts, with the walking distance as its axis: a
+            // crossing has no ground under it, advances nothing and leaves a
+            // break behind — the same break the panel already draws wherever
+            // nothing was read. Two walked parts meeting at a waypoint both
+            // sample it, so the second copy is dropped, exactly as two edges
+            // meeting at a node are.
+            function composeRoute() {
+                var height = [], distance = [], free = [];
+                var walked = 0, crossings = 0, crossed = 0, straight = 0, read = false, joined = false;
+                legs.forEach(function (leg) {
+                    // A leg still being worked out, or one the height service
+                    // refused, breaks the series rather than being stepped over.
+                    // Its ground is not known to be anything, and a curve drawn
+                    // straight through the hole would join two stretches the
+                    // route does not yet connect — the same invention as a climb
+                    // counted across a gap.
+                    if (!leg.parts) {
+                        if (height.length) { height.push(NaN); distance.push(walked); free.push(0); }
+                        joined = false;
+                        return;
+                    }
+                    leg.parts.forEach(function (part) {
+                        if (part.height === null) {
+                            crossings += 1;
+                            crossed += part.length;
+                            if (height.length) { height.push(NaN); distance.push(walked); free.push(0); }
+                            joined = false;
+                            return;
+                        }
+                        if (part.kind === 'land') { straight += part.length; }
+                        var mark = part.kind === 'land' ? 1 : 0;
+                        for (var s = (joined ? 1 : 0); s < part.height.length; s += 1) {
+                            height.push(part.height[s]);
+                            distance.push(walked + part.distance[s]);
+                            free.push(mark);
+                            if (!isNaN(part.height[s])) { read = true; }
+                        }
+                        joined = part.height.length > 0;
+                        walked += part.length;
+                    });
+                });
+                return {height: height, distance: distance, free: free, total: walked, read: read,
+                        crossing: crossings > 0, crossings: crossings, crossed: crossed, straight: straight};
+            }
+
+            // Read off the composed series by the build's own rule: a climb
+            // counts once the series has turned away from its low point by the
+            // threshold, and a gain smaller than that is noise the sampling
+            // invented. The same rule in Python is trails.routing.elevation, and
+            // two halves of one profile read under two rules would answer
+            // differently without either looking wrong. Never summed off the
+            // parts: the threshold restarts at every boundary, and over this
+            // network summing gives two thirds of the figure.
+            function climbOf(values, threshold) {
+                var total = 0, at = 0;
+                while (at < values.length) {
+                    if (isNaN(values[at])) { at += 1; continue; }
+                    var first = at;
+                    while (at < values.length && !isNaN(values[at])) { at += 1; }
+                    total += runClimb(values, first, at, threshold);
+                }
+                return total;
+            }
+
+            function runClimb(values, first, last, threshold) {
+                var total = 0, anchor = values[first], extreme = values[first];
+                for (var at = first + 1; at < last; at += 1) {
+                    var height = values[at];
+                    if (extreme >= anchor) {
+                        if (height > extreme) { extreme = height; }
+                        else if (extreme - height >= threshold) { total += extreme - anchor; anchor = extreme; extreme = height; }
+                    } else if (height < extreme) { extreme = height; }
+                    else if (height - extreme >= threshold) { anchor = extreme; extreme = height; }
+                }
+                // The run the series ends on is judged by the same threshold as
+                // any other, or a metre of noise lands on the end of every one.
+                if (extreme - anchor >= threshold) { total += extreme - anchor; }
+                return total;
+            }
+
+            function figuresOf(shape) {
+                var high = -Infinity, low = Infinity, upside = new Array(shape.height.length);
+                for (var i = 0; i < shape.height.length; i += 1) {
+                    var value = shape.height[i];
+                    upside[i] = -value;
+                    if (isNaN(value)) { continue; }
+                    if (value > high) { high = value; }
+                    if (value < low) { low = value; }
+                }
+                // Nothing read is not a climb of zero, the same distinction
+                // the Python side keeps: a figure of zero is a statement about
+                // flat ground.
+                return {
+                    ascent: shape.read ? climbOf(shape.height, PLAN.ascentThresholdM) : NaN,
+                    descent: shape.read ? climbOf(upside, PLAN.ascentThresholdM) : NaN,
+                    high: shape.read ? high : NaN,
+                    low: shape.read ? low : NaN,
+                    // A route has no single direction to name and no ascent that
+                    // is true both ways round, so it names neither.
+                    bearing: null, point: null
+                };
+            }
+
+            // The two groups reported apart, never folded into the walking
+            // total. A crossing is not walking and a stretch drawn straight is
+            // not a path, and the reader is told both rather than shown one
+            // number that quietly holds all three.
+            function told(shape) {
+                var said = [];
+                if (shape.crossings) {
+                    said.push(shape.crossings + (shape.crossings === 1 ? ' crossing, ' : ' crossings, ') +
+                              (shape.crossed / 1000).toFixed(2) + ' km');
+                }
+                if (shape.straight > 0) {
+                    said.push((shape.straight / 1000).toFixed(2) + ' km drawn straight, not a path');
+                }
+                var waiting = legs.filter(function (leg) { return !leg.parts && !leg.failed; }).length;
+                if (waiting) { said.push(waiting + (waiting === 1 ? ' leg' : ' legs') + ' still being worked out'); }
+                var refused = legs.filter(function (leg) { return leg.failed; });
+                if (refused.length) {
+                    said.push(refused.length + (refused.length === 1 ? ' leg' : ' legs') +
+                              ' with no heights: ' + refused[0].failed);
+                }
+                return said;
+            }
+
+            // ---- drawing --------------------------------------------------------
+            // Not the overlay pane, and not the marker pane either: what goes
+            // into either is counted for ever, and both counts are acceptance
+            // figures. A pane of its own also keeps the route above every trail
+            // layer without depending on the order the layers were added in.
+            var pane = map.createPane('trailsPlanRoute');
+            pane.style.zIndex = 460;
+            // Nothing here is ever a click target. In plan mode a click places a
+            // waypoint wherever it lands, and out of it the route must not stand
+            // between a reader and the line underneath — the mistake the park
+            // boundary made for a fortnight.
+            pane.style.pointerEvents = 'none';
+
+            function draw(parts) {
+                var layers = [];
+                parts.forEach(function (part) {
+                    var corners = [];
+                    for (var i = 0; i < part.lon.length; i += 1) { corners.push([part.lat[i], part.lon[i]]); }
+                    if (corners.length < 2) { return; }
+                    var colour = part.kind === 'waiting' ? WAITING : ROUTE;
+                    // The casing first, so it lies under. Dashed identically, or
+                    // white would show through every gap.
+                    [[CASING, 6], [colour, 2.6]].forEach(function (stroke) {
+                        layers.push(L.polyline(corners, {
+                            pane: 'trailsPlanRoute', color: stroke[0], weight: stroke[1], opacity: 0.95,
+                            dashArray: DASH[part.kind], interactive: false
+                        }).addTo(map));
+                    });
+                });
+                return layers;
+            }
+
+            function pin(point) {
+                return L.circleMarker([point.lat, point.lon], {
+                    pane: 'trailsPlanRoute', radius: 5, weight: 2, color: ROUTE,
+                    fillColor: CASING, fillOpacity: 1, interactive: false
+                }).addTo(map);
+            }
+
+            function undraw(layers) {
+                layers.forEach(function (layer) { if (layer) { map.removeLayer(layer); } });
+            }
+
+            function straightAcross(from, to) {
+                return [{kind: 'waiting', lon: [from.lon, to.lon], lat: [from.lat, to.lat]}];
+            }
+
+            // ---- the route ------------------------------------------------------
+            var on = false;
+            var points = [];
+            var legs = [];
+            var pins = [];
+            var settling = 0;
+
+            function addLeg(graph, from, to) {
+                var leg = {from: from, to: to, parts: null, failed: null, layers: []};
+                legs.push(leg);
+                // Something on the map the instant the click lands, replaced when
+                // the leg is worked out. **Only this leg is redrawn**, then and
+                // later: rebuilding the route on every click is what froze this
+                // map twice already, on a layer rather than on a route.
+                leg.layers = draw(straightAcross(from, to));
+                settling += 1;
+                refresh();
+                // Wrapped, so that a fault thrown on the way *into* the work
+                // is a rejection like any other rather than an exception that
+                // leaves the count of outstanding legs standing for ever.
+                Promise.resolve().then(function () { return resolve(graph, from, to); }).then(function (parts) {
+                    leg.parts = parts;
+                }, function (failure) {
+                    leg.failed = String(failure && failure.message ? failure.message : failure);
+                // A third handler rather than a catch over the two above: a
+                // fault while *drawing* is not a leg that could not be worked
+                // out, and reporting it as one sends the next reader to the
+                // wrong place. It belongs in the console, loudly.
+                }).then(function () {
+                    settling -= 1;
+                    // The point may have been taken back while this was in
+                    // flight, in which case the leg is off the route and nothing
+                    // it has to say matters any more.
+                    if (legs.indexOf(leg) < 0) { return; }
+                    undraw(leg.layers);
+                    leg.layers = draw(leg.parts || straightAcross(from, to));
+                    refresh();
+                });
+            }
+
+            function withGraph(run, always) {
+                if (!window.trailsGraph) {
+                    say('There is no routing graph in this page, so nothing can be routed.');
+                    always();
+                    return;
+                }
+                // Two handlers rather than a catch, for the reason above. The
+                // release is a finally rather than a line after the call: the
+                // work must be counted as over whether it succeeded or threw,
+                // and a throw still reaches the console, loudly.
+                window.trailsGraph.ready.then(function (graph) {
+                    try { run(graph); } finally { always(); }
+                }, function () {
+                    say('The routing graph did not arrive, so nothing can be routed.');
+                    always();
+                });
+            }
+
+            function place(lat, lon) {
+                // Counted as outstanding from the click, not from the moment
+                // the graph answers. A reader who has clicked is waiting, and a
+                // state that reads 'nothing in hand' for the microtask in
+                // between is one a check would believe.
+                settling += 1;
+                refresh();
+                withGraph(function (graph) {
+                    // Snapped to the network where there is any within reach, so
+                    // a route can start from where the reader meant rather than
+                    // from a metre beside it; beyond that the raw point stands
+                    // and the leg is drawn straight.
+                    var node = graph.nearestNode(lat, lon, PLAN.snapM);
+                    var point = node >= 0
+                        ? {lat: graph.nodeLat[node], lon: graph.nodeLon[node], node: node}
+                        : {lat: lat, lon: lon, node: -1};
+                    points.push(point);
+                    pins.push(pin(point));
+                    if (points.length > 1) { addLeg(graph, points[points.length - 2], point); }
+                }, function () { settling -= 1; refresh(); });
+            }
+
+            // One misclick should not cost a route. Everything beyond taking the
+            // last point back — moving one, inserting one, dropping one from the
+            // middle — is a later phase.
+            function undo() {
+                if (!points.length) { return; }
+                points.pop();
+                undraw([pins.pop()]);
+                var leg = legs.pop();
+                if (leg) { undraw(leg.layers); }
+                refresh();
+            }
+
+            // ---- the control ------------------------------------------------------
+            var toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;cursor:pointer';
+            var back = document.createElement('button');
+            back.type = 'button';
+            back.textContent = 'Take back the last point';
+            back.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-top:4px;cursor:pointer;display:block';
+            var status = document.createElement('div');
+            status.style.cssText = 'margin-top:4px;color:#555';
+
+            var control = L.control({position: 'topright'});
+            var box = null;
+            control.onAdd = function () {
+                box = L.DomUtil.create('div', 'trails-plan-control');
+                box.style.cssText = 'background:rgba(255,255,255,0.94);padding:6px 8px;border:1px solid #999;' +
+                    'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4';
+                box.appendChild(toggle);
+                box.appendChild(back);
+                box.appendChild(status);
+                // Clicking inside the control must not reach the map, and the
+                // wheel must, or the map reads as frozen under it.
+                L.DomEvent.disableClickPropagation(box);
+                return box;
+            };
+            control.addTo(map);
+
+            // Leaflet appends to a top corner, and the layer control sharing
+            // this one is expanded over twenty-five layers, so anything added
+            // after it lands below the fold. Moved to the front of the corner
+            // after addTo, the way a control that has to sit above the zoom
+            // buttons is.
+            var corner = control.getContainer().parentNode;
+            corner.insertBefore(control.getContainer(), corner.firstChild);
+
+            function say(message) {
+                status.textContent = message;
+            }
+
+            function refresh() {
+                toggle.textContent = on ? 'Stop planning' : 'Plan a route';
+                back.style.display = on ? 'block' : 'none';
+                back.disabled = !points.length;
+                status.style.display = on ? '' : 'none';
+                if (on) {
+                    say(points.length === 0 ? 'Click the map to place the first point.'
+                        : points.length + (points.length === 1 ? ' point' : ' points') + (settling ? ' \\u00b7 working\\u2026' : ''));
+                }
+                present();
+            }
+
+            // What the panel is shown. The route's series is composed here and
+            // handed over; the panel draws the curve, the bands, the crosshair
+            // and the reduction exactly as it does for a chain.
+            function present() {
+                var showing = panel();
+                if (!showing) { return; }
+                if (!points.length) { showing.series(null); return; }
+                var shape = composeRoute();
+                showing.series({label: 'planned route', figure: figuresOf(shape), shape: shape, told: told(shape)});
+            }
+
+            function switchTo(want) {
+                if (want === on) { return; }
+                on = want;
+                toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+                var showing = panel();
+                // While plan mode is on the map's clicks are its own, so the
+                // panel stops answering them; the route is left drawn either
+                // way, because switching off to look at something is not
+                // throwing a plan away.
+                if (showing) { showing.suspend(on); }
+                refresh();
+            }
+
+            toggle.addEventListener('click', function () { switchTo(!on); });
+            back.addEventListener('click', undo);
+
+            // ---- the clicks --------------------------------------------------------
+            // One handler for every click on the map, whatever it lands on.
+            // Leaflet fires a layer's click for a line and the map's click only
+            // for empty ground, so listening to either alone would miss half the
+            // map — and a click reaching a line would open its popup as well.
+            // Taken in the capture phase on the container and stopped there:
+            // Leaflet's own listener sits on the same element in the bubble
+            // phase and never runs.
+            var pressed = null;
+            var container = map.getContainer();
+
+            function overControl(event) {
+                return !!(event.target && event.target.closest && event.target.closest('.leaflet-control-container'));
+            }
+
+            container.addEventListener('mousedown', function (event) {
+                pressed = {x: event.clientX, y: event.clientY};
+            }, true);
+
+            container.addEventListener('click', function (event) {
+                if (!on || overControl(event)) { return; }
+                // A pan ends in a click too. Leaflet drops that one for its own
+                // listeners; this one is not Leaflet's, so how far the pointer
+                // travelled is what tells the two apart.
+                if (pressed && Math.max(Math.abs(event.clientX - pressed.x), Math.abs(event.clientY - pressed.y)) > 3) { return; }
+                event.stopPropagation();
+                var where = map.mouseEventToLatLng(event);
+                place(where.lat, where.lng);
+            }, true);
+
+            // Two clicks place two points, which the button takes back one at a
+            // time; zooming as well would leave the reader somewhere else too.
+            container.addEventListener('dblclick', function (event) {
+                if (on && !overControl(event)) { event.stopPropagation(); }
+            }, true);
+
+            // What the plan is, and the entry a click uses, the way the graph
+            // arrives as window.trailsGraph and the panel's selection as
+            // window.trailsProfile: so a browser check can drive it and read it
+            // rather than screenshot it.
+            window.trailsPlan = {
+                place: place,
+                undo: undo,
+                toggle: function (want) { switchTo(want === undefined ? !on : !!want); },
+                state: function () {
+                    var shape = composeRoute();
+                    return {
+                        on: on, working: settling > 0,
+                        points: points.map(function (point) { return {lat: point.lat, lon: point.lon, node: point.node}; }),
+                        legs: legs.map(function (leg) {
+                            return {
+                                settled: !!leg.parts, failed: leg.failed,
+                                parts: (leg.parts || []).map(function (part) {
+                                    return {kind: part.kind, length: part.length, read: !!part.read,
+                                            samples: part.height ? part.height.length : 0};
+                                })
+                            };
+                        }),
+                        walked: shape.total, crossings: shape.crossings, crossed: shape.crossed,
+                        straight: shape.straight, read: shape.read, figure: figuresOf(shape)
+                    };
+                }
+            };
+
+            // Plan mode lays its route out with the walk the profile panel
+            // owns, so a page carrying one and not the other can plan nothing.
+            // Said once, loudly, rather than thrown at the first click.
+            if (panel()) {
+                refresh();
+            } else {
+                console.error('plan mode: there is no profile panel in this page, so nothing can be planned');
+                toggle.disabled = true;
+                toggle.textContent = 'Plan a route';
+                back.style.display = 'none';
+                status.style.display = '';
+                say('There is no profile panel in this page, so nothing can be planned.');
+            }
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, plan: dict[str, Any]) -> None:
+        """Initialize plan mode.
+
+        Args:
+            plan: What the page needs to route and to sample. See
+                :func:`add_plan_mode`.
+        """
+        super().__init__()
+        self._name = "PlanMode"
+        # Through _script_json like everything else that lands inside a script
+        # block: a service URL or a terrain name carrying a '<' would otherwise
+        # close it, and json.dumps leaves that character alone.
+        self.plan_json = _script_json(plan)
+
+
+def add_plan_mode(fmap: folium.Map, plan: dict[str, Any]) -> None:
+    """Let a reader click a route together over the graph in the page.
+
+    Switch it on and every click appends a waypoint, snapping to the network
+    where one is within ``snapM`` and keeping the raw point beyond that. The way
+    from the point before is found with Dijkstra over the weighted graph — the
+    cost of an edge is its length times its source's factor, both out of the
+    payload's header, and a crossing costs the header's flat figure instead.
+    Where no way exists the leg is drawn straight, its heights fetched from the
+    height service on demand and cached by its two ends.
+
+    **The four kinds of leg are parts of a leg, not legs.** A routed leg that
+    takes a ferry is walked, then crossed, then walked; a straight leg over a
+    strait splits at the shoreline into the same two things, and the samples are
+    what split it. Walking and crossing are reported apart, always, and a
+    crossing carries no profile at all.
+
+    The route's profile goes to the panel :func:`add_profile_panel` put in the
+    page, through the second way in that panel offers — so call this after both
+    that and :func:`add_routing_graph`. Nothing is drawn into the overlay or
+    marker panes: the route, its waypoints and everything else here live in a
+    pane of their own, because what goes into either of those is counted among
+    the map's markers and paths for ever after.
+
+    Args:
+        fmap: Map holding the graph and the panel
+        plan: What the page needs, none of it invented here.
+            ``heightsUrl``, ``heightsCrs``, ``heightsBatch`` and
+            ``heightsWorkers`` are the height service, the coordinates it is
+            asked in, its own cap on points per request and the concurrency the
+            build settled on; ``terrainModel`` and ``seaTerrain`` are the two
+            answers that classify a sample — what makes it a ground height, and
+            what makes it sea rather than ground; ``sampleStepM`` and
+            ``ascentThresholdM`` are the build's own sampling step and ascent
+            threshold, which a leg sampled on demand has to be read under or the
+            two halves of one profile answer differently; ``snapM`` is how near
+            a click has to land to be taken as a node; ``maxStraightM`` is how
+            far a leg may be drawn straight before it is refused, which bounds
+            what one misclick can ask of a public service. The names come from
+            :mod:`trails.io.sources.hoydedata` and
+            :mod:`trails.routing.elevation`.
+
+    Raises:
+        ValueError: If ``plan`` leaves out something the page cannot route or
+            sample without. A page that quietly sampled every 50 m, or read a
+            climb at no threshold at all, would look exactly like one that did
+            neither.
+    """
+    missing = sorted(set(PLAN_SETTINGS) - set(plan))
+    if missing:
+        raise ValueError(f"the page cannot plan a route without {', '.join(missing)}")
+
+    _PlanMode(plan).add_to(fmap)
 
 
 class _Legend(MacroElement):

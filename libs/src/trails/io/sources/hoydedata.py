@@ -60,6 +60,23 @@ REQUEST_CRS = f"EPSG:{COORDINATE_SYSTEM}"
 #: ground height, and is read as no reading rather than as a number.
 TERRAIN_MODEL = "dtm"
 
+#: What the service calls open sea in its ``terreng`` field. It is a different
+#: question from :data:`TERRAIN_MODEL` and answers a different one: that says
+#: whether the number is a ground height, this says what the point is *on*, and
+#: it is what tells a line drawn across a fjord that it is a crossing rather
+#: than a walk. **Tested for by name and never by exclusion**: measured, a
+#: perfectly good ``dtm1`` reading comes back with no ``terreng`` at all, and a
+#: lake answers ``InnsjøRegulert`` from a lake model — walked ground with
+#: nothing read along it, which is neither sea nor a height.
+SEA_TERRAIN = "Havflate"
+
+#: The other coordinate system the service is asked in. It answers to longitude
+#: and latitude as readily as to :data:`COORDINATE_SYSTEM` — measured, not
+#: assumed — which is what lets a consumer holding only degrees, such as a map
+#: page, ask it without reprojecting anything. Nothing in this module uses it:
+#: the network is built in the metric grid and asking in it costs no conversion.
+WGS84_COORDINATE_SYSTEM = 4326
+
 #: Sent so the service's operators can identify the client, as
 #: :mod:`trails.io.sources.overpass` already does for the same reason. Said
 #: twice rather than shared, so neither module's politeness depends on the other

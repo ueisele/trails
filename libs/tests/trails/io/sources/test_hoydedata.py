@@ -76,6 +76,23 @@ class TestReadings:
         with pytest.raises(ValueError, match="asked about"):
             hoydedata._readings({"punkter": [_ground(1.0)]}, 2)
 
+    def test_sea_is_a_different_question_from_whether_there_is_a_height(self):
+        """Test that the two fields answer two things.
+
+        ``datakilde`` says whether the number is a ground height; ``terreng``
+        says what the point is on, and that is what tells a line drawn across a
+        fjord that it is a crossing rather than a walk. A lake answers neither:
+        a real height from a lake model, which is walked ground with nothing
+        read along it.
+        """
+        lake = {"datakilde": "innsjohoyde", "terreng": "InnsjøRegulert", "z": 198.0}
+        assert math.isnan(hoydedata._reading(lake))
+        assert lake["terreng"] != hoydedata.SEA_TERRAIN
+
+    def test_a_reading_can_be_good_and_name_no_terrain_at_all(self):
+        """Test why sea is tested for by name and never by exclusion."""
+        assert hoydedata._reading({"datakilde": "dtm1", "terreng": None, "z": 51.2}) == pytest.approx(51.2)
+
 
 class TestPointStore:
     """Test the table that keeps a second build from asking again."""

@@ -593,6 +593,63 @@ def ascent_method(params: Params) -> str:
     return f"DTM1, sampled every {params.elevation_step_m:g} m, gains under {params.ascent_threshold_m:g} m ignored"
 
 
+#: How near a click has to land to be taken as a point on the network. The
+#: phase's figure, and it is a judgement rather than a measurement: near enough
+#: that a reader aiming at a path gets the path, far enough that a click on open
+#: ground stays on open ground. Beyond it the raw point stands and the leg is
+#: drawn straight.
+SNAP_M = 150.0
+
+#: How far a single leg may be drawn straight before the page refuses to sample
+#: it. A leg drawn straight is sampled at the build's own 5 m and fifty points
+#: to a request, so its cost to Kartverket's height service is its length: a
+#: 1 km leg is four requests, a 10 km one forty. This map is 45 km across, so
+#: two clicks in opposite corners would be some 180 — from one misclick, at a
+#: click's notice, against a public service the build is careful with.
+#:
+#: **Twenty kilometres, and the leg says so rather than being coarsened.**
+#: Sampling further apart would make the two halves of one profile answer
+#: differently and nothing would look wrong; refusing is visible. It is well
+#: clear of anything real here: the longest stretch of UT.no's own routes that
+#: no source records a path along is 10.3 km, and that is spread over a 42 km
+#: trip rather than being one leg.
+MAX_STRAIGHT_M = 20_000.0
+
+
+def plan_settings(params: Params) -> dict[str, object]:
+    """Hand the page what it needs to plan a route over the graph it carries.
+
+    Everything here is a fact the build already settled, and the page must not
+    settle any of it again: the two rules an answer from the height service is
+    read by, the step the whole network was sampled at, and the threshold every
+    ascent on this map was read under. A page sampling every 50 m, or counting a
+    climb at no threshold at all, would draw a profile that disagrees with every
+    other figure on the map without anything looking wrong.
+
+    Args:
+        params: What decided the build
+
+    Returns:
+        The ``plan`` argument of :func:`~trails.visualization.maps.add_plan_mode`
+    """
+    return {
+        "heightsUrl": hoydedata.SERVICE_URL,
+        # Degrees, not the metric grid the build asks in: the page holds
+        # longitude and latitude and the service takes either.
+        "heightsCrs": hoydedata.WGS84_COORDINATE_SYSTEM,
+        "heightsBatch": hoydedata.MAX_POINTS,
+        # The build's concurrency and for the build's reason: this is somebody
+        # else's endpoint, and one number rather than two.
+        "heightsWorkers": hoydedata.DEFAULT_WORKERS,
+        "terrainModel": hoydedata.TERRAIN_MODEL,
+        "seaTerrain": hoydedata.SEA_TERRAIN,
+        "sampleStepM": params.elevation_step_m,
+        "ascentThresholdM": params.ascent_threshold_m,
+        "snapM": SNAP_M,
+        "maxStraightM": MAX_STRAIGHT_M,
+    }
+
+
 def export_settings(versions: dict[str, str | None], params: Params) -> dict[str, object]:
     """Hand the page everything it needs to write a GPX file.
 
@@ -1388,6 +1445,11 @@ def main() -> int:
     # a licence, a version or a field name it was not given is one it would have
     # to invent.
     maps.add_profile_panel(fmap, highlightable, export=export_settings(loaded.versions, params))
+
+    # And a route can now be clicked together over the graph, leg by leg, with
+    # its profile drawn in the same panel. After the panel, whose walk it lays
+    # its route out with, and after the graph it routes over.
+    maps.add_plan_mode(fmap, plan_settings(params))
 
     maps.finalize(fmap)
 

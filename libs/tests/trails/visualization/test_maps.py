@@ -812,6 +812,296 @@ class TestProfilePanel:
         assert "var open = false;" in fmap.get_root().render()
 
 
+class TestPlanMode:
+    """Tests for clicking a route together over the graph in the page."""
+
+    def planned(self, **changed: object) -> dict[str, object]:
+        """What the page has to be handed before it can plan a route.
+
+        Args:
+            **changed: Settings to override or, with a value of None, to drop
+
+        Returns:
+            A complete set, minus anything set to None
+        """
+        settings: dict[str, object] = {
+            "heightsUrl": "https://ws.geonorge.no/hoydedata/v1/punkt",
+            "heightsCrs": 4326,
+            "heightsBatch": 50,
+            "heightsWorkers": 6,
+            "terrainModel": "dtm",
+            "seaTerrain": "Havflate",
+            "sampleStepM": 5.0,
+            "ascentThresholdM": 5.0,
+            "snapM": 150.0,
+            "maxStraightM": 20000.0,
+        }
+        settings.update(changed)
+        return {name: value for name, value in settings.items() if value is not None}
+
+    def drawn(self) -> tuple[folium.Map, folium.FeatureGroup]:
+        """A map carrying a chain, the graph and the panel, ready for plan mode."""
+        gdf = gpd.GeoDataFrame(
+            {"chain_id": ["ut-no-1-2-3"], "ascent": [996.4], "geometry": [LineString([(12.8, 65.4), (12.81, 65.41)])]},
+            crs="EPSG:4326",
+        )
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        layer = maps.add_trails(fmap, gdf, name="Chains", group_field="chain_id", figure_fields={"ascent": "ascent"})
+        maps.add_routing_graph(fmap, {"version": 2, "edges": 0}, "")
+        maps.add_profile_panel(fmap, [layer])
+        return fmap, layer
+
+    def test_every_setting_the_template_reads_is_one_it_insists_on(self):
+        """The two lists are the same list. A setting the template reads and the
+        check does not require is one a caller can leave out and find missing in
+        a browser, which is the expensive place to find it."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        for setting in maps.PLAN_SETTINGS:
+            assert f"PLAN.{setting}" in html, setting
+
+    def test_a_plan_missing_a_setting_is_refused(self):
+        """A page that quietly sampled every 50 m, or read a climb at no
+        threshold at all, would look exactly like one that did neither."""
+        fmap, _ = self.drawn()
+
+        with pytest.raises(ValueError, match="sampleStepM|ascentThresholdM"):
+            maps.add_plan_mode(fmap, self.planned(sampleStepM=None, ascentThresholdM=None))
+
+    def test_the_build_s_own_step_and_threshold_reach_the_page(self):
+        """Two halves of one profile read under two rules answer differently,
+        and nothing about the answer looks wrong."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned(sampleStepM=7.5, ascentThresholdM=3.25))
+
+        html = fmap.get_root().render()
+        assert "7.5" in html
+        assert "3.25" in html
+
+    def test_it_draws_nothing_on_the_map(self):
+        """The route belongs in a pane of its own: anything drawn into the
+        overlay pane is counted among the map's paths for ever after, and 11,589
+        is an acceptance figure for every phase from the third."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+        maps.finalize(fmap)
+
+        assert not [child for child in fmap._children.values() if isinstance(child, folium.GeoJson | folium.Marker)]
+        html = fmap.get_root().render()
+        assert "createPane('trailsPlanRoute')" in html
+        planning = html.split("var PLAN =")[-1]
+        assert "pane: 'trailsPlanRoute'" in planning
+        # Every layer it makes names that pane. One that did not would land in
+        # the overlay pane by default, which is the whole thing being avoided.
+        assert planning.count("L.polyline(") == planning.count("pane: 'trailsPlanRoute'") - planning.count("L.circleMarker(")
+
+    def test_the_waypoints_are_not_markers(self):
+        """198 is the other acceptance figure, and a marker joins it for ever."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "L.marker(" not in planning
+        assert "L.circleMarker(" in planning
+
+    def test_the_wheel_still_reaches_the_map(self):
+        """disableClickPropagation, and deliberately not the scroll one: a
+        control that swallows the wheel reads as a map that has frozen."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "disableClickPropagation" in planning
+        assert "disableScrollPropagation" not in planning
+
+    def test_the_only_address_it_carries_is_the_height_service(self):
+        """A routing library from a CDN does not load on a file:// page: it
+        fails silently, the way the OpenStreetMap tiles once did. The one
+        address here is the service a leg drawn straight asks for its heights,
+        and it is asked when a reader draws one, not when the page loads."""
+        fmap, _ = self.drawn()
+        bare = fmap.get_root().render().count("://")
+
+        maps.add_plan_mode(fmap, self.planned())
+        planning = fmap.get_root().render()
+        assert planning.count("://") == bare + 1
+        assert planning.count("fetch(") == 1
+
+    def test_the_cost_comes_out_of_the_header(self):
+        """Length times the source's factor, and a crossing at the header's flat
+        figure. A cost column in the payload is the thing the encoder
+        deliberately left out, and a second table here would be the same
+        mistake wearing a different hat."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "graph.header.sources[graph.sources[i]]" in planning
+        assert "cost[i] = length[i] * source.factor" in planning
+        assert "source.flatM" in planning
+
+    def test_it_lays_its_route_out_with_the_panel_s_own_walk(self):
+        """Two walks laying edges end to end would eventually disagree, and a
+        route composed by the wrong one still looks like a route. The Python
+        side keeps its one in trails.routing.order for the same reason."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "panel().layEdges(" in planning
+        assert "function layEdges(" not in planning
+        assert "panel().metresBetween" in planning
+
+    def test_every_walk_over_the_graph_is_bounded_and_throws(self):
+        """An unbounded walk that appends is what a defect here looks like from
+        the outside: not an error but a page that has hung. The Python sibling
+        of the back-walk, written without a bound, took 42 GB before the kernel
+        stopped it."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "pops > mostPops" in planning
+        assert "steps > graph.header.edges" in planning
+        assert planning.count("throw new Error(") >= 3
+
+    def test_the_sentinel_is_tested_for_and_never_indexed_with(self):
+        """A typed array answers a negative index with undefined rather than
+        raising, so an unset predecessor would put undefined into the geometry
+        and carry on."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "if (used < 0 || before < 0)" in planning
+        # Which way round an edge is walked comes off the predecessor, not off
+        # the edge's own ends: fourteen edges in this graph begin and end at the
+        # same node and say nothing about direction.
+        assert "graph.fromNode[used] !== before" in planning
+
+    def test_a_crossing_carries_no_profile(self):
+        """Not a flat line at zero, which is a claim about ground that is not
+        there. The same rule a ferry chain follows in the panel."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "kind: 'ferry'" in planning
+        assert "kind: 'water'" in planning
+        # Both are written with no series at all rather than with an empty one.
+        assert planning.count("height: null, distance: null, read: false") == 2
+
+    def test_the_four_kinds_are_all_there_from_the_first_line(self):
+        """A model that knew only routed legs would have to be widened the first
+        time a ferry or a strait turned up, and both turn up here."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        for kind in ("routed", "land", "water", "ferry"):
+            assert f"{kind}:" in planning or f"'{kind}'" in planning, kind
+
+    def test_a_crossing_is_priced_as_a_whole_crossing(self):
+        """Noding cuts a ferry wherever something meets it: 15 of the 21 ferry
+        chains here are in several pieces and the longest is in seven. Charging
+        the flat figure per edge priced that one at 35 km of walking instead of
+        5, and a page that does so refuses crossings the build called
+        affordable. trails.routing.graph._cost splits it the same way."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "source.flatM * (whole[i] > 0 ? length[i] / whole[i] : 1)" in planning
+
+    def test_a_leg_drawn_straight_has_a_stated_ceiling(self):
+        """Sampling is fixed at the build's step, so the only way to bound what
+        one misclick asks of a public service is to bound the leg — and to say
+        so, because coarsening instead would make the two halves of one profile
+        answer differently with nothing looking wrong."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "length > PLAN.maxStraightM" in planning
+        assert "is further than a leg may be drawn straight" in planning
+
+    def test_one_refused_batch_stops_the_rest(self):
+        """Once a leg has given up there is nothing left to use, and a page that
+        carries on fetching the remainder is the opposite of the restraint the
+        concurrency is set for."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "if (stopped || next >= batches.length)" in planning
+
+    def test_a_page_without_a_panel_says_so_rather_than_throwing(self):
+        """Plan mode composes with the walk the panel owns, so a page carrying
+        one and not the other can plan nothing — said once, loudly."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        assert "console.error('plan mode: there is no profile panel" in html
+
+
+class TestComposedProfile:
+    """Tests for the second way into the panel, which a planned route uses."""
+
+    def drawn(self) -> folium.Map:
+        """A map carrying one chain and the panel."""
+        gdf = gpd.GeoDataFrame(
+            {"chain_id": ["ut-no-1-2-3"], "ascent": [996.4], "geometry": [LineString([(12.8, 65.4), (12.81, 65.41)])]},
+            crs="EPSG:4326",
+        )
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        layer = maps.add_trails(fmap, gdf, name="Chains", group_field="chain_id", figure_fields={"ascent": "ascent"})
+        maps.add_profile_panel(fmap, [layer])
+        return fmap
+
+    def test_the_panel_offers_a_second_way_in(self):
+        """A planned route has no chain and no row in the figures table."""
+        html = self.drawn().get_root().render()
+        assert "window.trailsProfilePanel" in html
+        assert "series: function (spec)" in html
+        assert "suspend: function (taken)" in html
+
+    def test_one_walk_and_one_metre_are_handed_out_rather_than_copied(self):
+        html = self.drawn().get_root().render()
+        assert "layEdges: layEdges" in html
+        assert "metresBetween: metresBetween" in html
+
+    def test_a_composed_route_is_not_offered_as_a_file(self):
+        """Writing a plan out is its own phase, and a button this panel could
+        not honour is worse than no button."""
+        html = self.drawn().get_root().render()
+        assert "if (!selected || selected.composed) { return; }" in html
+
+    def test_the_panel_stops_answering_clicks_while_something_else_owns_them(self):
+        html = self.drawn().get_root().render()
+        assert "if (suspended) { return; }" in html
+        assert "if (!suspended) { show(null); }" in html
+
+    def test_a_straight_stretch_is_dashed_in_the_curve(self):
+        """The profile has to say the same thing the map does about the same
+        ground, and a chain is never any of it."""
+        html = self.drawn().get_root().render()
+        assert "FREE_DASH" in html
+        assert "current.free !== free" in html
+        assert "drawn straight, not a path" in html
+
+    def test_the_metre_is_the_ellipsoid_and_not_a_sphere(self):
+        """Measured over 4,000 real edges: the sphere read 0.56 % short, which
+        is 900 m on a 160 km route stating its own distance. Nothing scales a
+        planned route onto a length it carries, because it carries none."""
+        html = self.drawn().get_root().render()
+        assert "111132.92" in html
+        assert "111412.84" in html
+        assert "110574" not in html
+
+
 class TestLegendAndFinalize:
     """Tests for legend rendering and layer control."""
 
