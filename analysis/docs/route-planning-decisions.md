@@ -1608,6 +1608,97 @@ worked out, or one the height service refused, would break the track somewhere
 that is not a crossing, and nothing in the file would say so. The button says
 which and stays disabled.
 
+### A loaded recording is a fifth kind of leg, and a chain export is one too
+
+Phase 8 reads a GPX back, and reading and writing the same format in one phase
+happens nowhere else in this project. Three things had to be settled to do it,
+each of them a change to what an exported file says.
+
+**The kind is `track`, and it means a stretch kept exactly as some file recorded
+it.** The four before it all say where a line came from — the network routed it,
+somebody drew it straight over land or water, a ferry carries it — and a
+recording is none of those. `routed` asserts an edge of this graph under every
+metre and `land` asserts a straight line nobody recorded, so folding a recording
+into either would be a claim about provenance that is simply untrue. What it
+costs is one word in `PART_KIND_ATTR` and, because the marking buckets must sum
+to `walked`, one bucket: `recorded`, beside `undrawn` and for the same reason —
+**never asked**, rather than asked and unanswered. A recording tells you nobody
+surveyed it, and calling that *unmarked* answers a question nobody put.
+
+**What a reader that has never seen the kind does, in both directions.** Any GPX
+reader finds it inside `<extensions>`, which GPX 1.1 says may be ignored, and
+reads the track and the waypoints unchanged — nothing about the geometry depends
+on it. This page, given a kind it has no case for, cannot restore that leg
+exactly, so it routes the leg between its two waypoints and **says how many legs
+it had to**. Never fatal, because a file from a later build should still open;
+never silent, because a leg quietly re-routed is a route that came back different
+with nothing to say so.
+
+**A chain export becomes one recorded leg.** It carries **0 `<wpt>` and 0 legs**
+and its `chain_id`, so *anything this map wrote restores exactly* was only ever
+true of a plan: there is nothing to route between and nothing to rebuild.
+Drawing it as the chain it already is was the alternative and belongs to phase 4,
+where clicking the line does it in one gesture and does it against the chain
+this graph holds — a chain id out of an older build names nothing here, so that
+route works sometimes and not others. Loading it as a track works always and
+leaves it immediately editable, which is what this phase is for. The
+recognition is not wasted: it is what the page says the file is, and the loaded
+route takes the chain's own name.
+
+**A file states the height model only where the height model was read.** Every
+height on this map came from DTM1 for seven phases, so the credit and the
+`ascentMethod` line were unconditional on there being heights at all. A stretch
+kept as it was recorded breaks that: its heights came with the reader's file,
+and crediting Kartverket for a consumer GPS reading — and saying it was sampled
+every 5 m — is the exact false claim `ascentMethod` was added to prevent. So a
+part says where its heights came from, the model is credited only where it was
+read, and the description says *the climb is the loaded file's own heights, not
+the model* wherever any of it is.
+
+**Every break in a loaded track is a crossing.** That is the same rule the writer
+works to, read the other way round, and getting it wrong is the one failure this
+whole distinction exists to prevent: GPX cannot say a segment is a boat, so a
+break is all a crossing leaves behind, and a page joining the two ends with a
+walked line would hand somebody a route across a fjord. It counts as a crossing,
+adds nothing to the walking distance, and carries no profile.
+
+### Matching a recording: what the rule is, and what it cannot do
+
+**Proximity alone is a weak test for lines** — the lesson `attach_nearest`
+learned, where 23 % of matches followed their road for under half its length
+until `min_overlap` was added. It is right and it is not the whole rule here,
+because one side of this pairing is a network rather than another dataset. What
+the page applies is three tests, and the second was learned the same way the
+first was:
+
+- **What share of the recording lies along the path offered to replace it**, at
+  0.6 over a 25 m tolerance. That is `min_overlap`, with the recorded stretch as
+  the line and the routed path as its counterpart.
+- **And the path may not be longer than the recording by more than the tolerance
+  at each end.** `min_overlap` is one-directional: a path running along the whole
+  recording *and then somewhere else as well* passes it. Measured on a round trip
+  whose own line crosses itself, the router took the wrong branch at the crossing
+  and 42.44 km came back as 48.2. **A route may not claim more ground than was
+  walked.**
+- **A heading test at 60°, per point, undirected.** The cheap half: a side path
+  leaving a junction points somewhere else and is never a candidate. Undirected
+  because a recording may walk an edge either way round.
+
+**An anchor is a node the recording passed within the tolerance of.** Noding cuts
+a line only where something meets it, so a recording out in the terrain that
+nothing crosses is *one edge*: median edge length here is 6.9 m but 1,142 of the
+234,358 are over 500 m and the longest is 18.5 km. Anchoring to the far end of
+one of those puts an anchor where the walker never stood.
+
+**And a part is a whole edge, which is the one thing this cannot do.** A
+recording that walks half of a long edge is kept as recorded rather than
+half-matched — 3.5 km of the 376 km corpus, and the whole difference between
+99.1 % and 100 %. Matching a *part* of an edge would mean slicing its geometry
+and its height samples at two positions and apportioning its marking and its
+protected shares by length, which is a part that no longer stands for an edge.
+That is an extension of the model rather than a tuning change, and it is written
+down here so the next person weighs it rather than discovers it.
+
 ### An exported file names its sources, and cannot name one licence
 
 Record in `<metadata>` the sources a file actually draws on, each with its
