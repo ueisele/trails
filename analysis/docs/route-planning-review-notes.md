@@ -23,7 +23,7 @@ for 2 because two fifths of its payload is elevation.
 
 **Phase 3B** put the graph in the page: `routing/order.py`,
 `visualization/encoding.py`, a hand-written decoder in `maps.py` and
-`edge_costs` in `norway.py`. **4.12 MB** in the page against an allowance of 5,
+`edge_costs` in `norway.py`. **4.12 MB** in the page, later 4.93,
 inflating in 0.34 s and reading into arrays in 75 ms, arriving as
 `window.trailsGraph` and read by nothing yet. Every browser figure held and the
 graph did not move. What it cost against the estimate, and the two findings the
@@ -473,8 +473,13 @@ after on reach and chain counts, not just on the edge count it was aimed at.
 
 Budgets worth stating, so "too large" is testable:
 
-- the graph's whole contribution to the page stays under about 5 MB, against the
-  1.8 MB of geometry already measured
+- ~~the graph's whole contribution to the page stays under about 5 MB~~ —
+  **struck out after phase 5.** It was never measured, and measured it guards
+  nothing: quadrupling the payload costs about thirty milliseconds of a 1.6 s
+  load, and the payload is 4.93 MB of a 37.4 MB page. What it did do was force
+  the edge table to be encoded, worth 1.7 MB. **A ceiling nobody can justify is
+  still useful if it makes the right question unavoidable, and useless as a
+  fact.** The load time replaces it
 - noding stays within single-digit minutes
 
 Neither looks threatened by 25,000 extra edges: a Dijkstra does not notice
@@ -618,7 +623,8 @@ against 3.30, because gzip does better on more data than a linear scale assumes.
 And the edge table, which the draft listed as a deliverable and left out of the
 budget, is **1.98 MB as JSON** and puts the total at 6.5 MB, over. Sorted by
 `from_node` with both columns delta-encoded it is **0.27 MB**. That seven-fold
-difference is the whole margin: 4.8 MB against an allowance of 5.
+difference is the whole margin — as the allowance stood then; see *Where the
+5 MB went* below.
 
 A second pass once phase 2 had run corrected the table again in the other
 direction: the elevations were estimated at 2.2 MB and measure **0.98**, so the
@@ -957,6 +963,50 @@ Two more, and one of them was mine:
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
 
+## Where the 5 MB went
+
+Asked plainly — *why only 5 MB?* — and it turned out **nobody had ever
+justified it.** The number appears once in the decisions document, in a note
+referring to it as already settled, and it is settled nowhere: nothing was
+measured to arrive at it, nothing against it. I then carried it into these
+notes as "about 5 MB", which reads like a hedge and was really an unchecked
+figure being passed on.
+
+Measured, on the built page:
+
+| | |
+|---|---:|
+| HTML parsed, to `DOMContentLoaded` | 1,195 ms |
+| to `load` | 1,581 ms |
+| the graph inflating, off the load | 229 ms |
+| reading it into arrays | 50 ms |
+| decoding base64: 5 / 10 / 20 MB | 7 / 18 / 34 ms |
+
+**Quadrupling the payload would cost about thirty milliseconds of a 1.6 second
+load.** It guards nothing. And the payload is 4.93 MB of a 37.4 MB page — the
+rest is popup HTML and the coordinate arrays Folium writes for the drawn lines,
+where nothing counts anything and where the two coverage rows cost **1.57 MB
+against 0.009 in the payload**.
+
+**But it earned its keep, and that is the part worth carrying forward.** It is
+why the edge table is encoded rather than serialised, worth 1.7 MB; why the
+coordinate quantum was weighed in metres rather than taken as free; and three
+times it turned an estimate into a measurement. **A ceiling nobody can justify
+is still useful if it makes the right question unavoidable — and useless as a
+fact.** Struck as a fact, kept as a habit:
+
+- encode and quantise always, because JSON coordinates are 22.4 MB against 1.8
+  whatever the ceiling;
+- argue for anything added on its own, never against a remaining margin —
+  *"it still fits"* is not a reason;
+- **the load time is the acceptance**, 1.6 s, re-readable on every build;
+- look at the drawn side first, because that is where a megabyte gets added by
+  accident.
+
+The generalisable bit: **an inherited number that nobody can source is worth
+attacking on sight.** This one had survived eight phases, and I had quoted it
+in three documents without once asking where it came from.
+
 ## What phase 5's review found
 
 **Everything the phase claimed reproduces**, and one of its checks holds more
@@ -998,7 +1048,7 @@ either way, thousands of times along a route.
 none between two. **There is no "exact" beyond 0.01 m** — the service answers in
 centimetres. So the decimetre was not a modest claim about an uncertain model, it
 was throwing away a digit that had been measured. The payload now carries it:
-4.12 → **4.93 MB** of an allowance of 5, and the downloaded file reads
+4.12 → **4.93 MB**, and the downloaded file reads
 **+0.00 m** against what it states.
 
 The argument that nearly stopped this was mine, and it was a category error:

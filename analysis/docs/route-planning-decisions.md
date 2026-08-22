@@ -232,9 +232,50 @@ not:
 > Phase 1, built, carries more: **541,062 vertices across the chains** and
 > 948,465 across the edges, the difference being the vertex each cut duplicates.
 > Scaling the encoded figures below by that gives 1.9 MB for what is drawn and
-> 3.3 MB for the routing graph — both inside the 5 MB this was budgeted at, and
-> the reason phase 1 nodes the published sources at their own resolution rather
-> than a simplified one.
+> 3.3 MB for the routing graph, and that is the reason phase 1 nodes the
+> published sources at their own resolution rather than a simplified one.
+
+#### There is no size allowance, and the one this document used to name was never measured
+
+An earlier draft said the payload had **5 MB** to spend. That number appears once,
+in a note that refers to it as already settled, and nowhere is it settled: nothing
+was measured to arrive at it and nothing was measured against it. It was a round
+number.
+
+It did real work all the same, and the work is worth keeping while the number
+goes. It is why the edge table is encoded rather than serialised, which was 1.7 MB;
+it is why the coordinate quantum was weighed against what it costs in metres
+rather than taken as free; and three times it forced a figure to be measured
+where an estimate would have passed. **A ceiling nobody can justify is still
+useful if it makes the right question unavoidable.** It is not useful as a fact.
+
+Measured, on the built page — 37.4 MB, of which the payload is 4.93:
+
+| | |
+|---|---:|
+| HTML parsed, to `DOMContentLoaded` | 1,195 ms |
+| to `load` | 1,581 ms |
+| the graph inflating, off the load | 229 ms |
+| reading it into arrays | 50 ms |
+| decoding base64: 5 MB / 10 MB / 20 MB | 7 / 18 / 34 ms |
+
+So quadrupling the payload costs about thirty milliseconds of a page that takes
+1.6 seconds to open. **The payload is not what makes this page large.** Of the
+37.4 MB it is 4.93; the rest is popup HTML and the coordinate arrays Folium
+writes for the drawn lines — and the two coverage rows added in phase 3B cost
+**1.57 MB in the popups against 0.009 MB in the payload**, a factor of 175.
+
+The rules that replace the number:
+
+- **Encode and quantise, always.** Not to stay under anything: `<ele>` values and
+  coordinates written as JSON are 22.4 MB where the same data delta-encoded is
+  1.8, and that difference is real whatever the ceiling.
+- **Anything added is measured and argued for on its own**, never against a
+  remaining allowance. "It still fits" is not a reason.
+- **The acceptance is the load time**, which is 1.6 s and can be re-read on every
+  build. If a change moves it, that is the finding.
+- **Look at the drawn side first.** That is where a megabyte is cheap to add by
+  accident and where nothing is counting.
 
 | encoding | in the file |
 |---|---:|

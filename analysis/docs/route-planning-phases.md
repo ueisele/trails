@@ -700,7 +700,7 @@ wrong:
 | elevations, 1,406,040 samples at 0.01 m | **1.80 MB** |
 | the two derived fields, one byte an edge | under 0.01 MB |
 | the chain ids and the four count sections | **0.37 MB** |
-| **total, as built** | **4.93 MB** against an allowance of 5 |
+| **total, as built** | **4.93 MB**, in a page of 37.4 |
 
 The estimate above this table said 3.6 MB and was wrong twice over, both worth
 keeping. It left out the stream's own structure — the chain ids and the counts
@@ -709,6 +709,13 @@ it budgeted the elevations at a decimetre. Phase 5 moved them to the centimetre
 the height service actually answers at, so that an exported file reproduces the
 ascent it states; that is the 0.8 MB between 4.12 and 4.93. **Ask what else has
 to be in a file for the thing you budgeted to be readable.**
+
+**The "allowance of 5 MB" these figures used to be measured against is gone**, and
+the decisions document says why: it was never measured, and measured now it
+guards nothing — quadrupling the payload costs about thirty milliseconds of a
+1.6 second load. What replaces it is that anything put in here is argued for on
+its own rather than against a remaining margin, and that the load time is the
+acceptance.
 
 **The edge table has to be encoded, not serialised.** An earlier draft listed it
 without budgeting it, and as JSON it is 1.98 MB, which puts the total at 6.5 MB

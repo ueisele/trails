@@ -7,8 +7,9 @@ whole point of the chain/edge split — and one copy cannot serve both without
 losing either the accuracy or the render budget.
 
 **The table is encoded, not serialised.** Written as JSON the edge table alone
-is 1.98 MB and puts the payload over its allowance; delta-encoded it is a
-seventh of that. The same holds for the geometry: 948,465 vertices as JSON
+is 1.98 MB; delta-encoded it is a seventh of that. Not to stay under a ceiling —
+there is none, see the decisions document — but because the difference is real
+and nothing is bought by spending it. The same holds for the geometry: 948,465 vertices as JSON
 coordinate arrays are 22.4 MB, and as zigzag varints over the delta between
 consecutive points, gzipped, about a tenth of it.
 
