@@ -1534,42 +1534,99 @@ the route.
 ## Phase 8 — Loading a route and working on it
 
 Read a GPX back in and carry on from it: one of our own exports, or a track from
-Komoot, or one a friend sent.
+somewhere else.
 
 It comes after phase 7 for a reason rather than by convenience — a loaded route
 has to be immediately editable, and editing is what phase 7 builds. Before that
 you could load a route and look at it, which is not the point.
 
-**Ask on load what should happen to it.** Three answers, and they cost very
-different amounts:
+**Loading happens in the browser**, on a page served from `file://`, and that
+single fact governs the whole phase. Checked before handing it over: a page there
+*may* read a file the reader picks — `<input type="file">` and `FileReader`
+returned all 1,197,976 bytes of a chain export and `DOMParser` found its
+trackpoints. Nothing else about this phase would matter if that had failed. The
+page has no file control today; anything over the map has to be a Leaflet control
+for the reasons in the trap list.
+
+### The first work is a spatial index, not a matcher
+
+The matching rule is right and it is worth stating first: **walk the track, find
+where it runs along an edge within a tolerance, swap that stretch for the edge,
+keep the rest verbatim** — and check that the track runs *along* the edge rather
+than merely near it, because a track beside a parallel path snaps to the wrong
+one on distance alone. `attach_nearest` with `min_overlap` in
+`trails.utils.geo` is where that lesson was learned and is worth reading.
+
+**It is not a component this phase can use.** It is Python, it takes
+GeoDataFrames, and it copies attributes between two datasets; the work here
+happens in a page, on one track against 234,358 edges. And the page has nothing
+to do it with. Measured: `nearestNode` is a **linear scan over 116,967 nodes at
+0.135 ms**, and over the edges there is nothing at all — one linear pass over the
+948,465 edge vertices costs **2 ms**. Matched naively, a track of the median
+foreign size below is **2.9 s** of frozen main thread and the largest is **10 s**,
+before any overlap test. This map already froze once over redraw cost.
+
+So: a grid or another index over the edge geometry, built once, is the first
+work. Say what it costs to build and what a lookup costs, the way every other
+figure here is stated.
+
+### What this map wrote is two different files
+
+Measured, and the phase used to treat them as one:
+
+| | `<wpt>` | legs | carries |
+|---|---:|---:|---|
+| a chain export | **0** | **0** | its `chain_id` |
+| a route export | 29 | 4 | its waypoints and their `origin` |
+
+So *"anything this map wrote restores exactly"* is true of a **plan** and not of a
+**chain**: a chain export has no waypoints to route between and no legs to
+rebuild. It is recognised by its id and drawn as the chain it already is, or it
+becomes one fixed leg like any other track. Decide which, and say so.
+
+A route export restores from its `<wpt>` list, and **the `origin` field is what
+makes that safe**: 6B marks every generated marker, and loading must ignore those
+or a route gains stations nobody placed and starts routing through them.
+
+### Three modes, and the third one is a leg kind that does not exist
 
 | mode | what it does | effort |
 |---|---|---|
-| take it as it is | the whole track becomes one fixed leg, untouched | trivial |
+| take it as it is | the whole track becomes one fixed leg, untouched | small |
 | align to the network | read the `<wpt>` list and route between them afresh | small |
-| **match where a path exists** | follow the track, replace the stretches that run along network edges, leave the rest as drawn | **the real work** |
+| **match where a path exists** | follow the track, swap the stretches that run along edges, keep the rest | **the real work** |
 
-The middle one is not routing. Re-routing between waypoints throws the shape away
-— fine for one of our own plans, which *is* a handful of waypoints, useless for a
-foreign track that has thousands of points and no waypoints at all. What it needs
-is map-matching: walk the track, find where it follows an edge within a
-tolerance, swap that stretch for the edge, keep the remainder verbatim.
+The middle one is not routing a foreign track. Re-routing between waypoints
+throws the shape away — right for one of our own plans, which *is* a handful of
+waypoints, useless for a track with thousands of points and none.
 
-That is `attach_nearest` with `min_overlap` applied along a track instead of
-between datasets, and it inherits the same trap: a track running beside a
-parallel path will snap to the wrong one unless the overlap is checked, not just
-the distance.
+**A fixed leg is a fifth kind and the file format was fixed around four.** The
+page knows `routed`, `land`, `water` and `ferry`; 6B writes each part as
+`<trails:part kind>`, so a fifth changes what an exported file says — and this
+phase both reads that format and writes it. Name the kind, and say what a reader
+of an older file does with one it has never seen.
 
 Build it as one phase even though the ends are cheap. Split, and the loading and
 parsing gets written twice.
 
-**Anything this map wrote restores exactly**, without matching: a chain export
-names itself since phase 5, a plan carries its waypoints and leg modes since
-phase 6. Only foreign tracks go through matching.
+### The acceptance, which can actually be run
 
-**Done when** a track exported from this map loads back identically, and a GPX
-from Komoot loads, matches onto the network where one exists, and can then be
-edited like any other plan.
+An earlier draft asked for a GPX from Komoot. There is no account and no network
+here, and phase 5's readiness check already established that **a phase whose
+acceptance its builder cannot execute has no acceptance at all**. The foreign
+tracks are already on disk: **35 UT.no recordings** under `.cache/downloads/ut/`,
+**62,158 points**, median **1,443** and largest **5,147**, with **no `<wpt>`, no
+`<extensions>` and a timestamp on every point** — consumer GPS, genuinely
+foreign, already fetched.
+
+**Done when** a route this map exported loads back with the same waypoints, the
+same leg modes and the same walked figure, with its generated markers ignored; a
+chain export is recognised for what it is; every one of the 35 UT.no tracks loads
+without error and each mode does what it says; a matched track keeps its own
+shape where no path exists and follows the network where one does; and a loaded
+route is editable by phase 7's four edits like any other. Nothing phase 7 was
+accepted against moves: **11,589** paths with one non-interactive, **25** layers,
+and the plan's own panes at **8 paths and 203 markers** with a five-point route.
 
 ---
 

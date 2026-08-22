@@ -15,7 +15,8 @@ protected areas it passes and how far through each.
 `libs/src/trails/routing/`, `libs/src/trails/network/`,
 `visualization/encoding.py`, `io/export/gpx.py`, `routing/track.py`,
 `analysis/scripts/route_graph.py` and `lomsdal_visten.py`.
-**8 remains and has not had a readiness check.** The project runs on
+**8 is checked and rewritten, not yet built — every phase has now had a
+readiness check.** The project runs on
 **Python 3.14** and `uv.lock` is tracked from 1D.
 
 **Phase 7** makes a route something to work on: insert into the middle, remove,
@@ -508,8 +509,9 @@ every one was invisible until something was actually run.
 
 ## Before handing a phase over
 
-This has been done for 1B, 2, 3, 3B, 4, 5, 6, 6B, 6C and 7 — **ten times, and it
-found something every time.** A rule that was not implementable, six acceptance
+This has been done for 1B, 2, 3, 3B, 4, 5, 6, 6B, 6C, 7 and 8 — **eleven times,
+and it found something every time.** A rule that was not implementable, six
+acceptance
 figures that would have failed a correct implementation, fifteen attributes
 nobody had counted, a missing layer, a forgotten payload, a budget off in both
 directions, a rounded label that two languages would round differently, an
@@ -971,22 +973,18 @@ reply that is no longer wanted, and it looks like a route until you measure it.
 distance and the profile have to follow a live drag; a value correct only once
 the mouse stops is the failure this phase exists to prevent.
 
-**Phase 8, loading — no readiness check yet, and one figure in it is already
-known to be soft.** The phase says the two easy modes are cheap because only the
-matching is real work. Measured, **the only GPX reader in this project is
-`ut.py`**, and its own docstring says *"Only `trk/trkseg/trkpt` is read.
-Elevation and timestamps are dropped."* It reads coordinates and nothing else, so
-it is a reader for a foreign track and not for what this map writes: phase 8 has
-to read `<wpt>`, the `origin` that says set or generated, and the leg list 6B
-puts on the track. *The ends are cheap* holds for parsing a track and not for
-restoring a plan.
+**Phase 8, loading — checked and rewritten, not yet built.** What the check found
+is in *What phase 8's readiness check found*. The short of it: the matching
+happens in the page and `attach_nearest` is Python, and the page has **no index
+over the edges at all** — one linear pass over the 948,465 vertices is 2 ms, so a
+foreign track matched naively is 2.9 to 10 seconds of frozen main thread; this
+map writes **two** kinds of GPX and only one of them has waypoints to restore
+from; a fixed leg is a fifth kind and 6B fixed the file format around four; and
+the acceptance asked for a Komoot file nobody here can fetch, when 35 genuinely
+foreign tracks are already on disk.
 
 Round-trip one of this map's own exports and check it comes back identical —
-that is what the `<extensions>` exist for. Then load a foreign
-track and watch the middle mode: a track running beside a parallel path will snap
-to the wrong one if only distance is checked. And confirm that generated
-waypoints — boundary crossings and the like — are *not* read back as waypoints
-someone placed.
+that is what the `<extensions>` exist for.
 
 ## The question that found the expensive gaps
 
@@ -1110,7 +1108,8 @@ Otherwise nothing is known to be open. **That has now been true nine times and
 was wrong all nine** — the readiness checks found gaps in 1B, in 3, in 2, in 3B
 (which this document had written itself), in 4, in 5, in 6, in 6B and in 6C, and
 the 3B review then found the payload gap above. The check that finds them is not
-reading the phase; it is measuring it against the built graph. **Only 8 has not had it.**
+reading the phase; it is measuring it against the built graph. **All eleven have
+now had it.**
 
 And the shape has moved. The early checks found *figures* that had drifted; the
 last two found **premises** — 6B's *"the composed geometry already exists"* and
@@ -1390,6 +1389,57 @@ and the constant's own docstring promises otherwise. Honouring it needs the
 is checking — the header cannot verify itself. That is a change to the payload
 contract, and this phase's acceptance is that the graph is not touched. Under
 *Known open*.
+
+## What phase 8's readiness check found
+
+**The assumption the whole phase rests on holds, and it was ten minutes.** A page
+served from `file://` may read a file the reader picks: `<input type="file">`
+plus `FileReader` returned all **1,197,976 bytes** of a chain export and
+`DOMParser` found its trackpoints. Nothing else about this phase would have
+mattered if it had failed — the same shape as the height-service check before
+phase 6, and the same ten minutes.
+
+**The matcher the phase named cannot be used where the work happens.**
+`attach_nearest` with `min_overlap` is in `trails.utils.geo`, it is Python, it
+takes GeoDataFrames, and it copies attributes **between two datasets**. Loading
+happens in the page, on one track against 234,358 edges. The rule it teaches —
+check that a line runs *along* its counterpart rather than merely near it — is
+exactly right and is the reason the function is worth reading. The function is
+not a component. **A phase naming a function is not the same as a phase naming a
+mechanism**; ask which language it is in and what it takes.
+
+**And the page has nothing to match with.** Measured: `nearestNode` is a linear
+scan over 116,967 nodes at **0.135 ms**, and over the edge geometry there is
+nothing — one linear pass over the **948,465** vertices costs **2 ms**. So a
+foreign track matched naively is **2.9 s** at the corpus median and **10 s** at
+its largest, on the main thread, before a single overlap test. The first work of
+this phase is an index, and the phase called it *the ends are cheap*.
+
+**This map writes two kinds of GPX and the phase treated them as one.** Measured:
+a chain export carries **0 `<wpt>` and 0 legs** and its `chain_id`; a route
+export carries **29 `<wpt>` and 4 legs** and no id. *"Anything this map wrote
+restores exactly"* is therefore true of a plan and false of a chain, which has no
+waypoints to route between. That is a third case and it was not among the three
+modes.
+
+**A fixed leg is a fifth kind, and 6B fixed the file format around four.** The
+page knows `routed`, `land`, `water` and `ferry`. *"The whole track becomes one
+fixed leg"* is none of them, and since 6B writes every part as
+`<trails:part kind>`, a fifth changes what an exported file says — in a phase
+that both reads that format and writes it.
+
+**The acceptance could not be run, for the second time in this project.** *"A GPX
+from Komoot loads"* — no account, no network. Phase 5's check found exactly this
+and recorded that a phase whose acceptance its builder cannot execute has no
+acceptance at all; two phases later the same sentence had been written again.
+**Ask of every done-when whether the person writing it could run it today.**
+
+**The replacement was already on disk, which is the part worth remembering.** 35
+UT.no recordings under `.cache/downloads/ut/`: **62,158 points**, median
+**1,443**, largest **5,147**, with **no `<wpt>`, no `<extensions>` and a
+timestamp on every point**. Genuinely foreign, genuinely consumer GPS, fetched
+months ago for a different reason. **Before declaring a test corpus
+unobtainable, look at what the build already downloads.**
 
 ## What phase 7's readiness check found
 
