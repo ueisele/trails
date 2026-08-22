@@ -870,12 +870,14 @@ What it was checked against, kept for 6B and 6C:
   assuming. **Three phases in a row assumed a mechanism that did not exist** —
   GeoJSON properties, the licences, the point table.
 
-**Phase 6B, the plan as a file, and 6C, protected areas.** Both are specified and
-both carry a warning found before handover: 6C needs a spatial query
-`naturbase.Source` does not have, a **new per-edge field and therefore a
-`GRAPH_LAYOUT` bump**, and a machine-readable table of the named points — which
-the page does not have either, they are 1,410 `circleMarker` and 865 `marker`
-with their names inside popup HTML.
+**Phase 6C, protected areas — checked and rewritten, not yet built.** What its
+readiness check found is in *What phase 6C's readiness check found*. The short
+of it: the spatial query is ten lines and the smallest part; the per-edge field
+needs a **`GRAPH_LAYOUT` bump and a rebuild**, the first since phase 2; the named
+points have no table — **1,411** `circleMarker` and 865 `marker` with their names
+inside popup HTML; a free leg cannot answer from its samples at all; and the
+phase has to set a threshold before it can report anything, because one of the
+nineteen areas the network touches is met over ten metres.
 
 **Phase 7, editing.** Reorder and watch the numbers; the failure mode is a stale
 leg or a profile that no longer matches the line.
@@ -1173,6 +1175,70 @@ and the metre's own before-and-after.
 **Two things deliberately not built**, and both are right: the plan is not
 exportable, which is 6B, and switching plan mode off keeps the route drawn rather
 than discarding it, since undo is the only edit this phase owns.
+
+## What phase 6C's readiness check found
+
+**The phase was right about all three mechanisms it said were missing**, which
+is the first time a readiness check has confirmed rather than corrected that
+part. `naturbase.Source` has `find(name, layer, exact)` and no geometry.
+The edges carry `waymarked`, `no_path_recorded`, `elevations`, `ascent` and
+`descent` and nothing about where they are. The named points have no table:
+**1,411** `L.circleMarker` — the phase said 1,410 — and **865** `L.marker`, names
+inside popup HTML. And 6B's field is real, `gpx.py` carrying
+`WAYPOINT_GENERATED`.
+
+**The spatial query is the smallest part, not the first hurdle.** Built while
+checking: the same ArcGIS endpoint with `geometry`,
+`geometryType=esriGeometryEnvelope` and `spatialRel=esriSpatialRelIntersects`
+instead of a `where` clause. One request, ten lines, and it answered for the
+whole box. **A phase calling something "the first work" is worth timing before
+believing it.**
+
+**What that request measured is now the phase's reference.** 43 protected areas
+in the network's bounding box — 39 nature reserves, two national parks, one
+landscape protection area and one marine — of which **nineteen are touched by
+the walked network**, 741.2 km of 5,853.3. Lomsdal-Visten holds 647.8 of it,
+Holmvassdalen 25.7, Strauman 24.9, Stavvassdalen 17.1, Sirijorda 11.9, and the
+smallest is **10 m of Innervisten marine protected area**.
+
+**The premise that fails is in the decisions document, not only in the phase.**
+Both said a free leg *"gets it from the samples it fetches anyway"*. At build
+time that works, because Python has the polygons. In the browser it does not:
+the samples give a position and the page carries **one** protected area of the
+nineteen. The height service answers `datakilde`, `terreng` and `z`, and
+`terreng` is ground cover — *Havflate*, *Skog*, *InnsjøRegulert* — not a
+protected area, which the module's own comment says. So the page has to carry
+the boundaries, and measured that is cheap: 25,144 vertices, 1.03 MB of GeoJSON,
+0.37 gzipped, and simplified to 10 m — inside the ±5 m the sampling already
+accepts at each crossing — **0.08 MB raw, 0.03 gzipped** against a 37.5 MB page.
+**This is the second phase running whose central mechanism was assumed by the
+specification rather than checked**, after 6B's route geometry.
+
+**And a claim in both documents is measurably false.** *"None of the reserves
+touches the park"* — **Sirijorda does**, sharing a boundary at 0.0 m, and so does
+Innervisten. What it was used for survives, since touching is not overlapping and
+a route strictly inside the park is still outside Sirijorda. The premise was
+simply never measured, and 11.9 km of network runs inside Sirijorda.
+
+**Two things the phase has to decide rather than discover**, both found by
+looking at the measurement rather than at the text:
+
+- **Which `verneform` count.** `naturbase.Layer` already separates the five, and
+  the answer set as it stands includes a *marine* protected area. A walker
+  reading that learns something different from a nature reserve.
+- **How little counts as touching.** Five of the nineteen are met over less than
+  400 m and one over ten. With no threshold a route brushing a boundary reports
+  an area it never entered and generates a pair of waypoints for it. **A rounded
+  label is a threshold** — phase 4's lesson — and so is a reported one.
+
+**A figure without its extent cannot be re-derived.** The 26 reserves came from
+the drawn zone, 39 from the network's own box; neither is wrong and neither said
+which. This document demands reproducible figures and had let one through that
+was not.
+
+**Two national parks lie in the box** — Børgefjell/Burkijen besides
+Lomsdal-Visten. The network does not reach the second, so nothing is wrong today;
+a query written for *the* park rather than for parks is wrong the day it does.
 
 ## What phase 6B found
 

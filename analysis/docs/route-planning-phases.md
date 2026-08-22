@@ -1294,41 +1294,101 @@ decisions document.
 ## Phase 6C — Where the route is, and what it passes
 
 Two lookups the page cannot do today, and both are about naming ground rather
-than finding it.
+than finding it. The decisions document carries the reasoning; this is what was
+measured before handing it over.
 
-- **Say which protected areas the route touches and how far** — *38 km, of which
-  22 in the national park and 3 in Strauman landskapsvernområde*. Not the park
-  alone: the zone holds **26 nature reserves** besides, none touching the park,
-  but every approach crosses ground they sit on. The boundary has been drawn all
-  along and the plan made no use of it, and the rules inside differ from those
-  outside.
-  - `naturbase.Source` **searches by name and needs a spatial query**, which it
-    does not have. That is the first work of this phase.
-  - **Nothing on any edge or chain says which area it lies in.** Measured: the
-    edges carry `waymarked`, `no_path_recorded`, `elevations`, `ascent` and
-    `descent`, and nothing else about where they are. Deciding it at the 5 m
-    samples, as the decisions document sets out, means a new field from build
-    time — and therefore a `GRAPH_LAYOUT` bump and a rebuild. A free leg gets it
-    from the samples it fetches anyway.
-  - Put the figure in the exported description, and a **generated waypoint** at
-    each crossing so a reader sees where the route enters and leaves. GPX holds
-    waypoints, routes and tracks, and no polygons; the marker is the only way to
-    carry a boundary at all. Mark them generated — 6B put the field in.
-- **Name a waypoint after what is there.** When one lands within about 50 m of a
-  named point the map already draws — a hut, a quay, a trailhead, a farm — take
-  that point's name, type and position for the `<wpt>`, while the route stays on
-  the network. It is the difference between a file reading *Lavasshytta →
-  Sæterskaret skogstue → Bønå ferjekai* and one reading as three coordinates.
-  - **Those points are not machine-readable in the page.** They are drawn as
-    1,410 `L.circleMarker` and 865 `L.marker` with their names inside popup HTML.
-    A lookup needs a table of name, type and position, keyed the way the chain
-    figures already are. **This is the third time a phase has assumed a mechanism
-    that does not exist** — after phase 4's GeoJSON properties and phase 5's
-    licences — so check for the table before planning around it.
+### What the network actually touches
+
+The acceptance needs reference figures, so here they are. Over the bounding box
+of the walked network Naturbase returns **43** protected areas — 39 nature
+reserves, two national parks, one landscape protection area and one marine
+protected area. **Nineteen are touched by the network**, 741.2 km of 5,853.3:
+
+| area | verneform | km |
+|---|---|---:|
+| Lomsdal-Visten | Nasjonalpark | 647.82 |
+| Holmvassdalen | Naturreservat | 25.69 |
+| Strauman | Landskapsvernområde | 24.90 |
+| Stavvassdalen | Naturreservat | 17.07 |
+| Sirijorda | Naturreservat | 11.85 |
+| *fourteen more* | Naturreservat | 13.80 |
+| Innervisten | MarintVerneområde | **0.01** |
+
+**An earlier draft said 26 reserves and no extent.** 26 is the count over the
+smaller drawn zone; 39 is the count over the network's own box. Neither is wrong
+and a figure without its extent cannot be re-derived, which this project requires
+of every figure.
+
+**And it said no reserve touches the park.** Measured, **Sirijorda does** — they
+share a boundary at 0.0 m — and so does Innervisten. What that claim was used
+for still holds, since sharing a boundary is not overlapping, but the premise
+was wrong.
+
+### Say which protected areas the route touches, and how far
+
+*38 km, of which 22 in the national park and 3 in Strauman
+landskapsvernområde*. Not the park alone: the rules inside a reserve differ from
+those outside, and every approach to this one crosses ground reserves sit on.
+
+- `naturbase.Source` **searches by name and needs a spatial query.** Measured,
+  this is about ten lines: the same endpoint with `geometry`,
+  `geometryType=esriGeometryEnvelope` and `spatialRel=esriSpatialRelIntersects`
+  instead of a `where` clause. One request answers for the whole box. It is the
+  first work of this phase and the smallest part of it.
+- **Nothing on any edge or chain says which area it lies in.** Measured, the
+  edges carry `waymarked`, `no_path_recorded`, `elevations`, `ascent` and
+  `descent` and nothing about where they are. Deciding it at the 5 m samples, as
+  the decisions document sets out, means a new field from build time — and
+  therefore a `GRAPH_LAYOUT` bump and a rebuild. This is the first phase since 2
+  to touch the graph.
+- **A free leg does not get it from the samples it fetches**, and both this phase
+  and the decisions document used to say it did. The samples give a position; the
+  answer needs the polygons, and the browser has **one of the nineteen** — the
+  height service returns `datakilde`, `terreng` and `z`, and `terreng` is ground
+  cover, *Havflate* or *Skog*, not a protected area. So the page has to carry the
+  boundaries. Measured: the nineteen come to 25,144 vertices, 1.03 MB of GeoJSON
+  and 0.37 gzipped; simplified to 10 m — inside the ±5 m the sampling already
+  accepts at each crossing — **0.08 MB raw and 0.03 gzipped**, against a 37.5 MB
+  page. Cheap, and it still has to be decided rather than discovered.
+
+**Two decisions this phase owns.** *Which `verneform` count*: `naturbase.Layer`
+already separates the five, and a walker reading that a route passes a marine
+protected area learns something different from a nature reserve. And **how little
+counts as touching**: five of the nineteen are met over less than 400 m and one
+over **ten metres**. With no threshold a route that brushes a boundary reports an
+area it never entered, and generates a pair of waypoints for it. A rounded label
+is a threshold, and every rule this project has about thresholds applies here.
+
+Put the figure in the exported description, and a **generated waypoint** at each
+crossing so a reader sees where the route enters and leaves. GPX holds waypoints,
+routes and tracks, and no polygons; the marker is the only way to carry a
+boundary at all. Mark them generated — 6B put the field in and
+`gpx.py` already carries `WAYPOINT_GENERATED`.
+
+### Name a waypoint after what is there
+
+When one lands within about 50 m of a named point the map already draws — a hut,
+a quay, a trailhead, a farm — take that point's name, type and position for the
+`<wpt>`, while the route stays on the network. It is the difference between a
+file reading *Lavasshytta → Sæterskaret skogstue → Bønå ferjekai* and one reading
+as three coordinates.
+
+- **Those points are not machine-readable in the page.** They are drawn as
+  **1,411** `L.circleMarker` and **865** `L.marker` with their names inside popup
+  HTML. A lookup needs a table of name, type and position, keyed the way the
+  chain figures already are — `CHAIN_FIGURES_ATTR` is the shape to copy.
+  **This is the fourth time a phase has assumed a mechanism that does not
+  exist**, after phase 4's GeoJSON properties, phase 5's licences and 6B's route
+  geometry, so check for the table before planning around it.
+- Lavasshytta is drawn, so the acceptance below can actually be run.
 
 **Done when** a route through the park reports the length it spends in each
-protected area, its exported file carries a generated waypoint at every crossing
-of one, and a waypoint set beside Lavasshytta comes back named after it.
+protected area it passes under the threshold this phase sets, its exported file
+carries a generated waypoint where it enters and leaves one, and a waypoint set
+beside Lavasshytta comes back named after it. The graph is rebuilt, so every
+phase 1 figure must come out unchanged — 11,290 chains, 234,358 edges, 116,967
+nodes, 757/747 components, reach 50.8 km = 94 %, 17 quays, Mosjøen 2.17 m — and
+nothing phase 6B was accepted against moves.
 
 ---
 
