@@ -1180,15 +1180,61 @@ map's paths for ever after.
 
 ## Phase 6B — A plan becomes a file
 
-Export through the writer phase 5 built. Little more than wiring — the composed
-geometry and its elevations already exist, because the profile needs them — and
-without it the feature stops one step short of its own point.
+Phase 6 leaves the route on the screen. This makes it a file, through the writer
+phase 5 built, and without it the feature stops one step short of its own point.
 
-- **Extend the `<extensions>` mechanism**, do not rebuild it. A plan adds the
-  clicked waypoints as `<wpt>` and each leg's mode: routed, free over land,
-  crossing. Do it here rather than in phase 8, because everything exported from
-  now on should be loadable, and a file written before its description existed
-  can never be restored exactly, only matched. Phase 8 adds the reading side.
+**It is not wiring, and an earlier draft of this phase said it was.** Measured
+against the built page: `composeRoute` returns `height`, `distance`, `free` and
+the route's totals, and **no coordinates at all**. A chain's shape carries `lat`,
+`lon` and `stretches`; a plan's carries none of the three, and
+`window.trailsProfile.runs` is `null` while a route is composed. `runsOf` and
+`denseOf` — where the writer gets its points, its 5 m gap fill and its segments —
+need exactly what is missing. The geometry does exist: all four leg kinds carry
+`lon` and `lat` on the part. It is the composition that does not.
+
+So the first work of this phase is a **track composer beside the profile
+composer**, producing what the writer already knows how to read: coordinates,
+heights, and a stretch boundary wherever the ground stops.
+
+### The three mechanisms that do not exist
+
+- **Neither writer can write a `<wpt>`.** `gpx.py` and `maps.py` contain the
+  string zero times. And a waypoint is **not** part of the `<extensions>`
+  mechanism: it is a GPX 1.1 top-level element written *before* `<trk>`, where
+  the extensions are a block inside it. Extend the extensions for anything that
+  is a scalar of the whole route; add waypoints as their own element in their own
+  place, or the file will not validate.
+- **A leg's mode has nowhere obvious to go, because legs and segments do not line
+  up.** A segment is a stretch, and stretches break where the series breaks —
+  four routed legs laid end to end are **one** segment, so a `<trkseg>`-level
+  extension cannot carry four modes. Decide it here and say which: a list on the
+  track naming each leg in order, or one segment per leg, which changes what a
+  segment means. Do not leave it to be discovered while writing the file.
+- **`creditsOf` is single-source.** It looks up `EXPORT.credits[figure.source]`,
+  one string, because a chain has one source. A route has several, and this phase
+  wants each with its length.
+
+### And the distinction that will produce a wrong file quietly
+
+**The composed series carries two kinds of `NaN` and they mean opposite things.**
+A crossing pushes one because there is no ground under it; an unread sample is
+one because the model had no reading for ground that is there. Phase 5 settled
+what each deserves — the first breaks the track, the second only omits the
+`<ele>` — and in a chain they are structurally apart, `stretches` against NaN
+heights. In a plan they are both a NaN in `height`, told apart only by a
+crossing's distance repeating the previous point's. Measured on a route over a
+crossing: **12 NaN, of which one is the crossing.** Carry the distinction
+explicitly rather than inferring it. Getting it wrong draws a line across a fjord
+or cuts a route into dozens of pieces, and both look right on a chart.
+
+### What the file says
+
+- **Extend the `<extensions>` mechanism**, do not rebuild it, for everything that
+  is a scalar of the whole route. A plan adds the clicked waypoints and each
+  leg's mode: routed, free over land, crossing. Do it here rather than in phase
+  8, because everything exported from now on should be loadable, and a file
+  written before its description existed can never be restored exactly, only
+  matched. Phase 8 adds the reading side.
 - **Mark every `<wpt>` as set or generated.** Nothing generates one yet — 6C
   does — but the field goes in now, because phase 8 must never read a marker the
   map placed as a station somebody chose. The rule covers any marker the map adds
@@ -1196,25 +1242,34 @@ without it the feature stops one step short of its own point.
 - **The sources list now spans several.** Report the length contributed by each
   and the licence that comes with it, so *3.2 km OSM (ODbL) · 1.1 km UT.no
   (CC BY-NC)* is visible before the download rather than a blanket warning. The
-  page carries every source's licence and version since phase 5.
+  page carries every source's licence and version since phase 5, and every edge's
+  source since 3B; what it does not carry is a per-source length, which is a sum
+  over the route's edges.
 - **Say how much of it is waymarked**, as length in three buckets — marked,
-  unmarked, unknown. The edges carry the field from phase 1B and it is in the
-  payload. **Unknown is its own bucket and is never folded into unmarked**:
-  measured over this network, **63.4 %** of the walked length is unknown, and
-  FKB — the largest source at **33.8 %** — carries no marking information at all.
-  Calling that unmarked asserts what no source says.
+  unmarked, unknown. This one *is* wiring: the page holds `waymarked` and
+  `noPathRecorded` as a `Uint8Array` per edge since 3B, put there for exactly
+  this. **Unknown is its own bucket and is never folded into unmarked**: measured
+  over the walked network without its bridge connectors, **63.4 %** of the length
+  is unknown, and FKB — the largest source at **33.8 %** — carries no marking
+  information at all. Calling that unmarked asserts what no source says. Marked
+  is 17.8 %, unmarked 18.8 %.
 - **And how much runs where no source records a path** — *8 km with no path
-  recorded*. Also from phase 1B, also in the payload. **State it as recorded, not
-  as fact**: the sources over-record, so their silence is evidence and their lines
-  are not. Do **not** add a survey-quality breakdown beside it — FKB discloses
-  nothing about how it captured anything, so it would read *30 km not disclosed*.
-  That question belongs to one line and is answered in its popup.
+  recorded*; the whole network holds 20.3 km of it on 189 edges. **State it as
+  recorded, not as fact**: the sources over-record, so their silence is evidence
+  and their lines are not. Do **not** add a survey-quality breakdown beside it —
+  FKB discloses nothing about how it captured anything, so it would read *30 km
+  not disclosed*. That question belongs to one line and is answered in its popup.
+- **The download button is withheld today**, deliberately: phase 6 offers none
+  for a composed series. Restoring it is this phase's visible outcome.
 
 **Done when** a planned route downloads as a GPX that validates against the
 shipped schema, carries its waypoints and each leg's mode, breaks its track at
-every crossing, and states its own ascent, its sources with licences, its three
-marking buckets and its unrecorded length — with the download line saying which
-licences the file actually carries.
+every crossing and nowhere else, keeps a point the height model never read while
+omitting only its `<ele>`, and states its own ascent, its sources with their
+lengths and licences, its three marking buckets and its unrecorded length — with
+the download line naming the licences the file actually carries. Nothing phase 6
+was accepted against moves: **198** markers, **11,589** paths with exactly one
+non-interactive, **25** layers, and the route in a pane of its own.
 
 ---
 
