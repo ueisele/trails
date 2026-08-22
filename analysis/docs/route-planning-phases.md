@@ -1531,7 +1531,7 @@ the route.
 
 ---
 
-## Phase 8 — Loading a route and working on it
+## Phase 8 — Loading a route and working on it — **built**
 
 Read a GPX back in and carry on from it: one of our own exports, or a track from
 somewhere else.
@@ -1627,6 +1627,90 @@ shape where no path exists and follows the network where one does; and a loaded
 route is editable by phase 7's four edits like any other. Nothing phase 7 was
 accepted against moves: **11,589** paths with one non-interactive, **25** layers,
 and the plan's own panes at **8 paths and 203 markers** with a five-point route.
+
+### Built, and what it came to
+
+**The index first, and it is the reason the rest is fast.** A uniform grid over
+the edge geometry in scaled degrees, one entry per segment per cell its box
+touches, laid out the way the node adjacency is: count, prefix-sum, fill. At
+100 m cells it is **29–42 ms to build, 799,863 entries, 8.85 MB**, and a lookup
+is **0.7 microseconds** against the 2 ms linear pass the page had before —
+2,800 times cheaper. Built on the first thing that asks and then kept, so a
+reader who never loads a file never pays for it. Three cell sizes were measured
+before one was chosen, and the table is in *What phase 8 found*.
+
+**Three modes, and the fifth kind is `track`.** Take it as it is makes the whole
+recording one `track` leg between its own two ends; align reads the `<wpt>` list
+and routes between the points afresh; match anchors the recording to the network
+every 250 m, routes between the anchors, and keeps verbatim whatever the test
+below refuses. A break between two segments is a **crossing** in all three, never
+a walked line — GPX has no way to say a segment is a boat, so a break is all a
+crossing leaves behind, and joining the two ends would draw somebody a route
+across a fjord.
+
+`track` is written as `<trails:part kind="track"/>` and its metres go in a
+bucket of their own, `recorded`, beside `undrawn`. The buckets have to sum to
+`walked`, and ground read off a file belongs in none of the four that were there:
+no register was asked about it, which rules out marked, unmarked and unknown, and
+it is not a connector. **A reader that has never seen it** — Komoot,
+Outdooractive, an earlier build of this map — reads the track and the waypoints
+exactly as before, because a part kind lives in `<extensions>` and GPX 1.1 says a
+reader may ignore those. **This page**, given a kind it does not know, cannot
+restore that leg exactly, so it routes it between its two waypoints and says how
+many it had to: never fatal, never silent.
+
+**A chain export becomes one recorded leg, and is recognised while it does.** It
+has no waypoints to route between and no legs to rebuild, so treating it as a
+plan was never available; drawing it as the chain it already is belongs to phase
+4, where a chain is one click away, and a chain id out of an older build names
+nothing in this graph. So it loads as a track like any other and the page says
+what it was: *a chain export: Rundtur i Lomsdal-Visten… (ut-no-414306-7244296-42442)
+· 16,415 recorded points*.
+
+**The matching rule is `attach_nearest`'s and one more.** What share of the
+recording lies along the path offered to replace it, at **0.6** over a **25 m**
+tolerance — and, because that test is one-directional, a routed stretch may not
+be **longer** than the recorded stretch it replaces by more than the tolerance at
+each end. Without the second half the 42.44 km *Rundtur* came back at 48.2 km. A
+heading test at **60°** runs per point and keeps a side path at a junction from
+ever being a candidate, and an anchor is only taken at a node the recording
+passed within the tolerance of, which is what stops a 4.7 km edge being handed
+back for a walk that turned round 332 m short of its end.
+
+**And a file says the height model only where the model was read.** A stretch
+kept as recorded carries the heights the loaded file had on its trackpoints, so
+crediting Kartverket for them and stating they were sampled from DTM1 every 5 m
+was a false claim in a file somebody takes into the terrain. A part now says
+which, and the description says *the climb is the loaded file's own heights, not
+the model*.
+
+**Editing works because a waypoint carries where it came from.** An anchored
+waypoint holds its index into the recording, so a point put into the middle of a
+recorded leg splits it into two recorded legs rather than replacing the whole
+thing with a routed line — measured with a real click, `elementFromPoint`
+asserted: 7,420 m in one part becomes 1,759 + 5,660 in two, and the walked figure
+does not move. Drag one off the recording and it loses its index, and its legs
+become ordinary ones. Nothing needed a case of its own: the rule that legs follow
+from waypoints already said all of it.
+
+**What it was accepted on.** All **35** UT.no recordings load in all three modes
+with no error and no failed leg, median **37 ms** and **67 ms** at the worst.
+Matched, **99.1 %** of 376.3 km lands on the network's own lines and no recording
+comes back longer than it was recorded; three keep ground of their own, which is
+the other half of the claim. A five-point route exported and loaded back aligned
+returns `7265.882765177558` m walked against `7265.882765177558`, the same
+ascent to the last bit, the same 2,005 vertices, the same five waypoints to seven
+decimals, the same four `routed` legs — and its one generated marker skipped and
+said so. A track kept as recorded, written out and read back aligned, comes home
+as recorded, because the file says `kind="track"` and the reader honours it. The
+chain export still reads 16,415 points and its ascent back to 0.00 m. **11,589**
+paths with one non-interactive, **25** layers, **10 px above 60**, wheel
+**9 → 11**, the plan's panes **8 paths and 203 markers** at five points.
+
+**One thing was deliberately left undone**: a part is a whole edge, so a
+recording that walks half of a long one is kept as recorded rather than
+half-matched. That is 3.5 km of 376 and the whole difference between 99.1 % and
+100 %. What it would take is in *What phase 8 found*.
 
 ---
 

@@ -15,8 +15,7 @@ protected areas it passes and how far through each.
 `libs/src/trails/routing/`, `libs/src/trails/network/`,
 `visualization/encoding.py`, `io/export/gpx.py`, `routing/track.py`,
 `analysis/scripts/route_graph.py` and `lomsdal_visten.py`.
-**8 is checked and rewritten, not yet built — every phase has now had a
-readiness check.** The project runs on
+**All eight are built and checked.** The project runs on
 **Python 3.14** and `uv.lock` is tracked from 1D.
 
 **Phase 7** makes a route something to work on: insert into the middle, remove,
@@ -284,6 +283,17 @@ A download is drivable: `browser.new_page(accept_downloads=True)`, then
 `page.expect_download()` around a click on the panel's GPX control. Measured, a
 blob download from a `file://` page works and keeps its offered filename.
 
+**And the loading, since phase 8.** `window.trailsPlan.load(text, mode)` takes
+the file's text and one of `asis`, `align`, `match` — the text rather than a
+`File`, so a check drives exactly what the picker drives one step further on.
+`state().loaded` says what the file turned out to be and what it cost;
+`state().index` is the grid over the edge geometry and is **null until something
+asks**, which is how the page says it is built on demand. The picker itself is
+`.trails-plan-file` and takes `set_input_files` although it is hidden, and the
+mode is `.trails-plan-mode`. A load is finished when `state().working` is false,
+not when `load` returns: the legs settle a microtask or more later, which is why
+`loaded.settleMs` is stamped by the refresh and not by the loader.
+
 **Do not record a checksum as a reference figure.** It verifies that *this*
 build's page decoded *this* build's stream; it is not a property of the network.
 It moved once during the phase 4 review and cost half an hour: Turrutebasen
@@ -495,6 +505,40 @@ every one was invisible until something was actually run.
   you are aiming at**, and pick the target that way rather than by index. This is
   the twin of the `document.body` warning: that one is about reading the wrong
   element, this one about writing to it.
+- **A waypoint that refuses to snap is a waypoint nothing can route to.** Phase
+  8's anchored waypoints keep the recording's own position, which is right, and
+  carried `node: -1`, which meant every leg with one anchored end and one
+  ordinary one fell past `from.node >= 0 && to.node >= 0` and was drawn straight
+  over the terrain. Neither acceptance file caught it because both were pure —
+  every leg recorded, or every leg routed. **A field with a sentinel value is a
+  branch, and the case where two kinds meet is the one nobody drives.**
+- **A setting the template reads and the check does not list is `undefined`,
+  and JavaScript says nothing.** `PLAN.matchAnchorM` was read by phase 8's
+  matcher and left out of `PLAN_SETTINGS`; `along[i] - since < undefined` is
+  `false`, so every recorded point became an anchor and the matcher matched
+  **3.6 %** of a track that lies exactly on the network. Nothing threw, nothing
+  logged, `make check` was green. The existing test walked the *list* and looked
+  for each name in the page — **a contract checked in one direction is not
+  checked** — and the converse is now a test of its own.
+- **Edge length here is median 6.9 m and the longest walked edge is 6.8 km.**
+  Noding cuts a line only where something meets it, so an isolated recording out
+  in the terrain is *one* edge: **1,141** of the 234,358 are over 500 m, and
+  UT.no's longest is 4.7 km with thirteen over 500 m. The 18.5 km edge quoted
+  beside this figure at first is a **ferry crossing**, not a recording — a right
+  mechanism with the wrong number standing next to it.
+  Anything that reasons from the average — *the nearer end of the matched edge is
+  a dozen metres away* — is right at the median and wrong exactly where a foreign
+  track lives.
+- **`DOMParser` logs a console error the page cannot suppress.** A file that is
+  not XML produces *XML Parsing Error: syntax error* attributed to the page's own
+  URL before `parsererror` can be found and the file refused properly. A probe
+  treating `console.error` as failure reads a correct refusal as a fault.
+- **`getElementsByTagName` matches the qualified name in an XML document.** A
+  prefix is the writer's choice, not the format's, so a file spelling this map's
+  namespace `t:` rather than `trails:` is missed entirely. Address extensions by
+  `getElementsByTagNameNS(namespace, name)` and GPX's own elements under `'*'`,
+  since a consumer device that leaves the default namespace off writes a file
+  every other reader still accepts.
 - **An unbounded walk over the graph takes the machine down, not the script.** A
   Dijkstra's path reconstruction — `while walk != a: used.append(edge)` — grew to
   **42 GiB in 376 seconds** and reached the kernel's OOM killer, which chose the
@@ -973,15 +1017,53 @@ reply that is no longer wanted, and it looks like a route until you measure it.
 distance and the profile have to follow a live drag; a value correct only once
 the mouse stops is the failure this phase exists to prevent.
 
-**Phase 8, loading — checked and rewritten, not yet built.** What the check found
-is in *What phase 8's readiness check found*. The short of it: the matching
-happens in the page and `attach_nearest` is Python, and the page has **no index
-over the edges at all** — one linear pass over the 948,465 vertices is 2 ms, so a
-foreign track matched naively is 2.9 to 10 seconds of frozen main thread; this
-map writes **two** kinds of GPX and only one of them has waypoints to restore
-from; a fixed leg is a fifth kind and 6B fixed the file format around four; and
-the acceptance asked for a Komoot file nobody here can fetch, when 35 genuinely
-foreign tracks are already on disk.
+**Phase 8, loading — built.** What it came to is in *What phase 8 found* and
+what the readiness check found before it is in *What phase 8's readiness check
+found*. Reviewing it, or anything that touches it:
+
+**The index came first and it is 29–42 ms for 0.7 µs a lookup.** That was the
+right order and it is worth keeping: with no index over the edges, one linear
+pass over the 948,465 vertices costs 2 ms, so a recording matched naively is 2.9
+to 10 seconds of frozen main thread. Anything added to the matcher that walks the
+geometry rather than asking the grid puts that straight back, and it will not
+look like a fault, because the result works.
+
+**Time it on the whole corpus and quote the worst, not the median.** 35 tracks
+under `.cache/downloads/ut/`, median 1,443 points and largest 5,147. A phase that
+reports one number for matching has measured one track.
+
+**Then the trap that has already cost this project once, and the half of it that
+was not in the trap.** A track beside a parallel path snaps to the wrong one on
+distance alone — 23 % of `attach_nearest` matches followed their road for under
+half its length before `min_overlap`. That rule is in, and so is its converse,
+which `attach_nearest` never needed: **a routed stretch may not be longer than
+the recording it replaces.** Without it the 42.44 km Rundtur came back at 48.2.
+Any change to the matching must keep both, and the corpus total is the test —
+376.3 km recorded, 372.8 matched, nothing longer than its own recording.
+
+**A loaded plan must ignore its generated waypoints.** 6B marks every one
+`origin=generated`. Load a route this map exported with boundary markers in it
+and count the waypoints that come back: more than were set means the route gained
+stations nobody placed, and it will route through them. The reader takes a
+waypoint that says `set` or says nothing at all, and skips everything else —
+counting *this map placed it* and *this page does not know this word* apart,
+because a file from a later build is worth saying out loud.
+
+**It reads and writes the same format, which nothing else here does.** A fixed
+leg is a fifth `<trails:part kind>`. Check both directions: an older file still
+loads, and a file carrying the new kind says something a reader can act on.
+
+**And the figures.** 11,589 paths with exactly one non-interactive, 25 layers,
+10 px above 60, wheel 9 → 11, the plan's panes at 8 paths and 203 markers with
+five points, the chain export at 16,415 points reading its ascent back to 0.00 m,
+and the graph untouched at 11,290 / 234,358 / 116,967.
+
+**This is the last phase, so the temptation to write *nothing is open* is
+strongest here.** That sentence has been written eleven times in this document
+and has been wrong every time — and it is wrong now: a part is a whole edge, so
+3.5 km of the corpus is kept as recorded where the network does carry it, and
+`.leaflet-marker-icon` and the recorded-ground bucket are both new surfaces
+nothing downstream has been read against yet.
 
 Round-trip one of this map's own exports and check it comes back identical —
 that is what the `<extensions>` exist for.
@@ -1083,6 +1165,25 @@ own.**
   header and stream always come out of one `encode_graph` call. The fix is not
   the obvious one: the header cannot verify itself, so the decoder has to be
   handed the layout it was written for.
+
+**The leg modes are written into every exported plan and no mode reads them
+back.** Measured on a route that mixes routed and recorded legs: the file carries
+all seven parts with their kinds and metres — `routed 19,884.1`, `track 816.4`,
+`routed 1,295.7`, and so on — and loading it returns 42,284.1 m as **one** track
+under `asis`, 6,354.9 m re-routed under `align`, or 41,909.1 m in **five** parts
+under `match`. None of the three restores it. A **purely routed** plan does come
+back bit-identical, because re-routing between the same waypoints reproduces the
+same legs, and that is the common case; the gap is exactly a plan holding a
+recorded leg.
+
+It matters because the decisions document promises the opposite in as many
+words — *"the waypoints let a plan be rebuilt, the modes let it be rebuilt
+**exactly** rather than approximately"* — and because the fix is a decision about
+the model rather than a repair: a fourth mode that restores, or `asis` taught to
+honour the leg list it already receives. **This is the third thing in this
+project written and never read**, after `PAYLOAD_VERSION` and the survey fields
+FKB does not publish, and it is the only one of the three that a document
+promises out loud.
 
 One thing is open, and it is open by decision rather than by oversight:
 
@@ -1211,6 +1312,249 @@ Two more, and one of them was mine:
   22.9, 12.7. Two other figures moved the same way, 237 → **241** and 4,485 →
   **4,444**. **The shortcut was taken in the very commit that corrected four
   stale figures for having been derived rather than measured.**
+
+## What phase 8 found
+
+**Every acceptance figure reproduced and none of them moved.** With no route
+down: 198 markers, **11,589** paths with exactly one non-interactive, 25 layers,
+the search 10 px above the zoom at 60, the wheel 9 → 11, the plan pane 0. With
+five waypoints down: the plan pane **8 paths** and the marker pane **203**, with
+`.leaflet-marker-icon` at 5. The graph is unchanged at 11,290 chains, 234,358
+edges, 116,967 nodes. The chain export still holds at **16,415 points**, 123
+without an `<ele>`, its ascent reading back to **0.00 m**. No page errors on any
+run. The page went from **37,780,664 to 37,850,638 bytes** — 70 kB, all of it
+script, and it stays 37.8 MB.
+
+**The round trip is exact, to the last bit.** A five-point route exported and
+loaded back aligned comes home at `7265.882765177558` m walked against
+`7265.882765177558`, ascent `1078.9098510742188` against
+`1078.9098510742188`, 2,005 vertices against 2,005, five waypoints identical to
+seven decimals, and four legs all `routed` as they went out. Written out again
+it is the same file: 6 `<wpt>`, 5 of them `set`, 2,939 trackpoints. **The one
+generated marker is skipped and said so** — *1 marker this map placed, skipped*.
+
+### The first work was the index, and here is what it cost
+
+29–42 ms to build, 799,863 entries over 613,278 cells, **8.85 MB**, and **0.7
+microseconds a lookup** looking at 159 of the network's 714,107 segments.
+Against the 2 ms linear pass the page had before, a lookup is some **2,800 times
+cheaper**, and that is the whole of why a 5,147-point recording is matched
+between two frames. Built on the first thing that asks and then kept: a reader
+who never loads a file never pays for it, and `state().index` is `null` until
+something does.
+
+Three cell sizes were measured in the built page before one was chosen:
+
+| cell | build | entries | per lookup | segments looked at |
+|---|---:|---:|---:|---:|
+| 50 m | 49 ms | 902,548 | 1.4 µs | 119 |
+| **100 m** | **29 ms** | **799,863** | **0.7 µs** | **159** |
+| 200 m | 31 ms | 754,842 | 0.7 µs | 242 |
+
+The smaller cell loses on both counts, which is the part worth keeping: halving
+the cell quadruples the cell count, and laying down the extra entries costs more
+than the shorter scan saves.
+
+**And what a whole load costs, over all 35 recordings and all three modes:**
+median **37 ms** wall clock and **67 ms** at the worst, of which the settle —
+from the file being handed over to a route drawn and every leg worked out — is a
+median of 15 ms and 54 ms at the worst. Nothing here needed cutting into pieces,
+which is a figure and not a hope: the largest recording is 5,147 points and the
+largest file loaded is the 16,415-point chain export, which settles in 116 ms.
+
+### The corpus is not foreign to the network, and that changes what it proves
+
+**All 62,158 points of the 35 UT.no recordings lie at distance 0.0 from the
+graph** — p50, p90, p99 and the maximum, every one of them 0.0. They are not
+merely near it: UT.no *is* one of the graph's six sources, and these 35 files are
+the ones it loads. The readiness check called them *genuinely foreign*, which is
+true of the file — consumer GPS, timestamps on every point, no `<wpt>`, no
+`<extensions>` — and false of the geometry.
+
+Two consequences, and they pull in opposite directions:
+
+- **It is the strongest ground truth a matcher could be given.** The right answer
+  is known exactly, so anything short of matching end to end is a defect rather
+  than a judgement call. Both of the two real defects below were found that way.
+- **It cannot, by itself, exercise *keeps its own shape where no path is*.** With
+  UT excluded 96.97 % of the points still lie within 25 m of another register's
+  line, because FKB and Turrutebasen braid against UT.no — *Sjøbergmarsjruta* is
+  drawn by all three, all 20.48 km of it, over the same ground.
+
+**Before declaring a corpus foreign, measure its distance to the thing it is
+meant to be foreign to.** The readiness check asked whether the files were
+obtainable and answered well; it did not ask what was in them.
+
+What rescued the acceptance was not a new corpus. Three recordings keep ground of
+their own after matching — 1,038 m, 256 m and 2,164 m — for the reason in the
+next section, and the map's own writer supplies the rest: a route exported as
+recorded and loaded back carries `<trails:part kind="track">` and comes home as
+recorded, which is the same claim tested from the other end.
+
+### The two defects, and both were the graph rather than the matcher
+
+**A recording out in the terrain is one edge, because noding cuts only where
+lines meet.** Edge length here is median **6.9 m** and 49.3 m at the 90th
+percentile — but **1,141 of the 234,358 edges are over 500 m** and UT.no's
+longest is **4.7 km**, with thirteen over 500 m. (The 18.5 km edge is a ferry
+crossing and belongs to a different sentence; the longest *walked* edge is 6.8 km
+of OSM.) Trip 1113935 lies end to end on a single 4,729 m
+UT.no edge and turns round 332 m short of its far end. Anchoring to the nearer
+end of the matched edge — reasonable at the median, where the nearer end is a
+dozen metres away — put an anchor at a place the walker never stood, and routing
+to it handed back the whole edge. **The route came back 332 m longer than the
+walk.** The rule that fixes it is one line and states something worth stating: an
+anchor is a node the recording passed *within the tolerance of*, so a routed
+stretch runs between two places it demonstrably stood.
+
+**And `min_overlap` is one-directional, which is half a test.** It asks what
+share of the recording lies along the path offered to replace it — exactly
+`attach_nearest`'s rule — and a path that runs along the whole recording *and
+then goes somewhere else as well* passes it. Measured: the 42.44 km *Rundtur*, a
+round trip whose own line crosses itself, came back at **48.2 km**. At the
+crossing the router took the wrong branch while still lying along the recording
+everywhere it was asked about. The other half is a length: a routed stretch may
+not exceed the recorded stretch it replaces by more than the tolerance at each
+end. With both halves in, **no recording in the corpus comes back longer than it
+was recorded** — 376.3 km recorded, 372.8 km matched, and 99.1 % of the ground on
+the network's own lines.
+
+**Neither of these is deducible from `attach_nearest`, and both are the same
+shape of mistake.** That function joins whole features of comparable size, so it
+never has to ask whether the counterpart is *longer* than the thing it is
+attached to, and it never meets a counterpart kilometres long. The lesson it
+teaches — proximity alone is a weak test for lines — is right and is not the
+whole rule when one side of the pairing is a network.
+
+### The one that cost the most, and it was invisible to every check
+
+`PLAN.matchAnchorM` was read by the matcher and left out of `PLAN_SETTINGS`.
+JavaScript has nothing to say about that: `along[i] - since < undefined` is
+`false`, so every recorded point became an anchor, and **the matcher matched
+3.6 % of a track that lies exactly on the network** — 269 m of 7,420. Nothing
+threw, nothing logged, `make check` was green and the page looked right.
+
+The test that should have caught it exists and runs the other way:
+`test_every_setting_the_template_reads_is_one_it_insists_on` walks
+`PLAN_SETTINGS` and asserts each name appears in the rendered page. **A contract
+checked in one direction is not checked.** The converse is now a test of its own
+and it fails on exactly this: strip `matchAnchorM` from the list and it names it.
+
+### The claim the file was making about somebody else's numbers
+
+A route made of a loaded recording credited **Høydedata DTM1** and stated
+`ascentMethod: DTM1, sampled every 5 m, gains under 5 m ignored`. Every height
+in it came off the reader's own trackpoints and this map never asked the service
+about a metre of it. The file was naming Kartverket for a consumer GPS reading,
+in a document somebody takes into the terrain — which is the precise claim the
+`ascentMethod` field exists to stop being made by accident, made by the field
+itself.
+
+Found by reading a written file rather than by any check: `heightsWritten(runs)`
+asks whether the file carries heights, and *where they came from* is a different
+question that nothing had needed to ask before, because until this phase every
+height on this map came from one place. A part now says which, the shape carries
+`modelled` and `fromFile`, and the model is credited and its method stated only
+where it was actually read. Where it was not, the description says so —
+*the climb is the loaded file's own heights, not the model*, and *part of the
+climb…* for a route that is some of each. A route with nothing of this map's in
+it now writes no source list at all rather than `Sources: ` and a blank.
+
+**The general form is worth keeping**: a field that has only ever had one
+possible value is not a field anybody has checked. There was exactly one source
+of heights for seven phases.
+
+### What the review found, and what was done with each
+
+Eight, and **the first three were the same mistake in three places**: a waypoint
+anchored to the recording carried no node, so every leg with one anchored end and
+one ordinary one fell past the routing test and was drawn straight over the
+terrain. It never showed in the acceptance because both files driven there were
+pure — every leg recorded, or every leg routed — and the defect only exists where
+the two meet.
+
+1. **A leg beside a recorded one was drawn straight, never routed.** Confirmed in
+   three shapes: extending a loaded recording by clicking gave a straight line
+   instead of a path, dragging an anchored waypoint made *both* its neighbours
+   straight rather than "ordinary" as the comment beside it claimed, and — worst
+   — a mixed route reloaded aligned came back with every routed leg beside a
+   recorded one turned into a straight line, silently breaking the round trip
+   this phase is built on. **Fixed**: an anchored waypoint now carries the node
+   the recording reached, within the *match* tolerance rather than `snapM`, so a
+   routed leg laid from that node steps at most 25 m — the same seam the matcher
+   already leaves. Measured after: extending reaches `routed:1434` where it drew
+   `land:1302`, a dragged waypoint's legs come back `routed`, and the mixed route
+   returns `track:3470 · routed:3921`.
+2. **A leg spanning a track break drew a walked line across the gap.** Only a leg
+   that was *nothing but* a break was treated as a crossing, and phase 7's Remove
+   merges the two legs either side of one in a single click. The result walked
+   straight across and counted the gap as recorded ground — the one failure the
+   whole crossing distinction exists to prevent. It also disagreed with
+   `loaded.along`, which does not advance across a break. **Fixed**: every break
+   inside a leg is a crossing, in both modes. Measured: removing the waypoint
+   that ended a segment now gives `['track:1209', 'water:130']`, one crossing,
+   130 m crossed, and the walked figure does not move.
+3. **A recorded leg was anchored from where its waypoint had snapped to, not
+   from what the file wrote.** `snapped` moves a waypoint up to 150 m onto the
+   network before the lookup ran, and on a switchback the nearest recorded point
+   to *that* is on another pass. **Fixed**: it reads the written position, and it
+   may now decline — a waypoint of a recorded leg is written at the recorded
+   point or at a named thing within `namedM` of it, so that is exactly how far it
+   looks.
+4. **A refused second file dropped the recording the route was still anchored
+   to.** `loadGpx` refuses before it touches anything, so nulling it in the catch
+   destroyed a good recording and the next edit turned a recorded stretch into a
+   straight line with nothing said. **Fixed**: what is on the map stays.
+5. **A `<trkseg>` holding one point made two waypoints on one position** — a leg
+   of no length, an extra pin, and a request to the height service about nothing.
+   **Fixed**, by collecting the indices first and never taking one twice.
+6. **The break count came off the `<trkseg>` elements rather than the breaks.**
+   An empty segment leaves no break, and the page said *2 breaks* where there was
+   one. **Fixed**: counted.
+7. **A `<trails:part>` with no `kind` was reported as a kind called `null`**, and
+   the table of known kinds was an object literal, so `constructor` read as
+   known. **Fixed**, and the table has no prototype — the same rule every other
+   table here keyed on somebody else's words already follows.
+8. **A test did not exercise the branch it documented.** `gpx=None` drops the key,
+   so the `PLAN_SETTINGS` check fired first and the new one was never reached.
+   **Fixed**, with `gpx={}`.
+
+All eight were real and all eight were taken. **Every acceptance figure was
+re-measured afterwards and none moved.**
+
+### Three more, cheaper but not free
+
+- **`DOMParser` logs a console error the page cannot suppress.** A file that is
+  not XML produces *XML Parsing Error: syntax error* attributed to the page's own
+  URL, before `parsererror` is found and the file refused with a sentence. The
+  handling is right and the log is unavoidable; a probe treating `console.error`
+  as failure reads it as one, which is the twin of the `elementFromPoint` trap —
+  the probe is wrong, not the page.
+- **A matched route restores exactly through *as it is* and not through
+  *aligned*, and that is what the modes mean.** Written out and read back as
+  recorded it comes home to `7307.4335` against `7307.4358` m — 2.3 mm over
+  7.3 km, which is the file's seven decimals — and its ascent to 0.15 mm.
+  Aligned, the same file comes back at 7,266 m: align mode routes between the
+  waypoints, a matched route has two of them, and the cheapest path between two
+  points is not the concatenation of the cheapest paths between the anchors
+  along it. Nothing is wrong; a matched route's geometry is not derivable from
+  two waypoints, and the file carries the geometry for exactly that reason.
+- **`getElementsByTagName` matches the qualified name in an XML document.** A
+  file spelling this map's namespace `t:` rather than `trails:` says the same
+  thing and would have been missed entirely. Everything is addressed by
+  namespace and local name, and the GPX elements under `'*'` so that a consumer
+  device leaving the default namespace off still loads.
+
+### What was deliberately not built, and what it would take
+
+**Matching a part of an edge.** A part is a whole edge, so a recording that
+walks half of a long one is kept as recorded rather than half-matched. On this
+corpus that is 3.5 km of 376 — and it is the whole of the difference between
+99.1 % and 100 %. Doing it would mean slicing an edge's geometry *and* its
+height samples at two positions, apportioning its marking and its protected
+shares by length, and a part that no longer stands for an edge — which is what
+`tallyOf` consumes. It is a real extension of the model rather than a tuning
+change, and it belongs to whoever wants the last percent.
 
 ## What phase 7 found
 
