@@ -2499,6 +2499,61 @@ class _ProfilePanel(MacroElement):
             body.appendChild(meta);
             body.appendChild(chart);
 
+            // ---- the height, which a reader owns ----------------------------
+            // **Dragging this taller is not decoration.** The chart's scale is
+            // the coarser of length-per-width and relief-per-height, so on a
+            // chain steep enough for the height to bind, every pixel given here
+            // is a finer scale: 55 px took the 3 km path off Øyfjellet from
+            // 6.96 to 4.72 metres a pixel. On a long gentle route the width
+            // binds and dragging changes the picture's size and nothing else,
+            // which is honest — there is no detail there to uncover.
+            var grip = document.createElement('div');
+            grip.title = 'Drag to change the height of the profile';
+            grip.style.cssText = 'height:7px;margin:-4px -10px 1px;cursor:ns-resize;' +
+                'display:flex;align-items:center;justify-content:center';
+            var grabbed = document.createElement('div');
+            grabbed.style.cssText = 'width:38px;height:3px;border-radius:2px;background:#c4c4c4';
+            grip.appendChild(grabbed);
+            var stretching = null, awaiting = false;
+            grip.addEventListener('mouseenter', function () { grabbed.style.background = '#8a8a8a'; });
+            grip.addEventListener('mouseleave', function () { if (!stretching) { grabbed.style.background = '#c4c4c4'; } });
+
+            function stretchTo(pixels) {
+                // Room for a curve at all, and never so tall that the panel is
+                // the map. The overhead is measured rather than assumed: the two
+                // rows above the chart are a different height in every browser.
+                var least = 60;
+                var most = Math.max(least, map.getSize().y - (box.offsetHeight - chartHeight) - 80);
+                var wanted = Math.round(Math.min(most, Math.max(least, pixels)));
+                if (wanted === chartHeight) { return; }
+                chartHeight = wanted;
+                // Coalesced to one draw a frame. A redraw per mouse move is the
+                // mistake that froze this map twice, and a chain of eight
+                // thousand samples is four hundred separate strokes.
+                if (!awaiting) {
+                    awaiting = true;
+                    window.requestAnimationFrame(function () { awaiting = false; render(); });
+                }
+            }
+
+            grip.addEventListener('mousedown', function (event) {
+                if (!open) { return; }
+                // The panel is anchored to the bottom of the map, so it grows
+                // upwards and a pointer moving up asks for more.
+                stretching = {from: event.clientY, height: chartHeight};
+                grabbed.style.background = '#8a8a8a';
+                event.preventDefault();
+            });
+            document.addEventListener('mousemove', function (event) {
+                if (!stretching) { return; }
+                stretchTo(stretching.height + (stretching.from - event.clientY));
+            });
+            document.addEventListener('mouseup', function () {
+                if (!stretching) { return; }
+                stretching = null;
+                grabbed.style.background = '#c4c4c4';
+            });
+
             var control = L.control({position: 'bottomleft'});
             var box = null;
             control.onAdd = function () {
@@ -2508,6 +2563,7 @@ class _ProfilePanel(MacroElement):
                     // Clear of the attribution, which sits in the corner opposite
                     // and would otherwise be covered by a panel this wide.
                     'margin-bottom:22px';
+                box.appendChild(grip);
                 box.appendChild(header);
                 box.appendChild(body);
                 // Clicking and dragging inside the panel must not reach the map;
@@ -2758,6 +2814,13 @@ class _ProfilePanel(MacroElement):
                 if (!open) { return; }
 
                 var width = Math.max(240, body.clientWidth || (map.getSize().x - 40));
+                // The height is set here and nowhere else. It is no longer a
+                // constant — a reader drags it — and a viewBox that disagreed
+                // with the element it is drawn in scales the whole chart by the
+                // ratio between them, which reads as a wrong slope on a panel
+                // whose whole point is that the slope is right.
+                chart.setAttribute('height', chartHeight);
+                chart.style.height = chartHeight + 'px';
                 chart.setAttribute('viewBox', '0 0 ' + width + ' ' + chartHeight);
                 chart.setAttribute('width', width);
                 if (!selected || !selected.shape || !selected.shape.read) { return; }

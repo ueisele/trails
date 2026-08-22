@@ -697,6 +697,31 @@ class TestProfilePanel:
         assert str(maps.GRADIENT_WINDOW_M) in html
         assert str(maps.GRADIENT_MIN_RUN_M) in html
 
+    def test_the_profile_height_is_a_reader_s_to_drag(self, group):
+        """And the drag is coalesced to one draw a frame.
+
+        A redraw per mouse move is the mistake that froze this map twice, and a
+        chain of eight thousand samples is four hundred separate strokes.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "cursor:ns-resize" in html
+        assert "function stretchTo(pixels)" in html
+        assert "window.requestAnimationFrame(function () { awaiting = false; render(); });" in html
+
+    def test_the_profile_height_is_bounded_at_both_ends(self, group):
+        """Room for a curve at all, and never so tall that the panel is the map."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "var least = 60;" in html
+        assert "map.getSize().y - (box.offsetHeight - chartHeight) - 80" in html
+
     def test_the_lowest_band_clears_what_the_model_reads_on_level_ground(self):
         """Measured: level chains read a median of 1.0 % over a 25 m window and
         never more than 9.2 %. A boundary under that would colour the data."""

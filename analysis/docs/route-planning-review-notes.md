@@ -107,6 +107,22 @@ the page and meant two things; it stands once. Measured on the 42 km Rundtur, th
 two files disagree by 262 m of ascent and one of them carries a timestamp on
 every point.
 
+**And the profile's height is a reader's to drag**, which on a steep chain is
+resolution rather than taste. The scale is the coarser of length-per-width and
+relief-per-height, so where the height binds every pixel given is a finer scale.
+Measured on the 3 km path off Øyfjellet: the chart at 205 px draws it 638 px
+wide at 4.73 m/px, dragged to 445 px it draws **1,170 px wide at 2.58 m/px** —
+past one reading a pixel — and the drawn ratio holds at 3.74 against the ground's
+3.74 the whole way. Dragged to the floor of 60 px it is 96 px wide at 31 m/px,
+and still true. On a long gentle route the width binds and dragging changes the
+size and nothing else, which is honest: there is no detail there to uncover.
+
+The drag is coalesced to one draw a frame rather than one a mouse move — 60
+pulls in 998 ms, no error — the panel is bounded at 60 px and at the map's own
+height less 80, and the map does not pan under it: centre and zoom identical
+before and after. **A control that grows over the map has to be measured against
+the map**, and this one leaves 80 px of it at full stretch.
+
 **And a chain's popup says the steepest ground it covers**, over 25 m and over
 100 m, absolute. Absolute because this park's steepest chain climbs 9 m and drops
 816, so a signed maximum would call it flat; two windows because one invites the
