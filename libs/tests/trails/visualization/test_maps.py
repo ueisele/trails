@@ -1,5 +1,8 @@
 """Tests for Folium map building."""
 
+import pathlib
+import re
+
 import folium
 import geopandas as gpd
 import pytest
@@ -967,6 +970,27 @@ class TestPlanMode:
             "connectorKind": "bridge",
             "touchedM": 100.0,
             "namedM": 50.0,
+            "indexCellM": 100.0,
+            "matchToleranceM": 25.0,
+            "matchMinOverlap": 0.6,
+            "matchMinRunM": 100.0,
+            "matchMaxTurnDeg": 60.0,
+            "matchAnchorM": 250.0,
+            "gpx": {
+                "namespace": "https://github.com/ueisele/trails/gpx/1",
+                "kindField": "kind",
+                "kind": "route",
+                "chainField": "chain",
+                "legs": "legs",
+                "leg": "leg",
+                "part": "part",
+                "partKind": "kind",
+                "partLength": "m",
+                "origin": "origin",
+                "set": "set",
+                "generated": "generated",
+                "trackKind": "track",
+            },
         }
         settings.update(changed)
         return {name: value for name, value in settings.items() if value is not None}
@@ -993,6 +1017,65 @@ class TestPlanMode:
         html = fmap.get_root().render()
         for setting in maps.PLAN_SETTINGS:
             assert f"PLAN.{setting}" in html, setting
+
+    def test_every_setting_the_template_reads_is_one_the_check_knows_about(self):
+        """The converse of the test above, and the one that was missing.
+
+        That direction — list to template — says nothing about a name the
+        template reads that is not on the list, and JavaScript has no complaint
+        to make about one: ``PLAN.matchAnchorM`` was left out of
+        :data:`PLAN_SETTINGS` while the matcher read it, ``along[i] - since <
+        undefined`` is ``false``, and every recorded point became an anchor. The
+        matcher then matched **3.6 %** of a track that lies exactly on the
+        network, and nothing threw, nothing logged, and the page looked right.
+        """
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        read = set(re.findall(r"PLAN\.([A-Za-z_][A-Za-z0-9_]*)", planning)) - {"gpx"}
+        assert read - set(maps.PLAN_SETTINGS) == set()
+        assert set(maps.PLAN_SETTINGS) - read - {"gpx"} == set()
+
+        inside = set(re.findall(r"PLAN\.gpx\.([A-Za-z_][A-Za-z0-9_]*)", planning))
+        assert inside - set(maps.PLAN_GPX_SETTINGS) == set()
+        assert set(maps.PLAN_GPX_SETTINGS) - inside == set()
+
+    def test_every_name_the_reader_looks_for_is_one_the_check_insists_on(self):
+        """Phase 8 both reads and writes this file, which nothing else here does.
+        A ``gpx`` short of one name leaves the page looking for an element called
+        ``undefined``, finding none, and reporting one of its own routes as a
+        foreign track without a word."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        for setting in maps.PLAN_GPX_SETTINGS:
+            assert f"PLAN.gpx.{setting}" in html, setting
+
+    def test_a_plan_that_cannot_read_a_file_back_is_refused(self):
+        """The same refusal as a missing sampling step, for the same reason: a
+        page that guessed a field name would load its own routes as foreign
+        tracks and nothing about it would look wrong."""
+        fmap, _ = self.drawn()
+        short = self.planned()
+        short["gpx"] = {name: value for name, value in short["gpx"].items() if name not in ("origin", "trackKind")}
+
+        with pytest.raises(ValueError, match="gpx.origin|gpx.trackKind"):
+            maps.add_plan_mode(fmap, short)
+
+    def test_a_plan_with_no_gpx_block_at_all_is_refused(self):
+        """Checked as its own list rather than by the presence of the key above
+        it, which is how :data:`EXPORT_ROUTE_SETTINGS` is checked and for the
+        same reason."""
+        fmap, _ = self.drawn()
+
+        # An empty block rather than no block: dropping the key means the check
+        # above this one fires first, and the branch this test is about is never
+        # reached — which is what it did until a review said so.
+        with pytest.raises(ValueError, match=r"read a GPX back without gpx\."):
+            maps.add_plan_mode(fmap, self.planned(gpx={}))
+
+        with pytest.raises(ValueError, match="without gpx$"):
+            maps.add_plan_mode(fmap, self.planned(gpx=None))
 
     def test_a_plan_missing_a_setting_is_refused(self):
         """A page that quietly sampled every 50 m, or read a climb at no
@@ -1165,8 +1248,13 @@ class TestPlanMode:
 
         maps.add_plan_mode(fmap, self.planned())
         planning = fmap.get_root().render()
-        assert planning.count("://") == bare + 1
+        # Two, since phase 8: the height service, and the namespace a file this
+        # map wrote puts its extensions in. **A namespace is an identifier and
+        # never fetched** — it is compared against, which is the whole reason
+        # the reader addresses elements by it rather than by their prefix.
+        assert planning.count("://") == bare + 2
         assert planning.count("fetch(") == 1
+        assert "getElementsByTagNameNS(PLAN.gpx.namespace" in planning
 
     def test_the_cost_comes_out_of_the_header(self):
         """Length times the source's factor, and a crossing at the header's flat
@@ -1294,7 +1382,10 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "var MARKING = ['marked', 'unmarked', 'unknown'];" in planning
-        assert "var TALLIED = MARKING.concat(['undrawn', 'unrecorded']);" in planning
+        assert "var TALLIED = MARKING.concat(['undrawn', 'recorded', 'unrecorded']);" in planning
+        # And the fifth, which phase 8 adds beside `undrawn` and for the same
+        # reason: no register was asked about ground read off a loaded file.
+        assert "tally.recorded = run;" in planning
         # A state the payload names and this page has no bucket for is a defect,
         # not a fourth silent bucket created by an index into an object.
         assert "the payload names a marking state this page has no bucket for" in planning
@@ -1356,7 +1447,7 @@ class TestPlanMode:
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function relink(graph, mayAsk)" in planning
         assert "kept[k].from === points[i] && kept[k].to === points[i + 1]" in planning
-        for edit in ("function insert(at, lat, lon)", "function remove(at)", "function moveBy(at, step)"):
+        for edit in ("function insert(at, lat, lon, trackAt)", "function remove(at)", "function moveBy(at, step)"):
             assert edit in planning, edit
         # And a waypoint that has moved is a new object, so a drag needs no
         # case of its own in the rule above.

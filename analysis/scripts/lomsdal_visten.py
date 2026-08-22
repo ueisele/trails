@@ -54,6 +54,7 @@ from trails.io.export.gpx import (
     LEGS_ELEMENT,
     PART_ELEMENT,
     PART_KIND_ATTR,
+    PART_KIND_TRACK,
     PART_LENGTH_ATTR,
     ROUTE_EXTENSION_FIELDS,
     ROUTE_KIND,
@@ -708,6 +709,93 @@ MAX_STRAIGHT_M = 20_000.0
 #: named thing wins and only that one, rather than everything within reach.
 NAMED_POINT_M = 50.0
 
+#: How wide one cell of the page's index over the edge geometry is.
+#:
+#: **The first work of phase 8 is this index and not the matcher**, and the
+#: measurement is why. ``nearestNode`` is a linear scan over 116,967 nodes at
+#: 0.135 ms and over the *edge* geometry the page had nothing at all: one pass
+#: over its 948,465 vertices costs 2 ms, so a foreign track matched a point at a
+#: time is 2.9 s of frozen main thread at the corpus median and 10 s at its
+#: largest, before a single overlap test. Measured in the built page at three
+#: sizes, over the 714,107 segments of the network:
+#:
+#: ======= ========= ========= ============== =================
+#: cell    build     entries   per lookup     segments looked at
+#: ======= ========= ========= ============== =================
+#: 50 m    49 ms     902,548   1.4 µs         119
+#: 100 m   29 ms     799,863   0.7 µs         159
+#: 200 m   31 ms     754,842   0.7 µs         242
+#: ======= ========= ========= ============== =================
+#:
+#: A hundred metres is the cheapest to build and ties the fastest to ask, and
+#: the middle column is why the smaller cell does not win: halving the cell
+#: quadruples the cell count and the extra entries cost more to lay down than
+#: the shorter scan saves. Against the 2 ms linear pass a lookup is some 2,800
+#: times cheaper, which is the whole of what makes matching a 5,147-point track
+#: something that happens between two frames.
+INDEX_CELL_M = 100.0
+
+#: How far from an edge a recorded point may lie and still be taken as running
+#: along it.
+#:
+#: Consumer GPS under tree cover and against a mountainside is the error this
+#: has to absorb, and the sources' own disagreement is the other half: the same
+#: path drawn by FKB and by Turrutebasen sits metres apart, and a recording of
+#: it can be nearer either. Twenty-five metres takes both without reaching the
+#: next path over. It is a judgement; the two below are what keep it from being
+#: the *only* test.
+MATCH_TOLERANCE_M = 25.0
+
+#: The least share of a matched stretch that must actually lie along the edges
+#: matched to it, between 0 and 1.
+#:
+#: **This is the rule ``trails.utils.geo.attach_nearest`` learned and it is the
+#: most important one in this phase.** Proximity alone is a weak test for lines:
+#: at a junction the first metres of a side road lie well within tolerance of
+#: the main road, and 23 % of that function's matches followed their road for
+#: under half its length until ``min_overlap`` was added. A recording beside a
+#: parallel path snaps to the wrong one on distance alone, and this map is full
+#: of parallel paths — UT.no, Turrutebasen and FKB all draw Sjøbergmarsjruta,
+#: all 20.48 km of it, over the same ground.
+MATCH_MIN_OVERLAP = 0.6
+
+#: The least a matched stretch may be, in metres. Below it the match is dropped
+#: and the recording is kept as it was recorded.
+#:
+#: A stretch shorter than this is the junction case: a recording crossing a path
+#: touches a few of its metres and would take them. Edges here average 25 m, so
+#: this is some four of them, and it is the length below which *running along*
+#: something and *touching* it cannot be told apart.
+MATCH_MIN_RUN_M = 100.0
+
+#: How far a recording's heading may differ from an edge's before the edge is
+#: not a candidate at all, in degrees.
+#:
+#: The cheap half of the overlap rule and the one that runs per point: a side
+#: road leaving a junction points somewhere else, and a parallel path walked the
+#: other way is not the path being walked. Sixty degrees is loose enough for a
+#: recording that wanders and tight enough that a crossing path is never a
+#: candidate. Undirected — a recording may walk an edge either way round.
+MATCH_MAX_TURN_DEG = 60.0
+
+#: How far apart the points a recording is anchored to the network by are, along
+#: the recording, in metres.
+#:
+#: The matcher anchors and then routes between the anchors, so this is the unit
+#: it decides in: a stretch this long is taken onto the network or kept as it was
+#: recorded, whole. It is also what the matching costs — one Dijkstra per anchor,
+#: and a search between two nodes this far apart settles a handful of nodes
+#: against the three 116,967-long arrays it has to clear first, which is the
+#: floor and the reason the anchors are spaced rather than taken at every
+#: recorded point.
+#:
+#: Two hundred and fifty metres is ten of this network's edges and, at the
+#: corpus's 5 m point spacing, some fifty recorded points to test each stretch
+#: against — enough for the overlap test to mean something, and fine enough that
+#: a recording leaving the path is followed off it within a quarter of a
+#: kilometre.
+MATCH_ANCHOR_M = 250.0
+
 
 def plan_settings(params: Params) -> dict[str, object]:
     """Hand the page what it needs to plan a route over the graph it carries.
@@ -752,6 +840,38 @@ def plan_settings(params: Params) -> dict[str, object]:
         # disagree about what counts as passing through somewhere.
         "touchedM": DEFAULT_TOUCHED_M,
         "namedM": NAMED_POINT_M,
+        # What it takes to index the edge geometry and to match a recording
+        # against it. Every one is a judgement this build made and printed, and
+        # a page that picked its own would match differently from run to run
+        # with nothing in the file saying which rule it was matched under.
+        "indexCellM": INDEX_CELL_M,
+        "matchToleranceM": MATCH_TOLERANCE_M,
+        "matchMinOverlap": MATCH_MIN_OVERLAP,
+        "matchMinRunM": MATCH_MIN_RUN_M,
+        "matchAnchorM": MATCH_ANCHOR_M,
+        "matchMaxTurnDeg": MATCH_MAX_TURN_DEG,
+        # And the vocabulary of the file the page both writes and reads. Every
+        # name here is one of the constants export_settings hands the writer,
+        # out of trails.io.export.gpx — handed over twice rather than agreed on
+        # by convention, because a reader and a writer of one file are in one
+        # phase here for the only time in this project, and a page that read
+        # `origin` while writing `Origin` would load its own routes as foreign
+        # tracks and say nothing.
+        "gpx": {
+            "namespace": TRAILS_NAMESPACE,
+            "kindField": ROUTE_KIND_FIELD,
+            "kind": ROUTE_KIND,
+            "chainField": DEFAULT_EXTENSION_FIELDS[CHAIN_KEY],
+            "legs": LEGS_ELEMENT,
+            "leg": LEG_ELEMENT,
+            "part": PART_ELEMENT,
+            "partKind": PART_KIND_ATTR,
+            "partLength": PART_LENGTH_ATTR,
+            "origin": WAYPOINT_ORIGIN_FIELD,
+            "set": WAYPOINT_SET,
+            "generated": WAYPOINT_GENERATED,
+            "trackKind": PART_KIND_TRACK,
+        },
     }
 
 

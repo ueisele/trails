@@ -162,12 +162,22 @@ AREA_LENGTH_ATTR = "m"
 #: information at all. Calling that unmarked asserts what no source says.
 #: ``undrawn`` is a fourth thing again: ground on a connector nobody drew, which
 #: was never asked rather than asked and unanswered.
+#:
+#: **And ``recorded`` is a fifth, which phase 8 adds beside** :data:`PART_KIND_TRACK`.
+#: The buckets have to sum to ``walked`` or the file states a length it then
+#: fails to account for, so a kind that walks ground needs a bucket. Ground read
+#: off a loaded recording belongs in none of the four: no register was asked
+#: about it, which rules out ``marked``, ``unmarked`` and ``unknown``, and it is
+#: not a connector, which rules out ``undrawn``. It is the same shape of answer
+#: as ``undrawn`` — never asked, reported under its own name, never folded into
+#: a bucket that would make it a claim.
 ROUTE_EXTENSION_FIELDS = {
     "ascent": "ascent",
     "descent": "descent",
     "walked": "walked",
     "crossed": "crossed",
     "straight": "straight",
+    "recorded": "recorded",
     "unrecorded": "unrecorded",
     "marked": "marked",
     "unmarked": "unmarked",
@@ -202,11 +212,36 @@ LEG_ELEMENT = "leg"
 #: walked, then crossed, then walked, and those are three parts of one leg.
 PART_ELEMENT = "part"
 
-#: What a part says it is — ``routed``, ``land``, ``water`` or ``ferry``.
+#: What a part says it is — ``routed``, ``land``, ``water``, ``ferry`` or
+#: :data:`PART_KIND_TRACK`.
 PART_KIND_ATTR = "kind"
 
 #: How long a part is, in metres.
 PART_LENGTH_ATTR = "m"
+
+#: The fifth kind, and the one phase 8 adds: a stretch of a **loaded recording**,
+#: kept exactly as it was recorded.
+#:
+#: The four kinds before it all say where a line came from — the network routed
+#: it, the reader drew it straight over land or water, a ferry carries it. This
+#: one says a file did, which is a different provenance from all four and cannot
+#: be folded into any of them: ``routed`` asserts an edge of this graph under
+#: every metre, and ``land`` asserts somebody drew a straight line nobody
+#: recorded. A recording is neither, and a route that loses the distinction
+#: cannot be written back out as what it is.
+#:
+#: **What a reader that has never seen it does**, in both directions:
+#:
+#: - Any GPX reader — Komoot, Outdooractive, an earlier build of this map — sees
+#:   it inside ``<extensions>``, which GPX 1.1 says a reader may ignore, and
+#:   reads the track and the waypoints exactly as before. Nothing about the
+#:   geometry depends on it.
+#: - **This page**, loading a file whose part names a kind it does not know,
+#:   cannot restore that leg exactly — so it routes the leg between its two
+#:   waypoints instead and says how many legs it had to. Never fatal, and never
+#:   silent: a leg quietly re-routed is a route that came back different with
+#:   nothing saying so.
+PART_KIND_TRACK = "track"
 
 
 def create_gpx_document(

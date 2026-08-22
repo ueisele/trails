@@ -334,6 +334,42 @@ PLAN_SETTINGS = (
     "connectorKind",
     "touchedM",
     "namedM",
+    "gpx",
+    "indexCellM",
+    "matchToleranceM",
+    "matchMinOverlap",
+    "matchMinRunM",
+    "matchMaxTurnDeg",
+    "matchAnchorM",
+)
+
+
+#: What ``gpx`` holds: every name phase 8's reader needs to recognise a file
+#: this map wrote and to read back what it says. Checked as its own list for the
+#: reason :data:`EXPORT_ROUTE_SETTINGS` is — a missing key here is a page that
+#: looks for an element called ``undefined``, finds none, and reports a route
+#: export as a foreign track without a word.
+#:
+#: **This is the one place in the project where a reader and a writer of the
+#: same file are in one phase**, and every name below is also in
+#: :data:`EXPORT_ROUTE_SETTINGS` or :data:`EXPORT_WAYPOINT_SETTINGS` — handed
+#: over twice, out of one Python constant each, so the two vocabularies cannot
+#: drift. ``trackKind`` is the exception and travels only here: it is the fifth
+#: part kind, and plan mode both writes it and reads it.
+PLAN_GPX_SETTINGS = (
+    "namespace",
+    "kindField",
+    "kind",
+    "chainField",
+    "legs",
+    "leg",
+    "part",
+    "partKind",
+    "partLength",
+    "origin",
+    "set",
+    "generated",
+    "trackKind",
 )
 
 
@@ -1999,6 +2035,22 @@ class _ProfilePanel(MacroElement):
                 return runs.some(function (run) { return run.ele.some(function (value) { return !isNaN(value); }); });
             }
 
+            // Whether the height model is behind any of the numbers in this
+            // file, which is a different question from whether the file carries
+            // heights at all.
+            //
+            // **A stretch kept as it was recorded carries the heights that came
+            // with the loaded file, and this map never asked the model about
+            // it.** Crediting Kartverket for a consumer GPS reading, and
+            // stating it was sampled from DTM1 every 5 m, is a false claim in a
+            // file somebody takes into the terrain — and it is the exact claim
+            // this file was given an `ascentMethod` to avoid making by
+            // accident. A chain's series is nothing but the model and says
+            // nothing about itself, so an absent answer means the model.
+            function modelBehind(shape) {
+                return !shape || shape.modelled === undefined ? true : !!shape.modelled;
+            }
+
             // What a chain's file draws on: the chain's own source, and the
             // height model wherever the file carries a height. Naming a source a
             // file does not draw on is exactly as wrong as leaving one out.
@@ -2031,7 +2083,7 @@ class _ProfilePanel(MacroElement):
                 // the file states one. A file naming a source it did not draw on
                 // is exactly as wrong as one leaving a source out, and this
                 // route's description carries a number that came from Naturbase.
-                return out.concat(heightsWritten(runs) ? EXPORT.heights : [])
+                return out.concat(heightsWritten(runs) && modelBehind(shape) ? EXPORT.heights : [])
                     .concat((shape.protected || []).length ? EXPORT.protected : []);
             }
 
@@ -2081,6 +2133,13 @@ class _ProfilePanel(MacroElement):
                 if (tally.undrawn > 0) {
                     said.push(span(tally.undrawn) + ' on connectors nobody drew');
                 }
+                // The fifth bucket, and it is reported for the same reason the
+                // fourth is: no register was asked about ground that came off a
+                // loaded recording, and folding it into 'unmarked' would turn a
+                // question nobody put into an answer.
+                if (tally.recorded > 0) {
+                    said.push(span(tally.recorded) + ' kept as it was recorded');
+                }
                 if (tally.unrecorded > 0) {
                     said.push(span(tally.unrecorded) + ' where no source records a path');
                 }
@@ -2127,7 +2186,15 @@ class _ProfilePanel(MacroElement):
             function metadataOf(out, name, described, credits) {
                 out.push('  <metadata>');
                 out.push('    <name>' + escaped(name) + '</name>');
-                out.push('    <desc>' + escaped(described + '. Sources: ' + credits.map(creditLine).join(' \\u00b7 ')) + '</desc>');
+                // The phrase goes in with the list and not before it. A route
+                // made entirely of a loaded recording draws on nothing this map
+                // holds — its ground came out of the reader's file and its
+                // heights with it — and `Sources: ` followed by nothing reads
+                // like a list that failed to be written rather than one there
+                // was nothing to put in.
+                out.push('    <desc>' + escaped(credits.length
+                    ? described + '. Sources: ' + credits.map(creditLine).join(' \\u00b7 ')
+                    : described) + '</desc>');
                 out.push('    <time>' + new Date().toISOString().replace(/\\.\\d+Z$/, 'Z') + '</time>');
                 out.push('    <extensions>');
                 credits.forEach(function (credit) {
@@ -2205,6 +2272,7 @@ class _ProfilePanel(MacroElement):
                     walked: shape.total,
                     crossed: shape.crossed,
                     straight: shape.straight,
+                    recorded: shape.tally.recorded,
                     unrecorded: shape.tally.unrecorded,
                     marked: shape.tally.marked,
                     unmarked: shape.tally.unmarked,
@@ -2285,7 +2353,7 @@ class _ProfilePanel(MacroElement):
                     if (value === null || value === undefined || isNaN(value)) { return; }
                     out.push('      ' + element(pair[1], fixed(value)));
                 });
-                if (heightsWritten(runs) && EXPORT.ascentMethod) {
+                if (heightsWritten(runs) && modelBehind(shape) && EXPORT.ascentMethod) {
                     out.push('      ' + element('ascentMethod', EXPORT.ascentMethod));
                 }
                 // The legs, in the order they were clicked, each holding its
@@ -3523,7 +3591,13 @@ class _PlanMode(MacroElement):
             // along. Kept apart, because a bucket that quietly absorbed one of
             // the others would be a claim nothing supports.
             var MARKING = ['marked', 'unmarked', 'unknown'];
-            var TALLIED = MARKING.concat(['undrawn', 'unrecorded']);
+            // And the two that are not answers at all, now three: ground on a
+            // connector nobody drew, ground kept exactly as some file recorded
+            // it, and ground no source records a path along. `recorded` is
+            // phase 8's, and it is its own bucket for the reason `undrawn` is —
+            // no register was asked about it, so folding it into `unmarked`
+            // would turn a question nobody put into an answer.
+            var TALLIED = MARKING.concat(['undrawn', 'recorded', 'unrecorded']);
 
             // Two things counted by name rather than into a fixed bucket: which
             // dataset drew each metre, and which protected areas the metres lie
@@ -3627,17 +3701,476 @@ class _PlanMode(MacroElement):
             function straightTally(graph, laid, standing, first, last, began, ended) {
                 var out = blankTally();
                 out.unmarked = ended - began;
+                spreadProtected(out, graph, standing, laid.along, first, last, began, ended);
+                return out;
+            }
+
+
+            // ---- the index over the edge geometry ---------------------------------
+            // **The first work of this phase, and it is not the matcher.** The
+            // page could already find the nearest node — a linear scan over
+            // 116,967 of them, 0.135 ms — and over the *edge* geometry it had
+            // nothing whatever. One pass over the 948,465 vertices costs 2 ms,
+            // so a recording matched a point at a time is 2.9 s of frozen main
+            // thread at the corpus median and 10 s at its largest, before a
+            // single overlap test. Written the other way round the matcher
+            // works, on a map that has stopped answering, and the cause is
+            // looked for in the matcher.
+            //
+            // A uniform grid in scaled degrees, laid out the way the adjacency
+            // is: count per cell, prefix-sum, fill. One entry per *segment* per
+            // cell its bounding box touches, rather than one per edge: 21 of
+            // this network's chains are ferries and the longest runs kilometres
+            // end to end, and an edge indexed by its own box would be in every
+            // cell between them.
+            //
+            // Measured in the built page over the network's 714,107 segments:
+            // **29 ms to build**, 799,863 entries, 8.4 MB, and **0.7
+            // microseconds a lookup** looking at 159 segments. Against the 2 ms
+            // pass that is some 2,800 times cheaper, and it is what makes a
+            // 5,147-point recording something matched between two frames.
+            //
+            // Built once, on the first thing that asks — a reader who never
+            // loads a file never pays for it.
+            var gridded = null;
+
+            function edgeIndex(graph) {
+                if (gridded) { return gridded; }
+                var began = performance.now();
+                var co = graph.coordinates, vertexAt = graph.vertexAt, edges = graph.header.edges, i, v, r, c;
+                var minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+                for (i = 0; i < co.length; i += 2) {
+                    if (co[i] < minLon) { minLon = co[i]; }
+                    if (co[i] > maxLon) { maxLon = co[i]; }
+                    if (co[i + 1] < minLat) { minLat = co[i + 1]; }
+                    if (co[i + 1] > maxLat) { maxLat = co[i + 1]; }
+                }
+                // One cosine for the whole grid, taken at its middle. The zone
+                // is 80 km of latitude and the cosine moves 1.4 % across it,
+                // which is a metre in seventy on a cell edge and nothing at all
+                // against a tolerance of twenty-five metres.
+                var lonScale = Math.cos((minLat + maxLat) / 2 * Math.PI / 180);
+                var dLat = PLAN.indexCellM / 111320, dLon = dLat / lonScale;
+                var cols = Math.floor((maxLon - minLon) / dLon) + 1;
+                var rows = Math.floor((maxLat - minLat) / dLat) + 1;
+                var at = new Int32Array(cols * rows + 1), entries = 0;
+
+                // Both passes walk the same segments in the same order and have
+                // to agree exactly on how many cells each one touches, or the
+                // fill writes past a cell's own run and the index is quietly
+                // wrong wherever two cells meet. So the box is worked out in
+                // one place and each pass reads it out of the same four slots
+                // rather than deriving it again.
+                var box = new Int32Array(4);
+
+                function boxOf(vertex) {
+                    var ax = co[2 * vertex], ay = co[2 * vertex + 1];
+                    var bx = co[2 * vertex + 2], by = co[2 * vertex + 3];
+                    box[0] = Math.floor(((ax < bx ? ax : bx) - minLon) / dLon);
+                    box[1] = Math.floor(((ax > bx ? ax : bx) - minLon) / dLon);
+                    box[2] = Math.floor(((ay < by ? ay : by) - minLat) / dLat);
+                    box[3] = Math.floor(((ay > by ? ay : by) - minLat) / dLat);
+                }
+
+                for (i = 0; i < edges; i += 1) {
+                    for (v = vertexAt[i]; v + 1 < vertexAt[i + 1]; v += 1) {
+                        boxOf(v);
+                        for (r = box[2]; r <= box[3]; r += 1) {
+                            for (c = box[0]; c <= box[1]; c += 1) { at[r * cols + c + 1] += 1; entries += 1; }
+                        }
+                    }
+                }
+                for (i = 1; i < at.length; i += 1) { at[i] += at[i - 1]; }
+                var cursor = new Int32Array(cols * rows);
+                var item = new Int32Array(entries), vert = new Int32Array(entries);
+                for (i = 0; i < edges; i += 1) {
+                    for (v = vertexAt[i]; v + 1 < vertexAt[i + 1]; v += 1) {
+                        boxOf(v);
+                        for (r = box[2]; r <= box[3]; r += 1) {
+                            for (c = box[0]; c <= box[1]; c += 1) {
+                                var cell = r * cols + c, put = at[cell] + cursor[cell];
+                                cursor[cell] += 1;
+                                item[put] = i; vert[put] = v;
+                            }
+                        }
+                    }
+                }
+                // Filling leaves cursor[cell] at that cell's own count, so
+                // at[cell] + cursor[cell] is where the next cell begins — the
+                // invariant the node adjacency above is filled under too.
+                gridded = {at: at, item: item, vert: vert, cols: cols, rows: rows,
+                           dLon: dLon, dLat: dLat, minLon: minLon, minLat: minLat, lonScale: lonScale,
+                           entries: entries, cells: cols * rows, buildMs: performance.now() - began,
+                           bytes: (at.length + item.length + vert.length) * 4};
+                return gridded;
+            }
+
+            // The nearest edge to a position, or nothing within the tolerance.
+            //
+            // **The heading is tested here, and it is the cheap half of what
+            // keeps a recording off the wrong line.** At a junction the first
+            // metres of a side path lie well inside any tolerance of the path
+            // being walked, and a test asking only how far away something is
+            // takes it: that is what put 23 % of `attach_nearest`'s matches on
+            // a road they followed for under half its length. Undirected,
+            // because a recording may walk an edge either way round — what is
+            // compared is the line's direction and not its arrow. Where the
+            // recording has no heading at all, which consumer GPS produces
+            // whenever somebody stands still, every candidate passes it and the
+            // distance decides.
+            function nearestEdge(graph, index, lon, lat, hx, hy) {
+                var co = graph.coordinates, lonScale = index.lonScale;
+                var reach = PLAN.matchToleranceM / 111320;
+                var c0 = Math.floor((lon - reach / lonScale - index.minLon) / index.dLon);
+                var c1 = Math.floor((lon + reach / lonScale - index.minLon) / index.dLon);
+                var r0 = Math.floor((lat - reach - index.minLat) / index.dLat);
+                var r1 = Math.floor((lat + reach - index.minLat) / index.dLat);
+                if (c0 < 0) { c0 = 0; }
+                if (r0 < 0) { r0 = 0; }
+                if (c1 > index.cols - 1) { c1 = index.cols - 1; }
+                if (r1 > index.rows - 1) { r1 = index.rows - 1; }
+                var turning = Math.cos(PLAN.matchMaxTurnDeg * Math.PI / 180);
+                var heading = Math.sqrt(hx * hx + hy * hy);
+                var closest = reach * reach, best = -1;
+                for (var r = r0; r <= r1; r += 1) {
+                    for (var c = c0; c <= c1; c += 1) {
+                        var cell = r * index.cols + c;
+                        for (var s = index.at[cell]; s < index.at[cell + 1]; s += 1) {
+                            var v = index.vert[s];
+                            var ax = co[2 * v], ay = co[2 * v + 1];
+                            var ex = (co[2 * v + 2] - ax) * lonScale, ey = co[2 * v + 3] - ay;
+                            var span = ex * ex + ey * ey;
+                            if (heading > 0 && span > 0 &&
+                                Math.abs(hx * ex + hy * ey) < turning * heading * Math.sqrt(span)) { continue; }
+                            var px = (lon - ax) * lonScale, py = lat - ay;
+                            var t = span > 0 ? (px * ex + py * ey) / span : 0;
+                            t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                            var qx = px - t * ex, qy = py - t * ey;
+                            var away = qx * qx + qy * qy;
+                            if (away < closest) { closest = away; best = index.item[s]; }
+                        }
+                    }
+                }
+                return best < 0 ? null : {edge: best, m: Math.sqrt(closest) * 111320};
+            }
+
+            // How far a position lies from a run of coordinates, in metres. It
+            // stops as soon as it is inside the tolerance: the overlap test asks
+            // it once per recorded point against a laid path, and all it wants
+            // to know is whether that point is near the path at all.
+            function awayFromRun(lon, lat, xs, ys, lonScale, withinM) {
+                var reach = withinM / 111320, inside = reach * reach, closest = Infinity;
+                for (var i = 0; i + 1 < xs.length; i += 1) {
+                    var ax = xs[i], ay = ys[i];
+                    var ex = (xs[i + 1] - ax) * lonScale, ey = ys[i + 1] - ay;
+                    var px = (lon - ax) * lonScale, py = lat - ay;
+                    var span = ex * ex + ey * ey;
+                    var t = span > 0 ? (px * ex + py * ey) / span : 0;
+                    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                    var qx = px - t * ex, qy = py - t * ey, away = qx * qx + qy * qy;
+                    if (away < closest) { closest = away; }
+                    if (closest <= inside) { return Math.sqrt(closest) * 111320; }
+                }
+                return Math.sqrt(closest) * 111320;
+            }
+
+            // ---- the recording, and the parts cut out of it ------------------------
+            // The one recording the page is working from, or nothing. Loading a
+            // second replaces the first, and every waypoint that came out of the
+            // first names it by id — so a waypoint left over from a file that is
+            // no longer loaded is recognised rather than read against the wrong
+            // coordinates.
+            var loaded = null;
+            var loadedCount = 0;
+
+            // A waypoint anchored to a recorded point. **It keeps the
+            // recording's own position and does not snap to the network**: the
+            // mode that takes a track as it is has to leave it where it was
+            // recorded, and a waypoint that jumped to a node 100 m away would
+            // drag the first and last hundred metres of the track with it.
+            function anchored(graph, at) {
+                // **And it carries a node where the recording reached one**,
+                // which is not the same as snapping to it. Its position stays
+                // the recording's, because a mode that takes a track as it is
+                // has to leave it where it was recorded; the node is what lets
+                // the *other* legs beside it route. Without it a leg joining an
+                // anchored waypoint to an ordinary one falls past the routing
+                // test — which wants a node at both ends — and is drawn straight
+                // over the terrain: extending a loaded track by clicking would
+                // draw a line rather than follow a path, and a mixed route
+                // reloaded would come back with every leg beside a recorded one
+                // turned into a straight line.
+                //
+                // Within the match tolerance rather than `snapM`. A routed leg
+                // is laid from the node, so whatever the two are apart is a step
+                // in the track at that waypoint, and 25 m is the same seam the
+                // matcher already leaves where a recorded stretch meets a
+                // routed one. A hundred and fifty would be a visible jump.
+                var node = graph ? graph.nearestNode(loaded.lat[at], loaded.lon[at], PLAN.matchToleranceM) : -1;
+                return {lat: loaded.lat[at], lon: loaded.lon[at], node: node, track: loaded.id, at: at};
+            }
+
+            // Which protected areas a run of ground lies in, spread over it by
+            // the halfway rule: a point's own stretch runs half way to each of
+            // its neighbours. **One rule, in one place**, called by the leg
+            // drawn straight and by the stretch kept as recorded — two spellings
+            // of a halfway rule would eventually disagree about a boundary and
+            // both would look right.
+            function spreadProtected(out, graph, standing, along, first, last, began, ended) {
                 for (var s = first; s < last; s += 1) {
                     var here = standing[s];
-                    if (!here.length) { continue; }
-                    var low = s === first ? began : (laid.along[s - 1] + laid.along[s]) / 2;
-                    var high = s === last - 1 ? ended : (laid.along[s] + laid.along[s + 1]) / 2;
+                    if (!here || !here.length) { continue; }
+                    var low = s === first ? began : (along[s - 1] + along[s]) / 2;
+                    var high = s === last - 1 ? ended : (along[s] + along[s + 1]) / 2;
                     for (var a = 0; a < here.length; a += 1) {
                         var id = graph.header.protected[here[a]].id;
                         out.protected[id] = (out.protected[id] || 0) + (high - low);
                     }
                 }
+            }
+
+            // One stretch of the recording, kept as it was recorded: the fifth
+            // kind, and the one this phase adds.
+            //
+            // **Its metres go in a bucket of their own and in none of the four.**
+            // No register was asked about this ground, which rules out marked,
+            // unmarked and unknown; it is not a connector, which rules out
+            // undrawn. It is the same shape of answer as a connector's — never
+            // asked, reported under its own name — and folding it into unmarked
+            // would turn a question nobody put into an answer.
+            //
+            // What protects it, it can say, and by the same halfway rule as a
+            // leg drawn straight: the boundaries are in the page and the
+            // recording has a point every few metres.
+            //
+            // ``firstLon``/``firstLat`` and ``lastLon``/``lastLat`` move the two
+            // ends onto whatever they join, which is a node where a matched
+            // stretch begins or ends. The displacement is bounded by the match
+            // tolerance and it is what keeps the route one continuous line
+            // instead of a run of stretches with 20 m holes between them.
+            function trackPart(graph, first, last, firstLon, firstLat, lastLon, lastLat) {
+                // **A typed array answers an index outside it with undefined
+                // rather than raising**, so an anchor left over from a file that
+                // is no longer loaded would put NaN coordinates into the route
+                // and draw nothing, silently. The Python sibling of this rule is
+                // that a numpy array is never indexed with a sentinel; here the
+                // sentinel would be an index into the wrong recording.
+                if (first < 0 || last < 0 || first >= loaded.n || last >= loaded.n) {
+                    throw new Error('a waypoint points at ' + first + '..' + last +
+                                    ' of a recording that has ' + loaded.n + ' points');
+                }
+                var step = last >= first ? 1 : -1, count = Math.abs(last - first) + 1;
+                var lon = new Array(count), lat = new Array(count), height = new Array(count);
+                var along = new Array(count), i, at;
+                for (i = 0, at = first; i < count; i += 1, at += step) {
+                    lon[i] = loaded.lon[at]; lat[i] = loaded.lat[at]; height[i] = loaded.ele[at];
+                }
+                if (firstLon !== undefined) { lon[0] = firstLon; lat[0] = firstLat; }
+                if (lastLon !== undefined) { lon[count - 1] = lastLon; lat[count - 1] = lastLat; }
+                var run = 0;
+                along[0] = 0;
+                for (i = 1; i < count; i += 1) {
+                    run += panel().metresBetween(lon[i - 1], lat[i - 1], lon[i], lat[i]);
+                    along[i] = run;
+                }
+                var tally = blankTally();
+                tally.recorded = run;
+                var standing = new Array(count);
+                for (i = 0; i < count; i += 1) { standing[i] = graph.areasAt(lon[i], lat[i]); }
+                spreadProtected(tally, graph, standing, along, 0, count, 0, run);
+                var read = false;
+                for (i = 0; i < count; i += 1) { if (!isNaN(height[i])) { read = true; break; } }
+                // The vertices and the samples are one series here, which they
+                // are for no other kind: a recording's points are both what the
+                // file writes and what the profile is drawn from, and there is
+                // nothing to sample between them that was ever measured.
+                return {kind: PLAN.gpx.trackKind, lon: lon, lat: lat, along: along, length: run,
+                        height: height, distance: along, read: read, tally: tally,
+                        index: {from: first, step: step, count: count}};
+            }
+
+            // ---- matching a recording onto the network ----------------------------
+            // **Anchor, then route, then test the result against the recording.**
+            // Every point of the recording could be assigned an edge instead,
+            // and the runs of like assignment chained into paths — that was the
+            // first design and it spends its life on cases the graph answers for
+            // free: an edge here averages 25 m, a recording wobbles between two
+            // of them at every junction, and reconstructing which way round each
+            // one is walked is arithmetic with four ways to be wrong. Routing
+            // between two anchors cannot produce a path that is not a path, and
+            // the 14 edges here whose two ends are the same node are the
+            // router's problem rather than this function's.
+            //
+            // What it costs: one Dijkstra per anchor, and a search between two
+            // nodes a few hundred metres apart settles a handful of nodes. The
+            // three arrays it clears are the floor — 116,967 each — which is
+            // why the anchors are spaced rather than taken at every point.
+            //
+            // **And the test is `attach_nearest`'s rule, with the recording as
+            // the line and the routed path as its counterpart**: what share of
+            // the recorded stretch actually lies along the path offered to
+            // replace it. Proximity alone is a weak test for lines, and this is
+            // the phase where that lesson is either applied or paid for.
+            function anchorsOf(graph, index, first, last) {
+                var out = [], since = -Infinity;
+                for (var i = first; i <= last; i += 1) {
+                    if (i > first && i < last && loaded.along[i] - since < PLAN.matchAnchorM) { continue; }
+                    since = loaded.along[i];
+                    var before = i > first ? i - 1 : i, after = i < last ? i + 1 : i;
+                    var hx = (loaded.lon[after] - loaded.lon[before]) * index.lonScale;
+                    var hy = loaded.lat[after] - loaded.lat[before];
+                    var found = nearestEdge(graph, index, loaded.lon[i], loaded.lat[i], hx, hy);
+                    if (!found) { continue; }
+                    // The nearer of the matched edge's own two ends, **and
+                    // only if the recording actually reached it**.
+                    //
+                    // That second half is not a refinement, it is what keeps
+                    // the matcher from stating a walk nobody took. Noding cuts
+                    // a line only where something meets it, so a recording out
+                    // in the terrain that nothing crosses is *one edge*: the
+                    // median edge here is 6.9 m and the 90th percentile 49 m,
+                    // but **1,142 of the 234,358 are over 500 m and 79 over
+                    // 2 km, the longest 18.5 km**. Anchoring to the far end of
+                    // one of those and routing to it hands back the whole edge
+                    // — measured on trip 1113935, an out-and-back that turns
+                    // round 332 m short of the end of its own 4,729 m edge, and
+                    // the route came back 332 m longer than the walk.
+                    //
+                    // A node the recording passed within the tolerance of is a
+                    // place it demonstrably stood, so a routed stretch between
+                    // two of them is ground that was walked. Where there is no
+                    // such node the stretch is kept as it was recorded, which
+                    // is the honest answer while a part is a whole edge: what
+                    // it would take to say more is in the phase's write-up.
+                    var a = graph.fromNode[found.edge], b = graph.toNode[found.edge];
+                    var toA = panel().metresBetween(loaded.lon[i], loaded.lat[i], graph.nodeLon[a], graph.nodeLat[a]);
+                    var toB = panel().metresBetween(loaded.lon[i], loaded.lat[i], graph.nodeLon[b], graph.nodeLat[b]);
+                    if (toA > PLAN.matchToleranceM && toB > PLAN.matchToleranceM) { continue; }
+                    var node = toA <= toB ? a : b;
+                    // Never the node the last anchor already stands on. Two
+                    // anchors at one node have nothing to route between, and the
+                    // stretch between them would be dropped rather than tested —
+                    // so the recording would keep ground the network carries
+                    // perfectly well, for no reason a reader could see.
+                    if (out.length && out[out.length - 1].node === node) { continue; }
+                    out.push({at: i, node: node, away: found.m});
+                }
                 return out;
+            }
+
+            // What share of the recorded points between two anchors lies within
+            // the tolerance of the path offered to replace them.
+            function overlapWith(laid, first, last, lonScale) {
+                var inside = 0, count = 0;
+                for (var i = first; i <= last; i += 1) {
+                    count += 1;
+                    if (awayFromRun(loaded.lon[i], loaded.lat[i], laid.lon, laid.lat,
+                                    lonScale, PLAN.matchToleranceM) <= PLAN.matchToleranceM) { inside += 1; }
+                }
+                return count ? inside / count : 0;
+            }
+
+            // The recording cut into stretches: the ones the network carries and
+            // the ones it does not, in the order they are walked. Every stretch
+            // between ``first`` and ``last`` is covered exactly once.
+            function matchedSpans(graph, first, last) {
+                var index = edgeIndex(graph);
+                var anchors = anchorsOf(graph, index, first, last);
+                var spans = [], at = first, k;
+                for (k = 0; k + 1 < anchors.length; k += 1) {
+                    var a = anchors[k], b = anchors[k + 1];
+                    if (a.node === b.node || b.at <= a.at) { continue; }
+                    var found = route(graph, a.node, b.node);
+                    if (!found || !found.edges.length) { continue; }
+                    var breaks = found.edges.map(function () { return false; });
+                    var laid = panel().layEdges(graph, found.edges, found.reversed, breaks);
+                    // **The overlap test's other half, and it is not optional.**
+                    // Overlap asks what share of the *recording* lies along the
+                    // path offered to replace it, which is `attach_nearest`'s
+                    // rule and is one-directional: a path that runs along the
+                    // whole recording and then goes somewhere else as well
+                    // passes it. Measured before this line existed, the 42.44 km
+                    // Rundtur came back as **48.2 km** — 5.7 km of ground the
+                    // walker never covered, on a round trip whose own line
+                    // crosses itself and where the router took the wrong branch
+                    // at the crossing while still lying along the recording
+                    // everywhere it was asked about.
+                    //
+                    // A route may not claim more ground than was walked. Both
+                    // anchors lie within the tolerance of a recorded point, so
+                    // the tolerance at each end is the whole of the slack there
+                    // is: anything beyond it is a different way round.
+                    var covered = loaded.along[b.at] - loaded.along[a.at];
+                    if (laid.total > covered + 2 * PLAN.matchToleranceM) { continue; }
+                    if (overlapWith(laid, a.at, b.at, index.lonScale) < PLAN.matchMinOverlap) { continue; }
+                    if (at < a.at) { spans.push({routed: false, from: at, to: a.at}); }
+                    // Two accepted stretches meeting at one anchor are one path
+                    // and not two: the second begins at the node the first ended
+                    // at, so their edge lists lay end to end with nothing
+                    // between them.
+                    var back = spans.length ? spans[spans.length - 1] : null;
+                    if (back && back.routed && back.to === a.at) {
+                        back.edges = back.edges.concat(found.edges);
+                        back.reversed = back.reversed.concat(found.reversed);
+                        back.to = b.at; back.length += laid.total;
+                    } else {
+                        spans.push({routed: true, from: a.at, to: b.at, node: a.node,
+                                    edges: found.edges, reversed: found.reversed, length: laid.total});
+                    }
+                    at = b.at;
+                }
+                if (at < last) { spans.push({routed: false, from: at, to: last}); }
+                if (!spans.length) { spans.push({routed: false, from: first, to: last}); }
+
+                // **A floor under what counts as running along something.** A
+                // matched stretch shorter than this is the junction case — a
+                // recording crossing a path takes a few of its metres — and
+                // below it *running along* a path and *touching* it cannot be
+                // told apart. Reverted rather than dropped: the ground is still
+                // walked, and what changes is only whose line says so.
+                var kept = [];
+                spans.forEach(function (span) {
+                    var back = kept.length ? kept[kept.length - 1] : null;
+                    var verbatim = !span.routed || span.length < PLAN.matchMinRunM;
+                    if (verbatim && back && !back.routed) { back.to = span.to; return; }
+                    kept.push(verbatim ? {routed: false, from: span.from, to: span.to} : span);
+                });
+                return kept;
+            }
+
+            // The stretches as parts of one leg: what the network carries laid
+            // out of its own edges, and what it does not kept exactly as it was
+            // recorded, with the two ends of every recorded stretch moved onto
+            // the nodes it joins.
+            function matchedParts(graph, first, last) {
+                var spans = matchedSpans(graph, first, last), parts = [];
+                spans.forEach(function (span, i) {
+                    if (span.routed) {
+                        parts.push.apply(parts, routedParts(graph, {edges: span.edges, reversed: span.reversed}));
+                        return;
+                    }
+                    var before = i > 0 ? spans[i - 1] : null, after = i + 1 < spans.length ? spans[i + 1] : null;
+                    var lead = before && before.routed ? endOf(parts) : null;
+                    var trail = after && after.routed ? startOf(graph, after) : null;
+                    parts.push(trackPart(graph, span.from, span.to,
+                                         lead ? lead.lon : undefined, lead ? lead.lat : undefined,
+                                         trail ? trail.lon : undefined, trail ? trail.lat : undefined));
+                });
+                return parts;
+            }
+
+            function endOf(parts) {
+                for (var i = parts.length - 1; i >= 0; i -= 1) {
+                    var part = parts[i];
+                    if (part.lon && part.lon.length) {
+                        return {lon: part.lon[part.lon.length - 1], lat: part.lat[part.lat.length - 1]};
+                    }
+                }
+                return null;
+            }
+
+            function startOf(graph, span) {
+                return {lon: graph.nodeLon[span.node], lat: graph.nodeLat[span.node]};
             }
 
             // ---- the four kinds ----------------------------------------------
@@ -3960,6 +4493,16 @@ class _PlanMode(MacroElement):
             // which is what makes dragging a point back where it came from cost
             // nothing at all.
             function resolve(graph, from, to, mayAsk) {
+                // **A leg between two points of the loaded recording is the
+                // recording's**, whichever of the two modes put them there.
+                // Tested before the network is, because both of its ends may
+                // well sit on a node — a recording of a path this map already
+                // draws is on the network at every point — and routing between
+                // them would silently replace what was recorded with whatever
+                // the router prefers.
+                if (loaded && from.track === loaded.id && to.track === loaded.id && from.at !== to.at) {
+                    return Promise.resolve(recordedParts(graph, from, to));
+                }
                 if (from.node >= 0 && to.node >= 0) {
                     var found = route(graph, from.node, to.node);
                     if (found) { return Promise.resolve(routedParts(graph, found)); }
@@ -3988,6 +4531,440 @@ class _PlanMode(MacroElement):
                 return [{kind: 'land', lon: [from.lon, to.lon], lat: [from.lat, to.lat],
                          along: [0, length], length: length, height: [NaN, NaN], distance: [0, length],
                          read: false, tally: tally, provisional: true}];
+            }
+
+
+            // ---- reading a GPX back ------------------------------------------------
+            // **This is the only place in the project where a reader and a
+            // writer of the same file sit in one phase.** Every name the reader
+            // looks for arrives in PLAN.gpx out of the same Python constant the
+            // writer's own name comes from, so the two cannot drift: a page
+            // reading `origin` while writing `Origin` would take every route it
+            // ever wrote for a foreign track and say nothing about it.
+            //
+            // Addressed by namespace and local name rather than by tag, because
+            // a prefix is the writer's choice and not the format's: a file that
+            // spells this map's namespace `t:` instead of `trails:` says exactly
+            // the same thing, and getElementsByTagName would miss all of it. The
+            // GPX elements are looked up under any namespace at all, since a
+            // consumer device that leaves the default namespace off writes a
+            // file every other reader still accepts.
+            function ours(parent, name) {
+                return parent ? parent.getElementsByTagNameNS(PLAN.gpx.namespace, name) : [];
+            }
+
+            function firstText(parent, name) {
+                var found = parent ? parent.getElementsByTagNameNS('*', name) : [];
+                for (var i = 0; i < found.length; i += 1) {
+                    // Only a child of this element, never a grandchild: a <trk>
+                    // holds a <name> of its own and so does every <wpt> before
+                    // it, and a search that went deep would give the track the
+                    // first waypoint's name.
+                    if (found[i].parentNode === parent) { return found[i].textContent; }
+                }
+                return null;
+            }
+
+            // Everything one loaded file says about itself, read once. Nothing
+            // here decides anything: what the three modes do with it is below,
+            // and a reader that also chose would have to be read twice to find
+            // out what a file became.
+            function parseGpx(text) {
+                var doc = new DOMParser().parseFromString(text, 'application/xml');
+                if (doc.getElementsByTagName('parsererror').length) {
+                    throw new Error('this file is not XML that a browser can read');
+                }
+                var root = doc.documentElement;
+                if (!root || root.localName !== 'gpx') {
+                    throw new Error('this file is not GPX: its outermost element is <' + (root ? root.nodeName : 'nothing') + '>');
+                }
+
+                var segments = root.getElementsByTagNameNS('*', 'trkseg');
+                var lon = [], lat = [], ele = [], ends = [], along = [], run = 0, s, p;
+                for (s = 0; s < segments.length; s += 1) {
+                    var points = segments[s].getElementsByTagNameNS('*', 'trkpt');
+                    for (p = 0; p < points.length; p += 1) {
+                        var x = parseFloat(points[p].getAttribute('lon')), y = parseFloat(points[p].getAttribute('lat'));
+                        if (!isFinite(x) || !isFinite(y)) { continue; }
+                        if (lon.length && !ends[lon.length - 1]) {
+                            run += panel().metresBetween(lon[lon.length - 1], lat[lat.length - 1], x, y);
+                        }
+                        var height = firstText(points[p], 'ele');
+                        lon.push(x); lat.push(y); along.push(run);
+                        // A point with no <ele> keeps its place and loses only
+                        // its height, which is the same distinction the writer
+                        // keeps: there is ground here and no reading of it.
+                        ele.push(height === null || height === '' ? NaN : parseFloat(height));
+                        ends.push(false);
+                    }
+                    if (lon.length) { ends[lon.length - 1] = true; }
+                }
+                var breaks = 0;
+                for (s = 0; s + 1 < lon.length; s += 1) { if (ends[s]) { breaks += 1; } }
+                if (lon.length < 2) {
+                    throw new Error('this file has ' + lon.length + ' trackpoints, and a route needs two');
+                }
+
+                // The track's own extensions, which is where a file this map
+                // wrote says what it is. A chain export says its chain id and
+                // has no waypoints at all; a planned route says its kind and
+                // carries the points somebody clicked.
+                var tracks = root.getElementsByTagNameNS('*', 'trk');
+                var extensions = tracks.length ? firstChildNamed(tracks[0], 'extensions') : null;
+                var kind = textOf(ours(extensions, PLAN.gpx.kindField));
+                var chainId = textOf(ours(extensions, PLAN.gpx.chainField));
+
+                var legs = [], unknown = Object.create(null);
+                // Without a prototype, like every other table this page keys on
+                // somebody else's words: `known['constructor']` on an object
+                // literal is a function and reads as a kind this page knows.
+                var known = Object.create(null);
+                known.routed = true; known.land = true; known.water = true;
+                known[CROSSING] = true;
+                known[PLAN.gpx.trackKind] = true;
+                var lists = ours(extensions, PLAN.gpx.legs);
+                if (lists.length) {
+                    var each = lists[0].getElementsByTagNameNS(PLAN.gpx.namespace, PLAN.gpx.leg);
+                    for (s = 0; s < each.length; s += 1) {
+                        var parts = each[s].getElementsByTagNameNS(PLAN.gpx.namespace, PLAN.gpx.part), made = [];
+                        for (p = 0; p < parts.length; p += 1) {
+                            // A part with no kind at all is named as that
+                            // rather than as a kind called 'null', which is what
+                            // an absent attribute reads as once it is a key.
+                            var said = parts[p].getAttribute(PLAN.gpx.partKind);
+                            if (said === null) { said = 'no kind at all'; }
+                            if (!known[said]) { unknown[said] = (unknown[said] || 0) + 1; }
+                            made.push({kind: said, m: parseFloat(parts[p].getAttribute(PLAN.gpx.partLength))});
+                        }
+                        legs.push(made);
+                    }
+                }
+
+                // **The generated markers are skipped here and nowhere else.**
+                // 6B marks every one the map placed by itself — at a park
+                // boundary, at a hut — and a reader that took them for stations
+                // somebody chose would give the route points nobody put down and
+                // then route through them. Skipped rather than counted and
+                // dropped later: one place to get it wrong is enough.
+                var carried = root.getElementsByTagNameNS('*', 'wpt'), waypoints = [];
+                var generated = 0, strange = 0;
+                for (p = 0; p < carried.length; p += 1) {
+                    var block = firstChildNamed(carried[p], 'extensions');
+                    var origin = textOf(ours(block, PLAN.gpx.origin));
+                    // What says `set`, and what says nothing at all — a file
+                    // from anywhere else has no origin on its waypoints, and
+                    // every one of those is a station somebody chose. Anything
+                    // else is skipped, which is the conservative way round: a
+                    // value this page has never heard of is likelier a later
+                    // writer's second kind of marker than a station, and taking
+                    // it would put a point on the route that nobody placed.
+                    //
+                    // The two reasons for skipping are counted apart because
+                    // they mean different things to a reader: a marker this map
+                    // placed is expected and a word this page does not know is a
+                    // file from a later build, and one of those is worth saying.
+                    if (origin === PLAN.gpx.generated) { generated += 1; continue; }
+                    if (origin !== null && origin !== PLAN.gpx.set) { strange += 1; continue; }
+                    waypoints.push({lat: parseFloat(carried[p].getAttribute('lat')),
+                                    lon: parseFloat(carried[p].getAttribute('lon')),
+                                    name: firstText(carried[p], 'name'),
+                                    kind: firstText(carried[p], 'type')});
+                }
+
+                loadedCount += 1;
+                return {
+                    id: 'loaded-' + loadedCount,
+                    name: (tracks.length ? firstText(tracks[0], 'name') : null) ||
+                          firstText(firstChildNamed(root, 'metadata'), 'name') || 'the loaded file',
+                    isRoute: kind === PLAN.gpx.kind,
+                    chainId: chainId,
+                    waypoints: waypoints, generated: generated, strange: strange, legs: legs,
+                    unknown: Object.keys(unknown),
+                    lon: Float64Array.from(lon), lat: Float64Array.from(lat),
+                    ele: Float64Array.from(ele), along: Float64Array.from(along),
+                    // **Counted, not taken off the element list.** An empty
+                    // <trkseg>, or one whose points are all unreadable, is a
+                    // segment that leaves no break behind, and a page reporting
+                    // '2 breaks, which are crossings' where the route has one
+                    // has miscounted the thing this file is most careful about.
+                    ends: ends, n: lon.length, breaks: breaks, mode: null
+                };
+            }
+
+            function firstChildNamed(parent, name) {
+                if (!parent) { return null; }
+                for (var i = 0; i < parent.childNodes.length; i += 1) {
+                    if (parent.childNodes[i].localName === name) { return parent.childNodes[i]; }
+                }
+                return null;
+            }
+
+            function textOf(list) {
+                return list && list.length ? list[0].textContent : null;
+            }
+
+            // Which recorded point a written position stands at. A waypoint of
+            // this map's own is exact to seven decimals, which is 11 cm, so this
+            // is a lookup and not a match — but it is written as a search over
+            // the whole recording because a file may have been edited by hand,
+            // and a waypoint that landed on the wrong point would move a leg
+            // rather than fail.
+            function recordedAt(lon, lat) {
+                var best = -1, closest = Infinity;
+                for (var i = 0; i < loaded.n; i += 1) {
+                    var away = panel().metresBetween(lon, lat, loaded.lon[i], loaded.lat[i]);
+                    if (away < closest) { closest = away; best = i; }
+                }
+                return {at: best, away: closest};
+            }
+
+            // ---- the three modes ---------------------------------------------------
+            // What a loaded file may become. The names travel with the control
+            // and with window.trailsPlan.load, so a browser check drives the
+            // same three things a reader picks from.
+            //
+            // **The middle one is not routing a foreign track**, and the table
+            // reads oddly until that is said: re-routing between waypoints
+            // throws the recorded shape away, which is exactly right for one of
+            // this map's own plans — a plan *is* a handful of waypoints, and the
+            // track under it was drawn from them — and useless for a recording
+            // of thousands of points and no waypoints at all. Given one of
+            // those it routes between its two ends, which is a thing somebody
+            // may well want and is never a surprise, because the status line
+            // says the file had no waypoints in it.
+            var MODES = [
+                {key: 'asis', label: 'Take it as it is'},
+                {key: 'align', label: 'Align to the network'},
+                {key: 'match', label: 'Match where a path exists'}
+            ];
+
+            // A break between two segments is a crossing and is never walked.
+            // **This is the one reading of a loaded file that must not be got
+            // wrong quietly**: GPX has no way to say a segment is a boat, so a
+            // break is all a crossing leaves behind, and a page that joined the
+            // two ends with a walked line would draw somebody a route across a
+            // fjord. It counts as a crossing, adds nothing to the walking
+            // distance and carries no profile — the same as every other
+            // crossing on this map.
+            function crossingPart(from, to) {
+                var length = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
+                return {kind: 'water', lon: [from.lon, to.lon], lat: [from.lat, to.lat],
+                        along: [0, length], length: length, height: null, distance: null,
+                        read: false, tally: blankTally()};
+            }
+
+            // The same ground, walked the other way. A route whose two ends are
+            // swapped is phase 7's third edit and it reaches a matched leg like
+            // any other, so the parts are turned round rather than matched
+            // again — matching backwards would anchor from the far end and could
+            // answer differently, and a route that changed when it was reversed
+            // would be a route measured twice.
+            function turnedRound(part) {
+                var made = {kind: part.kind, length: part.length, tally: part.tally, read: part.read};
+                made.lon = part.lon.slice().reverse();
+                made.lat = part.lat.slice().reverse();
+                made.along = part.along.map(function (value) { return part.length - value; }).reverse();
+                if (part.index) {
+                    made.index = {from: part.index.from + (part.index.count - 1) * part.index.step,
+                                  step: -part.index.step, count: part.index.count};
+                }
+                if (part.height === null) { made.height = null; made.distance = null; return made; }
+                made.height = part.height.slice().reverse();
+                made.distance = part.distance.map(function (value) { return part.length - value; }).reverse();
+                return made;
+            }
+
+            function walkedBackwards(parts) {
+                var out = [];
+                for (var i = parts.length - 1; i >= 0; i -= 1) { out.push(turnedRound(parts[i])); }
+                return out;
+            }
+
+            // What a leg between two waypoints of the loaded recording is, which
+            // is the whole of what the modes change. Anything not anchored to the
+            // recording falls through to the routing and the sampling that were
+            // already here, so a waypoint dragged off the track needs no case of
+            // its own: it stops being anchored and its legs become ordinary ones.
+            function recordedParts(graph, from, to) {
+                var low = from.at < to.at ? from.at : to.at, high = from.at < to.at ? to.at : from.at;
+                var parts = [], at = low, i;
+                // **Every break inside the stretch, not only a stretch that is
+                // nothing but a break.** Take one of the two waypoints either
+                // side of a break out — which phase 7's Remove does in one
+                // click, and which merges the two legs that met there — and the
+                // leg left behind spans the gap. Walked straight across, that is
+                // a line drawn over a fjord and counted as ground, which is the
+                // one thing this distinction exists to prevent. It is also why
+                // `loaded.along` does not advance across a break and this must
+                // not either.
+                for (i = low; i < high; i += 1) {
+                    if (!loaded.ends[i]) { continue; }
+                    parts.push.apply(parts, walkedBetween(graph, at, i));
+                    parts.push(crossingPart({lon: loaded.lon[i], lat: loaded.lat[i]},
+                                            {lon: loaded.lon[i + 1], lat: loaded.lat[i + 1]}));
+                    at = i + 1;
+                }
+                parts.push.apply(parts, walkedBetween(graph, at, high));
+                return from.at < to.at ? parts : walkedBackwards(parts);
+            }
+
+            // One stretch of walked recording, in whichever way the mode asks
+            // for it. Nothing at all where the stretch is a single point: a
+            // <trkseg> holding one trackpoint ends where it begins, and a leg of
+            // no length is a leg the height service would be asked about.
+            function walkedBetween(graph, first, last) {
+                if (first >= last) { return []; }
+                return loaded.mode === 'match'
+                    ? matchedParts(graph, first, last) : [trackPart(graph, first, last)];
+            }
+
+            // Where the waypoints of a loaded file come from, per mode.
+            function pointsForLoaded(graph) {
+                var made = [], wanted = [], i;
+                if (loaded.mode === 'align') {
+                    if (loaded.waypoints.length) {
+                        loaded.waypoints.forEach(function (point) { made.push(snapped(graph, point.lat, point.lon)); });
+                    } else {
+                        made.push(snapped(graph, loaded.lat[0], loaded.lon[0]));
+                        made.push(snapped(graph, loaded.lat[loaded.n - 1], loaded.lon[loaded.n - 1]));
+                    }
+                    anchorRecordedLegs(graph, made);
+                    return made;
+                }
+                // As it is, and matched: the recording's own ends, and both
+                // sides of every break. A break is where a segment stopped, so
+                // the point before it and the point after it are two stations
+                // with a crossing between them.
+                //
+                // **Collected as indices first and never two of one point.** A
+                // <trkseg> holding a single trackpoint ends where it begins, so
+                // it flags two ends in a row and would put two waypoints on one
+                // position — a leg of no length, an extra pin, and a request to
+                // the height service about nothing.
+                wanted.push(0);
+                for (i = 0; i + 1 < loaded.n; i += 1) {
+                    if (loaded.ends[i]) { wanted.push(i); wanted.push(i + 1); }
+                }
+                wanted.push(loaded.n - 1);
+                wanted.forEach(function (at) {
+                    if (made.length && made[made.length - 1].at === at) { return; }
+                    made.push(anchored(graph, at));
+                });
+                return made;
+            }
+
+            // **A leg the file says was kept as recorded is restored as that**,
+            // not routed. Align mode rebuilds a plan from its waypoints, and
+            // for four of the five kinds that is exact — the router is
+            // deterministic and the weights have not moved — but the fifth came
+            // out of a file rather than out of the network, and re-routing it
+            // would quietly replace it with whatever path happens to lie there.
+            function anchorRecordedLegs(graph, made) {
+                // **Looked up from what the file wrote, not from where the page
+                // has since snapped it.** `made[i]` has already been through
+                // `snapped`, which moves a waypoint up to `snapM` — 150 m — onto
+                // the network, and asking which recorded point is nearest *that*
+                // can land on a different pass of a switchback and move the
+                // whole leg. The written position is what the writer put down.
+                var written = loaded.waypoints.length ? loaded.waypoints : null;
+                for (var k = 0; k + 1 < made.length && k < loaded.legs.length; k += 1) {
+                    var parts = loaded.legs[k];
+                    if (!parts.length) { continue; }
+                    var recorded = true;
+                    for (var p = 0; p < parts.length; p += 1) {
+                        if (parts[p].kind !== PLAN.gpx.trackKind) { recorded = false; break; }
+                    }
+                    if (!recorded) { continue; }
+                    [k, k + 1].forEach(function (i) {
+                        var from = written && written[i] ? written[i] : made[i];
+                        var found = recordedAt(from.lon, from.lat);
+                        // And it may decline. A waypoint of a recorded leg was
+                        // written either at the recorded point itself — exact to
+                        // seven decimals, 11 cm — or at a named thing within
+                        // `namedM` of it, which is the whole of how far a
+                        // waypoint is ever moved from the route it belongs to.
+                        // Past that the file is not describing this recording,
+                        // and the leg is routed rather than anchored to a point
+                        // that happens to be nearest.
+                        if (found.at >= 0 && found.away <= PLAN.namedM) { made[i] = anchored(graph, found.at); }
+                    });
+                }
+            }
+
+            // What the file turned out to be, said before anything is done with
+            // it. A chain export is recognised and *not* treated as a plan: it
+            // has no waypoints to route between and no legs to rebuild, so it
+            // becomes one recorded leg like any other track — recognised, named
+            // after itself, and immediately something to work on, which is what
+            // this phase is for. Drawing it as the chain it already is was the
+            // alternative and is phase 4's job: a chain is one click away on the
+            // map, and a chain id out of an older build names nothing here.
+            function describeLoaded() {
+                var said = [];
+                if (loaded.isRoute) {
+                    said.push('a route this map wrote: ' + loaded.waypoints.length +
+                              (loaded.waypoints.length === 1 ? ' waypoint' : ' waypoints') +
+                              ', ' + loaded.legs.length + (loaded.legs.length === 1 ? ' leg' : ' legs'));
+                } else if (loaded.chainId) {
+                    said.push('a chain export: ' + loaded.name + ' (' + loaded.chainId + ')');
+                } else {
+                    said.push('a track from somewhere else: no waypoints and no legs');
+                }
+                said.push(loaded.n.toLocaleString('en-GB') + ' recorded points');
+                if (loaded.breaks) {
+                    said.push(loaded.breaks + (loaded.breaks === 1 ? ' break, which is a crossing' : ' breaks, which are crossings'));
+                }
+                if (loaded.generated) {
+                    said.push(loaded.generated + (loaded.generated === 1 ? ' marker' : ' markers') + ' this map placed, skipped');
+                }
+                if (loaded.strange) {
+                    said.push(loaded.strange + (loaded.strange === 1 ? ' waypoint' : ' waypoints') +
+                              ' whose origin this page does not know, skipped');
+                }
+                // Never fatal and never silent. A part naming a kind this page
+                // has no case for cannot be restored, so its leg is routed
+                // between its two waypoints instead — which is a route that came
+                // back different, and a reader who is not told has no way to know.
+                if (loaded.unknown.length) {
+                    said.push('a kind this page does not know (' + loaded.unknown.join(', ') + '), so those legs are routed instead');
+                }
+                return said.join(' · ');
+            }
+
+            // ---- loading ------------------------------------------------------------
+            function loadGpx(text, mode) {
+                var began = performance.now();
+                var known = false;
+                MODES.forEach(function (offered) { known = known || offered.key === mode; });
+                if (!known) {
+                    throw new Error(mode + ' is not one of ' +
+                                    MODES.map(function (offered) { return offered.key; }).join(', '));
+                }
+                var read = parseGpx(text);
+                read.parseMs = performance.now() - began;
+                read.began = began;
+                // Filled in by refresh() once every leg has settled, which is
+                // the figure worth having: from picking a file to a route drawn
+                // on the map. It is null while that is still happening rather
+                // than 0, because a load that is still working and one that
+                // took no time are not the same thing.
+                read.settleMs = null;
+                read.mode = mode;
+                loaded = read;
+                applyEdit(function (graph) {
+                    // The index is built here rather than inside the first leg
+                    // that needs it, so that what a matched load costs is one
+                    // figure and not one figure with a surprise buried in it.
+                    if (mode === 'match') { edgeIndex(graph); }
+                    points = pointsForLoaded(graph);
+                    chosen = -1;
+                });
+                // Loading a file is a plan, so plan mode comes on with it: a
+                // route drawn on a map that will not let it be touched is the
+                // state this phase exists to avoid.
+                if (!on) { switchTo(true); }
+                loadSaid = describeLoaded();
+                refresh();
             }
 
             // ---- the route's own series ---------------------------------------
@@ -4021,6 +4998,15 @@ class _PlanMode(MacroElement):
                 var lon = [], lat = [], along = [], height = [], distance = [], free = [];
                 var stretches = [], stretch = null, tally = blankTally();
                 var walked = 0, crossings = 0, crossed = 0, straight = 0, read = false, joined = false;
+                // **Where the heights came from, carried apart from whether
+                // there are any.** A routed part's are the build's DTM1 samples
+                // and a straight leg's come from the same service on demand; a
+                // stretch kept as it was recorded carries whatever the loaded
+                // file had on its trackpoints, which this map never asked
+                // anybody about. A file crediting Kartverket for a consumer GPS
+                // reading, and saying it was sampled every 5 m, states two
+                // things that are not so.
+                var modelled = false, fromFile = false;
 
                 function close() {
                     if (!stretch) { return; }
@@ -4065,6 +5051,9 @@ class _PlanMode(MacroElement):
                             free.push(mark);
                             if (!isNaN(part.height[at])) { read = true; }
                         }
+                        if (part.read) {
+                            if (part.kind === PLAN.gpx.trackKind) { fromFile = true; } else { modelled = true; }
+                        }
                         joined = part.height.length > 0 && part.lon.length > 0;
                         walked += part.length;
                     });
@@ -4072,6 +5061,7 @@ class _PlanMode(MacroElement):
                 close();
                 return {lon: lon, lat: lat, along: along, height: height, distance: distance, free: free,
                         stretches: stretches, tally: tally, total: walked, read: read,
+                        modelled: modelled, fromFile: fromFile,
                         // Filtered once, here, and read by the sentence above
                         // the button, by the file's description and by the
                         // markers the file carries. Three readings of one list,
@@ -4202,6 +5192,13 @@ class _PlanMode(MacroElement):
                 }
                 if (shape.straight > 0) {
                     said.push((shape.straight / 1000).toFixed(2) + ' km drawn straight, not a path');
+                }
+                // Said wherever it is true, because the climb above it was read
+                // under a different rule from every other climb on this map and
+                // the figure alone cannot say so.
+                if (shape.fromFile) {
+                    said.push(shape.modelled ? 'part of the climb is the loaded file\u2019s own heights, not the model'
+                        : 'the climb is the loaded file\u2019s own heights, not the model');
                 }
                 var outstanding = unsettled();
                 if (outstanding.waiting) {
@@ -4542,10 +5539,18 @@ class _PlanMode(MacroElement):
             // two asked for in one turn would both be checked against the route
             // as it was before either — and the second would splice against a
             // list that had already moved under it.
-            function insert(at, lat, lon) {
+            // ``trackAt`` is which point of the loaded recording the click
+            // landed on, where it landed on a stretch kept as recorded. Passed
+            // through rather than worked out again here: **without it a point
+            // put into the middle of a recorded leg would split it into two legs
+            // that are no longer the recording**, and the whole track would be
+            // replaced by a routed line the moment a reader corrected one point
+            // of it. With it both halves stay what they were.
+            function insert(at, lat, lon, trackAt) {
                 applyEdit(function (graph) {
                     if (at < 1 || at > points.length - 1) { return; }
-                    points.splice(at, 0, snapped(graph, lat, lon));
+                    points.splice(at, 0, trackAt === undefined || trackAt === null || !loaded
+                        ? snapped(graph, lat, lon) : anchored(graph, trackAt));
                     chosen = at;
                 });
             }
@@ -4693,7 +5698,20 @@ class _PlanMode(MacroElement):
                                                    part.lat[v + 1], part.lon[v + 1]);
                             if (near.away > withinM) { continue; }
                             if (best && near.away >= best.away) { continue; }
-                            best = {leg: i, away: near.away, lat: near.lat, lon: near.lon};
+                            best = {leg: i, away: near.away, lat: near.lat, lon: near.lon, trackAt: null};
+                            // Which point of the loaded recording the click
+                            // landed on, where the part came out of one. The
+                            // nearer of the segment's two ends rather than the
+                            // position between them: a recorded point is
+                            // something that was measured, and half way between
+                            // two of them is not — and a waypoint standing
+                            // where nothing was recorded cannot anchor the two
+                            // halves of a stretch that has to stay recorded.
+                            if (part.index) {
+                                var onward = panel().metresBetween(near.lon, near.lat, part.lon[v], part.lat[v]);
+                                var back = panel().metresBetween(near.lon, near.lat, part.lon[v + 1], part.lat[v + 1]);
+                                best.trackAt = part.index.from + part.index.step * (onward <= back ? v : v + 1);
+                            }
                         }
                     }
                 }
@@ -4778,6 +5796,92 @@ class _PlanMode(MacroElement):
             hint.textContent = 'Drag a point to move it \u00b7 click one to work on it \u00b7 ' +
                 'click the route to put one in';
 
+
+            // What the last load turned out to be, or what went wrong with it.
+            var loadSaid = '';
+
+            // ---- the file control ---------------------------------------------------
+            // **A page served from the disk may read a file the reader picks**,
+            // and that single fact is what this phase rests on. Checked before
+            // any of it was built: <input type="file"> plus FileReader returned
+            // all 1,197,976 bytes of a chain export and DOMParser found its
+            // trackpoints. Nothing else here would have mattered if it had
+            // failed.
+            //
+            // The input is hidden behind a button of its own rather than shown:
+            // a bare file input is a browser widget in the middle of a control
+            // that is otherwise this map's, and it cannot be made to say what it
+            // does. Hidden is not unreachable — it is still an input and still
+            // takes a file from a driven check.
+            var picker = document.createElement('input');
+            picker.type = 'file';
+            picker.accept = '.gpx,application/gpx+xml,application/xml,text/xml';
+            picker.style.display = 'none';
+            picker.className = 'trails-plan-file';
+
+            var chooser = document.createElement('button');
+            chooser.type = 'button';
+            chooser.textContent = 'Load a GPX';
+            chooser.title = 'Read a route or a recorded track back in and carry on from it';
+            chooser.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;cursor:pointer';
+
+            var modes = document.createElement('select');
+            modes.className = 'trails-plan-mode';
+            modes.style.cssText = 'font:inherit;font-size:12px;margin-left:4px;max-width:12em';
+            MODES.forEach(function (mode) {
+                var option = document.createElement('option');
+                option.value = mode.key;
+                option.textContent = mode.label;
+                modes.appendChild(option);
+            });
+            modes.value = 'asis';
+
+            var loading = document.createElement('div');
+            loading.style.cssText = 'margin-top:4px';
+            loading.appendChild(chooser);
+            loading.appendChild(modes);
+            loading.appendChild(picker);
+
+            var loadStatus = document.createElement('div');
+            loadStatus.style.cssText = 'margin-top:4px;color:#555;max-width:22em';
+
+            chooser.addEventListener('click', function () { picker.click(); });
+
+            picker.addEventListener('change', function () {
+                var file = picker.files && picker.files[0];
+                if (!file) { return; }
+                var reader = new FileReader();
+                // **Two handlers and not one catch over both.** The wait for the
+                // disk and the work on what came back fail for different reasons
+                // and a handler spanning them blames the wait: the panel spent
+                // two runs looking for a payload that had arrived perfectly well
+                // because a fault while drawing it was reported as one.
+                reader.onerror = function () {
+                    loadSaid = 'That file could not be read off the disk.';
+                    picker.value = '';
+                    refresh();
+                };
+                reader.onload = function () {
+                    try {
+                        loadGpx(String(reader.result), modes.value);
+                    } catch (failure) {
+                        // **What was already on the map stays.** `loadGpx`
+                        // refuses before it touches anything, so the recording
+                        // that is loaded is still the one every waypoint is
+                        // anchored to — and dropping it here would leave those
+                        // anchors pointing at nothing, so the next edit would
+                        // quietly turn a recorded stretch into a straight line.
+                        loadSaid = 'That file could not be loaded: ' +
+                            (failure && failure.message ? failure.message : String(failure));
+                        refresh();
+                    }
+                    // Cleared, or picking the same file twice is not a change
+                    // and the second pick does nothing at all.
+                    picker.value = '';
+                };
+                reader.readAsText(file);
+            });
+
             var control = L.control({position: 'topright'});
             var box = null;
             control.onAdd = function () {
@@ -4785,6 +5889,14 @@ class _PlanMode(MacroElement):
                 box.style.cssText = 'background:rgba(255,255,255,0.94);padding:6px 8px;border:1px solid #999;' +
                     'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4';
                 box.appendChild(toggle);
+                // Loading is how a plan starts from a file, so it is offered
+                // whether or not plan mode is already on — and switching it on
+                // is what loading does. The mode is beside the button rather
+                // than asked afterwards: what a file becomes is a decision
+                // about the file, and asking it after the file is in is a
+                // dialogue this control has no room for.
+                box.appendChild(loading);
+                box.appendChild(loadStatus);
                 box.appendChild(back);
                 box.appendChild(edits);
                 box.appendChild(status);
@@ -4825,6 +5937,16 @@ class _PlanMode(MacroElement):
                     say(points.length === 0 ? 'Click the map to place the first point.'
                         : points.length + (points.length === 1 ? ' point' : ' points') + (settling ? ' \\u00b7 working\\u2026' : ''));
                 }
+                // What the last load turned out to be, and what it cost once
+                // every leg of it has settled. **Stamped here rather than where
+                // the file was read**: the legs settle a microtask or more after
+                // the load returns, so a figure taken at the end of loadGpx
+                // would time the parsing and call it the load.
+                if (loaded && loaded.settleMs === null && !settling) {
+                    loaded.settleMs = performance.now() - loaded.began;
+                }
+                loadStatus.textContent = loadSaid;
+                loadStatus.style.display = loadSaid ? '' : 'none';
                 // The pins say which point is which and which one is held, and
                 // both change with every edit. Applied here as differences, so
                 // that a refresh in the middle of a drag writes nothing.
@@ -4940,7 +6062,7 @@ class _PlanMode(MacroElement):
                 }
                 var where = map.mouseEventToLatLng(event);
                 var hit = onRoute(where.lat, where.lng);
-                if (hit) { insert(hit.leg + 1, hit.lat, hit.lon); return; }
+                if (hit) { insert(hit.leg + 1, hit.lat, hit.lon, hit.trackAt); return; }
                 place(where.lat, where.lng);
             }, true);
 
@@ -4957,6 +6079,13 @@ class _PlanMode(MacroElement):
             window.trailsPlan = {
                 place: place,
                 undo: undo,
+                // Reading a file, which is the whole of phase 8's way in. It
+                // takes the text rather than a File, so a browser check drives
+                // exactly what the picker drives one step further on — the
+                // FileReader is what turns one into the other and it was proved
+                // before any of this was built.
+                load: loadGpx,
+                modes: MODES.map(function (mode) { return mode.key; }),
                 // The four edits, each as the entry the gesture uses, so a
                 // browser check can drive them and read what came out rather
                 // than screenshot it. `dragTo` is what a drag does once the
@@ -5003,7 +6132,25 @@ class _PlanMode(MacroElement):
                         // file to see that it says the same.
                         tally: shape.tally, stretches: shape.stretches.length,
                         vertices: shape.lon.length, samples: shape.height.length,
-                        writable: writable()
+                        writable: writable(),
+                        // What was loaded and what it cost, so a check reads the
+                        // figures rather than the status line they are written
+                        // into. `index` is null until something asks for it,
+                        // which is what says the index is built on demand and
+                        // not at load.
+                        loaded: loaded === null ? null : {
+                            name: loaded.name, isRoute: loaded.isRoute, chain: loaded.chainId,
+                            mode: loaded.mode, points: loaded.n, breaks: loaded.breaks,
+                            waypoints: loaded.waypoints.length, generated: loaded.generated,
+                            strange: loaded.strange,
+                            legs: loaded.legs.length, unknown: loaded.unknown,
+                            parseMs: loaded.parseMs, settleMs: loaded.settleMs,
+                            said: loadSaid
+                        },
+                        index: gridded === null ? null : {
+                            cellM: PLAN.indexCellM, buildMs: gridded.buildMs, entries: gridded.entries,
+                            cells: gridded.cells, bytes: gridded.bytes
+                        }
                     };
                 }
             };
@@ -5115,6 +6262,9 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
     missing = sorted(set(PLAN_SETTINGS) - set(plan))
     if missing:
         raise ValueError(f"the page cannot plan a route without {', '.join(missing)}")
+    absent = sorted(set(PLAN_GPX_SETTINGS) - set(plan.get("gpx") or {}))
+    if absent:
+        raise ValueError(f"the page cannot read a GPX back without gpx.{', gpx.'.join(absent)}")
 
     named: list[dict[str, object]] = []
     for group in points or []:
