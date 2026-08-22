@@ -1384,6 +1384,82 @@ One thing is deliberately not claimed: the rules inside a Norwegian protected
 area differ from outside, but *how* they differ is in each area's verneforskrift
 and none has been read. The figure is a fact about the route, not advice.
 
+### What a route's file says that a chain's cannot
+
+A chain is one line from one register, and phase 5's file says so in one track.
+A route is a sequence somebody chose, and three things about it have nowhere to
+go in that shape. Each was decided while building phase 6B, against what was
+measured rather than what looked tidy.
+
+**The clicked points travel as `<wpt>`, before the track.** A waypoint is a GPX
+1.1 top-level element and **not** part of the `<extensions>` mechanism — the
+extensions are a block inside it — so a file putting one anywhere else parses
+and fails the schema. Neither writer could write one at all before this phase:
+the string appeared zero times in both.
+
+Every one says whether it was **set or generated**, and the field goes in now
+though nothing generates a waypoint until 6C. A file written before its own
+description existed can never be restored exactly, only matched — and phase 8
+must never read a marker the map placed at a boundary or a hut as a station
+somebody chose, or a loaded route gains points nobody put down and starts
+routing through them.
+
+**No `<ele>` on a waypoint.** The track carries every height that was read and
+the file states the rule they were read under; a height on the waypoint as well
+would be that number in a fourth place, and where the route breaks at that very
+point there is no reading to put there at all.
+
+**A leg's mode goes on the track and cannot go on a `<trkseg>`.** That is a fact
+about the geometry rather than a preference: a segment is a stretch of track and
+a stretch breaks only where the ground stops, so four routed legs laid end to
+end are **one** segment and a segment-level extension would carry one mode for
+all four. So the track's extensions hold `<trails:legs>`, one `<trails:leg>` per
+leg in the order they were clicked, each holding its parts in the order they are
+walked — `routed`, `land`, `water`, `ferry`, with the metres of each. Leg *n*
+runs from waypoint *n* to waypoint *n + 1*, which is what lets the list be read
+without an index on either side.
+
+**A crossing's own line is never written into the track.** It ends the segment
+and leaves a gap, and the gap is the crossing. Writing it as a segment of its
+own was the obvious alternative and is wrong: GPX has no way to say a segment is
+a boat, so every reader would import a fjord crossing as a walked line — which is
+the failure this whole distinction exists to prevent. What the file does say
+about it is exact: the leg list names the part and its length, `<trails:crossed>`
+sums them, and the description says *1 crossing, 5.06 km*.
+
+So **every break in the track is a crossing** — but the count runs the other
+way round from the obvious guess, and phase 8 is the one that would be caught by
+it. A segment is a walked stretch, and a crossing only adds one where it lies
+*between* two of them: a route that starts from a quay a ferry reaches, or ends
+at one, has one crossing and **one** segment, and two crossings back to back
+still yield two. `segments = crossings + 1` holds only for a route that begins
+and ends on foot with no two crossings adjacent, which is most of them and not
+all. Read the leg list for the order; read the breaks only as *a crossing was
+here*.
+
+Measured on a route from a quay only a ferry reaches: one leg of
+`routed 2,027 m · ferry 5,057 m · routed 1,737 m`, two segments, one break.
+
+**The sources carry their own metres.** `metres` is a field of a source credit
+rather than a block of its own, so it lands on the entry that already names the
+licence and the version — *3.20 km OSM (ODbL 1.0)*. A chain leaves it unset,
+because a chain has one source and its length is the track's, and both writers
+drop a field with nothing in it. **A ferry is credited too**: the file states its
+length, and that figure is Kartverket's geometry whether or not the line is
+drawn.
+
+**An inferred connector names no source and no marking bucket.** Nobody drew it,
+which is what a connector is, so it is neither a dataset to credit nor ground
+anybody was asked about. Its metres are reported under their own name —
+*23.1 m on connectors nobody drew* — rather than being folded into `unknown`,
+which means asked and unanswered. Measured over the built graph they are 46.6 km
+beside the 5,853.3 km of walked network, on 8,684 edges averaging 5.4 m.
+
+**A route with a hole in it is refused rather than written.** A leg still being
+worked out, or one the height service refused, would break the track somewhere
+that is not a crossing, and nothing in the file would say so. The button says
+which and stays disabled.
+
 ### An exported file names its sources, and cannot name one licence
 
 Record in `<metadata>` the sources a file actually draws on, each with its
