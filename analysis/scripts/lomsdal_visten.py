@@ -273,14 +273,27 @@ UT_POPUP_FIELDS = {
     "unrecorded": "Unrecorded ground",
 }
 
+#: Set above the UT.no links. Two of the four point at the park's own site
+#: rather than at UT.no, so the heading names what they have in common instead
+#: of naming a publisher: none of them comes from this map. The GPX among them
+#: is the one that matters: it is UT.no's own recording, and the profile panel
+#: offers this map's export of the same line a click away. The two disagree.
+#: Measured on the 42 km Rundtur, theirs holds 1,330 points and states
+#: +1,460 / -1,622 m where this map's holds 16,415 and states +1,722 / -1,867 —
+#: a sparser series under the same 5 m threshold simply misses climbs. Theirs
+#: also carries a timestamp on every point, which is what this map's writer
+#: refuses so that a plan does not read as a walk somebody took. Two files of
+#: one route, and only the words tell them apart.
+UT_LINK_HEADING = "Published elsewhere, not by this map"
+
 #: Clickable links in the UT.no popup. The route page and the park's own
 #: description carry everything the geometry cannot: season, difficulty, the
 #: state of the river crossings.
 UT_LINK_FIELDS = {
-    "ut_url": "→ Route on ut.no",
+    "ut_url": "→ Route page on ut.no",
     "guide_url_no": "→ Beskrivelse på lomsdalvisten.no",
     "guide_url_en": "→ Description on lomsdalvisten.no",
-    "gpx_url": "→ Download GPX",
+    "gpx_url": "→ UT.no's own GPX recording",
 }
 
 TRAIL_POPUP_FIELDS = {
@@ -492,6 +505,7 @@ class TrailLayer(NamedTuple):
         weight: Line width in pixels
         popup_fields: Mapping of column name to popup label
         link_fields: Mapping of a column holding a URL to its link text
+        link_heading: Line set above those links, saying whose pages they are
         tooltip_field: Column shown on hover
         search_field: Column the search box matches against. Not the chain id:
             what a reader types is a name, and a road's identity is a register
@@ -508,6 +522,7 @@ class TrailLayer(NamedTuple):
     tooltip_field: str | None = None
     search_field: str | None = None
     dash: str | None = None
+    link_heading: str | None = None
 
 
 def source_of(label: str) -> str | None:
@@ -1314,8 +1329,8 @@ def main() -> int:
         # with a written description, so they should win wherever they share a
         # path with a Turrutebasen or FKB line. They also carry links, which no
         # other layer does.
-        TrailLayer(ut_core, "Routes [UT.no]", "#d81b60", 4.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name"),
-        TrailLayer(ut_access, "Access routes [UT.no]", "#f48fb1", 3.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name"),
+        TrailLayer(ut_core, "Routes [UT.no]", "#d81b60", 4.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name", None, UT_LINK_HEADING),
+        TrailLayer(ut_access, "Access routes [UT.no]", "#f48fb1", 3.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name", None, UT_LINK_HEADING),
     ]
 
     legend: dict[str, str] = {}
@@ -1332,6 +1347,7 @@ def main() -> int:
                 weight=layer.weight,
                 popup_fields=layer.popup_fields,
                 link_fields=layer.link_fields,
+                link_heading=layer.link_heading,
                 tooltip_field=layer.tooltip_field,
                 dash_array=layer.dash,
                 group_field=CHAIN_KEY,

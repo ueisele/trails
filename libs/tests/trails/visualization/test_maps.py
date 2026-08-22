@@ -142,6 +142,43 @@ class TestPopup:
 
         assert maps._build_popup(row, {}, {"ut_url": "Route"}) is not None
 
+    def test_link_heading_is_written_once_above_the_links(self, trails):
+        row = trails.iloc[0].copy()
+        row["ut_url"] = "https://ut.no/turforslag/1"
+        row["gpx_url"] = "https://ut.no/api/gpx/trip/1"
+
+        html = maps._build_popup(
+            row,
+            {"trail_name": "Route"},
+            {"ut_url": "Route page", "gpx_url": "Their GPX"},
+            link_heading="Published elsewhere",
+        )
+
+        assert html.count("Published elsewhere") == 1
+        assert html.index("Published elsewhere") < html.index("Route page")
+
+    def test_no_link_heading_where_no_link_survives(self, trails):
+        """A route with no description elsewhere must not get a heading over nothing."""
+        row = trails.iloc[0].copy()
+        row["guide_url_en"] = None
+
+        html = maps._build_popup(
+            row,
+            {"trail_name": "Route"},
+            {"guide_url_en": "Description"},
+            link_heading="Published elsewhere",
+        )
+
+        assert "Published elsewhere" not in html
+
+    def test_escapes_the_link_heading(self, trails):
+        row = trails.iloc[0].copy()
+        row["ut_url"] = "https://ut.no/turforslag/1"
+
+        html = maps._build_popup(row, {"trail_name": "Route"}, {"ut_url": "Route page"}, link_heading="a <b>heading</b>")
+
+        assert "<b>heading</b>" not in html
+
     def test_skips_missing_link_values(self, trails):
         row = trails.iloc[0].copy()
         row["guide_url_en"] = None

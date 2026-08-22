@@ -343,6 +343,7 @@ def _build_popup(
     fields: dict[str, str],
     link_fields: dict[str, str] | None = None,
     source: str | None = None,
+    link_heading: str | None = None,
 ) -> str | None:
     """Render a popup table from selected fields.
 
@@ -355,6 +356,9 @@ def _build_popup(
         source: Dataset the feature came from, shown as a footer. A map that
             stacks seven sources is unreadable without it, so it is worth a line
             even where nothing else about the feature is known.
+        link_heading: Line set above the links, saying whose pages they are.
+            Without one, a link offering a GPX reads as this map's export of the
+            line rather than as the recording somebody else published.
 
     Returns:
         HTML table, or None if the row has nothing to show at all
@@ -372,12 +376,19 @@ def _build_popup(
             f"<td style='padding:2px 0'><b>{escape(str(value))}</b></td></tr>"
         )
 
+    written = 0
     for column, text in (link_fields or {}).items():
         if column not in row:
             continue
         url = row[column]
         if pd.isna(url) or not str(url).startswith(_LINK_SCHEMES):
             continue
+        # Above the first link that survives, not above the block: a route with
+        # no description on the park's site would otherwise get a heading over
+        # nothing at all.
+        if link_heading and not written:
+            rows.append(f"<tr><td colspan='2' style='padding:7px 0 1px;color:#777'>{escape(str(link_heading))}</td></tr>")
+        written += 1
         # noopener keeps the opened page from reaching back into this one.
         rows.append(
             f"<tr><td colspan='2' style='padding:3px 0'>"
@@ -404,6 +415,7 @@ def add_trails(
     opacity: float = 0.85,
     popup_fields: dict[str, str] | None = None,
     link_fields: dict[str, str] | None = None,
+    link_heading: str | None = None,
     tooltip_field: str | None = None,
     group_field: str | None = None,
     search_field: str | None = None,
@@ -424,6 +436,7 @@ def add_trails(
         popup_fields: Mapping of column name to popup label
         link_fields: Mapping of a column holding a URL to its link text, for
             trails that have a description page elsewhere
+        link_heading: Line set above those links, saying whose pages they are
         tooltip_field: Column shown on hover, so a line can be identified before
             it is clicked
         group_field: Column whose value ties the parts of one route together, so
@@ -458,7 +471,7 @@ def add_trails(
             continue
 
         lines = list(geometry.geoms) if geometry.geom_type == "MultiLineString" else [geometry]
-        popup_html = _build_popup(row, popup_fields or {}, link_fields, source) if (popup_fields or link_fields or source) else None
+        popup_html = _build_popup(row, popup_fields or {}, link_fields, source, link_heading) if (popup_fields or link_fields or source) else None
 
         tooltip = None
         if tooltip_field and tooltip_field in row and pd.notna(row[tooltip_field]):
