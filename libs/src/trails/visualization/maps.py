@@ -2529,16 +2529,40 @@ class _ProfilePanel(MacroElement):
             var grabbed = document.createElement('div');
             grabbed.style.cssText = 'width:38px;height:3px;border-radius:2px;background:#c4c4c4';
             grip.appendChild(grabbed);
+            // The chart height the panel was last **laid out** with, which
+            // is not the same as the height it has been asked for: a redraw is
+            // coalesced to the next frame, so between the ask and the frame the
+            // box on the page still measures the old one.
+            var laidOut = chartHeight;
             var stretching = null, awaiting = false;
             grip.addEventListener('mouseenter', function () { grabbed.style.background = '#8a8a8a'; });
             grip.addEventListener('mouseleave', function () { if (!stretching) { grabbed.style.background = '#c4c4c4'; } });
 
             function stretchTo(pixels) {
+                // **Only while the panel is open**, and that is not tidiness.
+                // Folded, the box is one line with no chart in it, so the
+                // overhead below measures as negative — 35 px of panel against
+                // a 205 px chart, an overhead of minus 170 — and the ceiling
+                // comes out taller than the map instead of shorter. A click on
+                // the map folds the panel, and a click can land in the middle of
+                // a drag: measured, that reopened the panel at 705 px with the
+                // ceiling reading 990.
+                if (!open) { return; }
                 // Room for a curve at all, and never so tall that the panel is
                 // the map. The overhead is measured rather than assumed: the two
                 // rows above the chart are a different height in every browser.
+                //
+                // **Against the height the panel was laid out with, not the one
+                // it was last asked for.** Two moves inside one frame otherwise
+                // measure a fresh chart against a stale box: the second reads an
+                // overhead of minus 620, a ceiling of 1,440, and hands out a
+                // panel taller than the map. It is not a corner — Firefox
+                // reports clientY as -86 the moment the pointer leaves the foot
+                // of the window, so a drag that runs off the bottom delivers
+                // three of them at once, and the panel opens at 900 px on a
+                // 900 px map.
                 var least = 60;
-                var most = Math.max(least, map.getSize().y - (box.offsetHeight - chartHeight) - 80);
+                var most = Math.max(least, map.getSize().y - (box.offsetHeight - laidOut) - 80);
                 var wanted = Math.round(Math.min(most, Math.max(least, pixels)));
                 if (wanted === chartHeight) { return; }
                 chartHeight = wanted;
@@ -2597,6 +2621,11 @@ class _ProfilePanel(MacroElement):
             corner.appendChild(control.getContainer());
 
             function fold() {
+                // A drag does not survive the panel folding under it: the grip
+                // it started on is no longer above a chart, and picking the drag
+                // up again on reopening would jump the height by however far the
+                // pointer travelled in between.
+                if (!open && stretching) { stretching = null; grabbed.style.background = '#c4c4c4'; }
                 var named = open && selected && selected.label ? ' \\u00b7 ' + selected.label : '';
                 name.textContent = (open ? '\\u25be ' : '\\u25b8 ') + title + named;
                 body.style.display = open ? '' : 'none';
@@ -2879,6 +2908,7 @@ class _ProfilePanel(MacroElement):
                 // whose whole point is that the slope is right.
                 chart.setAttribute('height', chartHeight);
                 chart.style.height = chartHeight + 'px';
+                laidOut = chartHeight;
                 chart.setAttribute('viewBox', '0 0 ' + width + ' ' + chartHeight);
                 chart.setAttribute('width', width);
                 if (!selected || !selected.shape || !selected.shape.read) { return; }

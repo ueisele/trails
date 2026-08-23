@@ -713,14 +713,38 @@ class TestProfilePanel:
         assert "window.requestAnimationFrame(function () { awaiting = false; render(); });" in html
 
     def test_the_profile_height_is_bounded_at_both_ends(self, group):
-        """Room for a curve at all, and never so tall that the panel is the map."""
+        """Room for a curve at all, and never so tall that the panel is the map.
+
+        Measured against the height the panel was **laid out** with rather than
+        the one it was last asked for. A redraw is coalesced to the next frame,
+        so two moves inside one frame otherwise measure a fresh chart against a
+        stale box: the second reads an overhead of minus 620, a ceiling of 1,440,
+        and hands out a panel taller than the map. Firefox reports clientY as -86
+        the moment the pointer leaves the foot of the window, so a drag that runs
+        off the bottom delivers three such moves at once.
+        """
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
 
         assert "var least = 60;" in html
-        assert "map.getSize().y - (box.offsetHeight - chartHeight) - 80" in html
+        assert "map.getSize().y - (box.offsetHeight - laidOut) - 80" in html
+        assert "laidOut = chartHeight;" in html
+
+    def test_the_profile_height_does_not_move_while_the_panel_is_folded(self, group):
+        """Folded, the box is one line with no chart in it, so the overhead
+        measures as minus 170 and the ceiling comes out taller than the map
+        instead of shorter. A click on the map folds the panel, and a click can
+        land in the middle of a drag: measured, that reopened it at 705 px.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "Folded, the box is one line with no chart in it" in html
+        assert "if (!open && stretching) { stretching = null;" in html
 
     def test_the_wheel_is_the_map_s_except_over_a_curve_that_can_use_it(self, group):
         """A panel that swallows a wheel and does nothing with it reads as the
