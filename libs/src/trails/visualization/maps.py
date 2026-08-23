@@ -2722,6 +2722,18 @@ class _ProfilePanel(MacroElement):
             // map's path count is what phase 3 was accepted against, and nothing
             // this panel draws may join it — and the crosshair's colour, because
             // the two are one thing shown in two places.
+            // **Above the planned route, in a pane of its own.** It shared the
+            // arrow's, at z-index 450, and plan mode's route pane is 460 — so
+            // the one mark whose whole job is to say *where on this route you
+            // are* was drawn underneath the route. Not the arrow's pane raised
+            // instead: the arrow belongs under a route it can only ever point
+            // along, and the two never show together anyway. Under the markers
+            // at 600, so a waypoint's pin still covers it where they coincide,
+            // which is the pin saying the same place.
+            var over = map.createPane('trailsProfileHere');
+            over.style.zIndex = 470;
+            over.style.pointerEvents = 'none';
+            L.DomUtil.addClass(over, 'leaflet-zoom-hide');
             var here = document.createElementNS(SVG, 'svg');
             here.setAttribute('width', '22');
             here.setAttribute('height', '22');
@@ -2735,7 +2747,7 @@ class _ProfilePanel(MacroElement):
                 ring.setAttribute('fill', colour);
                 here.appendChild(ring);
             });
-            pane.appendChild(here);
+            over.appendChild(here);
 
             // The position under the crosshair, in ground rather than in pixels,
             // so a pan or a zoom moves the mark with the map rather than leaving

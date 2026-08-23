@@ -208,6 +208,15 @@ own colour, because the two are one thing shown in two places. It is taken back
 when the pointer leaves, when the curve is redrawn under it and when a drag
 starts: a dot outliving its reading claims a position nobody is pointing at.
 
+**It also had to be given a pane of its own.** It shared the direction arrow's,
+at z-index 450, and plan mode's route pane is **460** — so the one mark whose
+whole job is to say *where on this route you are* was drawn underneath the route.
+It is 470 now: above the route, below the markers at 600, so a waypoint's pin
+still covers it where the two coincide, which is the pin saying the same place.
+The arrow was left at 450, where it belongs — it can only ever point along a
+route, and the two never show together anyway. **A z-index is a claim about what
+matters more, and this one had been made by whichever pane was written first.**
+
 **The position is not the sample's index**, and that is the whole of the work. A
 series carries two axes of different lengths — heights every 5 m, and the line
 through the vertices somebody surveyed — and the only thing they share is a

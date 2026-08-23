@@ -861,8 +861,22 @@ class TestProfilePanel:
         assert "standing = positionAt(shape, shape.distance[at]);" in html
         assert "function placeHere() {" in html
         assert "L.DomUtil.setPosition(here, map.latLngToLayerPoint(standing));" in html
-        assert "pane.appendChild(here);" in html
         assert "map.on('zoomend viewreset moveend resize', placeHere);" in html
+
+    def test_the_mark_is_drawn_above_the_route_it_reports_on(self, group):
+        """It shared the direction arrow's pane at 450 and plan mode's route
+        pane is 460, so the one mark whose whole job is to say where on this
+        route you are was drawn underneath the route."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "map.createPane('trailsProfileHere')" in html
+        assert "over.style.zIndex = 470;" in html
+        assert "over.appendChild(here);" in html
+        # And it takes no clicks, so plan mode's dispatcher never sees it.
+        assert "over.style.pointerEvents = 'none';" in html
 
     def test_a_position_is_looked_up_on_the_axis_that_has_one(self, group):
         """A series has two axes and they are not the same length: heights every
