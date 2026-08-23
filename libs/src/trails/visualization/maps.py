@@ -655,6 +655,18 @@ class _ClickHighlight(MacroElement):
             // Leaflet only fires a map click when the click hit no layer, so this
             // clears the selection on empty terrain without fighting the handler above.
             {{ this._parent.get_name() }}.on('click', clear);
+
+            // **And a way in that is not a click**, because both of the ways out
+            // above are clicks and something else can own those. Plan mode does:
+            // it takes every click on the container and stops it there, so a
+            // highlight made before switching it on had no way back and left the
+            // whole map faded behind the route being planned. Exposed the way the
+            // graph and the panel's selection are, so a browser check reads it
+            // rather than measuring opacities.
+            window.trailsHighlight = {
+                clear: clear,
+                selected: function () { return selected; }
+            };
         })();
         {% endmacro %}
     """)
@@ -6510,6 +6522,14 @@ class _PlanMode(MacroElement):
                 // way, because switching off to look at something is not
                 // throwing a plan away.
                 if (showing) { showing.suspend(on); }
+                // And the click-highlight lets go, for a harder reason than
+                // tidiness: its only two ways out are a click on the line and a
+                // click on empty ground, and from here on this handler owns
+                // both. Left standing it would dim every line on the map for as
+                // long as plan mode is on, with nothing a reader could do about
+                // it. Not restored on the way out — it was a selection made by
+                // clicking, and it is given up by planning.
+                if (on && window.trailsHighlight) { window.trailsHighlight.clear(); }
                 // Warmed here rather than at the first drag: a drag settles
                 // inside a pointer event and cannot wait a microtask for a
                 // payload that has been in the page since it loaded. Quietly,

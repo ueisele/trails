@@ -116,6 +116,22 @@ out per feature and compresses against nothing. **Showing a figure is the
 expensive half; carrying it is nearly free.** Neither budget is threatened, and
 the ratio is the thing to remember before adding the next row.
 
+**And a highlighted line could not be let go of while planning.** The
+click-highlight has exactly two ways out — a click on the line, and a click on
+empty ground — and plan mode owns both from the moment it is switched on.
+Measured against the built page with the clearing taken back out: pick a chain
+and it goes from 4 px at 0.85 opacity to **8 px at 1.0**; switch plan mode on and
+it stays there, with all eleven thousand other lines dimmed behind the route
+being planned and nothing a reader can do about it. Plan mode now lets go of it
+on the way in, and it is not restored on the way out — it was a selection made by
+clicking, and planning is what gives it up.
+
+The highlight gained a way in that is not a click, `window.trailsHighlight` with
+`clear()` and `selected()`, the way the graph and the panel's selection are
+already readable. **The general form is the same as the popup below it**: a
+behaviour whose only exits are clicks is at the mercy of whatever else claims
+clicks, and this map now has something that claims all of them.
+
 **And a click inside a popup was a click on the ground.** Plan mode takes every
 click in the capture phase on the map container — that is how one handler tells a
 pin from the route from open terrain — and it stepped around

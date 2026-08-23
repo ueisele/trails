@@ -245,6 +245,21 @@ class TestLabelledPoints:
 class TestClickHighlight:
     """Tests for add_click_highlight."""
 
+    def test_it_can_be_let_go_of_without_a_click(self, trails):
+        """Both of its ways out are clicks -- on the line, or on empty ground --
+        and something else can own those. Plan mode does, so the highlight needs
+        a way in that is not a click or it dims the map with no way back.
+        """
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="Paths", color="#1b5e20")
+        maps.add_click_highlight(fmap, [group])
+
+        html = fmap.get_root().render()
+
+        assert "window.trailsHighlight = {" in html
+        assert "clear: clear," in html
+        assert "selected: function () { return selected; }" in html
+
     def test_renders_after_the_layers_it_drives(self, trails):
         """The snippet names the feature groups, so they must exist by then."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
@@ -1296,6 +1311,18 @@ class TestPlanMode:
         assert "event.target.closest('.leaflet-control-container, .leaflet-popup')" in html
         assert "if (!on || overFurniture(event)) { return; }" in html
         assert "if (on && !overFurniture(event)) { event.stopPropagation(); }" in html
+
+    def test_switching_on_lets_go_of_a_highlighted_line(self):
+        """The click-highlight's only two ways out are a click on the line and a
+        click on empty ground, and plan mode owns both from the moment it is on.
+        Left standing it dims every line on the map with no way back.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "if (on && window.trailsHighlight) { window.trailsHighlight.clear(); }" in html
 
     def test_a_waypoint_is_a_marker_because_a_circle_cannot_be_dragged(self):
         """198 markers and 13 plan-pane paths were both acceptance figures, and
