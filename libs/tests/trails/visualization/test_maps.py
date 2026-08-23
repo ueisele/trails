@@ -722,6 +722,85 @@ class TestProfilePanel:
         assert "var least = 60;" in html
         assert "map.getSize().y - (box.offsetHeight - chartHeight) - 80" in html
 
+    def test_the_wheel_is_the_map_s_except_over_a_curve_that_can_use_it(self, group):
+        """A panel that swallows a wheel and does nothing with it reads as the
+        map having frozen, which is why this panel has only ever taken clicks.
+        So the chart takes the wheel exactly where there is detail under the
+        drawing to reach: 126 chains of 11,264, and every route worth planning.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "chart.addEventListener('wheel'" in html
+        assert "if (!crosshair || !(crosshair.closest > 1.001)) { return; }" in html
+        assert "}, {passive: false});" in html
+
+    def test_the_zoom_stops_at_one_reading_per_pixel(self, group):
+        """The ceiling is the data's rather than a taste. Past it the panel
+        magnifies the straight lines drawn between samples, which claims a
+        resolution nothing supports: 7.1x on the 42 km chain, 1 on most.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "var spacing = readable > 1 ? shape.total / (readable - 1) : shape.total;" in html
+        assert "var closest = spacing > 0 ? Math.max(1, base / spacing) : 1;" in html
+        assert "view.zoom = Math.min(closest, Math.max(1, view.zoom));" in html
+
+    def test_a_zoomed_window_is_drawn_at_the_same_true_scale(self, group):
+        """One metres-per-pixel for both axes, whatever the window: zooming
+        changes how much of the chain is on the panel and never its angle.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "var metresPerPixel = base / view.zoom;" in html
+        assert "return box.left + (value - from) / metresPerPixel;" in html
+        assert "return middleY - (value - view.centre) / metresPerPixel;" in html
+
+    def test_a_window_steeper_than_the_panel_is_clipped(self, group):
+        """The panel's own shape is a gradient, 14.6 %, and it does not move with
+        the zoom. Unclipped, a steeper window runs over the height labels and out
+        of the panel into the map.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "createElementNS(SVG, 'clipPath')" in html
+        assert "inside.setAttribute('clip-path', 'url(#' + frameId + ')');" in html
+
+    def test_a_window_belongs_to_the_chain_it_was_opened_on(self, group):
+        """Carried over, it would open the panel somewhere in the middle of
+        whatever the reader just clicked, at a scale chosen for something else.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "view.zoom = 1; view.at = 0; view.centre = null;" in html
+
+    def test_the_panel_says_which_part_of_the_chain_it_is_showing(self, group):
+        """A window is a thing to be read rather than screenshotted, the same as
+        the series and the figures above it.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "view: function () {" in html
+        assert "metresPerPixel: crosshair ? crosshair.mpp : null," in html
+        assert "closest: crosshair ? crosshair.closest : null" in html
+
     def test_the_lowest_band_clears_what_the_model_reads_on_level_ground(self):
         """Measured: level chains read a median of 1.0 % over a 25 m window and
         never more than 9.2 %. A boundary under that would colour the data."""

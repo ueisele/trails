@@ -1575,7 +1575,22 @@ class _ProfilePanel(MacroElement):
 
     A control rather than a box over the page, and with only
     ``disableClickPropagation``: a wheel turned over it still has to reach the
-    map, or the map reads as frozen the moment the panel is open.
+    map, or the map reads as frozen the moment the panel is open. The **curve**
+    is the one exception, and only where it has detail to give — see the zoom
+    below.
+
+    **And a reader can zoom into the curve**, which is a feature of the long
+    chain and of a planned route rather than of the map's lines. Measured over
+    the built graph: the median chain is drawn at 0.16 metres a pixel against a
+    series carrying a height every 5.12 m, so the panel already magnifies every
+    reading it holds some thirty times, and only 126 chains of 11,264 are drawn
+    coarser than their own samples. The wheel is therefore taken over the curve
+    exactly where zooming would show something and passed to the map everywhere
+    else. The ceiling is the data's — one reading per pixel, 7.1x on the 42 km
+    chain — and the scale stays true in both axes at every step, so zooming
+    changes how much of the chain is on the panel and never its angle. Dragging
+    moves the window, double-clicking returns the whole chain, and a new
+    selection starts over.
 
     **It also writes the chain out as GPX**, from the same composed series it
     draws the curve from — which is the reason the two live in one closure
@@ -2669,6 +2684,27 @@ class _ProfilePanel(MacroElement):
                 return out;
             }
 
+            // ---- how much of the chain is on the panel, and at what scale ---
+            // **Zoom belongs to the long chain and to a planned route, and to
+            // almost nothing else.** Measured over the built graph: the median
+            // chain is drawn at 0.16 metres a pixel against a series carrying a
+            // height every 5.12 m, so the panel already magnifies every reading
+            // it holds some thirty times over. Only 126 chains of 11,264 are
+            // drawn coarser than their own samples — the 42 km Rundtur is one of
+            // them, at 36.28 m/px, and a route planned here is that long by
+            // nature. So this is for the route, and the chain is the exception.
+            //
+            // The ceiling is the data's rather than a taste: **one reading per
+            // pixel**. Past it the panel magnifies the straight lines drawn
+            // between samples, which claims a resolution nothing supports. It
+            // works out at 7.1x on that chain and 3 to 5x on the next longest.
+            //
+            // ``at`` is the distance at the left edge and ``centre`` the height
+            // at the middle, both in metres, because pixels change under a drag
+            // of the grip and metres do not. ``centre`` is null until a window
+            // turns out to be steeper than the panel — see render().
+            var view = {zoom: 1, at: 0, centre: null};
+
             var crosshair = null;
 
             // How steep the ground is at each sample, read over GRADE.window
@@ -2713,15 +2749,33 @@ class _ProfilePanel(MacroElement):
 
             // The points the curve is drawn through, in runs that must not be
             // joined across, each carrying the sample it came from so its band
-            // can be looked up in the full series.
-            function drawPoints(shape, columns) {
+            // can be looked up in the full series. ``from`` and ``to`` are the
+            // window on the chain, which is the whole of it until something
+            // zooms in.
+            function drawPoints(shape, columns, from, to) {
                 var runs = [], run = [], i;
-                if (shape.height.length <= columns) {
+                var reach = to - from;
+                if (!(reach > 0)) { return runs; }
+                // Samples are laid in order, so a window is a slice and not a
+                // filter. Held to a hair either side, or the sample sitting
+                // exactly on the end of the chain falls outside its own chain.
+                var lo = 0, hi = shape.distance.length - 1;
+                while (lo <= hi && shape.distance[lo] < from - 1e-6) { lo += 1; }
+                while (hi >= lo && shape.distance[hi] > to + 1e-6) { hi -= 1; }
+                if (hi < lo) { return runs; }
+                if (hi - lo + 1 <= columns) {
                     // The common case, and it has to be: the median chain here
                     // holds 36 samples and a third of them fewer than twenty.
                     // Bucketing those into 900 columns leaves 864 empty and the
                     // curve full of holes it has no business having.
-                    for (i = 0; i < shape.height.length; i += 1) {
+                    //
+                    // One sample beyond each edge as well, and only here: zoomed
+                    // into a sparse stretch the nearest reading can lie a long
+                    // way outside the window, and without it the curve stops
+                    // short of the edge and says nothing about why. What that
+                    // draws outside the box is clipped away below.
+                    var a = lo > 0 ? lo - 1 : lo, b = hi < shape.distance.length - 1 ? hi + 1 : hi;
+                    for (i = a; i <= b; i += 1) {
                         if (isNaN(shape.height[i])) {
                             if (run.length) { runs.push(run); run = []; }
                             continue;
@@ -2740,13 +2794,17 @@ class _ProfilePanel(MacroElement):
                 var firstAt = new Int32Array(columns), lastAt = new Int32Array(columns);
                 // How many samples up to here the model had no reading for, so
                 // the question "was anything missed between these two columns"
-                // is one subtraction rather than a scan.
+                // is one subtraction rather than a scan. Over the whole series
+                // rather than the window: the indices it is asked about are the
+                // series' own, and a window does not renumber them.
                 var missed = new Int32Array(shape.height.length + 1);
                 for (i = 0; i < shape.height.length; i += 1) {
+                    missed[i + 1] = missed[i] + (isNaN(shape.height[i]) ? 1 : 0);
+                }
+                for (i = lo; i <= hi; i += 1) {
                     var value = shape.height[i];
-                    missed[i + 1] = missed[i] + (isNaN(value) ? 1 : 0);
                     if (isNaN(value)) { continue; }
-                    var column = Math.max(0, Math.min(columns - 1, Math.floor((shape.distance[i] / shape.total) * columns)));
+                    var column = Math.max(0, Math.min(columns - 1, Math.floor(((shape.distance[i] - from) / reach) * columns)));
                     if (!filled[column] || value < low[column]) { low[column] = value; lowAt[column] = i; }
                     if (!filled[column] || value > high[column]) { high[column] = value; highAt[column] = i; }
                     if (!filled[column]) { firstAt[column] = i; }
@@ -2766,7 +2824,7 @@ class _ProfilePanel(MacroElement):
                     if (previous >= 0 && missed[firstAt[c]] > missed[lastAt[previous] + 1]) {
                         if (run.length) { runs.push(run); run = []; }
                     }
-                    var at = ((c + 0.5) / columns) * shape.total;
+                    var at = from + ((c + 0.5) / columns) * reach;
                     var lowFirst = lowAt[c] <= highAt[c];
                     run.push({d: at, h: lowFirst ? low[c] : high[c], at: firstAt[c]});
                     if (low[c] !== high[c]) { run.push({d: at, h: lowFirst ? high[c] : low[c], at: lastAt[c]}); }
@@ -2783,7 +2841,7 @@ class _ProfilePanel(MacroElement):
                 return shape.free && shape.free[sample] ? 1 : 0;
             }
 
-            function drawCurve(shape, plot, x, y, slope) {
+            function drawCurve(shape, plot, x, y, slope, from, to) {
                 // One stroke per run of segments sharing a band, so the curve is
                 // its own legend: where it turns amber the ground turned steep.
                 // And per run sharing a *drawing*, so a stretch the plan drew
@@ -2791,7 +2849,7 @@ class _ProfilePanel(MacroElement):
                 // profile has to say the same thing the map does about the same
                 // ground.
                 var strokes = [], current;
-                drawPoints(shape, Math.max(1, Math.floor(plot.width))).forEach(function (points) {
+                drawPoints(shape, Math.max(1, Math.floor(plot.width)), from, to).forEach(function (points) {
                     current = null;
                     for (var i = 1; i < points.length; i += 1) {
                         var band = bandOf(slope[points[i - 1].at]), free = freeAt(shape, points[i - 1].at);
@@ -2828,9 +2886,11 @@ class _ProfilePanel(MacroElement):
                 var shape = selected.shape;
                 if (!(shape.total > 0)) { return; }
                 var box = {left: PAD.left, right: width - PAD.right, top: PAD.top, bottom: chartHeight - PAD.bottom};
-                var lowest = Infinity, highest = -Infinity;
-                for (var i = 0; i < shape.height.length; i += 1) {
+                var wide = box.right - box.left, tall = box.bottom - box.top;
+                var lowest = Infinity, highest = -Infinity, readable = 0, i;
+                for (i = 0; i < shape.height.length; i += 1) {
                     if (isNaN(shape.height[i])) { continue; }
+                    readable += 1;
                     if (shape.height[i] < lowest) { lowest = shape.height[i]; }
                     if (shape.height[i] > highest) { highest = shape.height[i]; }
                 }
@@ -2855,32 +2915,86 @@ class _ProfilePanel(MacroElement):
                 // steep chain then leaves width unused — 561 px of 1,238 for the
                 // 3 km one — and a long gentle chain draws as the ribbon it is,
                 // 20 px tall over 42 km. Both are the truth about the ground.
-                var span = highest - lowest;
-                var metresPerPixel = Math.max(shape.total / (box.right - box.left),
-                                              span / (box.bottom - box.top));
-                var centre = (box.top + box.bottom) / 2;
-                var plot = {left: box.left, right: box.left + shape.total / metresPerPixel,
-                            top: centre - span / metresPerPixel / 2,
-                            bottom: centre + span / metresPerPixel / 2};
+                var base = Math.max(shape.total / wide, (highest - lowest) / tall);
+
+                // **How far in the readings let anyone go.** One per pixel, and
+                // the mean spacing is the honest measure of that: the series is
+                // laid per edge, so a chain does not sample evenly and a median
+                // per render would cost a sort. Where a chain is already drawn
+                // finer than it was measured this is 1 and nothing zooms, which
+                // is 99 % of them.
+                var spacing = readable > 1 ? shape.total / (readable - 1) : shape.total;
+                var closest = spacing > 0 ? Math.max(1, base / spacing) : 1;
+                view.zoom = Math.min(closest, Math.max(1, view.zoom));
+                var metresPerPixel = base / view.zoom;
+                var holds = wide * metresPerPixel;
+                var shown = Math.min(shape.total, holds);
+                view.at = Math.min(Math.max(0, view.at), Math.max(0, shape.total - holds));
+                var from = view.at, to = view.at + shown;
+
+                // The band is the **window's** own range and not the chain's.
+                // Zoomed into a col, a panel scaled to a summit ten kilometres
+                // away would draw the col as a flat line along the foot of the
+                // box. At zoom 1 the window is the chain and the two are one.
+                var seenLow = Infinity, seenHigh = -Infinity;
+                for (i = 0; i < shape.height.length; i += 1) {
+                    if (isNaN(shape.height[i])) { continue; }
+                    if (shape.distance[i] < from - 1e-6 || shape.distance[i] > to + 1e-6) { continue; }
+                    if (shape.height[i] < seenLow) { seenLow = shape.height[i]; }
+                    if (shape.height[i] > seenHigh) { seenHigh = shape.height[i]; }
+                }
+                if (!(seenHigh >= seenLow)) { seenLow = lowest; seenHigh = highest; }
+                if (seenHigh - seenLow < 20) {
+                    var centre = (seenHigh + seenLow) / 2;
+                    seenLow = centre - 10; seenHigh = centre + 10;
+                }
+
+                // **The panel's own shape is a gradient** — 171 px over 1,170,
+                // or 14.6 % — and it does not move with the zoom. At a true
+                // scale a window fits top to bottom exactly when the ground
+                // across it averages gentler than that, so zooming in far enough
+                // on steep ground must eventually overflow. Measured over the
+                // six longest chains: everything fits to 4x, and at 8x three of
+                // them stand 108 to 163 m over, which at that scale is 24 to
+                // 36 px — the grip above the chart is where those come from.
+                // Where it does stand over, the reader drags the window up and
+                // down as well, and this is the only case where that does
+                // anything: below it the middle is pinned and a vertical drag
+                // cannot take the curve off the panel.
+                var carries = tall * metresPerPixel;
+                if (seenHigh - seenLow > carries) {
+                    if (view.centre === null) { view.centre = (seenLow + seenHigh) / 2; }
+                    view.centre = Math.min(Math.max(view.centre, seenLow + carries / 2), seenHigh - carries / 2);
+                } else {
+                    view.centre = (seenLow + seenHigh) / 2;
+                }
+
+                var middleY = (box.top + box.bottom) / 2;
+                var x = function (value) { return box.left + (value - from) / metresPerPixel; };
+                var y = function (value) { return middleY - (value - view.centre) / metresPerPixel; };
+                var plot = {left: box.left, right: box.left + shown / metresPerPixel,
+                            top: Math.max(box.top, y(seenHigh)), bottom: Math.min(box.bottom, y(seenLow))};
                 plot.width = plot.right - plot.left;
-                var x = function (value) { return plot.left + (shape.total > 0 ? (value / shape.total) * plot.width : 0); };
-                var y = function (value) { return plot.bottom - ((value - lowest) / (highest - lowest)) * (plot.bottom - plot.top); };
 
                 // As many labels as the drawn band can hold rather than a fixed
                 // four: a gentle chain is twenty pixels tall at a true scale,
-                // and four heights stacked in twenty pixels is one smear.
+                // and four heights stacked in twenty pixels is one smear. Over
+                // what the box shows rather than what the window holds, so a
+                // window taller than the panel is not labelled off its own edge.
                 var heights = Math.max(2, Math.min(4, Math.round((plot.bottom - plot.top) / 34)));
-                ticks(lowest, highest, heights).forEach(function (value) {
+                ticks(Math.max(seenLow, view.centre - carries / 2),
+                      Math.min(seenHigh, view.centre + carries / 2), heights).forEach(function (value) {
                     chart.appendChild(line(plot.left, y(value), plot.right, y(value), '#eceff1'));
                     chart.appendChild(text(plot.left - 6, y(value) + 3, metres(value) + ' m', 'end'));
                 });
                 // One number of decimals for the whole axis, decided by how far
-                // the chain runs: 0.00 beside 1.0 reads as two different scales.
-                // The gridlines run the box's full height rather than the band's,
-                // so a twenty-pixel ribbon still has something to be read against.
-                var decimals = shape.total < 2000 ? 2 : 1;
+                // the window runs: 0.00 beside 1.0 reads as two different
+                // scales. The gridlines run the box's full height rather than
+                // the band's, so a twenty-pixel ribbon still has something to be
+                // read against.
+                var decimals = shown < 2000 ? 2 : 1;
                 var alongs = Math.max(2, Math.min(6, Math.round(plot.width / 110)));
-                ticks(0, shape.total, alongs).forEach(function (value) {
+                ticks(from, to, alongs).forEach(function (value) {
                     chart.appendChild(line(x(value), box.top, x(value), box.bottom, '#eceff1'));
                     chart.appendChild(text(x(value), box.bottom + 14, (value / 1000).toFixed(decimals), 'middle'));
                 });
@@ -2888,8 +3002,24 @@ class _ProfilePanel(MacroElement):
                 chart.appendChild(line(plot.left, box.top, plot.left, box.bottom, AXIS));
                 chart.appendChild(line(plot.left, box.bottom, plot.right, box.bottom, AXIS));
 
+                // Everything that can leave the box goes in here. A window
+                // steeper than the panel draws past the top and the bottom, and
+                // unclipped that runs over the height labels and out of the
+                // panel into the map.
+                var frameId = 'trails-profile-frame-{{ this.get_name() }}';
+                var frame = document.createElementNS(SVG, 'clipPath');
+                frame.setAttribute('id', frameId);
+                var shield = document.createElementNS(SVG, 'rect');
+                shield.setAttribute('x', box.left); shield.setAttribute('y', box.top);
+                shield.setAttribute('width', Math.max(0, wide)); shield.setAttribute('height', Math.max(0, tall));
+                frame.appendChild(shield);
+                chart.appendChild(frame);
+                var inside = document.createElementNS(SVG, 'g');
+                inside.setAttribute('clip-path', 'url(#' + frameId + ')');
+                chart.appendChild(inside);
+
                 var slope = gradients(shape);
-                var strokes = drawCurve(shape, plot, x, y, slope);
+                var strokes = drawCurve(shape, plot, x, y, slope, from, to);
                 if (strokes.some(function (stroke) { return stroke.free; })) { freeKey.style.display = ''; }
                 strokes.forEach(function (stroke) {
                     var band = GRADE.bands[stroke.band];
@@ -2906,12 +3036,29 @@ class _ProfilePanel(MacroElement):
                     // The gradient still bands it: the hill is real even where
                     // the line across it is a straight one somebody drew.
                     if (stroke.free) { curve.setAttribute('stroke-dasharray', FREE_DASH); }
-                    chart.appendChild(curve);
+                    inside.appendChild(curve);
                 });
+
+                // What the reader is looking at, and only where that is less
+                // than all of it. On the 99 % of chains already drawn finer than
+                // their own readings neither line ever appears: there is nothing
+                // under the drawing to reach, and offering it would be a claim
+                // to detail that does not exist.
+                if (view.zoom > 1.001) {
+                    chart.appendChild(text(box.left, box.top + 8, (shown / 1000).toFixed(2) + ' km of '
+                        + (shape.total / 1000).toFixed(2) + ' \\u00b7 drag to move, double-click for all', 'start'));
+                } else if (closest > 1.05) {
+                    var hint = text(box.left, box.top + 8,
+                        'Scroll here: the readings hold ' + closest.toFixed(1) + '\\u00d7 more detail than this', 'start');
+                    hint.setAttribute('fill', '#9e9e9e');
+                    chart.appendChild(hint);
+                }
 
                 // The crosshair's own parts, made once and moved afterwards.
                 // Rebuilding them per mouse move is the mistake that froze this
-                // map twice already, on a layer rather than on a chart.
+                // map twice already, on a layer rather than on a chart. The rule
+                // and the dot are clipped with the curve — the dot sits on it,
+                // and on an overflowing window that is off the panel.
                 var rule = line(plot.left, box.top, plot.left, box.bottom, CROSS);
                 var dot = document.createElementNS(SVG, 'circle');
                 dot.setAttribute('r', '2.5'); dot.setAttribute('fill', CROSS);
@@ -2919,8 +3066,12 @@ class _ProfilePanel(MacroElement):
                 // in the same place whether the chain drew 150 pixels tall or 20.
                 var reading = text(box.right, box.top + 8, '', 'end');
                 reading.setAttribute('fill', CROSS);
-                [rule, dot, reading].forEach(function (node) { node.style.display = 'none'; chart.appendChild(node); });
-                crosshair = {rule: rule, dot: dot, reading: reading, plot: plot, width: width, x: x, y: y, at: -1, slope: slope};
+                [rule, dot].forEach(function (node) { node.style.display = 'none'; inside.appendChild(node); });
+                reading.style.display = 'none';
+                chart.appendChild(reading);
+                crosshair = {rule: rule, dot: dot, reading: reading, plot: plot, width: width, x: x, y: y, at: -1,
+                             slope: slope, box: box, from: from, shown: shown, mpp: metresPerPixel,
+                             base: base, closest: closest};
             }
 
             // The nearest sample to a distance, over the full series: the
@@ -2938,6 +3089,11 @@ class _ProfilePanel(MacroElement):
             }
 
             chart.addEventListener('mousemove', function (event) {
+                // Not while the window is being dragged: the pointer is moving
+                // the curve then, and a reading that chased it would name a
+                // different place every frame without the pointer leaving the
+                // ground it started on.
+                if (dragging) { return; }
                 if (!crosshair || !selected || !selected.shape) { return; }
                 var shape = selected.shape;
                 // The drawing is scaled to whatever width the panel ended up
@@ -2958,7 +3114,10 @@ class _ProfilePanel(MacroElement):
                     }
                     return;
                 }
-                var at = nearest(shape.distance, ((px - crosshair.plot.left) / crosshair.plot.width) * shape.total);
+                // Through the window rather than through the chain: at zoom
+                // 1 the two are the same arithmetic, and past it only this one
+                // is right.
+                var at = nearest(shape.distance, crosshair.from + (px - crosshair.plot.left) * crosshair.mpp);
                 if (at === crosshair.at) { return; }
                 crosshair.at = at;
                 var here = crosshair.x(shape.distance[at]);
@@ -2987,6 +3146,77 @@ class _ProfilePanel(MacroElement):
                 if (!crosshair) { return; }
                 crosshair.at = -1;
                 [crosshair.rule, crosshair.dot, crosshair.reading].forEach(function (node) { node.style.display = 'none'; });
+            });
+
+            // ---- the window on the chain, which a reader moves ---------------
+            // One redraw a frame, for the reason the grip has one: a redraw per
+            // event is the mistake that froze this map twice, and a long chain
+            // is four hundred separate strokes.
+            var settling = false;
+            function redraw() {
+                if (settling) { return; }
+                settling = true;
+                window.requestAnimationFrame(function () { settling = false; render(); });
+            }
+
+            // **The wheel stays the map's, except over a curve that can use it.**
+            // A panel that swallows a wheel and does nothing with it reads as
+            // the map having frozen the moment the panel opened — which is why
+            // this panel has only ever taken clicks, and why the map's own
+            // 9 to 11 is unchanged everywhere else on it. So the chart takes the
+            // wheel exactly where there is detail under the drawing to reach,
+            // and lets it through where there is not: 126 chains of 11,264, and
+            // every route long enough to be worth planning.
+            chart.addEventListener('wheel', function (event) {
+                if (!crosshair || !(crosshair.closest > 1.001)) { return; }
+                event.preventDefault();
+                event.stopPropagation();
+                // A wheel says its delta in pixels, lines or pages, and a line
+                // is not a pixel. Four notches of a mouse double the scale.
+                var step = event.deltaY * (event.deltaMode === 1 ? 20 : (event.deltaMode === 2 ? 400 : 1));
+                var wanted = Math.min(crosshair.closest, Math.max(1, view.zoom * Math.pow(2, -step / 400)));
+                if (wanted === view.zoom) { return; }
+                var rect = chart.getBoundingClientRect();
+                var px = ((event.clientX - rect.left) / rect.width) * crosshair.width;
+                // The ground under the pointer stays under the pointer, which is
+                // what makes a wheel read as a lens rather than as a slider.
+                var under = crosshair.from + (px - crosshair.box.left) * crosshair.mpp;
+                view.zoom = wanted;
+                view.at = under - (px - crosshair.box.left) * (crosshair.base / wanted);
+                redraw();
+            }, {passive: false});
+
+            // Dragging moves the window, in both directions: along the chain,
+            // and up and down where the window is steeper than the panel and so
+            // does not all fit. render() pins the second whenever it does fit,
+            // so there is no way to drag the curve off its own panel.
+            var dragging = null;
+            chart.addEventListener('mousedown', function (event) {
+                if (!crosshair || !(view.zoom > 1.001)) { return; }
+                dragging = {x: event.clientX, y: event.clientY, at: view.at, centre: view.centre, mpp: crosshair.mpp};
+                chart.style.cursor = 'grabbing';
+                event.preventDefault();
+            });
+            document.addEventListener('mousemove', function (event) {
+                if (!dragging) { return; }
+                view.at = dragging.at - (event.clientX - dragging.x) * dragging.mpp;
+                view.centre = dragging.centre + (event.clientY - dragging.y) * dragging.mpp;
+                redraw();
+            });
+            document.addEventListener('mouseup', function () {
+                if (!dragging) { return; }
+                dragging = null;
+                chart.style.cursor = 'crosshair';
+            });
+
+            // Back to the whole chain. The map never sees this — the panel stops
+            // clicks at its own edge — and the header's own click, which folds
+            // the panel away, is a different element.
+            chart.addEventListener('dblclick', function (event) {
+                if (!(view.zoom > 1.001)) { return; }
+                event.preventDefault();
+                view.zoom = 1; view.at = 0; view.centre = null;
+                redraw();
             });
 
             // ---- what is selected -------------------------------------------
@@ -3139,6 +3369,10 @@ class _ProfilePanel(MacroElement):
             // only in how they arrive.
             function present(given) {
                 selected = given;
+                // A window belongs to the chain it was opened on. Carried over,
+                // it would open the panel somewhere in the middle of whatever
+                // the reader just clicked, at a scale chosen for something else.
+                view.zoom = 1; view.at = 0; view.centre = null;
                 // Open on a selection and folded away again the moment there is
                 // none: a panel this wide takes a strip of the map with it, and
                 // it may only do that while it has something to show there.
@@ -3185,7 +3419,19 @@ class _ProfilePanel(MacroElement):
                 // is a method rather than a field because asking costs 45 ms
                 // over a 37 km route. The file is written from what this
                 // returns, so a check reads the same list the file carries.
-                crossings: crossings
+                crossings: crossings,
+                // And which part of the chain is on the panel, at what scale,
+                // and how much finer the readings would let it go. A window is
+                // a thing to be read rather than screenshotted, the same as the
+                // series and the figures above it; ``closest`` is 1 wherever the
+                // panel is already drawn finer than the ground was measured,
+                // which is 99 % of the chains here.
+                view: function () {
+                    return {zoom: view.zoom, at: view.at, centre: view.centre,
+                            metresPerPixel: crosshair ? crosshair.mpp : null,
+                            shown: crosshair ? crosshair.shown : null,
+                            closest: crosshair ? crosshair.closest : null};
+                }
             };
 
             function show(className, label) {
@@ -3326,6 +3572,16 @@ def add_profile_panel(
     and only the curve and the distance under it come out of that. A chain whose
     series holds no reading at all — a ferry crossing, or a stretch outside the
     height model — says so instead of drawing a flat line at zero.
+
+    **The curve can be zoomed into, where there is anything to see.** A wheel
+    over it takes the window down to one height reading per pixel and no
+    further; past that the panel would be magnifying the straight lines drawn
+    between samples. On this map that is worth doing on 126 chains of 11,264 —
+    the rest are already drawn finer than the ground under them was measured —
+    and on every route long enough to be worth planning. Everywhere it is not
+    worth doing the wheel goes to the map, as it always has. The scale stays
+    true in both axes throughout, dragging moves the window, and a double click
+    puts the whole chain back.
 
     **And it writes the chain out.** Given ``export``, the panel offers the
     selected chain as a GPX file — every vertex, a point wherever two are
