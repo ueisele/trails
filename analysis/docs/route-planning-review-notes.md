@@ -116,6 +116,16 @@ out per feature and compresses against nothing. **Showing a figure is the
 expensive half; carrying it is nearly free.** Neither budget is threatened, and
 the ratio is the thing to remember before adding the next row.
 
+**And the row with the download button reads as one sentence.** Its three parts —
+the button, how many points the file holds, and which sources it draws on with
+their licences — were flex items, so the licences either fitted beside the count
+or moved to a line of their own. A chain's list fitted and a route's did not,
+which is why the two looked like different panels for the same job. Measured on a
+route over two sources at 620 px, the list now begins on the count's own line and
+runs to three. What the file covers — the marking buckets and the ground no
+source records a path along — is deliberately still a line of its own: run
+together with the licences it reads as one longer list of sources.
+
 **And the profile's height is a reader's to drag**, which on a steep chain is
 resolution rather than taste. The scale is the coarser of length-per-width and
 relief-per-height, so where the height binds every pixel given is a finer scale.
@@ -384,9 +394,16 @@ horizontal scale off the distance marks, names the crosshair's sample with it,
 and takes the vertical scale from that sample's height: **the two agree to six
 decimals** at zoom 1, 2, 4, the ceiling and the 60 px floor. Do not test it with
 the crosshair alone — it snaps to the nearest sample, and a probe that assumes
-the sample it aimed at reports a 0.2 to 0.44 % bias of its own making. It stands in **two rows above the chart**, title with
-the figures right of it and the button with the colour key right of that. And its
-height is **a reader's to drag**, from a grip on the top edge, floor 60 px and
+the sample it aimed at reports a 0.2 to 0.44 % bias of its own making.
+
+It stands in **two rows above the chart** for a chain — title with the figures
+right of it, and the button with the colour key right of that — and a third for a
+route, which also says what ground its file covers. The row with the button is
+**a sentence and not a row of boxes**: the licences begin where the point count
+ends and wrap mid-list. As flex items they could only fit on that line or not,
+and a route naming seven sources in 300 characters did not, so the whole list
+dropped to a line of its own and left the count beside the button with nothing
+after it. And its height is **a reader's to drag**, from a grip on the top edge, floor 60 px and
 ceiling the map's height less 80 — so `chartHeight` is not a constant and a probe
 that assumes 205 px is assuming a default nobody promised.
 

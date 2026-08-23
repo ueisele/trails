@@ -2482,21 +2482,32 @@ class _ProfilePanel(MacroElement):
             // stretch of OSM is share-alike and a stretch of UT.no is
             // non-commercial, and the reader should know which before pressing
             // the button rather than afterwards.
+            // **Text, not a row of boxes.** As flex items the button, the
+            // count and the licences were three things that either fitted on one
+            // line or did not: a route drawing on seven sources names them in
+            // some 300 characters, so the whole list moved to a line of its own
+            // and left the count sitting alone beside the button. Laid out as a
+            // sentence it starts where the count ends and wraps mid-list, which
+            // is what a chain has always looked like — the chain's list is just
+            // short enough that flex never had to choose.
             var offer = document.createElement('div');
-            offer.style.cssText = 'margin:4px 0 2px;display:none;gap:8px;align-items:baseline;flex-wrap:wrap';
+            offer.style.cssText = 'margin:4px 0 2px;display:none';
             var download = document.createElement('button');
             download.type = 'button';
             download.textContent = 'Download GPX';
             download.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-right:8px;cursor:pointer';
             var carries = document.createElement('span');
-            carries.style.cssText = 'color:#333';
+            carries.style.cssText = 'color:#333;margin-right:8px';
             var licensed = document.createElement('span');
             licensed.style.cssText = 'color:#666;font-size:11px';
             // What kind of ground the file covers, which only a route states:
             // its three marking buckets, and the length no source records a path
-            // along. A chain leaves this row empty.
+            // along. A chain leaves this row empty. A line of its own and
+            // deliberately so: the licences say who may be asked about the file,
+            // this says what ground it covers, and run together the two read as
+            // one longer list of sources.
             var noted = document.createElement('span');
-            noted.style.cssText = 'color:#666;font-size:11px';
+            noted.style.cssText = 'color:#666;font-size:11px;display:block;margin-top:2px';
             offer.appendChild(download);
             offer.appendChild(carries);
             offer.appendChild(licensed);
@@ -3339,7 +3350,7 @@ class _ProfilePanel(MacroElement):
                 // what it composed cannot be written out: the file has to say
                 // what its legs are and where its waypoints went, and a button
                 // this panel could not honour is worse than no button at all.
-                offer.style.display = (selected && (!selected.composed || selected.plan)) ? 'flex' : 'none';
+                offer.style.display = (selected && (!selected.composed || selected.plan)) ? 'block' : 'none';
                 noted.textContent = '';
                 if (!selected || (selected.composed && !selected.plan)) { return; }
                 if (!selected.shape) {
