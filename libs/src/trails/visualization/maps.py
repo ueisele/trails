@@ -3116,7 +3116,24 @@ class _ProfilePanel(MacroElement):
                     // level the lowest reading has to stay in the box, and where
                     // the height binds there is no surplus to spend, so this
                     // comes out at the midpoint and nothing moves.
-                    var floorM = Math.min(seenLow, Math.max(0, seenHigh - carries));
+                    // **Sea level stands clear of the floor rather than on
+                    // it.** A waypoint resting at 0 m is a disc, and a disc on
+                    // the floor is half a disc; the label had the km numbers
+                    // immediately under it as well. The clearance is a layout
+                    // margin and not a claim about height, so it is counted in
+                    // pixels — and capped against the panel's own height, or a
+                    // reader who drags it short spends a quarter of what is left
+                    // on empty water.
+                    var spare = Math.min(18, tall / 4) * metresPerPixel;
+                    // Where the floor would have to stand for that, and how low
+                    // it may go at all without pushing the high point out of the
+                    // box. Where sea level cannot be reached the old midpoint is
+                    // the answer: pinning the floor as low as it will go instead
+                    // would jam the curve against the ceiling, which is the same
+                    // arbitrariness the other way up.
+                    var wanted = -spare, lowest = seenHigh - carries;
+                    var floorM = wanted < lowest ? (seenLow + seenHigh - carries) / 2
+                                                 : Math.min(wanted, seenLow);
                     view.centre = floorM + carries / 2;
                 }
 
@@ -3190,9 +3207,9 @@ class _ProfilePanel(MacroElement):
                     var frame = document.createElementNS(SVG, 'clipPath');
                     frame.setAttribute('id', id);
                     var shield = document.createElementNS(SVG, 'rect');
-                    shield.setAttribute('x', box.left - spare); shield.setAttribute('y', box.top);
+                    shield.setAttribute('x', box.left - spare); shield.setAttribute('y', box.top - spare);
                     shield.setAttribute('width', Math.max(0, wide + 2 * spare));
-                    shield.setAttribute('height', Math.max(0, tall));
+                    shield.setAttribute('height', Math.max(0, tall + 2 * spare));
                     frame.appendChild(shield);
                     chart.appendChild(frame);
                     var group = document.createElementNS(SVG, 'g');
@@ -3201,12 +3218,14 @@ class _ProfilePanel(MacroElement):
                     return group;
                 };
                 var inside = framed('trails-profile-frame-{{ this.get_name() }}', 0);
-                // **A second frame, wider by a waypoint's own radius.** The
-                // curve's has to end where the plot does — zoomed in, the run it
-                // is drawn from reaches a sample beyond each edge on purpose —
-                // but a waypoint sits *at* a distance, and every route has one at
-                // nought and one at its end. Clipped to the plot they are both
-                // drawn as half discs, every time.
+                // **A second frame, roomier by a waypoint's own radius, in
+                // both directions.** The curve's has to end where the plot does —
+                // zoomed in, the run it is drawn from reaches a sample beyond
+                // each edge on purpose — but a waypoint sits *at* a distance and
+                // *at* a height, and a disc straddles both. Every route has a
+                // point at nought and one at its end, and any point at sea level
+                // sits on the floor: clipped to the plot, all of them came out
+                // as half discs.
                 var marks = framed('trails-profile-marks-{{ this.get_name() }}', STATION_R + 1);
 
                 var slope = gradients(shape);

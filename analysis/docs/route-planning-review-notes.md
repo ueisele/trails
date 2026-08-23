@@ -135,9 +135,14 @@ most of the height unused — 39 km across this panel is **30.23 m to the pixel*
 so the box carries **5,170 m** of height and a route with 658 m of relief draws as
 a 22 px ribbon. That surplus used to be split evenly above and below, which put a
 waypoint standing at **0 m just under the middle of the box**, where it reads as
-half way up something. The band is anchored now: `floor = min(seenLow, max(0,
-seenHigh - carries))`, so sea level is the floor wherever there is room for it,
-and the ribbon's height above the floor is the reader's own. Both clamps are
+half way up something. The band is anchored now, and sea level stands **clear** of the floor rather
+than on it: a waypoint resting at 0 m is a disc, and a disc on the floor is half
+a disc. The clearance is a layout margin and not a claim about height, so it is
+counted in pixels — **18, capped at a quarter of the panel** — and where sea
+level cannot be reached at all the old midpoint is what answers, because pinning
+the floor as low as it will go instead jams the curve against the ceiling, which
+is the same arbitrariness the other way up. The ribbon's height above sea level
+is then the reader's own. Both clamps are
 real — below sea level the lowest reading has to stay in the box, and where the
 height binds there is no surplus, so it comes out at the midpoint and nothing
 moves. **The scale is untouched**: re-driven afterwards, both axes still agree to
@@ -165,12 +170,13 @@ not on. Driven with a series holding a hole under the middle point: it lands at
 the box's floor less its own radius, in `#9e9e9e`, and only the two readable
 points keep their dashed rules.
 
-**And they needed a frame of their own.** The curve's clip has to end exactly at
-the plot, because zoomed in the run it is drawn from deliberately reaches one
-sample past each edge. But a waypoint sits *at* a distance, and **every route has
-one at nought and one at its end**, so clipped to the plot both were drawn as
-half discs — every route, every time. The marks now use a second clip, wider by
-their own radius.
+**And they needed a frame of their own, roomier in both directions.** The curve's
+clip has to end exactly at the plot, because zoomed in the run it is drawn from
+deliberately reaches one sample past each edge. But a waypoint sits *at* a
+distance **and at a height**, and a disc straddles both: every route has a point
+at nought and one at its end, and any point at sea level sits on the floor — so
+clipped to the plot every one of them came out as half a disc. The marks use a
+second clip, roomier by their own radius on all four sides.
 
 **And a highlighted line could not be let go of while planning.** The
 click-highlight has exactly two ways out — a click on the line, and a click on
