@@ -1362,6 +1362,54 @@ class TestPlanMode:
 
         assert "if (on && window.trailsHighlight) { window.trailsHighlight.clear(); }" in html
 
+    def test_the_points_are_listed_in_order_behind_their_own_count(self):
+        """A route is a sequence and a map cannot show a sequence: reading eleven
+        numbered pins off a map to find that 7 comes before 8 is searching, not
+        reading. The count was already naming what the list holds, so it is the
+        handle -- a second heading saying the same number would be the two-panel
+        mistake the legend was cured of.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "function drawList(stations) {" in html
+        assert "listOpen = !listOpen;" in html
+        assert "listBox.style.display = (listable && listOpen) ? '' : 'none';" in html
+        # Drawn from the walk the panel is fed, so how far along a point comes is
+        # the walk's answer and not a sum of the legs'.
+        assert "drawList(shape.stations || []);" in html
+
+    def test_a_row_can_be_dragged_to_any_place_in_the_route(self):
+        """A splice and not a run of swaps: a swap is a full re-route of the two
+        legs it touches, so dragging a point four places would route eight legs
+        to arrive at the two that changed -- and dropping a row between two
+        others means taking it out and putting it back in, where a run of swaps
+        would drag every point it passed one place the other way.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "function moveTo(at, to) {" in html
+        assert "points.splice(to, 0, points.splice(at, 1)[0]);" in html
+        assert "row.draggable = true;" in html
+        # Firefox starts no drag at all without something in the transfer.
+        assert "event.dataTransfer.setData('text/plain', String(index));" in html
+        assert "if (from !== null && from !== index) { moveTo(from, index); }" in html
+
+    def test_the_list_is_not_rebuilt_under_a_row_in_the_air(self):
+        """A leg settling mid-drag would rebuild the rows under the pointer and
+        the drop would land on nothing."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "if (heldRow !== null) { return; }" in html
+
     def test_the_points_a_reader_put_down_are_recorded_as_the_walk_happens(self):
         """A crossing contributes no walking distance and a leg still being
         worked out contributes none either, so a sum over the legs' own lengths

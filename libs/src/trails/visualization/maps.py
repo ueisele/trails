@@ -6257,6 +6257,22 @@ class _PlanMode(MacroElement):
                 });
             }
 
+            // **And to any place at all, which a list can ask for and a pin
+            // cannot.** A splice rather than a run of swaps: a swap is a full
+            // re-route of the two legs it touches, so dragging a point four
+            // places up a list would route eight legs to arrive at the two that
+            // actually changed. It is also a different gesture's meaning —
+            // dropping a row between two others takes it out and puts it back
+            // in, where a run of swaps would drag every point it passed one
+            // place the other way.
+            function moveTo(at, to) {
+                applyEdit(function () {
+                    if (at < 0 || at >= points.length || to < 0 || to >= points.length || at === to) { return; }
+                    points.splice(to, 0, points.splice(at, 1)[0]);
+                    chosen = to;
+                });
+            }
+
             // One misclick should not cost a route, and taking the last point
             // back is the gesture a reader reaches for before they know the rest
             // of these are there.
@@ -6464,14 +6480,131 @@ class _PlanMode(MacroElement):
             buttons.appendChild(later);
             buttons.appendChild(drop);
 
+            // ---- the points, listed --------------------------------------
+            // **A route is a sequence, and a map cannot show a sequence.** The
+            // pins carry numbers, but reading eleven of them off a map to find
+            // out that point 7 comes before point 8 is not reading, it is
+            // searching. The list is the sequence itself: one row a point, in
+            // order, with what it is called and how far into the walk it comes.
+            //
+            // It folds away behind the count, which was already saying "5
+            // points" and is now the handle for the five. A second heading
+            // saying the same number would be the two-panel mistake the legend
+            // was just cured of.
+            var listOpen = false, listStations = [], heldRow = null;
+            var listBox = document.createElement('div');
+            listBox.style.cssText = 'margin-top:4px;max-height:220px;overflow-y:auto;display:none';
+            // The wheel is the map's except where this has somewhere left to
+            // scroll, the same bargain the legend strikes: a list that will not
+            // scroll is as useless as a map that will not zoom, and only one of
+            // them can have any one turn.
+            listBox.addEventListener('wheel', function (event) {
+                var room = listBox.scrollHeight - listBox.clientHeight;
+                if (room <= 0) { return; }
+                if (event.deltaY < 0 ? listBox.scrollTop > 0 : listBox.scrollTop < room - 1) {
+                    event.stopPropagation();
+                }
+            }, {passive: true});
+
+            function drawList(stations) {
+                listStations = stations || [];
+                // Never while a row is in the air. A leg settling mid-drag would
+                // otherwise rebuild the rows under the pointer and the drop
+                // would land on nothing.
+                if (heldRow !== null) { return; }
+                while (listBox.firstChild) { listBox.removeChild(listBox.firstChild); }
+                points.forEach(function (point, index) {
+                    var called = nameOf(point, index);
+                    var row = document.createElement('div');
+                    row.draggable = true;
+                    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 3px;' +
+                        'border-radius:3px;cursor:pointer;' +
+                        (index === chosen ? 'background:#e8eaf6' : '');
+                    var grip = document.createElement('span');
+                    grip.textContent = '\u2261';
+                    grip.title = 'Drag to move this point in the route';
+                    grip.style.cssText = 'cursor:grab;color:#9e9e9e;flex:none';
+                    var number = document.createElement('span');
+                    number.textContent = String(index + 1);
+                    number.style.cssText = 'flex:none;min-width:14px;text-align:right;font-weight:600;color:' + ROUTE;
+                    // What it is called where anything nearby is named, and its
+                    // position where nothing is. A row that said only "3" would
+                    // be the map's numbers again, in a column.
+                    var says = document.createElement('span');
+                    says.textContent = called.name
+                        ? called.name
+                        : point.lat.toFixed(4) + ', ' + point.lon.toFixed(4);
+                    says.style.cssText = 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;' +
+                        'white-space:nowrap;color:' + (called.name ? '#333' : '#777');
+                    if (called.name) { says.title = called.name + (called.kind ? ' \u00b7 ' + called.kind : ''); }
+                    // How far into the walk it comes, which is the one thing the
+                    // profile beside it and the map above it both leave out.
+                    var far = document.createElement('span');
+                    far.style.cssText = 'flex:none;color:#777;font-variant-numeric:tabular-nums';
+                    far.textContent = listStations.length > index
+                        ? (listStations[index] / 1000).toFixed(2) + ' km' : '';
+                    var out = document.createElement('button');
+                    out.type = 'button';
+                    out.draggable = false;
+                    out.textContent = '\u00d7';
+                    out.title = 'Take this point out and join the two legs that met at it';
+                    out.style.cssText = 'flex:none;font:inherit;font-size:13px;line-height:1;padding:0 4px;' +
+                        'border:0;background:none;color:#777;cursor:pointer';
+                    out.addEventListener('click', function (event) {
+                        // Or the row's own click would take hold of the point
+                        // this one is removing.
+                        event.stopPropagation();
+                        remove(index);
+                    });
+                    row.addEventListener('click', function () {
+                        chosen = chosen === index ? -1 : index;
+                        refresh();
+                    });
+                    row.addEventListener('dragstart', function (event) {
+                        heldRow = index;
+                        event.dataTransfer.effectAllowed = 'move';
+                        // Firefox starts no drag at all without something in the
+                        // transfer, whatever the handlers say.
+                        event.dataTransfer.setData('text/plain', String(index));
+                        row.style.opacity = '0.4';
+                    });
+                    row.addEventListener('dragover', function (event) {
+                        if (heldRow === null || heldRow === index) { return; }
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                        // An inset rather than a border, which would move every
+                        // row below it by two pixels as the pointer passes.
+                        row.style.boxShadow = 'inset 0 ' + (index < heldRow ? '2px' : '-2px') + ' 0 ' + ROUTE;
+                    });
+                    row.addEventListener('dragleave', function () { row.style.boxShadow = ''; });
+                    row.addEventListener('drop', function (event) {
+                        event.preventDefault();
+                        row.style.boxShadow = '';
+                        var from = heldRow;
+                        heldRow = null;
+                        if (from !== null && from !== index) { moveTo(from, index); }
+                    });
+                    row.addEventListener('dragend', function () {
+                        heldRow = null;
+                        row.style.opacity = '';
+                        row.style.boxShadow = '';
+                    });
+                    row.appendChild(grip);
+                    row.appendChild(number);
+                    row.appendChild(says);
+                    row.appendChild(far);
+                    row.appendChild(out);
+                    listBox.appendChild(row);
+                });
+            }
+
             // Said rather than discovered. Three gestures share one click here
             // and none of them is guessable from a map that has never had more
             // than one.
             var hint = document.createElement('div');
             hint.style.cssText = 'margin-top:2px;color:#777;max-width:16em';
             hint.textContent = 'Drag a point to move it \u00b7 click one to work on it \u00b7 ' +
-                'click the route to put one in';
-
+                'click the route to put one in \u00b7 click the count for the list';
 
             // What the last load turned out to be, or what went wrong with it.
             var loadSaid = '';
@@ -6576,6 +6709,7 @@ class _PlanMode(MacroElement):
                 box.appendChild(back);
                 box.appendChild(edits);
                 box.appendChild(status);
+                box.appendChild(listBox);
                 box.appendChild(hint);
                 // Clicking inside the control must not reach the map, and the
                 // wheel must, or the map reads as frozen under it.
@@ -6609,9 +6743,17 @@ class _PlanMode(MacroElement):
                 }
                 status.style.display = on ? '' : 'none';
                 hint.style.display = on ? '' : 'none';
+                // The count is the list's handle. It was already naming what the
+                // list holds, and a second heading saying the same number is the
+                // two-panel mistake the legend was cured of.
+                var listable = on && points.length > 0;
+                status.style.cursor = listable ? 'pointer' : '';
+                status.title = listable ? 'Show or hide the points, one to a row' : '';
+                listBox.style.display = (listable && listOpen) ? '' : 'none';
                 if (on) {
-                    say(points.length === 0 ? 'Click the map to place the first point.'
-                        : points.length + (points.length === 1 ? ' point' : ' points') + (settling ? ' \\u00b7 working\\u2026' : ''));
+                    say((listable ? (listOpen ? '\\u25be ' : '\\u25b8 ') : '')
+                        + (points.length === 0 ? 'Click the map to place the first point.'
+                           : points.length + (points.length === 1 ? ' point' : ' points') + (settling ? ' \\u00b7 working\\u2026' : '')));
                 }
                 // What the last load turned out to be, and what it cost once
                 // every leg of it has settled. **Stamped here rather than where
@@ -6659,9 +6801,17 @@ class _PlanMode(MacroElement):
             // file from the same series it drew.
             function present() {
                 var showing = panel();
-                if (!showing) { return; }
-                if (!points.length) { showing.series(null); return; }
+                if (!points.length) {
+                    // The list is drawn from the same walk the panel is fed, and
+                    // for the same reason the panel is: how far along a point
+                    // comes is the walk's answer, not a sum of the legs'.
+                    drawList([]);
+                    if (showing) { showing.series(null); }
+                    return;
+                }
                 var shape = composeRoute();
+                drawList(shape.stations || []);
+                if (!showing) { return; }
                 showing.series({label: 'planned route', figure: figuresOf(shape), shape: shape,
                                 told: told(shape), plan: writable()});
             }
@@ -6694,6 +6844,12 @@ class _PlanMode(MacroElement):
                 }
                 refresh();
             }
+
+            status.addEventListener('click', function () {
+                if (!on || !points.length) { return; }
+                listOpen = !listOpen;
+                refresh();
+            });
 
             toggle.addEventListener('click', function () { switchTo(!on); });
             back.addEventListener('click', undo);
@@ -6788,6 +6944,7 @@ class _PlanMode(MacroElement):
                 // check does both.
                 insert: insert,
                 remove: remove,
+                moveTo: moveTo,
                 moveBy: moveBy,
                 dragTo: function (at, lat, lon) {
                     applyEdit(function (graph) {

@@ -116,6 +116,38 @@ out per feature and compresses against nothing. **Showing a figure is the
 expensive half; carrying it is nearly free.** Neither budget is threatened, and
 the ratio is the thing to remember before adding the next row.
 
+**And plan mode lists its points, one to a row.** A route is a sequence, and a
+map cannot show a sequence: the pins carry numbers, but reading eleven of them
+off the terrain to establish that 7 comes before 8 is searching rather than
+reading. Each row carries what the point is called where anything named is within
+reach, its position where nothing is, and **how far into the walk it comes** —
+which is the one thing neither the map above it nor the profile beside it says.
+A row can be dragged to any place in the route and taken out with its own button.
+
+**It folds away behind the count**, which was already saying *4 points* and is now
+the handle for the four; a second heading naming the same number would be the
+two-panel mistake the legend had just been cured of.
+
+**The move is a splice and not a run of swaps.** `moveBy` swaps with a neighbour,
+which is the right gesture for a pin — but a swap is a full re-route of the two
+legs it touches, so dragging a point four places up the list would route eight
+legs to arrive at the two that changed. It is also a different meaning: dropping a
+row between two others takes it out and puts it back in, where a run of swaps
+would drag every point it passed one place the other way.
+
+Driven on a four-point route: the count folds open, dragging row 4 onto row 2
+gives `[1, 4, 2, 3]` with the distances recomputed — **0.00, 15.82, 31.27,
+38.31 km** — and the ×  on row 2 takes it to three points. A **real** mouse drag in
+Firefox does the same as the synthetic one, which is worth checking separately:
+HTML5 dragging is the browser's own and a handler that answers a dispatched
+`DragEvent` says nothing about whether the browser ever starts one.
+
+Two things it did not do. The old ◀ ▶ *Remove* row that appears while a pin is
+held is left alone: it works from the map, the list works from the sequence, and
+taking away a working gesture to avoid an overlap is not an improvement. And the
+list is **not** rebuilt while a row is in the air — a leg settling mid-drag would
+otherwise rebuild the rows under the pointer and the drop would land on nothing.
+
 **And the profile marks the points a route was planned with.** *Where is the
 climb* is half an answer until the panel says which two of the reader's own
 points it lies between. Drawn as the pin is drawn — a pale disc, a dark ring, the
