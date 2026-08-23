@@ -132,6 +132,39 @@ height less 80, and the map does not pan under it: centre and zoom identical
 before and after. **A control that grows over the map has to be measured against
 the map**, and this one leaves 80 px of it at full stretch.
 
+**And the curve can be zoomed into, where there is anything to see.** That
+proviso is the whole finding. Measured over the built graph, the median chain is
+drawn at **0.16 m/px** against a series carrying a height every **5.12 m**, so
+the panel already magnifies every reading it holds some thirty times, and only
+**126 chains of 11,264** — 1,210 km of 5,853 — are drawn coarser than their own
+samples. Zoom belongs to the long chain and to a planned route; on the other
+99 % the wheel goes to the map as it always has, and the map's own 9 → 11 is
+unmoved. The ceiling is the data's rather than a taste — one reading per pixel,
+**6.31×** on the 42 km Rundtur in a 1,400 px window — and it is not a constant,
+because it is the drawn scale over the reading spacing and the drawn scale moves
+with the panel's width and height. The scale stays true in both axes at every step, and
+not approximately: **both carry the same metres per pixel to six decimals** at
+zoom 1, 2, 4, the ceiling and the panel's 60 px floor, so the drawn gradient is
+the ground's on all of them. Dragging moves the
+window, a double click puts the whole chain back, a new selection starts over.
+The page did not move — **39.4 MB, the payload untouched at 4.93 MB**. A
+behaviour is written once, which is why it is free where a popup row is not.
+
+**And two defects in the grip that shipped yesterday**, both found by driving it
+rather than by reading it, and both the same shape: the ceiling was measured as
+the panel's height less the chart's, taken at the moment of the call. A redraw is
+coalesced to the next frame, so two mouse moves inside one frame measure a fresh
+chart against a stale box — the second read an overhead of **minus 620**, a
+ceiling of **1,440**, and handed out a panel taller than the map. That is not a
+corner: **Firefox reports `clientY` as −86 the moment the pointer leaves the foot
+of the window**, so a drag running off the bottom delivers three of them at once,
+and the panel opened at 900 px on a 900 px map. Folded, the same arithmetic reads
+35 px of box against a 205 px chart — an overhead of minus 170, a ceiling of 990
+— and a click on the map folds the panel, which a click can do in the middle of a
+drag: measured, that reopened it at 705 px. Both are closed. The overhead is now
+measured against the height the panel was **laid out** with, and the grip does
+nothing while the panel is folded.
+
 **And a chain's popup says the steepest ground it covers**, over 25 m and over
 100 m, absolute. Absolute because this park's steepest chain climbs 9 m and drops
 816, so a signed maximum would call it flat; two windows because one invites the
@@ -343,14 +376,28 @@ probe rather than screenshotted. The panel's container is
 its text, or a probe reads the first of eleven thousand popups instead and
 reports nonsense confidently. That cost an hour.
 
-**The panel itself is now three things to check rather than one.** It draws
-**true to scale** — one metres-per-pixel for both axes — so the test is the drawn
-bounding box against the ground's own ratio, and it holds within **0.2 %**, which
-is the stroke's half-pixel. It stands in **two rows above the chart**, title with
+**The panel itself is now four things to check rather than one.** It draws
+**true to scale** — one metres-per-pixel for both axes, at every zoom — and the
+bounding box against the ground's ratio holds within **0.2 %**, which is only the
+stroke's half-pixel and is as much as that test can say. The sharp test reads the
+horizontal scale off the distance marks, names the crosshair's sample with it,
+and takes the vertical scale from that sample's height: **the two agree to six
+decimals** at zoom 1, 2, 4, the ceiling and the 60 px floor. Do not test it with
+the crosshair alone — it snaps to the nearest sample, and a probe that assumes
+the sample it aimed at reports a 0.2 to 0.44 % bias of its own making. It stands in **two rows above the chart**, title with
 the figures right of it and the button with the colour key right of that. And its
 height is **a reader's to drag**, from a grip on the top edge, floor 60 px and
 ceiling the map's height less 80 — so `chartHeight` is not a constant and a probe
 that assumes 205 px is assuming a default nobody promised.
+
+And it holds a **window** on the chain, which `window.trailsProfilePanel.view()`
+reports: `zoom`, `at` — the distance at the left edge, in metres — `centre`, the
+height at the middle, `shown`, `metresPerPixel` and `closest`, the furthest the
+readings let it go. At rest that is zoom 1 and `at` 0 on every chain, and
+`closest` is **1 on 99 % of them**, which is how the page says there is nothing
+under the drawing to reach. Where `closest` is 1 the wheel belongs to the map and
+the chart does not touch it: that is the same 9 → 11 as everywhere else, and it
+is worth checking on a short chain rather than assuming it.
 
 The crosshair now stops where the curve does. At a true scale a steep chain
 leaves width unused — 638 px of 1,170 on the 3 km one — and there is no ground
@@ -1306,6 +1353,147 @@ them written in the decisions document rather than in the phase. A wrong figure
 fails an implementation loudly. A wrong premise sends it in the wrong direction
 quietly, and it is the sentence that sounds most like background that is worth
 measuring.
+
+## What the profile zoom found
+
+Not a phase. It is the second half of the panel work the true-scale fix started,
+and it was the readiness check rather than the build that produced everything
+worth writing down.
+
+### The premise did not hold, and it was the whole premise
+
+*Zoom shows detail the drawing is hiding.* Measured over the built graph, per
+chain, at the panel's default 1,238 px by 205 px: the median chain is drawn at
+**0.16 m/px**, and its series carries a height every **5.12 m**. The panel
+magnifies the median chain **thirty times** already. Across all 11,264 chains
+with a readable series, exactly **126 (1.1 %)** are drawn coarser than their own
+samples — 1,210 km of 5,853. Eight are coarser by more than 4×.
+
+So the feature is not for the map's lines. It is for the 42 km Rundtur, which
+stands at 36.28 m/px against a 5.09 m spacing and hides 7.1×, and for the
+**planned route**, which in this park is that long by nature. Building it as a
+chain feature and testing it on chains would have found nothing wrong and shipped
+something nobody could use.
+
+Two thirds of the ratio is height rather than length, incidentally: **5,188 of
+the 11,264 are bound by the height and not the width**. Those are the ones the
+grip helps, and they are almost exactly the ones the zoom cannot.
+
+### The ceiling is the data's, and it is not a constant
+
+One reading per pixel, and past it the panel magnifies the straight lines drawn
+between samples — a claim to resolution nothing supports. In the page that is
+`base / spacing`, where `spacing` is the mean over the readable samples: the
+mean rather than a median because the series is laid **per edge** and does not
+sample evenly, and a median per render costs a sort.
+
+Measured in the browser on the Rundtur, in a 1,400 px window: **6.31×**, taking
+5.216 m/px against a 5.182 m mean spacing. Offline over a 1,238 px panel the same
+chain gives 7.13× against a 5.09 m median. The two disagree because **the ceiling
+is not a property of the chain** — it is the drawn scale over the reading
+spacing, and the drawn scale moves with the panel's width, with the window, and
+with wherever the reader dragged the grip. Recording 7.1× as a reference figure
+would be recording a screenshot.
+
+### The angle survives the zoom, measured rather than argued
+
+By construction one `metresPerPixel` drives both `x()` and `y()`, and a zoom
+changes only that number — so the angle cannot move. That is an argument, and
+the argument is what a reviewer should distrust, so it was measured at every
+step: zoom 1, 2, 4, the ceiling, on two chains, and at the 60 px floor with a
+window standing over the box. **Both axes carry the same metres per pixel to six
+decimals in every one of them**, and the drawn gradient equals the ground's to
+the third: 32.900775 at rest, 5.215927 at the ceiling, 9.021299 at the floor.
+
+Getting that measurement honest took three attempts, and the two failures are
+worth keeping:
+
+- **The bounding box of the curve is too blunt a ruler here.** At a true scale a
+  chain long enough to zoom into draws as a ribbon twenty pixels tall, so half a
+  stroke width is a whole per cent. It gave 0.07 % at rest, which is fine, and
+  could not have told a real error from the stroke.
+- **The crosshair snaps, and a probe that forgets it measures its own
+  assumption.** Aiming the pointer at a chosen sample and then computing with
+  *that* sample's height reads whatever neighbour the snap actually chose: it
+  produced a steady 0.2 to 0.44 % that looked like a real bias and was entirely
+  the probe's. At zoom 1 one pixel of this chain covers six samples, so no
+  reading printed to 10 m and 1 m can name which.
+
+What works: read the **horizontal** scale off the distance marks the axis draws —
+they carry their own value, and no snapping is involved — then use *only* that
+to say which sample the crosshair dot is sitting on, and let the vertical scale
+fall out of that sample's height. The scale under test never takes part in
+identifying the thing it is tested against. Where the axis cannot name a point
+cleanly the probe declines to measure rather than guessing.
+
+**And the printed gradient does not move either**, for a different reason: it is
+read over a 25 m window from the full series, which the view never touches. What
+the crosshair says at 20.61 km is what it says at every zoom.
+
+### The panel's own shape is a gradient, and it decides what fits
+
+At a true scale the box holds `tall × metresPerPixel` of height and
+`wide × metresPerPixel` of length, so a window fits top to bottom exactly when
+the ground across it averages gentler than `tall / wide` — **171 over 1,170, or
+14.6 %** — and **that ratio does not move with the zoom**. Measured over the six
+longest chains: everything fits to 4×, and at 8× three of them stand 108 to 163 m
+over, which at that scale is 24 to 36 px.
+
+At the reachable ceiling, with the panel at its default, nothing in this park
+overflows: the worst is 534 m of relief over a 5.31 km window against 775 m
+carried. It overflows the moment the reader drags the panel **short**, which is
+the case the vertical drag exists for. Driven at the 60 px floor: the window
+carries 136 m, the relief under it runs to **199 m**, and **412 of 1,368 drawn
+points** fall outside the box and are clipped rather than painted over the height
+labels. Where the relief does fit — 125 m against 136 — a vertical drag moves
+nothing at all, because the middle is pinned. There is no way to drag the curve
+off its own panel.
+
+### Two defects in the grip, and one arithmetic behind both
+
+Neither is in the zoom. Both are in the drag that shipped the day before, and
+both are the same mistake: **the overhead was measured live, against a number
+that had already moved.**
+
+`most = map.getSize().y - (box.offsetHeight - chartHeight) - 80`. The redraw is
+coalesced to one a frame, so between the ask and the frame `chartHeight` is the
+new height and `box.offsetHeight` is still the old panel. Two moves in one frame
+and the second computes an overhead of **minus 620**, a ceiling of **1,440**, and
+grants a panel taller than the map. Measured: the panel opened at **900 px on a
+900 px map**.
+
+And it is not a corner case, because of the second thing this turned up:
+**Firefox reports `clientY` as −86 the moment the pointer leaves the foot of the
+window.** Not a clamp to 899, not a stop — a small negative number, which reads
+as *dragged far upwards*. A drag that runs off the bottom of the screen therefore
+delivers three such moves at once, which is exactly the two-in-one-frame case.
+
+The same arithmetic with the panel **folded** reads 35 px of box against a 205 px
+chart: an overhead of minus 170, a ceiling of 990. A click on the map folds the
+panel, and a click can land mid-drag. Measured: reopened at **705 px**.
+
+Both closed. The overhead is measured against `laidOut`, the height the panel was
+last actually laid out with, and `stretchTo` returns while the panel is folded;
+`fold()` drops any drag in progress so it cannot be picked up again later. After
+the fix the ceiling holds at **750** from either direction and the floor at 60.
+
+### Two ways the probe lied, and both are the recorded family
+
+**Selecting a chain by firing its click also opens its popup.** `layer.fire('click')`
+runs every handler bound to that layer, and one of them is the popup. Leaflet
+then auto-pans the popup to the middle of the map — and a Leaflet popup calls
+`disableScrollPropagation` on its own content. So a probe that selects a chain
+and then turns the wheel at the map centre is turning it **over the popup**, gets
+no zoom, and reports that the panel broke the map. It cost twenty minutes and one
+wrong conclusion. `closePopup()` after the `fire`, or wheel somewhere the popup is
+not.
+
+**And a mouse driven outside the window does not report where it was sent.**
+Playwright asked for y = 1,009; the page was told −86. Any probe that drags past
+an edge is measuring the browser's coordinate handling and not the page. The way
+to test a drag's limits is to dispatch the moves with the coordinates written
+down: driven that way the same grip gave 60 at the floor and 750 at the ceiling,
+cleanly, before and after the fix.
 
 ## What phase 2 found
 
