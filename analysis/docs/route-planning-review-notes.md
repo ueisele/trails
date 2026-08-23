@@ -130,6 +130,32 @@ distance at the head of leg *i* is point *i*'s, and the walk's end is the last
 one's. Driven on a four-point route: the marks land within **0.02 px** of where
 their own distance says.
 
+**And the floor of the box means sea level.** At a true scale a long route leaves
+most of the height unused — 39 km across this panel is **30.23 m to the pixel**,
+so the box carries **5,170 m** of height and a route with 658 m of relief draws as
+a 22 px ribbon. That surplus used to be split evenly above and below, which put a
+waypoint standing at **0 m just under the middle of the box**, where it reads as
+half way up something. The band is anchored now: `floor = min(seenLow, max(0,
+seenHigh - carries))`, so sea level is the floor wherever there is room for it,
+and the ribbon's height above the floor is the reader's own. Both clamps are
+real — below sea level the lowest reading has to stay in the box, and where the
+height binds there is no surplus, so it comes out at the midpoint and nothing
+moves. **The scale is untouched**: re-driven afterwards, both axes still agree to
+six decimals at every zoom.
+
+Sea level is also **drawn**, in its own blue, wherever the box holds it, and
+labelled where no ordinary tick already sits at nought. It is the one height on
+this panel that is not a choice; every other line is drawn where the data happens
+to be.
+
+**And no height label closer to the next than it can be read apart.** Asking for
+a number of labels is not the same as having room for them: a 100 m relief over
+39 km draws as a **three-pixel** ribbon, and the two the count asked for landed
+**1.7 px apart** and came out as one smear. The count says how many to aim for;
+twelve pixels of clearance says which of them there is room to draw. On that route
+the answer is one, plus sea level at the floor — which is the whole truth about
+it.
+
 **And one the height model has nothing to say about rests on the floor.** It was
 the ceiling first, and that put a waypoint set on the water at the very top of the
 profile — where a summit goes, and the one reading it must not have. The floor is

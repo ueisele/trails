@@ -1676,6 +1676,9 @@ class _ProfilePanel(MacroElement):
             // Blue, deliberately: the steepest gradient band is red, and a red rule
             // over a red stretch of curve reads as part of the data.
             var AXIS = '#9e9e9e', TEXT = '#555', CROSS = '#1565c0';
+            // Sea level, which is the one height on this panel that is not a
+            // choice: every other line is drawn where the data happens to be.
+            var SEA = '#4fa3c7';
             // The dash a stretch nobody recorded a way along is drawn with,
             // here and on the map. One pattern, so the two read as one thing.
             var FREE_DASH = '5,4';
@@ -3099,7 +3102,22 @@ class _ProfilePanel(MacroElement):
                     if (view.centre === null) { view.centre = (seenLow + seenHigh) / 2; }
                     view.centre = Math.min(Math.max(view.centre, seenLow + carries / 2), seenHigh - carries / 2);
                 } else {
-                    view.centre = (seenLow + seenHigh) / 2;
+                    // **Sea level on the floor wherever it fits.** At a true
+                    // scale a long route leaves most of the height unused — 39 km
+                    // across this panel is 30 m to the pixel, so the box carries
+                    // 5,168 m of it and a route with 658 m of relief draws as a
+                    // 22 px ribbon. Centred in that surplus the ribbon sat where
+                    // nothing put it, and a point standing at 0 m came out just
+                    // under the middle of the box, which reads as half way up
+                    // something. Anchored, the floor of the box means sea level
+                    // and the ribbon's height above it is the reader's own.
+                    //
+                    // Clamped both ways, and both bounds are real: below sea
+                    // level the lowest reading has to stay in the box, and where
+                    // the height binds there is no surplus to spend, so this
+                    // comes out at the midpoint and nothing moves.
+                    var floorM = Math.min(seenLow, Math.max(0, seenHigh - carries));
+                    view.centre = floorM + carries / 2;
                 }
 
                 var middleY = (box.top + box.bottom) / 2;
@@ -3115,16 +3133,45 @@ class _ProfilePanel(MacroElement):
                 // what the box shows rather than what the window holds, so a
                 // window taller than the panel is not labelled off its own edge.
                 var heights = Math.max(2, Math.min(4, Math.round((plot.bottom - plot.top) / 34)));
+                // **And none of them closer together than they can be read.**
+                // Asking for a number of labels is not the same as having room
+                // for them: a 100 m relief over 39 km draws as a three-pixel
+                // ribbon, and the two this asked for landed 1.7 px apart and
+                // came out as one smear. The count above says how many to aim
+                // for; this says which of them there is room to draw.
+                var drawnHeights = [], lastY = null;
                 ticks(Math.max(seenLow, view.centre - carries / 2),
                       Math.min(seenHigh, view.centre + carries / 2), heights).forEach(function (value) {
-                    chart.appendChild(line(plot.left, y(value), plot.right, y(value), '#eceff1'));
-                    chart.appendChild(text(plot.left - 6, y(value) + 3, metres(value) + ' m', 'end'));
+                    var at = y(value);
+                    if (lastY !== null && Math.abs(at - lastY) < 12) { return; }
+                    lastY = at;
+                    drawnHeights.push(value);
+                    chart.appendChild(line(plot.left, at, plot.right, at, '#eceff1'));
+                    chart.appendChild(text(plot.left - 6, at + 3, metres(value) + ' m', 'end'));
                 });
                 // One number of decimals for the whole axis, decided by how far
                 // the window runs: 0.00 beside 1.0 reads as two different
                 // scales. The gridlines run the box's full height rather than
                 // the band's, so a twenty-pixel ribbon still has something to be
                 // read against.
+                // **And sea level itself, wherever the box holds it.** Every
+                // other line on this axis is drawn where the data happens to
+                // be; this one is the only height that means the same thing on
+                // every profile, and without it the floor of the box is a number
+                // a reader has to look up rather than a place they know.
+                if (0 >= view.centre - carries / 2 && 0 <= view.centre + carries / 2) {
+                    var sea = line(plot.left, y(0), plot.right, y(0), SEA);
+                    chart.appendChild(sea);
+                    // Not a second time: anchored to the floor, 0 is usually a
+                    // tick already, and two labels at one height read as two
+                    // heights.
+                    if (!drawnHeights.some(function (value) { return Math.abs(value) < 0.5; })) {
+                        var label = text(plot.left - 6, y(0) + 3, '0 m', 'end');
+                        label.setAttribute('fill', SEA);
+                        chart.appendChild(label);
+                    }
+                }
+
                 var decimals = shown < 2000 ? 2 : 1;
                 var alongs = Math.max(2, Math.min(6, Math.round(plot.width / 110)));
                 ticks(from, to, alongs).forEach(function (value) {
