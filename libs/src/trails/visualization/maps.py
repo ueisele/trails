@@ -2830,6 +2830,8 @@ class _ProfilePanel(MacroElement):
             // its pins with it; a station on this panel is the same point seen
             // from the side, and two colours for one point would be two points.
             var STATION = '#111111', STATION_R = 7;
+            // And the ink for one the height model has nothing to say about.
+            var STATION_UNREAD = '#9e9e9e';
 
             var crosshair = null;
 
@@ -3194,25 +3196,34 @@ class _ProfilePanel(MacroElement):
                     if (here < box.left - 1 || here > box.right + 1) { return; }
                     var sample = nearest(shape.distance, metres);
                     var value = shape.height[sample];
-                    // A point on ground nothing was read along still happened;
-                    // it is drawn against the foot of the box rather than not at
-                    // all, because a route with a hole in it is exactly when a
-                    // reader is looking for its points.
-                    var level = isNaN(value) ? box.top + 10 : y(value);
-                    var rule = line(here, box.bottom, here, level, STATION);
-                    rule.setAttribute('stroke-dasharray', '2 2');
-                    marks.appendChild(rule);
+                    var read = !isNaN(value);
+                    // **One the model has no reading for rests on the floor, not
+                    // the ceiling.** It was the ceiling first, which drew a
+                    // waypoint set on the water at the very top of the profile —
+                    // where a summit goes, and the one thing it must not be read
+                    // as. The floor is no claim either, because the box's lowest
+                    // line is the window's lowest reading and not sea level, so
+                    // this one is greyed and given no rule up to a curve it is
+                    // not on. Drawn all the same: a route with a hole in it is
+                    // exactly when a reader is looking for its points.
+                    var level = read ? y(value) : box.bottom - STATION_R - 1;
+                    var ink = read ? STATION : STATION_UNREAD;
+                    if (read) {
+                        var rule = line(here, box.bottom, here, level, STATION);
+                        rule.setAttribute('stroke-dasharray', '2 2');
+                        marks.appendChild(rule);
+                    }
                     var disc = document.createElementNS(SVG, 'circle');
                     disc.setAttribute('cx', here); disc.setAttribute('cy', level);
                     disc.setAttribute('r', String(STATION_R));
                     disc.setAttribute('fill', '#ffffff');
-                    disc.setAttribute('stroke', STATION);
+                    disc.setAttribute('stroke', ink);
                     disc.setAttribute('stroke-width', '1.5');
                     marks.appendChild(disc);
                     var number = text(here, level + 3, String(index + 1), 'middle');
                     number.setAttribute('font-size', '9');
                     number.setAttribute('font-weight', 'bold');
-                    number.setAttribute('fill', STATION);
+                    number.setAttribute('fill', ink);
                     marks.appendChild(number);
                 });
 

@@ -832,8 +832,11 @@ class TestProfilePanel:
 
         assert "(shape.stations || []).forEach(function (metres, index) {" in html
         assert "var sample = nearest(shape.distance, metres);" in html
-        # A point on ground nothing was read along still happened.
-        assert "var level = isNaN(value) ? box.top + 10 : y(value);" in html
+        # A point on ground nothing was read along still happened, and it rests
+        # on the floor of the box: at the ceiling it read as a summit, which a
+        # waypoint set on the water is the one thing it must not.
+        assert "var level = read ? y(value) : box.bottom - STATION_R - 1;" in html
+        assert "var ink = read ? STATION : STATION_UNREAD;" in html
 
     def test_a_window_belongs_to_the_chain_it_was_opened_on(self, group):
         """Carried over, it would open the panel somewhere in the middle of

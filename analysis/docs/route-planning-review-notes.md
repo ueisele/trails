@@ -130,6 +130,15 @@ distance at the head of leg *i* is point *i*'s, and the walk's end is the last
 one's. Driven on a four-point route: the marks land within **0.02 px** of where
 their own distance says.
 
+**And one the height model has nothing to say about rests on the floor.** It was
+the ceiling first, and that put a waypoint set on the water at the very top of the
+profile — where a summit goes, and the one reading it must not have. The floor is
+no claim either, since the box's lowest line is the window's lowest reading and
+not sea level, so such a mark is **greyed** and given no rule up to a curve it is
+not on. Driven with a series holding a hole under the middle point: it lands at
+the box's floor less its own radius, in `#9e9e9e`, and only the two readable
+points keep their dashed rules.
+
 **And they needed a frame of their own.** The curve's clip has to end exactly at
 the plot, because zoomed in the run it is drawn from deliberately reaches one
 sample past each edge. But a waypoint sits *at* a distance, and **every route has
