@@ -1579,6 +1579,16 @@ class _ProfilePanel(MacroElement):
     is the one exception, and only where it has detail to give — see the zoom
     below.
 
+    **And the crosshair marks the ground it is reading.** Wherever the pointer
+    stands on the curve, a dot stands at that position on the map, so the hill
+    under the pointer and the hill on the map are visibly the same hill. It works
+    for a chain and for a planned route alike, because both reach this panel as
+    one series. Finding the position is not the sample's index: the heights are
+    sampled every 5 m and the line is drawn through the vertices somebody
+    surveyed, so the two axes are different lengths and only a distance is shared
+    between them. The dot travels in the same pane as the direction arrow and for
+    the same reason — the map's path count is what phase 3 was accepted against.
+
     **And a reader can zoom into the curve**, which is a feature of the long
     chain and of a planned route rather than of the map's lines. Measured over
     the built graph: the median chain is drawn at 0.16 metres a pixel against a
@@ -1823,19 +1833,30 @@ class _ProfilePanel(MacroElement):
                 return shape;
             }
 
+            // Which point of the drawn line lies this far along it.
+            //
+            // **A series has two axes and they are not the same length.** The
+            // heights are sampled every 5 m; the line is drawn through the
+            // vertices somebody surveyed, which fall wherever they fall. So a
+            // sample's index says nothing about a vertex's, and the only thing
+            // the two share is a distance. ``along`` is the vertices' own.
+            function positionAt(shape, metres) {
+                if (!shape.along || !shape.along.length) { return null; }
+                var low = 0, high = shape.along.length - 1;
+                while (low < high) {
+                    var middle = (low + high) >> 1;
+                    if (shape.along[middle] < metres) { low = middle + 1; } else { high = middle; }
+                }
+                if (low < 1) { return L.latLng(shape.lat[0], shape.lon[0]); }
+                var span = shape.along[low] - shape.along[low - 1];
+                var t = span > 0 ? Math.min(1, Math.max(0, (metres - shape.along[low - 1]) / span)) : 0;
+                return L.latLng(shape.lat[low - 1] + t * (shape.lat[low] - shape.lat[low - 1]),
+                                shape.lon[low - 1] + t * (shape.lon[low] - shape.lon[low - 1]));
+            }
+
             // Where to put the arrow: half way along, by distance.
             function midpoint(shape) {
-                if (!shape.along.length) { return null; }
-                var half = shape.total / 2;
-                for (var i = 1; i < shape.along.length; i += 1) {
-                    if (shape.along[i] >= half) {
-                        var span = shape.along[i] - shape.along[i - 1];
-                        var t = span > 0 ? (half - shape.along[i - 1]) / span : 0;
-                        return L.latLng(shape.lat[i - 1] + t * (shape.lat[i] - shape.lat[i - 1]),
-                                        shape.lon[i - 1] + t * (shape.lon[i] - shape.lon[i - 1]));
-                    }
-                }
-                return L.latLng(shape.lat[0], shape.lon[0]);
+                return positionAt(shape, shape.total / 2);
             }
 
             // ---- the file this panel writes ---------------------------------
@@ -2680,6 +2701,41 @@ class _ProfilePanel(MacroElement):
             });
             pane.appendChild(arrow);
 
+            // **And where the reader's pointer is, on the ground.** The panel
+            // already knows which sample the crosshair sits on and the map wants
+            // that sample's position: a profile is far easier to plan against
+            // when the hill under the pointer and the hill on the map are the
+            // same hill. It takes the arrow's pane for the arrow's reason — the
+            // map's path count is what phase 3 was accepted against, and nothing
+            // this panel draws may join it — and the crosshair's colour, because
+            // the two are one thing shown in two places.
+            var here = document.createElementNS(SVG, 'svg');
+            here.setAttribute('width', '22');
+            here.setAttribute('height', '22');
+            here.style.cssText = 'position:absolute;margin:-11px 0 0 -11px;overflow:visible;display:none';
+            // A pale disc under a dark one, like the arrow: over a dark line, or
+            // over the dark green of a forest, a bare dot disappears.
+            ['#ffffff', CROSS].forEach(function (colour, index) {
+                var ring = document.createElementNS(SVG, 'circle');
+                ring.setAttribute('cx', '11'); ring.setAttribute('cy', '11');
+                ring.setAttribute('r', index ? '4' : '6.5');
+                ring.setAttribute('fill', colour);
+                here.appendChild(ring);
+            });
+            pane.appendChild(here);
+
+            // The position under the crosshair, in ground rather than in pixels,
+            // so a pan or a zoom moves the mark with the map rather than leaving
+            // it where the map used to be.
+            var standing = null;
+
+            function placeHere() {
+                if (!standing) { here.style.display = 'none'; return; }
+                here.style.display = '';
+                L.DomUtil.setPosition(here, map.latLngToLayerPoint(standing));
+            }
+            map.on('zoomend viewreset moveend resize', placeHere);
+
             function placeArrow() {
                 // Nothing is drawn for a chain with no profile — a crossing has
                 // no figures for an arrow to point the way of, and an arrow
@@ -2906,6 +2962,10 @@ class _ProfilePanel(MacroElement):
             function render() {
                 while (chart.firstChild) { chart.removeChild(chart.firstChild); }
                 crosshair = null;
+                // The mark goes with the crosshair that put it there. A wheel or
+                // a drag redraws the curve without the pointer moving, and a mark
+                // left behind would point at whatever is now under that pixel.
+                if (standing) { standing = null; placeHere(); }
                 // Cleared before every early return below, so the row never
                 // outlives the curve that explained it.
                 freeKey.style.display = 'none';
@@ -3149,10 +3209,7 @@ class _ProfilePanel(MacroElement):
                 // would pin the reading to the last sample while the pointer
                 // sits a third of a panel away from it.
                 if (px < crosshair.plot.left - 1 || px > crosshair.plot.right + 1) {
-                    if (crosshair.at !== -1) {
-                        crosshair.at = -1;
-                        [crosshair.rule, crosshair.dot, crosshair.reading].forEach(function (node) { node.style.display = 'none'; });
-                    }
+                    forget();
                     return;
                 }
                 // Through the window rather than through the chain: at zoom
@@ -3161,6 +3218,11 @@ class _ProfilePanel(MacroElement):
                 var at = nearest(shape.distance, crosshair.from + (px - crosshair.plot.left) * crosshair.mpp);
                 if (at === crosshair.at) { return; }
                 crosshair.at = at;
+                // The mark on the map, before anything is written: a reader
+                // following a climb wants to see where it is, and the sentence
+                // beside it is the slower half of the answer.
+                standing = positionAt(shape, shape.distance[at]);
+                placeHere();
                 var here = crosshair.x(shape.distance[at]);
                 crosshair.rule.setAttribute('x1', here); crosshair.rule.setAttribute('x2', here);
                 crosshair.rule.style.display = '';
@@ -3183,11 +3245,19 @@ class _ProfilePanel(MacroElement):
                     + (read ? metres(value) + ' m' : 'not read') + gradient;
             });
 
-            chart.addEventListener('mouseleave', function () {
-                if (!crosshair) { return; }
-                crosshair.at = -1;
-                [crosshair.rule, crosshair.dot, crosshair.reading].forEach(function (node) { node.style.display = 'none'; });
-            });
+            // Everything the crosshair is showing, taken back: the rule, the
+            // reading, and the mark on the map. In one place because they have to
+            // go together — a dot left on the map after the pointer has gone
+            // claims a position nobody is pointing at.
+            function forget() {
+                if (crosshair && crosshair.at !== -1) {
+                    crosshair.at = -1;
+                    [crosshair.rule, crosshair.dot, crosshair.reading].forEach(function (node) { node.style.display = 'none'; });
+                }
+                if (standing) { standing = null; placeHere(); }
+            }
+
+            chart.addEventListener('mouseleave', forget);
 
             // ---- the window on the chain, which a reader moves ---------------
             // One redraw a frame, for the reason the grip has one: a redraw per
@@ -3234,6 +3304,7 @@ class _ProfilePanel(MacroElement):
             var dragging = null;
             chart.addEventListener('mousedown', function (event) {
                 if (!crosshair || !(view.zoom > 1.001)) { return; }
+                forget();
                 dragging = {x: event.clientX, y: event.clientY, at: view.at, centre: view.centre, mpp: crosshair.mpp};
                 chart.style.cursor = 'grabbing';
                 event.preventDefault();
@@ -3613,6 +3684,13 @@ def add_profile_panel(
     and only the curve and the distance under it come out of that. A chain whose
     series holds no reading at all — a ferry crossing, or a stretch outside the
     height model — says so instead of drawing a flat line at zero.
+
+    **The crosshair marks its position on the map.** Hovering the curve puts a
+    dot on the ground the reading came from, which is what makes a profile worth
+    planning against: the climb in the panel and the climb on the map become one
+    thing. A chain and a planned route both get it. It is taken back whenever the
+    pointer leaves, the curve is redrawn or the window is dragged, so it can never
+    name a place nobody is pointing at.
 
     **The curve can be zoomed into, where there is anything to see.** A wheel
     over it takes the window down to one height reading per pixel and no

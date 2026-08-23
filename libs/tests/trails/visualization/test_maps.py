@@ -812,6 +812,53 @@ class TestProfilePanel:
 
         assert "view.zoom = 1; view.at = 0; view.centre = null;" in html
 
+    def test_the_crosshair_marks_its_position_on_the_map(self, group):
+        """The hill under the pointer and the hill on the map are the same hill.
+
+        In the direction arrow's pane, for the arrow's reason: the map's path
+        count is what phase 3 was accepted against and nothing this panel draws
+        may join it.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "standing = positionAt(shape, shape.distance[at]);" in html
+        assert "function placeHere() {" in html
+        assert "L.DomUtil.setPosition(here, map.latLngToLayerPoint(standing));" in html
+        assert "pane.appendChild(here);" in html
+        assert "map.on('zoomend viewreset moveend resize', placeHere);" in html
+
+    def test_a_position_is_looked_up_on_the_axis_that_has_one(self, group):
+        """A series has two axes and they are not the same length: heights every
+        5 m, and the line through the vertices somebody surveyed. Only a distance
+        is shared between them, so a sample's index cannot index a vertex.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "function positionAt(shape, metres) {" in html
+        assert "if (shape.along[middle] < metres) { low = middle + 1; } else { high = middle; }" in html
+        # And the arrow asks the same walk rather than keeping one of its own.
+        assert "return positionAt(shape, shape.total / 2);" in html
+
+    def test_the_mark_does_not_outlive_the_reading_that_put_it_there(self, group):
+        """A dot left on the map after the pointer has gone claims a position
+        nobody is pointing at. It goes when the pointer leaves the chart, when
+        the curve is redrawn under it, and when a drag starts.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "function forget() {" in html
+        assert "chart.addEventListener('mouseleave', forget);" in html
+        assert "if (standing) { standing = null; placeHere(); }" in html
+
     def test_the_panel_says_which_part_of_the_chain_it_is_showing(self, group):
         """A window is a thing to be read rather than screenshotted, the same as
         the series and the figures above it.

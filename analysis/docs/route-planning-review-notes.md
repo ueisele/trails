@@ -116,6 +116,38 @@ out per feature and compresses against nothing. **Showing a figure is the
 expensive half; carrying it is nearly free.** Neither budget is threatened, and
 the ratio is the thing to remember before adding the next row.
 
+**And the crosshair marks the ground it is reading.** A dot on the map,
+wherever the pointer stands on the curve, for a chain and for a planned route
+alike — asked for because a profile is far easier to plan against when the climb
+in the panel and the climb on the map are visibly the same climb. It takes the
+direction arrow's pane, so the path count stays **11,589**, and the crosshair's
+own colour, because the two are one thing shown in two places. It is taken back
+when the pointer leaves, when the curve is redrawn under it and when a drag
+starts: a dot outliving its reading claims a position nobody is pointing at.
+
+**The position is not the sample's index**, and that is the whole of the work. A
+series carries two axes of different lengths — heights every 5 m, and the line
+through the vertices somebody surveyed — and the only thing they share is a
+distance. Measured, on the 42 km chain: **2,123 vertices against 8,191 samples**;
+on a planned route, 2,340 against 3,688. So the mark is found by walking the
+vertices' own `along` axis, which was measured to be strictly non-decreasing on
+both and to end exactly on `total` — that is what makes the binary search
+admissible, and a binary search over an axis that went backwards would be
+silently wrong rather than loudly. The arrow's midpoint now asks the same walk
+instead of keeping a second one.
+
+Measured against an independent projection of the mark back onto the line, at
+about 4 m to the pixel: it lies **0.09 to 1.35 m** off the drawn line and **1.15
+to 6.56 m** from the distance the panel names, against a reading rounded to 10 m.
+
+**And one 1,519 m disagreement that was the probe's.** Projecting the mark onto
+the line and taking the nearest point is not a way to check a mark on a round
+trip: at the 21.19 km reading the line passes the same spot twice — 19.63 to
+19.69 km and 21.17 to 21.22 km, both 7.5 m away — and the projection picked the
+other pass. The mark was 3.22 m from where it belonged. **A nearest-point search
+answers "where is the line closest" and not "where is the walker", and on an
+out-and-back those are different questions.**
+
 **And the row with the download button reads as one sentence.** Its three parts —
 the button, how many points the file holds, and which sources it draws on with
 their licences — were flex items, so the licences either fitted beside the count
