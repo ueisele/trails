@@ -13,6 +13,7 @@ visually::
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from enum import Enum
 from html import escape
 from typing import Any
@@ -85,8 +86,8 @@ def create_map(
             stacks them all and the last one wins.
 
     Returns:
-        Folium map with base layers attached; call :func:`finalize` when done
-        adding overlays.
+        Folium map with base layers attached; call :func:`add_legend` when done
+        adding overlays, which is what lists and switches them.
 
     Raises:
         ValueError: If neither bounds nor center is given
@@ -690,7 +691,7 @@ def add_click_highlight(
     value are selected together, so a route split into several pieces — or
     across two layers — still highlights as one.
 
-    Call after the layers have been added, and before :func:`finalize`.
+    Call after the layers have been added, and before :func:`add_legend`.
 
     Args:
         fmap: Map holding the layers
@@ -919,7 +920,7 @@ def add_search(
     that is switched off is switched on for as long as it holds a match, so a
     name cannot hide behind an unticked box.
 
-    Call after the layers have been added, and before :func:`finalize`.
+    Call after the layers have been added, and before :func:`add_legend`.
 
     Args:
         fmap: Map holding the layers
@@ -6781,17 +6782,57 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
     _PlanMode(plan, named).add_to(fmap)
 
 
-class _Legend(MacroElement):
-    """A legend that can be folded away.
+@dataclass(frozen=True)
+class LegendRow:
+    """One row of the legend, and the layer its checkbox switches.
 
-    A control rather than a box floating over the page, for the same reason the
-    search is one: a panel outside the map container swallows the wheel, and
-    with two dozen entries this one covers a good part of the map.
+    Attributes:
+        label: The row's text. Written as text and never as markup, so a label
+            holding ``<15 km`` stays a label rather than becoming a tag.
+        colour: CSS colour of the swatch drawn before the label
+        layer: The layer the checkbox adds to and removes from the map, or
+            ``None`` for a row that only explains a colour
+    """
+
+    label: str
+    colour: str
+    layer: Any = None
+
+
+class _Legend(MacroElement):
+    """The legend, which is also the layer control.
+
+    **One panel rather than two.** They said very nearly the same thing: of the
+    30 rows the legend drew, 23 named a layer the control also listed, one named
+    the same layer under a different name, and six were kinds inside a single
+    layer. Two panels of the same list is two places to look and two places to
+    drift, and measured on this map they cost a 297 x 557 box and a 441 x 737
+    one for the privilege.
+
+    So the legend keeps its colours and gains the checkbox, and folium's
+    ``LayerControl`` goes. **What has to come with it is the part that control
+    did quietly**: a layer added with ``show=False`` is on the map like any other
+    until that control's template takes it off again. Without this the two layers
+    this map starts with switched off would arrive switched on.
+
+    A control rather than a box floating over the page, for the reason the search
+    is one: a panel outside the map container swallows the wheel. It takes the
+    wheel itself only where it has somewhere left to scroll, and lets it through
+    to the map otherwise.
     """
 
     _template = Template("""
         {% macro script(this, kwargs) %}
         (function () {
+            var map = {{ this._parent.get_name() }};
+            var bases = [{{ this.base_names|join(', ') }}];
+            var baseLabels = {{ this.base_labels_json }};
+            var baseShown = {{ this.base_shown_json }};
+            var layers = [{{ this.layer_names|join(', ') }}];
+            var rows = {{ this.rows_json }};
+            var title = {{ this.title_json }};
+            var open = {{ 'false' if this.collapsed else 'true' }};
+
             var control = L.control({position: 'bottomleft'});
             control.onAdd = function () {
                 var box = L.DomUtil.create('div');
@@ -6802,12 +6843,88 @@ class _Legend(MacroElement):
                 var header = document.createElement('div');
                 header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none';
                 var body = document.createElement('div');
-                body.innerHTML = {{ this.rows_json }};
-                var title = {{ this.title_json }};
-                var open = {{ 'false' if this.collapsed else 'true' }};
+
+                // **Whichever base map was asked for, and only that one.**
+                // Folium hands every base layer to the map and leaves it to the
+                // layer control's template to take the unwanted ones off again;
+                // with that control gone this does it, or two tile layers stack
+                // and the last one drawn wins.
+                var picked = document.createElement('div');
+                picked.style.cssText = 'margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #ddd';
+                bases.forEach(function (layer, index) {
+                    if (!baseShown[index] && map.hasLayer(layer)) { map.removeLayer(layer); }
+                    var line = document.createElement('label');
+                    line.style.cssText = 'display:flex;align-items:center;gap:6px;margin:3px 0;cursor:pointer';
+                    var pick = document.createElement('input');
+                    pick.type = 'radio';
+                    pick.name = 'trails-base-{{ this.get_name() }}';
+                    pick.checked = map.hasLayer(layer);
+                    pick.addEventListener('change', function () {
+                        bases.forEach(function (other) {
+                            if (other !== layer && map.hasLayer(other)) { map.removeLayer(other); }
+                        });
+                        if (!map.hasLayer(layer)) { map.addLayer(layer); }
+                    });
+                    var name = document.createElement('span');
+                    name.textContent = baseLabels[index];
+                    line.appendChild(pick);
+                    line.appendChild(name);
+                    picked.appendChild(line);
+                });
+                if (bases.length) { body.appendChild(picked); }
+
+                // A row is a label where it switches something and a plain div
+                // where it only explains a colour — but it keeps the checkbox's
+                // width either way, or the two kinds of row would not line up.
+                var drawn = [];
+                rows.forEach(function (row, index) {
+                    var layer = layers[index];
+                    var line = document.createElement(layer ? 'label' : 'div');
+                    line.style.cssText = 'display:flex;align-items:center;gap:6px;margin:3px 0' +
+                        (layer ? ';cursor:pointer' : '');
+                    var tick = null;
+                    if (layer) {
+                        if (!row.shown && map.hasLayer(layer)) { map.removeLayer(layer); }
+                        tick = document.createElement('input');
+                        tick.type = 'checkbox';
+                        tick.style.cssText = 'flex:none;margin:0';
+                        tick.checked = map.hasLayer(layer);
+                        tick.addEventListener('change', function () {
+                            if (tick.checked) { map.addLayer(layer); } else { map.removeLayer(layer); }
+                            paint();
+                        });
+                        line.appendChild(tick);
+                    } else {
+                        var gap = document.createElement('span');
+                        gap.style.cssText = 'display:inline-block;width:13px;flex:none';
+                        line.appendChild(gap);
+                    }
+                    var swatch = document.createElement('span');
+                    swatch.style.cssText = 'display:inline-block;width:18px;height:4px;flex:none;background:' + row.colour;
+                    line.appendChild(swatch);
+                    // As text. A label here routinely holds characters that
+                    // would otherwise start a tag — the map's own read
+                    // "Paths, approach ≤15 km" — and written as markup the
+                    // whole row would vanish instead of saying so.
+                    var name = document.createElement('span');
+                    name.textContent = row.label;
+                    line.appendChild(name);
+                    body.appendChild(line);
+                    drawn.push({line: line, layer: layer});
+                });
+
+                // A colour for something switched off is a colour for something
+                // that is not on the map. The row stays — it is still the key to
+                // that colour — but it says it is not speaking for the terrain.
+                function paint() {
+                    drawn.forEach(function (row) {
+                        row.line.style.opacity = (row.layer && !map.hasLayer(row.layer)) ? '0.45' : '';
+                    });
+                }
+                paint();
 
                 function draw() {
-                    header.textContent = (open ? '\u25be ' : '\u25b8 ') + title;
+                    header.textContent = (open ? '▾ ' : '▸ ') + title;
                     header.style.marginBottom = open ? '6px' : '0';
                     body.style.display = open ? '' : 'none';
                 }
@@ -6817,58 +6934,86 @@ class _Legend(MacroElement):
                 box.appendChild(header);
                 box.appendChild(body);
                 L.DomEvent.disableClickPropagation(box);
+                // The wheel is the map's, except where this box still has
+                // somewhere to scroll in the direction it was turned. A list
+                // this long that cannot be scrolled is as useless as a map that
+                // will not zoom, and only one of the two can have any one turn.
+                box.addEventListener('wheel', function (event) {
+                    var room = box.scrollHeight - box.clientHeight;
+                    if (room <= 0) { return; }
+                    if (event.deltaY < 0 ? box.scrollTop > 0 : box.scrollTop < room - 1) {
+                        event.stopPropagation();
+                    }
+                }, {passive: true});
                 return box;
             };
-            control.addTo({{ this._parent.get_name() }});
+            control.addTo(map);
         })();
         {% endmacro %}
     """)
 
-    def __init__(self, title: str, rows: str, collapsed: bool) -> None:
+    def __init__(self, title: str, rows: list[LegendRow], collapsed: bool) -> None:
         """Initialize the legend.
 
         Args:
             title: Legend heading, doubling as the fold handle
-            rows: Rendered HTML of the entries
+            rows: The rows, in the order they are drawn
             collapsed: Whether it starts folded away
         """
         super().__init__()
         self._name = "Legend"
         self.title_json = _script_json(title)
-        self.rows_json = _script_json(rows)
         self.collapsed = collapsed
+        self.layer_names = [row.layer.get_name() if row.layer is not None else "null" for row in rows]
+        self.rows_json = _script_json([{"label": row.label, "colour": row.colour, "shown": bool(getattr(row.layer, "show", True))} for row in rows])
+        self.base_names: list[str] = []
+        self.base_labels_json = "[]"
+        self.base_shown_json = "[]"
+
+    def render(self, **kwargs: Any) -> Any:
+        """Collect the base layers, then render.
+
+        They are whatever base layers the map holds when this renders, which is
+        why the legend has to be added after them. Folium's own control walks the
+        same children for the same reason.
+
+        Args:
+            **kwargs: Passed through to the parent
+
+        Returns:
+            Whatever branca's own render returns, which it does not document
+        """
+        labels: list[str] = []
+        shown: list[bool] = []
+        self.base_names = []
+        for child in self._parent._children.values() if self._parent is not None else ():
+            if isinstance(child, folium.TileLayer) and child.control and not child.overlay:
+                self.base_names.append(child.get_name())
+                labels.append(str(child.layer_name))
+                shown.append(bool(child.show))
+        self.base_labels_json = _script_json(labels)
+        self.base_shown_json = _script_json(shown)
+        return super().render(**kwargs)
 
 
-def add_legend(fmap: folium.Map, title: str, entries: dict[str, str], collapsed: bool = False) -> None:
-    """Add a legend that folds away at a click on its heading.
+def add_legend(fmap: folium.Map, title: str, entries: dict[str, str] | list[LegendRow], collapsed: bool = False) -> None:
+    """Add the legend, which is also the map's layer control.
 
-    Enough sources and enough layers make a legend tall enough to hide the
-    terrain behind it, so it has to be possible to get it out of the way
-    without losing the key to the colours.
+    Every row explains a colour, and a row given a layer also switches it. The
+    base maps sit above them as radio buttons. **There is no separate layer
+    control**: this replaces it, so nothing else may add one, and this has to be
+    added after every layer it is to list.
+
+    Enough sources make it tall enough to hide the terrain behind it, so it folds
+    away at a click on its heading and scrolls within 70 % of the window.
 
     Args:
         fmap: Map to add the legend to
         title: Legend heading, which doubles as the fold handle
-        entries: Mapping of label to CSS color
+        entries: The rows in the order they are drawn. A mapping of label to
+            colour gives a legend that only explains colours; a list of
+            :class:`LegendRow` gives one that switches layers too.
         collapsed: Whether it starts folded away
     """
-    swatch = "display:inline-block;width:18px;height:4px;vertical-align:middle;margin-right:8px"
-    # Labels routinely contain characters like "<15 km"; unescaped they would be
-    # parsed as a tag and the whole entry would vanish from the rendered legend.
-    rows = "".join(
-        f"<div style='margin:3px 0'><span style='{swatch};background:{color}'></span>{escape(label)}</div>" for label, color in entries.items()
-    )
+    rows = [LegendRow(label, colour) for label, colour in entries.items()] if isinstance(entries, dict) else list(entries)
     _Legend(title, rows, collapsed).add_to(fmap)
-
-
-def finalize(fmap: folium.Map) -> folium.Map:
-    """Attach the layer control after all layers have been added.
-
-    Args:
-        fmap: Map to finalize
-
-    Returns:
-        The same map, for chaining
-    """
-    folium.LayerControl(collapsed=False).add_to(fmap)
-    return fmap

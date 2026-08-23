@@ -571,8 +571,6 @@ class TestAddRoutingGraph:
     def test_it_draws_nothing_and_joins_no_layer_control(self):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_routing_graph(fmap, {"version": 1, "edges": 0}, "")
-        maps.finalize(fmap)
-
         assert not [child for child in fmap._children.values() if isinstance(child, folium.GeoJson | folium.FeatureGroup)]
 
     def test_the_decoder_fetches_nothing(self):
@@ -918,8 +916,6 @@ class TestProfilePanel:
         overlay pane is counted among the map's paths for ever after."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
-        maps.finalize(fmap)
-
         assert not [child for child in fmap._children.values() if isinstance(child, folium.GeoJson | folium.Marker)]
         html = fmap.get_root().render()
         assert "createPane" in html
@@ -1276,8 +1272,6 @@ class TestPlanMode:
         is an acceptance figure for every phase from the third."""
         fmap, _ = self.drawn()
         maps.add_plan_mode(fmap, self.planned())
-        maps.finalize(fmap)
-
         assert not [child for child in fmap._children.values() if isinstance(child, folium.GeoJson | folium.Marker)]
         html = fmap.get_root().render()
         assert "createPane('trailsPlanRoute')" in html
@@ -1922,8 +1916,13 @@ class TestComposedProfile:
         assert "110574" not in html
 
 
-class TestLegendAndFinalize:
-    """Tests for legend rendering and layer control."""
+class TestLegend:
+    """The legend, which is also the map's layer control."""
+
+    @staticmethod
+    def points(show=True):
+        """A one-point layer to hang a legend row on."""
+        return gpd.GeoDataFrame({"name": ["Hut"]}, geometry=[Point(13.0, 65.5)], crs="EPSG:4326"), show
 
     def test_legend_renders_entries(self):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
@@ -1933,12 +1932,82 @@ class TestLegendAndFinalize:
         assert "Lomsdal-Visten" in html
         assert "#1b5e20" in html
 
-    def test_finalize_adds_layer_control(self):
+    def test_a_row_given_a_layer_switches_it(self):
+        """The legend replaced the layer control, so this is the only thing on
+        the page that can put a layer on the map or take it off."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
-        maps.finalize(fmap)
+        gdf, _ = self.points()
+        layer = maps.add_points(fmap, gdf, name="Huts")
+        maps.add_legend(fmap, "Legend", [maps.LegendRow("Huts (1)", "#800080", layer)])
 
-        controls = [child for child in fmap._children.values() if isinstance(child, folium.LayerControl)]
-        assert len(controls) == 1
+        html = fmap.get_root().render()
+        assert "tick.type = 'checkbox';" in html
+        assert "if (tick.checked) { map.addLayer(layer); } else { map.removeLayer(layer); }" in html
+        assert layer.get_name() in html.split("var layers = [")[1].split("]")[0]
+
+    def test_a_row_without_a_layer_switches_nothing(self):
+        """A mapping still gives a legend that only explains colours, and those
+        rows keep the checkbox's width so the labels line up with the ones that
+        have a box."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_legend(fmap, "Legend", {"Turrutebasen": "#1b5e20"})
+
+        html = fmap.get_root().render()
+        assert "var layers = [null];" in html
+        assert "width:13px;flex:none" in html
+
+    def test_a_layer_that_starts_off_is_taken_off(self):
+        """**Folium's layer control did this in its own template**, so with that
+        control gone the legend has to: a layer added with show=False is on the
+        map like any other until something removes it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        gdf, _ = self.points()
+        layer = maps.add_points(fmap, gdf, name="Huts", show=False)
+        maps.add_legend(fmap, "Legend", [maps.LegendRow("Huts (1)", "#800080", layer)])
+
+        html = fmap.get_root().render()
+        assert '"shown": false' in html
+        assert "if (!row.shown && map.hasLayer(layer)) { map.removeLayer(layer); }" in html
+
+    def test_the_base_maps_become_radio_buttons(self):
+        """And only the one asked for stays on the map, for the same reason:
+        folium hands every base layer to the map and left the unwanted ones to
+        the control's template."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_legend(fmap, "Legend", {"x": "#000000"})
+
+        html = fmap.get_root().render()
+        assert '["Kartverket Topo", "Kartverket Grayscale"]' in html
+        assert "[true, false]" in html
+        assert "pick.type = 'radio';" in html
+        assert "if (!baseShown[index] && map.hasLayer(layer)) { map.removeLayer(layer); }" in html
+
+    def test_nothing_else_adds_a_layer_control(self):
+        """Two controls over one list is two places to look and two to drift."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_legend(fmap, "Legend", {"x": "#000000"})
+
+        assert not [child for child in fmap._children.values() if isinstance(child, folium.LayerControl)]
+        assert not hasattr(maps, "finalize")
+
+    def test_a_switched_off_row_says_so(self):
+        """A colour for something not on the map is still the key to that
+        colour, but it is not speaking for the terrain."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_legend(fmap, "Legend", {"x": "#000000"})
+
+        html = fmap.get_root().render()
+        assert "row.line.style.opacity = (row.layer && !map.hasLayer(row.layer)) ? '0.45' : '';" in html
+
+    def test_the_wheel_is_the_map_s_where_the_list_cannot_scroll(self):
+        """A list this long that will not scroll is as useless as a map that
+        will not zoom, and only one of the two can have any one turn."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_legend(fmap, "Legend", {"x": "#000000"})
+
+        html = fmap.get_root().render()
+        assert "var room = box.scrollHeight - box.clientHeight;" in html
+        assert "if (room <= 0) { return; }" in html
 
 
 class TestTextLabelColours:
@@ -1986,13 +2055,18 @@ class TestTextLabelColours:
 class TestLegendEscaping:
     """Legend text must survive characters that would otherwise start a tag."""
 
-    def test_less_than_in_a_label_is_escaped(self):
+    def test_a_label_that_would_start_a_tag_stays_a_label(self):
+        """The map's own legend reads "Paths, approach ≤15 km". Built as markup
+        the browser would read "<15 km ..." as a tag and drop the whole row, so
+        a label is written as text and can no longer make markup at all.
+        """
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_legend(fmap, "Legend", {"Paths, approach <15 km [OSM] (1965)": "#ce93d8"})
 
         html = fmap.get_root().render()
-        # Unescaped, the browser reads "<15 km ..." as a tag and drops the entry.
-        assert "&lt;15 km" in html
+        assert "name.textContent = row.label;" in html
+        # It survives whole, and as an escape rather than as a live "<".
+        assert "Paths, approach \\u003c15 km [OSM] (1965)" in html
         assert "approach <15 km" not in html
 
     def test_boundary_does_not_intercept_clicks(self, park):

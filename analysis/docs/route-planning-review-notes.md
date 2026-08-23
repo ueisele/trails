@@ -116,6 +116,35 @@ out per feature and compresses against nothing. **Showing a figure is the
 expensive half; carrying it is nearly free.** Neither budget is threatened, and
 the ratio is the thing to remember before adding the next row.
 
+**And the legend is the layer control.** They were two panels over nearly one
+list: of the legend's 30 rows, **23 named a layer the control also listed**, one
+named the same layer under a second name, and six were kinds inside a single
+layer. Measured, they cost a 297 x 557 box and a 441 x 737 one; the merged panel
+is **480 x 687** and folium's `LayerControl` is gone. Every row now switches its
+own layer, a row whose layer is off is greyed rather than hidden — it is still
+the key to that colour, it is just not speaking for the terrain — and the six
+name kinds became **six layers**, so a planner can put the mountains on the map
+without the marshes.
+
+**What had to come with it is the part that control did quietly.** A folium layer
+added with `show=False` is on the map like any other; it is `LayerControl`'s own
+template that takes it off again. Remove the control and this map's two switched-
+off layers arrive switched on, and so does the second base map — measured after
+the fix, **one tile layer on the map** and the right one. The legend does that job
+now, off the `show` each layer carries.
+
+**And it settled a two-named layer.** The park boundary was *Park boundary
+[Naturbase]* in the legend and *National park boundary [Naturbase]* in the
+control. Nothing noticed for as long as the two lists were never compared. The
+merged panel looks its layers up by the name they carry and **raises** where a row
+finds none, so the next drift is a traceback rather than a row that switches
+nothing.
+
+Driven: the panel's 30 rows all switch, 7 start off — the six name kinds and the
+farms — toggling *Paths in park [FKB] (53)* takes the map from **11,589 paths to
+11,536 and back**, and toggling the mountain names on takes the marker pane from
+**198 to 431**, both exactly the counts their labels state.
+
 **And the crosshair marks the ground it is reading.** A dot on the map,
 wherever the pointer stands on the curve, for a chain and for a planned route
 alike — asked for because a profile is far easier to plan against when the climb
@@ -381,7 +410,7 @@ probes, with what they read now:
 | `.leaflet-marker-pane > *` | **198** with no route down, **203** with five waypoints |
 | `.leaflet-marker-icon` | **0** with no route down, **5** with five waypoints — folium overwrites the class on its own markers, and phase 7's are Leaflet's own |
 | `.leaflet-overlay-pane path` | **11,589**, of which exactly **1** has `pointer-events: none` |
-| `.leaflet-control-layers-overlays input` | **25** |
+| checkboxes in the legend | **30**, of which 7 start off — there is no `.leaflet-control-layers` any more |
 | children of `.leaflet-top.leaflet-left`, by `getBoundingClientRect().top` | search **10 px**, zoom **60** |
 
 and the wheel over the map, which takes zoom **9 → 11**. Reach the map object

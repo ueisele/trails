@@ -1587,30 +1587,33 @@ def main() -> int:
         TrailLayer(ut_access, "Access routes [UT.no]", "#f48fb1", 3.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name", None, UT_LINK_HEADING),
     ]
 
-    legend: dict[str, str] = {}
+    # **The legend is the layer control now**, so a row carries the layer it
+    # switches and not only the colour it explains. A row that cannot reach its
+    # layer would draw and switch nothing, which is worse than the two panels it
+    # replaced, so every lookup below fails loudly rather than quietly.
+    legend: list[maps.LegendRow] = []
     highlightable = []
     for layer in layers:
         if not len(layer.gdf):
             continue
-        highlightable.append(
-            maps.add_trails(
-                fmap,
-                simplify_for_display(layer.gdf, args.simplify_m),
-                name=layer.label,
-                color=layer.color,
-                weight=layer.weight,
-                popup_fields=layer.popup_fields,
-                link_fields=layer.link_fields,
-                link_heading=layer.link_heading,
-                tooltip_field=layer.tooltip_field,
-                dash_array=layer.dash,
-                group_field=CHAIN_KEY,
-                search_field=layer.search_field,
-                figure_fields=CHAIN_FIGURE_FIELDS,
-                source=source_of(layer.label),
-            )
+        group = maps.add_trails(
+            fmap,
+            simplify_for_display(layer.gdf, args.simplify_m),
+            name=layer.label,
+            color=layer.color,
+            weight=layer.weight,
+            popup_fields=layer.popup_fields,
+            link_fields=layer.link_fields,
+            link_heading=layer.link_heading,
+            tooltip_field=layer.tooltip_field,
+            dash_array=layer.dash,
+            group_field=CHAIN_KEY,
+            search_field=layer.search_field,
+            figure_fields=CHAIN_FIGURE_FIELDS,
+            source=source_of(layer.label),
         )
-        legend[f"{layer.label} ({len(layer.gdf)})"] = layer.color
+        highlightable.append(group)
+        legend.append(maps.LegendRow(f"{layer.label} ({len(layer.gdf)})", layer.color, group))
 
     # Six sources through the same handful of valleys are impossible to follow by
     # eye where they run together, so a click picks one chain out of the bundle.
@@ -1645,19 +1648,34 @@ def main() -> int:
                 point_type="cabin",
             )
         )
+    # **One layer per kind of name rather than one for all of them.** They are
+    # different questions — where the water runs, where the passes are — and a
+    # planner usually wants one of them and not the other five. Split after the
+    # thinning above, so each keeps the labels that survived it.
+    name_rows: list[maps.LegendRow] = []
     if len(terrain_names):
-        searchable.append(
-            maps.add_text_labels(
+        drawn_kinds = set(terrain_names["kind"])
+        for label, kinds in TERRAIN_NAME_LEGEND:
+            present = sorted(kinds & drawn_kinds)
+            if not present:
+                continue
+            part = terrain_names[terrain_names["kind"].isin(present)]
+            # Types can share a colour but differ in glyph (fjell vs li), so
+            # show every glyph the group actually draws.
+            glyphs = dict.fromkeys(TERRAIN_NAME_SYMBOLS.get(kind, TERRAIN_NAME_DEFAULT_SYMBOL) for kind in present)
+            heading = f"Name {' '.join(glyphs)} {label} — {', '.join(present)} [SSR]"
+            group = maps.add_text_labels(
                 fmap,
-                terrain_names,
-                name="Terrain names [SSR]",
+                part,
+                name=heading,
                 label_field="name",
                 size_field="font_size",
                 color_field="color",
                 symbol_field="symbol",
                 show=False,
             )
-        )
+            searchable.append(group)
+            name_rows.append(maps.LegendRow(f"{heading} ({len(part)})", TERRAIN_NAME_COLORS[present[0]], group))
     if len(ssr_huts):
         # Two of these have no N50 building at all, so the join above cannot reach
         # them; as their own layer none of the register's huts is lost.
@@ -1756,7 +1774,7 @@ def main() -> int:
     maps.add_search(fmap, searchable)
 
     # Added last so the boundary outline stays legible on top of every trail layer.
-    maps.add_boundary(fmap, park, name="National park boundary [Naturbase]", weight=3.5)
+    boundary = maps.add_boundary(fmap, park, name="National park boundary [Naturbase]", weight=3.5)
 
     # And the graph itself, which nothing draws and nothing yet reads: phase 4
     # takes the profile off it and phase 6 routes over it, and both of those live
@@ -1778,18 +1796,36 @@ def main() -> int:
             fmap, highlighted, name=f"HIGHLIGHT labels: {args.highlight}", label_field="marker_label", default_size=20, color="#e00000"
         )
 
-    legend["Park boundary [Naturbase]"] = "#0d47a1"
+    # It carried two names in one page until the legend and the layer control
+    # became one panel — "Park boundary" here and "National park boundary" in the
+    # control — which nothing noticed because nothing ever compared them.
+    legend.append(maps.LegendRow("National park boundary [Naturbase]", "#0d47a1", boundary))
 
-    # Name colours are only decodable with a key, so list the types actually drawn.
-    if len(terrain_names):
-        drawn_kinds = set(terrain_names["kind"])
-        for label, kinds in TERRAIN_NAME_LEGEND:
-            present = sorted(kinds & drawn_kinds)
-            if present:
-                # Types can share a colour but differ in glyph (fjell vs li), so
-                # show every glyph the group actually draws.
-                glyphs = dict.fromkeys(TERRAIN_NAME_SYMBOLS.get(kind, TERRAIN_NAME_DEFAULT_SYMBOL) for kind in present)
-                legend[f"Name {' '.join(glyphs)} {label} — {', '.join(present)} [SSR]"] = TERRAIN_NAME_COLORS[present[0]]
+    # Name colours are only decodable with a key, and each kind now switches.
+    legend.extend(name_rows)
+
+    # Every layer that reached the map, under the name it carries. The legend's
+    # own label is built the same way — the layer's name and its count — so a
+    # row that cannot find its layer means the two have drifted apart, and that
+    # is worth a traceback rather than a row that silently switches nothing.
+    drawn = {getattr(layer, "layer_name", None): layer for layer in searchable}
+
+    def switched(label: str) -> object:
+        """The layer a legend row switches.
+
+        Args:
+            label: The row's label, which is the layer's own name
+
+        Returns:
+            The layer that name belongs to
+
+        Raises:
+            KeyError: If no layer on the map carries that name
+        """
+        found = drawn.get(label)
+        if found is None:
+            raise KeyError(f"the legend row {label!r} names no layer on the map")
+        return found
 
     # Point layers carry an icon rather than a line colour, so they are listed
     # here only to record their source alongside everything else.
@@ -1805,7 +1841,7 @@ def main() -> int:
         ("Towns and villages [SSR]", len(settlements), "#263238"),
     ):
         if count:
-            legend[f"{label} ({count})"] = color
+            legend.append(maps.LegendRow(f"{label} ({count})", color, switched(f"{label} ({count})")))
 
     maps.add_legend(fmap, f"{PARK_NAME} nasjonalpark", legend)
 
@@ -1828,8 +1864,6 @@ def main() -> int:
     # and carry nothing: only a layer given a point_type has a table, and a
     # place name drawn as text asserts no single position to be named after.
     maps.add_plan_mode(fmap, plan_settings(params), searchable)
-
-    maps.finalize(fmap)
 
     map_path = output_dir / "lomsdal-visten.html"
     fmap.save(str(map_path))
