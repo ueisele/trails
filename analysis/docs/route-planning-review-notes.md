@@ -116,6 +116,23 @@ out per feature and compresses against nothing. **Showing a figure is the
 expensive half; carrying it is nearly free.** Neither budget is threatened, and
 the ratio is the thing to remember before adding the next row.
 
+**And a click inside a popup was a click on the ground.** Plan mode takes every
+click in the capture phase on the map container — that is how one handler tells a
+pin from the route from open terrain — and it stepped around
+`.leaflet-control-container`. **A popup is not in there.** It lives in a pane
+inside the map, so every click in one fell through: measured against the built
+page with the old selector, clicking a chain's popup text placed a waypoint
+(1 to 2), clicking its close button placed another (2 to 3) **and left the popup
+open**, because the dispatcher's own `stopPropagation` meant Leaflet's closer
+never ran. With `.leaflet-popup` named alongside the controls, both place nothing
+and the button closes; a click on terrain still places. It had been there since
+phase 7 and no check had ever clicked a popup while planning.
+
+The general shape is worth keeping: **a handler that owns every click has to
+enumerate everything that is not terrain**, and Leaflet's furniture is not all in
+one container. What is in the map's own panes and is not ground: popups, and
+nothing else today — tooltips take no pointer events.
+
 **And the legend is the layer control.** They were two panels over nearly one
 list: of the legend's 30 rows, **23 named a layer the control also listed**, one
 named the same layer under a second name, and six were kinds inside a single

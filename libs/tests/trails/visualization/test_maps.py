@@ -1281,6 +1281,22 @@ class TestPlanMode:
         # the overlay pane by default, which is the whole thing being avoided.
         assert planning.count("L.polyline(") == planning.count("pane: 'trailsPlanRoute'") - planning.count("L.circleMarker(")
 
+    def test_a_click_in_a_popup_is_not_a_click_on_the_ground(self):
+        """A popup is not in the control container -- it lives in a pane inside
+        the map -- so a dispatcher that only steps around the controls walks
+        over it. Measured: the close button of a chain's popup placed a waypoint
+        behind it and left the popup open.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "function overFurniture(event) {" in html
+        assert "event.target.closest('.leaflet-control-container, .leaflet-popup')" in html
+        assert "if (!on || overFurniture(event)) { return; }" in html
+        assert "if (on && !overFurniture(event)) { event.stopPropagation(); }" in html
+
     def test_a_waypoint_is_a_marker_because_a_circle_cannot_be_dragged(self):
         """198 markers and 13 plan-pane paths were both acceptance figures, and
         phase 7 moves them on purpose. Measured in the built page: a

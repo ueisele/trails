@@ -6535,8 +6535,18 @@ class _PlanMode(MacroElement):
             var pressed = null;
             var container = map.getContainer();
 
-            function overControl(event) {
-                return !!(event.target && event.target.closest && event.target.closest('.leaflet-control-container'));
+            // Whether a click landed on something that is not the ground.
+            //
+            // **A popup is not in the control container.** It lives in a pane
+            // inside the map, so a handler that only steps around the controls
+            // walks straight over it: measured, clicking the close button of a
+            // chain's popup placed a waypoint behind it and left the popup open.
+            // Everything inside a popup is the same case — a link, a name, the
+            // text a reader is trying to select — because a popup is something
+            // to read and not terrain to plan over.
+            function overFurniture(event) {
+                if (!event.target || !event.target.closest) { return false; }
+                return !!event.target.closest('.leaflet-control-container, .leaflet-popup');
             }
 
             container.addEventListener('mousedown', function (event) {
@@ -6544,7 +6554,7 @@ class _PlanMode(MacroElement):
             }, true);
 
             container.addEventListener('click', function (event) {
-                if (!on || overControl(event)) { return; }
+                if (!on || overFurniture(event)) { return; }
                 // A pan ends in a click too. Leaflet drops that one for its own
                 // listeners; this one is not Leaflet's, so how far the pointer
                 // travelled is what tells the two apart.
@@ -6579,7 +6589,7 @@ class _PlanMode(MacroElement):
             // Two clicks place two points, which the button takes back one at a
             // time; zooming as well would leave the reader somewhere else too.
             container.addEventListener('dblclick', function (event) {
-                if (on && !overControl(event)) { event.stopPropagation(); }
+                if (on && !overFurniture(event)) { event.stopPropagation(); }
             }, true);
 
             // What the plan is, and the entry a click uses, the way the graph
