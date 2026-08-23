@@ -812,7 +812,28 @@ class TestProfilePanel:
         html = fmap.get_root().render()
 
         assert "createElementNS(SVG, 'clipPath')" in html
-        assert "inside.setAttribute('clip-path', 'url(#' + frameId + ')');" in html
+        assert "group.setAttribute('clip-path', 'url(#' + id + ')');" in html
+        # And the waypoint marks get a frame of their own, wider by their own
+        # radius: every route has a point at nought and one at its end, and the
+        # curve's frame would draw both as half discs.
+        assert "var marks = framed('trails-profile-marks-" in html
+        assert "STATION_R + 1);" in html
+
+    def test_the_profile_marks_the_points_a_route_was_planned_with(self, group):
+        """ "Where is the climb" is half an answer until the profile says which
+        two points it lies between. Drawn as the pin is drawn — a pale disc, a
+        dark ring, the same number — because they are the same point seen from
+        above and from the side.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "(shape.stations || []).forEach(function (metres, index) {" in html
+        assert "var sample = nearest(shape.distance, metres);" in html
+        # A point on ground nothing was read along still happened.
+        assert "var level = isNaN(value) ? box.top + 10 : y(value);" in html
 
     def test_a_window_belongs_to_the_chain_it_was_opened_on(self, group):
         """Carried over, it would open the panel somewhere in the middle of
@@ -1323,6 +1344,24 @@ class TestPlanMode:
         html = fmap.get_root().render()
 
         assert "if (on && window.trailsHighlight) { window.trailsHighlight.clear(); }" in html
+
+    def test_the_points_a_reader_put_down_are_recorded_as_the_walk_happens(self):
+        """A crossing contributes no walking distance and a leg still being
+        worked out contributes none either, so a sum over the legs' own lengths
+        would put every later point too far along. Leg i runs from point i to
+        point i + 1, so the distance at the head of leg i is point i's.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "var stations = [];" in html
+        assert "stations.push(walked);\n                    if (!leg.parts)" in html
+        # One per point and never one per leg: with nothing down there is
+        # nothing to mark, and the guard is what says so.
+        assert "if (points.length) { stations.push(walked); }" in html
+        assert "stations: shape.stations," in html
 
     def test_a_waypoint_is_a_marker_because_a_circle_cannot_be_dragged(self):
         """198 markers and 13 plan-pane paths were both acceptance figures, and

@@ -2814,6 +2814,11 @@ class _ProfilePanel(MacroElement):
             // turns out to be steeper than the panel — see render().
             var view = {zoom: 1, at: 0, centre: null};
 
+            // The waypoint pins' own ink. Plan mode names it ROUTE and draws
+            // its pins with it; a station on this panel is the same point seen
+            // from the side, and two colours for one point would be two points.
+            var STATION = '#111111', STATION_R = 7;
+
             var crosshair = null;
 
             // How steep the ground is at each sample, read over GRADE.window
@@ -3120,17 +3125,28 @@ class _ProfilePanel(MacroElement):
                 // steeper than the panel draws past the top and the bottom, and
                 // unclipped that runs over the height labels and out of the
                 // panel into the map.
-                var frameId = 'trails-profile-frame-{{ this.get_name() }}';
-                var frame = document.createElementNS(SVG, 'clipPath');
-                frame.setAttribute('id', frameId);
-                var shield = document.createElementNS(SVG, 'rect');
-                shield.setAttribute('x', box.left); shield.setAttribute('y', box.top);
-                shield.setAttribute('width', Math.max(0, wide)); shield.setAttribute('height', Math.max(0, tall));
-                frame.appendChild(shield);
-                chart.appendChild(frame);
-                var inside = document.createElementNS(SVG, 'g');
-                inside.setAttribute('clip-path', 'url(#' + frameId + ')');
-                chart.appendChild(inside);
+                var framed = function (id, spare) {
+                    var frame = document.createElementNS(SVG, 'clipPath');
+                    frame.setAttribute('id', id);
+                    var shield = document.createElementNS(SVG, 'rect');
+                    shield.setAttribute('x', box.left - spare); shield.setAttribute('y', box.top);
+                    shield.setAttribute('width', Math.max(0, wide + 2 * spare));
+                    shield.setAttribute('height', Math.max(0, tall));
+                    frame.appendChild(shield);
+                    chart.appendChild(frame);
+                    var group = document.createElementNS(SVG, 'g');
+                    group.setAttribute('clip-path', 'url(#' + id + ')');
+                    chart.appendChild(group);
+                    return group;
+                };
+                var inside = framed('trails-profile-frame-{{ this.get_name() }}', 0);
+                // **A second frame, wider by a waypoint's own radius.** The
+                // curve's has to end where the plot does — zoomed in, the run it
+                // is drawn from reaches a sample beyond each edge on purpose —
+                // but a waypoint sits *at* a distance, and every route has one at
+                // nought and one at its end. Clipped to the plot they are both
+                // drawn as half discs, every time.
+                var marks = framed('trails-profile-marks-{{ this.get_name() }}', STATION_R + 1);
 
                 var slope = gradients(shape);
                 var strokes = drawCurve(shape, plot, x, y, slope, from, to);
@@ -3151,6 +3167,41 @@ class _ProfilePanel(MacroElement):
                     // the line across it is a straight one somebody drew.
                     if (stroke.free) { curve.setAttribute('stroke-dasharray', FREE_DASH); }
                     inside.appendChild(curve);
+                });
+
+                // **The reader's own points, on the profile.** A route is
+                // planned by putting points down on the map, and "where is the
+                // climb" is only half an answer until the profile says which two
+                // points the climb lies between. Drawn as the pin is drawn — a
+                // pale disc, a dark ring, the same number — because they are the
+                // same point seen from above and from the side, and a reader
+                // should not have to work that out. Clipped with the curve: at a
+                // zoom most of them are off the panel.
+                (shape.stations || []).forEach(function (metres, index) {
+                    var here = x(metres);
+                    if (here < box.left - 1 || here > box.right + 1) { return; }
+                    var sample = nearest(shape.distance, metres);
+                    var value = shape.height[sample];
+                    // A point on ground nothing was read along still happened;
+                    // it is drawn against the foot of the box rather than not at
+                    // all, because a route with a hole in it is exactly when a
+                    // reader is looking for its points.
+                    var level = isNaN(value) ? box.top + 10 : y(value);
+                    var rule = line(here, box.bottom, here, level, STATION);
+                    rule.setAttribute('stroke-dasharray', '2 2');
+                    marks.appendChild(rule);
+                    var disc = document.createElementNS(SVG, 'circle');
+                    disc.setAttribute('cx', here); disc.setAttribute('cy', level);
+                    disc.setAttribute('r', String(STATION_R));
+                    disc.setAttribute('fill', '#ffffff');
+                    disc.setAttribute('stroke', STATION);
+                    disc.setAttribute('stroke-width', '1.5');
+                    marks.appendChild(disc);
+                    var number = text(here, level + 3, String(index + 1), 'middle');
+                    number.setAttribute('font-size', '9');
+                    number.setAttribute('font-weight', 'bold');
+                    number.setAttribute('fill', STATION);
+                    marks.appendChild(number);
                 });
 
                 // What the reader is looking at, and only where that is less
@@ -5551,7 +5602,17 @@ class _PlanMode(MacroElement):
                     joined = false;
                 }
 
+                // **Where the reader's own points sit, in walked metres.**
+                // Recorded as the walk happens and not summed from the legs
+                // afterwards: a crossing contributes no walking distance and a
+                // leg still being worked out contributes none either, so a sum
+                // over the legs' own lengths would put every later point too far
+                // along. Leg i runs from point i to point i + 1, so the distance
+                // at the head of leg i is point i's, and the walk's end is the
+                // last point's.
+                var stations = [];
                 legs.forEach(function (leg) {
+                    stations.push(walked);
                     if (!leg.parts) { breakHere(); return; }
                     leg.parts.forEach(function (part) {
                         addTally(tally, part.tally);
@@ -5581,7 +5642,11 @@ class _PlanMode(MacroElement):
                     });
                 });
                 close();
+                // One per point, never one per leg: with no points down there is
+                // nothing to mark, and the guard is what says so.
+                if (points.length) { stations.push(walked); }
                 return {lon: lon, lat: lat, along: along, height: height, distance: distance, free: free,
+                        stations: stations,
                         stretches: stretches, tally: tally, total: walked, read: read,
                         modelled: modelled, fromFile: fromFile,
                         // Filtered once, here, and read by the sentence above
@@ -6672,6 +6737,9 @@ class _PlanMode(MacroElement):
                         // file to see that it says the same.
                         tally: shape.tally, stretches: shape.stretches.length,
                         vertices: shape.lon.length, samples: shape.height.length,
+                        // Where each point the reader put down sits along the
+                        // walk, which is what the profile marks them at.
+                        stations: shape.stations,
                         writable: writable(),
                         // What was loaded and what it cost, so a check reads the
                         // figures rather than the status line they are written

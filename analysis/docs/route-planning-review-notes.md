@@ -116,6 +116,27 @@ out per feature and compresses against nothing. **Showing a figure is the
 expensive half; carrying it is nearly free.** Neither budget is threatened, and
 the ratio is the thing to remember before adding the next row.
 
+**And the profile marks the points a route was planned with.** *Where is the
+climb* is half an answer until the panel says which two of the reader's own
+points it lies between. Drawn as the pin is drawn — a pale disc, a dark ring, the
+same number — because they are one point seen from above and from the side.
+
+**The distance is the only part of this that is not obvious.** It has to be the
+**walked** distance, and only the walk itself knows it: a crossing contributes
+none, and a leg still being worked out contributes none either, so summing the
+legs' own lengths would put every later point too far along. So it is recorded as
+`composeRoute` walks — leg *i* runs from point *i* to point *i* + 1, so the
+distance at the head of leg *i* is point *i*'s, and the walk's end is the last
+one's. Driven on a four-point route: the marks land within **0.02 px** of where
+their own distance says.
+
+**And they needed a frame of their own.** The curve's clip has to end exactly at
+the plot, because zoomed in the run it is drawn from deliberately reaches one
+sample past each edge. But a waypoint sits *at* a distance, and **every route has
+one at nought and one at its end**, so clipped to the plot both were drawn as
+half discs — every route, every time. The marks now use a second clip, wider by
+their own radius.
+
 **And a highlighted line could not be let go of while planning.** The
 click-highlight has exactly two ways out — a click on the line, and a click on
 empty ground — and plan mode owns both from the moment it is switched on.
