@@ -75,7 +75,7 @@ uv run python script.py          # Execute Python scripts
 ### Code Style
 - Type hints for all public functions
 - Google-style docstrings
-- 100-character line limit
+- 150-character line limit (`[tool.ruff] line-length` in pyproject.toml is what `make check` enforces)
 - No trailing whitespace
 - Use f-strings for formatting
 
@@ -206,6 +206,15 @@ command make install-all          # Install all dependencies (core + dev + jupyt
 # Development
 command make notebook             # Start JupyterLab
 command make notebook-clean       # Clear all notebook outputs
+
+# The map
+command make map                  # Build the Lomsdal-Visten map into analysis/output/
+command make graph                # Build the routing graph and report its numbers
+command make drive                # Drive the built page in a real browser (48 readings)
+command make deploy               # Publish the built map and purge the edge cache
+# map/graph/drive/deploy all take ARGS="...", e.g. make deploy ARGS="--dry-run".
+# deploy needs settings in the environment; see .env.example. Nothing identifying the
+# Cloudflare account may be committed here — this repository is public.
 
 # Testing & Quality
 command make check                # Run all checks (format check, lint, type, test)

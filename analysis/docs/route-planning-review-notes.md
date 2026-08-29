@@ -1892,6 +1892,13 @@ three times — `pd.NA` as the text `<NA>`, an empty string counted by `notna`,
 and `Ukjent` read as a name. Every carried column, looked at for values that mean
 absence.
 
+**5. The page on a phone.** The map is now published, and measured against a
+phone it does not hold: 523 MB of memory, 41 % of the file is popups nobody
+opens, no touch handling at all, and no map visible at either test size. All of
+it is in *What hosting it, and pointing a phone at it, found* below, including
+the one measurement still missing — what the 523 MB is actually made of, which
+decides whether anything beyond popups and the canvas renderer is needed.
+
 **After those, and none of them blocked**: elevation-aware routing, splitting a
 route into days, snapping a waypoint to a hut or a quay. All three are decisions
 nobody has taken rather than work nobody has done.
@@ -2011,6 +2018,108 @@ them written in the decisions document rather than in the phase. A wrong figure
 fails an implementation loudly. A wrong premise sends it in the wrong direction
 quietly, and it is the sentence that sounds most like background that is worth
 measuring.
+
+## What hosting it, and pointing a phone at it, found
+
+Not a phase either. The map was put on the web — a static object in Cloudflare
+R2, served at `https://atlas.cairn.zone/lomsdal-visten`, with the infrastructure
+as an OpenTofu module in a separate private repository and `command make deploy`
+here to publish. Everything below came out of measuring the page as a thing
+other people load, rather than as a file this machine opens.
+
+**The page needs almost nothing from the network, and that was a surprise.**
+Requests counted by intercepting them, not by reasoning:
+
+| | requests |
+|---|---|
+| loading | 54 tiles + 13 CDN |
+| selecting a chain and reading its **full** elevation profile | **0** |
+| routing over the network | **0** — the Dijkstra is in the page |
+| six freehand points, legs drawn straight | **82** to `ws.geonorge.no` |
+
+So heights for all 11,290 chains are already in the payload. Offline, the only
+things missing are the background tiles, the four CDN scripts, and heights for
+legs that leave the network. The first two are cheap to remove; that makes an
+offline map far closer than it looked.
+
+**The file is 39.6 MB and almost none of it is terrain.** Measured by
+classifying every line:
+
+| | | |
+|---|---|---|
+| 16.3 MB | **41 %** | 12,898 popups, every one built as jQuery DOM **at load** |
+| ~5.3 MB | | folium's per-line boilerplate — 11,290 × `L.polyline(` + options + `.addTo` |
+| 3.2 MB | | coordinates at 15 decimal places (`65.44107796402518` — nanometres) |
+| 1.09 MB | | 163,144 blank lines |
+| 4.93 MB | | the graph payload — the one part that earns its size |
+| 2.84 MB | | `figures` |
+
+Compressed it is 7.5 MB gzip, 6.4 MB brotli -q11.
+
+**Loaded, the page costs 523 MB.** PSS across every browser process, content
+process 32.8 → 544.8 MB; `window.trailsGraph.ready` resolves at **9.2 s** on a
+desktop CPU. That is the number that decides whether a phone can hold it at all,
+and **the 523 MB has not been split** across popups, SVG paths and the graph.
+That split is the first measurement to take, and it decides everything after it.
+
+**Nothing in `maps.py` handles touch.** `touchstart|touchmove|pointerdown|
+touchend` — zero occurrences. What that costs on a phone:
+
+- **Dead**: panning the profile (`mousedown`/`mousemove`/`mouseup`, `maps.py:3489`),
+  zooming it (`wheel`, `maps.py:3465`), reordering the point list (HTML5
+  drag-and-drop, `maps.py:6605`/`6649` — a thing mobile browsers do not implement
+  at all).
+- **Works**: tapping a line, placing a point, dragging a pin (`draggable: true`,
+  `maps.py:6047` — Leaflet does touch itself).
+
+The panel even tells the reader to *"Scroll here"*, which on a phone is an
+instruction nobody can follow.
+
+**And there is no room.** At 390×844 and at 360×640, with the legend open, plan
+mode on and a profile showing, `mapVisiblePct` is **0** — no map is visible at
+all. The legend and the plan control overlap by **85,158 px²** (390) and 26,394
+px² (360); the legend is 380 px wide on a 390 px screen and is pushed off the top
+(`y = −239`).
+
+**The diagnosis is sharper than "it does not fit".** The page already negotiates
+space at runtime in five places — `maps.py:2613`, `2690`, `3040`, `3802`, `6829`
+and `roomAbove()` — where the profile caps itself against the map, the chart sizes
+itself, and the point list refits on every resize. **The legend is the only panel
+that does not take part**: a fixed `max-height:70vh` that never asks what else is
+on screen. Three of four panels already do the right thing.
+
+Readability itself is fine. The profile is the best of the three at 370×425 with
+9–12 px type; the point list reads cleanly at 12–13 px and already fits itself to
+the room (5 of 6 rows at 390, 1 of 6 at 360). Two things are not: **tap targets**
+— the row's `×` is **15×13 px** and its `≡` **9×17 px** against a 44 px guideline
+— and **popups open behind the legend**, because Leaflet's control container
+outranks the popup pane and the legend is nearly screen-wide.
+
+**What follows, and what it is not.** None of this is a mobile *variant*. The
+axes are viewport width (a desktop window at 390 px breaks identically), pointer
+type (Pointer Events cover mouse and finger in one path), and weight — and only
+weight could ever justify a second build, because bytes cannot be media-queried
+away. In order:
+
+1. **Split the 523 MB.** One experiment; it decides whether anything else is
+   needed.
+2. Popups built on click, not on load. Biggest single win in both file and memory.
+3. `preferCanvas: true` — it is `false` today, so 11,589 SVG paths sit in the DOM.
+   Safe for the app: chain identity is read from `layer.options.className`, never
+   from the DOM, and **no CSS anywhere targets `.trail-group-*`**. It breaks the
+   browser checks instead — `drive_map.py:126` counts `.leaflet-overlay-pane path`
+   and `:724` reads `path.classList` — which is the only reason to keep it behind
+   a flag.
+4. Coordinates at 6 decimals; the legend into the space negotiation; the popup
+   above the controls; Pointer Events; 44 px targets; ↑/↓ instead of drag.
+
+**Offline is a different project, and it decomposes.** Vendoring the four CDN
+scripts plus a service worker already gives every line, every profile and the
+routing in a dead spot — only the background would be blank. The tiles are the
+work: for the drawn extent, **6,308 tiles and 563 MB at zoom ≤ 14** (~4 m/px at
+65.5° N), measured against real tile sizes; z15 would be 2.1 GB. That wants
+PMTiles, a download with progress, `navigator.storage.persist()`, and Kartverket's
+terms read before bulk-fetching anything.
 
 ## What the profile zoom found
 
