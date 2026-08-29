@@ -155,6 +155,27 @@ only thing that can tell you whether the drawn angle is right or a control has
 gone under another. A red reading is labelled either a broken invariant — a
 defect — or a moved figure, which happens legitimately when the sources change.
 
+**Publishing** — puts the map the last `command make map` produced on the web, then drops it from
+the edge cache so the new one is served at once:
+
+```bash
+command make deploy
+command make deploy ARGS="--dry-run"     # says what it would do, changes nothing
+```
+
+It **does not build**. That separation is deliberate: a deploy that rebuilt first would make
+"publish the thing I just looked at" impossible, and the thing you just looked at is the only one
+worth publishing.
+
+Where it goes is not configured here. This repository is public, so the bucket, endpoint, hostname
+and zone would be account identifiers in a public place; they come from the environment instead —
+`.env.example` names them, `.env` is git-ignored. The infrastructure that receives the upload lives
+in a separate private repository as an OpenTofu module, whose `just deploy-env` prints every value.
+
+A map named `<name>` is uploaded as `<name>.html` and is then readable at `https://<host>/<name>`.
+Publishing a second map needs nothing but a second upload.
+
+
 ## Structure
 
 ```

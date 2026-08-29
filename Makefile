@@ -1,4 +1,4 @@
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy
 
 # Default target
 help:
@@ -26,6 +26,7 @@ help:
 	@echo "  make map           Build the Lomsdal-Visten map into analysis/output/"
 	@echo "  make graph         Build the Lomsdal-Visten routing graph and report it"
 	@echo "                     both take ARGS=\"...\", e.g. make map ARGS=\"--approach-km 10\""
+	@echo "  make deploy        Publish the built map and purge the edge (needs .env)"
 	@echo "  make fixtures      Generate/update test fixtures from real data"
 	@echo "  make fixtures-info Show information about test fixtures"
 	@echo "  make fixtures-clean Remove all test fixtures"
@@ -151,6 +152,14 @@ map:
 graph:
 	@echo "🕸️  Building the Lomsdal-Visten routing graph..."
 	uv run python analysis/scripts/route_graph.py $(ARGS)
+
+# Publishes whatever `make map` last built — it does not build. That separation is deliberate: a
+# deploy that rebuilds would make "publish the thing I just looked at" impossible, and the thing you
+# just looked at is the only one worth publishing. Where it goes is not in this repository; see
+# .env.example.
+deploy:
+	@echo "🚀 Publishing the built map..."
+	uv run python analysis/scripts/deploy_map.py $(ARGS)
 
 drive:
 	@echo "🖱️  Driving the built map in a browser (about a minute; 25 s of it is the page loading)..."
