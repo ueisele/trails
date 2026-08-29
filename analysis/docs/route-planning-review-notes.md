@@ -2487,6 +2487,39 @@ pushed value instead.
   same shape as the profile panel's own ceiling, which was clamped only where it
   was asked for.
 
+### And whether a file survives a phone at all
+
+**Asked, and the asking found a defect.** Driven at 390 x 844 in a touch
+context, with real downloads and the real file input: a chain writes a 1.20 MB
+GPX, a planned route writes 797 kB with 5 `<wpt>` and one `<trk>` — four set
+points and one generated crossing marker — the archive opens in Python with a
+clean `testzip()`, and the file read back through the picker is offered as
+*route · asis · 4 waypoints · 3 legs* and restores **4 points, 27,306.0 m**.
+**The mechanism holds end to end.**
+
+**But a stage named itself twice.** The archive's members came out as
+`lomsdal-visten-Planned-route-in-Lomsdal-Visten-1-2-1-2.gpx`. The file name fell
+back `plan.stem || plan.name`, and an unnamed tour leaves `stem` null while
+`name` is the *track's title* — which already ends in the stage — so the suffix
+went on after it. **The code names the trap in its own comment** two lines up:
+*"or the stage's own name lands in it twice."* A named tour never showed it,
+because then `stem` answers.
+
+`stem` is what the file is called and `name` is what the track is called, and
+neither is the other's fallback. The members are `-route-1-2.gpx`,
+`-route-2-4.gpx` and `-route.gpx` now.
+
+**111 browser readings and 208 source tests were green over it**, which is the
+argument for the check that now exists: `files written and read back` writes a
+route, cuts a stage, downloads the archive, opens it in Python and reads the
+route back through the picker. **It lays its own route down** rather than
+inheriting one — the checks before it take points out, and one of them exists to
+prove that undo does. `make drive` reads **119**.
+
+What that check cannot answer is Safari: until iOS 16.4 an `<a download>` on a
+blob opened the file in a tab rather than saving it, and headless Firefox on
+Linux says nothing about that.
+
 ### What is still open on a phone
 
 - **The keyboard.** Naming a stage means typing; `visualViewport` shrinks and

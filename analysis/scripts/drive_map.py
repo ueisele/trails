@@ -1275,6 +1275,132 @@ def the_plan_bar(page: Any) -> Check:
     )
 
 
+def files_from_the_page(page: Any) -> Check:
+    """Writing a file and reading one back, on a phone-sized page.
+
+    **Only a browser can answer this.** The page builds a blob, offers it
+    through an anchor it puts in the document, and reads a file back through an
+    ``<input type="file">`` and a ``FileReader``; none of that exists in the
+    source tests, and the archive is written by hand -- varints, deflate-raw and
+    a DOS timestamp -- so *it opens* is a claim about arithmetic.
+
+    It also catches a class of defect nothing else did. Driven before this check
+    existed, a stage's file came out as
+    ``lomsdal-visten-Planned-route-in-Lomsdal-Visten-1-2-1-2.gpx``: the file name
+    fell back from ``stem`` to ``name``, ``name`` is the track's title, and the
+    title already ends in the stage. 111 browser readings and 208 source tests
+    were all green over it.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What came out, whether the archive opens, and what a round trip restored
+    """
+    import tempfile
+    import zipfile
+
+    # **It lays its own route down rather than inheriting one.** The checks
+    # before this take points out -- one of them exists to prove that undo does
+    # -- so a file check that used what it found would write whatever was left
+    # and skip itself the day that was nothing.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(900)
+    page.evaluate("() => window.trailsChrome.close()")
+    if not select(page, LONG_CHAIN):
+        page.set_viewport_size({"width": 1400, "height": 900})
+        return Check("files written and read back", skipped=f"{LONG_CHAIN} is not in this page")
+
+    places = page.evaluate(
+        """() => { const shape = window.trailsProfile.shape;
+        return [0.08, 0.35, 0.62, 0.9].map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
+    )
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.undo(); } }"""
+    )
+    page.wait_for_timeout(1200)
+    for at in places:
+        page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
+        page.wait_for_timeout(2000)
+    page.wait_for_timeout(2500)
+
+    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.wait_for_timeout(900)
+    out = pathlib.Path(tempfile.mkdtemp(prefix="trails-drive-"))
+
+    press_download = """() => { const panel = document.querySelector('.trails-profile-panel');
+        [...panel.querySelectorAll('button')].find(b => /Download/.test(b.textContent)).click(); }"""
+    with page.expect_download(timeout=25_000) as caught:
+        page.evaluate(press_download)
+    written = caught.value
+    route = out / written.suggested_filename
+    written.save_as(route)
+    text = route.read_text(encoding="utf-8")
+
+    # A stage, and the archive that gathers them.
+    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.wait_for_timeout(900)
+    page.evaluate(
+        """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+          .filter(row => !row.classList.contains('trails-plan-stage'));
+        const cut = rows[1] && rows[1].querySelector('.trails-plan-cut');
+        if (cut) { cut.click(); } }"""
+    )
+    page.wait_for_timeout(1600)
+    members: list[str] = []
+    broken: str | None = "the archive was never offered"
+    if page.evaluate("() => { const z = document.querySelector('.trails-plan-zip'); return !!(z && z.offsetParent !== null); }"):
+        with page.expect_download(timeout=35_000) as caught:
+            page.evaluate("() => document.querySelector('.trails-plan-zip').click()")
+        archive = out / caught.value.suggested_filename
+        caught.value.save_as(archive)
+        with zipfile.ZipFile(archive) as opened:
+            broken = opened.testzip()
+            members = opened.namelist()
+
+    # And read one back, through the picker rather than around it.
+    page.evaluate("() => { window.trailsPlan.toggle(false); window.trailsPlan.toggle(true); }")
+    page.wait_for_timeout(700)
+    page.set_input_files(".trails-plan-file", str(route))
+    page.wait_for_timeout(3000)
+    offer = page.evaluate("() => window.trailsPlan.state().pending")
+    restored = None
+    if offer:
+        page.evaluate("() => window.trailsPlan.take()")
+        page.wait_for_timeout(4500)
+        restored = page.evaluate("() => window.trailsPlan.state().points.length")
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(900)
+
+    stages = [name for name in members if name != written.suggested_filename]
+    return Check(
+        "files written and read back",
+        [
+            Reading("a route downloads", written.suggested_filename.endswith(".gpx"), True, note=written.suggested_filename),
+            Reading("and is a GPX", text.startswith('<?xml version="1.0" encoding="UTF-8"?>'), True),
+            Reading("carrying its waypoints", text.count("<wpt ") > 0, True, note=f"{text.count('<wpt ')} wpt"),
+            Reading("the archive opens", broken, None),
+            Reading("holding a stage each and the tour", len(members), 3, note="; ".join(members)),
+            # The defect this check exists for: a stage's file name must carry
+            # the stage once. `stem` is the file's name and `name` is the
+            # track's, and neither is the other's fallback.
+            Reading(
+                "and no stage names itself twice",
+                all(name.count(name.rsplit("-", 2)[-2] + "-" + name.rsplit("-", 2)[-1]) == 1 for name in stages),
+                True,
+                note="; ".join(stages),
+            ),
+            Reading("a file picked with the picker is offered", bool(offer), True, note=str(offer["kind"]) if offer else ""),
+            Reading("and taking it restores its points", restored, offer["waypoints"] if offer else None),
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -1347,6 +1473,7 @@ def drive(page: Any) -> list[Check]:
     checks.append(stations_and_list(page, places))
     checks.append(a_finger_can_use_it(page))
     checks.append(the_plan_bar(page))
+    checks.append(files_from_the_page(page))
     checks.append(sharing_the_room(page))
     return checks
 

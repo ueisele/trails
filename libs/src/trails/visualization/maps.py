@@ -4141,7 +4141,16 @@ class _ProfilePanel(MacroElement):
                     // tour; what goes in the file name is the tour, with the
                     // stage as its suffix, or the stage's own name lands in it
                     // twice.
-                    var stem = (plan && (plan.stem || plan.name)) || EXPORT.route.fileStem;
+                    // **`stem` and never `name`.** The comment above says the
+                    // stage's own name must not land in the file name twice, and
+                    // falling back from `stem` to `name` is how it did: an
+                    // unnamed tour leaves `stem` null, `name` is the title —
+                    // which already ends in the stage — and the suffix goes on
+                    // after it. Driven, that wrote
+                    // `lomsdal-visten-Planned-route-in-Lomsdal-Visten-1-2-1-2.gpx`.
+                    // `stem` is the file's name and `name` is the track's; the
+                    // two are never each other's fallback.
+                    var stem = (plan && plan.stem) || EXPORT.route.fileStem;
                     return {name: fileNameOf(stem + (suffix ? '-' + suffix : '')),
                             text: routeGpxOf(figure, shape, runs, plan, told || [],
                                              crossingsOf(shape, runs))};
@@ -4169,7 +4178,16 @@ class _ProfilePanel(MacroElement):
                     // tour; what goes in the file name is the tour, with the
                     // stage as its suffix, or the stage's own name lands in it
                     // twice.
-                    var stem = (plan && (plan.stem || plan.name)) || EXPORT.route.fileStem;
+                    // **`stem` and never `name`.** The comment above says the
+                    // stage's own name must not land in the file name twice, and
+                    // falling back from `stem` to `name` is how it did: an
+                    // unnamed tour leaves `stem` null, `name` is the title —
+                    // which already ends in the stage — and the suffix goes on
+                    // after it. Driven, that wrote
+                    // `lomsdal-visten-Planned-route-in-Lomsdal-Visten-1-2-1-2.gpx`.
+                    // `stem` is the file's name and `name` is the track's; the
+                    // two are never each other's fallback.
+                    var stem = (plan && plan.stem) || EXPORT.route.fileStem;
                     return zipOf(files).then(function (blob) { saveFile(fileNameOf(stem, '.zip'), blob); });
                 }
             };
@@ -8273,6 +8291,10 @@ class _PlanMode(MacroElement):
                             ' no way and no heights, so the route has a gap that is not a crossing.'
                         : '',
                     name: tourName || null,
+                    // Said outright rather than left to a fallback: what the
+                    // file is called and what the track is called are two
+                    // decisions, and here they happen to agree.
+                    stem: tourName || null,
                     waypoints: points.map(nameOf),
                     legs: legs.map(function (leg) {
                         return (leg.parts || []).map(function (part) { return {kind: part.kind, length: part.length}; });
