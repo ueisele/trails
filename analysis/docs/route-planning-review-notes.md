@@ -486,6 +486,72 @@ drawn bounding box against the ground: **within 0.2 %** on three chains, which i
 the stroke's own half-pixel. A steep chain leaves width unused — 433 px of 1,238
 — and the crosshair is hidden out there, because there is no ground to report.
 
+**And a route this map wrote came back with two of its six points.** Reported by
+a reader, reproduced in a browser the same hour: six points planned along a real
+chain, exported, loaded back. The file was right — **6 `set` waypoints** and one
+generated marker. Read back it gave **2 points under *Take it as it is*, 6 under
+*Align to the network*, 2 under *Match***, with the walked distance correct to a
+decimetre in all three, which is why nothing looked wrong. `pointsForLoaded`
+reads the file's waypoints **only in the align branch**; the other two rebuild the
+stations from the track — its ends and both sides of every break. That is right
+for a foreign recording, which has no waypoints, and wrong for a file carrying
+its own.
+
+**A point set on open water cannot come back that way at all.** Driven with three
+points, the middle one offshore: `land 88 · water 554` and `water 573 · land 25 ·
+water 4,971 · land 195 · water 20 · land 208`. Under *as it is* and *match* it
+returns **8 points and the offshore one is not among them** — a crossing writes no
+track geometry, so there is nothing at that position to find — and the crossings
+fall **4 to 3**. The count can rise as easily as fall; they are simply other
+points. Align returns all three, identical.
+
+**The cause is the picker and not the loader.** The mode was chosen **before** the
+file was read, so three names had to be true of a planned route and of somebody's
+GPS recording at once. Read as a plan, *take it as it is* means the route as it
+was planned; read as a recording it means the line as it was walked. Both
+readings are reasonable and one word was offered for them — and it is the
+**first** in the list, so it is what a reader gets without choosing. The page even
+named the number it was about to discard: *a route this map wrote: 6 waypoints, 5
+legs*, and then two points on the map.
+
+**So the question is asked once the file has been read, in terms of the file.**
+What it turned out to be, what each mode would do to *it*, which one is offered
+first, and — where there is something to lose — what taking it costs. Driven: a
+route file offers **align** and says *Restore its points and plan between them
+again*; a recording offers **match**; a chain export offers **as it is** and shows
+no warning over an empty map. Taken at the offered default the six points come
+home, 32,175.4 m walked. Cancelling leaves the six that were there untouched, and
+no question stands before a file is read.
+
+Two things it deliberately does. **Nothing is withheld**: routing between the two
+ends of a recording is rarely wanted and occasionally exactly it, so it is named —
+*Route between its two ends only, the recording is not kept* — rather than greyed
+out, because a mode that works and is refused is a capability lost. And the
+**wording and the default live in one table** keyed by kind and mode, tested in
+both directions: a kind missing a mode leaves the sentence `undefined` and
+JavaScript says nothing, which is the `matchAnchorM` shape exactly.
+
+**And it is the only moment at which the plan still exists.** Taking a file
+replaces it and there is no way back — `undo()` takes a point off the end and a
+load has no history — so the offer says *This replaces the 6 points on the map*,
+as a count and only where there is something to lose. That was the argument for
+asking rather than applying and offering the alternatives afterwards: re-reading
+the file in hand is cheap and would work, but it can change how the file is read
+and never bring back what the file replaced.
+
+Cost **13,601 bytes**, 39,626,411 to 39,640,012, all of it script. `make drive`
+reads **48, all green**, and the two controls still overlap by 0 at every profile
+height — the offer is inside the plan control and goes through the same room
+arithmetic.
+
+**What it does not do: *as it is* still does not restore a plan.** Its sentence
+says so, and the default routes around it. Restoring one means honouring the leg
+list the file already carries, which is *Known open*'s second item — and that item
+now has its decision, taken by the reader who hit this: *take it as it is* should
+mean **restore what the file describes**, the plan for one of ours and the
+recorded line for anybody else's. That is one of the two options that entry has
+been holding open, and it settles it without a fourth mode.
+
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
 chain. 20,183 requests in 13.6 minutes, none at all on a second build or on a
@@ -651,14 +717,14 @@ worth keeping in its own right: **copy the built HTML, undo one fix with a
 **Rebuild the map and drive it.** `command make map`, about a minute warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and **wait twenty seconds after load** —
-the page is **39.63 MB**. It was 25.4 before 3B, 31.1 after the coverage rows,
+the page is **39.64 MB**. It was 25.4 before 3B, 31.1 after the coverage rows,
 36.0 after phase 4, 37.4 after phase 5, 37.5 after 6B, 37.7 after 6C, 39.4 once
 every chain carried its two steepness figures into its popup, and 39.63 once each
 also carried its steepest into the figures table — 201,279 bytes, 17.8 a chain.
 Everything else this panel gained — the zoom, the crosshair's mark on the map,
 the merged legend, the waypoint marks, the point list, the two controls learning
-to share the room — came to **33,923 bytes between them**, a sixth of what one
-number per chain cost. **A behaviour is written once and a row is written eleven
+to share the room, and the question the picker now asks — came to **47,524 bytes
+between them**, under a quarter of what one number per chain cost. **A behaviour is written once and a row is written eleven
 thousand times**, which is the popups' 175-to-1 seen from the other end.
 The probes, with what they read now:
 
@@ -692,6 +758,10 @@ the house rule for anything worth checking:
 | `window.trailsHighlight` | `clear()` and `selected()`, because both of the highlight's other ways out are clicks and plan mode owns clicks |
 | `.trails-plan-points` | the list of points. **Not** findable by its 220 px cap any more — the cap is computed |
 | `.leaflet-trailsProfileHere-pane` | the crosshair's mark on the map, at z-index **470** |
+| `window.trailsPlan.offer(text, name)` | read a file and describe it **without taking it** — `state().pending` then says what it turned out to be and which mode stands |
+| `window.trailsPlan.choose(mode)` / `.take()` / `.dismiss()` | the three steps the picker drives, so a check reads the answer rather than the screen |
+| `window.trailsPlan.readings` | the wording table, keyed by file kind and mode, with each kind's `first` |
+| `.trails-plan-offer` | the question itself. Absent from the screen until a file has been read |
 
 **And the panes, in the order they paint**: the overlay with all 11,589 paths at
 400, the direction arrow at 450, a planned route at 460, the crosshair's mark at
@@ -1640,13 +1710,14 @@ criterion of this whole project that **nobody has ever run**;
 no account and no network here. Everything downstream of *the file is correct*
 rests on it, and the file has been rewritten four times since anybody looked.
 
-**2. The leg modes nothing reads back.** Every exported plan carries what each
-leg is made of, and not one of the three load modes reads it: a plan holding a
-recorded leg does not come back. A purely routed one does, bit for bit, which is
-the common case and is why this has survived. It matters because the decisions
-document promises the opposite in as many words, and the fix is a **decision
-about the model** — a fourth mode that restores, or `asis` taught to honour the
-leg list it already receives — rather than a repair. Figures under *Known open*.
+**2. Teach *take it as it is* to restore a plan.** Every exported plan carries
+what each leg is made of and no load mode reads it, so a plan holding a recorded
+leg does not come back; a purely routed one does, bit for bit, which is the common
+case and is why this survived. **The model decision is no longer open** — the mode
+means *restore what the file describes*, the plan for one of ours and the recorded
+line for anybody else's — so what is left is the work: cut the track by the leg
+list's own lengths, which arrive in metres and not in indices, and remember that a
+crossing consumes none of them. Figures under *Known open*.
 
 **3. `PAYLOAD_VERSION` is written and never checked.** Small, and the fix is not
 the obvious one: the header cannot verify itself, so the decoder has to be handed
@@ -1726,6 +1797,18 @@ honour the leg list it already receives. **This is the third thing in this
 project written and never read**, after `PAYLOAD_VERSION` and the survey fields
 FKB does not publish, and it is the only one of the three that a document
 promises out loud.
+
+**The decision has since been taken, and it is the second one.** It came from a
+reader rather than from a review, and by the shortest possible route: told that
+*take it as it is* keeps the recorded line, they answered that they would expect
+it to keep *the route as they planned it* for a plan and *the line as it was
+walked* for a recording. That is one sentence covering both — **restore what the
+file describes** — so no fourth mode is wanted, and the name it would have needed
+is already on the one that should do it. What is left is the work: cutting the
+track by the leg list's own lengths, which the parts give in metres rather than in
+indices, remembering that a crossing consumes no track distance. The waypoints
+themselves no longer wait on it — the offer's defaults route around it, and *as
+it is* says in the picker that it does not restore them.
 
 One thing is open, and it is open by decision rather than by oversight:
 

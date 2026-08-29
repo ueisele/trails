@@ -121,9 +121,12 @@ route's own profile is drawn in the same panel and marks each of your points on
 it, and *Download GPX* writes it with its waypoints, its legs and the protected
 areas it enters and leaves.
 
-**A GPX can be loaded back**, with a choice made before the file is read: take
-the track exactly as it is, route afresh between its waypoints, or match it onto
-the network wherever a path exists.
+**A GPX can be loaded back.** The file is read and described first — a route
+this map wrote, a chain export, or somebody else's track — and then it asks how to
+read it, with the sensible answer already chosen and a sentence saying what each
+one would do to *that* file: take the line as it is, route afresh between its
+waypoints, or match it onto the network wherever a path exists. Loading replaces
+whatever is on the map, so the question says how many points that is.
 
 ### Checking the built page
 

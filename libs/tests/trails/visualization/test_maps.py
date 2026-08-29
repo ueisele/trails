@@ -1356,6 +1356,73 @@ class TestPlanMode:
         assert "7.5" in html
         assert "3.25" in html
 
+    def test_every_mode_says_what_it_does_to_every_kind_of_file(self):
+        """The mode names have to be true of a planned route and of somebody's
+        GPS recording at once, and they cannot be: read as a plan, *take it as it
+        is* means the route as it was planned; read as a recording it means the
+        line as it was walked. So the question is asked once the file has been
+        read, in terms of the file -- and the wording lives in one table keyed by
+        both, because a sentence and the mode it describes are one decision.
+
+        Checked in **both** directions. A kind missing a mode leaves the sentence
+        under the selector ``undefined`` and JavaScript has nothing to say about
+        it; a kind naming a mode that does not exist is a sentence no reader can
+        ever reach. That asymmetry cost this page an hour once already.
+        """
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        modes = set(re.findall(r"\{key: '([a-z]+)', label:", planning))
+        assert modes
+
+        table = planning.split("var READINGS = {")[1].split("\n            };")[0]
+        kinds = re.findall(r"\n                ([a-z]+): \{(.*?)\n                \}", table, re.S)
+        assert {kind for kind, _ in kinds} == {"route", "chain", "track"}
+
+        for kind, block in kinds:
+            named = set(re.findall(r"\n                    ([a-z]+):", block))
+            assert named - {"first"} == modes, kind
+            first = re.search(r"first: '([a-z]+)'", block)
+            assert first and first.group(1) in modes, kind
+
+    def test_the_mode_is_asked_after_the_file_has_been_read(self):
+        """It stood beside the button and had to be answered before anybody knew
+        what was in the file. A reader picking the first of the three lost the
+        points their route was planned with -- measured, six set waypoints in the
+        file and two points on the map -- while the page named the number it was
+        about to discard.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        # The picker reads and describes; nothing is taken by picking a file.
+        assert "offerFile(String(reader.result), file.name);" in html
+        assert "loadGpx(String(reader.result)" not in html
+        assert "class ='trails-plan-offer'" not in html
+        assert "offerBox.className = 'trails-plan-offer';" in html
+
+    def test_a_file_read_and_not_taken_replaces_nothing(self):
+        """The question is the only moment at which the plan on the map still
+        exists: taking a file replaces it and there is no way back, because undo
+        takes a point off the end and a load has no history. So reading must
+        touch nothing -- one place puts a file on the map, and it is the one the
+        reader reaches through an answer.
+        """
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+
+        assert planning.count("points = pointsForLoaded(graph);") == 1
+        assert planning.count("loaded = read;") == 1
+        taking = planning.split("function takeGpx(read, mode) {")[1].split("\n            }")[0]
+        assert "points = pointsForLoaded(graph);" in taking
+        assert "loaded = read;" in taking
+
+        # And the loss is said before it happens, as a count rather than as a
+        # warning about files in general.
+        assert "' points' ) + ' on the map." not in planning
+        assert "on the map. There is no way back." in planning
+
     def test_it_draws_nothing_on_the_map(self):
         """The route belongs in a pane of its own: anything drawn into the
         overlay pane is counted among the map's paths for ever after, and 11,589

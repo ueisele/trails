@@ -4586,6 +4586,14 @@ class _PlanMode(MacroElement):
             // no longer loaded is recognised rather than read against the wrong
             // coordinates.
             var loaded = null;
+
+            // A file that has been read and not yet taken, and null the rest of
+            // the time — which is how everything else knows whether a question
+            // is on the screen. **It is deliberately not `loaded`**: nothing
+            // anchored to a recording may see a file the reader has not
+            // accepted, or an edit made while the question stands would look its
+            // points up in the wrong track.
+            var pendingFile = null;
             var loadedCount = 0;
 
             // A waypoint anchored to a recorded point. **It keeps the
@@ -5443,6 +5451,57 @@ class _PlanMode(MacroElement):
                 {key: 'match', label: 'Match where a path exists'}
             ];
 
+            // ---- what a mode does to *this* file ------------------------------------
+            // **Three names cannot be true of two kinds of file at once**, and
+            // that is what the mode picker asked of them for as long as it stood
+            // beside the button: it had to be answered before anybody knew what
+            // was in the file. Read as a plan, 'take it as it is' means the
+            // route as it was planned; read as a recording it means the line as
+            // it was walked. Both readings are reasonable and the picker offered
+            // one word for them.
+            //
+            // So the question is asked once the file has been read, in terms of
+            // the file: what it turned out to be, what each mode would do to it,
+            // and which one is offered first. **One table, keyed by both** —
+            // the wording and the default are one decision, and two recordings
+            // of one decision drifting apart is the failure this page has found
+            // three times.
+            //
+            // Nothing is withheld. Routing between the two ends of a recording
+            // is rarely what anybody wants and is occasionally exactly it, so it
+            // is named rather than taken away: a mode that works and is refused
+            // is a capability lost, where a mode that says what it will do is a
+            // reader who chose.
+            var READINGS = {
+                route: {
+                    first: 'align',
+                    asis: 'Take the drawn line as it is \\u2014 the points it was planned with are not restored.',
+                    align: 'Restore its points and plan between them again, over the network as it now stands.',
+                    match: 'Keep its line and attach it to the network again wherever a path exists.'
+                },
+                chain: {
+                    first: 'asis',
+                    asis: 'Take the line as it is \\u2014 it came off this map and is already exact.',
+                    align: 'Route between its two ends only \\u2014 the line itself is not kept.',
+                    match: 'Lay it on the network again wherever a path exists.'
+                },
+                track: {
+                    first: 'match',
+                    asis: 'Take the recorded line exactly as it was walked.',
+                    align: 'Route between its two ends only \\u2014 the recording is not kept.',
+                    match: 'Put it on the network wherever a path exists, and keep the rest as recorded.'
+                }
+            };
+
+            // Which of the three kinds a read file is. The same three questions
+            // describeFile asks, in the same order, because a file that says it
+            // is one of this map's routes is that whatever else it carries.
+            function kindOf(read) {
+                if (read.isRoute) { return 'route'; }
+                if (read.chainId) { return 'chain'; }
+                return 'track';
+            }
+
             // A break between two segments is a crossing and is never walked.
             // **This is the one reading of a loaded file that must not be got
             // wrong quietly**: GPX has no way to say a segment is a boat, so a
@@ -5604,55 +5663,76 @@ class _PlanMode(MacroElement):
             // this phase is for. Drawing it as the chain it already is was the
             // alternative and is phase 4's job: a chain is one click away on the
             // map, and a chain id out of an older build names nothing here.
-            function describeLoaded() {
+            // **It takes the file rather than reading the one in hand**, because
+            // it is now said twice and the first time is before anything has
+            // been taken: the offer names what the file turned out to be so the
+            // mode can be chosen against it, and the status line says the same
+            // afterwards. One sentence, written once, or the two would
+            // eventually describe the same file differently.
+            function describeFile(read) {
                 var said = [];
-                if (loaded.isRoute) {
-                    said.push('a route this map wrote: ' + loaded.waypoints.length +
-                              (loaded.waypoints.length === 1 ? ' waypoint' : ' waypoints') +
-                              ', ' + loaded.legs.length + (loaded.legs.length === 1 ? ' leg' : ' legs'));
-                } else if (loaded.chainId) {
-                    said.push('a chain export: ' + loaded.name + ' (' + loaded.chainId + ')');
+                if (read.isRoute) {
+                    said.push('a route this map wrote: ' + read.waypoints.length +
+                              (read.waypoints.length === 1 ? ' waypoint' : ' waypoints') +
+                              ', ' + read.legs.length + (read.legs.length === 1 ? ' leg' : ' legs'));
+                } else if (read.chainId) {
+                    said.push('a chain export: ' + read.name + ' (' + read.chainId + ')');
                 } else {
                     said.push('a track from somewhere else: no waypoints and no legs');
                 }
-                said.push(loaded.n.toLocaleString('en-GB') + ' recorded points');
-                if (loaded.breaks) {
-                    said.push(loaded.breaks + (loaded.breaks === 1 ? ' break, which is a crossing' : ' breaks, which are crossings'));
+                said.push(read.n.toLocaleString('en-GB') + ' recorded points');
+                if (read.breaks) {
+                    said.push(read.breaks + (read.breaks === 1 ? ' break, which is a crossing' : ' breaks, which are crossings'));
                 }
-                if (loaded.generated) {
-                    said.push(loaded.generated + (loaded.generated === 1 ? ' marker' : ' markers') + ' this map placed, skipped');
+                if (read.generated) {
+                    said.push(read.generated + (read.generated === 1 ? ' marker' : ' markers') + ' this map placed, skipped');
                 }
-                if (loaded.strange) {
-                    said.push(loaded.strange + (loaded.strange === 1 ? ' waypoint' : ' waypoints') +
+                if (read.strange) {
+                    said.push(read.strange + (read.strange === 1 ? ' waypoint' : ' waypoints') +
                               ' whose origin this page does not know, skipped');
                 }
                 // Never fatal and never silent. A part naming a kind this page
                 // has no case for cannot be restored, so its leg is routed
                 // between its two waypoints instead — which is a route that came
                 // back different, and a reader who is not told has no way to know.
-                if (loaded.unknown.length) {
-                    said.push('a kind this page does not know (' + loaded.unknown.join(', ') + '), so those legs are routed instead');
+                if (read.unknown.length) {
+                    said.push('a kind this page does not know (' + read.unknown.join(', ') + '), so those legs are routed instead');
                 }
                 return said.join(' · ');
             }
 
             // ---- loading ------------------------------------------------------------
-            function loadGpx(text, mode) {
+            // **Reading a file and taking it are two steps now**, and the seam
+            // is where the reader is asked. Everything that can refuse the file
+            // happens in the first — a document that is not XML, a GPX with no
+            // track — so what is on the map is still untouched while the
+            // question is on the screen, and a cancelled offer costs nothing but
+            // the parse.
+            function readGpx(text) {
                 var began = performance.now();
+                var read = parseGpx(text);
+                read.parseMs = performance.now() - began;
+                read.began = began;
+                return read;
+            }
+
+            // **The clock is restarted here and not kept from the read.** What
+            // `settleMs` is worth saying about is the wait between choosing a
+            // mode and a route being drawn; the seconds a reader spent looking
+            // at the question are not the page's to report.
+            function takeGpx(read, mode) {
                 var known = false;
                 MODES.forEach(function (offered) { known = known || offered.key === mode; });
                 if (!known) {
                     throw new Error(mode + ' is not one of ' +
                                     MODES.map(function (offered) { return offered.key; }).join(', '));
                 }
-                var read = parseGpx(text);
-                read.parseMs = performance.now() - began;
-                read.began = began;
+                read.began = performance.now();
                 // Filled in by refresh() once every leg has settled, which is
-                // the figure worth having: from picking a file to a route drawn
-                // on the map. It is null while that is still happening rather
-                // than 0, because a load that is still working and one that
-                // took no time are not the same thing.
+                // the figure worth having: from the mode being chosen to a route
+                // drawn on the map. It is null while that is still happening
+                // rather than 0, because a load that is still working and one
+                // that took no time are not the same thing.
                 read.settleMs = null;
                 read.mode = mode;
                 loaded = read;
@@ -5668,7 +5748,34 @@ class _PlanMode(MacroElement):
                 // route drawn on a map that will not let it be touched is the
                 // state this phase exists to avoid.
                 if (!on) { switchTo(true); }
-                loadSaid = describeLoaded();
+                loadSaid = describeFile(loaded);
+                pendingFile = null;
+                refresh();
+            }
+
+            // Reading and taking in one, which is what every check and every
+            // test drives and what the picker did before the question existed.
+            // Kept exactly as it was: a phase that moves an entry point moves
+            // every acceptance figure taken through it.
+            function loadGpx(text, mode) {
+                takeGpx(readGpx(text), mode);
+            }
+
+            // ---- the offer ----------------------------------------------------------
+            // A file is read, described, and only taken once a mode has been
+            // chosen against what it turned out to be.
+            function offerFile(text, name) {
+                var read = readGpx(text);
+                pendingFile = {read: read, name: name, kind: kindOf(read),
+                               mode: READINGS[kindOf(read)].first};
+                loadSaid = '';
+                refresh();
+            }
+
+            // Reading a file costs a parse and nothing else, so an offer taken
+            // back leaves the map exactly as it was.
+            function dismissFile() {
+                pendingFile = null;
                 refresh();
             }
 
@@ -6729,13 +6836,87 @@ class _PlanMode(MacroElement):
                 option.textContent = mode.label;
                 modes.appendChild(option);
             });
-            modes.value = 'asis';
 
             var loading = document.createElement('div');
             loading.style.cssText = 'margin-top:4px';
             loading.appendChild(chooser);
-            loading.appendChild(modes);
             loading.appendChild(picker);
+
+            // ---- the question ------------------------------------------------------
+            // Shown between the file being read and anything being done with
+            // it, and it is the only moment at which the plan on the map still
+            // exists: taking a file replaces it and there is no way back, since
+            // undo takes a point off the end and a load has no history. So this
+            // is where the loss is said, and it is said as a count rather than
+            // as a warning about files in general.
+            var offerBox = document.createElement('div');
+            offerBox.className = 'trails-plan-offer';
+            offerBox.style.cssText = 'margin-top:4px;padding-top:4px;border-top:1px solid #ddd;max-width:22em';
+
+            var offerSaid = document.createElement('div');
+            offerSaid.style.cssText = 'color:#555';
+
+            var offerRow = document.createElement('div');
+            offerRow.style.cssText = 'margin-top:4px';
+            var offerAsks = document.createElement('span');
+            offerAsks.textContent = 'Read it as';
+            offerRow.appendChild(offerAsks);
+            offerRow.appendChild(modes);
+
+            // What the chosen mode would do *to this file*, under the selector
+            // rather than inside it: an option list is where a name goes and a
+            // sentence does not fit in one.
+            var offerMeans = document.createElement('div');
+            offerMeans.style.cssText = 'margin-top:4px';
+
+            var offerCosts = document.createElement('div');
+            offerCosts.style.cssText = 'margin-top:4px;color:#8a5000';
+
+            var offerButtons = document.createElement('div');
+            offerButtons.style.cssText = 'margin-top:4px';
+            var take = document.createElement('button');
+            take.type = 'button';
+            take.className = 'trails-plan-take';
+            take.textContent = 'Load it';
+            take.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-right:6px;cursor:pointer';
+            var drop = document.createElement('button');
+            drop.type = 'button';
+            drop.className = 'trails-plan-drop';
+            drop.textContent = 'Cancel';
+            drop.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;cursor:pointer';
+            offerButtons.appendChild(take);
+            offerButtons.appendChild(drop);
+
+            offerBox.appendChild(offerSaid);
+            offerBox.appendChild(offerRow);
+            offerBox.appendChild(offerMeans);
+            offerBox.appendChild(offerCosts);
+            offerBox.appendChild(offerButtons);
+
+            modes.addEventListener('change', function () {
+                if (!pendingFile) { return; }
+                pendingFile.mode = modes.value;
+                refresh();
+            });
+
+            take.addEventListener('click', function () {
+                if (!pendingFile) { return; }
+                var ready = pendingFile;
+                try {
+                    takeGpx(ready.read, ready.mode);
+                } catch (failure) {
+                    // The same rule the read already follows: what is on the map
+                    // stays. A mode that threw has not replaced anything, and
+                    // the offer is dropped rather than left standing over a file
+                    // that cannot be taken the way it was asked for.
+                    pendingFile = null;
+                    loadSaid = 'That file could not be loaded: ' +
+                        (failure && failure.message ? failure.message : String(failure));
+                    refresh();
+                }
+            });
+
+            drop.addEventListener('click', function () { dismissFile(); });
 
             var loadStatus = document.createElement('div');
             loadStatus.style.cssText = 'margin-top:4px;color:#555;max-width:22em';
@@ -6758,10 +6939,12 @@ class _PlanMode(MacroElement):
                 };
                 reader.onload = function () {
                     try {
-                        loadGpx(String(reader.result), modes.value);
+                        // Read and described, not taken: the mode is asked for
+                        // once there is something to ask it about.
+                        offerFile(String(reader.result), file.name);
                     } catch (failure) {
-                        // **What was already on the map stays.** `loadGpx`
-                        // refuses before it touches anything, so the recording
+                        // **What was already on the map stays.** `readGpx`
+                        // refuses before anything is touched, so the recording
                         // that is loaded is still the one every waypoint is
                         // anchored to — and dropping it here would leave those
                         // anchors pointing at nothing, so the next edit would
@@ -6786,11 +6969,20 @@ class _PlanMode(MacroElement):
                 box.appendChild(toggle);
                 // Loading is how a plan starts from a file, so it is offered
                 // whether or not plan mode is already on — and switching it on
-                // is what loading does. The mode is beside the button rather
-                // than asked afterwards: what a file becomes is a decision
-                // about the file, and asking it after the file is in is a
-                // dialogue this control has no room for.
+                // is what loading does.
+                //
+                // **The mode is asked after the file has been read, not before
+                // it.** It stood beside the button for as long as the answer was
+                // thought to be a decision about the file rather than about what
+                // is in it; it is not. Three mode names had to be true of a
+                // planned route and of somebody's GPS recording at once, and a
+                // reader picking the first of them lost the points their route
+                // was planned with, with the page naming the number it was about
+                // to discard. Asked here, the question can say what this file
+                // turned out to be, what each answer would do to it, and what
+                // taking it costs.
                 box.appendChild(loading);
+                box.appendChild(offerBox);
                 box.appendChild(loadStatus);
                 box.appendChild(back);
                 box.appendChild(edits);
@@ -6872,6 +7064,25 @@ class _PlanMode(MacroElement):
                 }
                 loadStatus.textContent = loadSaid;
                 loadStatus.style.display = loadSaid ? '' : 'none';
+                // The question, wherever one stands. **Its wording comes out of
+                // the one table** rather than being assembled here: the sentence
+                // under the selector and the mode it describes are one decision,
+                // and writing either of them twice is how the two come apart.
+                offerBox.style.display = pendingFile ? '' : 'none';
+                if (pendingFile) {
+                    offerSaid.textContent = pendingFile.name + ' \u2014 ' + describeFile(pendingFile.read);
+                    modes.value = pendingFile.mode;
+                    offerMeans.textContent = READINGS[pendingFile.kind][pendingFile.mode];
+                    // Said as a count and only where there is something to lose.
+                    // 'This replaces your plan' over an empty map is a warning
+                    // about nothing, and a reader who is warned about nothing
+                    // stops reading warnings.
+                    offerCosts.textContent = points.length
+                        ? 'This replaces the ' + points.length +
+                          (points.length === 1 ? ' point' : ' points') + ' on the map. There is no way back.'
+                        : '';
+                    offerCosts.style.display = points.length ? '' : 'none';
+                }
                 // The pins say which point is which and which one is held, and
                 // both change with every edit. Applied here as differences, so
                 // that a refresh in the middle of a drag writes nothing.
@@ -7045,6 +7256,27 @@ class _PlanMode(MacroElement):
                 // before any of this was built.
                 load: loadGpx,
                 modes: MODES.map(function (mode) { return mode.key; }),
+                // Reading a file without taking it, and the three steps the
+                // picker drives: what it turned out to be and which mode is
+                // offered first, then taking it or dropping it. A check reads
+                // the answer rather than the screen, the way everything else on
+                // this page is checked.
+                offer: offerFile,
+                take: function () {
+                    if (!pendingFile) { throw new Error('no file is waiting to be taken'); }
+                    takeGpx(pendingFile.read, pendingFile.mode);
+                },
+                choose: function (mode) {
+                    if (!pendingFile) { throw new Error('no file is waiting to be taken'); }
+                    if (!READINGS[pendingFile.kind][mode]) {
+                        throw new Error(mode + ' is not one of ' +
+                                        MODES.map(function (each) { return each.key; }).join(', '));
+                    }
+                    pendingFile.mode = mode;
+                    refresh();
+                },
+                dismiss: dismissFile,
+                readings: READINGS,
                 // The four edits, each as the entry the gesture uses, so a
                 // browser check can drive them and read what came out rather
                 // than screenshot it. `dragTo` is what a drag does once the
@@ -7074,6 +7306,16 @@ class _PlanMode(MacroElement):
                     var shape = composeRoute();
                     return {
                         on: on, working: settling > 0, chosen: chosen, dragging: !!dragging,
+                        // A file read and not yet taken, with what it turned out
+                        // to be and which mode is standing. Null while no
+                        // question is on the screen, which is the same thing the
+                        // control reads to decide whether to draw one.
+                        pending: pendingFile === null ? null : {
+                            name: pendingFile.name, kind: pendingFile.kind, mode: pendingFile.mode,
+                            waypoints: pendingFile.read.waypoints.length,
+                            legs: pendingFile.read.legs.length,
+                            says: READINGS[pendingFile.kind][pendingFile.mode]
+                        },
                         points: points.map(function (point) { return {lat: point.lat, lon: point.lon, node: point.node}; }),
                         legs: legs.map(function (leg) {
                             return {
