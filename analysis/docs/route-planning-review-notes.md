@@ -544,13 +544,46 @@ reads **48, all green**, and the two controls still overlap by 0 at every profil
 height — the offer is inside the plan control and goes through the same room
 arithmetic.
 
-**What it does not do: *as it is* still does not restore a plan.** Its sentence
-says so, and the default routes around it. Restoring one means honouring the leg
-list the file already carries, which is *Known open*'s second item — and that item
-now has its decision, taken by the reader who hit this: *take it as it is* should
-mean **restore what the file describes**, the plan for one of ours and the
-recorded line for anybody else's. That is one of the two options that entry has
-been holding open, and it settles it without a fourth mode.
+**And then *as it is* was taught to restore a plan, which is what the question
+was routing around.** *Take it as it is* now means the same sentence for both
+kinds of file — **restore what the file describes** — the plan for one of ours and
+the recorded line for anybody else's, so it is the offered default for a route
+again and no fourth mode is wanted. Driven: six routed points come home as six at
+**32.175,4 m**; a route with a waypoint on open water comes home as three, with
+the offshore one at the position it was set and **4 crossings**; and a mixed route
+— the case nothing had ever restored — comes home as `routed:3142 + track:1038 +
+routed:186` and `routed:1621`, **5.986,6 m walked and 1.038 m recorded**, part for
+part what went out.
+
+**The seam is inside a leg, and that is why nothing restored one before.**
+`anchorRecordedLegs` asks whether a leg is *wholly* recorded, and a matched leg is
+`routed + track + routed` — so it never fired on the very legs that needed it.
+Measured before the fix: align routed the 1.038 recorded metres away and came back
+**353 m short**, with nothing said.
+
+**And a routed part is routed again rather than copied.** The file holds a line
+and the network holds the edges under it, and only the edges say which dataset
+drew each metre, whether anything calls it waymarked and where no source records a
+path. Copied, a restored plan would state its whole length as recorded ground —
+the same loss, better hidden. Measured on the mixed route: restored, the marking
+buckets come back to the metre.
+
+**The near-miss worth keeping.** Routing a part between its own two ends read
+**2.899 m against the 3.142 the file states**, and would have restored a plan 243 m
+short while calling it exact. A routed part of a matched route is a run of spans
+between anchors *merged into one*, and the cheapest path between its ends is not
+the concatenation of the cheapest paths between the anchors along it — which this
+document already records about align on a matched route, at 7,266 against 7,307.
+**The same shape, one order of magnitude down, and it would have passed for
+correct.** The anchors are not in the file; the geometry they were derived from
+is, so the part is matched off the very line the router produced. Each way of
+laying it is now held to the length the file states — routed, then matched, then
+the file's own line — and the last of those is exact and costs the edges, which is
+then **said** rather than swallowed: *the network has moved under this plan, 5.743 m
+walked against the 5.987 the file states*.
+
+Cost **16,289 bytes** on top of the question's, 39,640,012 to 39,656,301, and
+`make drive` still reads **48 green**.
 
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
@@ -717,14 +750,15 @@ worth keeping in its own right: **copy the built HTML, undo one fix with a
 **Rebuild the map and drive it.** `command make map`, about a minute warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and **wait twenty seconds after load** —
-the page is **39.64 MB**. It was 25.4 before 3B, 31.1 after the coverage rows,
+the page is **39.66 MB**. It was 25.4 before 3B, 31.1 after the coverage rows,
 36.0 after phase 4, 37.4 after phase 5, 37.5 after 6B, 37.7 after 6C, 39.4 once
 every chain carried its two steepness figures into its popup, and 39.63 once each
 also carried its steepest into the figures table — 201,279 bytes, 17.8 a chain.
 Everything else this panel gained — the zoom, the crosshair's mark on the map,
 the merged legend, the waypoint marks, the point list, the two controls learning
-to share the room, and the question the picker now asks — came to **47,524 bytes
-between them**, under a quarter of what one number per chain cost. **A behaviour is written once and a row is written eleven
+to share the room, the question the picker now asks and the restoring behind it —
+came to **63,813 bytes between them**, under a third of what one number per chain
+cost. **A behaviour is written once and a row is written eleven
 thousand times**, which is the popups' 175-to-1 seen from the other end.
 The probes, with what they read now:
 
@@ -1710,23 +1744,14 @@ criterion of this whole project that **nobody has ever run**;
 no account and no network here. Everything downstream of *the file is correct*
 rests on it, and the file has been rewritten four times since anybody looked.
 
-**2. Teach *take it as it is* to restore a plan.** Every exported plan carries
-what each leg is made of and no load mode reads it, so a plan holding a recorded
-leg does not come back; a purely routed one does, bit for bit, which is the common
-case and is why this survived. **The model decision is no longer open** — the mode
-means *restore what the file describes*, the plan for one of ours and the recorded
-line for anybody else's — so what is left is the work: cut the track by the leg
-list's own lengths, which arrive in metres and not in indices, and remember that a
-crossing consumes none of them. Figures under *Known open*.
-
-**3. `PAYLOAD_VERSION` is written and never checked.** Small, and the fix is not
+**2. `PAYLOAD_VERSION` is written and never checked.** Small, and the fix is not
 the obvious one: the header cannot verify itself, so the decoder has to be handed
 the layout it was written for.
 
-**4. A boundary crossed inside a break gets one marker, not a pair.** Wants a
+**3. A boundary crossed inside a break gets one marker, not a pair.** Wants a
 decision about what a marker on water would claim, and then a figure.
 
-**5. The placeholder sweep.** An hour, and the same shape of bug has now appeared
+**4. The placeholder sweep.** An hour, and the same shape of bug has now appeared
 three times — `pd.NA` as the text `<NA>`, an empty string counted by `notna`,
 and `Ukjent` read as a name. Every carried column, looked at for values that mean
 absence.
@@ -1779,7 +1804,13 @@ own.**
   the obvious one: the header cannot verify itself, so the decoder has to be
   handed the layout it was written for.
 
-**The leg modes are written into every exported plan and no mode reads them
+**Settled and built.** *Take it as it is* restores a plan from its own leg list:
+the stations from the file's waypoints, each leg laid out the way its part list
+describes, routed stretches routed again and held to the length the file states.
+Figures in *Where things stand*. What follows is the finding as it stood, kept
+because the shape of it is worth having.
+
+**The leg modes were written into every exported plan and no mode read them
 back.** Measured on a route that mixes routed and recorded legs: the file carries
 all seven parts with their kinds and metres — `routed 19,884.1`, `track 816.4`,
 `routed 1,295.7`, and so on — and loading it returns 42,284.1 m as **one** track

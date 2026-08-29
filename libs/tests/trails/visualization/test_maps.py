@@ -1423,6 +1423,70 @@ class TestPlanMode:
         assert "' points' ) + ' on the map." not in planning
         assert "on the map. There is no way back." in planning
 
+    def test_a_plan_is_restored_from_its_own_leg_list(self):
+        """*Take it as it is*, read as what the file describes. The seam is
+        **inside** a leg -- a matched leg is ``routed + track + routed`` -- which
+        is why nothing restored one before: ``anchorRecordedLegs`` asks whether a
+        leg is *wholly* recorded and so never fires on the legs that need it.
+        Measured, align routed 1,038 recorded metres away and came back 353 m
+        short without a word; restored, the same route comes home at 5,986.6 m
+        with its three points and its four parts.
+
+        The order in ``resolve`` is the test worth having: both ends of a
+        restored leg may well sit on a node, so a routing branch reached first
+        would replace a recorded stretch with whatever path lies there.
+        """
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        deciding = planning.split("function resolve(graph, from, to, mayAsk) {")[1]
+
+        assert deciding.index("from.restore") < deciding.index("from.track === loaded.id")
+        assert deciding.index("from.restore") < deciding.index("from.node >= 0")
+
+        # And it is offered only where there is a plan in the file to restore.
+        assert "loaded.mode === 'asis' && loaded.isRoute" in planning
+        assert "loaded.waypoints.length === loaded.legs.length + 1" in planning
+
+    def test_a_restored_routed_stretch_is_held_to_the_length_the_file_states(self):
+        """A routed part of a *matched* route is a run of spans between anchors
+        merged into one, and the cheapest path between its two ends is not the
+        concatenation of the cheapest paths between the anchors along it -- the
+        same thing this project already measured about align on a matched route,
+        7,266 m against 7,307. Here it read **2,899 against 3,142**, and routing
+        alone would have restored a plan 243 m short while calling it exact.
+
+        So each way of laying the stretch is checked against the length the file
+        states, and they are tried in the order that keeps the most: routed,
+        then matched off the very geometry the router produced, then the file's
+        own line -- which is exact and costs the edges underneath, and is what
+        ``drifted`` then says out loud.
+        """
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        laying = planning.split("function restoredWalked(")[1].split("\n            function agrees")[0]
+
+        assert laying.count("agrees(") == 2
+        assert laying.index("routedParts(graph, found)") < laying.index("matchedParts(graph, first, last)")
+        assert laying.index("matchedParts(graph, first, last)") < laying.rindex("trackPart(graph, first, last)")
+
+    def test_a_waypoint_off_the_track_keeps_the_position_it_was_written_at(self):
+        """A point set on open water is in the ``<wpt>`` list and in no
+        ``<trkseg>`` at all -- the crossing either side of it writes no geometry,
+        which is what stops a file drawing a line across a fjord. Anchoring it to
+        the nearest trackpoint would put it on the shore, and the shore is where
+        it went: measured, three points out and eight back with the offshore one
+        gone. Restored, it comes home at the position it was set.
+        """
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        placing = planning.split("if (restoring()) {")[1].split("if (loaded.mode === 'align')")[0]
+
+        assert "<= 1.0" in placing
+        assert "anchored(graph, at) : snapped(graph, wp.lat, wp.lon)" in placing
+        # And a crossing contributes none of its length to the walking, so the
+        # stations cannot be summed off the parts without saying so.
+        assert "part.kind !== 'water' && part.kind !== CROSSING" in placing
+
     def test_it_draws_nothing_on_the_map(self):
         """The route belongs in a pane of its own: anything drawn into the
         overlay pane is counted among the map's paths for ever after, and 11,589

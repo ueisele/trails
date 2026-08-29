@@ -124,8 +124,9 @@ areas it enters and leaves.
 **A GPX can be loaded back.** The file is read and described first — a route
 this map wrote, a chain export, or somebody else's track — and then it asks how to
 read it, with the sensible answer already chosen and a sentence saying what each
-one would do to *that* file: take the line as it is, route afresh between its
-waypoints, or match it onto the network wherever a path exists. Loading replaces
+one would do to *that* file: restore what the file describes — for one of this
+map's own routes that is the plan itself, points, legs and all — route afresh
+between its waypoints, or match it onto the network wherever a path exists. Loading replaces
 whatever is on the map, so the question says how many points that is.
 
 ### Checking the built page

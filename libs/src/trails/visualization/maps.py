@@ -4661,7 +4661,12 @@ class _PlanMode(MacroElement):
             // stretch begins or ends. The displacement is bounded by the match
             // tolerance and it is what keeps the route one continuous line
             // instead of a run of stretches with 20 m holes between them.
-            function trackPart(graph, first, last, firstLon, firstLat, lastLon, lastLat) {
+            //
+            // ``kind`` is what the span is, where something knows: a restored
+            // plan's own leg list says whether a stretch was recorded or drawn
+            // straight, and the two are different ground. Left out it is a
+            // recording, which is what every other caller has.
+            function trackPart(graph, first, last, firstLon, firstLat, lastLon, lastLat, kind) {
                 // **A typed array answers an index outside it with undefined
                 // rather than raising**, so an anchor left over from a file that
                 // is no longer loaded would put NaN coordinates into the route
@@ -4687,7 +4692,12 @@ class _PlanMode(MacroElement):
                     along[i] = run;
                 }
                 var tally = blankTally();
-                tally.recorded = run;
+                // **A stretch the reader drew across open ground is unmarked by
+                // construction and not recorded**: nobody marks a line you drew,
+                // and nobody recorded it either. The decisions document settles
+                // that distinction, and restoring a plan is the first thing that
+                // ever had to apply it to a span of somebody's file.
+                if (kind === 'land') { tally.unmarked = run; } else { tally.recorded = run; }
                 var standing = new Array(count);
                 for (i = 0; i < count; i += 1) { standing[i] = graph.areasAt(lon[i], lat[i]); }
                 spreadProtected(tally, graph, standing, along, 0, count, 0, run);
@@ -4697,7 +4707,7 @@ class _PlanMode(MacroElement):
                 // are for no other kind: a recording's points are both what the
                 // file writes and what the profile is drawn from, and there is
                 // nothing to sample between them that was ever measured.
-                return {kind: PLAN.gpx.trackKind, lon: lon, lat: lat, along: along, length: run,
+                return {kind: kind || PLAN.gpx.trackKind, lon: lon, lat: lat, along: along, length: run,
                         height: height, distance: along, read: read, tally: tally,
                         index: {from: first, step: step, count: count}};
             }
@@ -5206,6 +5216,16 @@ class _PlanMode(MacroElement):
             // which is what makes dragging a point back where it came from cost
             // nothing at all.
             function resolve(graph, from, to, mayAsk) {
+                // **A leg the file described is laid out the way it described
+                // it**, before anything else is tried. It has to come first for
+                // the same reason the recorded test does and one more: both ends
+                // may well sit on a node, so routing would quietly replace a
+                // recorded stretch, and the seam this restores is *inside* the
+                // leg where the recorded test cannot see it at all.
+                if (from.restore) {
+                    var laid = restoredParts(graph, from, to, from.restore);
+                    if (laid) { return Promise.resolve(laid); }
+                }
                 // **A leg between two points of the loaded recording is the
                 // recording's**, whichever of the two modes put them there.
                 // Tested before the network is, because both of its ends may
@@ -5474,9 +5494,9 @@ class _PlanMode(MacroElement):
             // reader who chose.
             var READINGS = {
                 route: {
-                    first: 'align',
-                    asis: 'Take the drawn line as it is \\u2014 the points it was planned with are not restored.',
-                    align: 'Restore its points and plan between them again, over the network as it now stands.',
+                    first: 'asis',
+                    asis: 'Restore the plan: its points, its legs, and the stretches it kept as recorded.',
+                    align: 'Keep its points and plan between them again, over the network as it now stands.',
                     match: 'Keep its line and attach it to the network again wherever a path exists.'
                 },
                 chain: {
@@ -5510,9 +5530,14 @@ class _PlanMode(MacroElement):
             // fjord. It counts as a crossing, adds nothing to the walking
             // distance and carries no profile — the same as every other
             // crossing on this map.
-            function crossingPart(from, to) {
+            // **The kind is handed in where one is known.** A crossing is a
+            // crossing whichever of the two it is, and both are dashed the same
+            // — but a route restored from a file that said `ferry` and written
+            // out again saying `water` has quietly changed what it claims about
+            // a fjord somebody has to get across.
+            function crossingPart(from, to, kind) {
                 var length = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
-                return {kind: 'water', lon: [from.lon, to.lon], lat: [from.lat, to.lat],
+                return {kind: kind || 'water', lon: [from.lon, to.lon], lat: [from.lat, to.lat],
                         along: [0, length], length: length, height: null, distance: null,
                         read: false, tally: blankTally()};
             }
@@ -5572,6 +5597,160 @@ class _PlanMode(MacroElement):
                 return from.at < to.at ? parts : walkedBackwards(parts);
             }
 
+            // ---- restoring a plan ---------------------------------------------------
+            // **Take it as it is, read as what the file describes.** For
+            // somebody's recording that is the line as it was walked, and it
+            // always was. For a route this map wrote it is the *plan* — the
+            // stations, the legs, and what each leg is made of — and until this
+            // it was not: the stations were rebuilt out of the track's ends and
+            // its breaks, which is right for a file that carries no waypoints
+            // and wrong for one that carries its own. Measured, six points went
+            // out and two came back, with the walked distance right to a
+            // decimetre so that nothing looked wrong.
+            //
+            // Whether there is a plan in the file to restore. Every part of the
+            // test is load-bearing: without the leg list there is nothing saying
+            // what a leg was made of, and where the waypoints and the legs do
+            // not count up the file was written by something this page does not
+            // understand and the old reading is the safe one.
+            function restoring() {
+                return !!loaded && loaded.mode === 'asis' && loaded.isRoute &&
+                    loaded.legs.length > 0 && loaded.waypoints.length === loaded.legs.length + 1;
+            }
+
+            // The track point a walked distance falls on, searched forward from
+            // where the last part ended. **Forward, and not a binary search.**
+            // `along` is the *walking* axis, so it stands still across a break —
+            // a crossing advances the walk by nothing — and one distance
+            // therefore names two points either side of it. Which of them a part
+            // means depends on where the part started, and only a walk knows
+            // that. On a tie the earlier wins, because a walked part ends *at*
+            // the break and the stretch after it is begun deliberately.
+            function alongIndex(distance, from) {
+                var best = from, i;
+                for (i = from; i < loaded.n; i += 1) {
+                    if (Math.abs(loaded.along[i] - distance) < Math.abs(loaded.along[best] - distance)) { best = i; }
+                    if (loaded.along[i] > distance) { break; }
+                }
+                return best;
+            }
+
+            // The break standing at a walked distance, for the one case that
+            // cannot be reached by walking forward: a leg whose first part is a
+            // crossing, because its own waypoint is out on the water and is in
+            // no <trkseg> at all. Half a metre, because the two sides of a break
+            // carry the same distance exactly and nothing else is near it.
+            function breakAt(distance) {
+                for (var i = 0; i + 1 < loaded.n; i += 1) {
+                    if (loaded.ends[i] && Math.abs(loaded.along[i] - distance) < 0.5) { return i; }
+                }
+                return -1;
+            }
+
+            // One walked part of a restored leg. **A routed part is routed
+            // again rather than copied**, and that is the decision this rests
+            // on: the file holds a line and the network holds the edges under
+            // it, and only the edges can say which dataset drew each metre,
+            // whether anything calls it waymarked, and where no source records a
+            // path at all. Copied, a restored plan would state 32 km of
+            // recorded ground — the same loss this is fixing, better hidden.
+            //
+            // Where the network can no longer carry it, the recording is what is
+            // left and is kept, rather than a straight line over the terrain.
+            // That is said afterwards rather than swallowed.
+            function restoredWalked(graph, kind, first, last, metres) {
+                if (kind !== 'routed') {
+                    return [trackPart(graph, first, last, undefined, undefined, undefined, undefined,
+                                      kind === 'land' ? 'land' : undefined)];
+                }
+                // **Routed between its own two ends first, and checked against
+                // the length the file states.** For a leg the reader clicked
+                // that is the whole of it: the router is deterministic and the
+                // weights have not moved, so it comes back to the centimetre.
+                var a = graph.nearestNode(loaded.lat[first], loaded.lon[first], PLAN.matchToleranceM);
+                var b = graph.nearestNode(loaded.lat[last], loaded.lon[last], PLAN.matchToleranceM);
+                if (a >= 0 && b >= 0 && a !== b) {
+                    var found = route(graph, a, b);
+                    if (found && found.edges.length) {
+                        var laid = routedParts(graph, found), run = 0;
+                        laid.forEach(function (part) { run += part.length; });
+                        if (agrees(run, metres)) { return laid; }
+                    }
+                }
+                // **And where it does not agree, the part is matched rather
+                // than routed.** A routed part of a *matched* route is a run of
+                // spans between anchors that were merged into one, and the
+                // cheapest path between its two ends is not the concatenation of
+                // the cheapest paths between the anchors along it — the same
+                // thing this document already records about align on a matched
+                // route, at 7,266 m against 7,307. Measured here at 2,899
+                // against 3,142. The anchors are not in the file, but the
+                // geometry they were derived from is, so the matcher recovers
+                // them from the very line it produced.
+                var matched = matchedParts(graph, first, last), total = 0;
+                matched.forEach(function (part) { total += part.length; });
+                if (agrees(total, metres)) { return matched; }
+                // Neither reproduced it, so the file's own line is what is left.
+                // It is exact and it is honest, and what it costs is the edges
+                // underneath — which is what `drifted` then says out loud.
+                return [trackPart(graph, first, last)];
+            }
+
+            // Two lengths of one stretch, one stated by the file and one worked
+            // out again. A metre, or a thousandth, whichever is the larger: the
+            // file rounds what it writes and the page recomputes its distances
+            // from written coordinates, so exact equality is not on offer.
+            function agrees(got, said) {
+                if (!isFinite(said) || said <= 0) { return false; }
+                return Math.abs(got - said) <= Math.max(1, said / 1000);
+            }
+
+            // A leg laid out the way its own part list says, instead of by
+            // guessing where the seams are. **The seam is inside the leg**,
+            // which is why nothing before this restored one: a matched leg is
+            // `routed + track + routed`, so anchorRecordedLegs — which asks
+            // whether a leg is *wholly* recorded — never fires on the very legs
+            // that need it. Measured, align routed 1,038 recorded metres away
+            // and came back 353 m short without a word.
+            //
+            // Null where the file and the track do not line up, which puts the
+            // leg back on the ordinary machinery rather than on a guess.
+            function restoredParts(graph, from, to, wanted) {
+                var parts = [], i;
+                var cursor = (from.at === undefined || from.at === null) ? -1 : from.at;
+                var reached = cursor >= 0 ? loaded.along[cursor] : (from.station || 0);
+                for (i = 0; i < wanted.length; i += 1) {
+                    var kind = wanted[i].kind, metres = wanted[i].m;
+                    if (kind === 'water' || kind === CROSSING) {
+                        // A crossing carries no track and advances the walk by
+                        // nothing; all it left behind is the break, and its two
+                        // ends are the points either side of that — except where
+                        // one of them is a waypoint out on the water, which is in
+                        // the <wpt> list and nowhere else.
+                        var gap = cursor >= 0 ? cursor : breakAt(reached);
+                        var head = cursor >= 0 ? {lon: loaded.lon[cursor], lat: loaded.lat[cursor]} : from;
+                        var more = i + 1 < wanted.length;
+                        var resumes = (gap >= 0 && gap + 1 < loaded.n) ? gap + 1 : -1;
+                        var tail = (more && resumes >= 0)
+                            ? {lon: loaded.lon[resumes], lat: loaded.lat[resumes]} : to;
+                        parts.push(crossingPart(head, tail, kind));
+                        if (more) {
+                            if (resumes < 0) { return null; }
+                            cursor = resumes;
+                            reached = loaded.along[cursor];
+                        }
+                        continue;
+                    }
+                    if (cursor < 0 || !isFinite(metres)) { return null; }
+                    var end = alongIndex(reached + metres, cursor);
+                    if (end <= cursor) { return null; }
+                    parts.push.apply(parts, restoredWalked(graph, kind, cursor, end, metres));
+                    cursor = end;
+                    reached = loaded.along[cursor];
+                }
+                return parts.length ? parts : null;
+            }
+
             // One stretch of walked recording, in whichever way the mode asks
             // for it. Nothing at all where the stretch is a single point: a
             // <trkseg> holding one trackpoint ends where it begins, and a leg of
@@ -5585,6 +5764,43 @@ class _PlanMode(MacroElement):
             // Where the waypoints of a loaded file come from, per mode.
             function pointsForLoaded(graph) {
                 var made = [], wanted = [], i;
+                if (restoring()) {
+                    // **Where each station sits along the walk**, summed off the
+                    // leg list rather than measured off the track: a crossing has
+                    // a length and contributes none of it to the walking, so the
+                    // two are different sums and only one of them is the axis the
+                    // track carries.
+                    var reached = 0, stations = [0];
+                    loaded.legs.forEach(function (parts) {
+                        parts.forEach(function (part) {
+                            if (part.kind !== 'water' && part.kind !== CROSSING && isFinite(part.m)) {
+                                reached += part.m;
+                            }
+                        });
+                        stations.push(reached);
+                    });
+                    var cursor = 0;
+                    for (i = 0; i < loaded.waypoints.length; i += 1) {
+                        var wp = loaded.waypoints[i];
+                        var at = alongIndex(stations[i], cursor);
+                        cursor = at;
+                        // **A station is anchored to the track only where the
+                        // track is actually under it.** A waypoint set on open
+                        // water is in the <wpt> list and in no <trkseg> at all,
+                        // because the crossing either side of it writes nothing
+                        // — so anchoring it to the nearest trackpoint would move
+                        // it to the shore, which is the very point that went
+                        // missing. A metre, because a waypoint is written at the
+                        // position the track passes through and the two agree to
+                        // seven decimals or not at all.
+                        var here = panel().metresBetween(wp.lon, wp.lat, loaded.lon[at], loaded.lat[at]) <= 1.0
+                            ? anchored(graph, at) : snapped(graph, wp.lat, wp.lon);
+                        here.station = stations[i];
+                        if (loaded.legs[i]) { here.restore = loaded.legs[i]; }
+                        made.push(here);
+                    }
+                    return made;
+                }
                 if (loaded.mode === 'align') {
                     if (loaded.waypoints.length) {
                         loaded.waypoints.forEach(function (point) { made.push(snapped(graph, point.lat, point.lon)); });
@@ -5759,6 +5975,41 @@ class _PlanMode(MacroElement):
             // every acceptance figure taken through it.
             function loadGpx(text, mode) {
                 takeGpx(readGpx(text), mode);
+            }
+
+            // **What the file said it was, against what came back.** A restored
+            // plan's routed stretches are routed again rather than copied, which
+            // is what brings the edges back and with them everything the route
+            // says about the ground it covers -- and it means that where a
+            // source has moved since the export the route is a different one.
+            // Correctly different, and silently so unless something looks.
+            //
+            // Two figures are worth comparing and both come out of the file
+            // itself: the walking it states, and the ground it says was kept as
+            // recorded. The second moves on its own where a stretch the network
+            // once carried can no longer be routed and the recording is what is
+            // left -- which is the right answer and not one to keep quiet about.
+            function drifted() {
+                if (!restoring()) { return ''; }
+                var walked = 0, recorded = 0, said = [];
+                loaded.legs.forEach(function (parts) {
+                    parts.forEach(function (part) {
+                        if (!isFinite(part.m)) { return; }
+                        if (part.kind === 'water' || part.kind === CROSSING) { return; }
+                        walked += part.m;
+                        if (part.kind === PLAN.gpx.trackKind) { recorded += part.m; }
+                    });
+                });
+                var shape = composeRoute();
+                if (walked && Math.abs(shape.total - walked) > 1) {
+                    said.push('the network has moved under this plan: ' + Math.round(shape.total) +
+                              ' m walked against the ' + Math.round(walked) + ' the file states');
+                }
+                if (shape.tally.recorded - recorded > 1) {
+                    said.push(Math.round(shape.tally.recorded - recorded) +
+                              ' m the network no longer carries, kept as recorded');
+                }
+                return said.length ? ' \\u00b7 ' + said.join(' \\u00b7 ') : '';
             }
 
             // ---- the offer ----------------------------------------------------------
@@ -7061,6 +7312,11 @@ class _PlanMode(MacroElement):
                 // would time the parsing and call it the load.
                 if (loaded && loaded.settleMs === null && !settling) {
                     loaded.settleMs = performance.now() - loaded.began;
+                    // Said here for the same reason the figure is: the route is
+                    // only comparable with the file once every leg of it has
+                    // settled, and before that the two disagree about ground
+                    // that is still being worked out.
+                    loadSaid += drifted();
                 }
                 loadStatus.textContent = loadSaid;
                 loadStatus.style.display = loadSaid ? '' : 'none';
