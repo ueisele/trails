@@ -3603,10 +3603,12 @@ class _ProfilePanel(MacroElement):
                 // to detail that does not exist.
                 if (view.zoom > 1.001) {
                     chart.appendChild(text(box.left, box.top + 8, (shown / 1000).toFixed(2) + ' km of '
-                        + (shape.total / 1000).toFixed(2) + ' \\u00b7 drag to move, double-click for all', 'start'));
+                        + (shape.total / 1000).toFixed(2)
+                        + ' \\u00b7 drag a stretch \\u00b7 shift-drag to move \\u00b7 double-click for all', 'start'));
                 } else if (closest > 1.05) {
                     var hint = text(box.left, box.top + 8,
-                        'Scroll here: the readings hold ' + closest.toFixed(1) + '\\u00d7 more detail than this', 'start');
+                        'Drag a stretch to look into it, or scroll: the readings hold '
+                        + closest.toFixed(1) + '\\u00d7 more detail than this', 'start');
                     hint.setAttribute('fill', '#9e9e9e');
                     chart.appendChild(hint);
                 }
@@ -3650,7 +3652,7 @@ class _ProfilePanel(MacroElement):
                 // the curve then, and a reading that chased it would name a
                 // different place every frame without the pointer leaving the
                 // ground it started on.
-                if (dragging) { return; }
+                if (dragging || brushing) { return; }
                 if (!crosshair || !selected || !selected.shape) { return; }
                 var shape = selected.shape;
                 // The drawing is scaled to whatever width the panel ended up
@@ -3715,6 +3717,38 @@ class _ProfilePanel(MacroElement):
 
             chart.addEventListener('mouseleave', forget);
 
+            // ---- picking a stretch to look at --------------------------------
+            // Press, drag, let go, and the panel draws what lay between the two.
+            // One meaning at every zoom: at the whole chain a reader picks where
+            // to look, and zoomed in they pick again and go deeper.
+            var brushing = null;
+            var brush = document.createElementNS(SVG, 'rect');
+            brush.setAttribute('fill', 'rgba(21,101,192,0.14)');
+            brush.setAttribute('stroke', CROSS);
+            brush.setAttribute('stroke-width', '1');
+            // Or the rectangle would take the pointer off the chart it is drawn
+            // over, and the drag would end the moment it began.
+            brush.setAttribute('pointer-events', 'none');
+
+            // Client pixels are not the drawing's: the chart is laid out at
+            // whatever width the panel ended up and drawn in its own viewBox.
+            // The wheel converts the same way, off the same two numbers.
+            function chartX(clientX) {
+                var seen = chart.getBoundingClientRect();
+                if (!seen.width || !crosshair) { return 0; }
+                return ((clientX - seen.left) / seen.width) * crosshair.width;
+            }
+
+            function drawBrush(to) {
+                var box = brushing.box;
+                var began = Math.max(box.left, Math.min(box.right, brushing.from));
+                var here = Math.max(box.left, Math.min(box.right, to));
+                brush.setAttribute('x', Math.min(began, here));
+                brush.setAttribute('width', Math.abs(here - began));
+                brush.setAttribute('y', box.top);
+                brush.setAttribute('height', Math.max(0, box.bottom - box.top));
+            }
+
             // ---- the window on the chain, which a reader moves ---------------
             // One redraw a frame, for the reason the grip has one: a redraw per
             // event is the mistake that froze this map twice, and a long chain
@@ -3759,10 +3793,32 @@ class _ProfilePanel(MacroElement):
             // so there is no way to drag the curve off its own panel.
             var dragging = null;
             chart.addEventListener('mousedown', function (event) {
-                if (!crosshair || !(view.zoom > 1.001)) { return; }
+                if (!crosshair) { return; }
+                // **Shift moves the window; a plain drag picks a stretch.** The
+                // pointer was free for it — a plain drag did nothing at all at
+                // the whole chain, and moved the window only once a wheel had
+                // already zoomed into something. Moving is not taken away for
+                // it: taking a working gesture off a reader to avoid an overlap
+                // is not an improvement, which this document says already about
+                // a row of buttons.
+                if (event.shiftKey) {
+                    if (!(view.zoom > 1.001)) { return; }
+                    forget();
+                    dragging = {x: event.clientX, y: event.clientY, at: view.at, centre: view.centre, mpp: crosshair.mpp};
+                    chart.style.cursor = 'grabbing';
+                    event.preventDefault();
+                    return;
+                }
+                // The wheel's own proviso: where there is nothing under the
+                // drawing to reach there is no stretch worth picking either, and
+                // a rectangle that zoomed to nothing would be a claim to detail
+                // that does not exist.
+                if (!(crosshair.closest > 1.001)) { return; }
                 forget();
-                dragging = {x: event.clientX, y: event.clientY, at: view.at, centre: view.centre, mpp: crosshair.mpp};
-                chart.style.cursor = 'grabbing';
+                brushing = {from: chartX(event.clientX), box: crosshair.box,
+                            at: crosshair.from, mpp: crosshair.mpp, base: crosshair.base};
+                drawBrush(brushing.from);
+                chart.appendChild(brush);
                 event.preventDefault();
             });
             document.addEventListener('mousemove', function (event) {
@@ -3775,6 +3831,38 @@ class _ProfilePanel(MacroElement):
                 if (!dragging) { return; }
                 dragging = null;
                 chart.style.cursor = 'crosshair';
+            });
+
+            document.addEventListener('mousemove', function (event) {
+                if (!brushing) { return; }
+                drawBrush(chartX(event.clientX));
+            });
+            document.addEventListener('mouseup', function (event) {
+                if (!brushing) { return; }
+                var picked = brushing;
+                brushing = null;
+                if (brush.parentNode) { brush.parentNode.removeChild(brush); }
+                if (!crosshair) { return; }
+                var box = picked.box;
+                var began = Math.max(box.left, Math.min(box.right, picked.from));
+                var here = Math.max(box.left, Math.min(box.right, chartX(event.clientX)));
+                // **Six pixels, because a click is a drag of nothing.** Under
+                // that the reader meant to click, and zooming to a stretch a few
+                // metres wide would lose the chain to a slip of the hand.
+                if (Math.abs(here - began) < 6) { return; }
+                var wide = box.right - box.left;
+                var span = Math.abs(here - began) * picked.mpp;
+                if (!(span > 0) || !(wide > 0)) { return; }
+                // Metres a pixel is `base / zoom`, which is the wheel's own
+                // arithmetic read the other way: the stretch picked is the one
+                // that has to fill the plot.
+                view.zoom = Math.min(crosshair.closest, Math.max(1, picked.base * wide / span));
+                view.at = picked.at + (Math.min(began, here) - box.left) * picked.mpp;
+                // The height fits itself to what was picked, the way it does for
+                // a fresh selection: a vertical a reader set over one stretch is
+                // not a claim about another.
+                view.centre = null;
+                redraw();
             });
 
             // Back to the whole chain. The map never sees this — the panel stops

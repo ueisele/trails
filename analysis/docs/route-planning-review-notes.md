@@ -2604,6 +2604,38 @@ left the chain selected behind it, so the check after it selected the same chain
 and **deselected** it — every profile reading after that skipped, silently.
 `make drive` reads **137**.
 
+### And the curve can be brushed
+
+**Press, drag, let go, and the panel draws what lay between the two.** Asked for
+by a reader, and the pointer was free for it: a plain drag did nothing at all at
+the whole chain, and moved the window only once a wheel had already zoomed into
+something.
+
+**One meaning at every zoom.** At the whole chain a reader picks where to look;
+zoomed in they pick again and go deeper. No mode to hold in mind, and the state
+is on the screen either way — the *whole chain* button is showing or it is not.
+
+**Moving did not go away for it, it moved to shift.** Taking a working gesture
+off a reader to avoid an overlap is not an improvement, which this document
+already says about the ◀ ▶ row that appears while a pin is held. Shift-drag
+keeps the zoom and moves the window, exactly as a plain drag used to.
+
+The arithmetic is the wheel's read the other way: metres a pixel is `base /
+zoom`, so the stretch picked is the one that has to fill the plot. Driven with a
+**real mouse** — down, moved in steps, up, because a dispatched sequence proves
+the arithmetic and not that a browser ever starts the gesture — a quarter-width
+drag on the 42.44 km chain gives **zoom 3.79 over 11,188 m** beginning at
+**13,894 m**, which is where the drag began to the pixel. The same drag twice
+picks the same stretch.
+
+**Six pixels is the floor, because a click is a drag of nothing.** Under it the
+reader meant to click, and zooming to a stretch a few metres wide would lose the
+chain to a slip of the hand.
+
+The check holds the thing that makes it a lens rather than a slider: **the zoom
+and the width shown are one number seen twice** — 42,442 / 11,188 = 3.79 = the
+zoom. `make drive` reads **148**.
+
 ### What is still open on a phone
 
 - **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the

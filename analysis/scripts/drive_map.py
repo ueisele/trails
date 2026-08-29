@@ -1604,6 +1604,103 @@ def the_profile_tool(page: Any) -> Check:
     )
 
 
+def brushing_the_curve(page: Any) -> Check:
+    """Press, drag, let go, and the panel draws what lay between the two.
+
+    Driven with a **real mouse** — down, moved in steps, up — because a
+    dispatched sequence would prove the arithmetic and not that a browser ever
+    starts the gesture, which is the caveat this suite already carries about
+    HTML5 dragging.
+
+    The pointer was free for it: a plain drag did nothing at all at the whole
+    chain, and moved the window only once a wheel had zoomed into something.
+    Moving is not taken away for it, it moves to shift — taking a working
+    gesture off a reader to avoid an overlap is not an improvement.
+
+    Args:
+        page: The driven page, with a zoomable chain selected
+
+    Returns:
+        What a drag picked, what a click did not, and what shift still does
+    """
+    view = "() => window.trailsProfilePanel.view()"
+    rects = "() => document.querySelectorAll('.trails-profile-panel svg rect').length"
+    reset = """() => { const chart = document.querySelector('.trails-profile-panel svg');
+        chart.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true})); }"""
+
+    page.evaluate(reset)
+    page.wait_for_timeout(600)
+    whole = page.evaluate(view)
+    at_rest = page.evaluate(rects)
+
+    box = page.evaluate(
+        """() => { const r = document.querySelector('.trails-profile-panel svg').getBoundingClientRect();
+        return {left: r.left, top: r.top, w: r.width, h: r.height}; }"""
+    )
+    middle = box["top"] + box["h"] / 2
+
+    def pick(first: float, last: float) -> dict:
+        page.mouse.move(box["left"] + box["w"] * first, middle)
+        page.mouse.down()
+        page.mouse.move(box["left"] + box["w"] * (first + last) / 2, middle, steps=4)
+        held = page.evaluate(rects)
+        page.mouse.move(box["left"] + box["w"] * last, middle, steps=6)
+        page.mouse.up()
+        page.wait_for_timeout(700)
+        return {"held": held, **page.evaluate(view)}
+
+    picked = pick(0.35, 0.60)
+
+    page.evaluate(reset)
+    page.wait_for_timeout(600)
+    again = pick(0.35, 0.60)
+
+    # A click is a drag of nothing, and must stay one.
+    before = page.evaluate(view)
+    page.mouse.click(box["left"] + box["w"] * 0.5, middle)
+    page.wait_for_timeout(600)
+    clicked = page.evaluate(view)
+
+    page.keyboard.down("Shift")
+    page.mouse.move(box["left"] + box["w"] * 0.60, middle)
+    page.mouse.down()
+    page.mouse.move(box["left"] + box["w"] * 0.40, middle, steps=6)
+    page.mouse.up()
+    page.keyboard.up("Shift")
+    page.wait_for_timeout(700)
+    shifted = page.evaluate(view)
+
+    page.evaluate(reset)
+    page.wait_for_timeout(600)
+    back = page.evaluate(view)
+
+    return Check(
+        "picking a stretch of the curve",
+        [
+            Reading("a rectangle is drawn while the button is held", picked["held"] - at_rest, 1),
+            Reading("and is gone once it is let go", page.evaluate(rects), at_rest),
+            # The window is inside the one it was picked from, and the zoom says
+            # the same thing the width does: they are one number seen twice.
+            Reading("what is shown is inside what was", picked["shown"] < whole["shown"], True),
+            Reading(
+                "and the zoom agrees with the width",
+                round(whole["shown"] / picked["shown"], 2),
+                round(picked["zoom"], 2),
+                within=0.02,
+            ),
+            Reading("the same drag twice picks the same stretch", round(again["at"]), round(picked["at"])),
+            Reading("a click picks nothing", round(clicked["at"]), round(before["at"])),
+            Reading("and does not zoom", round(clicked["zoom"], 3), round(before["zoom"], 3)),
+            # Moving did not go away for it.
+            Reading("shift-drag keeps the zoom", round(shifted["zoom"], 3), round(clicked["zoom"], 3)),
+            Reading("and moves the window", shifted["at"] != clicked["at"], True),
+            Reading("a double click puts the whole chain back", round(back["zoom"], 3), 1.0),
+            # A recorded figure: it moves when the chain or the panel does.
+            Reading("m shown by a quarter-width drag", round(picked["shown"]), 11188, within=60, holds=False),
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -1627,6 +1724,7 @@ def drive(page: Any) -> list[Check]:
     checks.append(curve_wheel(page, zoomable=True))
     checks.append(true_scale(page))
     checks.append(zoom_ceiling(page))
+    checks.append(brushing_the_curve(page))
     checks.append(pinch_the_curve(page))
     checks.append(a_way_back_to_the_whole(page))
     checks.append(room_on_a_short_screen(page))
