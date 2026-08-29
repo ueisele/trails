@@ -775,6 +775,7 @@ class _NameSearch(MacroElement):
             input.type = 'search';
             input.placeholder = {{ this.placeholder_json }};
             input.autocomplete = 'off';
+            input.className = 'trails-search-field';
             input.style.cssText = 'width:210px;font-size:12px;padding:3px 6px;border:1px solid #bbb;border-radius:3px';
 
             var count = document.createElement('span');
@@ -8421,7 +8422,22 @@ class _PlanMode(MacroElement):
                 return !!event.target.closest('.leaflet-control-container, .leaflet-popup, .trails-chrome');
             }
 
-            container.addEventListener('mousedown', function (event) {
+            // **`pointerdown` and not `mousedown`.** A finger fires no
+            // `mousedown` of its own: a browser may send a compatibility one
+            // after the gesture ends, and may not — after a pan it usually does
+            // not, which is the only reason a pan never placed a point. That is
+            // an assumption about a browser rather than a rule this page keeps,
+            // and it cannot be driven here: a synthetic `TouchEvent` produces no
+            // compatibility events at all, so the very mechanism in question is
+            // the one a check cannot reproduce.
+            //
+            // A pointer event fires for finger, mouse and pen alike, **at the
+            // start of the gesture and before any compatibility event**, so the
+            // three-pixel test below compares where the gesture began with where
+            // it ended, whatever began it. The assumption is replaced rather
+            // than tested.
+            var pressEvent = window.PointerEvent ? 'pointerdown' : 'mousedown';
+            container.addEventListener(pressEvent, function (event) {
                 pressed = {x: event.clientX, y: event.clientY};
             }, true);
 
@@ -9069,10 +9085,34 @@ class _Chrome(MacroElement):
                 found.style.background = 'transparent';
                 found.style.maxHeight = 'none';
                 found.style.width = 'auto';
+                // **And the float goes.** Leaflet puts `leaflet-control` on
+                // every container it adds and floats it left, which is how a
+                // corner stacks its controls — and a floated box shrinks to its
+                // content. Adopted, that made the search 219 px wide inside a
+                // 368 px panel however its own field was told to grow.
+                found.style.setProperty('float', 'none');
+                found.style.setProperty('clear', 'none');
                 tool.holder = document.createElement('div');
                 tool.holder.appendChild(found);
                 tool.node = found;
             });
+
+            // **The search was measured for a corner and now stands in a
+            // panel.** Its 210 px were the corner's width; measured on a phone
+            // they left 150 px of a 390 px screen unused beside a field 25 px
+            // tall. In the dock it takes the row it is given.
+            if (byKey.search.node) {
+                var field = byKey.search.node.querySelector('.trails-search-field');
+                if (field) {
+                    byKey.search.node.style.display = 'flex';
+                    byKey.search.node.style.alignItems = 'center';
+                    byKey.search.node.style.gap = '8px';
+                    field.style.width = 'auto';
+                    field.style.flex = '1 1 auto';
+                    field.style.minWidth = '0';
+                    if (field.nextElementSibling) { field.nextElementSibling.style.marginLeft = '0'; }
+                }
+            }
 
             // The legend's own fold handle is the dock's job now, and a panel
             // with two headings is the two-panel mistake in miniature. It is
@@ -9118,7 +9158,12 @@ class _Chrome(MacroElement):
                 '  { min-height: 40px; }',
                 '.trails-coarse .trails-legend input, .trails-coarse .trails-basemap input',
                 '  { width: 20px; height: 20px; }',
-                '.trails-coarse .trails-profile-more { min-width: 40px; min-height: 40px; }'
+                '.trails-coarse .trails-profile-more { min-width: 40px; min-height: 40px; }',
+                // **16px is not a taste.** iOS Safari zooms the whole page when
+                // a field smaller than that takes focus, which on a map is the
+                // reader losing their place to type a name.
+                '.trails-coarse .trails-search-field',
+                '  { box-sizing: border-box; min-height: 40px !important; font-size: 16px !important; }'
             ].join('\\n');
             document.head.appendChild(sheet);
 
@@ -9566,14 +9611,26 @@ class _Chrome(MacroElement):
                 var corner = container.querySelector('.leaflet-top.leaflet-left');
                 if (corner) { corner.style.marginLeft = narrow ? '' : '56px'; }
 
+                // **What a soft keyboard covers.** It shrinks the *visual*
+                // viewport and leaves the layout one alone, so `map.getSize()`
+                // reports a height that is partly under the keyboard and a
+                // full-screen sheet reaches under it with the field the reader
+                // is typing into. Both places this page asks for typing — the
+                // search and a stage's name — are fields inside such a sheet.
+                // With no keyboard up the two viewports agree and nothing here
+                // moves, which is the part a check can hold.
+                var covered = window.visualViewport
+                    ? Math.max(0, Math.round(size.y - window.visualViewport.height)) : 0;
+
                 // The floor is the top of the profile panel where one is showing,
                 // measured rather than assumed: it is the reader's own to drag.
-                var floor = size.y;
+                var floor = size.y - covered;
                 var panel = profilePanel();
-                if (panel && panel.style.display !== 'none') {
+                var standing = !!(panel && panel.style.display !== 'none');
+                if (standing) {
                     var seen = panel.getBoundingClientRect();
                     if (seen.height > 0) {
-                        floor = Math.max(0, seen.top - container.getBoundingClientRect().top);
+                        floor = Math.min(floor, Math.max(0, seen.top - container.getBoundingClientRect().top));
                     }
                 }
 
@@ -9591,8 +9648,12 @@ class _Chrome(MacroElement):
                 var planShown = narrow && planOn();
                 planbar.style.display = planShown ? 'flex' : 'none';
                 if (planShown) {
-                    planbar.style.bottom = (floor < size.y ? size.y - floor : 16) + 'px';
-                    floor = Math.max(0, (floor < size.y ? floor : size.y - 16) - 44);
+                    // On the profile panel where one is showing, above the
+                    // keyboard where one is up, and at the foot otherwise —
+                    // keeping the 16 px the panel leaves the attribution.
+                    var barBottom = Math.max(covered, size.y - floor, standing ? 0 : 16);
+                    planbar.style.bottom = barBottom + 'px';
+                    floor = Math.max(0, size.y - barBottom - 44);
                 }
 
                 var covering = narrow && (openTool !== null || menuOpen ||
@@ -9653,6 +9714,12 @@ class _Chrome(MacroElement):
             }
 
             map.on('resize', place);
+            // The keyboard opening is not a map resize: the layout viewport does
+            // not move, so Leaflet never hears about it.
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', place);
+                window.visualViewport.addEventListener('scroll', place);
+            }
 
             // **The floor moves, and not only when the window does.** The panel
             // it is measured against is opened by a selection, laid out a

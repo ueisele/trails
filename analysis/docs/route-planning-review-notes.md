@@ -2520,19 +2520,68 @@ What that check cannot answer is Safari: until iOS 16.4 an `<a download>` on a
 blob opened the file in a tab rather than saving it, and headless Firefox on
 Linux says nothing about that.
 
+### And the three that were left, two built and one replaced
+
+**The search was measured for a corner and stands in a panel.** Nobody had
+looked at it on a phone. Measured at 390 x 844: the field is **210 px wide and
+25 px tall** inside a 390 px sheet — a third of the row spent, and a target well
+under a finger — though it works, *Gåsvatnet* finding 3 matches and moving the
+map. The width belongs to the dock and the height to the pointer, so they are
+fixed in different places: **40 px and 16 px of type** under a coarse pointer,
+**92 % of the panel** on either. 16 is not a taste — iOS Safari zooms the whole
+page when a field smaller than that takes focus, which on a map is the reader
+losing their place in order to type a name.
+
+**And the reason it would not grow is worth more than the fix.** Leaflet puts
+`leaflet-control` on every container it adds and **floats it left** — that is how
+a corner stacks its controls — and a floated box shrinks to its content. Adopted
+into the dock, the search stayed 219 px wide however its own field was told to
+grow. It applies to **all four** adopted panels and was invisible on the other
+three because their content is wide enough to hide it. The chrome clears the
+float where it clears the frame.
+
+**The keyboard, and what a check can hold of it.** A soft keyboard shrinks the
+*visual* viewport and leaves the layout one alone, so `map.getSize()` reports a
+height partly under the keyboard and a full-screen sheet reaches under it — with
+the field being typed into. Both places this page asks for typing, the search
+and a stage's name, are fields inside such a sheet. The chrome measures what is
+covered off `visualViewport` and caps the sheets and the plan bar against it,
+and listens to `visualViewport`'s own resize because the keyboard opening is not
+a map resize and Leaflet never hears about it. **With no keyboard up the two
+viewports agree and nothing moves** — which is the part a check holds, and the
+plan bar's 784 px is that check.
+
+**And `pointerdown` replaces an assumption rather than testing it.** A finger
+fires no `mousedown` of its own; a browser *may* send a compatibility one after
+the gesture, and after a pan it usually does not — which is the only reason a
+pan never placed a point. That is an assumption about a browser rather than a
+rule this page keeps, and **it cannot be driven**: a synthetic `TouchEvent`
+produces no compatibility events at all, so the very mechanism in question is
+the one a check cannot reproduce. A pointer event fires for finger, mouse and
+pen alike, at the start of the gesture and before any compatibility event, so
+the three-pixel test compares where the gesture began with where it ended
+whatever began it.
+
+**Which turned up that nothing had ever driven the gesture.** Every check places
+a waypoint through `window.trailsPlan.place` — the API, not the click — so the
+dispatcher that tells a click on the ground from the end of a pan had **no
+reading at all**, on any pointer. There is one now: a click places a point and
+dragging the map places none. It holds the mouse's half; the finger's half is
+the assumption that was removed.
+
+`make drive` reads **127**.
+
 ### What is still open on a phone
 
-- **The keyboard.** Naming a stage means typing; `visualViewport` shrinks and
-  `map.getSize()` does not, so the field can land behind it. Headless has no
-  keyboard, and the answer is to cap the bar and the sheets against
-  `visualViewport` rather than against the map.
-- **Writing a file.** A blob and `<a download>`; historically the most brittle
-  thing on iOS Safari, and the archive more so.
-- **A real touch pan.** The plan dispatcher tells a tap from a pan by how far the
-  pointer travelled between `mousedown` and `click`, and a finger fires no
-  `mousedown`. A real tap places a point — driven, three times. Whether a real
-  pan wrongly places one cannot be driven here: Playwright can tap and cannot
-  swipe. **Pointer Events cover mouse and finger in one path** and are the answer.
+- **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the
+  no-keyboard case is held by a check; what a real soft keyboard does to it has
+  been seen by nobody.
+- **~~A real touch pan~~ — replaced, not tested.** `pointerdown` records where
+  the gesture began for every pointer, so there is no longer an assumption to
+  verify. What a real finger does is still unobserved.
+- **Writing a file on iOS.** A blob and `<a download>`; until iOS 16.4 that
+  opened the file in a tab rather than saving it. Everything else about the file
+  round trip is driven and green.
 - **Coordinates at 6 decimals** and the rest of the weight work, which the memory
   split above orders and which nothing here touched.
 

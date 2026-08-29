@@ -1401,6 +1401,130 @@ def files_from_the_page(page: Any) -> Check:
     )
 
 
+def a_click_is_not_a_pan(page: Any) -> Check:
+    """Placing a point by clicking the map, and not placing one by dragging it.
+
+    **The path nothing else drove.** Every other check places a waypoint through
+    ``window.trailsPlan.place``, which is the API and not the gesture: the
+    dispatcher that tells a click on the ground from the end of a pan was
+    covered by no reading at all. It matters now because what records where a
+    gesture began moved from ``mousedown`` to ``pointerdown`` — a finger fires
+    no ``mousedown`` of its own, and whether a browser sends a compatibility one
+    after a pan was the assumption this replaced.
+
+    The finger's own half cannot be driven: a synthetic ``TouchEvent`` produces
+    no compatibility events, which is the mechanism in question. What is driven
+    here is that the mouse's half did not move.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What a click placed and what a drag did not
+
+    """
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(true); }")
+    page.wait_for_timeout(700)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.undo(); } }"""
+    )
+    page.wait_for_timeout(1200)
+    empty = page.evaluate("() => window.trailsPlan.state().points.length")
+
+    middle = page.evaluate(
+        """() => { const r = document.querySelector('.leaflet-container').getBoundingClientRect();
+        return {x: Math.round(r.left + r.width * 0.55), y: Math.round(r.top + r.height * 0.42)}; }"""
+    )
+    page.mouse.click(middle["x"], middle["y"])
+    page.wait_for_timeout(2400)
+    clicked = page.evaluate("() => window.trailsPlan.state().points.length")
+
+    # A pan ends in a click too, and how far the pointer travelled is what tells
+    # the two apart -- measured from where the gesture began, which is what
+    # pointerdown records.
+    page.mouse.move(middle["x"] - 120, middle["y"] + 60)
+    page.mouse.down()
+    page.mouse.move(middle["x"] - 40, middle["y"] + 20, steps=8)
+    page.mouse.up()
+    page.wait_for_timeout(2000)
+    panned = page.evaluate("() => window.trailsPlan.state().points.length")
+
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(400)
+
+    return Check(
+        "a click places a point and a pan does not",
+        [
+            Reading("it starts with nothing down", empty, 0),
+            Reading("a click on the ground places one", clicked, 1),
+            Reading("and dragging the map places none", panned, clicked),
+        ],
+    )
+
+
+def the_search_on_a_narrow_panel(page: Any) -> Check:
+    """A field measured for a corner, standing in a panel.
+
+    Measured before this: 210 px wide and 25 px tall in a 390 px sheet, so a
+    third of the row was spent and the target was well under a finger. The width
+    belongs to the dock -- it is the same field on any pointer -- and the height
+    belongs to the pointer.
+
+    **16 px of type is not a taste.** iOS Safari zooms the whole page when a
+    field smaller than that takes focus, which on a map is the reader losing
+    their place in order to type a name.
+
+    Args:
+        page: The driven page
+
+    Returns:
+        What the field measures at each width and with each pointer
+    """
+    read = """() => { const field = document.querySelector('.trails-search-field');
+      if (!field || field.offsetParent === null) { return null; }
+      const r = field.getBoundingClientRect();
+      const dock = document.querySelector('.trails-dock').getBoundingClientRect();
+      return {w: Math.round(r.width), h: Math.round(r.height),
+              size: Math.round(parseFloat(getComputedStyle(field).fontSize)),
+              share: Math.round(100 * r.width / dock.width)}; }"""
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(900)
+    page.evaluate("() => { window.trailsChrome.coarse(true); window.trailsChrome.open('search'); }")
+    page.wait_for_timeout(700)
+    finger = page.evaluate(read)
+
+    page.evaluate("() => window.trailsChrome.coarse(null)")
+    page.wait_for_timeout(500)
+    mouse = page.evaluate(read)
+
+    # And it finds what it always found.
+    page.fill(".trails-search-field", "Gåsvatnet")
+    page.wait_for_timeout(1200)
+    found = page.evaluate(
+        """() => { const box = document.querySelector('.trails-search');
+        return (box.textContent.match(/(\\d+) match/) || [null, '0'])[1]; }"""
+    )
+    page.fill(".trails-search-field", "")
+    page.evaluate("() => window.trailsChrome.close()")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(900)
+
+    return Check(
+        "the search takes the row it is given",
+        [
+            Reading("with a finger: px tall", finger["h"] if finger else 0, 40, within=2, note="25 before"),
+            Reading("and px of type", finger["size"] if finger else 0, 16),
+            Reading("with a mouse: px tall", mouse["h"] if mouse else 0, 25, within=4),
+            # The width is the dock's business and not the pointer's: it is the
+            # same field either way, in the same panel.
+            Reading("either way, per cent of the panel it takes", finger["share"] if finger else 0, 92, within=5, note="54 before"),
+            Reading("and it still finds a name", int(found), 3, holds=False),
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -1474,6 +1598,8 @@ def drive(page: Any) -> list[Check]:
     checks.append(a_finger_can_use_it(page))
     checks.append(the_plan_bar(page))
     checks.append(files_from_the_page(page))
+    checks.append(a_click_is_not_a_pan(page))
+    checks.append(the_search_on_a_narrow_panel(page))
     checks.append(sharing_the_room(page))
     return checks
 
