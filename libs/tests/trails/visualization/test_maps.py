@@ -1595,9 +1595,12 @@ class TestPlanMode:
         its name, opens in Python with a clean ``testzip()``, and every member
         reads back byte for byte. Deflated it is 1.87 MB of GPX in 282 kB.
 
-        **No timestamps**, for the reason no trackpoint carries one: a file that
-        says when it was made invites being read as a record of something that
-        happened.
+        **Stamped with the time it was written**, which is a correction: it went
+        in at zero on the rule that no trackpoint carries a time, and that rule
+        is about the *route* -- a time on a trackpoint claims somebody walked
+        there at that hour. When an archive was written claims nothing about the
+        walk. And zero is not absent: the DOS field counts from 1980, so every
+        member showed 1980-01-01, a wrong answer stated confidently.
         """
         fmap, _ = self.drawn()
 
@@ -1609,9 +1612,10 @@ class TestPlanMode:
         # bigger -- a zip that grew its own members advertises itself badly.
         assert "u16(deflated ? 8 : 0)" in html
         assert "small.length < member.body.length" in html
-        # The two DOS date fields, both zero, in the local header and again in
-        # the central directory entry.
-        assert html.count("u16(0), u16(0), u32(sum)") == 2
+        # One stamp for the whole archive, in the local header and again in the
+        # central directory entry: the members were written in one act.
+        assert html.count("u16(stamp.time), u16(stamp.date), u32(sum)") == 2
+        assert "var stamp = dosStamp(new Date());" in html
 
     def test_a_point_where_a_stage_changes_hands_says_so(self):
         """A pin already carries two things -- which number it is and whether it

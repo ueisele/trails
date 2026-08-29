@@ -2496,9 +2496,27 @@ class _ProfilePanel(MacroElement):
             // graph with, so anything that can read the payload can pack this.
             // Measured, 20,016 bytes to 55 and back unchanged.
             //
-            // **No timestamps.** Every entry is stamped zero, for the reason no
-            // trackpoint carries a time: a file that says when it was made
-            // invites being read as a record of something that happened.
+            // **Stamped with the time it was written, and that is a correction.**
+            // Every entry went in at zero first, on the rule that no trackpoint
+            // carries a time — and that rule is about the *route*: a time on a
+            // trackpoint claims somebody walked there at that hour. When an
+            // archive was written claims nothing about the walk, and the two are
+            // different sentences about the word 'time'. Worse, zero is not
+            // absent: the DOS field counts from 1980, so every member showed
+            // **1980-01-01**, which is a wrong answer stated confidently rather
+            // than no answer at all.
+            //
+            // One stamp for the whole archive, taken once: the members were
+            // written in one act and dating them apart would say otherwise.
+            function dosStamp(when) {
+                var year = Math.max(1980, when.getFullYear());
+                return {
+                    // Seconds are stored halved, in the five bits that leaves.
+                    time: (when.getHours() << 11) | (when.getMinutes() << 5) | (when.getSeconds() >> 1),
+                    date: ((year - 1980) << 9) | ((when.getMonth() + 1) << 5) | when.getDate()
+                };
+            }
+
             function crc32(bytes) {
                 var table = crc32.table, n, k, c, i;
                 if (!table) {
@@ -2531,6 +2549,7 @@ class _ProfilePanel(MacroElement):
                 var members = files.map(function (file) {
                     return {name: encoder.encode(file.name), body: encoder.encode(file.text)};
                 });
+                var stamp = dosStamp(new Date());
                 return Promise.all(members.map(function (member) { return packed(member.body); }))
                     .then(function (compressed) {
                         var chunks = [], directory = [], at = 0;
@@ -2545,12 +2564,13 @@ class _ProfilePanel(MacroElement):
                             var stored = deflated ? small : member.body;
                             var sum = crc32(member.body);
                             var header = [].concat(u32(0x04034b50), u16(20), u16(0x0800), u16(deflated ? 8 : 0),
-                                                   u16(0), u16(0), u32(sum), u32(stored.length),
+                                                   u16(stamp.time), u16(stamp.date), u32(sum), u32(stored.length),
                                                    u32(member.body.length), u16(member.name.length), u16(0));
                             chunks.push(new Uint8Array(header), member.name, stored);
                             directory.push(new Uint8Array(
                                 [].concat(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(deflated ? 8 : 0),
-                                          u16(0), u16(0), u32(sum), u32(stored.length), u32(member.body.length),
+                                          u16(stamp.time), u16(stamp.date), u32(sum), u32(stored.length),
+                                          u32(member.body.length),
                                           u16(member.name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(at))),
                                 member.name);
                             at += header.length + member.name.length + stored.length;

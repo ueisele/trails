@@ -641,8 +641,21 @@ keeps its offered name, opens in Python with a clean `testzip()`, and every memb
 reads back byte for byte. Deflated through `CompressionStream('deflate-raw')`, the
 twin of the `DecompressionStream` this page already inflates its graph with:
 **1.87 MB of GPX in 282 kB**, and stored where the browser cannot or where
-deflating made a member bigger. **No timestamps**, for the reason no trackpoint
-carries one.
+deflating made a member bigger.
+
+**And the entries are stamped, which is a correction to what went in first.**
+They were written at zero, on the rule that no trackpoint carries a time — and
+**that rule is about the route**: a time on a trackpoint claims somebody walked
+there at that hour, where when an archive was written claims nothing about the
+walk. Two sentences about the word *time* that are about different things, which
+is the same category error this document already records about the word
+*accuracy*. Worse, **zero is not absent**: the DOS field counts from 1980, so
+every member showed *1980-01-01* — a wrong answer stated confidently rather than
+no answer at all, and it took a reader opening the archive to see it. One stamp
+for the whole archive, taken once, because the members were written in one act.
+Driven: all four read 2026-08-29 at the page's own clock, which is the browser's
+local time and not the shell's — the headless Firefox stands on GMT+01:00 where
+the system is CEST, and the stamp follows the page, correctly.
 
 **And it broke a reading of the driver, correctly.** A row holds two buttons now,
 and `row.querySelector('button')` took the cut where it meant the removal — so
