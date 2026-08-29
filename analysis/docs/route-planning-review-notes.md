@@ -1621,6 +1621,49 @@ encoding, which was specified over thirty lines and belonged to no phase and is
 now 3B, and the popup ascent, which fell between phases 2, 3 and 4. Run it
 whenever the decisions document grows.
 
+## Picking this up again
+
+**Three commands, in this order.** Read this document — it is the one that
+survives a compaction, and everything below assumes it. Then `git log --oneline
+-25`, which says what was last done and why, because every commit message here
+carries the measurement that justified it. Then `command make drive`, which
+takes a minute and says whether the page still holds: **48 readings, and it
+should be green**. If it is not, the report's last line says whether an invariant
+broke or a recorded figure moved, and those are different problems.
+
+Nothing in the profile panel or in plan mode is waiting on a decision. What is
+open is below, in the order I would take it.
+
+**1. Import an exported GPX into Komoot or Outdooractive.** The one acceptance
+criterion of this whole project that **nobody has ever run**;
+`route-planning-phases.md:1073` records it as a step for a person, and there is
+no account and no network here. Everything downstream of *the file is correct*
+rests on it, and the file has been rewritten four times since anybody looked.
+
+**2. The leg modes nothing reads back.** Every exported plan carries what each
+leg is made of, and not one of the three load modes reads it: a plan holding a
+recorded leg does not come back. A purely routed one does, bit for bit, which is
+the common case and is why this has survived. It matters because the decisions
+document promises the opposite in as many words, and the fix is a **decision
+about the model** — a fourth mode that restores, or `asis` taught to honour the
+leg list it already receives — rather than a repair. Figures under *Known open*.
+
+**3. `PAYLOAD_VERSION` is written and never checked.** Small, and the fix is not
+the obvious one: the header cannot verify itself, so the decoder has to be handed
+the layout it was written for.
+
+**4. A boundary crossed inside a break gets one marker, not a pair.** Wants a
+decision about what a marker on water would claim, and then a figure.
+
+**5. The placeholder sweep.** An hour, and the same shape of bug has now appeared
+three times — `pd.NA` as the text `<NA>`, an empty string counted by `notna`,
+and `Ukjent` read as a name. Every carried column, looked at for values that mean
+absence.
+
+**After those, and none of them blocked**: elevation-aware routing, splitting a
+route into days, snapping a waypoint to a hut or a quay. All three are decisions
+nobody has taken rather than work nobody has done.
+
 ## Known open, and never asked
 
 Separate from the decisions taken *against* something below. These are simply
