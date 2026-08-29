@@ -1872,6 +1872,13 @@ def main() -> int:
     # place name drawn as text asserts no single position to be named after.
     maps.add_plan_mode(fmap, plan_settings(params), searchable)
 
+    # And the one way into all of it, which is why it goes last: it adopts the
+    # search, the legend, the base-map picker and the plan control, so every one
+    # of them has to exist by the time it runs. What it buys is a map that opens
+    # showing a map — measured on the built page, the legend alone left 23 % of
+    # a 390 px screen and 74 % of a desktop one before anything was clicked.
+    maps.add_chrome(fmap, credits=source_credits(loaded.versions))
+
     map_path = output_dir / "lomsdal-visten.html"
     fmap.save(str(map_path))
     print(f"  Map: {map_path} ({map_path.stat().st_size / 1e6:.1f} MB)")

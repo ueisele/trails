@@ -236,6 +236,23 @@ GRADIENT_MIN_RUN_M = elevation.GRADIENT_MIN_RUN_M
 #: a worst case of 9.2 %. Not one level stretch reaches 15 %. So a coloured
 #: stretch is a statement about the hill and never about the data. Measured over
 #: the network the bands hold 81.9 %, 11.5 %, 5.1 % and 1.5 % of the ground.
+#: The width, in CSS pixels of the map itself, under which the page lays out for
+#: a hand rather than for a desk. **Derived rather than chosen**: the legend
+#: measures 380 px and a popup 367, so below their sum plus margins the two
+#: cannot stand side by side and something has to cover something. The axis is
+#: the map's width and not the device — a desktop window dragged to 390 px has
+#: exactly the same problem, and a phone held sideways no longer has it.
+NARROW_PX = 760
+
+#: The height, in CSS pixels of the map, under which a panel at the foot has to
+#: give room back rather than take it. **Derived**: the tallest phone held
+#: sideways is about 430 and the shortest laptop about 600, so anything under
+#: this is a phone on its side and nothing else. It is a separate question from
+#: :data:`NARROW_PX` because room at the foot is about height and standing side
+#: by side is about width — measured, a phone upright is 390 x 844 and a desktop
+#: 1400 x 900, which one number cannot tell apart.
+SHORT_PX = 500
+
 GRADIENT_BANDS = (
     (0.0, "gentle", "#33691e", 1.6),
     (15.0, "steep", "#f9a825", 2.1),
@@ -765,7 +782,7 @@ class _NameSearch(MacroElement):
 
             var control = L.control({position: 'topleft'});
             control.onAdd = function () {
-                var box = L.DomUtil.create('div');
+                var box = L.DomUtil.create('div', 'trails-search');
                 box.style.cssText = 'background:rgba(255,255,255,0.95);padding:6px 8px;border:1px solid #999;' +
                     'border-radius:4px;font-family:sans-serif;font-size:12px';
                 box.appendChild(input);
@@ -1666,8 +1683,11 @@ class _ProfilePanel(MacroElement):
             var groups = [{{ this.group_names|join(', ') }}];
             var figures = {{ this.figures_json }};
             var title = {{ this.title_json }};
-            var chartHeight = {{ this.chart_height }};
+            var startingChartHeight = {{ this.chart_height }};
+            var chartHeight = startingChartHeight;
             var GRADE = {{ this.gradient_json }};
+            var NARROW = {{ this.narrow_px }};
+            var SHORT = {{ this.short_px }};
             var open = {{ 'false' if this.collapsed else 'true' }};
 
             var SVG = 'http://www.w3.org/2000/svg';
@@ -2595,9 +2615,22 @@ class _ProfilePanel(MacroElement):
             // already are. Where the width binds — a long gentle route — it
             // changes nothing, and only zooming would.
             var header = document.createElement('div');
+            header.className = 'trails-profile-head';
             header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none;' +
                 'display:flex;gap:12px;align-items:baseline;justify-content:space-between';
             var name = document.createElement('span');
+            // **A way back that can be found.** Double-clicking the curve has
+            // put the whole chain back since the zoom was built, and nothing
+            // says so — an undiscoverable gesture is a gesture most readers do
+            // not have. It shows only while there is something to go back from,
+            // so the heading is one line again the moment there is not.
+            var whole = document.createElement('button');
+            whole.type = 'button';
+            whole.className = 'trails-profile-whole';
+            whole.textContent = 'whole chain';
+            whole.title = 'Draw the whole of it again';
+            whole.style.cssText = 'font:inherit;font-weight:400;font-size:11px;padding:2px 8px;flex:none;' +
+                'border:1px solid #bbb;border-radius:10px;background:#fff;color:#333;cursor:pointer;display:none';
             var body = document.createElement('div');
             // Right of the title, not under it. It reads as what the title is
             // about rather than as a second thing to look at, and when nothing
@@ -2605,6 +2638,7 @@ class _ProfilePanel(MacroElement):
             var summary = document.createElement('span');
             summary.style.cssText = 'font-weight:400;color:#333;text-align:right';
             header.appendChild(name);
+            header.appendChild(whole);
             header.appendChild(summary);
             var chart = document.createElementNS(SVG, 'svg');
             chart.setAttribute('height', chartHeight);
@@ -2668,8 +2702,36 @@ class _ProfilePanel(MacroElement):
             // one longer list of sources.
             var noted = document.createElement('span');
             noted.style.cssText = 'color:#666;font-size:11px;display:block;margin-top:2px';
+            // **The licences fold where there is no room for them, and only
+            // there.** Measured on a phone held sideways, this row is **66 px**
+            // against a **78 px** drawing — the licence list wraps to three
+            // lines on a screen that narrow and to one on a desktop, so the
+            // small screen pays double for the same sentence. It folds behind an
+            // *i* rather than going away: a reader has to be able to see what
+            // they are taking on **before** pressing Download, which is the whole
+            // reason this sentence is beside the button and not in a panel of
+            // its own.
+            var more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'trails-profile-more';
+            more.textContent = '\u24d8';
+            more.style.cssText = 'font:inherit;font-size:13px;padding:0 6px;border:0;background:none;' +
+                'color:#0d47a1;cursor:pointer;display:none';
+            var licencesOpen = false;
+            function showLicences() {
+                var short = map.getSize().y < SHORT;
+                var folded = short && !licencesOpen;
+                licensed.style.display = folded ? 'none' : '';
+                noted.style.display = folded ? 'none' : 'block';
+                more.style.display = short ? '' : 'none';
+                more.title = licencesOpen ? 'Hide the licences again'
+                    : 'Show the licences and what ground this file covers';
+            }
+            more.addEventListener('click', function () { licencesOpen = !licencesOpen; showLicences(); });
+
             offer.appendChild(download);
             offer.appendChild(carries);
+            offer.appendChild(more);
             offer.appendChild(licensed);
             offer.appendChild(noted);
             // The button and what the file carries on the left, the colour key
@@ -2746,8 +2808,46 @@ class _ProfilePanel(MacroElement):
                 }
             }
 
+            // **Whether the height on this panel is anybody's decision.**
+            // Until a reader drags it, it is a default and may be recomputed
+            // when the window changes shape; after that it is theirs and a
+            // rotation must not take it back. The flag is set on the grab and
+            // never cleared, which is the whole rule.
+            var readerSized = false;
+
+            // A share of the map rather than a constant. Measured on the built
+            // page, the panel opened at 393 px whatever it opened on: 47 % of an
+            // 844 px screen and 61 % of a 640 px one, decided by a build-time
+            // number that never saw the screen.
+            function defaultChartHeight() {
+                var size = map.getSize();
+                var wanted = startingChartHeight;
+                // **Two caps, because one number cannot tell these screens
+                // apart.** A phone held upright is 390 x 844 and a desktop is
+                // 1400 x 900: near enough the same height, so a share of the
+                // height alone treats them the same and a share of the width
+                // says nothing about a panel at the foot. Narrow is what makes
+                // the first a phone; short is what makes a phone turned
+                // sideways one.
+                if (size.x < NARROW) { wanted = Math.min(wanted, Math.round(size.y * 0.22)); }
+                // Under 500 is a phone on its side and nothing else: the tallest
+                // phone in landscape is about 430, the shortest laptop about 600.
+                //
+                // **0.28 and not 0.20, and the number moved for a reason.** The
+                // share is on the *drawing* while the panel's own furniture is
+                // what it costs, so shrinking the furniture without moving this
+                // handed the freed pixels to the map rather than to the curve —
+                // measured, the row went 66 to 31 px and the drawing stayed at
+                // 78. Folded, the overhead is 87 px, so 0.28 of a 390 px screen
+                // puts the panel at 196: about half, which is where it was, with
+                // **40 % more drawing in it**.
+                if (size.y < SHORT) { wanted = Math.min(wanted, Math.round(size.y * 0.28)); }
+                return Math.max(60, wanted);
+            }
+
             grip.addEventListener('mousedown', function (event) {
                 if (!open) { return; }
+                readerSized = true;
                 // The panel is anchored to the bottom of the map, so it grows
                 // upwards and a pointer moving up asks for more.
                 stretching = {from: event.clientY, height: chartHeight};
@@ -2759,6 +2859,29 @@ class _ProfilePanel(MacroElement):
                 stretchTo(stretching.height + (stretching.from - event.clientY));
             });
             document.addEventListener('mouseup', function () {
+                if (!stretching) { return; }
+                stretching = null;
+                grabbed.style.background = '#c4c4c4';
+            });
+
+            // And with a finger, because the height is resolution on a steep
+            // chain and a grip only a mouse can reach hands that to one kind of
+            // reader. The move listener preventDefaults only while something is
+            // actually being stretched, or it would take the scroll away from
+            // every panel on the page.
+            grip.addEventListener('touchstart', function (event) {
+                if (!open || event.touches.length !== 1) { return; }
+                readerSized = true;
+                stretching = {from: event.touches[0].clientY, height: chartHeight};
+                grabbed.style.background = '#8a8a8a';
+                event.preventDefault();
+            }, {passive: false});
+            document.addEventListener('touchmove', function (event) {
+                if (!stretching || event.touches.length !== 1) { return; }
+                stretchTo(stretching.height + (stretching.from - event.touches[0].clientY));
+                event.preventDefault();
+            }, {passive: false});
+            document.addEventListener('touchend', function () {
                 if (!stretching) { return; }
                 stretching = null;
                 grabbed.style.background = '#c4c4c4';
@@ -2808,9 +2931,19 @@ class _ProfilePanel(MacroElement):
                 name.textContent = (open ? '\\u25be ' : '\\u25b8 ') + title + named;
                 body.style.display = open ? '' : 'none';
                 header.style.marginBottom = open ? '4px' : '0';
-                // Full width only when there is something to show in it: folded
-                // away, a full-width bar would take a strip of the map with it.
-                box.style.width = open ? (map.getSize().x - 20) + 'px' : '';
+                // **Edge to edge where the screen is narrow**, and inset where
+                // it is not. Leaflet gives every control a 10 px margin, which
+                // on a 390 px screen is 5 % of the width spent on a gutter
+                // beside a chart whose whole value is metres per pixel.
+                // The 16 px that stay below it are not decoration: the
+                // attribution sits in the corner underneath, and a panel that
+                // covered it would be taking a credit off the page.
+                var narrow = map.getSize().x < NARROW;
+                box.style.margin = narrow ? '0 0 16px 0' : '';
+                box.style.borderRadius = narrow ? '0' : '';
+                box.style.borderLeftWidth = narrow ? '0' : '';
+                box.style.borderRightWidth = narrow ? '0' : '';
+                box.style.width = open ? (map.getSize().x - (narrow ? 0 : 20)) + 'px' : '';
             }
             header.addEventListener('click', function () { open = !open; fold(); render(); });
 
@@ -3150,6 +3283,7 @@ class _ProfilePanel(MacroElement):
 
             function render() {
                 while (chart.firstChild) { chart.removeChild(chart.firstChild); }
+                whole.style.display = view.zoom > 1.001 ? '' : 'none';
                 crosshair = null;
                 // The mark goes with the crosshair that put it there. A wheel or
                 // a drag redraws the curve without the pointer moving, and a mark
@@ -3652,6 +3786,104 @@ class _ProfilePanel(MacroElement):
                 redraw();
             });
 
+            // ---- and the same two gestures with a finger --------------------
+            // **Two fingers apart is in and together is out**, which is the one
+            // gesture every map on a phone already answers, and this curve is a
+            // map of a walk. One finger moves the window, the way a press and a
+            // drag do with a mouse.
+            //
+            // **The wheel's rule is kept exactly**: where there is no detail
+            // under the drawing to reach, the gesture is not taken and Leaflet's
+            // own pinch gets it. A panel that swallowed a pinch and did nothing
+            // with it would read as the map having frozen the moment the panel
+            // opened, which is the reason the wheel behaves that way.
+            function spanOf(touches) {
+                var dx = touches[0].clientX - touches[1].clientX;
+                var dy = touches[0].clientY - touches[1].clientY;
+                return Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            }
+
+            var pinching = null;
+            chart.addEventListener('touchstart', function (event) {
+                if (!crosshair || !(crosshair.closest > 1.001)) { return; }
+                if (event.touches.length === 2) {
+                    forget();
+                    var rect = chart.getBoundingClientRect();
+                    var midX = (event.touches[0].clientX + event.touches[1].clientX) / 2;
+                    var px = ((midX - rect.left) / rect.width) * crosshair.width;
+                    // The ground between the two fingers stays between them,
+                    // which is what makes a pinch a lens rather than a slider.
+                    // The wheel's own rule, written once more for the other
+                    // pointer, off the same three numbers.
+                    pinching = {span: spanOf(event.touches), zoom: view.zoom, px: px,
+                                under: crosshair.from + (px - crosshair.box.left) * crosshair.mpp};
+                    dragging = null;
+                    event.preventDefault();
+                } else if (event.touches.length === 1 && view.zoom > 1.001) {
+                    forget();
+                    dragging = {x: event.touches[0].clientX, y: event.touches[0].clientY,
+                                at: view.at, centre: view.centre, mpp: crosshair.mpp};
+                    pinching = null;
+                    event.preventDefault();
+                }
+            }, {passive: false});
+
+            chart.addEventListener('touchmove', function (event) {
+                if (pinching && event.touches.length === 2) {
+                    var wanted = Math.min(crosshair.closest,
+                        Math.max(1, pinching.zoom * (spanOf(event.touches) / pinching.span)));
+                    view.zoom = wanted;
+                    view.at = pinching.under - (pinching.px - crosshair.box.left) * (crosshair.base / wanted);
+                    event.preventDefault();
+                    redraw();
+                    return;
+                }
+                if (dragging && event.touches.length === 1) {
+                    view.at = dragging.at - (event.touches[0].clientX - dragging.x) * dragging.mpp;
+                    view.centre = dragging.centre + (event.touches[0].clientY - dragging.y) * dragging.mpp;
+                    event.preventDefault();
+                    redraw();
+                }
+            }, {passive: false});
+
+            function fingersUp(event) {
+                if (event.touches.length < 2) { pinching = null; }
+                if (event.touches.length === 0) { dragging = null; chart.style.cursor = 'crosshair'; }
+            }
+            chart.addEventListener('touchend', fingersUp);
+            chart.addEventListener('touchcancel', fingersUp);
+
+            function backToWhole() {
+                if (!(view.zoom > 1.001)) { return; }
+                view.zoom = 1; view.at = 0; view.centre = null;
+                redraw();
+            }
+            // The header's own click folds the panel away; this is a different
+            // thing standing in the same row.
+            whole.addEventListener('click', function (event) { event.stopPropagation(); backToWhole(); });
+
+            // **A double click is the mouse's and does not reach a finger.**
+            // The position is checked as well as the interval: two taps 300 ms
+            // apart at opposite ends of the chart are two readings and not one
+            // gesture, and a reader who has just dragged the window would
+            // otherwise lose it.
+            var lastTap = 0, lastTapAt = null;
+            chart.addEventListener('touchend', function (event) {
+                if (event.touches.length > 0 || pinching) { return; }
+                var finger = event.changedTouches && event.changedTouches[0];
+                if (!finger) { return; }
+                var now = Date.now();
+                var near = lastTapAt && Math.abs(finger.clientX - lastTapAt.x) < 30 &&
+                    Math.abs(finger.clientY - lastTapAt.y) < 30;
+                if (now - lastTap < 300 && near) {
+                    lastTap = 0; lastTapAt = null;
+                    backToWhole();
+                    return;
+                }
+                lastTap = now;
+                lastTapAt = {x: finger.clientX, y: finger.clientY};
+            });
+
             // ---- what is selected -------------------------------------------
             var selected = null;
             // Whether something else owns the map's clicks. Plan mode does
@@ -3827,6 +4059,11 @@ class _ProfilePanel(MacroElement):
                 // was handed, so a browser check can read them rather than a
                 // screenshot.
                 window.trailsProfile = selected;
+                // The chrome hides this panel while nothing is selected — a map
+                // that opens showing only a map is the whole point of it — and
+                // it cannot know that from the DOM, because a folded panel and
+                // an empty one look the same from outside.
+                if (window.trailsChrome && window.trailsChrome.selected) { window.trailsChrome.selected(selected); }
                 fold();
                 describe();
                 offered();
@@ -3994,8 +4231,14 @@ class _ProfilePanel(MacroElement):
             map.on('click', function () { if (!suspended) { show(null); } });
             // A panel this wide is sized against the map, so a resized window
             // has to size it again before anything is drawn into it.
-            map.on('resize', function () { fold(); render(); placeArrow(); });
+            map.on('resize', function () {
+                if (!readerSized) { chartHeight = defaultChartHeight(); }
+                showLicences();
+                fold(); render(); placeArrow();
+            });
 
+            if (!readerSized) { chartHeight = defaultChartHeight(); }
+            showLicences();
             fold();
             describe();
             offered();
@@ -4030,6 +4273,8 @@ class _ProfilePanel(MacroElement):
         self.figures_json = _script_json(figures)
         self.title_json = _script_json(title)
         self.chart_height = int(chart_height)
+        self.narrow_px = NARROW_PX
+        self.short_px = SHORT_PX
         self.collapsed = collapsed
         # Through _script_json like everything else that lands inside a script
         # block: a licence or a source name carrying a '<' would otherwise close
@@ -7430,6 +7675,25 @@ class _PlanMode(MacroElement):
                 }
                 points.forEach(function (point, index) {
                     if (heads[index]) { listBox.appendChild(stageHead(heads[index])); }
+                    // One shape for both, because they differ only in which way
+                    // they go and whether there is anywhere to go.
+                    function rowStep(glyph, explains, may, act) {
+                        var made = document.createElement('button');
+                        made.type = 'button';
+                        made.draggable = false;
+                        made.textContent = glyph;
+                        made.title = explains;
+                        made.style.cssText = 'flex:none;font:inherit;line-height:1;padding:0 4px;border:0;' +
+                            'background:none;color:#777;cursor:pointer;visibility:' +
+                            (may ? 'visible' : 'hidden');
+                        made.addEventListener('click', function (event) {
+                            // Or the row's own click would take hold of the
+                            // point this one is moving.
+                            event.stopPropagation();
+                            act();
+                        });
+                        return made;
+                    }
                     var called = nameOf(point, index);
                     var row = document.createElement('div');
                     row.draggable = true;
@@ -7437,6 +7701,7 @@ class _PlanMode(MacroElement):
                         'border-radius:3px;cursor:pointer;' +
                         (index === chosen ? 'background:#e8eaf6' : '');
                     var grip = document.createElement('span');
+                    grip.className = 'trails-plan-grip';
                     grip.textContent = '\u2261';
                     grip.title = 'Drag to move this point in the route';
                     grip.style.cssText = 'cursor:grab;color:#9e9e9e;flex:none';
@@ -7531,10 +7796,27 @@ class _PlanMode(MacroElement):
                         row.style.opacity = '';
                         row.style.boxShadow = '';
                     });
+                    // **Up and down, for the pointer that cannot drag.** HTML5
+                    // dragging is not implemented by mobile browsers at all, so
+                    // on a finger the grip promises something that cannot
+                    // happen. These call `moveBy`, which is the pin's own
+                    // gesture and already here — a swap with a neighbour, which
+                    // is exactly what one step up or down means. **No new
+                    // model, two buttons.** They are drawn only under a coarse
+                    // pointer, so a row keeps its 21 px where a mouse is.
+                    var up = rowStep('\u2191', 'Move this point one place earlier in the route',
+                                     index > 0, function () { moveBy(index, -1); });
+                    up.className = 'trails-plan-up';
+                    var down = rowStep('\u2193', 'Move this point one place later in the route',
+                                       index + 1 < points.length, function () { moveBy(index, 1); });
+                    down.className = 'trails-plan-down';
+
                     row.appendChild(grip);
                     row.appendChild(number);
                     row.appendChild(says);
                     row.appendChild(far);
+                    row.appendChild(up);
+                    row.appendChild(down);
                     row.appendChild(cut);
                     row.appendChild(out);
                     listBox.appendChild(row);
@@ -8083,7 +8365,12 @@ class _PlanMode(MacroElement):
             // to read and not terrain to plan over.
             function overFurniture(event) {
                 if (!event.target || !event.target.closest) { return false; }
-                return !!event.target.closest('.leaflet-control-container, .leaflet-popup');
+                // **The chrome belongs in this list for the same reason the
+                // popup did.** A handler that owns every click has to enumerate
+                // everything that is not terrain, and the chrome is not in the
+                // control container: it is appended to the map container itself,
+                // so that a panel can cover the corners on a narrow screen.
+                return !!event.target.closest('.leaflet-control-container, .leaflet-popup, .trails-chrome');
             }
 
             container.addEventListener('mousedown', function (event) {
@@ -8425,14 +8712,23 @@ class _Legend(MacroElement):
 
             var control = L.control({position: 'bottomleft'});
             control.onAdd = function () {
-                var box = L.DomUtil.create('div');
+                var box = L.DomUtil.create('div', 'trails-legend');
+                // **No 70vh here any more.** A fixed share of the window was the
+                // one panel on this map that never asked what else was on
+                // screen, and measured at 390 px it took 77 % of the map before
+                // anything had been clicked — and its own fold handle left the
+                // map at y = -206 the moment a profile opened, which is the
+                // profile grip's old defect in a second place. The chrome caps
+                // it against the profile panel now, the way the plan control is.
                 box.style.cssText = 'background:rgba(255,255,255,0.92);padding:8px 12px;border:1px solid #999;' +
                     'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4;' +
-                    'max-height:70vh;overflow-y:auto';
+                    'overflow-y:auto';
 
                 var header = document.createElement('div');
+                header.className = 'trails-legend-head';
                 header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none';
                 var body = document.createElement('div');
+                body.className = 'trails-legend-body';
 
                 // **Whichever base map was asked for, and only that one.**
                 // Folium hands every base layer to the map and leaves it to the
@@ -8440,6 +8736,11 @@ class _Legend(MacroElement):
                 // with that control gone this does it, or two tile layers stack
                 // and the last one drawn wins.
                 var picked = document.createElement('div');
+                // Its own name because the chrome lifts it out of here into a
+                // panel of its own: which base map is drawn is a different
+                // question from which overlays are on, and on a narrow screen
+                // the two cannot share one list.
+                picked.className = 'trails-basemap';
                 picked.style.cssText = 'margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #ddd';
                 bases.forEach(function (layer, index) {
                     if (!baseShown[index] && map.hasLayer(layer)) { map.removeLayer(layer); }
@@ -8607,3 +8908,657 @@ def add_legend(fmap: folium.Map, title: str, entries: dict[str, str] | list[Lege
     """
     rows = [LegendRow(label, colour) for label, colour in entries.items()] if isinstance(entries, dict) else list(entries)
     _Legend(title, rows, collapsed).add_to(fmap)
+
+
+class _Chrome(MacroElement):
+    """The one way into everything this map can do, and the panel that tells the others where to stand.
+
+    **The map opens showing a map.** Everything else is reached for. On a wide
+    screen the reach is a rail of icons down the left edge and a panel that docks
+    beside it; on a narrow one it is a burger and a panel over the whole screen.
+    One layout decided by one number, because the axis is the width of the map
+    and not the kind of device: a desktop window dragged to 390 px has exactly
+    the problem a phone has, and a phone held sideways no longer has it.
+
+    **It adopts the controls rather than replacing them.** The search, the
+    legend, the base-map picker and the plan control keep every line of their own
+    behaviour and lose only their frame and their corner; this moves their
+    containers into a dock it owns and shows one at a time. Nothing about what
+    they do had to be rewritten to make them share a screen, which is the whole
+    reason it is built this way.
+
+    **And every popup docks.** Measured on the built page at 390 x 844, a tap on
+    a trail put a 367 x 386 popup and a 393 px profile panel on an 844 px screen
+    and left 6.9 % of the map visible — with 113,036 px² of that popup *behind*
+    the legend, because Leaflet's popup pane is z-index 700 and a control corner
+    is 1000. A popup that docks cannot be behind anything, so the fix and the
+    layout are one change rather than two.
+
+    The dock is appended to the map container and not to a control corner,
+    deliberately: on a narrow screen a panel has to be able to cover the corners,
+    and a control cannot cover its own siblings.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function () {
+            var map = {{ this._parent.get_name() }};
+            var NARROW = {{ this.narrow_px }};
+            var CREDITS = {{ this.credits_json }};
+            var container = map.getContainer();
+
+            function esc(text) {
+                return String(text === null || text === undefined ? '' : text)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+
+            var ICONS = {
+                search: '<circle cx="7.5" cy="7.5" r="5.2"/><path d="M11.4 11.4 15.5 15.5"/>',
+                layers: '<path d="M9 2.3 15.7 6 9 9.7 2.3 6Z"/><path d="M2.3 9.6 9 13.3l6.7-3.7"/><path d="M2.3 12.9 9 16.6l6.7-3.7"/>',
+                base: '<rect x="2.4" y="3.6" width="13.2" height="10.8" rx="1.3"/>' +
+                      '<path d="M2.4 11 6.4 7.4l3.1 2.8 2.6-2.2 3.5 3"/><circle cx="6.2" cy="6.2" r="1.1"/>',
+                plan: '<circle cx="4.3" cy="13.7" r="2"/><circle cx="13.7" cy="4.3" r="2"/><path d="M5.9 12.3C8.5 9.6 8.9 8 12.1 5.9"/>',
+                profile: '<path d="M2.4 13.4 6 7.9l3 3.4 2.6-5.4 3.9 7.5Z"/>',
+                info: '<circle cx="9" cy="9" r="6.6"/><path d="M9 8.2v4.1"/><circle cx="9" cy="5.7" r=".7" fill="currentColor" stroke="none"/>',
+                burger: '<path d="M3 5.4h14M3 10h14M3 14.6h14"/>',
+                chevron: '<path d="M7 4.5 12 9l-5 4.5"/>'
+            };
+
+            function icon(name, size) {
+                var side = size || 18;
+                return '<svg width="' + side + '" height="' + side + '" viewBox="0 0 18 18" fill="none" ' +
+                    'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" ' +
+                    'aria-hidden="true">' + ICONS[name] + '</svg>';
+            }
+
+            // What this map can do, in the order a reader meets it. `selector`
+            // names a control that already exists and is adopted; the two
+            // without one are built here or are a panel of their own.
+            var TOOLS = [
+                {key: 'search', label: 'Search', width: 300, selector: '.trails-search',
+                 hint: 'A name from the register, and the map goes to it.'},
+                {key: 'layers', label: 'Layers', width: 344, selector: '.trails-legend',
+                 hint: 'Every line and point drawn here, and what each one is.'},
+                {key: 'base', label: 'Base map', width: 250, selector: '.trails-basemap',
+                 hint: 'Which Kartverket sheet is drawn underneath.'},
+                {key: 'plan', label: 'Plan a route', width: 330, selector: '.trails-plan-control',
+                 hint: 'Set points, route between them, cut it into stages.'},
+                {key: 'profile', label: 'Profile', width: 0, selector: null,
+                 hint: 'The height of what is selected, along the foot.'},
+                {key: 'info', label: 'Sources', width: 360, selector: null,
+                 hint: 'Who made this data, and under what licence.'}
+            ];
+
+            var byKey = {};
+            TOOLS.forEach(function (tool) { byKey[tool.key] = tool; });
+
+            // **The base map picker comes out first, and the order is the
+            // point.** It is built inside the legend, so adopting the legend
+            // while it is still in there would carry it along and the two tools
+            // would fight over one element.
+            ['base', 'search', 'layers', 'plan'].forEach(function (key) {
+                var tool = byKey[key];
+                var found = container.querySelector(tool.selector);
+                if (!found) { return; }
+                // It keeps its contents and loses its frame: it is inside the
+                // dock's frame now, and two borders around one list read as two
+                // panels, which is the mistake the legend and the layer control
+                // had already made once on this map.
+                found.style.margin = '0';
+                found.style.padding = '0';
+                found.style.border = '0';
+                found.style.borderRadius = '0';
+                found.style.boxShadow = 'none';
+                found.style.background = 'transparent';
+                found.style.maxHeight = 'none';
+                found.style.width = 'auto';
+                tool.holder = document.createElement('div');
+                tool.holder.appendChild(found);
+                tool.node = found;
+            });
+
+            // The legend's own fold handle is the dock's job now, and a panel
+            // with two headings is the two-panel mistake in miniature. It is
+            // unfolded first, or hiding the handle would leave a list nobody
+            // can open.
+            if (byKey.layers.node) {
+                var legendHead = byKey.layers.node.querySelector('.trails-legend-head');
+                var legendBody = byKey.layers.node.querySelector('.trails-legend-body');
+                if (legendHead && legendBody) {
+                    if (legendBody.style.display === 'none') { legendHead.click(); }
+                    legendHead.style.display = 'none';
+                }
+            }
+
+            // ---- what a finger needs, in one place ---------------------------
+            // **Keyed off the pointer and not off the width.** Every other rule
+            // on this page is about room, and room is a question about pixels;
+            // how big a target has to be is a question about hands. A touch
+            // laptop at 1400 px needs the bigger buttons and a mouse in a 390 px
+            // window does not, and only `(pointer: coarse)` tells those two
+            // apart.
+            //
+            // The query sets a **class** rather than styling directly, so a
+            // browser check can ask for the coarse layout and measure it — the
+            // same reason everything else here is a method rather than something
+            // to read off a screenshot.
+            //
+            // `!important` is not decoration either: these elements carry their
+            // sizes as inline styles, and inline beats a stylesheet. This is the
+            // one place that has to win over them.
+            var sheet = document.createElement('style');
+            sheet.textContent = [
+                '.trails-plan-up, .trails-plan-down { display: none; }',
+                '.trails-coarse .trails-plan-up, .trails-coarse .trails-plan-down { display: inline-block; }',
+                '.trails-coarse .trails-plan-grip { display: none; }',
+                '.trails-coarse .trails-plan-points > div:not(.trails-plan-stage)',
+                '  { min-height: 44px; gap: 8px; }',
+                '.trails-coarse .trails-plan-control button { min-height: 36px; padding: 6px 12px; }',
+                '.trails-coarse .trails-plan-points button',
+                '  { min-width: 40px !important; min-height: 40px !important;',
+                '    font-size: 17px !important; padding: 0 4px !important; }',
+                '.trails-coarse .trails-legend label, .trails-coarse .trails-basemap label',
+                '  { min-height: 40px; }',
+                '.trails-coarse .trails-legend input, .trails-coarse .trails-basemap input',
+                '  { width: 20px; height: 20px; }',
+                '.trails-coarse .trails-profile-more { min-width: 40px; min-height: 40px; }'
+            ].join('\\n');
+            document.head.appendChild(sheet);
+
+            var pointer = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+            var forcedCoarse = null;
+            function paintCoarse() {
+                var on = forcedCoarse === null ? !!(pointer && pointer.matches) : forcedCoarse;
+                container.classList.toggle('trails-coarse', on);
+            }
+            if (pointer && pointer.addEventListener) { pointer.addEventListener('change', paintCoarse); }
+            paintCoarse();
+
+            var chrome = document.createElement('div');
+            chrome.className = 'trails-chrome';
+            chrome.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;z-index:1100;' +
+                'pointer-events:none;font-family:sans-serif;font-size:12px;line-height:1.4;color:#1d282c';
+            container.appendChild(chrome);
+
+            function frame(cls) {
+                var box = document.createElement('div');
+                box.className = cls;
+                box.style.cssText = 'position:absolute;display:none;flex-direction:column;overflow:hidden;' +
+                    'pointer-events:auto;background:rgba(255,255,255,0.96);box-shadow:0 2px 10px rgba(0,0,0,0.16)';
+                L.DomEvent.disableClickPropagation(box);
+                // The wheel is the map's except where this still has somewhere
+                // to scroll — the bargain the legend and the plan list already
+                // strike, written once more because this is the box that
+                // scrolls now.
+                box.addEventListener('wheel', function (event) {
+                    var scroller = box.querySelector('.trails-chrome-body');
+                    if (!scroller) { return; }
+                    var room = scroller.scrollHeight - scroller.clientHeight;
+                    if (room <= 0) { return; }
+                    if (event.deltaY < 0 ? scroller.scrollTop > 0 : scroller.scrollTop < room - 1) {
+                        event.stopPropagation();
+                    }
+                }, {passive: true});
+                chrome.appendChild(box);
+                return box;
+            }
+
+            function headed(box, onClose) {
+                var bar = document.createElement('div');
+                bar.className = 'trails-chrome-bar';
+                bar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:9px 11px;' +
+                    'border-bottom:1px solid #dfe4e5;flex:none';
+                var title = document.createElement('div');
+                title.className = 'trails-chrome-title';
+                title.style.cssText = 'flex:1;min-width:0;font-weight:600;font-size:14px;' +
+                    'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+                var shut = document.createElement('button');
+                shut.type = 'button';
+                shut.className = 'trails-chrome-close';
+                shut.setAttribute('aria-label', 'Close');
+                shut.textContent = '\\u00d7';
+                // 40 px square. The point list's own buttons are 15 x 13 and
+                // 9 x 17, which is the one kind of defect a finger cannot work
+                // around by trying again.
+                shut.style.cssText = 'flex:none;width:40px;height:40px;border:1px solid #d3dbdc;' +
+                    'border-radius:8px;background:#fff;cursor:pointer;font-size:19px;line-height:1;color:#55666b';
+                shut.addEventListener('click', onClose);
+                bar.appendChild(title);
+                bar.appendChild(shut);
+                var body = document.createElement('div');
+                body.className = 'trails-chrome-body';
+                body.style.cssText = 'flex:1;min-height:0;overflow:auto;padding:9px 11px 12px;' +
+                    '-webkit-overflow-scrolling:touch';
+                box.appendChild(bar);
+                box.appendChild(body);
+                return {title: title, body: body};
+            }
+
+            // **What is open, as three facts rather than as three styles.**
+            // On a narrow screen the dock, the menu and the detail are all the
+            // same full-screen sheet, so only one may be drawn — and reading
+            // that off `style.display` while also writing it there is how two
+            // of them end up stacked. Everything below decides; `place` draws.
+            var openTool = null, menuOpen = false, detailShown = false;
+
+            var dock = frame('trails-dock');
+            var dockParts = headed(dock, function () { closeDock(); });
+            var menu = frame('trails-menu');
+            var menuParts = headed(menu, function () { closeMenu(); });
+            var sheet = frame('trails-detail');
+            var sheetParts = headed(sheet, function () { closeSheet(); });
+
+            // ---- the sources panel, built from what the export was handed ----
+            var sourcesHolder = document.createElement('div');
+            (function () {
+                var seen = {}, out = '';
+                Object.keys(CREDITS).forEach(function (key) {
+                    (CREDITS[key] || []).forEach(function (credit) {
+                        if (seen[credit.name]) { return; }
+                        seen[credit.name] = true;
+                        out += '<div style="padding:8px 0;border-top:1px solid #e8ecec">' +
+                            '<div style="font-weight:600">' + esc(credit.name) + '</div>' +
+                            '<div style="color:#55666b">' + esc(credit.licence) +
+                            (credit.version ? ' \\u00b7 ' + esc(credit.version) : '') + '</div>' +
+                            (credit.note ? '<div style="color:#8a9a9e;font-size:11px;margin-top:2px">' +
+                                esc(credit.note) + '</div>' : '') +
+                            (credit.url ? '<div style="margin-top:3px"><a href="' + esc(credit.url) +
+                                '" target="_blank" rel="noopener noreferrer">' +
+                                esc(credit.attribution || credit.url) + '</a></div>' : '') +
+                            '</div>';
+                    });
+                });
+                sourcesHolder.innerHTML = out || '<p style="color:#8a9a9e">No sources were handed to this page.</p>';
+            })();
+            byKey.info.holder = sourcesHolder;
+
+            // **Every holder lives in the dock from the start, hidden rather
+            // than detached.** Detached DOM measures zero, and two of these
+            // controls size themselves against what is around them — a plan
+            // list that caps itself against a box whose top reads 0 caps itself
+            // against nothing. It also keeps them findable: plan mode is a mode
+            // and outlives its panel, so `document.querySelector` has to answer
+            // for it whether or not anybody has the panel open.
+            TOOLS.forEach(function (tool) {
+                if (!tool.holder) { return; }
+                tool.holder.style.display = 'none';
+                dockParts.body.appendChild(tool.holder);
+            });
+
+            // ---- the rail, on a wide screen ----------------------------------
+            var rail = document.createElement('div');
+            rail.className = 'trails-rail';
+            rail.style.cssText = 'position:absolute;left:10px;top:10px;width:46px;pointer-events:auto;' +
+                'background:rgba(255,255,255,0.94);border:1px solid #999;border-radius:8px;overflow:hidden;' +
+                'box-shadow:0 1px 3px rgba(0,0,0,0.18)';
+            L.DomEvent.disableClickPropagation(rail);
+            chrome.appendChild(rail);
+
+            var railButtons = {};
+            TOOLS.forEach(function (tool, index) {
+                var button = document.createElement('button');
+                button.type = 'button';
+                button.title = tool.label;
+                button.setAttribute('aria-label', tool.label);
+                button.setAttribute('data-tool', tool.key);
+                button.innerHTML = icon(tool.key);
+                button.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;' +
+                    'height:44px;border:0;background:none;cursor:pointer;color:#55666b;' +
+                    'border-bottom:' + (index < TOOLS.length - 1 ? '1px solid #e3e8e8' : '0');
+                button.addEventListener('click', function () { pick(tool.key); });
+                rail.appendChild(button);
+                railButtons[tool.key] = button;
+            });
+
+            // ---- the burger, on a narrow one ---------------------------------
+            // Top right, not top left: the zoom buttons keep their corner, so
+            // going narrow takes nothing away that was there before.
+            var burger = document.createElement('button');
+            burger.type = 'button';
+            burger.className = 'trails-burger';
+            burger.title = 'Menu';
+            burger.setAttribute('aria-label', 'Menu');
+            burger.innerHTML = icon('burger', 21);
+            burger.style.cssText = 'position:absolute;right:10px;top:10px;width:46px;height:46px;' +
+                'pointer-events:auto;display:none;align-items:center;justify-content:center;' +
+                'background:rgba(255,255,255,0.94);border:1px solid #999;border-radius:10px;' +
+                'cursor:pointer;color:#1d282c;box-shadow:0 1px 3px rgba(0,0,0,0.18)';
+            L.DomEvent.disableClickPropagation(burger);
+            burger.addEventListener('click', function () { openMenu(); });
+            chrome.appendChild(burger);
+
+            // ---- the profile panel, which is shown by having something to show
+            var profileBox = null;
+            function profilePanel() {
+                if (!profileBox) { profileBox = container.querySelector('.trails-profile-panel'); }
+                return profileBox;
+            }
+
+            function showProfile(on) {
+                var panel = profilePanel();
+                if (panel) { panel.style.display = on ? '' : 'none'; }
+                var button = railButtons.profile;
+                if (button) {
+                    button.disabled = !on;
+                    button.style.opacity = on ? '' : '0.4';
+                    button.style.cursor = on ? 'pointer' : 'default';
+                }
+            }
+
+            function planOn() {
+                try { return !!(window.trailsPlan && window.trailsPlan.state().on); } catch (error) { return false; }
+            }
+
+            function paintRail() {
+                TOOLS.forEach(function (tool) {
+                    var button = railButtons[tool.key];
+                    if (!button) { return; }
+                    var lit = openTool === tool.key;
+                    button.style.background = lit ? '#0d47a1' : 'none';
+                    button.style.color = lit ? '#ffffff' : (tool.key === 'plan' && planOn() ? '#0d47a1' : '#55666b');
+                    button.setAttribute('aria-pressed', String(lit));
+                });
+            }
+
+            // Plan mode outlives its panel — it is a mode, not a window — so the
+            // rail says whether it is on. Asked after the control's own handler
+            // has run, and only then: reading it composes the route.
+            if (byKey.plan.node) {
+                byKey.plan.node.addEventListener('click', function () { window.setTimeout(paintRail, 0); });
+            }
+
+            function buildMenu() {
+                menuParts.title.textContent = 'Menu';
+                menuParts.body.innerHTML = '';
+                TOOLS.forEach(function (tool) {
+                    var row = document.createElement('button');
+                    row.type = 'button';
+                    row.setAttribute('data-tool', tool.key);
+                    // 48 px, which is a finger, and the reason every row here is
+                    // a whole line rather than an icon beside a word.
+                    row.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;min-height:48px;' +
+                        'padding:8px 4px;border:0;border-bottom:1px solid #e3e8e8;background:none;' +
+                        'cursor:pointer;text-align:left;color:#1d282c;font:inherit';
+                    row.innerHTML = '<span style="flex:none;width:26px;display:flex;justify-content:center;' +
+                        'color:#55666b">' + icon(tool.key) + '</span>' +
+                        '<span style="flex:1;min-width:0"><b style="display:block;font-size:14px">' +
+                        esc(tool.label) + '</b><span style="display:block;font-size:11.5px;color:#8a9a9e">' +
+                        esc(tool.hint) + '</span></span>' +
+                        '<span style="flex:none;color:#8a9a9e">' + icon('chevron', 15) + '</span>';
+                    if (tool.key === 'profile' && !window.trailsProfile) {
+                        row.disabled = true;
+                        row.style.opacity = '0.45';
+                        row.style.cursor = 'default';
+                    }
+                    row.addEventListener('click', function () { pick(tool.key); });
+                    menuParts.body.appendChild(row);
+                });
+            }
+
+            function pick(key) {
+                var tool = byKey[key];
+                if (!tool) { return; }
+                if (key === 'profile') {
+                    var head = container.querySelector('.trails-profile-head');
+                    if (head) { head.click(); }
+                    closeMenu();
+                    place();
+                    return;
+                }
+                if (openTool === key) { closeDock(); return; }
+                openTool = key;
+                dockParts.title.textContent = tool.label;
+                TOOLS.forEach(function (each) {
+                    if (each.holder) { each.holder.style.display = each.key === key ? '' : 'none'; }
+                });
+                menuOpen = false;
+                paintRail();
+                place();
+            }
+
+            // A tool closing on a narrow screen gives the detail back rather
+            // than throwing it away: it was never closed, only covered.
+            function closeDock() { openTool = null; paintRail(); place(); }
+            function closeMenu() { menuOpen = false; place(); }
+            function closeSheet() { detailShown = false; place(); }
+
+            function openMenu() {
+                buildMenu();
+                openTool = null;
+                menuOpen = true;
+                paintRail();
+                place();
+            }
+
+            // ---- every popup docks -------------------------------------------
+            // Leaflet keeps no public handle on what a popup was bound to, and
+            // the name is worth more than the purity here: a sheet headed
+            // "Details" says nothing, and the tooltip is the same text the
+            // profile panel puts in its own heading, so the two agree.
+            function titleFor(popup) {
+                var source = popup._source;
+                if (source && source.getTooltip) {
+                    var tooltip = source.getTooltip();
+                    var content = tooltip && tooltip.getContent();
+                    if (typeof content === 'string') {
+                        return content.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();
+                    }
+                    if (content && content.textContent) { return content.textContent.trim(); }
+                }
+                if (window.trailsProfile && window.trailsProfile.label) { return window.trailsProfile.label; }
+                return 'Details';
+            }
+
+            var adopting = false;
+            map.on('popupopen', function (event) {
+                if (adopting) { return; }
+                var popup = event.popup;
+                var content = popup.getContent();
+                // Closed at once rather than a frame later, so it is never seen
+                // to open. Leaflet re-appends the content node into its own box
+                // the next time the same popup opens, which is what makes moving
+                // it out of one safe.
+                adopting = true;
+                map.closePopup(popup);
+                adopting = false;
+                sheetParts.title.textContent = titleFor(popup);
+                sheetParts.body.innerHTML = '';
+                if (typeof content === 'string') {
+                    var wrap = document.createElement('div');
+                    wrap.innerHTML = content;
+                    sheetParts.body.appendChild(wrap);
+                } else if (content) {
+                    sheetParts.body.appendChild(content);
+                }
+                sheetParts.body.scrollTop = 0;
+                detailShown = true;
+                // A tap on the ground is an answer to the map, so whatever was
+                // being read about the map steps aside for it.
+                openTool = null;
+                menuOpen = false;
+                paintRail();
+                place();
+            });
+
+            // A belt to the braces: with every popup adopted none is ever drawn,
+            // but the pane's 700 against a control corner's 1000 is a defect on
+            // any screen size and is not left standing on the chance that one is.
+            var popupPane = map.getPane('popupPane');
+            if (popupPane) { popupPane.style.zIndex = 1050; }
+
+            // ---- where everything stands -------------------------------------
+            function place() {
+                var size = map.getSize();
+                var narrow = size.x < NARROW;
+                var landscape = narrow && size.x > size.y;
+                chrome.classList.toggle('trails-chrome-narrow', narrow);
+                rail.style.display = narrow ? 'none' : '';
+
+                // The zoom buttons keep the top-left corner; on a wide screen the
+                // rail stands where they were, so the corner steps aside for it.
+                var corner = container.querySelector('.leaflet-top.leaflet-left');
+                if (corner) { corner.style.marginLeft = narrow ? '' : '56px'; }
+
+                // The floor is the top of the profile panel where one is showing,
+                // measured rather than assumed: it is the reader's own to drag.
+                var floor = size.y;
+                var panel = profilePanel();
+                if (panel && panel.style.display !== 'none') {
+                    var seen = panel.getBoundingClientRect();
+                    if (seen.height > 0) {
+                        floor = Math.max(0, seen.top - container.getBoundingClientRect().top);
+                    }
+                }
+
+                // Drawn from the three facts, in one place. On a narrow
+                // screen a tool covers the detail rather than replacing it.
+                var hidden = narrow && (openTool !== null || menuOpen);
+                menu.style.display = (menuOpen && narrow) ? 'flex' : 'none';
+                dock.style.display = openTool ? 'flex' : 'none';
+                sheet.style.display = (detailShown && !hidden) ? 'flex' : 'none';
+
+                var covering = narrow && (openTool !== null || menuOpen ||
+                    (!landscape && detailShown));
+                burger.style.display = (narrow && !covering) ? 'flex' : 'none';
+
+                if (narrow) {
+                    [dock, menu, sheet].forEach(function (box) {
+                        box.style.left = '0';
+                        box.style.right = '0';
+                        box.style.top = '0';
+                        box.style.bottom = 'auto';
+                        box.style.width = 'auto';
+                        box.style.height = Math.max(40, floor) + 'px';
+                        box.style.maxHeight = 'none';
+                        box.style.border = '0';
+                        box.style.borderBottom = '1px solid #999';
+                        box.style.borderRadius = '0';
+                    });
+                    if (landscape) {
+                        // Sideways the width is there and the height is not, so
+                        // the detail becomes a column and the map keeps the rest.
+                        sheet.style.right = 'auto';
+                        sheet.style.width = Math.min(340, Math.round(size.x * 0.44)) + 'px';
+                        sheet.style.borderRight = '1px solid #999';
+                    } else {
+                        sheet.style.borderRight = '0';
+                    }
+                } else {
+                    // **The floor is 40 and the margin 8, and both are the
+                    // plan control's own numbers rather than new ones.** The
+                    // profile panel keeps 80 px of map clear of itself, and a
+                    // box standing at 10 from the top has to fit its margin and
+                    // its floor into what is left of that 80 — at a floor of
+                    // 140 it did not, and the dock hung 49 px into the panel
+                    // with the profile dragged as tall as it goes.
+                    var capped = Math.max(40, floor - 18);
+                    dock.style.left = '66px';
+                    dock.style.top = '10px';
+                    dock.style.right = 'auto';
+                    dock.style.bottom = 'auto';
+                    dock.style.width = ((byKey[openTool] && byKey[openTool].width) || 320) + 'px';
+                    dock.style.height = 'auto';
+                    dock.style.maxHeight = capped + 'px';
+                    dock.style.border = '1px solid #999';
+                    dock.style.borderRadius = '4px';
+                    sheet.style.left = 'auto';
+                    sheet.style.right = '10px';
+                    sheet.style.top = '10px';
+                    sheet.style.bottom = 'auto';
+                    sheet.style.width = '352px';
+                    sheet.style.height = 'auto';
+                    sheet.style.maxHeight = capped + 'px';
+                    sheet.style.border = '1px solid #999';
+                    sheet.style.borderRight = '1px solid #999';
+                    sheet.style.borderRadius = '4px';
+                }
+            }
+
+            map.on('resize', place);
+
+            // **The floor moves, and not only when the window does.** The panel
+            // it is measured against is opened by a selection, laid out a
+            // moment later, and is then the reader's own to drag taller. Placing
+            // once on the selection measured it mid-flight: the detail sheet
+            // came out 793 px tall on an 844 px screen against a panel whose top
+            // had settled at 471, so the two overlapped by everything. Watching
+            // the panel is the honest answer, and it covers the drag for free.
+            if (window.ResizeObserver) {
+                var watching = new ResizeObserver(function () { place(); });
+                var watched = profilePanel();
+                if (watched) { watching.observe(watched); }
+            }
+
+            // Read by a browser check rather than screenshotted, the way the
+            // graph, the panel and the plan are already read.
+            window.trailsChrome = {
+                narrow: function () { return map.getSize().x < NARROW; },
+                // Ask for the coarse layout, or hand it back to the pointer.
+                // A check drives this rather than pretending to have a finger:
+                // what it is measuring is the geometry, and whether Firefox
+                // reports a synthetic touch context as coarse is a different
+                // question and not this page's.
+                coarse: function (force) {
+                    forcedCoarse = (force === undefined || force === null) ? null : !!force;
+                    paintCoarse();
+                    return container.classList.contains('trails-coarse');
+                },
+                open: function (key) { pick(key); },
+                menu: function () { openMenu(); },
+                close: function () { closeDock(); closeMenu(); closeSheet(); },
+                tools: TOOLS.map(function (tool) { return tool.key; }),
+                // Told by the profile panel, because a folded panel and an empty
+                // one look the same from outside it.
+                selected: function (selection) {
+                    showProfile(!!selection);
+                    if (!selection) { closeSheet(); }
+                    place();
+                },
+                state: function () {
+                    return {
+                        narrow: map.getSize().x < NARROW,
+                        tool: openTool,
+                        menu: menuOpen,
+                        detail: detailShown,
+                        profile: !!(profilePanel() && profilePanel().style.display !== 'none'),
+                        coarse: container.classList.contains('trails-coarse'),
+                        threshold: NARROW
+                    };
+                }
+            };
+
+            showProfile(!!window.trailsProfile);
+            place();
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, credits: dict[str, list[dict[str, str]]] | None) -> None:
+        """Initialize the chrome.
+
+        Args:
+            credits: What each dataset is called, licensed under and read at, as
+                :func:`source_credits` composes it. Rendered into the *Sources*
+                panel. ``None`` leaves that panel saying it was handed nothing,
+                which is truthful and is not the same as an empty list.
+        """
+        super().__init__()
+        self._name = "Chrome"
+        self.narrow_px = NARROW_PX
+        self.credits_json = _script_json(credits or {})
+
+
+def add_chrome(fmap: folium.Map, credits: dict[str, list[dict[str, str]]] | None = None) -> None:
+    """Put every control behind one way in, and let the map open showing a map.
+
+    **Add this last.** It adopts the containers of the search, the legend, the
+    base-map picker and the plan control, so all four have to exist by the time
+    it runs — and it hides the profile panel until something is selected, which
+    means the panel has to have been added too.
+
+    Args:
+        fmap: Map to add it to
+        credits: What to put in the *Sources* panel, keyed by source, as
+            :func:`source_credits` composes it
+    """
+    _Chrome(credits).add_to(fmap)

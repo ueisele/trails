@@ -1661,6 +1661,12 @@ class TestPlanMode:
         the map -- so a dispatcher that only steps around the controls walks
         over it. Measured: the close button of a chain's popup placed a waypoint
         behind it and left the popup open.
+
+        The chrome is in the list for the same reason and was added later: it
+        hangs off the map container rather than off a corner, so that a panel
+        can cover the corners on a narrow screen. **The assertion names the
+        members and not the string**, because a check that pins the exact list
+        fails on the next thing that legitimately joins it.
         """
         fmap, _ = self.drawn()
         maps.add_plan_mode(fmap, self.planned())
@@ -1668,7 +1674,12 @@ class TestPlanMode:
         html = fmap.get_root().render()
 
         assert "function overFurniture(event) {" in html
-        assert "event.target.closest('.leaflet-control-container, .leaflet-popup')" in html
+        stepped = html.split("return !!event.target.closest('")[-1].split("')")[0]
+        assert {part.strip() for part in stepped.split(",")} >= {
+            ".leaflet-control-container",
+            ".leaflet-popup",
+            ".trails-chrome",
+        }
         assert "if (!on || overFurniture(event)) { return; }" in html
         assert "if (on && !overFurniture(event)) { event.stopPropagation(); }" in html
 

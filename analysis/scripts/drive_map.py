@@ -120,13 +120,25 @@ SELECT_CHAIN = with_map("""(cls) => {
   // the middle of the map and swallows the wheel. Closing it here is what keeps
   // the wheel checks below measuring the map instead of the popup.
   if (found.closePopup) { found.closePopup(); }
+  // Since the chrome, a popup does not float at all: it is taken into the
+  // detail panel, which on a narrow screen covers the map by design. Every
+  // check below this one is about the map, so the panel is put away here and
+  // the chrome has a check of its own.
+  if (window.trailsChrome) { window.trailsChrome.close(); }
   return true; }""")
 
 FURNITURE = with_map("""() => {
   const paths = [...document.querySelectorAll('.leaflet-overlay-pane path')];
-  const legend = [...document.querySelectorAll('.leaflet-bottom.leaflet-left input')];
-  const top = [...document.querySelectorAll('.leaflet-top.leaflet-left > div')]
-    .map(node => Math.round(node.getBoundingClientRect().top));
+  // The legend and the base-map picker are panels the chrome owns now, so they
+  // are addressed by their own names rather than by the corner they used to
+  // stand in. They are in the document whether or not anybody has them open --
+  // hidden, not detached, because a control that measures zero caps itself
+  // against nothing.
+  const legend = [...document.querySelectorAll('.trails-legend input')];
+  const bases = [...document.querySelectorAll('.trails-basemap input')];
+  const rail = document.querySelector('.trails-rail');
+  const zoom = document.querySelector('.leaflet-control-zoom');
+  const at = node => node ? Math.round(node.getBoundingClientRect().left) : null;
   return {
     paths: paths.length,
     // A chain drawn as a line, and a chain drawn as a circle marker: Leaflet
@@ -143,9 +155,12 @@ FURNITURE = with_map("""() => {
     markers: document.querySelectorAll('.leaflet-marker-pane > *').length,
     boxes: legend.filter(i => i.type === 'checkbox').length,
     off: legend.filter(i => i.type === 'checkbox' && !i.checked).length,
-    radios: legend.filter(i => i.type === 'radio').length,
+    radios: bases.filter(i => i.type === 'radio').length,
     tiles: Object.values(__MAP__._layers).filter(l => l._url).length,
-    controls: top.sort((a, b) => a - b),
+    // The rail takes the top-left corner and the zoom steps aside for it. Left
+    // rather than top, because both stand at 10 from the top and only the one
+    // that moved says whether the corner made room.
+    controls: [at(rail), at(zoom)],
     layerControls: document.querySelectorAll('.leaflet-control-layers').length}; }""")
 
 # The scale, read so that neither axis takes part in proving the other: the
@@ -263,7 +278,13 @@ SEA = """() => {
           'sea level drawn': line.length,
           'clear of the floor px': line.length ? (height - 22) - parseFloat(line[0].getAttribute('y1')) : null}; }"""
 
-PLAN_TOGGLE = "() => { document.querySelector('.trails-plan-control button').click(); }"
+#: Opening the tool first is not decoration. The control is in the dock, hidden
+#: until something asks for it, and a check that drove it while it was hidden
+#: would be driving a box with no size -- which is how this page's controls
+#: cap themselves against each other.
+PLAN_TOGGLE = """() => {
+  if (window.trailsChrome) { window.trailsChrome.open('plan'); }
+  document.querySelector('.trails-plan-control button').click(); }"""
 
 OPEN_LIST = """() => { const box = document.querySelector('.trails-plan-control');
   const handle = [...box.querySelectorAll('div')]
@@ -302,11 +323,18 @@ REMOVE_ROW = """(at) => {
   out.click(); return true; }"""
 
 BOXES = """() => {
-  const plan = document.querySelector('.trails-plan-control');
+  // **The dock and not the control inside it.** Since the chrome, the plan
+  // control is the dock's content: the dock is capped against the profile panel
+  // and clips what does not fit, so the control's own rectangle reports the
+  // height it would like to have and not the one a reader sees. Measuring the
+  // content here read a 49 px overlap of something clipped out of sight, which
+  // is the wrong question asked precisely.
+  const plan = document.querySelector('.trails-dock');
   const profile = document.querySelector('.trails-profile-panel');
   const seen = node => { const r = node.getBoundingClientRect();
     return {top: r.top, bottom: r.bottom, height: r.height}; };
   const a = seen(plan), b = seen(profile);
+  const clipped = getComputedStyle(plan).overflow;
   const list = document.querySelector('.trails-plan-points');
   let reachable = false;
   if (list && list.lastElementChild) {
@@ -320,6 +348,7 @@ BOXES = """() => {
     list.scrollTop = 0;
   }
   return {overlap: Math.max(0, a.bottom - b.top),
+          'dock clips': clipped === 'hidden',
           'profile height': Math.round(b.height),
           'list cap': list ? parseFloat(list.style.maxHeight) : null,
           'rows': list ? list.children.length : 0,
@@ -373,7 +402,7 @@ def furniture(page: Any) -> Check:
         The counts, against what the last build measured
     """
     seen = page.evaluate(FURNITURE)
-    search, zoom = (seen["controls"] + [None, None])[:2]
+    rail, zoom = (seen["controls"] + [None, None])[:2]
     return Check(
         "the page's furniture",
         [
@@ -402,8 +431,11 @@ def furniture(page: Any) -> Check:
             # unwanted ones off again, and nothing else will.
             Reading("tile layers actually on the map", seen["tiles"], 1),
             Reading("separate layer controls", seen["layerControls"], 0),
-            Reading("search box, px from the top", search, 10, within=1, holds=False),
-            Reading("zoom buttons, px from the top", zoom, 60, within=1, holds=False),
+            # The rail takes the corner and the zoom steps aside for it. A
+            # zoom still at 10 would mean the corner never made room and the two
+            # are stacked on each other, which is what this replaced.
+            Reading("the tool rail, px from the left", rail, 10, within=1),
+            Reading("zoom buttons, px from the left", zoom, 66, within=1),
         ],
     )
 
@@ -581,13 +613,22 @@ def sea_level(page: Any) -> Check:
 
 
 def popup_click(page: Any) -> Check:
-    """A click inside a popup is not a click on the ground.
+    """A click inside a chain's detail is not a click on the ground.
+
+    **The subject moved and the defect did not.** A popup used to float over the
+    map in a pane of its own, and plan mode -- which owns every click on the
+    container -- stepped around the control container and walked over it, so the
+    close button placed a waypoint behind the popup and left it open. Popups do
+    not float any more: the chrome takes each one into a panel of its own, which
+    is a different element in a different place and is exactly as easy to walk
+    over. The check follows the content rather than the widget it used to live
+    in, which is the same rule as addressing a row's buttons by name.
 
     Args:
         page: The driven page, in plan mode
 
     Returns:
-        Whether the close button placed a waypoint, and whether it closed
+        Whether reading the panel placed a waypoint, and whether it closed
     """
     page.evaluate(
         with_map("""(cls) => { const map = __MAP__;
@@ -602,22 +643,38 @@ def popup_click(page: Any) -> Check:
     )
     page.wait_for_timeout(1200)
     where = page.evaluate(
-        """() => { const popup = document.querySelector('.leaflet-popup');
-        if (!popup) { return null; }
-        const close = popup.querySelector('.leaflet-popup-close-button');
-        const box = close.getBoundingClientRect();
-        return {x: box.left + box.width / 2, y: box.top + box.height / 2}; }"""
+        """() => { const panel = document.querySelector('.trails-detail');
+        if (!panel || panel.style.display === 'none') { return null; }
+        const close = panel.querySelector('.trails-chrome-close');
+        const body = panel.querySelector('.trails-chrome-body');
+        const shut = close.getBoundingClientRect(), text = body.getBoundingClientRect();
+        return {close: {x: shut.left + shut.width / 2, y: shut.top + shut.height / 2},
+                text: {x: text.left + text.width / 2, y: text.top + 24},
+                rows: panel.querySelectorAll('tr').length}; }"""
     )
     if not where:
-        return Check("a click in a popup", skipped="no popup opened")
+        return Check("a click in a chain's detail", skipped="the detail panel did not open")
+
     before = page.evaluate("() => window.trailsPlan.state().points.length")
-    page.mouse.click(where["x"], where["y"])
-    page.wait_for_timeout(1200)
+    page.mouse.click(where["text"]["x"], where["text"]["y"])
+    page.wait_for_timeout(1000)
+    after_text = page.evaluate("() => window.trailsPlan.state().points.length")
+    page.mouse.click(where["close"]["x"], where["close"]["y"])
+    page.wait_for_timeout(1000)
+
     return Check(
-        "a click in a popup is not a click on the ground",
+        "a click in a chain's detail is not a click on the ground",
         [
+            # The popup carried 13 rows when it floated and carries them still:
+            # the chrome moves the node folium built, it does not rebuild it.
+            Reading("rows the detail holds", where["rows"] > 0, True, note=f"{where['rows']} rows"),
+            Reading("waypoints placed by reading it", after_text - before, 0),
             Reading("waypoints placed by the close button", page.evaluate("() => window.trailsPlan.state().points.length") - before, 0),
-            Reading("the popup closed", page.evaluate("() => !document.querySelector('.leaflet-popup')"), True),
+            Reading(
+                "and it closed",
+                page.evaluate("() => window.trailsChrome.state().detail"),
+                False,
+            ),
         ],
     )
 
@@ -684,13 +741,17 @@ def sharing_the_room(page: Any) -> Check:
         seen = page.evaluate(BOXES)
         readings.append(
             Reading(
-                f"{label}: px of the plan control under the profile",
+                f"{label}: px of the tool dock under the profile",
                 round(seen["overlap"]),
                 0,
                 note=f"profile {seen['profile height']} px, list cap {seen['list cap']}",
             )
         )
         readings.append(Reading(f"{label}: the last row can still be reached", seen["last row reachable"], True, note=f"{seen['rows']} rows"))
+        # What makes measuring the dock rather than its content the right
+        # question: without the clip, content taller than the cap would show
+        # through and the overlap above would be a fiction.
+        readings.append(Reading(f"{label}: and the dock clips what does not fit", seen["dock clips"], True))
 
     page.set_viewport_size({"width": 1400, "height": 620})
     page.wait_for_timeout(1200)
@@ -702,6 +763,421 @@ def sharing_the_room(page: Any) -> Check:
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(1000)
     return Check("two controls sharing one map", readings)
+
+
+def chrome_layout(page: Any) -> Check:
+    """One layout decided by one number, and what it puts where.
+
+    Driven at three widths in one session: a desktop, a phone held upright and
+    the same phone turned sideways. The reading that matters at each is how much
+    of the map nothing is standing on, worked out **on a grid rather than by
+    subtracting rectangles** -- the panels overlap each other, so subtracting
+    their areas would subtract the same pixels twice.
+
+    Args:
+        page: The driven page, with nothing selected
+
+    Returns:
+        What stands where at each width
+    """
+    free = """() => {
+      const box = node => { if (!node || node.offsetParent === null) { return null; }
+        const r = node.getBoundingClientRect();
+        return {x: r.x, y: r.y, w: r.width, h: r.height}; };
+      const map = document.querySelector('.leaflet-container').getBoundingClientRect();
+      const over = ['.trails-rail', '.trails-burger', '.trails-dock', '.trails-menu',
+                    '.trails-detail', '.trails-profile-panel', '.leaflet-control-zoom',
+                    '.leaflet-bottom.leaflet-left .leaflet-control']
+        .map(sel => box(document.querySelector(sel))).filter(Boolean);
+      let clear = 0, cells = 0;
+      for (let y = map.y; y < map.y + map.height; y += 4) {
+        for (let x = map.x; x < map.x + map.width; x += 4) {
+          cells += 1;
+          if (!over.some(b => x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h)) { clear += 1; }
+        } }
+      const zoom = document.querySelector('.leaflet-control-zoom');
+      return {free: Math.round(1000 * clear / cells) / 10,
+              rail: !!box(document.querySelector('.trails-rail')),
+              burger: !!box(document.querySelector('.trails-burger')),
+              zoomLeft: zoom ? Math.round(zoom.getBoundingClientRect().left) : null,
+              state: window.trailsChrome.state()}; }"""
+
+    readings = []
+    for label, width, height in (("desktop", 1400, 900), ("upright", 390, 844), ("sideways", 844, 390)):
+        page.set_viewport_size({"width": width, "height": height})
+        page.wait_for_timeout(900)
+        page.evaluate("() => window.trailsChrome.close()")
+        page.wait_for_timeout(400)
+        seen = page.evaluate(free)
+        narrow = width < seen["state"]["threshold"]
+        readings.append(Reading(f"{label}: map free with nothing asked for", seen["free"], 96, within=4, holds=False))
+        readings.append(Reading(f"{label}: the rail stands", seen["rail"], not narrow))
+        readings.append(Reading(f"{label}: the burger stands", seen["burger"], narrow))
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(900)
+    # Opening a tool docks it beside the rail, and the same call closes it: a
+    # rail button is a switch and not a one-way door.
+    page.evaluate("() => window.trailsChrome.open('layers')")
+    page.wait_for_timeout(500)
+    opened = page.evaluate("() => window.trailsChrome.state().tool")
+    boxes = page.evaluate("() => document.querySelectorAll('.trails-dock .trails-legend input[type=checkbox]').length")
+    page.evaluate("() => window.trailsChrome.open('layers')")
+    page.wait_for_timeout(400)
+    readings.append(Reading("a rail button docks its panel", opened, "layers"))
+    readings.append(Reading("and the legend is what is in it", boxes, 30, holds=False))
+    readings.append(Reading("and the same button puts it away", page.evaluate("() => window.trailsChrome.state().tool"), None))
+    return Check("one layout, decided by the width of the map", readings)
+
+
+def pinch_the_curve(page: Any) -> Check:
+    """Two fingers apart is in, together is out.
+
+    **A dispatched touch proves the arithmetic and not the plumbing**, which is
+    the caveat this suite already records for HTML5 dragging: that a handler
+    answers a synthetic event says nothing about whether the browser ever
+    delivers a real one. What it does prove is the part that could be wrong in a
+    way nobody would notice -- that the ground between the two fingers stays
+    between them, so a pinch reads as a lens and not as a slider.
+
+    Args:
+        page: The driven page, with a zoomable chain selected
+
+    Returns:
+        Where the window went, spreading and then closing the fingers
+    """
+    gesture = """(spread) => {
+      const chart = document.querySelector('.trails-profile-panel svg');
+      const box = chart.getBoundingClientRect();
+      const midX = box.left + box.width / 2, midY = box.top + box.height / 2;
+      const fire = (kind, half) => {
+        // A plain Event carrying a touch list: Firefox has no Touch constructor
+        // to build a real TouchEvent with, and the handler reads clientX and
+        // length off whatever it is given.
+        const event = new Event(kind, {bubbles: true, cancelable: true});
+        event.touches = half === null ? [] : [
+          {clientX: midX - half, clientY: midY}, {clientX: midX + half, clientY: midY}];
+        chart.dispatchEvent(event);
+      };
+      fire('touchstart', 40);
+      fire('touchmove', 40 * spread);
+      fire('touchend', null);
+      return true; }"""
+
+    # From the whole chain, put there rather than assumed: the check before this
+    # one leaves the window at the ceiling, and a gesture measured from an
+    # unknown starting point measures nothing.
+    reset = """() => { const chart = document.querySelector('.trails-profile-panel svg');
+        chart.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true})); }"""
+    page.evaluate(reset)
+    page.wait_for_timeout(500)
+
+    start = page.evaluate("() => window.trailsProfilePanel.view()")
+    page.evaluate(gesture, 3.0)
+    page.wait_for_timeout(600)
+    apart = page.evaluate("() => window.trailsProfilePanel.view()")
+    page.evaluate(gesture, 0.25)
+    page.wait_for_timeout(600)
+    together = page.evaluate("() => window.trailsProfilePanel.view()")
+
+    # And back to the whole chain, or every check after this one reads a window
+    # this one opened.
+    page.evaluate(reset)
+    page.wait_for_timeout(400)
+
+    return Check(
+        "two fingers on the curve",
+        [
+            Reading("it starts at the whole chain", round(start["zoom"], 3), 1.0),
+            Reading("apart zooms in", apart["zoom"] > 1.5, True, note=f"zoom {apart['zoom']:.2f}"),
+            # The ceiling is the data's: one reading per pixel, and not a taste.
+            Reading("and never past the readings", apart["zoom"] <= apart["closest"] + 1e-6, True, note=f"ceiling {apart['closest']:.2f}"),
+            Reading("together zooms out", together["zoom"] < apart["zoom"], True, note=f"zoom {together['zoom']:.2f}"),
+            Reading("and never below the whole chain", together["zoom"] >= 1.0 - 1e-9, True),
+        ],
+    )
+
+
+def narrow_sheets(page: Any) -> Check:
+    """On a narrow screen only one panel may be drawn, and a tool covers rather than closes.
+
+    The dock, the menu and the detail are the same full-screen sheet below the
+    threshold, so two of them showing at once is two readable panels stacked on
+    each other with the later-written one winning -- which is the defect the
+    legend and the layer control had already produced once on this map, and the
+    reason what is open is kept as three facts rather than as three styles.
+
+    Args:
+        page: The driven page, with a chain selected
+
+    Returns:
+        What is drawn as a tool is opened over an open detail and closed again
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(900)
+    page.evaluate(SELECT_CHAIN, LONG_CHAIN)
+    page.wait_for_timeout(900)
+
+    shown = """() => {
+      const drawn = sel => { const node = document.querySelector(sel);
+        return !!node && node.offsetParent !== null; };
+      return {dock: drawn('.trails-dock'), menu: drawn('.trails-menu'),
+              detail: drawn('.trails-detail'), state: window.trailsChrome.state()}; }"""
+
+    page.evaluate("() => window.trailsChrome.close()")
+    page.evaluate(
+        """(cls) => { const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
+        let found = null;
+        const walk = l => { if (found) return;
+          if (l.options && l.options.className === cls) { found = l; return; }
+          if (l.eachLayer) l.eachLayer(walk); };
+        map.eachLayer(walk);
+        if (found) { found.fire('click'); } }""",
+        LONG_CHAIN,
+    )
+    page.wait_for_timeout(900)
+    reading = page.evaluate(shown)
+
+    page.evaluate("() => window.trailsChrome.open('layers')")
+    page.wait_for_timeout(700)
+    over = page.evaluate(shown)
+
+    page.evaluate("() => window.trailsChrome.open('layers')")
+    page.wait_for_timeout(700)
+    back = page.evaluate(shown)
+
+    page.evaluate("() => window.trailsChrome.close()")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(900)
+
+    return Check(
+        "one sheet at a time on a narrow screen",
+        [
+            Reading("a tap draws the detail", reading["detail"], True),
+            Reading("and only that", reading["dock"] or reading["menu"], False),
+            Reading("a tool covers it", over["dock"] and not over["detail"], True),
+            # Covered, not closed: the chrome still says a detail is open, and
+            # that is the difference between stepping aside and being discarded.
+            Reading("but the detail is still open", over["state"]["detail"], True),
+            Reading("and closing the tool gives it back", back["detail"] and not back["dock"], True),
+        ],
+    )
+
+
+def room_on_a_short_screen(page: Any) -> Check:
+    """A panel at the foot gives room back where there is none to take.
+
+    Measured before this was built: on a phone held sideways the row holding the
+    download button, the point count, the licences and the colour key came out
+    **66 px** against a **78 px** drawing -- the licence list wraps to three
+    lines on a screen that narrow and to one on a desktop, so the small screen
+    paid double for the same sentence. It folds behind an *i* there, and the *i*
+    does not exist where the row already fits.
+
+    Args:
+        page: The driven page, with a chain selected
+
+    Returns:
+        What the row and the drawing measure, folded and unfolded, at both sizes
+    """
+    parts = """() => {
+      const panel = document.querySelector('.trails-profile-panel');
+      const body = panel.children[2];
+      const high = node => node ? Math.round(node.getBoundingClientRect().height) : null;
+      const more = document.querySelector('.trails-profile-more');
+      return {panel: high(panel), meta: high(body.children[0]), chart: high(body.children[1]),
+              more: !!(more && more.offsetParent !== null)}; }"""
+
+    page.set_viewport_size({"width": 844, "height": 390})
+    page.wait_for_timeout(1200)
+    folded = page.evaluate(parts)
+    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
+    page.wait_for_timeout(500)
+    opened = page.evaluate(parts)
+    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
+    page.wait_for_timeout(400)
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(1200)
+    desk = page.evaluate(parts)
+
+    return Check(
+        "a short screen gets its drawing back",
+        [
+            Reading("sideways: the licences are folded", folded["more"], True),
+            Reading("sideways: px the row takes", folded["meta"], 33, within=12, holds=False),
+            # And the freed pixels go to the drawing rather than to the map:
+            # the share is on the chart while the furniture is what it costs, so
+            # shrinking the furniture without moving the share gives the map the
+            # room and the curve none of it.
+            Reading("and the drawing gets them", folded["chart"], 109, within=6, note="78 px before"),
+            Reading("with the panel still about half the screen", folded["panel"] <= 215, True, note=f"{folded['panel']} px of 390"),
+            # Nothing is withheld: the sentence a reader has to see before
+            # pressing Download is one tap away and says so.
+            Reading("the i opens them again", opened["meta"] > folded["meta"], True, note=f"{opened['meta']} px"),
+            # And on a desktop there is nothing to fold, so there is no i.
+            Reading("desktop: no i at all", desk["more"], False),
+            Reading("desktop: px the row takes", desk["meta"], 33, within=2),
+            Reading("desktop: px the drawing takes", desk["chart"], 205, within=2),
+        ],
+    )
+
+
+def a_finger_can_use_it(page: Any) -> Check:
+    """The targets a finger needs, and the edits it can reach.
+
+    **Keyed off the pointer and not off the width**: how big a target has to be
+    is a question about hands, and a touch laptop at 1400 px needs what a mouse
+    in a 390 px window does not. The check drives the class the media query sets
+    rather than pretending to have a finger -- what is being measured is the
+    geometry, and whether Firefox calls a synthetic touch context coarse is a
+    different question and not this page's.
+
+    Args:
+        page: The driven page, in plan mode with points down and the list open
+
+    Returns:
+        What the row measures with each pointer, and whether the arrows move a point
+    """
+    # **It has to open the panel it is measuring.** A tap on a trail docks the
+    # chain's detail and closes whatever tool was open -- by design, and the
+    # check before this one taps a trail. Measuring here without opening it
+    # again measures a box with no size, which is the detached-DOM trap one
+    # level up.
+    page.evaluate("() => window.trailsChrome.open('plan')")
+    page.wait_for_timeout(600)
+    # And it asks whether the list is open rather than pressing the handle: the
+    # handle is a toggle, the check before this one has already opened it, and a
+    # second press shuts it. Driving a toggle blind is how a check ends up
+    # measuring the opposite of what it asked for.
+    page.evaluate(
+        """() => { const list = document.querySelector('.trails-plan-points');
+        if (list && list.style.display !== 'none') { return; }
+        const box = document.querySelector('.trails-plan-control');
+        const handle = [...box.querySelectorAll('div')]
+          .find(d => /point/.test(d.textContent) && d.style.cursor === 'pointer');
+        if (handle) { handle.click(); } }"""
+    )
+    page.wait_for_timeout(600)
+
+    sizes = """() => {
+      const size = node => { if (!node || node.offsetParent === null) return null;
+        const r = node.getBoundingClientRect();
+        return [Math.round(r.width), Math.round(r.height)]; };
+      const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+        .filter(row => !row.classList.contains('trails-plan-stage'));
+      return {row: size(rows[0]),
+              out: size(document.querySelector('.trails-plan-out')),
+              up: size(document.querySelector('.trails-plan-up')),
+              grip: size(document.querySelector('.trails-plan-grip')),
+              rows: rows.length}; }"""
+
+    fine = page.evaluate(sizes)
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.wait_for_timeout(500)
+    coarse = page.evaluate(sizes)
+
+    # And the arrows are not decoration: one press swaps a point with its
+    # neighbour, which is `moveBy` -- the pin's own gesture, already here.
+    before = page.evaluate("() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e5))")
+    moved = page.evaluate(
+        """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+          .filter(row => !row.classList.contains('trails-plan-stage'));
+        const up = rows[2] && rows[2].querySelector('.trails-plan-up');
+        if (!up) { return false; }
+        up.click(); return true; }"""
+    )
+    page.wait_for_timeout(2500)
+    after = page.evaluate("() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e5))")
+
+    page.evaluate("() => window.trailsChrome.coarse(null)")
+    page.wait_for_timeout(400)
+    back = page.evaluate(sizes)
+
+    swapped = before[:1] + [before[2], before[1]] + before[3:] if len(before) > 2 else before
+    return Check(
+        "what a finger needs",
+        [
+            Reading("with a mouse: the row's own height", fine["row"][1] if fine["row"] else 0, 21, within=3),
+            Reading("with a mouse: no arrows drawn", fine["up"], None),
+            Reading("with a mouse: the drag grip is there", fine["grip"] is not None, True),
+            Reading("coarse: px the row takes", coarse["row"][1] if coarse["row"] else 0, 44, within=2),
+            Reading("coarse: the × is at least 40 px", min(coarse["out"] or [0, 0]) >= 40, True, note=str(coarse["out"])),
+            Reading("coarse: the arrows are at least 40 px", min(coarse["up"] or [0, 0]) >= 40, True, note=str(coarse["up"])),
+            # A grip that promises a drag no browser here implements is a lie,
+            # so it goes and the arrows take its place.
+            Reading("coarse: the drag grip is gone", coarse["grip"], None),
+            Reading("an arrow swaps the point with its neighbour", after, swapped, note=f"{moved}"),
+            # And nothing of it survives going back to a mouse.
+            Reading("back with a mouse: the row is 21 px again", back["row"][1] if back["row"] else 0, 21, within=3),
+            Reading("back with a mouse: no arrows drawn", back["up"], None),
+        ],
+    )
+
+
+def a_way_back_to_the_whole(page: Any) -> Check:
+    """A reader can find the way out of a zoom, and a finger has one at all.
+
+    Double-clicking the curve has put the whole chain back since the zoom was
+    built and nothing said so. An undiscoverable gesture is a gesture most
+    readers do not have -- and ``dblclick`` never reaches a finger at all.
+
+    Args:
+        page: The driven page, with a zoomable chain selected
+
+    Returns:
+        Whether the way back appears, works, and puts itself away again
+    """
+    zoom = """(spread) => {
+      const chart = document.querySelector('.trails-profile-panel svg');
+      const box = chart.getBoundingClientRect();
+      const midX = box.left + box.width / 2, midY = box.top + box.height / 2;
+      const fire = (kind, half) => {
+        const event = new Event(kind, {bubbles: true, cancelable: true});
+        event.touches = half === null ? [] : [
+          {clientX: midX - half, clientY: midY}, {clientX: midX + half, clientY: midY}];
+        event.changedTouches = [{clientX: midX, clientY: midY}];
+        chart.dispatchEvent(event);
+      };
+      fire('touchstart', 40); fire('touchmove', 40 * spread); fire('touchend', null); }"""
+
+    tap = """() => {
+      const chart = document.querySelector('.trails-profile-panel svg');
+      const box = chart.getBoundingClientRect();
+      const at = {clientX: box.left + box.width / 2, clientY: box.top + box.height / 2};
+      const fire = () => { const event = new Event('touchend', {bubbles: true, cancelable: true});
+        event.touches = []; event.changedTouches = [at]; chart.dispatchEvent(event); };
+      fire(); fire(); }"""
+
+    shown = "() => { const node = document.querySelector('.trails-profile-whole'); return !!(node && node.offsetParent !== null); }"
+    at = "() => window.trailsProfilePanel.view().zoom"
+
+    resting = page.evaluate(shown)
+    page.evaluate(zoom, 3.0)
+    page.wait_for_timeout(600)
+    zoomed = {"shown": page.evaluate(shown), "zoom": page.evaluate(at)}
+
+    page.evaluate("() => document.querySelector('.trails-profile-whole').click()")
+    page.wait_for_timeout(600)
+    pressed = {"shown": page.evaluate(shown), "zoom": page.evaluate(at)}
+
+    page.evaluate(zoom, 3.0)
+    page.wait_for_timeout(600)
+    page.evaluate(tap)
+    page.wait_for_timeout(600)
+    tapped = page.evaluate(at)
+
+    return Check(
+        "a way back to the whole chain",
+        [
+            Reading("at rest there is nothing to go back from", resting, False),
+            Reading("zoomed in, it says so", zoomed["shown"], True, note=f"zoom {zoomed['zoom']:.2f}"),
+            Reading("and pressing it puts the chain back", round(pressed["zoom"], 3), 1.0),
+            Reading("after which it puts itself away", pressed["shown"], False),
+            # The finger's own way, since dblclick never reaches one.
+            Reading("two taps do the same", round(tapped, 3), 1.0),
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -716,7 +1192,7 @@ def drive(page: Any) -> list[Check]:
     Returns:
         Every check, in the order it ran
     """
-    checks = [furniture(page), map_wheel(page)]
+    checks = [furniture(page), map_wheel(page), chrome_layout(page)]
 
     if not select(page, LONG_CHAIN):
         checks.append(Check("the profile panel", skipped=f"{LONG_CHAIN} is not in this page — see LONG_CHAIN"))
@@ -727,6 +1203,11 @@ def drive(page: Any) -> list[Check]:
     checks.append(curve_wheel(page, zoomable=True))
     checks.append(true_scale(page))
     checks.append(zoom_ceiling(page))
+    checks.append(pinch_the_curve(page))
+    checks.append(a_way_back_to_the_whole(page))
+    checks.append(room_on_a_short_screen(page))
+    checks.append(narrow_sheets(page))
+    select(page, LONG_CHAIN)
 
     # A chain already drawn finer than its own samples, which is 99 % of them:
     # there the wheel belongs to the map and the chart must not touch it.
@@ -769,6 +1250,7 @@ def drive(page: Any) -> list[Check]:
 
     checks.append(popup_click(page))
     checks.append(stations_and_list(page, places))
+    checks.append(a_finger_can_use_it(page))
     checks.append(sharing_the_room(page))
     return checks
 
@@ -840,10 +1322,22 @@ def main() -> int:
     with sync_playwright() as playwright:
         browser = playwright.firefox.launch(headless=not args.headed)
         page = browser.new_page(viewport={"width": 1400, "height": 900})
+        # **Everything this page does is in one script block**, so one syntax
+        # error anywhere in it stops all of it -- and every check below then
+        # fails at once, saying which behaviour is missing and never why. It
+        # cost a build: a `\n` written into a template where `\\n` was meant
+        # became a real line break inside a JavaScript string, and the whole map
+        # was a blank grey box with 11,589 paths that never existed.
+        thrown: list[str] = []
+        page.on("pageerror", lambda error: thrown.append(str(error)))
         page.goto(page_path.resolve().as_uri())
         page.wait_for_timeout(SETTLE_MS)
+        checks = [Check("the page ran at all", [Reading("errors thrown while loading", len(thrown), 0, note="; ".join(thrown[:2]))])]
+        if thrown:
+            browser.close()
+            return report(checks)
         page.evaluate("() => window.trailsGraph.ready")
-        checks = drive(page)
+        checks += drive(page)
         browser.close()
 
     code = report(checks)

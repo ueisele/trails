@@ -1892,12 +1892,20 @@ three times — `pd.NA` as the text `<NA>`, an empty string counted by `notna`,
 and `Ukjent` read as a name. Every carried column, looked at for values that mean
 absence.
 
-**5. The page on a phone.** The map is now published, and measured against a
-phone it does not hold: 523 MB of memory, 41 % of the file is popups nobody
-opens, no touch handling at all, and no map visible at either test size. All of
-it is in *What hosting it, and pointing a phone at it, found* below, including
-the one measurement still missing — what the 523 MB is actually made of, which
-decides whether anything beyond popups and the canvas renderer is needed.
+**5. The page on a phone.** The map is published and confirmed — `just deploy` in
+the infrastructure repository, `command make deploy` here — and against a phone
+it does not hold: **590 MB** of memory, 41 % of the file is popups nobody opens,
+no touch handling at all, and no map visible at either test size. The memory has
+since been split — popups **187 MB**, the SVG paths **130**, the graph **95**,
+and a **242 MB floor** under all three. **But weight was not the blocker** — a
+reader used the published map on a phone and reported that it loads fine and that
+a tap on a trail buries the map. Room was. The chrome is built and the room is
+back: **98.2 % of a 390 px screen free at rest** against 23.1, and 55.6 % of a
+desktop with a trail open against 36.8, with every recorded desktop figure
+unmoved. It is all in *What hosting it, and pointing a phone at it, found*
+below, including the four things building it turned up and the four that are
+still open — of which **the point list's HTML5 drag** is the one that stops a
+route being planned with a finger at all.
 
 **After those, and none of them blocked**: elevation-aware routing, splitting a
 route into days, snapping a waypoint to a hut or a quay. All three are decisions
@@ -2058,9 +2066,64 @@ Compressed it is 7.5 MB gzip, 6.4 MB brotli -q11.
 
 **Loaded, the page costs 523 MB.** PSS across every browser process, content
 process 32.8 → 544.8 MB; `window.trailsGraph.ready` resolves at **9.2 s** on a
-desktop CPU. That is the number that decides whether a phone can hold it at all,
-and **the 523 MB has not been split** across popups, SVG paths and the graph.
-That split is the first measurement to take, and it decides everything after it.
+desktop CPU. That is the number that decides whether a phone can hold it at all.
+
+**And it has now been split.** The method is the one that proved the driver was
+worth something: **copy the built HTML, take one thing out of it with a line
+filter, load the copy** — no rebuild, and each edit is exact rather than a guess,
+because every line it touches was counted first (12,898 of each of the three
+popup lines, one line of 4,930,081 characters for the payload). PSS is summed
+over every Firefox process from `/proc/<pid>/smaps_rollup`, once on `about:blank`
+and again 25 s after the page has settled; the difference is the page. Each
+variant gets **its own browser launch**, because a second page in one browser
+reuses caches and compiled code and reads low.
+
+| | file | page | costs |
+|---|---:|---:|---:|
+| the built page | 39.7 MB | **590 MB** | — |
+| popups not built | 21.8 MB | 403 MB | **187 MB** |
+| `preferCanvas: true` | 39.7 MB | 460 MB | **130 MB** |
+| graph payload emptied | 34.8 MB | 495 MB | **95 MB** |
+| all three at once | 16.9 MB | **242 MB** | 348 MB |
+
+590 against the 523 measured the day before, on the same page: that reading was
+the content process alone and this is all seven. **The split is internally
+consistent and that is the whole of what it is for** — a figure from one method
+must not be subtracted from a figure from another, which is the shape of the
+1,519 m near-miss recorded above.
+
+The three do not add up: 187 + 130 + 95 is 412 and taking all three saves 348.
+The 64 MB of overlap is the paths and the popups holding each other — an
+interactive path in the DOM and a popup bound to it are not two independent
+costs.
+
+**Three things follow, and the third was not expected.**
+
+**The popups are the biggest single item at 187 MB, and their file cost is worse
+than their memory cost.** Every one of the 12,898 popup lines classified: 15.14
+MB of HTML carrying **1.28 MB of values**. 8.51 MB is the same 96 bytes of row
+markup written 88,609 times, 1.02 MB is labels drawn from **44 distinct
+strings**, and 4.33 MB is the wrapper, the source footer and the links. **A popup
+is eight per cent information.** Built on click from a per-class table of values
+— which is exactly how `figures` and the search names already travel — the file
+loses about 13 MB and the load loses the jQuery DOM that costs the 187.
+
+**`preferCanvas: true` is worth 130 MB and takes the document from 12,472
+elements to 882.** Everything the page needs still works with it on, measured
+rather than assumed: the graph decodes to all 11,290 chains and inflate and
+decode are unmoved at 178 and 64 ms. What it breaks is the browser checks,
+exactly as predicted — `.leaflet-overlay-pane path` reads **0** and there is one
+`canvas` — so `drive_map.py:126` and `:724` have to read both renderers before
+this can go in.
+
+**And the floor is 242 MB, which is the finding.** With the popups gone, the
+paths on canvas and the graph not there at all, the page still costs a quarter of
+a gigabyte. **No combination of these three makes a phone comfortable.** What is
+left is 11,290 `L.polyline` objects and their 948,465 vertices as `L.LatLng`
+objects, the 16.9 MB of source that remains, and Leaflet itself. Going below it
+means **drawing fewer lines** — by zoom, by layer, or from a tiled source — and
+that is a different piece of work from everything else on this list, with nothing
+decided about it.
 
 **Nothing in `maps.py` handles touch.** `touchstart|touchmove|pointerdown|
 touchend` — zero occurrences. What that costs on a phone:
@@ -2101,17 +2164,264 @@ type (Pointer Events cover mouse and finger in one path), and weight — and onl
 weight could ever justify a second build, because bytes cannot be media-queried
 away. In order:
 
-1. **Split the 523 MB.** One experiment; it decides whether anything else is
-   needed.
-2. Popups built on click, not on load. Biggest single win in both file and memory.
-3. `preferCanvas: true` — it is `false` today, so 11,589 SVG paths sit in the DOM.
-   Safe for the app: chain identity is read from `layer.options.className`, never
-   from the DOM, and **no CSS anywhere targets `.trail-group-*`**. It breaks the
-   browser checks instead — `drive_map.py:126` counts `.leaflet-overlay-pane path`
-   and `:724` reads `path.classList` — which is the only reason to keep it behind
-   a flag.
-4. Coordinates at 6 decimals; the legend into the space negotiation; the popup
-   above the controls; Pointer Events; 44 px targets; ↑/↓ instead of drag.
+1. ~~Split the 523 MB.~~ **Done**, above, and it says the order below is right
+   and that there is a fifth item under it.
+2. **Popups built on click, not on load.** 187 MB and about 13 MB of file, and
+   almost all of what it removes is waste rather than content.
+3. **`preferCanvas: true`** — 130 MB and 11,590 DOM elements. Safe for the app:
+   chain identity is read from `layer.options.className`, never from the DOM, and
+   **no CSS anywhere targets `.trail-group-*`**; measured with it on, the graph
+   still decodes and the timings do not move. It breaks the browser checks
+   instead — `drive_map.py:126` counts `.leaflet-overlay-pane path`, which reads
+   0, and `:724` reads `path.classList` — which is the only reason to keep it
+   behind a flag.
+4. ~~The legend into the space negotiation; the popup above the controls;
+   44 px targets.~~ **Done**, and by a different route than this line imagined:
+   the legend does not join the negotiation so much as move into a dock that
+   negotiates for it, and the popup is not raised above the controls so much as
+   stopped from floating at all. Still open here: coordinates at 6 decimals,
+   and **↑/↓ instead of drag**, which is what a finger needs to plan a route.
+5. **Drawing fewer lines**, because 2 and 3 together still leave 242 MB. Nothing
+   has been decided here, and it is the only item that changes what the map *is*
+   rather than how it is written.
+
+### What a tap on a trail leaves visible
+
+Measured after a reader used the published map on a phone and reported the real
+complaint, which was **not** the one this document had been building towards:
+loading is fine, and tapping a trail buries the map under a popup and a profile.
+So the panels were measured box by box at three phone sizes against the desktop,
+with the map's free area worked out **on a 4 px grid rather than by subtracting
+rectangles** — the panels overlap each other, and subtracting their areas
+subtracts the same pixels twice.
+
+| | at rest | a trail tapped |
+|---|---:|---:|
+| 390 × 844 | **23.1 %** of the map free | **6.9 %** |
+| 360 × 640 | 20.1 % | **6.5 %** |
+| 414 × 896 | 24.0 % | **7.5 %** |
+| 1400 × 900 | 73.6 % | 36.8 % |
+
+**The legend costs three quarters of the map before anything is tapped.** It is
+380 × 591 on a 390 × 844 screen — `max-height:70vh`, and rows wide enough to take
+the width — and it is open by default.
+
+**A tap then adds 779 px of panel to an 844 px screen.** The popup comes out
+367 × 386 whatever the screen is (`maxWidth: 320` and its chrome), so at 360 px
+it is **wider than the phone**; the profile panel opens at 393 px, which is 47 %
+of an 844 px screen and 61 % of a 640 px one. Neither of the two asks how much
+room there is.
+
+**And the popup opens behind the legend.** Leaflet's popup pane is z-index
+**700**, a control corner is **1000**. On an ordinary map a control is a small box
+in a corner and nothing ever notices; here the legend is nearly screen-wide, and
+the overlap is **113,036 px²** at 390 and **128,450** at 414 — most of the popup,
+underneath a panel.
+
+**And the legend's own fold handle leaves the map, on the desktop too.** It
+stands in the bottom-left corner, so the profile panel pushes it up: at rest its
+top is at y = 168; with a chain selected it is at **y = −74** on a 1400 × 900
+window and **y = −206** at 390 × 844. The header is the thing you fold it by.
+**This is the profile grip's defect in a second place** — a control that grows
+over another control puts that one's handle out of reach — and it is the sharpest
+possible form of what is written above: the legend is the only panel that does
+not take part in the space negotiation, and here that costs something on every
+screen size rather than only on small ones.
+
+**What this reorders.** The memory split above is right and stands, but it is not
+what makes the page unusable in a hand: measured on a real phone the page loads
+acceptably, and 590 MB is a number about a browser rather than about a reader.
+Room is the blocker. Weight comes after it.
+
+### And what was built for it
+
+**One way in, and the map opens showing a map.** `_Chrome` in `maps.py`, added
+last by `lomsdal_visten.py` because it adopts four controls that have to exist
+first. Below `NARROW_PX` (**760**) the page lays out for a hand; above it, line
+for line as before. **The threshold is derived and not chosen**: the legend
+measures 380 px and a popup 367, so below their sum plus margins the two cannot
+stand side by side and one has to cover the other. The axis is the map's width
+and not the device, which is what makes a desktop window dragged to 390 px
+behave like a phone and a phone held sideways behave like a desktop.
+
+| | at rest, before | at rest, now | a trail tapped, before | now |
+|---|---:|---:|---:|---:|
+| 390 × 844 | 23.1 % | **98.2 %** | 6.9 % | 1.9 % *(wanted)* |
+| 360 × 640 | 20.1 % | **97.3 %** | 6.5 % | 2.5 % *(wanted)* |
+| 844 × 390 | — | **95.1 %** | — | **30.0 %** |
+| 1400 × 900 | 73.6 % | **98.7 %** | 36.8 % | **55.6 %** |
+
+**The 1.9 % is the design and not a regression.** On a phone a tap on a trail
+fills the screen above the profile with what the popup used to hold and takes the
+map away on purpose — reading is what is being done, so reading is what the
+screen is for — and the `×` gives the map back and leaves the profile standing.
+What is left of the map in that state is the 16 px strip the attribution sits in
+and the scale bar, both of which are owed to somebody.
+
+**It adopts the controls rather than replacing them.** The search, the legend,
+the base-map picker and the plan control keep every line of their behaviour and
+lose only their frame and their corner. Nothing about what any of them *does* had
+to be rewritten to make them share a screen, and that is the whole reason it is
+built this way — the alternative was four rewrites and four new sets of defects.
+The base-map picker comes out of the legend first, in a fixed order, because
+adopting the legend while it was still inside would carry it along and two tools
+would fight over one element.
+
+**Every popup docks, and that is the z-index fix.** `map.on('popupopen')` takes
+the content node folium built, closes the popup before it is seen, and puts the
+node in a panel — right-hand dock on a wide screen, the top sheet on a narrow
+one. It carries the same 13 rows because it *is* the same node. A popup that
+docks cannot be behind anything, so the 113,036 px² that used to disappear under
+the legend, and the 367 px popup that was wider than a 360 px phone, both stop
+existing rather than being mitigated. The pane is still raised from 700 to 1050
+as a backstop.
+
+**And two fingers on the curve.** Apart is in, together is out, with one finger
+moving the window — and **the wheel's rule is kept exactly**: where there is no
+detail under the drawing to reach, the gesture is not taken and Leaflet's own
+pinch gets it, because a panel that swallows a gesture and does nothing with it
+reads as the map having frozen. The ground between the two fingers stays between
+them, off the same three numbers the wheel uses. The profile's grip answers a
+finger too, since the height is resolution on a steep chain and a grip only a
+mouse can reach hands that to one kind of reader.
+
+### Four things it turned up, and every one was a measurement
+
+- **Detached DOM measures zero, and a control that measures zero caps itself
+  against nothing.** The adopted panels were first held in holders outside the
+  document until something asked for them. Two of these controls size themselves
+  against what is around them, and `document.querySelector` stopped answering for
+  the plan control — which is a mode and outlives its own panel. They are hidden
+  now, not detached.
+- **The floor a panel is measured against moves after the selection that opened
+  it.** Placing once, on the selection, measured the profile panel mid-flight:
+  the detail sheet came out **793 px** tall on an 844 px screen against a panel
+  whose top settled at **471**. A `ResizeObserver` on the panel is the honest
+  answer and it covers the reader's own drag for free. Measured after: the sheet
+  ends at 471, 295 and 512 on the three phones — exactly the panel's top, every
+  time.
+- **A cap of 140 is not a floor of 40.** The dock hung **49 px** into the profile
+  with the panel dragged as tall as it goes. The profile keeps 80 px of map clear
+  of itself, and a box standing at 10 from the top has to fit its own margin and
+  its floor into what is left of that 80 — which is the plan control's arithmetic
+  from a month ago, and the numbers that come out are the same 40 and 8.
+- **One number cannot tell a phone from a desktop.** A phone upright is 390 × 844
+  and a desktop is 1400 × 900: **near enough the same height**, so a share of the
+  height alone treats them the same, and a share of the width says nothing about
+  a panel at the foot. The panel takes two caps now — narrow, and short — and
+  under 500 px of height is a phone on its side and nothing else, the tallest
+  phone in landscape being about 430 and the shortest laptop about 600.
+
+**And what the checks had to learn.** `make drive` reads **75** now, up from 48,
+with the desktop's recorded figures **all unmoved** — 11,589 paths, 198 markers,
+30 checkboxes, the profile at 325 px, the list cap at 220. Four of the old
+readings were asking the wrong question afterwards and were rewritten rather than
+retuned:
+
+- The search box is no longer in the top-left corner, so *px from the top* became
+  **px from the left** for the rail and the zoom: the invariant is that the
+  corner made room for the rail, and a zoom still at 10 would mean the two are
+  stacked.
+- *A click in a popup* became **a click in a chain's detail**. The defect is the
+  same one — plan mode owns every click and has to enumerate everything that is
+  not terrain — and the thing to click moved. `.trails-chrome` is in that list now
+  for exactly the reason `.leaflet-popup` was added to it before.
+- The two-controls overlap measured `.trails-plan-control`, which is now the
+  **dock's content**: the dock caps and clips it, so the content's rectangle
+  reports the height it would like and not the one a reader sees. It read a 49 px
+  overlap of something clipped out of sight — **the wrong question asked
+  precisely** — and now measures the dock, with the clip asserted beside it.
+- And the pinch check begins by putting the window back to the whole chain rather
+  than asserting it is there: the check before it leaves the zoom at the ceiling,
+  and a gesture measured from an unknown start measures nothing. It also carries
+  the suite's standing caveat out loud — **a dispatched touch proves the
+  arithmetic and not the plumbing**, the same thing already recorded about HTML5
+  dragging.
+
+### And then the four that were still open, all four done
+
+**The axis for the last three is the pointer and not the width.** Every other
+rule on this page is about room, and room is a question about pixels; how big a
+target has to be is a question about hands. A touch laptop at 1400 px needs the
+bigger buttons and a mouse in a 390 px window does not, and only
+`(pointer: coarse)` tells those two apart. The query sets a **class** on the map
+container rather than styling directly, so `window.trailsChrome.coarse(true)`
+can ask for the layout and a check can measure it — what is being measured is the
+geometry, and whether Firefox calls a synthetic touch context coarse is a
+different question and not this page's.
+
+**The licences fold where there is no room for them.** Measured before: the row
+holding the download button, the point count, the licences and the colour key was
+**66 px against a 78 px drawing** on a phone held sideways, because the licence
+list wraps to three lines there and to one on a desktop — the small screen paid
+double for the same sentence. Behind an *i*, not gone: a reader has to see what
+they are taking on **before** pressing Download, which is why that sentence is
+beside the button rather than in a panel of its own. Measured after: the row is
+**31 px**, the *i* opens it back to 66, and on a desktop there is nothing to fold
+so there is no *i* — 33 px and 205 px of drawing, both unmoved.
+
+**And the freed pixels nearly went to the wrong place.** The share is on the
+*drawing* while the furniture is what it costs, so shrinking the furniture without
+moving the share handed the 35 px to the map: measured, the row went 66 → 31 and
+the chart stayed at **78**. Folded, the overhead is 87 px, so the short screen's
+share moved 0.20 → **0.28** — the panel comes out at 195 px of a 390 px screen,
+about where it was, with **109 px of drawing in it against 78**. *A cap on a part
+is not a cap on the whole,* which is the dock's 140-against-40 in a second place.
+
+**The point list has ↑ and ↓, and they are not new machinery.** They call
+`moveBy`, which is the pin's own gesture and has been here since phase 7 — a swap
+with a neighbour, which is exactly what one step up or down means. **Two buttons,
+no model.** They are drawn only under a coarse pointer, and the drag grip is
+hidden there: HTML5 dragging is not implemented by mobile browsers at all, so a
+grip on a phone promises something that cannot happen. Measured: a row is
+**21 px with a mouse and 44 with a finger**, the `×` and the arrows are 40 × 40
+where they used to be 15 × 13 and 9 × 17, and pressing an arrow swaps the point
+with its neighbour. Back on a mouse the row is 21 px again — **the desktop's
+density is not something a phone gets to spend.**
+
+**And it had already been half true.** The ◀ ▶ *Remove* row above the list has
+moved the held point one place since phase 7, on any pointer. What was missing on
+a phone was the size of those buttons and the two-step reach — pick a row, then go
+up to the buttons — not the capability. Saying otherwise in a summary was wrong
+and is corrected here: this was the smallest of the four, not the largest.
+
+**A way back to the whole chain that can be found.** Double-clicking the curve has
+reset the zoom since it was built and nothing said so; an undiscoverable gesture
+is a gesture most readers do not have, and `dblclick` never reaches a finger at
+all. A *whole chain* button now stands in the heading **while there is something
+to go back from** and puts itself away when there is not, and two taps inside 300
+ms and 30 px do the same — the position is checked as well as the interval,
+because two taps at opposite ends of the chart are two readings and not one
+gesture.
+
+**What the checks read now: 99, all green, no recorded desktop figure moved.**
+And one of them is new in kind:
+
+**`the page ran at all`.** Everything this map does is in one script block, so one
+syntax error anywhere stops all of it — and every other check then fails at once,
+saying which behaviour is missing and never why. It cost a build: `'\n'` written
+into a template where `'\\n'` was meant became a **real line break inside a
+JavaScript string**, and the page came up as a grey box with none of its 11,589
+paths. The driver now collects `pageerror` during the load and reports it before
+anything else, and stops there when there is one. **A suite that cannot say
+"nothing ran" will say twenty other things instead.**
+
+Two more of the same family, both in checks I had just written:
+
+- **A check that drives a toggle blind measures the opposite of what it asked
+  for.** Opening the point list with its own handle shut it, because the check
+  before had already opened it. It asks whether the list is open now.
+- **A check has to open the panel it is measuring.** A tap on a trail docks the
+  chain's detail and closes whatever tool was open — by design — and the check
+  before this one taps a trail. Measuring without reopening measured a box with
+  no size, which is the detached-DOM trap one level up.
+
+### What is still open on a phone
+
+- **Coordinates at 6 decimals** and the rest of the weight work, which the memory
+  split above orders and which nothing here touched.
+- **The map's own gestures are Leaflet's** and were never in question; nothing on
+  this list is about them.
 
 **Offline is a different project, and it decomposes.** Vendoring the four CDN
 scripts plus a service worker already gives every line, every profile and the
