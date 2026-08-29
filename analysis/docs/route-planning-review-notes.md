@@ -603,6 +603,58 @@ shape, and a control that moves the map twice is one that fights the hand. The
 ceiling is 15, so a two-hundred-metre route does not land the reader at street
 level with nothing around it to say where in the park they are. 3,012 bytes.
 
+**And a tour is planned whole and walked in pieces.** A point can be marked as
+the end of a stage; the route falls into stages between the marks; the list grows
+a heading for each with its own kilometres and climb and its own file; and every
+stage plus the whole tour with its marks in it comes out as one archive. Asked
+for as *plan the whole thing and then export 1–3, 5–8*, which needs no model for
+gaps: those are three stages and you take the two you want.
+
+**The mark lives on the point object, and a drag is the trap.** Phase 7's model
+keeps a leg exactly while it runs between the same two waypoint *objects*, so
+reordering and inserting carry a mark along with no case of their own — but a
+dragged waypoint is a **new** object on purpose, which is what tells its legs to
+rebuild. Carried over by hand, and driven: three stages survive a drag of point 5
+and a move of point 2 to the front, and come back out of the file unchanged.
+
+**A stage is a range of the one walk and never a slice of its figures.** An
+ascent is not the difference of two ascents, a steepest is a maximum over its own
+window, and a stage's crossings are read off its own shape — one that inherited an
+`Enters` from ground it never covers would be a file stating something about
+somewhere else. Driven on a 32,175.4 m tour cut in three: **12,351.6 + 12,403.9 +
+7,419.9**, which is the walk exactly.
+
+**Names are optional and the mark carries them.** `<trails:stage>` standing on a
+waypoint is the cut and its text is the name, empty where there is none — one
+field, because they are one decision. The tour's own name goes where GPX already
+puts a name, `<metadata>` and `<trk>`, so it comes back without a field of its
+own; a stage's file is titled *tour · stage* so that a device listing four tracks
+shows four names rather than the tour four times, while the *file* name stays the
+tour's with the stage as a suffix. Driven: `lomsdal-visten-Visten-rundt-Tag-2.gpx`
+titled *Visten rundt · Tag 2*.
+
+**And several files are one download, because an archive rests on arithmetic
+where several downloads rest on an assumption.** The zip is written by hand — the
+same page that hand-writes GPX and hand-decodes a varint payload — and measured
+before anything was built on it: it downloads from a page opened off the disk,
+keeps its offered name, opens in Python with a clean `testzip()`, and every member
+reads back byte for byte. Deflated through `CompressionStream('deflate-raw')`, the
+twin of the `DecompressionStream` this page already inflates its graph with:
+**1.87 MB of GPX in 282 kB**, and stored where the browser cannot or where
+deflating made a member bigger. **No timestamps**, for the reason no trackpoint
+carries one.
+
+**And it broke a reading of the driver, correctly.** A row holds two buttons now,
+and `row.querySelector('button')` took the cut where it meant the removal — so
+`make drive` reported that a removal had removed nothing. The page was right and
+the probe was aiming by position, which is the trap the notes already record one
+level up for clicks. Both buttons are named, and the driver skips heading rows
+where it counts and drags them. **A check that addresses a thing by which comes
+first is a check with an expiry date.**
+
+Cost **31,933 bytes**, 39,656,301 to 39,688,233, and `make drive` reads **48
+green** with no figure moved.
+
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
 chain. 20,183 requests in 13.6 minutes, none at all on a second build or on a
@@ -768,15 +820,15 @@ worth keeping in its own right: **copy the built HTML, undo one fix with a
 **Rebuild the map and drive it.** `command make map`, about a minute warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and **wait twenty seconds after load** —
-the page is **39.66 MB**. It was 25.4 before 3B, 31.1 after the coverage rows,
+the page is **39.69 MB**. It was 25.4 before 3B, 31.1 after the coverage rows,
 36.0 after phase 4, 37.4 after phase 5, 37.5 after 6B, 37.7 after 6C, 39.4 once
 every chain carried its two steepness figures into its popup, and 39.63 once each
 also carried its steepest into the figures table — 201,279 bytes, 17.8 a chain.
 Everything else this panel gained — the zoom, the crosshair's mark on the map,
 the merged legend, the waypoint marks, the point list, the two controls learning
 to share the room, the question the picker now asks and the restoring behind it —
-and the map going to what was loaded — came to **66,825 bytes between them**, a
-third of what one number per chain cost. **A behaviour is written once and a row is written eleven
+the map going to what was loaded and a tour cut into stages — came to **98,758
+bytes between them**, half of what one number per chain cost. **A behaviour is written once and a row is written eleven
 thousand times**, which is the popups' 175-to-1 seen from the other end.
 The probes, with what they read now:
 

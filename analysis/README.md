@@ -121,6 +121,13 @@ route's own profile is drawn in the same panel and marks each of your points on
 it, and *Download GPX* writes it with its waypoints, its legs and the protected
 areas it enters and leaves.
 
+**A tour can be walked in stages.** Mark a point in the list as the end of one and
+the route falls into stages, each with a heading carrying its own kilometres, its
+climb, a name you can give it and its own file. *All stages (zip)* writes every
+stage and the whole tour with its marks in one archive. Name the tour in the box
+above the list; the marks travel in the file, so loading it back gives you the
+tour and its stages.
+
 **A GPX can be loaded back.** The file is read and described first — a route
 this map wrote, a chain export, or somebody else's track — and then it asks how to
 read it, with the sensible answer already chosen and a sentence saying what each

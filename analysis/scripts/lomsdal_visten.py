@@ -69,6 +69,7 @@ from trails.io.export.gpx import (
     WAYPOINT_LEAVES,
     WAYPOINT_ORIGIN_FIELD,
     WAYPOINT_SET,
+    WAYPOINT_STAGE_FIELD,
     export_to_gpx,
 )
 from trails.io.sources import geonorge, hoydedata, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
@@ -883,6 +884,7 @@ def plan_settings(params: Params) -> dict[str, object]:
             "set": WAYPOINT_SET,
             "generated": WAYPOINT_GENERATED,
             "trackKind": PART_KIND_TRACK,
+            "stage": WAYPOINT_STAGE_FIELD,
         },
     }
 
@@ -964,6 +966,7 @@ def export_settings(versions: dict[str, str | None], params: Params) -> dict[str
             "enters": WAYPOINT_ENTERS,
             "leaves": WAYPOINT_LEAVES,
             "area": WAYPOINT_AREA_FIELD,
+            "stage": WAYPOINT_STAGE_FIELD,
         },
         # Named wherever a file states how far the route runs inside a protected
         # area, and in no file that does not — the same rule the height model is

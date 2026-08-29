@@ -270,13 +270,17 @@ OPEN_LIST = """() => { const box = document.querySelector('.trails-plan-control'
     .find(d => /point/.test(d.textContent) && d.style.cursor === 'pointer');
   if (handle) { handle.click(); } return !!handle; }"""
 
+#: Points, not children: a cut tour puts a heading between the rows, and a
+#: check counting everything in the box would report a row per point plus one
+#: per stage and call the difference a defect.
 LIST_ROWS = """() => {
   const list = document.querySelector('.trails-plan-points');
-  return list ? [...list.children].length : -1; }"""
+  return list ? [...list.children].filter(row => !row.classList.contains('trails-plan-stage')).length : -1; }"""
 
 DRAG_ROW = """(spec) => {
   const list = document.querySelector('.trails-plan-points');
-  const from = list.children[spec.from], to = list.children[spec.to];
+  const rows = [...list.children].filter(row => !row.classList.contains('trails-plan-stage'));
+  const from = rows[spec.from], to = rows[spec.to];
   if (!from || !to) { return false; }
   const data = new DataTransfer();
   const fire = (node, kind) => node.dispatchEvent(new DragEvent(kind,
@@ -284,11 +288,18 @@ DRAG_ROW = """(spec) => {
   fire(from, 'dragstart'); fire(to, 'dragover'); fire(to, 'drop'); fire(from, 'dragend');
   return true; }"""
 
+#: A row holds two buttons since stages: the cut that ends one and the removal.
+#: Addressed by what it is rather than by which comes first -- taking
+#: ``querySelector('button')`` read the cut and reported that a removal had not
+#: removed anything, which is the aiming-by-position trap one level up.
 REMOVE_ROW = """(at) => {
   const list = document.querySelector('.trails-plan-points');
-  const row = list.children[at];
+  const rows = [...list.children].filter(row => !row.classList.contains('trails-plan-stage'));
+  const row = rows[at];
   if (!row) { return false; }
-  row.querySelector('button').click(); return true; }"""
+  const out = row.querySelector('.trails-plan-out');
+  if (!out) { return false; }
+  out.click(); return true; }"""
 
 BOXES = """() => {
   const plan = document.querySelector('.trails-plan-control');

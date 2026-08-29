@@ -1093,6 +1093,7 @@ class TestProfilePanel:
                 "enters": "Enters",
                 "leaves": "Leaves",
                 "area": "area",
+                "stage": "stage",
             },
             "protected": [{"name": "Naturvernområder", "licence": "NLOD", "note": ""}],
         }
@@ -1251,6 +1252,7 @@ class TestPlanMode:
                 "set": "set",
                 "generated": "generated",
                 "trackKind": "track",
+                "stage": "stage",
             },
         }
         settings.update(changed)
@@ -1517,6 +1519,96 @@ class TestPlanMode:
         assert "getBoundingClientRect().height" in showing
         assert "getBoundingClientRect().width" in showing
 
+    def test_a_stage_mark_survives_being_dragged(self):
+        """A tour is planned whole and walked in pieces, and the mark lives on
+        the point object so that reordering and inserting carry it along without
+        a case of their own. **A drag is the exception and the trap**: phase 7's
+        model replaces a dragged waypoint with a *new* object on purpose, which
+        is what tells the legs beside it to rebuild — so anything the reader put
+        on the old one is lost unless it is carried over by hand, and a mark lost
+        by dragging a point would be lost silently.
+
+        Driven: three stages cut, one named, then point 5 dragged and point 2
+        moved to the front. All three survive both, and come back out of the file
+        the same way.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "var was = points[at].stage;" in html
+        assert "if (was !== undefined) { points[at].stage = was; }" in html
+        # And it reaches the file, which is a different list from the point.
+        assert "stage: cut};" in html
+        assert "if (typeof wp.stage === 'string') { here.stage = wp.stage; }" in html
+
+    def test_a_tour_nobody_has_cut_is_offered_no_stages(self):
+        """One stage is the whole route, and a heading over it would offer the
+        file the button already offers under a second name -- which is the
+        two-panel mistake the legend was cured of. The archive follows the same
+        rule for a harder reason: with one stage it would hand over the same
+        file twice.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "if (stages.length > 1) {" in html
+        assert "var gathered = stagesOf().length > 1;" in html
+        # The ends are never marked: a tour ends where it ends, and a mark there
+        # would make a stage of no legs.
+        assert "if (at < 1 || at + 1 >= points.length) { return; }" in html
+
+    def test_a_stage_states_what_it_was_composed_to_state(self):
+        """Its ascent is not the difference of two ascents, its steepest is a
+        maximum over its own window, and its crossings are its own -- a stage
+        that inherited an ``Enters`` from ground it never covers would be a file
+        stating something about somewhere else. So a range is a narrowing of the
+        one walk and never a slice of its figures.
+
+        Driven: three stages of a 32,175.4 m tour come to 12,351.6, 12,403.9 and
+        7,419.9 m, which is the walk exactly.
+        """
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+
+        assert "composeRoute(stage.from, stage.to)" in planning
+        assert planning.count("function composeRoute(fromLeg, toLeg)") == 1
+        # And the writer works its runs and its crossings out from the shape it
+        # is handed, which is what makes a stage's file its own.
+        panelling = source.split("class _ProfilePanel")[1].split("class _PlanMode")[0]
+        writing = panelling.split("routeFile: function")[1].split("routeName:")[0]
+        assert "runsOf(shape)" in writing
+        assert "crossingsOf(shape, runs)" in writing
+
+    def test_the_archive_is_written_here_because_nothing_may_be_added(self):
+        """Several files as one download, against several downloads in a row --
+        which rests on an assumption about what a browser lets a page opened off
+        the disk do unattended, where an archive rests on arithmetic. Measured
+        before it was written: a hand-made zip downloads from this page, keeps
+        its name, opens in Python with a clean ``testzip()``, and every member
+        reads back byte for byte. Deflated it is 1.87 MB of GPX in 282 kB.
+
+        **No timestamps**, for the reason no trackpoint carries one: a file that
+        says when it was made invites being read as a record of something that
+        happened.
+        """
+        fmap, _ = self.drawn()
+
+        html = fmap.get_root().render()
+
+        assert "function crc32(bytes) {" in html
+        assert "new CompressionStream('deflate-raw')" in html
+        # Stored where the browser cannot deflate, and where deflating made it
+        # bigger -- a zip that grew its own members advertises itself badly.
+        assert "u16(deflated ? 8 : 0)" in html
+        assert "small.length < member.body.length" in html
+        # The two DOS date fields, both zero, in the local header and again in
+        # the central directory entry.
+        assert html.count("u16(0), u16(0), u32(sum)") == 2
+
     def test_it_draws_nothing_on_the_map(self):
         """The route belongs in a pane of its own: anything drawn into the
         overlay pane is counted among the map's paths for ever after, and 11,589
@@ -1650,8 +1742,9 @@ class TestPlanMode:
         assert "var stations = [];" in html
         assert "stations.push(walked);\n                    if (!leg.parts)" in html
         # One per point and never one per leg: with nothing down there is
-        # nothing to mark, and the guard is what says so.
-        assert "if (points.length) { stations.push(walked); }" in html
+        # nothing to mark, and the guard is what says so. A range of one leg has
+        # two stations, which is the same rule counted from the other end.
+        assert "if (last > first || points.length) { stations.push(walked); }" in html
         assert "stations: shape.stations," in html
 
     def test_a_waypoint_is_a_marker_because_a_circle_cannot_be_dragged(self):
@@ -1883,10 +1976,12 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert planning.count("function composeRoute()") == 1
+        # One walk, which a stage narrows rather than repeats: a second walk
+        # over a range would be the same failure at a smaller scale.
+        assert planning.count("function composeRoute(fromLeg, toLeg)") == 1
         # The shape a chain's series has, which is what the writer reads.
         for field in ("lon:", "lat:", "along:", "height:", "distance:", "stretches:"):
-            assert field in planning.split("function composeRoute()")[-1], field
+            assert field in planning.split("function composeRoute(fromLeg, toLeg)")[-1], field
 
     def test_a_crossing_ends_a_stretch_and_an_unread_sample_does_not(self):
         """The two kinds of NaN mean opposite things: no ground under a

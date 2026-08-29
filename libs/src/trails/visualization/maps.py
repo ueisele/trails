@@ -306,7 +306,7 @@ EXPORT_ROUTE_SETTINGS = (
 #: area it enters or leaves, and ``area`` is the field its id travels under, so
 #: a reader loading the file back can tell which boundary was meant without
 #: parsing a sentence.
-EXPORT_WAYPOINT_SETTINGS = ("name", "origin", "set", "generated", "enters", "leaves", "area")
+EXPORT_WAYPOINT_SETTINGS = ("name", "origin", "set", "generated", "enters", "leaves", "area", "stage")
 
 
 #: Everything the page has to be handed before it can plan a route. As with
@@ -366,6 +366,7 @@ PLAN_GPX_SETTINGS = (
     "set",
     "generated",
     "trackKind",
+    "stage",
 )
 
 
@@ -2209,8 +2210,9 @@ class _ProfilePanel(MacroElement):
                 return figure.noPath > 0 ? (figure.noPath / 1000).toFixed(2) + ' km where no source records a path' : '';
             }
 
-            function fileNameOf(stem) {
-                return (EXPORT.filePrefix + '-' + (stem || 'track')).replace(/[^A-Za-z0-9._-]+/g, '-') + '.gpx';
+            function fileNameOf(stem, extension) {
+                return (EXPORT.filePrefix + '-' + (stem || 'track')).replace(/[^A-Za-z0-9._-]+/g, '-') +
+                    (extension || '.gpx');
             }
 
             function element(name, value) {
@@ -2337,9 +2339,16 @@ class _ProfilePanel(MacroElement):
                 var told = planned(figure, shape, extra).concat([markingLine(shape.tally)]);
                 var figures = routeFigures(figure, shape);
 
+                // **What the reader called it, where they called it anything.**
+                // A tour goes into <metadata><name> and <trk><name>, which is
+                // where GPX already puts a name and what every other reader
+                // shows — so it needs no field of its own, and a second
+                // recording of one title is a second thing to disagree.
+                var titled = (plan && plan.name) ? plan.name : EXPORT.route.name;
+
                 var out = [];
                 openGpx(out);
-                metadataOf(out, EXPORT.route.name, EXPORT.route.description, credits);
+                metadataOf(out, titled, EXPORT.route.description, credits);
 
                 // After the metadata and before the track, which is where GPX
                 // 1.1 puts a waypoint: it is a top-level element of its own and
@@ -2350,7 +2359,7 @@ class _ProfilePanel(MacroElement):
                 // in the order they were thought of parses and fails the schema,
                 // which is the whole reason phase 6B's file is checked against
                 // one.
-                function waypoint(point, name, described, kind, origin, area) {
+                function waypoint(point, name, described, kind, origin, area, stage) {
                     out.push('  <wpt lat="' + point.lat.toFixed(EXPORT.coordinateDecimals) +
                         '" lon="' + point.lon.toFixed(EXPORT.coordinateDecimals) + '">');
                     out.push('    <name>' + escaped(name) + '</name>');
@@ -2363,6 +2372,14 @@ class _ProfilePanel(MacroElement):
                     out.push('    <extensions>');
                     out.push('      ' + element(EXPORT.waypoint.origin, origin));
                     if (area) { out.push('      ' + element(EXPORT.waypoint.area, area)); }
+                    // **Present and empty is not absent.** The element standing
+                    // there is what says a stage ends at this point; its text is
+                    // only the name. Written on a falsy test every unnamed cut
+                    // would be dropped, and a tour would come back in one piece
+                    // with nothing saying it had ever been in more.
+                    if (stage !== null && stage !== undefined) {
+                        out.push('      ' + element(EXPORT.waypoint.stage, stage));
+                    }
                     out.push('    </extensions>');
                     out.push('  </wpt>');
                 }
@@ -2374,7 +2391,8 @@ class _ProfilePanel(MacroElement):
                     // what the panel reports and what the file says are one
                     // answer.
                     waypoint(point, point.name || (EXPORT.waypoint.name + ' ' + (index + 1)),
-                             null, point.kind || null, EXPORT.waypoint.set, null);
+                             null, point.kind || null, EXPORT.waypoint.set, null,
+                             point.stage === undefined ? null : point.stage);
                 });
 
                 // And the boundaries, which are the only way GPX can carry one
@@ -2391,7 +2409,7 @@ class _ProfilePanel(MacroElement):
                 });
 
                 out.push('  <trk>');
-                out.push('    <name>' + escaped(EXPORT.route.name) + '</name>');
+                out.push('    <name>' + escaped(titled) + '</name>');
                 out.push('    <desc>' + escaped(told.join(' \\u00b7 ')) + '</desc>');
                 out.push('    <extensions>');
                 out.push('      ' + element(EXPORT.route.kindField, EXPORT.route.kind));
@@ -2446,7 +2464,9 @@ class _ProfilePanel(MacroElement):
             }
 
             function saveFile(name, body) {
-                var blob = new Blob([body], {type: 'application/gpx+xml'});
+                // A body already made into a blob is handed on as it is: an
+                // archive is not XML and wrapping it again would label it so.
+                var blob = (body instanceof Blob) ? body : new Blob([body], {type: 'application/gpx+xml'});
                 var url = URL.createObjectURL(blob);
                 var anchor = document.createElement('a');
                 anchor.href = url;
@@ -2459,6 +2479,89 @@ class _ProfilePanel(MacroElement):
                 anchor.click();
                 document.body.removeChild(anchor);
                 setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+            }
+
+            // ---- a zip, written here because nothing may be added to this page ----
+            // **A tour cut into stages is several files and one download.** The
+            // alternative was several downloads in a row, which rests on an
+            // assumption about what a browser lets a page opened off the disk do
+            // unattended; a zip rests on arithmetic. Measured before this was
+            // written: a hand-made archive downloads from this page, keeps its
+            // offered name, opens in Python with a clean `testzip()`, and every
+            // member reads back byte for byte.
+            //
+            // Deflated where the browser can, stored where it cannot, and the
+            // choice is not a guess: `CompressionStream('deflate-raw')` is the
+            // twin of the `DecompressionStream` this page already inflates its
+            // graph with, so anything that can read the payload can pack this.
+            // Measured, 20,016 bytes to 55 and back unchanged.
+            //
+            // **No timestamps.** Every entry is stamped zero, for the reason no
+            // trackpoint carries a time: a file that says when it was made
+            // invites being read as a record of something that happened.
+            function crc32(bytes) {
+                var table = crc32.table, n, k, c, i;
+                if (!table) {
+                    table = crc32.table = new Uint32Array(256);
+                    for (n = 0; n < 256; n += 1) {
+                        c = n;
+                        for (k = 0; k < 8; k += 1) { c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); }
+                        table[n] = c >>> 0;
+                    }
+                }
+                c = 0xFFFFFFFF;
+                for (i = 0; i < bytes.length; i += 1) { c = table[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); }
+                return (c ^ 0xFFFFFFFF) >>> 0;
+            }
+
+            function packed(bytes) {
+                if (typeof CompressionStream !== 'function') { return Promise.resolve(null); }
+                try {
+                    var stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+                    return new Response(stream).arrayBuffer().then(function (buffer) {
+                        return new Uint8Array(buffer);
+                    }, function () { return null; });
+                } catch (failure) {
+                    return Promise.resolve(null);
+                }
+            }
+
+            function zipOf(files) {
+                var encoder = new TextEncoder();
+                var members = files.map(function (file) {
+                    return {name: encoder.encode(file.name), body: encoder.encode(file.text)};
+                });
+                return Promise.all(members.map(function (member) { return packed(member.body); }))
+                    .then(function (compressed) {
+                        var chunks = [], directory = [], at = 0;
+                        function u16(v) { return [v & 0xFF, (v >>> 8) & 0xFF]; }
+                        function u32(v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; }
+                        members.forEach(function (member, index) {
+                            // Only where it is actually smaller: a short file
+                            // deflates to more than it was, and a zip that grew
+                            // its own members is a bad advertisement for itself.
+                            var small = compressed[index];
+                            var deflated = !!small && small.length < member.body.length;
+                            var stored = deflated ? small : member.body;
+                            var sum = crc32(member.body);
+                            var header = [].concat(u32(0x04034b50), u16(20), u16(0x0800), u16(deflated ? 8 : 0),
+                                                   u16(0), u16(0), u32(sum), u32(stored.length),
+                                                   u32(member.body.length), u16(member.name.length), u16(0));
+                            chunks.push(new Uint8Array(header), member.name, stored);
+                            directory.push(new Uint8Array(
+                                [].concat(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(deflated ? 8 : 0),
+                                          u16(0), u16(0), u32(sum), u32(stored.length), u32(member.body.length),
+                                          u16(member.name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(at))),
+                                member.name);
+                            at += header.length + member.name.length + stored.length;
+                        });
+                        var directoryAt = at, directoryLength = 0;
+                        directory.forEach(function (piece) { chunks.push(piece); directoryLength += piece.length; });
+                        chunks.push(new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0),
+                                                             u16(members.length), u16(members.length),
+                                                             u32(directoryLength), u32(directoryAt), u16(0))));
+                        return new Blob(chunks, {type: 'application/zip'});
+                    });
             }
 
             // ---- the panel -------------------------------------------------
@@ -3739,6 +3842,54 @@ class _ProfilePanel(MacroElement):
                             metresPerPixel: crosshair ? crosshair.mpp : null,
                             shown: crosshair ? crosshair.shown : null,
                             closest: crosshair ? crosshair.closest : null};
+                },
+                // **Writing a route the panel is not showing.** A stage of a
+                // plan is a range of one walk, and the file it becomes has to
+                // come out of the same writer as the whole tour's: a second
+                // writer would eventually disagree with the first about a route
+                // it was handed the same way, which is the failure this project
+                // keeps finding. So composing stays with the plan, which is the
+                // only thing that knows where a stage begins, and writing stays
+                // here, which is the only thing that knows what a file says.
+                //
+                // Its runs and its crossings are worked out from the shape it is
+                // given and never sliced from the whole tour's — a stage that
+                // inherited an `Enters` from ground it never covers would be a
+                // file stating something about somewhere else.
+                routeFile: function (figure, shape, told, plan, suffix) {
+                    if (!EXPORT) { throw new Error('this panel was given nothing to write a file with'); }
+                    var runs = runsOf(shape);
+                    // **The title and the file name come apart for a stage.**
+                    // What a device shows is the track's name, so a stage has to
+                    // be named as one or four files read as four copies of the
+                    // tour; what goes in the file name is the tour, with the
+                    // stage as its suffix, or the stage's own name lands in it
+                    // twice.
+                    var stem = (plan && (plan.stem || plan.name)) || EXPORT.route.fileStem;
+                    return {name: fileNameOf(stem + (suffix ? '-' + suffix : '')),
+                            text: routeGpxOf(figure, shape, runs, plan, told || [],
+                                             crossingsOf(shape, runs))};
+                },
+                // What a tour is called where nobody has called it anything, so
+                // the plan can offer it as a placeholder and tell a name a
+                // reader chose apart from the one every file carries by default.
+                routeName: function () { return EXPORT ? EXPORT.route.name : null; },
+                // Handing a name and a body to the browser, which is one place
+                // and not two: the anchor has to be in the document for the
+                // click to count, and that was measured rather than assumed.
+                save: saveFile,
+                // Several files as one download. The plan says which files,
+                // because it is the only thing that knows what a stage is.
+                saveZip: function (files, plan) {
+                    if (!EXPORT) { throw new Error('this panel was given nothing to write a file with'); }
+                    // **The title and the file name come apart for a stage.**
+                    // What a device shows is the track's name, so a stage has to
+                    // be named as one or four files read as four copies of the
+                    // tour; what goes in the file name is the tour, with the
+                    // stage as its suffix, or the stage's own name lands in it
+                    // twice.
+                    var stem = (plan && (plan.stem || plan.name)) || EXPORT.route.fileStem;
+                    return zipOf(files).then(function (blob) { saveFile(fileNameOf(stem, '.zip'), blob); });
                 }
             };
 
@@ -4598,6 +4749,12 @@ class _PlanMode(MacroElement):
             // Set when a file is taken and cleared by the fit itself, so the map
             // is moved once per load and not once per refresh.
             var fitWanted = false;
+
+            // What the reader calls this tour, or empty where they have called
+            // it nothing. It travels in <metadata><name> and <trk><name>, which
+            // is where GPX puts a name, so it comes back out of a file this map
+            // wrote without a field of its own.
+            var tourName = '';
             var loadedCount = 0;
 
             // A waypoint anchored to a recorded point. **It keeps the
@@ -5405,7 +5562,11 @@ class _PlanMode(MacroElement):
                     waypoints.push({lat: parseFloat(carried[p].getAttribute('lat')),
                                     lon: parseFloat(carried[p].getAttribute('lon')),
                                     name: firstText(carried[p], 'name'),
-                                    kind: firstText(carried[p], 'type')});
+                                    kind: firstText(carried[p], 'type'),
+                                    // Null where the element is absent and a
+                                    // string where it stands, empty included:
+                                    // an unnamed cut is a cut.
+                                    stage: textOf(ours(block, PLAN.gpx.stage))});
                 }
 
                 loadedCount += 1;
@@ -5800,6 +5961,11 @@ class _PlanMode(MacroElement):
                         var here = panel().metresBetween(wp.lon, wp.lat, loaded.lon[at], loaded.lat[at]) <= 1.0
                             ? anchored(graph, at) : snapped(graph, wp.lat, wp.lon);
                         here.station = stations[i];
+                        // The cuts come back with the points they were made on,
+                        // which is the whole reason they live on a waypoint: a
+                        // tour is planned whole, walked in pieces, and read back
+                        // in the pieces it was planned in.
+                        if (typeof wp.stage === 'string') { here.stage = wp.stage; }
                         if (loaded.legs[i]) { here.restore = loaded.legs[i]; }
                         made.push(here);
                     }
@@ -5807,7 +5973,11 @@ class _PlanMode(MacroElement):
                 }
                 if (loaded.mode === 'align') {
                     if (loaded.waypoints.length) {
-                        loaded.waypoints.forEach(function (point) { made.push(snapped(graph, point.lat, point.lon)); });
+                        loaded.waypoints.forEach(function (point) {
+                            var here = snapped(graph, point.lat, point.lon);
+                            if (typeof point.stage === 'string') { here.stage = point.stage; }
+                            made.push(here);
+                        });
                     } else {
                         made.push(snapped(graph, loaded.lat[0], loaded.lon[0]));
                         made.push(snapped(graph, loaded.lat[loaded.n - 1], loaded.lon[loaded.n - 1]));
@@ -5968,6 +6138,11 @@ class _PlanMode(MacroElement):
                 // route drawn on a map that will not let it be touched is the
                 // state this phase exists to avoid.
                 if (!on) { switchTo(true); }
+                // **A file's own title becomes the tour's**, unless it is the
+                // one every unnamed file carries — adopting that would turn a
+                // default into a choice the first time anything was saved again.
+                var standard = panel() ? panel().routeName() : null;
+                tourName = (read.name && read.name !== standard) ? read.name : '';
                 fitWanted = true;
                 loadSaid = describeFile(loaded);
                 pendingFile = null;
@@ -6101,7 +6276,16 @@ class _PlanMode(MacroElement):
             // repeats. So the boundary is recorded where it happens, as a
             // stretch that ends: getting it wrong draws a line across a fjord or
             // cuts a route into dozens of pieces, and both look right on a chart.
-            function composeRoute() {
+            // **A range of the same walk, and never a slice of its figures.**
+            // A stage is legs `first` up to but not including `last`, and what
+            // it states about itself has to be composed rather than subtracted:
+            // an ascent is not the difference of two ascents, a steepest is a
+            // maximum over its own window, and a marking bucket is a sum over
+            // its own edges. Given no range this is the whole route, which is
+            // every call that existed before stages did.
+            function composeRoute(fromLeg, toLeg) {
+                var first = fromLeg === undefined || fromLeg === null ? 0 : fromLeg;
+                var last = toLeg === undefined || toLeg === null ? legs.length : toLeg;
                 var lon = [], lat = [], along = [], height = [], distance = [], free = [];
                 var stretches = [], stretch = null, tally = blankTally();
                 var walked = 0, crossings = 0, crossed = 0, straight = 0, read = false, joined = false;
@@ -6145,7 +6329,7 @@ class _PlanMode(MacroElement):
                 // at the head of leg i is point i's, and the walk's end is the
                 // last point's.
                 var stations = [];
-                legs.forEach(function (leg) {
+                legs.slice(first, last).forEach(function (leg) {
                     stations.push(walked);
                     if (!leg.parts) { breakHere(); return; }
                     leg.parts.forEach(function (part) {
@@ -6177,8 +6361,10 @@ class _PlanMode(MacroElement):
                 });
                 close();
                 // One per point, never one per leg: with no points down there is
-                // nothing to mark, and the guard is what says so.
-                if (points.length) { stations.push(walked); }
+                // nothing to mark, and the guard is what says so. A range of one
+                // leg has two stations, which is the same rule counted from the
+                // other end.
+                if (last > first || points.length) { stations.push(walked); }
                 return {lon: lon, lat: lat, along: along, height: height, distance: distance, free: free,
                         stations: stations,
                         stretches: stretches, tally: tally, total: walked, read: read,
@@ -6523,6 +6709,126 @@ class _PlanMode(MacroElement):
                 while (pins.length > points.length) { map.removeLayer(pins.pop().marker); }
                 while (pins.length < points.length) { pins.push(pin(points[pins.length])); }
                 dressPins();
+            }
+
+            // ---- stages -------------------------------------------------------------
+            // **A tour is planned whole and walked in pieces.** A point can be
+            // marked as the end of one, and what falls out is a run of stages
+            // covering the route end to end. The first point and the last are
+            // boundaries whether anybody says so, so only the ones between are
+            // ever marked -- and a tour nobody has cut is one stage, which is
+            // the same as no stages and is treated as none.
+            //
+            // **The mark lives on the point object**, which is what makes it
+            // survive an edit: phase 7's model keeps a leg exactly while it runs
+            // between the same two waypoint *objects*, so reordering and
+            // inserting carry the mark along without a case of their own. A drag
+            // is the exception and the trap -- it replaces the point with a new
+            // object on purpose -- so `dragTo` copies it across, and so does
+            // every other place that rebuilds a point from a position.
+            //
+            // `stage` is null where a point ends nothing, and a string where it
+            // ends a stage: the text is the name, and empty means a stage with
+            // no name of its own rather than no stage. One field for the mark
+            // and the name together, because they are one decision and two
+            // fields would be two ways to disagree.
+            function stagesOf() {
+                if (points.length < 2) { return []; }
+                var cuts = [0], i;
+                for (i = 1; i + 1 < points.length; i += 1) {
+                    if (typeof points[i].stage === 'string') { cuts.push(i); }
+                }
+                cuts.push(points.length - 1);
+                var out = [];
+                for (i = 0; i + 1 < cuts.length; i += 1) {
+                    out.push({from: cuts[i], to: cuts[i + 1], at: i,
+                              name: points[cuts[i + 1]].stage || null});
+                }
+                return out;
+            }
+
+            // What a stage is called where nobody has named it: the two points
+            // it runs between, in the numbers the list and the pins already
+            // carry. Not its kilometres, which move whenever a point does.
+            function stageName(stage) {
+                return stage.name || (stage.from + 1) + '–' + (stage.to + 1);
+            }
+
+            // What its own file calls it: the tour and then the stage, where the
+            // tour has a name, so a device listing several says which walk they
+            // belong to as well as which piece of it.
+            function stageTitle(stage) {
+                var mine = stageName(stage);
+                var whole = tourName || (panel() ? panel().routeName() : null);
+                return whole ? whole + ' \u00b7 ' + mine : mine;
+            }
+
+            // Marking a point, and unmarking it. The ends are not offered: a
+            // tour that ends where it ends needs nobody to say so, and a mark
+            // there would make a stage of no legs.
+            function cutAt(at, wanted) {
+                if (at < 1 || at + 1 >= points.length) { return; }
+                points[at].stage = wanted ? (points[at].stage || '') : null;
+                refresh();
+            }
+
+            // Naming one, which is the same field. A name on the last point is
+            // allowed and marks nothing -- the tour already ends there.
+            function nameStage(at, name) {
+                if (at < 0 || at >= points.length) { return; }
+                points[at].stage = name;
+                refresh();
+            }
+
+            // What only this side knows about a *stage*, in the shape the writer
+            // reads for a whole tour. It is the same two lists narrowed to the
+            // stage's own legs and its own points -- and the points are
+            // renumbered from one, because a stage's file is a route in its own
+            // right and not an extract with holes in its numbering.
+            function writableRange(from, to, title) {
+                return {
+                    why: '',
+                    // Named as the stage it is, so a device listing four tracks
+                    // shows four names and not the tour four times. The file
+                    // name is the tour's, which is what `stem` is for.
+                    name: title,
+                    stem: tourName || null,
+                    waypoints: points.slice(from, to + 1).map(nameOf),
+                    legs: legs.slice(from, to).map(function (leg) {
+                        return (leg.parts || []).map(function (part) {
+                            return {kind: part.kind, length: part.length};
+                        });
+                    })
+                };
+            }
+
+            // One stage as its own file. **Composed, never sliced**: its
+            // crossings are read off its own shape, or a stage would carry an
+            // `Enters` for a boundary it never reaches, in a file somebody takes
+            // into the terrain.
+            // Every stage on its own, and the whole tour with its cuts in it,
+            // as one archive. **The tour goes in too**: the stages are what a
+            // reader takes into the terrain and the tour is what they come back
+            // to and edit, and an archive holding only the pieces would be a
+            // set of files nothing can put together again.
+            function saveStages() {
+                var made = stagesOf().map(function (stage) {
+                    var shape = composeRoute(stage.from, stage.to);
+                    return panel().routeFile(figuresOf(shape), shape, told(shape),
+                                             writableRange(stage.from, stage.to, stageTitle(stage)),
+                                             stageName(stage));
+                });
+                var whole = composeRoute();
+                made.push(panel().routeFile(figuresOf(whole), whole, told(whole), writable()));
+                return panel().saveZip(made, writable());
+            }
+
+            function saveStage(stage) {
+                var shape = composeRoute(stage.from, stage.to);
+                var made = panel().routeFile(figuresOf(shape), shape, told(shape),
+                                             writableRange(stage.from, stage.to, stageTitle(stage)),
+                                             stageName(stage));
+                panel().save(made.name, made.text);
             }
 
             // ---- the legs ---------------------------------------------------------
@@ -6873,10 +7179,16 @@ class _PlanMode(MacroElement):
                     var away = panel().metresBetween(point.lon, point.lat, NAMED[i].lon, NAMED[i].lat);
                     if (away < closest) { closest = away; best = NAMED[i]; }
                 }
+                // The stage mark rides along, because the writer is handed
+                // this and not the point: a cut the reader made would otherwise
+                // be in the plan and in no file it writes.
+                var cut = typeof point.stage === 'string' ? point.stage : null;
                 if (!best || closest > PLAN.namedM) {
-                    return {lat: point.lat, lon: point.lon, name: null, kind: null, away: null, number: index + 1};
+                    return {lat: point.lat, lon: point.lon, name: null, kind: null,
+                            away: null, number: index + 1, stage: cut};
                 }
-                return {lat: best.lat, lon: best.lon, name: best.name, kind: best.type, away: closest, number: index + 1};
+                return {lat: best.lat, lon: best.lon, name: best.name, kind: best.type,
+                        away: closest, number: index + 1, stage: cut};
             }
 
             // ---- the control ------------------------------------------------------
@@ -7001,7 +7313,16 @@ class _PlanMode(MacroElement):
                 // would land on nothing.
                 if (heldRow !== null) { return; }
                 while (listBox.firstChild) { listBox.removeChild(listBox.firstChild); }
+                // **A tour nobody has cut gets no headings.** One stage is the
+                // whole route, and a heading over it would offer the same file
+                // the button already offers, under a second name -- which is the
+                // two-panel mistake the legend was cured of.
+                var stages = stagesOf(), heads = Object.create(null);
+                if (stages.length > 1) {
+                    stages.forEach(function (stage) { heads[stage.from] = stage; });
+                }
                 points.forEach(function (point, index) {
+                    if (heads[index]) { listBox.appendChild(stageHead(heads[index])); }
                     var called = nameOf(point, index);
                     var row = document.createElement('div');
                     row.draggable = true;
@@ -7031,8 +7352,34 @@ class _PlanMode(MacroElement):
                     far.style.cssText = 'flex:none;color:#777;font-variant-numeric:tabular-nums';
                     far.textContent = listStations.length > index
                         ? (listStations[index] / 1000).toFixed(2) + ' km' : '';
+                    // **Where a stage ends**, on the point it ends at. Not
+                    // offered on the first or the last: a tour ends where it
+                    // ends and a mark there would make a stage of no legs.
+                    var cut = document.createElement('button');
+                    cut.type = 'button';
+                    cut.className = 'trails-plan-cut';
+                    cut.draggable = false;
+                    var isCut = typeof point.stage === 'string';
+                    var mayCut = index > 0 && index + 1 < points.length;
+                    cut.textContent = '\u2014';
+                    cut.title = isCut ? 'A stage ends here \u2014 click to join it to the next'
+                        : 'End a stage here';
+                    cut.style.cssText = 'flex:none;font:inherit;font-size:13px;line-height:1;padding:0 3px;' +
+                        'border:0;background:none;cursor:pointer;visibility:' +
+                        (mayCut ? 'visible' : 'hidden') + ';color:' + (isCut ? ROUTE : '#ccc');
+                    cut.addEventListener('click', function (event) {
+                        event.stopPropagation();
+                        cutAt(index, !isCut);
+                    });
+
+                    // **Named, because a row now holds two buttons.** A check
+                    // taking `row.querySelector('button')` got the cut where it
+                    // meant the removal the moment a second one appeared — which
+                    // is the same trap as aiming a click by position, one level
+                    // up. Both are addressed by what they are.
                     var out = document.createElement('button');
                     out.type = 'button';
+                    out.className = 'trails-plan-out';
                     out.draggable = false;
                     out.textContent = '\u00d7';
                     out.title = 'Take this point out and join the two legs that met at it';
@@ -7081,10 +7428,104 @@ class _PlanMode(MacroElement):
                     row.appendChild(number);
                     row.appendChild(says);
                     row.appendChild(far);
+                    row.appendChild(cut);
                     row.appendChild(out);
                     listBox.appendChild(row);
                 });
             }
+
+            // The heading over a stage: what it is called, what it comes to, and
+            // its own file. **Its figures are composed and never sliced** -- an
+            // ascent is not the difference of two ascents -- so this is the same
+            // walk the whole tour uses, narrowed to the legs of this stage.
+            function stageHead(stage) {
+                var shape = composeRoute(stage.from, stage.to);
+                var figure = figuresOf(shape);
+                var head = document.createElement('div');
+                head.className = 'trails-plan-stage';
+                head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:4px;' +
+                    'padding:2px 3px;border-top:1px solid #ddd;color:#555';
+
+                // The name, and the two points it runs between where nobody has
+                // given it one. A placeholder rather than a value, so that a
+                // stage nobody named writes its own numbers and a stage somebody
+                // named keeps the name through every edit that does not move it.
+                var called = document.createElement('input');
+                called.type = 'text';
+                called.className = 'trails-plan-stage-name';
+                called.value = stage.name || '';
+                called.placeholder = stageName(stage);
+                called.title = 'What this stage is called in its own file';
+                called.style.cssText = 'flex:1 1 auto;min-width:0;font:inherit;font-size:12px;' +
+                    'padding:1px 3px;border:1px solid transparent;background:none;color:#333';
+                called.addEventListener('focus', function () { called.style.borderColor = '#bbb'; });
+                called.addEventListener('blur', function () {
+                    called.style.borderColor = 'transparent';
+                    nameStage(stage.to, called.value);
+                });
+                // Leaflet binds its own shortcuts to the container, so a typed
+                // '+' would zoom the map mid-word.
+                L.DomEvent.on(called, 'keydown keypress keyup', L.DomEvent.stopPropagation);
+
+                var says = document.createElement('span');
+                says.style.cssText = 'flex:none;font-variant-numeric:tabular-nums';
+                says.textContent = (shape.total / 1000).toFixed(2) + ' km' +
+                    (shape.read && isFinite(figure.ascent) ? ' \u00b7 \u2191' + Math.round(figure.ascent) + ' m' : '');
+
+                var file = document.createElement('button');
+                file.type = 'button';
+                file.className = 'trails-plan-stage-file';
+                file.textContent = 'GPX';
+                file.title = 'Download this stage on its own';
+                file.style.cssText = 'flex:none;font:inherit;font-size:11px;padding:1px 6px;cursor:pointer';
+                // Refused while any leg of the route is unsettled, for the
+                // reason the whole tour's is: a file that states it breaks its
+                // track only at crossings must not be written over a hole.
+                file.disabled = !!writable().why;
+                file.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    saveStage(stage);
+                });
+
+                head.appendChild(called);
+                head.appendChild(says);
+                head.appendChild(file);
+                return head;
+            }
+
+            // **What the tour is called**, above the list because that is what
+            // the list is a list of. A placeholder rather than a value where
+            // nobody has typed one: a tour with no name of its own writes the
+            // one every file carries by default, and showing that as a value
+            // would turn a default into a choice the moment anything is saved.
+            var titleRow = document.createElement('div');
+            titleRow.style.cssText = 'margin-top:4px';
+            var title = document.createElement('input');
+            title.type = 'text';
+            title.className = 'trails-plan-title';
+            title.title = 'What this tour is called, in its files and in their names';
+            title.style.cssText = 'width:100%;box-sizing:border-box;font:inherit;font-size:12px;' +
+                'padding:1px 3px;border:1px solid #ddd;border-radius:3px;background:none;color:#333';
+            title.addEventListener('blur', function () {
+                tourName = title.value.trim();
+                refresh();
+            });
+            // Leaflet binds its own shortcuts to the container, so a typed '+'
+            // would zoom the map mid-word.
+            L.DomEvent.on(title, 'keydown keypress keyup', L.DomEvent.stopPropagation);
+            // Offered only where there are stages to gather. With one stage it
+            // would hand over the same file the button already offers, twice,
+            // under two names.
+            var everything = document.createElement('button');
+            everything.type = 'button';
+            everything.className = 'trails-plan-zip';
+            everything.textContent = 'All stages (zip)';
+            everything.title = 'Every stage on its own, and the whole tour with its stages, in one archive';
+            everything.style.cssText = 'margin-top:4px;font:inherit;font-size:11px;padding:1px 6px;cursor:pointer';
+            everything.addEventListener('click', function () { saveStages(); });
+
+            titleRow.appendChild(title);
+            titleRow.appendChild(everything);
 
             // Said rather than discovered. Three gestures share one click here
             // and none of them is guessable from a map that has never had more
@@ -7282,6 +7723,7 @@ class _PlanMode(MacroElement):
                 box.appendChild(back);
                 box.appendChild(edits);
                 box.appendChild(status);
+                box.appendChild(titleRow);
                 box.appendChild(listBox);
                 box.style.overflowY = 'auto';
                 // The wheel is the map's except where this has somewhere left to
@@ -7344,6 +7786,17 @@ class _PlanMode(MacroElement):
                 status.style.cursor = listable ? 'pointer' : '';
                 status.title = listable ? 'Show or hide the points, one to a row' : '';
                 listBox.style.display = (listable && listOpen) ? '' : 'none';
+                // The title folds with the list: it names what the list holds,
+                // and a box asking for a name over a route nobody has opened is
+                // a row of the control spent on nothing.
+                titleRow.style.display = (listable && listOpen) ? '' : 'none';
+                if (document.activeElement !== title) {
+                    title.value = tourName;
+                    title.placeholder = (panel() && panel().routeName()) || 'This tour';
+                }
+                var gathered = stagesOf().length > 1;
+                everything.style.display = gathered ? '' : 'none';
+                everything.disabled = !!writable().why;
                 if (on) {
                     say((listable ? (listOpen ? '\\u25be ' : '\\u25b8 ') : '')
                         + (points.length === 0 ? 'Click the map to place the first point.'
@@ -7412,6 +7865,7 @@ class _PlanMode(MacroElement):
                         : refused ? refused + (refused === 1 ? ' leg has' : ' legs have') +
                             ' no way and no heights, so the route has a gap that is not a crossing.'
                         : '',
+                    name: tourName || null,
                     waypoints: points.map(nameOf),
                     legs: legs.map(function (leg) {
                         return (leg.parts || []).map(function (part) { return {kind: part.kind, length: part.length}; });
@@ -7594,7 +8048,15 @@ class _PlanMode(MacroElement):
                 dragTo: function (at, lat, lon) {
                     applyEdit(function (graph) {
                         if (at < 0 || at >= points.length) { return; }
+                        // **A dragged waypoint is a new object on purpose** —
+                        // that is what tells the legs beside it to rebuild — so
+                        // anything the reader put on the old one has to be
+                        // carried over by hand. Today that is the stage mark,
+                        // and a mark lost by dragging a point would be lost
+                        // silently, which is the worst way to lose one.
+                        var was = points[at].stage;
                         points[at] = snapped(graph, lat, lon);
+                        if (was !== undefined) { points[at].stage = was; }
                         chosen = at;
                     });
                 },

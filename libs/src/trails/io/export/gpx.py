@@ -122,6 +122,15 @@ WAYPOINT_SET = "set"
 #: What ``origin`` says of a point the map placed by itself.
 WAYPOINT_GENERATED = "generated"
 
+#: Where a stage of a tour ends, on the point it ends at, with the name it was
+#: given as its text. **One field for the mark and the name together**, because
+#: they are one decision: a tour is planned whole and walked in pieces, and a
+#: reader who cut it after point three either named that piece or did not. The
+#: element standing there is the cut; its text is the name, and empty means a
+#: stage nobody named rather than no stage. A reader that does not know the word
+#: sees a waypoint like any other, which is what an extension is for.
+WAYPOINT_STAGE_FIELD = "stage"
+
 #: What a generated point at a boundary names the area by. The register's own
 #: id, beside the words in ``<name>``: a sentence has to be parsed back and an
 #: id does not, and phase 8 has to know *which* boundary was meant rather than
@@ -377,12 +386,19 @@ def waypoint_element(waypoint: dict[str, Any]) -> etree.Element:
         etree.SubElement(element, "type").text = str(waypoint["type"])
     origin = waypoint.get(WAYPOINT_ORIGIN_FIELD)
     area = waypoint.get(WAYPOINT_AREA_FIELD)
-    if origin or area:
+    stage = waypoint.get(WAYPOINT_STAGE_FIELD)
+    if origin or area or stage is not None:
         block = etree.SubElement(element, "extensions")
         if origin:
             etree.SubElement(block, f"{{{TRAILS_NAMESPACE}}}{WAYPOINT_ORIGIN_FIELD}").text = str(origin)
         if area:
             etree.SubElement(block, f"{{{TRAILS_NAMESPACE}}}{WAYPOINT_AREA_FIELD}").text = str(area)
+        # **Written where it is present and empty**, which is not the same as
+        # absent: the element standing there is what says a stage ends at this
+        # point, and its text is only the name. A falsy test here would drop
+        # every unnamed cut.
+        if stage is not None:
+            etree.SubElement(block, f"{{{TRAILS_NAMESPACE}}}{WAYPOINT_STAGE_FIELD}").text = str(stage) or None
     return element
 
 
