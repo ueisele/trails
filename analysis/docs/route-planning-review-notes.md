@@ -46,6 +46,21 @@ not. Write the message to a file under the scratchpad, try once, and if it times
 out say so and offer the `! git commit -F <path>` line rather than retrying
 blindly.
 
+**And the shell will not say when it refuses.** Two near-misses, both silent:
+
+- **`noclobber` is on**, so `cat > msg5.txt` fails where the file exists — and the
+  scratchpad outlives the session, so `msg5.txt` was still Phase 5's message from
+  a week before. `git commit -F` read it without complaint. Only the GPG timeout
+  stopped a commit landing under a message about something else entirely. Use
+  `>|`, give the file a name that says what it is, and read the first line back
+  before committing.
+- **`cp` is aliased to `cp -i`** and aborts on an existing target with no input,
+  printing its prompt into the middle of a pipeline. A restore that copied
+  nothing was then staged, and `make hooks-run` ran over an empty staging area
+  and reported everything green. Use `command cp -f`, and check the tree — the
+  same rule as *a green build proves that a build ran, not that it built what
+  you wrote*.
+
 The order these were done in is not the order they are numbered, and that was
 deliberate: 1C → 1D → **3** → 2 → 3B → 4. Phase 3 went before 2 because its
 acceptance is *the map behaves as it did* and 1C and 1D had just measured that in
@@ -598,10 +613,16 @@ changes with every parameter:
 **Rebuild the map and drive it.** `command make map`, about a minute warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and **wait twenty seconds after load** —
-the page is **39.4 MB**. It was 25.4 before 3B, 31.1 after the coverage rows,
-36.0 after phase 4, 37.4 after phase 5, 37.5 after 6B, 37.7 after 6C, and 39.4
-once every chain carried its two steepness figures into its popup. The five
-probes, with what they read now:
+the page is **39.63 MB**. It was 25.4 before 3B, 31.1 after the coverage rows,
+36.0 after phase 4, 37.4 after phase 5, 37.5 after 6B, 37.7 after 6C, 39.4 once
+every chain carried its two steepness figures into its popup, and 39.63 once each
+also carried its steepest into the figures table — 201,279 bytes, 17.8 a chain.
+Everything else this panel gained — the zoom, the crosshair's mark on the map,
+the merged legend, the waypoint marks, the point list, the two controls learning
+to share the room — came to **33,923 bytes between them**, a sixth of what one
+number per chain cost. **A behaviour is written once and a row is written eleven
+thousand times**, which is the popups' 175-to-1 seen from the other end.
+The probes, with what they read now:
 
 | | |
 |---|---|
@@ -620,6 +641,33 @@ with `window[Object.keys(window).find(k => k.startsWith('map_'))]`. There is no
 markers, the boundary — added up to all along. A figure and its own explanation
 disagreed by two for several days and neither was re-run. **When a figure is
 written next to its decomposition, add the decomposition up.**
+
+**And what the newest work put within reach of a probe.** Every one of these
+is a field or a method rather than something to read off a screenshot, which is
+the house rule for anything worth checking:
+
+| | |
+|---|---|
+| `window.trailsProfilePanel.view()` | the window on the chain — `zoom`, `at`, `centre`, `shown`, `metresPerPixel`, `closest` |
+| `window.trailsPlan.state().stations` | where each of the reader's own points sits along the walk, in metres |
+| `window.trailsPlan.moveTo(at, to)` | the list's own edit: a splice, where `moveBy` swaps |
+| `window.trailsHighlight` | `clear()` and `selected()`, because both of the highlight's other ways out are clicks and plan mode owns clicks |
+| `.trails-plan-points` | the list of points. **Not** findable by its 220 px cap any more — the cap is computed |
+| `.leaflet-trailsProfileHere-pane` | the crosshair's mark on the map, at z-index **470** |
+
+**And the panes, in the order they paint**: the overlay with all 11,589 paths at
+400, the direction arrow at 450, a planned route at 460, the crosshair's mark at
+**470**, and Leaflet's markers at 600. The mark was at 450 with the arrow until
+it was found underneath the very route it reports on. **A z-index is a claim
+about what matters more**, and every one of these was made by whichever pane was
+written first until something looked.
+
+**And two controls sharing one map have to be measured together.** The profile
+panel is anchored at the foot and is the reader's own to drag; the plan control
+grows down from the top right. They are Leaflet corners, so they share a z-index
+and the later one covers the earlier. The check is the two bounding boxes at
+several profile heights and window sizes: the overlap must read **0**, and the
+list's cap moves 220 → 98.6 → 40 → 183.6 px as it does.
 
 **And what protects the ground**, since 6C. `window.trailsGraph.protectedAreas`
 is the 31 areas with their outlines, available **before** the stream inflates
@@ -1368,7 +1416,10 @@ What it was checked against, kept for 6B and 6C:
   757/747 components, reach 50.8 km = 94 %, 17 quays, Mosjøen 2.17 m. **The
   payload must not move**: 4.93 MB, both checksums, heights at 0.01 m.
 - **The page must not move**: 198 markers, **11,589** paths of which exactly one
-  non-interactive, 25 layers, 10 px above 60, wheel 9 → 11. **If the path count
+  non-interactive, 25 layers, 10 px above 60, wheel 9 → 11. *(The layer count is
+  no longer checkable in that form: the legend became the layer control and there
+  is no `.leaflet-control-layers`. Its 25 overlays are the legend's 30 rows, six
+  of them the terrain-name kinds that used to be one layer.)* **If the path count
   moved, the route was drawn into the overlay pane** — that is the first thing to
   look at, and the arrow in phase 4 is the precedent.
 - **A chain's own export still reproduces its stated ascent to 0.00 m.** Phase 5
