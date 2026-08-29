@@ -116,6 +116,39 @@ out per feature and compresses against nothing. **Showing a figure is the
 expensive half; carrying it is nearly free.** Neither budget is threatened, and
 the ratio is the thing to remember before adding the next row.
 
+**And two controls stopped fighting over the same room.** The profile panel is
+anchored to the foot of the map, takes its full width and is the reader's own to
+drag taller; the plan control grows down from the top right. They share a
+z-index — Leaflet's corners are siblings — so the one written later simply covers
+the other. Measured, twelve points with the profile pulled to 725 px put **315
+px** of the plan control underneath it.
+
+**And the profile panel did not keep to its own ceiling.** The height was clamped
+only where it was asked for, so a window made shorter afterwards left the panel
+taller than the map: at 620 px it was **725 px tall with its top at −127**, which
+puts its own grip off the map and out of reach for good. Asking for the height it
+already has is what re-clamps it, and `fold()` is where that happens now, so a
+resize and a re-open both go through it.
+
+The plan control now asks what room is left above the profile panel and keeps
+inside it: the buttons, the count and the hint stay put, the **list takes what
+remains** and scrolls in it, and the whole box scrolls as a backstop. Driven with
+fourteen points: the cap moves **220 → 98.6 → 40 → 183.6 px** as the profile is
+dragged and the window resized, the overlap is **0 in every case**, and a wheel
+over the list scrolls it 108 px without the map's zoom moving.
+
+Two numbers in that are load-bearing and were arrived at rather than chosen. The
+margin is **8 px and not 12**, and the floor **40 and not 60**, because the
+profile panel keeps 80 px of map clear of itself and the control's top margin,
+its floor and that margin all have to come out of the same 80 — at 12 and 60 they
+did not, and the two overlapped by 12 px at the one place it matters, the panel
+dragged as tall as it goes.
+
+**And the fixed part is measured off the scroll height**, not the offset. The box
+is capped from below, so its offset height *is* the cap, and subtracting the list
+from it would measure the cap rather than the buttons. That is the same mistake
+the grip's ceiling made, in a second place.
+
 **And plan mode lists its points, one to a row.** A route is a sequence, and a
 map cannot show a sequence: the pins carry numbers, but reading eleven of them
 off the terrain to establish that 7 comes before 8 is searching rather than

@@ -2669,6 +2669,13 @@ class _ProfilePanel(MacroElement):
             corner.appendChild(control.getContainer());
 
             function fold() {
+                // **And the height is held to a ceiling that moves.** It was
+                // clamped only where it was asked for, so a window made shorter
+                // afterwards left the panel taller than the map: measured, a
+                // 725 px panel in a 620 px window put its own grip at −127, off
+                // the top of the map and out of a reader's reach for good.
+                // Asking for the height it already has is what re-clamps it.
+                if (open) { stretchTo(chartHeight); }
                 // A drag does not survive the panel folding under it: the grip
                 // it started on is no longer above a chart, and picking the drag
                 // up again on reopening would jump the height by however far the
@@ -6493,6 +6500,9 @@ class _PlanMode(MacroElement):
             // was just cured of.
             var listOpen = false, listStations = [], heldRow = null;
             var listBox = document.createElement('div');
+            // Named, like the picker and the mode beside it: its height is
+            // computed now, so nothing can find it by the cap it used to carry.
+            listBox.className = 'trails-plan-points';
             listBox.style.cssText = 'margin-top:4px;max-height:220px;overflow-y:auto;display:none';
             // The wheel is the map's except where this has somewhere left to
             // scroll, the same bargain the legend strikes: a list that will not
@@ -6505,6 +6515,46 @@ class _PlanMode(MacroElement):
                     event.stopPropagation();
                 }
             }, {passive: true});
+
+            // **How much room there is above the profile panel.** That panel
+            // is anchored to the foot of the map, takes its full width and is the
+            // reader's own to drag taller; measured, twelve points with the
+            // profile pulled to 725 px put 315 px of this control underneath it,
+            // and the two corners share a z-index so whichever is written later
+            // wins. Rather than fight over which covers which, this asks what is
+            // left and stays inside it.
+            function roomAbove() {
+                if (!box) { return 0; }
+                var mine = box.getBoundingClientRect().top;
+                var below = map.getContainer().getBoundingClientRect().bottom;
+                var profile = document.querySelector('.trails-profile-panel');
+                if (profile) {
+                    var seen = profile.getBoundingClientRect();
+                    if (seen.height > 0) { below = Math.min(below, seen.top); }
+                }
+                // Eight, not twelve: the profile panel keeps 80 px of map
+                // clear of itself, and this control's own floor plus its top
+                // margin have to come out of that 80 or the two overlap at the
+                // one place it matters — the panel dragged as tall as it goes.
+                return Math.max(0, below - mine - 8);
+            }
+
+            function fitList() {
+                if (!box) { return; }
+                var room = roomAbove();
+                // Everything but the list, and **off the scroll height** rather
+                // than the offset: the box is capped below, so its offset height
+                // is the cap and subtracting the list from that would measure the
+                // cap instead of the buttons. The fixed part is measured rather
+                // than assumed, because the buttons wrap differently in every
+                // browser and the load status comes and goes.
+                var fixed = box.scrollHeight - listBox.offsetHeight;
+                // The floor is deliberate: under it the list is not worth showing
+                // and the box's own overflow takes over. A scrollbar on the whole
+                // control beats a control holding rows that cannot be reached.
+                listBox.style.maxHeight = Math.max(40, Math.min(220, room - fixed)) + 'px';
+                box.style.maxHeight = Math.max(40, room) + 'px';
+            }
 
             function drawList(stations) {
                 listStations = stations || [];
@@ -6710,6 +6760,18 @@ class _PlanMode(MacroElement):
                 box.appendChild(edits);
                 box.appendChild(status);
                 box.appendChild(listBox);
+                box.style.overflowY = 'auto';
+                // The wheel is the map's except where this has somewhere left to
+                // scroll, the same bargain the legend and the list strike. The
+                // list's own handler runs first and takes the turn while it can,
+                // so the two nest rather than fight.
+                box.addEventListener('wheel', function (event) {
+                    var spare = box.scrollHeight - box.clientHeight;
+                    if (spare <= 0) { return; }
+                    if (event.deltaY < 0 ? box.scrollTop > 0 : box.scrollTop < spare - 1) {
+                        event.stopPropagation();
+                    }
+                }, {passive: true});
                 box.appendChild(hint);
                 // Clicking inside the control must not reach the map, and the
                 // wheel must, or the map reads as frozen under it.
@@ -6718,13 +6780,22 @@ class _PlanMode(MacroElement):
             };
             control.addTo(map);
 
-            // Leaflet appends to a top corner, and the layer control sharing
-            // this one is expanded over twenty-five layers, so anything added
-            // after it lands below the fold. Moved to the front of the corner
-            // after addTo, the way a control that has to sit above the zoom
-            // buttons is.
+            // Leaflet appends to a top corner, and this one is reached for
+            // before anything else in it, so it goes to the front. It had the
+            // layer control for company here until the legend took that job over
+            // and the corner emptied.
             var corner = control.getContainer().parentNode;
             corner.insertBefore(control.getContainer(), corner.firstChild);
+
+            // The profile panel's height is a reader's to drag, and nothing
+            // announces that. Watching the element is the one way to hear about
+            // it that does not reach into the other control's own state.
+            map.on('resize', fitList);
+            if (typeof ResizeObserver !== 'undefined') {
+                var watched = document.querySelector('.trails-profile-panel');
+                if (watched) { new ResizeObserver(fitList).observe(watched); }
+            }
+            fitList();
 
             function say(message) {
                 status.textContent = message;
@@ -6770,6 +6841,8 @@ class _PlanMode(MacroElement):
                 // that a refresh in the middle of a drag writes nothing.
                 dressPins();
                 present();
+                // Last, because everything above it can change how tall this is.
+                fitList();
             }
 
             // What only this side knows and the file cannot be written without:

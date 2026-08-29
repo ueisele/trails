@@ -759,6 +759,19 @@ class TestProfilePanel:
         assert "Folded, the box is one line with no chart in it" in html
         assert "if (!open && stretching) { stretching = null;" in html
 
+    def test_the_height_is_held_to_a_ceiling_that_moves(self, group):
+        """It was clamped only where it was asked for, so a window made shorter
+        afterwards left the panel taller than the map: measured, a 725 px panel
+        in a 620 px window put its own grip at -127, off the top of the map and
+        out of a reader's reach for good.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "if (open) { stretchTo(chartHeight); }" in html
+
     def test_the_wheel_is_the_map_s_except_over_a_curve_that_can_use_it(self, group):
         """A panel that swallows a wheel and does nothing with it reads as the
         map having frozen, which is why this panel has only ever taken clicks.
@@ -1409,6 +1422,34 @@ class TestPlanMode:
         html = fmap.get_root().render()
 
         assert "if (heldRow !== null) { return; }" in html
+
+    def test_the_list_keeps_inside_the_room_the_profile_leaves_it(self):
+        """The profile panel is anchored to the foot of the map, takes its full
+        width and is the reader's own to drag taller. Measured, twelve points
+        with the profile pulled to 725 px put 315 px of this control underneath
+        it, and the two corners share a z-index so whichever is written later
+        wins. So this asks what is left rather than fighting over it.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "function roomAbove() {" in html
+        assert "document.querySelector('.trails-profile-panel')" in html
+        assert "map.on('resize', fitList);" in html
+        # The panel's height is a reader's to drag and nothing announces that.
+        assert "new ResizeObserver(fitList).observe(watched);" in html
+        # Off the scroll height, not the offset: the box is capped below, so its
+        # offset height is the cap and subtracting the list would measure the cap.
+        assert "var fixed = box.scrollHeight - listBox.offsetHeight;" in html
+
+    def test_the_list_is_named_so_it_can_be_found(self):
+        """Its height is computed, so nothing can find it by the cap it carried."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        assert "listBox.className = 'trails-plan-points';" in fmap.get_root().render()
 
     def test_the_points_a_reader_put_down_are_recorded_as_the_walk_happens(self):
         """A crossing contributes no walking distance and a leg still being
