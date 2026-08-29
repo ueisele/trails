@@ -1,4 +1,4 @@
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive
 
 # Default target
 help:
@@ -151,6 +151,10 @@ map:
 graph:
 	@echo "🕸️  Building the Lomsdal-Visten routing graph..."
 	uv run python analysis/scripts/route_graph.py $(ARGS)
+
+drive:
+	@echo "🖱️  Driving the built map in a browser (about a minute; 25 s of it is the page loading)..."
+	uv run --with playwright python analysis/scripts/drive_map.py $(ARGS)
 
 cache-clean:
 	@echo "🗑️  Cleaning cache directory (.cache)..."

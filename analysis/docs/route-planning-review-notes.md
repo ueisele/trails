@@ -610,6 +610,44 @@ changes with every parameter:
     net = cache_module.Object(cache_dir=".cache/objects").load(os.path.basename(key)[:-4])["network"]
     net.chains, net.edges, net.nodes
 
+**And drive it: `command make drive`.** One browser session, about a minute, 48
+readings, `analysis/scripts/drive_map.py`. **It does not overlap with `pytest`**
+and the difference is worth being exact about: the 1,050 source tests assert on
+the page's *text* — that the template says `metresPerPixel`, that a handler is
+registered, that a selector is named. Every defect found on this panel in a week
+was invisible to them and visible in thirty seconds of driving: the grip's
+ceiling, the click in a popup, the stuck highlight, the mark under the route, the
+waypoint at the ceiling, the two controls overlapping.
+
+**Two kinds of reading, and the split is the whole design.** A `holds` is a
+structural invariant — both axes carrying one scale, a mark on its line, two
+panels not overlapping, the decomposition adding up — and a red one is a defect.
+A recorded figure is one this build measured: 11,589 paths, 198 markers, the
+controls at 10 and 60. A red one there is **news**, because the sources move and
+the page moves with them, and the answer may be to change the number rather than
+the code — after looking at why. The script exits 1 for the first and 2 for the
+second; `make` turns any failure into its own 2, so read the last line of the
+report rather than the shell.
+
+**And the decomposition is now something the page proves rather than something
+this document asserts.** 11,589 = **11,290 chains drawn as lines + 298 drawn as
+circle markers + 1 carrying no chain class at all**, which is the park boundary
+and is also the one path deaf to the pointer. Counting the chain class alone gives
+**11,588**, because a circle marker carries it too — Leaflet draws a
+`CircleMarker` as a path of two arcs, and this is what a chain too short to draw
+as a line becomes. That caught the first version of this check, which had copied
+11,290 out of these notes and measured something else. **The unclassed count is
+the invariant worth having**: a planned route carries no chain class, so anything
+drawn into that pane by mistake lands there and takes it from 1 to 2.
+
+**A driver that is always green is worth nothing**, so it was proved against a
+copy of the built page with three fixes taken back out — the highlight's release,
+the popup's exclusion, and the mark's pane at 470. It went red on all three, plus
+two knock-on readings from the waypoint the popup click placed. That trick is
+worth keeping in its own right: **copy the built HTML, undo one fix with a
+`str.replace`, drive the copy.** Two minutes, no rebuild, and it is what turns
+*this looks wrong* into *this was wrong*.
+
 **Rebuild the map and drive it.** `command make map`, about a minute warm.
 `uv run --with playwright`, `p.firefox.launch()` against the `file://` URL of
 `analysis/output/lomsdal-visten.html`, and **wait twenty seconds after load** —
