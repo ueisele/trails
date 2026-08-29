@@ -3413,6 +3413,20 @@ class _ProfilePanel(MacroElement):
                         rule.setAttribute('stroke-dasharray', '2 2');
                         marks.appendChild(rule);
                     }
+                    // **A second ring where a stage changes hands**, the same
+                    // mark the pin on the map carries, because they are the same
+                    // point seen from above and from the side. Under the disc
+                    // rather than over it, so the number stays the clearest
+                    // thing on it.
+                    if (selected && selected.stages && selected.stages.indexOf(index) >= 0) {
+                        var ring = document.createElementNS(SVG, 'circle');
+                        ring.setAttribute('cx', here); ring.setAttribute('cy', level);
+                        ring.setAttribute('r', String(STATION_R + 2.5));
+                        ring.setAttribute('fill', 'none');
+                        ring.setAttribute('stroke', ink);
+                        ring.setAttribute('stroke-width', '1');
+                        marks.appendChild(ring);
+                    }
                     var disc = document.createElementNS(SVG, 'circle');
                     disc.setAttribute('cx', here); disc.setAttribute('cy', level);
                     disc.setAttribute('r', String(STATION_R));
@@ -3809,6 +3823,11 @@ class _ProfilePanel(MacroElement):
                     present(spec === null ? null : {
                         composed: true, label: spec.label, figure: spec.figure, shape: spec.shape,
                         told: spec.told || [], saying: spec.saying, mid: null,
+                        // Which of the points below the curve are where one
+                        // stage hands over to the next. The panel draws every
+                        // point the same; what a point *means* belongs to
+                        // whatever composed the series.
+                        stages: spec.stages || null,
                         // What the panel cannot work out from a series alone and
                         // the file cannot be written without: where the reader
                         // put its points down, what each leg is made of, and
@@ -6625,10 +6644,17 @@ class _PlanMode(MacroElement):
             // and rewriting five spans is a write nothing can feel.
             var PIN_PX = 18;
 
-            function pinStyle(picked) {
+            // **A second ring where a stage changes hands**, and a ring rather
+            // than a colour or a size: a pin already says two things — which
+            // number it is and whether it is picked — and a third meaning has to
+            // be readable beside both rather than instead of one. Drawn as a
+            // shadow, so the icon keeps its size and its anchor and nothing
+            // about where a click lands moves.
+            function pinStyle(picked, ends) {
                 return 'display:block;width:100%;height:100%;box-sizing:border-box;border-radius:50%;' +
                     'border:2px solid ' + ROUTE + ';background:' + (picked ? ROUTE : CASING) + ';' +
                     'color:' + (picked ? CASING : ROUTE) + ';text-align:center;' +
+                    (ends ? 'box-shadow:0 0 0 2px ' + CASING + ',0 0 0 4px ' + ROUTE + ';' : '') +
                     'font:bold 10px/' + (PIN_PX - 4) + 'px sans-serif';
             }
 
@@ -6656,7 +6682,7 @@ class _PlanMode(MacroElement):
                 // off the element: a style set to '#111111' reads back as
                 // 'rgb(17, 17, 17)', so an element cannot be asked whether it
                 // already says what is about to be written to it.
-                return {marker: marker, label: null, picked: null, live: null};
+                return {marker: marker, label: null, picked: null, ends: null, live: null};
             }
 
             function pinAt(marker) {
@@ -6680,13 +6706,15 @@ class _PlanMode(MacroElement):
                 for (var i = 0; i < most; i += 1) {
                     var record = pins[i], element = record.marker.getElement();
                     var label = String(i + 1), picked = i === chosen;
+                    var ends = i > 0 && i + 1 < points.length && typeof points[i].stage === 'string';
                     if (element && record.label !== label) {
                         element.firstChild.textContent = label;
                         record.label = label;
                     }
-                    if (element && record.picked !== picked) {
-                        element.firstChild.setAttribute('style', pinStyle(picked));
+                    if (element && (record.picked !== picked || record.ends !== ends)) {
+                        element.firstChild.setAttribute('style', pinStyle(picked, ends));
                         record.picked = picked;
+                        record.ends = ends;
                     }
                     // Out of plan mode a pin must no more stand between a reader
                     // and the line underneath than the route does, so it stops
@@ -6737,12 +6765,22 @@ class _PlanMode(MacroElement):
             // no name of its own rather than no stage. One field for the mark
             // and the name together, because they are one decision and two
             // fields would be two ways to disagree.
+            // Where the reader cut the tour, as point indices. **The ends are
+            // not among them**: a tour begins and ends whether anybody says so,
+            // and a pin at the finish marked as a transition would claim the
+            // walk carries on past it.
+            function cutsOf() {
+                var out = [];
+                for (var i = 1; i + 1 < points.length; i += 1) {
+                    if (typeof points[i].stage === 'string') { out.push(i); }
+                }
+                return out;
+            }
+
             function stagesOf() {
                 if (points.length < 2) { return []; }
-                var cuts = [0], i;
-                for (i = 1; i + 1 < points.length; i += 1) {
-                    if (typeof points[i].stage === 'string') { cuts.push(i); }
-                }
+                var cuts = [0].concat(cutsOf());
+                var i;
                 cuts.push(points.length - 1);
                 var out = [];
                 for (i = 0; i + 1 < cuts.length; i += 1) {
@@ -7958,7 +7996,11 @@ class _PlanMode(MacroElement):
                 drawList(shape.stations || []);
                 if (!showing) { return; }
                 showing.series({label: 'planned route', figure: figuresOf(shape), shape: shape,
-                                told: told(shape), plan: writable()});
+                                told: told(shape), plan: writable(),
+                                // Which of the marks below the curve are where a
+                                // stage changes hands. The panel draws the
+                                // points; only the plan knows what they mean.
+                                stages: cutsOf()});
             }
 
             function switchTo(want) {

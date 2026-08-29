@@ -123,7 +123,8 @@ areas it enters and leaves.
 
 **A tour can be walked in stages.** Mark a point in the list as the end of one and
 the route falls into stages, each with a heading carrying its own kilometres, its
-climb, a name you can give it and its own file. *All stages (zip)* writes every
+climb, a name you can give it and its own file. A point where one stage hands over
+to the next carries a second ring, on the map and on the profile. *All stages (zip)* writes every
 stage and the whole tour with its marks in one archive. Name the tour in the box
 above the list; the marks travel in the file, so loading it back gives you the
 tour and its stages.

@@ -1613,6 +1613,30 @@ class TestPlanMode:
         # the central directory entry.
         assert html.count("u16(0), u16(0), u32(sum)") == 2
 
+    def test_a_point_where_a_stage_changes_hands_says_so(self):
+        """A pin already carries two things -- which number it is and whether it
+        is picked -- so a third meaning has to be readable beside both rather
+        than instead of one. A second ring, drawn as a shadow so the icon keeps
+        its size and its anchor and nothing about where a click lands moves.
+
+        **The ends are not marked.** A tour begins and ends whether anybody says
+        so, and a ring at the finish would claim the walk carries on past it.
+        Driven with cuts after points 3 and 5: exactly pins 3 and 5 carry it, the
+        marker pane stays at one per point, and the two stations on the profile
+        carry two circles where the others carry one.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "function pinStyle(picked, ends) {" in html
+        assert "box-shadow:0 0 0 2px " in html
+        # Never the first or the last, in the one list all three readings of a
+        # cut are taken from.
+        assert "for (var i = 1; i + 1 < points.length; i += 1) {" in html
+        assert "stages: cutsOf()});" in html
+
     def test_it_draws_nothing_on_the_map(self):
         """The route belongs in a pane of its own: anything drawn into the
         overlay pane is counted among the map's paths for ever after, and 11,589
@@ -2198,7 +2222,10 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "if (element && record.label !== label)" in planning
-        assert "if (element && record.picked !== picked)" in planning
+        # Whether it is picked and whether it ends a stage, both compared
+        # against what was last written rather than read back off the element:
+        # a style set to '#111111' reads back as 'rgb(17, 17, 17)'.
+        assert "if (element && (record.picked !== picked || record.ends !== ends))" in planning
         # And the marker under the pointer is never written back to, or it
         # fights the hand moving it.
         assert "if (dragging && dragging.at === i) { continue; }" in planning

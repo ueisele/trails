@@ -691,6 +691,23 @@ the text is wrong about.
 walking further keeps the boundary where it was: a stage somebody named ends where
 they said it ended, and the ground added after it is the next stage.
 
+**And a point where a stage changes hands says so.** A second ring, on the pin and
+on the profile mark alike, because they are the same point seen from above and
+from the side. A ring rather than a colour or a size: a pin already carries which
+number it is and whether it is picked, and a third meaning has to be readable
+beside both rather than instead of one. Drawn as a **shadow**, so the icon keeps
+its size and its anchor and nothing about where a click lands moves — which is
+what keeps the marker pane at one per point and the plan's own paths where they
+were.
+
+**The ends are not marked**, and that is the decision in it: a tour begins and ends
+whether anybody says so, and a ring at the finish would claim the walk carries on
+past it. All three readings of a cut — the pins, the profile and the headings —
+come out of **one** list, so they cannot disagree about where the tour was cut.
+Driven with cuts after points 3 and 5: exactly pins 3 and 5 carry the ring, the
+marker pane holds 204 for six points, and two stations on the profile carry two
+circles where the other four carry one.
+
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
 chain. 20,183 requests in 13.6 minutes, none at all on a second build or on a
