@@ -210,11 +210,20 @@ command make notebook-clean       # Clear all notebook outputs
 # The map
 command make map                  # Build the Lomsdal-Visten map into analysis/output/
 command make graph                # Build the routing graph and report its numbers
-command make drive                # Drive the built page in a real browser (48 readings)
-command make deploy               # Publish the built map and purge the edge cache
+command make drive                # Drive the built page in a real browser (137 readings)
+command make deploy               # Publish the map make map last built, and purge the edge cache
 # map/graph/drive/deploy all take ARGS="...", e.g. make deploy ARGS="--dry-run".
-# deploy needs settings in the environment; see .env.example. Nothing identifying the
-# Cloudflare account may be committed here — this repository is public.
+#
+# PUBLISHING IS TWO STEPS AND THE ORDER MATTERS: `command make map`, then the deploy.
+# `make deploy` does NOT build. That is deliberate — it is what makes "publish the thing I
+# just looked at" possible — so deploying without building first publishes whatever is in
+# analysis/output/, however old it is.
+#
+# And `make deploy` is not the way in. It needs seven settings from the environment and has
+# no default for any of them, because nothing identifying the Cloudflare account may be
+# committed here: this repository is public. The infrastructure repository holds them and
+# drives the deploy; its own `just deploy` reads them out of state, unlocks the credentials
+# and calls `make deploy` here. See **Publishing** in analysis/README.md.
 
 # Testing & Quality
 command make check                # Run all checks (format check, lint, type, test)
