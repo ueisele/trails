@@ -127,7 +127,8 @@ read it, with the sensible answer already chosen and a sentence saying what each
 one would do to *that* file: restore what the file describes — for one of this
 map's own routes that is the plan itself, points, legs and all — route afresh
 between its waypoints, or match it onto the network wherever a path exists. Loading replaces
-whatever is on the map, so the question says how many points that is.
+whatever is on the map, so the question says how many points that is. Once the
+route has settled the map goes to it.
 
 ### Checking the built page
 

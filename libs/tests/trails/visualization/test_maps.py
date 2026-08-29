@@ -1487,6 +1487,36 @@ class TestPlanMode:
         # stations cannot be summed off the parts without saying so.
         assert "part.kind !== 'water' && part.kind !== CROSSING" in placing
 
+    def test_a_loaded_route_is_shown_once_and_not_once_a_refresh(self):
+        """The map stands wherever the reader left it and a file may describe
+        ground fifty kilometres away, so a load that changes nothing on the
+        screen reads as a load that did nothing. Driven: the map at zoom 9 over
+        the park moves to zoom 13 over a loaded recording with all 1,233 of its
+        vertices inside the window, and a map deliberately moved 50 km away
+        comes back to a loaded route with every point of it in view.
+
+        **The fit follows the settle, not the load.** A route half worked out has
+        half a shape, and fitting to that leaves the reader looking at the wrong
+        window. And it happens once: the map is the reader's from that moment,
+        and a control that moves it twice is one that fights the hand.
+        """
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+
+        assert "fitWanted = true;" in html
+        assert "if (fitWanted) { fitWanted = false; showRoute(); }" in html
+        # Fitted to what is drawn *and* to the points, which are not the same
+        # set: a waypoint on open water lies inside a crossing, and a crossing
+        # draws nothing at all.
+        showing = html.split("function showRoute() {")[1].split("\n            }")[0]
+        assert "points.forEach(" in showing
+        assert "maxZoom: SHOW_MAX_ZOOM" in showing
+        # Measured rather than assumed: both controls are the reader's to resize.
+        assert "getBoundingClientRect().height" in showing
+        assert "getBoundingClientRect().width" in showing
+
     def test_it_draws_nothing_on_the_map(self):
         """The route belongs in a pane of its own: anything drawn into the
         overlay pane is counted among the map's paths for ever after, and 11,589

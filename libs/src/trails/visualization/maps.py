@@ -4594,6 +4594,10 @@ class _PlanMode(MacroElement):
             // accepted, or an edit made while the question stands would look its
             // points up in the wrong track.
             var pendingFile = null;
+
+            // Set when a file is taken and cleared by the fit itself, so the map
+            // is moved once per load and not once per refresh.
+            var fitWanted = false;
             var loadedCount = 0;
 
             // A waypoint anchored to a recorded point. **It keeps the
@@ -5964,6 +5968,7 @@ class _PlanMode(MacroElement):
                 // route drawn on a map that will not let it be touched is the
                 // state this phase exists to avoid.
                 if (!on) { switchTo(true); }
+                fitWanted = true;
                 loadSaid = describeFile(loaded);
                 pendingFile = null;
                 refresh();
@@ -6010,6 +6015,45 @@ class _PlanMode(MacroElement):
                               ' m the network no longer carries, kept as recorded');
                 }
                 return said.length ? ' \\u00b7 ' + said.join(' \\u00b7 ') : '';
+            }
+
+            // ---- showing what was loaded -------------------------------------------
+            // **A loaded route is somewhere else.** The map stands wherever the
+            // reader left it and a file may describe ground fifty kilometres
+            // away, so a load that changes nothing on the screen reads as a load
+            // that did nothing. It is fitted once, when the route has settled,
+            // and never again: the map is the reader's from that moment and a
+            // control that moves it twice is one that fights the hand.
+            //
+            // Far enough in to read the route and no further. A two-hundred
+            // metre route fitted to the pixel would put the reader at street
+            // level with nothing around it to say where in the park they are.
+            var SHOW_MAX_ZOOM = 15;
+
+            function showRoute() {
+                var shape = composeRoute();
+                var bounds = L.latLngBounds([]), i;
+                for (i = 0; i < shape.lon.length; i += 1) { bounds.extend([shape.lat[i], shape.lon[i]]); }
+                // **And the points, which are not all in the line.** A waypoint
+                // set on open water lies inside a crossing, and a crossing draws
+                // nothing — so a route fitted to its drawn geometry alone would
+                // put that point outside the window it is a station of.
+                points.forEach(function (point) { bounds.extend([point.lat, point.lon]); });
+                if (!bounds.isValid()) { return; }
+                // The room the route may not be fitted into, because something
+                // is standing in it: the profile panel takes the foot of the map
+                // at whatever height the reader dragged it to, and the plan
+                // control takes the top right. Measured rather than assumed —
+                // both are the reader's to resize.
+                var panelBox = document.querySelector('.trails-profile-panel');
+                var planBox = document.querySelector('.trails-plan-control');
+                var below = panelBox ? Math.round(panelBox.getBoundingClientRect().height) : 0;
+                var beside = planBox ? Math.round(planBox.getBoundingClientRect().width) : 0;
+                map.fitBounds(bounds, {
+                    paddingTopLeft: [20, 20],
+                    paddingBottomRight: [beside + 20, below + 20],
+                    maxZoom: SHOW_MAX_ZOOM
+                });
             }
 
             // ---- the offer ----------------------------------------------------------
@@ -7317,6 +7361,10 @@ class _PlanMode(MacroElement):
                     // settled, and before that the two disagree about ground
                     // that is still being worked out.
                     loadSaid += drifted();
+                    // And shown, for the same reason again: a route half worked
+                    // out has half a shape, and fitting the map to it would
+                    // leave the reader looking at the wrong window.
+                    if (fitWanted) { fitWanted = false; showRoute(); }
                 }
                 loadStatus.textContent = loadSaid;
                 loadStatus.style.display = loadSaid ? '' : 'none';

@@ -585,6 +585,24 @@ walked against the 5.987 the file states*.
 Cost **16,289 bytes** on top of the question's, 39,640,012 to 39,656,301, and
 `make drive` still reads **48 green**.
 
+**And the map goes to what was loaded.** It stands wherever the reader left it and
+a file may describe ground fifty kilometres away, so a load that changes nothing on
+the screen reads as a load that did nothing. Driven: at rest the map is zoom 9 over
+the park; a recording taken puts it at **zoom 13** with all **1,233** of its
+vertices and every waypoint inside the window; and a map deliberately moved 50 km
+away to 65.15/13.4 comes back to a three-point route at **zoom 12**, all 201
+vertices and all three points in view.
+
+Three things it is careful about. It fits to the drawn line **and to the points**,
+which are not the same set — a waypoint on open water lies inside a crossing and a
+crossing draws nothing, so fitting to the geometry alone would put a station
+outside the window it belongs to. It keeps out of the room the two controls stand
+in, measured off them rather than assumed, because both are the reader's to
+resize. And it happens **once, on the settle**: a route half worked out has half a
+shape, and a control that moves the map twice is one that fights the hand. The
+ceiling is 15, so a two-hundred-metre route does not land the reader at street
+level with nothing around it to say where in the park they are. 3,012 bytes.
+
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
 chain. 20,183 requests in 13.6 minutes, none at all on a second build or on a
@@ -757,8 +775,8 @@ also carried its steepest into the figures table — 201,279 bytes, 17.8 a chain
 Everything else this panel gained — the zoom, the crosshair's mark on the map,
 the merged legend, the waypoint marks, the point list, the two controls learning
 to share the room, the question the picker now asks and the restoring behind it —
-came to **63,813 bytes between them**, under a third of what one number per chain
-cost. **A behaviour is written once and a row is written eleven
+and the map going to what was loaded — came to **66,825 bytes between them**, a
+third of what one number per chain cost. **A behaviour is written once and a row is written eleven
 thousand times**, which is the popups' 175-to-1 seen from the other end.
 The probes, with what they read now:
 
