@@ -3874,6 +3874,11 @@ class _ProfilePanel(MacroElement):
                 // the plan can offer it as a placeholder and tell a name a
                 // reader chose apart from the one every file carries by default.
                 routeName: function () { return EXPORT ? EXPORT.route.name : null; },
+                // Whether this panel was given what a file needs at all. A page
+                // may have a profile and no export — the panel hides its own
+                // button for exactly that — and anything else offering files off
+                // the back of it has to ask rather than assume.
+                writes: function () { return !!EXPORT; },
                 // Handing a name and a body to the browser, which is one place
                 // and not two: the anchor has to be in the document for the
                 // click to count, and that was measured rather than assumed.
@@ -6776,6 +6781,19 @@ class _PlanMode(MacroElement):
             // allowed and marks nothing -- the tour already ends there.
             function nameStage(at, name) {
                 if (at < 0 || at >= points.length) { return; }
+                // **An empty box over a point that ends nothing changes
+                // nothing.** Clicking into the last stage's name and out of it
+                // again wrote the empty string, which is a *string* and so a
+                // mark — invisible until the route grew a point past it and a
+                // stage boundary nobody had asked for appeared. Measured: two
+                // stages became three.
+                //
+                // Naming the last stage and then walking further does keep the
+                // boundary, and that is a decision rather than the defect: a
+                // stage somebody named ends where they said it ended, and the
+                // ground added after it is the next stage.
+                if (name === '' && typeof points[at].stage !== 'string') { return; }
+                if (points[at].stage === name) { return; }
                 points[at].stage = name;
                 refresh();
             }
@@ -6811,6 +6829,16 @@ class _PlanMode(MacroElement):
             // reader takes into the terrain and the tour is what they come back
             // to and edit, and an archive holding only the pieces would be a
             // set of files nothing can put together again.
+            // **Never fatal and never silent.** Writing an archive is the one
+            // thing here that finishes after the click that asked for it, so a
+            // failure arrives as a rejected promise with nobody listening —
+            // which is a button that does nothing and says nothing about it.
+            function fileFailed(failure) {
+                loadSaid = 'That file could not be written: ' +
+                    (failure && failure.message ? failure.message : String(failure));
+                refresh();
+            }
+
             function saveStages() {
                 var made = stagesOf().map(function (stage) {
                     var shape = composeRoute(stage.from, stage.to);
@@ -6820,7 +6848,7 @@ class _PlanMode(MacroElement):
                 });
                 var whole = composeRoute();
                 made.push(panel().routeFile(figuresOf(whole), whole, told(whole), writable()));
-                return panel().saveZip(made, writable());
+                return panel().saveZip(made, writable()).catch(fileFailed);
             }
 
             function saveStage(stage) {
@@ -7249,6 +7277,11 @@ class _PlanMode(MacroElement):
             // saying the same number would be the two-panel mistake the legend
             // was just cured of.
             var listOpen = false, listStations = [], heldRow = null;
+
+            // Which stage heading is being typed into, or null. The list is not
+            // rebuilt while one is, for the reason it is not rebuilt while a row
+            // is in the air.
+            var namingRow = null;
             var listBox = document.createElement('div');
             // Named, like the picker and the mode beside it: its height is
             // computed now, so nothing can find it by the cap it used to carry.
@@ -7311,13 +7344,29 @@ class _PlanMode(MacroElement):
                 // Never while a row is in the air. A leg settling mid-drag would
                 // otherwise rebuild the rows under the pointer and the drop
                 // would land on nothing.
-                if (heldRow !== null) { return; }
+                //
+                // **And never under a name being typed**, which is the same rule
+                // for the same reason and was missing: measured, typing a stage
+                // name and letting a point settle rebuilt the heading and threw
+                // the half-typed name away with it, with the caret going to the
+                // document. A leg settles a few hundred milliseconds after a
+                // click, which is well inside the time it takes to type a word.
+                if (heldRow !== null || namingRow !== null) { return; }
                 while (listBox.firstChild) { listBox.removeChild(listBox.firstChild); }
                 // **A tour nobody has cut gets no headings.** One stage is the
                 // whole route, and a heading over it would offer the same file
                 // the button already offers, under a second name -- which is the
                 // two-panel mistake the legend was cured of.
-                var stages = stagesOf(), heads = Object.create(null);
+                //
+                // **And only while the list is open.** Each heading composes its
+                // own stage to state its kilometres and its climb, so building
+                // them behind a shut box is a walk over the route per stage that
+                // nobody is looking at: measured with two stages, a refresh cost
+                // 9.65 ms shut against 10.20 open, which is to say shutting the
+                // list saved almost nothing. During a drag that is eight of them
+                // a second.
+                var stages = (listOpen && points.length) ? stagesOf() : [];
+                var heads = Object.create(null);
                 if (stages.length > 1) {
                     stages.forEach(function (stage) { heads[stage.from] = stage; });
                 }
@@ -7458,9 +7507,13 @@ class _PlanMode(MacroElement):
                 called.title = 'What this stage is called in its own file';
                 called.style.cssText = 'flex:1 1 auto;min-width:0;font:inherit;font-size:12px;' +
                     'padding:1px 3px;border:1px solid transparent;background:none;color:#333';
-                called.addEventListener('focus', function () { called.style.borderColor = '#bbb'; });
+                called.addEventListener('focus', function () {
+                    called.style.borderColor = '#bbb';
+                    namingRow = stage.at;
+                });
                 called.addEventListener('blur', function () {
                     called.style.borderColor = 'transparent';
+                    namingRow = null;
                     nameStage(stage.to, called.value);
                 });
                 // Leaflet binds its own shortcuts to the container, so a typed
@@ -7477,14 +7530,19 @@ class _PlanMode(MacroElement):
                 file.className = 'trails-plan-stage-file';
                 file.textContent = 'GPX';
                 file.title = 'Download this stage on its own';
-                file.style.cssText = 'flex:none;font:inherit;font-size:11px;padding:1px 6px;cursor:pointer';
+                file.style.cssText = 'flex:none;font:inherit;font-size:11px;padding:1px 6px;cursor:pointer;' +
+                    'display:' + ((panel() && panel().writes()) ? 'inline-block' : 'none');
                 // Refused while any leg of the route is unsettled, for the
                 // reason the whole tour's is: a file that states it breaks its
                 // track only at crossings must not be written over a hole.
                 file.disabled = !!writable().why;
                 file.addEventListener('click', function (event) {
                     event.stopPropagation();
-                    saveStage(stage);
+                    try {
+                        saveStage(stage);
+                    } catch (failure) {
+                        fileFailed(failure);
+                    }
                 });
 
                 head.appendChild(called);
@@ -7522,7 +7580,13 @@ class _PlanMode(MacroElement):
             everything.textContent = 'All stages (zip)';
             everything.title = 'Every stage on its own, and the whole tour with its stages, in one archive';
             everything.style.cssText = 'margin-top:4px;font:inherit;font-size:11px;padding:1px 6px;cursor:pointer';
-            everything.addEventListener('click', function () { saveStages(); });
+            everything.addEventListener('click', function () {
+                try {
+                    saveStages();
+                } catch (failure) {
+                    fileFailed(failure);
+                }
+            });
 
             titleRow.appendChild(title);
             titleRow.appendChild(everything);
@@ -7794,7 +7858,10 @@ class _PlanMode(MacroElement):
                     title.value = tourName;
                     title.placeholder = (panel() && panel().routeName()) || 'This tour';
                 }
-                var gathered = stagesOf().length > 1;
+                // Offered only where there is more than one stage to gather and
+                // where the panel can write a file at all.
+                var writes = !!(panel() && panel().writes());
+                var gathered = writes && listOpen && stagesOf().length > 1;
                 everything.style.display = gathered ? '' : 'none';
                 everything.disabled = !!writable().why;
                 if (on) {

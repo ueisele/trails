@@ -1556,7 +1556,11 @@ class TestPlanMode:
         html = fmap.get_root().render()
 
         assert "if (stages.length > 1) {" in html
-        assert "var gathered = stagesOf().length > 1;" in html
+        # And only where the panel can write a file at all, and only while the
+        # list is open -- each heading composes its own stage to state its
+        # figures, which is a walk over the route per stage nobody is looking at.
+        assert "var gathered = writes && listOpen && stagesOf().length > 1;" in html
+        assert "var stages = (listOpen && points.length) ? stagesOf() : [];" in html
         # The ends are never marked: a tour ends where it ends, and a mark there
         # would make a stage of no legs.
         assert "if (at < 1 || at + 1 >= points.length) { return; }" in html
@@ -1698,7 +1702,10 @@ class TestPlanMode:
 
         html = fmap.get_root().render()
 
-        assert "if (heldRow !== null) { return; }" in html
+        # And never under a name being typed, which is the same rule for the
+        # same reason: measured, typing a stage name and letting a point settle
+        # rebuilt the heading and threw the half-typed name away with it.
+        assert "if (heldRow !== null || namingRow !== null) { return; }" in html
 
     def test_the_list_keeps_inside_the_room_the_profile_leaves_it(self):
         """The profile panel is anchored to the foot of the map, takes its full

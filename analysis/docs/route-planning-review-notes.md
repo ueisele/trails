@@ -655,6 +655,42 @@ first is a check with an expiry date.**
 Cost **31,933 bytes**, 39,656,301 to 39,688,233, and `make drive` reads **48
 green** with no figure moved.
 
+### What reviewing the stages found
+
+**Four, three of them measured in a browser and all four taken.** The suite was
+green on all of them and so was `make drive`, which is the shape this project
+keeps meeting: the tests assert on the page's text and none of these is a thing
+the text is wrong about.
+
+- **A half-typed stage name was thrown away.** The list is not rebuilt while a row
+  is in the air — a leg settling mid-drag would rebuild the rows under the pointer
+  — and the same rule was missing for a name being typed. Measured: typing into a
+  heading and letting a point settle rebuilt it and lost the word, with the caret
+  going to the document. A leg settles a few hundred milliseconds after a click,
+  which is well inside the time it takes to type. Guarded the same way, and the
+  same word now survives with the caret still in the box.
+- **Clicking into a name and out of it planted a stage.** `nameStage` wrote the
+  empty string, and an empty string is a *string* and so a mark — invisible until
+  the route grew a point past it and a boundary nobody had asked for appeared.
+  Measured, two stages became three. An empty box over a point that ends nothing
+  now changes nothing. **A field whose absence and whose empty value mean
+  different things has to say which it is writing**, which is the `pd.NA` lesson
+  in a third language.
+- **Every heading composed its own stage whether or not anybody could see it.**
+  A shut list still walked the route once per stage on every refresh: measured at
+  9.65 ms shut against 10.20 open, which is to say shutting it saved nothing.
+  Built only while it is open, and the saving is 1.45 ms of a 10 ms refresh at
+  three stages and grows with them.
+- **The archive had no failure path**, and its button was offered on a panel that
+  cannot write a file at all. Writing an archive finishes *after* the click that
+  asked for it, so a fault arrived as a rejected promise with nobody listening —
+  a button that does nothing and says nothing. Caught and said, and both the
+  stage files and the archive now ask the panel whether it writes.
+
+**And one thing left as it is, deliberately.** Naming the last stage and then
+walking further keeps the boundary where it was: a stage somebody named ends where
+they said it ended, and the ground added after it is the next stage.
+
 **Phase 2** added `io/sources/hoydedata.py` and `routing/elevation.py`, a series
 on every walked edge with its ascent and descent, and four figures on every
 chain. 20,183 requests in 13.6 minutes, none at all on a second build or on a
