@@ -406,6 +406,10 @@ CHAIN_FIGURE_FIELDS = {
     "descent": "descent",
     "high_m": "high",
     "low_m": "low",
+    # The steepest the chain gets over a 25 m window, absolute. Carried rather
+    # than worked out in the page, so the panel's heading and the chain's own
+    # popup cannot come to say two different numbers about one chain.
+    "steepest_pct": "steepest",
     "compass": "point",
     # Only the arrow reads this, and it turns by it — a tenth of a degree is
     # less than the arrow's own stroke. The words come from "point" above.

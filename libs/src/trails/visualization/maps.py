@@ -2872,6 +2872,30 @@ class _ProfilePanel(MacroElement):
                 return out;
             }
 
+            // The steepest the ground gets along a series, absolute, over the
+            // same 25 m window the curve is banded by.
+            //
+            // **Absolute, because a signed maximum would call this park's
+            // steepest chain flat**: it climbs 9 m and drops 816. The same
+            // reasoning the popups were given, and the same window, so the
+            // heading, the colours and the crosshair cannot come to disagree
+            // about how steep the same ground is.
+            //
+            // Computed here only for a **composed route**, which nothing else
+            // has measured. A chain's is carried from the build, where it was
+            // read off the samples at arc length rather than off the chords this
+            // page sums — the two differ by about one part in a thousand, and
+            // one page showing both would be showing two answers.
+            function steepestOf(shape) {
+                var slope = gradients(shape), worst = NaN;
+                for (var i = 0; i < slope.length; i += 1) {
+                    if (isNaN(slope[i])) { continue; }
+                    var magnitude = Math.abs(slope[i]);
+                    if (isNaN(worst) || magnitude > worst) { worst = magnitude; }
+                }
+                return worst;
+            }
+
             // Which band a gradient falls in. Anything unmeasurable comes back
             // as the gentlest — a stretch too short to read a slope along is not
             // thereby steep, and colouring it would be an assertion nothing
@@ -3527,7 +3551,11 @@ class _ProfilePanel(MacroElement):
                 var told = [];
                 if (shape.read) { told.push(climb(figure)); }
                 told.push((shape.total / 1000).toFixed(2) + ' km on foot');
-                if (shape.read) { told.push('high ' + metres(figure.high) + ' m', 'low ' + metres(figure.low) + ' m'); }
+                if (shape.read) {
+                    told.push('high ' + metres(figure.high) + ' m', 'low ' + metres(figure.low) + ' m');
+                    var worst = steepestOf(shape);
+                    if (!isNaN(worst)) { told.push('steepest ' + Math.round(worst) + ' %'); }
+                }
                 told = told.concat(extra || []).concat(protectedIn(shape));
                 if (!shape.read) {
                     told.push(shape.total > 0 ? 'no height was read along it' : 'no ground under any of it');
@@ -3566,8 +3594,16 @@ class _ProfilePanel(MacroElement):
                         : 'No profile: the height model has no reading along this stretch.');
                     return;
                 }
+                // The chain's steepest is the **build's**, the same number its
+                // popup carries, and not one worked out here from the drawn
+                // series: those two agree to about a part in a thousand and
+                // disagree in the third decimal, which is one number too many
+                // for one chain in one page.
+                var steepest = figure.steepest;
                 say(climb(figure) + ' \\u00b7 high ' + metres(figure.high) + ' m \\u00b7 low ' + metres(figure.low) +
                     ' m \\u00b7 ' + (shape.total / 1000).toFixed(2) + ' km' +
+                    (steepest === null || steepest === undefined || isNaN(steepest)
+                        ? '' : ' \\u00b7 steepest ' + Math.round(Math.abs(steepest)) + ' %') +
                     (figure.bearing === null ? ' \\u00b7 a loop, so it climbs the same either way' : ''));
             }
 

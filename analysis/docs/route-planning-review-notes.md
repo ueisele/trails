@@ -116,6 +116,35 @@ out per feature and compresses against nothing. **Showing a figure is the
 expensive half; carrying it is nearly free.** Neither budget is threatened, and
 the ratio is the thing to remember before adding the next row.
 
+**And the profile's heading says how steep the ground gets**, absolute, over the
+25 m window the curve is banded by — for a chain and for a planned route alike.
+The route half is what was missing: a chain's popup has said it since the
+steepness rows went in, and a route has no popup.
+
+**Where the number comes from is the whole decision.** A chain's is the
+**build's**, carried in the figures table beside its ascent, because that is the
+number its own popup shows. The page could work it out from the series it draws —
+measured, it answers **80.87** where the build says **81**, and **62.80** against
+**63** — and the gap is the arc length Python spaces its samples at against the
+chords this page sums. Both round to the same whole per cent, and one page
+showing two answers about one chain is the failure this project keeps finding, so
+the chain's is carried and only a route's is computed.
+
+That cost **201,279 bytes**, 39,425,132 to 39,626,411, or **17.8 bytes a chain** —
+0.51 % of the page for one number on 11,290 chains. Cheap by the ratio that
+matters here: a popup row costs 175 times what carrying it does, and this is the
+carrying.
+
+**And it caught a probe of mine rather than a defect.** Re-derived by hand the
+route's steepest came out 52.62 against the page's 54, which looked like a real
+disagreement. The rule is **asymmetric** — `low` stays inside the window's half
+and `high` steps one sample past it — and my re-derivation had stepped `low` past
+it too. Written as it stands, the same walk gives **53.66**, which rounds to the
+54 shown. The page mirrors `elevation.py` line for line; it was the check that
+had drifted. **Re-deriving a rule is worth doing and worth doing exactly**, and
+the near-miss is the shape to watch: a re-derivation that is nearly right is more
+convincing than one that is obviously wrong.
+
 **And two controls stopped fighting over the same room.** The profile panel is
 anchored to the foot of the map, takes its full width and is the reader's own to
 drag taller; the plan control grows down from the top right. They share a

@@ -851,6 +851,30 @@ class TestProfilePanel:
         assert "var level = read ? y(value) : box.bottom - STATION_R - 1;" in html
         assert "var ink = read ? STATION : STATION_UNREAD;" in html
 
+    def test_the_heading_says_how_steep_the_ground_gets(self, group):
+        """Absolute, over the 25 m window the curve is banded by: a signed
+        maximum would call this park's steepest chain flat, since it climbs 9 m
+        and drops 816.
+
+        A chain's figure is the build's, the same number its popup carries. The
+        page's own series would answer 80.87 where the build says 81 -- they
+        differ by the arc length Python spaces its samples at against the chords
+        this page sums -- and one page showing both would be showing two answers
+        about one chain. A composed route has no build figure and no popup, so
+        there the page computes it.
+        """
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "function steepestOf(shape) {" in html
+        assert "var slope = gradients(shape), worst = NaN;" in html
+        # A route works it out; a chain is handed it.
+        assert "var worst = steepestOf(shape);" in html
+        assert "told.push('steepest ' + Math.round(worst) + ' %');" in html
+        assert "var steepest = figure.steepest;" in html
+
     def test_a_window_belongs_to_the_chain_it_was_opened_on(self, group):
         """Carried over, it would open the panel somewhere in the middle of
         whatever the reader just clicked, at a scale chosen for something else.
