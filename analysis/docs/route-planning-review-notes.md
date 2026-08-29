@@ -2571,6 +2571,39 @@ the assumption that was removed.
 
 `make drive` reads **127**.
 
+### And a reader asked what a tool was, which was the finding
+
+**"What is profile? I cannot click it."** Asked of the published map, and it is
+the sharpest kind of report: not *this is broken* but *I do not know what this
+is*. Both halves were true, and both were mine.
+
+It was **the only tool in the rail that was ever disabled** — greyed at 0.4 with
+no reason given, and on the rail with no text at all, only a hover title a finger
+never sees. And *ever* meant **every moment before something is selected**, which
+is exactly when somebody meets it for the first time. A reader's first encounter
+with it was a control that would not answer and could not say why.
+
+**A control that cannot be used has to say why**, and this one can do better: it
+is never disabled now, and with nothing to draw it opens like every other tool
+and says what it draws and what it needs. The moment something *is* selected the
+explanation goes away, because a panel saying there is nothing to draw is a wrong
+sentence the instant there is.
+
+**And it is called what its own panel calls itself.** The panel has headed itself
+*Elevation profile* since phase 4; the tool said *Profile*. One thing under two
+names is the mistake the legend and the layer control had already made once on
+this map, and it was reintroduced by the chrome in a smaller way.
+
+The icon says something too: blue while the panel stands, the way the plan icon
+is blue while plan mode is on. A second press folds it — **277 px to 35** — which
+is what its own heading has always done, and folding is not hiding.
+
+`the elevation profile tool` is ten readings, and it found two defects in itself
+on the way: that it was reading *hidden* where it meant *folded*, and that it
+left the chain selected behind it, so the check after it selected the same chain
+and **deselected** it — every profile reading after that skipped, silently.
+`make drive` reads **137**.
+
 ### What is still open on a phone
 
 - **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the

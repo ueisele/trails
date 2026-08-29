@@ -9056,8 +9056,8 @@ class _Chrome(MacroElement):
                  hint: 'Which Kartverket sheet is drawn underneath.'},
                 {key: 'plan', label: 'Plan a route', width: 330, selector: '.trails-plan-control',
                  hint: 'Set points, route between them, cut it into stages.'},
-                {key: 'profile', label: 'Profile', width: 0, selector: null,
-                 hint: 'The height of what is selected, along the foot.'},
+                {key: 'profile', label: 'Elevation profile', width: 320, selector: null,
+                 hint: 'The climb of a trail you tap, or of a route you plan.'},
                 {key: 'info', label: 'Sources', width: 360, selector: null,
                  hint: 'Who made this data, and under what licence.'}
             ];
@@ -9274,6 +9274,23 @@ class _Chrome(MacroElement):
             })();
             byKey.info.holder = sourcesHolder;
 
+            // **The one tool that used to be dead half the time.** It was
+            // disabled while nothing was selected — greyed, with no reason
+            // given, and on the rail with no text at all — so a reader meeting
+            // it for the first time met a control that would not answer and
+            // could not say why. It is never disabled now: with nothing to draw
+            // it opens and says what it is and what it needs, which is what
+            // every other tool here does.
+            var profileHolder = document.createElement('div');
+            profileHolder.className = 'trails-profile-empty';
+            profileHolder.innerHTML =
+                '<p style="margin:0 0 8px">The height of what you pick, drawn along the ' +
+                'foot of the map.</p>' +
+                '<p style="margin:0;color:#55666b">Tap a path or a route on the map and its ' +
+                'climb appears here \u2014 or plan a route with <b>Plan a route</b> and this ' +
+                'draws the walk.</p>';
+            byKey.profile.holder = profileHolder;
+
             // **Every holder lives in the dock from the start, hidden rather
             // than detached.** Detached DOM measures zero, and two of these
             // controls size themselves against what is around them — a plan
@@ -9440,12 +9457,14 @@ class _Chrome(MacroElement):
             function paintProfile() {
                 var panel = profilePanel();
                 if (panel) { panel.style.display = (selection && !profileHeld()) ? '' : 'none'; }
-                var button = railButtons.profile;
-                if (button) {
-                    button.disabled = !selection;
-                    button.style.opacity = selection ? '' : '0.4';
-                    button.style.cursor = selection ? 'pointer' : 'default';
-                }
+                paintRail();
+            }
+
+            // Whether the profile panel is standing, which is what the rail's
+            // own icon says now that it is never greyed.
+            function profileShowing() {
+                var panel = profilePanel();
+                return !!(panel && panel.style.display !== 'none');
             }
 
             // Read off what plan mode last pushed rather than asked for. Asking
@@ -9459,7 +9478,12 @@ class _Chrome(MacroElement):
                     if (!button) { return; }
                     var lit = openTool === tool.key;
                     button.style.background = lit ? '#0d47a1' : 'none';
-                    button.style.color = lit ? '#ffffff' : (tool.key === 'plan' && planOn() ? '#0d47a1' : '#55666b');
+                    // A tool the reader has switched on rather than opened:
+                    // plan mode outlives its panel, and the profile panel stands
+                    // at the foot rather than in the dock.
+                    var running = (tool.key === 'plan' && planOn()) ||
+                        (tool.key === 'profile' && profileShowing());
+                    button.style.color = lit ? '#ffffff' : (running ? '#0d47a1' : '#55666b');
                     button.setAttribute('aria-pressed', String(lit));
                 });
             }
@@ -9482,11 +9506,6 @@ class _Chrome(MacroElement):
                         esc(tool.label) + '</b><span style="display:block;font-size:11.5px;color:#8a9a9e">' +
                         esc(tool.hint) + '</span></span>' +
                         '<span style="flex:none;color:#8a9a9e">' + icon('chevron', 15) + '</span>';
-                    if (tool.key === 'profile' && !window.trailsProfile) {
-                        row.disabled = true;
-                        row.style.opacity = '0.45';
-                        row.style.cursor = 'default';
-                    }
                     row.addEventListener('click', function () { pick(tool.key); });
                     menuParts.body.appendChild(row);
                 });
@@ -9495,7 +9514,10 @@ class _Chrome(MacroElement):
             function pick(key) {
                 var tool = byKey[key];
                 if (!tool) { return; }
-                if (key === 'profile') {
+                // With something selected this shows and hides the panel and
+                // opens no dock: the panel *is* what the tool is for. With
+                // nothing selected it falls through and the dock explains it.
+                if (key === 'profile' && selection) {
                     if (map.getSize().x < NARROW && planOn()) {
                         // While planning on a phone this is what shows and hides
                         // the panel. Folding it by its own heading instead would
@@ -9756,6 +9778,9 @@ class _Chrome(MacroElement):
                 // one look the same from outside it.
                 selected: function (chosen) {
                     selection = chosen;
+                    // The empty profile panel says there is nothing to draw. The
+                    // moment there is, it is a wrong sentence on the screen.
+                    if (chosen && openTool === 'profile') { closeDock(); }
                     if (!chosen) { profileWanted = false; closeSheet(); }
                     paintProfile();
                     place();

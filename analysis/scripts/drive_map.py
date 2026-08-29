@@ -1525,6 +1525,85 @@ def the_search_on_a_narrow_panel(page: Any) -> Check:
     )
 
 
+def the_profile_tool(page: Any) -> Check:
+    """A tool that is never dead, and says what it needs when it has nothing.
+
+    Reported by a reader who met it on the published map: *what is profile? I
+    cannot click it.* It was the only tool in the rail that was ever disabled --
+    greyed at 0.4, with no reason given, and on the rail with no text at all --
+    and *ever* meant every moment before something is selected, which is exactly
+    when somebody meets it for the first time.
+
+    **A control that cannot be used has to say why**, and here it can do better
+    than that: it opens like every other tool and tells the reader what it draws
+    and what it needs. It is also called what its own panel calls itself now.
+
+    Args:
+        page: The driven page, with nothing selected
+
+    Returns:
+        Whether it opens, what it says, and whether it gets out of the way
+    """
+    button = """() => { const b = document.querySelector('.trails-rail button[data-tool=profile]');
+      return b ? {title: b.title, disabled: b.disabled, colour: b.style.color} : null; }"""
+    shown = """() => { const open = [...document.querySelectorAll('.trails-chrome-body > div')]
+        .filter(node => node.offsetParent !== null);
+      const empty = document.querySelector('.trails-profile-empty');
+      return {holders: open.length, empty: !!(empty && empty.offsetParent !== null),
+              says: open.length === 1 ? open[0].textContent.trim().slice(0, 60) : ''}; }"""
+
+    page.evaluate("() => window.trailsChrome.close()")
+    page.wait_for_timeout(500)
+    at_rest = page.evaluate(button)
+
+    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.wait_for_timeout(700)
+    opened = page.evaluate(shown)
+    titled = page.evaluate("() => document.querySelector('.trails-dock .trails-chrome-title').textContent")
+
+    told = select(page, LONG_CHAIN)
+    page.wait_for_timeout(900)
+    after = page.evaluate("() => ({tool: window.trailsChrome.state().tool, profile: window.trailsChrome.state().profile})")
+    lit = page.evaluate(button)
+
+    # **Folding is not hiding**, and the reading has to know which it asked
+    # for: the panel's own heading collapses it to a 35 px bar and leaves it on
+    # the map, which is what this tool does where there is room for it.
+    tall = "() => { const p = document.querySelector('.trails-profile-panel'); return p ? Math.round(p.getBoundingClientRect().height) : 0; }"
+    open_px = page.evaluate(tall)
+    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.wait_for_timeout(600)
+    folded_px = page.evaluate(tall)
+    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.wait_for_timeout(600)
+
+    # And it hands the page back the way it found it, or the check after this
+    # one selects the same chain and deselects it instead.
+    page.evaluate(SELECT_CHAIN, LONG_CHAIN)
+    page.wait_for_timeout(900)
+
+    return Check(
+        "the elevation profile tool",
+        [
+            Reading("it is never disabled", at_rest["disabled"] if at_rest else True, False),
+            Reading("and is called what its panel is called", at_rest["title"] if at_rest else "", "Elevation profile"),
+            Reading("with nothing selected it opens", titled, "Elevation profile"),
+            # One holder visible and one only: every tool's panel lives in the
+            # dock from the start, hidden rather than detached, so "what is on
+            # screen" is a question about display and not about the tree.
+            Reading("showing exactly one panel", opened["holders"], 1),
+            Reading("and it is the one that explains it", opened["empty"], True, note=opened["says"]),
+            # The moment there is something to draw, a panel saying there is not
+            # is a wrong sentence on the screen.
+            Reading("selecting a trail takes it away", after["tool"] if told else None, None),
+            Reading("and draws the profile instead", after["profile"] if told else True, True),
+            Reading("the rail says the panel is standing", lit["colour"] if lit else "", "rgb(13, 71, 161)"),
+            Reading("and the tool folds it away", folded_px < open_px / 2, True, note=f"{open_px} px to {folded_px}"),
+            Reading("leaving nothing selected behind it", page.evaluate("() => window.trailsProfile"), None),
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -1537,7 +1616,7 @@ def drive(page: Any) -> list[Check]:
     Returns:
         Every check, in the order it ran
     """
-    checks = [furniture(page), map_wheel(page), chrome_layout(page)]
+    checks = [furniture(page), map_wheel(page), chrome_layout(page), the_profile_tool(page)]
 
     if not select(page, LONG_CHAIN):
         checks.append(Check("the profile panel", skipped=f"{LONG_CHAIN} is not in this page — see LONG_CHAIN"))
