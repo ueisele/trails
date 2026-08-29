@@ -8284,6 +8284,23 @@ class _PlanMode(MacroElement):
             // handed over; the panel draws the curve, the bands, the crosshair
             // and the reduction exactly as it does for a chain, and writes the
             // file from the same series it drew.
+            // **Pushed, not polled.** The chrome draws a bar at the foot of a
+            // narrow screen while a route is being planned, and everything on it
+            // comes from here — reading it the other way round would mean
+            // `state()`, which composes the whole route, on a timer. The same
+            // seam the profile panel already uses to say what is selected.
+            function sayPlanning(shape) {
+                if (!window.trailsChrome || !window.trailsChrome.planning) { return; }
+                var figure = shape && points.length > 1 ? figuresOf(shape) : null;
+                window.trailsChrome.planning({
+                    on: on,
+                    points: points.length,
+                    metres: shape ? shape.total : 0,
+                    ascent: figure ? figure.ascent : null,
+                    working: settling > 0
+                });
+            }
+
             function present() {
                 var showing = panel();
                 if (!points.length) {
@@ -8291,12 +8308,21 @@ class _PlanMode(MacroElement):
                     // for the same reason the panel is: how far along a point
                     // comes is the walk's answer, not a sum of the legs'.
                     drawList([]);
+                    sayPlanning(null);
                     if (showing) { showing.series(null); }
                     return;
                 }
                 var shape = composeRoute();
                 drawList(shape.stations || []);
+                sayPlanning(shape);
                 if (!showing) { return; }
+                // **A route of one point has no legs and nothing to draw.**
+                // Measured on a phone: the panel opened at 355 px for it, 42 %
+                // of the screen for an empty chart, and the ground the reader
+                // was trying to tap went with it. Not a narrow-screen rule —
+                // there is nothing to draw on any screen — so the panel is told
+                // there is nothing rather than told to be small.
+                if (points.length < 2) { showing.series(null); return; }
                 showing.series({label: 'planned route', figure: figuresOf(shape), shape: shape,
                                 told: told(shape), plan: writable(),
                                 // Which of the marks below the curve are where a
@@ -8484,6 +8510,14 @@ class _PlanMode(MacroElement):
                 // answer the click uses to decide that it means an insertion.
                 onRoute: onRoute,
                 toggle: function (want) { switchTo(want === undefined ? !on : !!want); },
+                // The count is the list's handle inside this control, and the
+                // plan bar is its handle from outside one. Both ask for the
+                // same thing rather than each carrying their own idea of it.
+                showList: function (want) {
+                    listOpen = want === undefined ? !listOpen : !!want;
+                    refresh();
+                    return listOpen && points.length > 0;
+                },
                 state: function () {
                     var shape = composeRoute();
                     return {
@@ -8961,6 +8995,7 @@ class _Chrome(MacroElement):
                 profile: '<path d="M2.4 13.4 6 7.9l3 3.4 2.6-5.4 3.9 7.5Z"/>',
                 info: '<circle cx="9" cy="9" r="6.6"/><path d="M9 8.2v4.1"/><circle cx="9" cy="5.7" r=".7" fill="currentColor" stroke="none"/>',
                 burger: '<path d="M3 5.4h14M3 10h14M3 14.6h14"/>',
+                undo: '<path d="M4 8.5h7.2a3.3 3.3 0 0 1 0 6.6H7"/><path d="M6.8 5.3 3.6 8.5l3.2 3.2"/>',
                 chevron: '<path d="M7 4.5 12 9l-5 4.5"/>'
             };
 
@@ -9227,6 +9262,97 @@ class _Chrome(MacroElement):
             burger.addEventListener('click', function () { openMenu(); });
             chrome.appendChild(burger);
 
+            // ---- the plan bar, which is the whole of planning on a phone ------
+            // **44 px, and it is the pointer's own row height** — the same
+            // number the point list already takes under a coarse pointer, not a
+            // new constant. It carries what a reader planning needs to see and
+            // reach without giving up the ground they are tapping: how far they
+            // have got, the way back one step, and the way out.
+            //
+            // Measured before it: with the plan panel shut, the only thing on a
+            // 390 px screen was the burger — nothing said plan mode was on, and
+            // every tap placed a point. Reaching the point list was four taps.
+            var planState = null, profileWanted = false, selection = null;
+
+            var planbar = document.createElement('div');
+            planbar.className = 'trails-planbar';
+            planbar.style.cssText = 'position:absolute;left:0;right:0;height:44px;display:none;' +
+                'pointer-events:auto;background:#ffffff;border-top:1px solid #999;box-sizing:border-box;' +
+                'align-items:center;gap:8px;padding:0 8px 0 12px';
+            L.DomEvent.disableClickPropagation(planbar);
+
+            var planFigures = document.createElement('div');
+            planFigures.className = 'trails-planbar-figures';
+            planFigures.style.cssText = 'flex:1;min-width:0;cursor:pointer';
+            var planSays = document.createElement('b');
+            planSays.style.cssText = 'display:block;font-size:14px;line-height:1.15;' +
+                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+            var planHint = document.createElement('span');
+            planHint.style.cssText = 'display:block;font-size:10.5px;color:#8a9a9e;line-height:1.1';
+            planFigures.appendChild(planSays);
+            planFigures.appendChild(planHint);
+
+            function planAction(label, explains) {
+                var made = document.createElement('button');
+                made.type = 'button';
+                made.title = explains;
+                made.setAttribute('aria-label', explains);
+                made.style.cssText = 'flex:none;width:40px;height:40px;border:1px solid #d3dbdc;' +
+                    'border-radius:8px;background:#fff;cursor:pointer;color:#55666b;' +
+                    'display:flex;align-items:center;justify-content:center';
+                made.innerHTML = label;
+                return made;
+            }
+            var planUndo = planAction(icon('undo', 17), 'Take the last point back');
+            var planDone = document.createElement('button');
+            planDone.type = 'button';
+            planDone.textContent = 'Done';
+            planDone.style.cssText = 'flex:none;height:40px;padding:0 14px;border:1px solid #111;' +
+                'border-radius:8px;background:#111;color:#fff;cursor:pointer;font:inherit;' +
+                'font-size:13px;font-weight:600';
+
+            planbar.appendChild(planFigures);
+            planbar.appendChild(planUndo);
+            planbar.appendChild(planDone);
+            chrome.appendChild(planbar);
+
+            planFigures.addEventListener('click', function () {
+                if (window.trailsPlan) { window.trailsPlan.showList(true); }
+                pick('plan');
+            });
+            planUndo.addEventListener('click', function () {
+                if (window.trailsPlan) { window.trailsPlan.undo(); }
+            });
+            planDone.addEventListener('click', function () {
+                if (window.trailsPlan) { window.trailsPlan.toggle(false); }
+            });
+
+            function paintPlanBar() {
+                var count = planState ? planState.points : 0;
+                if (!count) {
+                    planSays.textContent = 'Tap the map to place the first point';
+                    planHint.textContent = 'Plan mode is on';
+                } else {
+                    // **`isFinite` and not a null check.** A route whose legs
+                    // are all crossings has no walked distance and no climb, and
+                    // the ascent comes back NaN rather than null — driven with
+                    // three points on open water, the bar read `+NaN m`. NaN is
+                    // neither null nor undefined, so a guard that tests for
+                    // those lets it straight through onto the screen.
+                    var said = count + (count === 1 ? ' point' : ' points');
+                    if (count > 1 && isFinite(planState.metres)) {
+                        said += ' \u00b7 ' + (planState.metres / 1000).toFixed(2) + ' km';
+                    }
+                    if (isFinite(planState.ascent)) {
+                        said += ' \u00b7 +' + Math.round(planState.ascent) + ' m';
+                    }
+                    planSays.textContent = said;
+                    planHint.textContent = planState.working ? 'working\u2026' : 'tap for the list';
+                }
+                planUndo.disabled = !count;
+                planUndo.style.opacity = count ? '' : '0.35';
+            }
+
             // ---- the profile panel, which is shown by having something to show
             var profileBox = null;
             function profilePanel() {
@@ -9234,20 +9360,31 @@ class _Chrome(MacroElement):
                 return profileBox;
             }
 
-            function showProfile(on) {
+            // **While a route is being planned on a narrow screen the panel
+            // does not open by itself.** The ground under it is exactly what the
+            // reader is tapping: measured, two points put 389 px of panel on an
+            // 844 px screen and left 439 px of map to place the next one on. It
+            // is one tap away on the Profile tool and not gone — the bargain the
+            // legend struck, in a second place.
+            function profileHeld() {
+                return map.getSize().x < NARROW && planOn() && !profileWanted;
+            }
+
+            function paintProfile() {
                 var panel = profilePanel();
-                if (panel) { panel.style.display = on ? '' : 'none'; }
+                if (panel) { panel.style.display = (selection && !profileHeld()) ? '' : 'none'; }
                 var button = railButtons.profile;
                 if (button) {
-                    button.disabled = !on;
-                    button.style.opacity = on ? '' : '0.4';
-                    button.style.cursor = on ? 'pointer' : 'default';
+                    button.disabled = !selection;
+                    button.style.opacity = selection ? '' : '0.4';
+                    button.style.cursor = selection ? 'pointer' : 'default';
                 }
             }
 
-            function planOn() {
-                try { return !!(window.trailsPlan && window.trailsPlan.state().on); } catch (error) { return false; }
-            }
+            // Read off what plan mode last pushed rather than asked for. Asking
+            // composes the whole route, which is 45 ms over a 37 km one, and
+            // this is called on every paint.
+            function planOn() { return !!(planState && planState.on); }
 
             function paintRail() {
                 TOOLS.forEach(function (tool) {
@@ -9258,13 +9395,6 @@ class _Chrome(MacroElement):
                     button.style.color = lit ? '#ffffff' : (tool.key === 'plan' && planOn() ? '#0d47a1' : '#55666b');
                     button.setAttribute('aria-pressed', String(lit));
                 });
-            }
-
-            // Plan mode outlives its panel — it is a mode, not a window — so the
-            // rail says whether it is on. Asked after the control's own handler
-            // has run, and only then: reading it composes the route.
-            if (byKey.plan.node) {
-                byKey.plan.node.addEventListener('click', function () { window.setTimeout(paintRail, 0); });
             }
 
             function buildMenu() {
@@ -9299,8 +9429,16 @@ class _Chrome(MacroElement):
                 var tool = byKey[key];
                 if (!tool) { return; }
                 if (key === 'profile') {
-                    var head = container.querySelector('.trails-profile-head');
-                    if (head) { head.click(); }
+                    if (map.getSize().x < NARROW && planOn()) {
+                        // While planning on a phone this is what shows and hides
+                        // the panel. Folding it by its own heading instead would
+                        // leave a 35 px bar of nothing over the map.
+                        profileWanted = !profileWanted;
+                        paintProfile();
+                    } else {
+                        var head = container.querySelector('.trails-profile-head');
+                        if (head) { head.click(); }
+                    }
                     closeMenu();
                     place();
                     return;
@@ -9388,6 +9526,13 @@ class _Chrome(MacroElement):
 
             // ---- where everything stands -------------------------------------
             function place() {
+                // **First, because whether the profile panel is drawn at all
+                // depends on the width.** Driven from a desktop viewport down to
+                // 390 px, the panel kept the display it had been given when the
+                // screen was wide, and the plan bar then measured itself against
+                // a panel that should not have been there — 346 px of map
+                // instead of 784. Anything that re-places has to re-decide this.
+                paintProfile();
                 var size = map.getSize();
                 var narrow = size.x < NARROW;
                 var landscape = narrow && size.x > size.y;
@@ -9416,6 +9561,17 @@ class _Chrome(MacroElement):
                 menu.style.display = (menuOpen && narrow) ? 'flex' : 'none';
                 dock.style.display = openTool ? 'flex' : 'none';
                 sheet.style.display = (detailShown && !hidden) ? 'flex' : 'none';
+
+                // The bar stands on the profile panel where one is showing and
+                // at the foot where none is, keeping the 16 px the panel leaves
+                // the attribution. Everything above is then capped against its
+                // top rather than against the panel's.
+                var planShown = narrow && planOn();
+                planbar.style.display = planShown ? 'flex' : 'none';
+                if (planShown) {
+                    planbar.style.bottom = (floor < size.y ? size.y - floor : 16) + 'px';
+                    floor = Math.max(0, (floor < size.y ? floor : size.y - 16) - 44);
+                }
 
                 var covering = narrow && (openTool !== null || menuOpen ||
                     (!landscape && detailShown));
@@ -9509,9 +9665,20 @@ class _Chrome(MacroElement):
                 tools: TOOLS.map(function (tool) { return tool.key; }),
                 // Told by the profile panel, because a folded panel and an empty
                 // one look the same from outside it.
-                selected: function (selection) {
-                    showProfile(!!selection);
-                    if (!selection) { closeSheet(); }
+                selected: function (chosen) {
+                    selection = chosen;
+                    if (!chosen) { profileWanted = false; closeSheet(); }
+                    paintProfile();
+                    place();
+                },
+                // What plan mode pushes on every refresh, and everything the bar
+                // draws. Nothing here asks plan mode anything back.
+                planning: function (summary) {
+                    planState = summary;
+                    if (!summary || !summary.on) { profileWanted = false; }
+                    paintPlanBar();
+                    paintProfile();
+                    paintRail();
                     place();
                 },
                 state: function () {
@@ -9521,13 +9688,18 @@ class _Chrome(MacroElement):
                         menu: menuOpen,
                         detail: detailShown,
                         profile: !!(profilePanel() && profilePanel().style.display !== 'none'),
+                        planning: planOn(),
+                        planPoints: planState ? planState.points : 0,
+                        planBar: planbar.style.display !== 'none',
                         coarse: container.classList.contains('trails-coarse'),
                         threshold: NARROW
                     };
                 }
             };
 
-            showProfile(!!window.trailsProfile);
+            selection = window.trailsProfile || null;
+            paintProfile();
+            paintPlanBar();
             place();
         })();
         {% endmacro %}

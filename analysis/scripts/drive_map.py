@@ -1180,6 +1180,101 @@ def a_way_back_to_the_whole(page: Any) -> Check:
     )
 
 
+def the_plan_bar(page: Any) -> Check:
+    """Planning on a phone, with the ground it is planned on left showing.
+
+    Measured before this was built, with real taps at 390 x 844: the profile
+    panel opened on the **first** point at 355 px and grew to 389 on the second,
+    so the map a reader was tapping shrank to **439 px** -- and with the plan
+    panel shut the only thing on the screen was the burger, so nothing said plan
+    mode was on and every tap placed a point. Reaching the point list was four
+    taps and undo was three.
+
+    Args:
+        page: The driven page, in plan mode with points down
+
+    Returns:
+        What the bar says and reaches, and what it left of the map
+
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(900)
+    page.evaluate("() => window.trailsChrome.close()")
+    page.wait_for_timeout(600)
+
+    seen = """() => {
+      const box = sel => { const n = document.querySelector(sel);
+        if (!n || n.offsetParent === null) { return null; }
+        const r = n.getBoundingClientRect();
+        return {w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top)}; };
+      const bar = document.querySelector('.trails-planbar');
+      return {bar: box('.trails-planbar'),
+              says: bar ? bar.querySelector('b').textContent : null,
+              profile: box('.trails-profile-panel'),
+              dock: box('.trails-dock'),
+              rows: (() => { const l = document.querySelector('.trails-plan-points');
+                return l && l.style.display !== 'none' ? l.children.length : 0; })(),
+              state: window.trailsChrome.state()}; }"""
+
+    planning = page.evaluate(seen)
+    before = page.evaluate("() => window.trailsPlan.state().points.length")
+
+    # One tap on the figures, and the list is open. Four taps before this.
+    page.evaluate("() => { document.querySelector('.trails-planbar-figures').click(); }")
+    page.wait_for_timeout(900)
+    reached = page.evaluate(seen)
+
+    page.evaluate("() => window.trailsChrome.close()")
+    page.wait_for_timeout(500)
+    page.evaluate("() => { document.querySelectorAll('.trails-planbar button')[0].click(); }")
+    page.wait_for_timeout(2400)
+    undone = page.evaluate("() => window.trailsPlan.state().points.length")
+
+    # The profile is one tap away rather than gone.
+    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.wait_for_timeout(900)
+    asked = page.evaluate(seen)
+
+    page.evaluate("() => { document.querySelectorAll('.trails-planbar button')[1].click(); }")
+    page.wait_for_timeout(900)
+    done = page.evaluate(seen)
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(900)
+
+    return Check(
+        "planning with the map still showing",
+        [
+            Reading("the bar stands while planning", bool(planning["bar"]), True),
+            Reading("px it takes", planning["bar"]["h"] if planning["bar"] else 0, 44),
+            # The whole point: the profile does not open by itself on a phone
+            # while the reader is tapping the ground it would cover.
+            Reading("and the profile does not open by itself", planning["profile"], None),
+            Reading(
+                "px of map left to tap on",
+                planning["bar"]["top"] if planning["bar"] else 0,
+                784,
+                within=2,
+                note="439 before",
+            ),
+            Reading("it says how far the walk has got", "point" in (planning["says"] or ""), True, note=planning["says"]),
+            # NaN is neither null nor undefined, and a route of crossings alone
+            # has no climb: driven on open water the bar once read "+NaN m".
+            Reading("and never says NaN", "NaN" in (planning["says"] or ""), False),
+            Reading("one tap reaches the list", reached["rows"] > 0, True, note=f"{reached['rows']} rows"),
+            Reading("one tap undoes a point", undone, before - 1),
+            Reading("and the profile is one tap away", bool(asked["profile"]), True),
+            Reading(
+                "with the bar still above it",
+                bool(asked["bar"] and asked["profile"] and asked["bar"]["top"] < asked["profile"]["top"]),
+                True,
+            ),
+            Reading("done puts plan mode away", done["state"]["planning"], False),
+            Reading("and the bar with it", done["bar"], None),
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -1251,6 +1346,7 @@ def drive(page: Any) -> list[Check]:
     checks.append(popup_click(page))
     checks.append(stations_and_list(page, places))
     checks.append(a_finger_can_use_it(page))
+    checks.append(the_plan_bar(page))
     checks.append(sharing_the_room(page))
     return checks
 

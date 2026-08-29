@@ -2416,12 +2416,92 @@ Two more of the same family, both in checks I had just written:
   before this one taps a trail. Measuring without reopening measured a box with
   no size, which is the detached-DOM trap one level up.
 
+### And then planning on a phone, which is a different question
+
+**Reading a tour and planning one need opposite things.** Reading wants the
+detail over the map; planning wants the map, because the map is what is being
+tapped. Driven with **real taps** at 390 x 844 — `page.touchscreen.tap`, not a
+dispatched event — the built page failed at exactly that:
+
+| | |
+|---|---:|
+| map left to tap on, after one point | **473 px** |
+| after two | **439 px** |
+| on screen with the plan panel shut | **the burger, and nothing else** |
+| taps to reach the point list | **4** |
+| taps to undo | **3** |
+
+**The profile panel opened on the first point, at 355 px.** A route of one point
+has no leg and no profile: 42 % of the screen for an empty chart, and the ground
+the reader was about to tap went with it. That is wrong on every screen size, so
+it is fixed on every screen size — the panel is told there is nothing rather than
+told to be small.
+
+**And nothing said plan mode was on.** With the panel shut the chrome drew one
+element, the burger; every tap on the map placed a point, and the way out was
+three taps. On a desktop the rail's Plan icon lights for this; a phone has no
+rail.
+
+**So a bar, 44 px, at the foot while a route is being planned.** It carries how
+far the walk has got, the way back one step and the way out — and one tap on the
+figures opens the plan panel **with the list already open**, which was four taps.
+It stands on the profile panel where one is showing and at the foot where none
+is, keeping the 16 px the panel leaves the attribution, and everything above it
+is capped against **its** top rather than the panel's.
+
+**44 is not a new constant**: it is the row height the point list already takes
+under a coarse pointer, and the three targets on the bar are 40 x 40 like every
+other one in the chrome.
+
+**And the profile is held rather than hidden.** While planning on a narrow
+screen the panel does not open by itself; the Profile tool shows it and shows it
+again. One tap away and not gone — the bargain the legend struck, in a second
+place. On a desktop nothing of this applies: the rail stands, the dock has room,
+and the only change there is the empty panel.
+
+Measured after: **784 px of map to tap on** against 439, the bar reading
+*3 points · 23.30 km · +942 m*, one tap to the list, one to undo, one to the
+profile, one to finish.
+
+**Pushed, not polled**, and that is the load-bearing part. Everything the bar
+draws comes from `sayPlanning` at the end of plan mode's `present()`; the chrome
+asks plan mode nothing back. Reading it the other way round means `state()`,
+which composes the whole route — **45 ms over a 37 km one**, on every paint. The
+rail's own *is plan mode on* light was doing exactly that and now reads the
+pushed value instead.
+
+### Two more, and both are the shape this document keeps recording
+
+- **`isFinite`, not a null check.** A route whose legs are all crossings has no
+  walked distance and no climb, and the ascent comes back **NaN** rather than
+  null. Driven with three points on open water, the bar read `+NaN m` — NaN is
+  neither null nor undefined, so a guard testing for those puts it on the screen.
+  The same family as `pd.NA` arriving as the text `<NA>` and an empty string
+  counted by `notna`: **a value meaning "no answer" that passes a test for
+  absence.** That is four.
+- **Whether a panel is drawn at all can depend on the width, so anything that
+  re-places has to re-decide it.** Driven from a desktop viewport down to 390 px,
+  the profile panel kept the display it had been given while the screen was wide,
+  and the plan bar then measured itself against a panel that should not have been
+  there: **346 px of map instead of 784**. `place()` decides it first now. The
+  same shape as the profile panel's own ceiling, which was clamped only where it
+  was asked for.
+
 ### What is still open on a phone
 
+- **The keyboard.** Naming a stage means typing; `visualViewport` shrinks and
+  `map.getSize()` does not, so the field can land behind it. Headless has no
+  keyboard, and the answer is to cap the bar and the sheets against
+  `visualViewport` rather than against the map.
+- **Writing a file.** A blob and `<a download>`; historically the most brittle
+  thing on iOS Safari, and the archive more so.
+- **A real touch pan.** The plan dispatcher tells a tap from a pan by how far the
+  pointer travelled between `mousedown` and `click`, and a finger fires no
+  `mousedown`. A real tap places a point — driven, three times. Whether a real
+  pan wrongly places one cannot be driven here: Playwright can tap and cannot
+  swipe. **Pointer Events cover mouse and finger in one path** and are the answer.
 - **Coordinates at 6 decimals** and the rest of the weight work, which the memory
   split above orders and which nothing here touched.
-- **The map's own gestures are Leaflet's** and were never in question; nothing on
-  this list is about them.
 
 **Offline is a different project, and it decomposes.** Vendoring the four CDN
 scripts plus a service worker already gives every line, every profile and the
