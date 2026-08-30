@@ -2438,6 +2438,105 @@ def reading_with_a_finger(page: Any) -> Check:
 # ---------------------------------------------------------------------------
 
 
+def where_the_reader_is(page: Any) -> Check:
+    """A dot for the reader's own position, and the accuracy drawn with it.
+
+    **The accuracy is the point.** A fix is a claim with a radius on it -- 8 m
+    under an open sky, 300 m in a valley -- and a page that draws it as a dot has
+    thrown away the half that matters on a mountain. On a map whose whole
+    argument is metres per pixel, the circle is the only honest way to show one.
+
+    Playwright answers the browser's question for the reader it does not have, so
+    both halves are driveable: that nothing is watched until it is asked for, and
+    that what arrives is drawn where it says.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What is drawn before and after, and what the map did about it
+    """
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(500)
+    page.evaluate("() => window.trailsChrome.close()")
+    # **It lays its own view down**, like the file check lays its own route. The
+    # checks before this leave the map wherever they were looking, and both
+    # questions here — did it move to the fix, and is the circle the reported
+    # accuracy at this scale — are answered against a scale.
+    page.evaluate(f"() => {MAP_OBJECT}.setView([65.60, 13.20], 11)")
+    page.wait_for_timeout(700)
+    page.evaluate(SHOW_TOOL, "here")
+    page.wait_for_timeout(600)
+
+    seen = """() => { const dot = document.querySelector('.trails-here-dot');
+      const ring = document.querySelector('.trails-here-ring');
+      const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
+      // **Leaflet draws a circle as a path**, so there is no `r` to read: the
+      // question is how wide it comes out on the screen, which is the question
+      // anyway — the circle has to be the reported accuracy at this map's scale.
+      const across = ring ? Math.round(ring.getBoundingClientRect().width) : 0;
+      const metres = map.distance(map.containerPointToLatLng([0, 0]),
+                                  map.containerPointToLatLng([100, 0])) / 100;
+      return {dot: !!dot, ring: !!ring, across: across,
+              wanted: Math.round(2 * 24 / metres),
+              said: (document.querySelector('.trails-here-state') || {}).textContent || '',
+              button: (document.querySelector('.trails-here-toggle') || {}).textContent || '',
+              centre: map.getCenter(), zoom: map.getZoom()}; }"""
+
+    before = page.evaluate(seen)
+    page.evaluate("() => document.querySelector('.trails-here-toggle').click()")
+    page.wait_for_function("() => !!document.querySelector('.trails-here-dot')", timeout=20_000)
+    page.wait_for_timeout(600)
+    after = page.evaluate(seen)
+    # **Read with the dock shut.** An open tool's button is lit white on the
+    # accent; what is being asked here is the other thing the rail says — that
+    # something is *running* behind a closed panel.
+    page.evaluate("() => window.trailsChrome.close()")
+    page.wait_for_timeout(500)
+    lit = page.evaluate(
+        """() => { const b = document.querySelector('.trails-rail button[data-tool=here]');
+        return b ? getComputedStyle(b).color : ''; }"""
+    )
+    page.evaluate(SHOW_TOOL, "here")
+    page.wait_for_timeout(500)
+
+    page.evaluate("() => document.querySelector('.trails-here-toggle').click()")
+    page.wait_for_timeout(600)
+    stopped = page.evaluate(seen)
+
+    page.evaluate("() => window.trailsChrome.close()")
+    page.wait_for_timeout(400)
+
+    moved = round(((after["centre"]["lat"] - 65.55) ** 2 + (after["centre"]["lng"] - 13.05) ** 2) ** 0.5, 4)
+    return Check(
+        "where the reader is",
+        [
+            # Nothing is watched because the tool was opened: a map that starts
+            # following a reader on its own has decided something for them.
+            Reading("nothing is drawn until it is asked for", before["dot"], False),
+            Reading("and the button offers it", before["button"], "Show my position"),
+            Reading("a fix draws a dot", after["dot"], True),
+            # The half that matters: the radius the browser reported, at the
+            # map's own scale.
+            Reading("with the accuracy around it", after["ring"], True),
+            Reading(
+                "drawn at the reported metres",
+                after["across"],
+                after["wanted"],
+                within=3,
+                note=f"{after['across']} px across, {after['wanted']} wanted for 24 m",
+            ),
+            Reading("and said in words too", "24 m" in after["said"], True, note=after["said"][:70]),
+            # Moved once, to a fix that is near what is on the screen.
+            Reading("the map went to it", moved < 0.05, True, note=str(moved)),
+            Reading("the rail says it is watching", lit, "rgb(13, 71, 161)"),
+            # And pressing again stops: the watch, the dot and the circle.
+            Reading("pressing again stops the watch", stopped["dot"] or stopped["ring"], False),
+            Reading("and offers it again", stopped["button"], "Show my position"),
+        ],
+    )
+
+
 def the_dark_set(page: Any) -> Check:
     """Two sets of colours for the furniture, and one for the ground.
 
@@ -2769,6 +2868,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_search_on_a_narrow_panel(page))
     if wanted(sharing_the_room):
         checks.append(sharing_the_room(page))
+    if wanted(where_the_reader_is):
+        checks.append(where_the_reader_is(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be
@@ -2847,7 +2948,15 @@ def main() -> int:
     print(f"driving {page_path} ({page_path.stat().st_size / 1e6:.2f} MB)" + (f" -- only {ONLY}" if ONLY else ""))
     with sync_playwright() as playwright:
         browser = playwright.firefox.launch(headless=not args.headed)
-        page = browser.new_page(viewport={"width": 1400, "height": 900})
+        # **A position is granted here or it cannot be driven at all.** The
+        # browser asks the reader, and a driven browser has no reader; Playwright
+        # answers for one. Somewhere inside the drawn park, so the check can ask
+        # whether the map moved to it.
+        page = browser.new_page(
+            viewport={"width": 1400, "height": 900},
+            permissions=["geolocation"],
+            geolocation={"latitude": 65.55, "longitude": 13.05, "accuracy": 24},
+        )
         # **Everything this page does is in one script block**, so one syntax
         # error anywhere in it stops all of it -- and every check below then
         # fails at once, saying which behaviour is missing and never why. It

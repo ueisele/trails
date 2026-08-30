@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 231 while one behaviour is being written. What is left out
+  readings instead of 241 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **179 seconds** and say
-whether the page still holds: **231 readings, and it should be green**. If it is
+whether the page still holds: **241 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 231. And **build before driving**: the run reads the page `make map`
+instead of 241. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3232,6 +3232,44 @@ so `querySelector` answered with a button nobody can see. It takes the first
 *drawn* one — the same lesson as `offsetParent`, from the other end.
 
 `make drive` reads **231**, the source tests **235**.
+
+### And the reader can be on the map
+
+**Asked for: my own position, from a menu entry.** A tool in the rail and in the
+burger, *Where I am*, which opens and says what it will do; the button is the
+gesture. Nothing is watched because the tool was opened — a map that starts
+following a reader because they looked at a menu has decided something for them.
+It stops when the button is pressed again, when the page is hidden, and when the
+browser refuses.
+
+**The accuracy is drawn, and that is the point.** A fix is a claim with a radius
+on it — 8 m under an open sky, 300 m in a valley — and a page that draws it as a
+dot has thrown away the half that matters on a mountain. On a map whose whole
+argument is metres per pixel, a circle at the reported radius is the only honest
+way to show one. Driven: **7 px across where 6 is wanted for 24 m** at that
+scale, the extra pixel being the stroke.
+
+**Moved once and never again.** A map that re-centres on every fix cannot be read
+while walking: the reader pans to look ahead and the next fix takes it back. And
+it does not move at all to a fix far from what is on the screen — a jump to a
+grey square 400 km away would be answering with a blank, so it says the distance
+instead.
+
+**Three refusals, three sentences.** Told not to share, no fix in time, and a
+device that cannot work it out are different things, and only the first is the
+reader's own doing.
+
+**Driveable, which was not obvious.** The browser asks the reader and a driven
+browser has no reader; Playwright answers for one, with a position inside the
+park. So both halves are read: that nothing is drawn until it is asked for, and
+that what arrives is drawn where and how big it says. The check lays its own view
+down first — both of its questions are answered against a scale, and the checks
+before it leave the map wherever they were looking.
+
+Blue, and not a themed colour: the tiles stay light in both sets, so this is
+drawn on the same ground either way.
+
+`make drive` reads **241**, the source tests **239**.
 
 ### What is still open on a phone
 

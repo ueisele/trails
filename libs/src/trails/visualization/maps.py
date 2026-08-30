@@ -10162,7 +10162,9 @@ class _Chrome(MacroElement):
                 burger: '<path d="M3 5.4h14M3 10h14M3 14.6h14"/>',
                 undo: '<path d="M4 8.5h7.2a3.3 3.3 0 0 1 0 6.6H7"/><path d="M6.8 5.3 3.6 8.5l3.2 3.2"/>',
                 chevron: '<path d="M7 4.5 12 9l-5 4.5"/>',
-                close: '<path d="M4.8 4.8 13.2 13.2M13.2 4.8 4.8 13.2"/>'
+                close: '<path d="M4.8 4.8 13.2 13.2M13.2 4.8 4.8 13.2"/>',
+                here: '<circle cx="9" cy="9" r="3.1"/><circle cx="9" cy="9" r="6.4"/>' +
+                      '<path d="M9 1.4v2.2M9 14.4v2.2M1.4 9h2.2M14.4 9h2.2"/>'
             };
 
             function icon(name, size) {
@@ -10186,6 +10188,8 @@ class _Chrome(MacroElement):
                  hint: 'Set points, route between them, cut it into stages.'},
                 {key: 'profile', label: 'Elevation profile', width: 320, selector: null,
                  hint: 'The climb of a trail you tap, or of a route you plan.'},
+                {key: 'here', label: 'Where I am', width: 300, selector: null,
+                 hint: 'Your own position on this map, while you ask for it.'},
                 {key: 'info', label: 'Sources', width: 360, selector: null,
                  hint: 'Who made this data, and under what licence.'}
             ];
@@ -10439,6 +10443,137 @@ class _Chrome(MacroElement):
                 'draws the walk.</p>';
             byKey.profile.holder = profileHolder;
 
+            // ---- where the reader is ------------------------------------------
+            // **Only while it is asked for.** A map that starts watching a
+            // reader because it was opened is a map that has decided something
+            // for them; this asks the browser for a position when the button is
+            // pressed and stops the moment it is pressed again, when the page is
+            // hidden, or when the browser refuses.
+            //
+            // **The accuracy is drawn.** A fix is a claim with a radius on it —
+            // 8 m under an open sky, 300 m in a valley — and a page that draws it
+            // as a dot has thrown away the half that matters on a mountain. The
+            // circle is what the browser reports, at the scale the map is drawn
+            // at, which is the only honest way to show it on a map whose whole
+            // argument is metres per pixel.
+            //
+            // Blue, and not a themed colour: the tiles stay light in both sets,
+            // so this is drawn on the same ground either way.
+            var HERE_BLUE = '#1565c0';
+            var hereWatch = null, hereDot = null, hereRing = null, hereFixes = 0;
+
+            var hereHolder = document.createElement('div');
+            hereHolder.className = 'trails-here';
+            var hereSays = document.createElement('p');
+            hereSays.className = 'trails-here-said';
+            hereSays.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-3)';
+            hereSays.textContent = 'Your position, from this device, while you ask for it. ' +
+                'Nothing is sent anywhere: the browser tells this page and the page draws a dot.';
+            var hereButton = document.createElement('button');
+            hereButton.type = 'button';
+            hereButton.className = 'trails-here-toggle';
+            hereButton.style.cssText = 'font:inherit;font-size:13px;font-weight:600;padding:8px 14px;' +
+                'border-radius:7px;border:1px solid var(--trails-strong);background:var(--trails-strong);' +
+                'color:var(--trails-on-strong);cursor:pointer';
+            var hereState = document.createElement('p');
+            hereState.className = 'trails-here-state';
+            hereState.style.cssText = 'margin:10px 0 0;color:var(--trails-ink-4);font-size:12px';
+            hereHolder.appendChild(hereSays);
+            hereHolder.appendChild(hereButton);
+            hereHolder.appendChild(hereState);
+            byKey.here.holder = hereHolder;
+
+            function paintHere(said) {
+                hereButton.textContent = hereWatch === null ? 'Show my position' : 'Stop';
+                if (said !== undefined) { hereState.textContent = said; }
+                // The rail is built further down this script and this runs while
+                // the panel is being made: `railButtons` is hoisted and empty,
+                // and painting it then threw before anything else could load.
+                if (railButtons) { paintRail(); }
+            }
+
+            function dropHere() {
+                if (hereDot) { map.removeLayer(hereDot); hereDot = null; }
+                if (hereRing) { map.removeLayer(hereRing); hereRing = null; }
+            }
+
+            function stopHere(said) {
+                if (hereWatch !== null && navigator.geolocation) {
+                    navigator.geolocation.clearWatch(hereWatch);
+                }
+                hereWatch = null;
+                hereFixes = 0;
+                dropHere();
+                paintHere(said === undefined ? '' : said);
+            }
+
+            // How far a fix is from what is on the screen, in metres, or 0 where
+            // it is on the screen. The map is moved to a reader who is near
+            // enough that moving shows them something they were already looking
+            // at, and told the distance where they are not — a map that jumped
+            // to a grey square 400 km away would be answering with a blank.
+            function awayFromView(where) {
+                var seen = map.getBounds();
+                if (seen.pad(2).contains(where)) { return 0; }
+                return map.distance(seen.getCenter(), where);
+            }
+
+            function drawHere(position) {
+                var where = L.latLng(position.coords.latitude, position.coords.longitude);
+                var spread = Math.max(1, position.coords.accuracy || 0);
+                if (!hereDot) {
+                    hereRing = L.circle(where, {radius: spread, color: HERE_BLUE, weight: 1,
+                                                opacity: 0.7, fillColor: HERE_BLUE, fillOpacity: 0.12,
+                                                interactive: false, className: 'trails-here-ring'}).addTo(map);
+                    hereDot = L.circleMarker(where, {radius: 6, color: '#ffffff', weight: 2.5,
+                                                     fillColor: HERE_BLUE, fillOpacity: 1,
+                                                     interactive: false, className: 'trails-here-dot'}).addTo(map);
+                } else {
+                    hereRing.setLatLng(where);
+                    hereRing.setRadius(spread);
+                    hereDot.setLatLng(where);
+                }
+                hereFixes += 1;
+                var away = awayFromView(where);
+                // **Moved once and never again.** A map that re-centres on every
+                // fix is a map that cannot be read while walking: the reader
+                // pans to look ahead and the next fix takes it back.
+                if (hereFixes === 1 && !away) {
+                    map.setView(where, Math.max(map.getZoom(), 13));
+                }
+                paintHere(away
+                    ? 'You are about ' + (away / 1000).toFixed(0) + ' km from what is on the screen, ' +
+                      'so the map has stayed where it is. Accurate to about ' + Math.round(spread) + ' m.'
+                    : 'Accurate to about ' + Math.round(spread) + ' m. The circle is that accuracy, ' +
+                      'drawn at this map\u2019s scale.');
+            }
+
+            function failedHere(problem) {
+                var why = problem && problem.code === 1
+                    ? 'This browser was told not to share your position.'
+                    : problem && problem.code === 3
+                        ? 'No position arrived in time \u2014 under a cliff or indoors that is ordinary.'
+                        : 'This device could not work out where it is.';
+                stopHere(why);
+            }
+
+            hereButton.addEventListener('click', function () {
+                if (hereWatch !== null) { stopHere(''); return; }
+                if (!navigator.geolocation) {
+                    paintHere('This browser has no way to tell the page where it is.');
+                    return;
+                }
+                paintHere('Asking the device\u2026');
+                hereWatch = navigator.geolocation.watchPosition(drawHere, failedHere, {
+                    enableHighAccuracy: true, maximumAge: 10000, timeout: 20000
+                });
+                paintHere();
+            });
+
+            // A tab that is put away is not a tab that needs to be watched.
+            window.addEventListener('pagehide', function () { stopHere(''); });
+            paintHere('');
+
             // **Every holder lives in the dock from the start, hidden rather
             // than detached.** Detached DOM measures zero, and two of these
             // controls size themselves against what is around them — a plan
@@ -10691,7 +10826,8 @@ class _Chrome(MacroElement):
                     // plan mode outlives its panel, and the profile panel stands
                     // at the foot rather than in the dock.
                     var running = (tool.key === 'plan' && planOn()) ||
-                        (tool.key === 'profile' && profileShowing());
+                        (tool.key === 'profile' && profileShowing()) ||
+                        (tool.key === 'here' && hereWatch !== null);
                     button.style.color = lit ? 'var(--trails-on-accent)' : (running ? 'var(--trails-accent)' : 'var(--trails-ink-3)');
                     button.setAttribute('aria-pressed', String(lit));
                 });

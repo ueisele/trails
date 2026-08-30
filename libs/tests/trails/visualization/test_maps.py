@@ -3058,3 +3058,55 @@ class TestTheme:
         html = fmap.get_root().render()
         assert ".trails-profile-panel, .trails-plan-control, .trails-legend, .trails-search," in html
         assert "color: var(--trails-ink);" in html
+
+
+class TestWhereTheReaderIs:
+    """Tests for the reader's own position on the map."""
+
+    def test_nothing_is_watched_until_it_is_asked_for(self):
+        """A map that starts following a reader because it was opened is a map
+        that has decided something for them. It watches when the button is
+        pressed and stops when it is pressed again, when the page is hidden, or
+        when the browser refuses."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "navigator.geolocation.watchPosition(drawHere, failedHere," in html
+        assert "hereButton.addEventListener('click'" in html
+        assert "window.addEventListener('pagehide', function () { stopHere(''); });" in html
+
+    def test_the_accuracy_is_drawn_and_not_only_the_dot(self):
+        """A fix is a claim with a radius on it — 8 m under an open sky, 300 m in
+        a valley — and a page that draws it as a dot has thrown away the half
+        that matters on a mountain."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "hereRing = L.circle(where, {radius: spread" in html
+        assert "var spread = Math.max(1, position.coords.accuracy || 0);" in html
+
+    def test_the_map_is_moved_once_and_never_again(self):
+        """A map that re-centres on every fix cannot be read while walking: the
+        reader pans to look ahead and the next fix takes it back. And it does not
+        move at all to a fix far from what is on the screen — a jump to a grey
+        square 400 km away would be answering with a blank."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "if (hereFixes === 1 && !away) {" in html
+        assert "function awayFromView(where)" in html
+
+    def test_a_refusal_says_which_refusal_it_was(self):
+        """Told not to share, no fix in time, and a device that cannot work it
+        out are three different things, and only the first is the reader's own
+        doing."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "problem.code === 1" in html
+        assert "This browser was told not to share your position." in html
+        assert "problem.code === 3" in html
