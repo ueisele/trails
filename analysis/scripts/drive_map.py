@@ -1593,6 +1593,29 @@ def files_from_the_page(page: Any) -> Check:
         const file = shared.files[0];
         return {name: file.name, type: file.type, bytes: file.size, isFile: file instanceof File}; }"""
     )
+    # **And the path the reader on iOS Firefox is actually on.** That browser
+    # takes downloads over itself and drops the anchor's name, and the sheet did
+    # not run for it either -- so the sheet refusing has to end somewhere better
+    # than a file called nothing. Driven by making `share` reject.
+    page.evaluate("() => { navigator.share = () => Promise.reject(new TypeError('no')); }")
+    with page.expect_download(timeout=25_000) as caught:
+        page.evaluate(press_download)
+    refused = caught.value.suggested_filename
+    fell_back = page.evaluate(
+        """() => ({way: window.trailsProfilePanel.lastSave(),
+        note: (document.querySelector('.trails-profile-saved') || {}).textContent || ''})"""
+    )
+
+    # A closed sheet is not a failure, and must not save the file behind the
+    # reader's back.
+    page.evaluate(
+        """() => { const closed = new Error('closed'); closed.name = 'AbortError';
+        navigator.share = () => Promise.reject(closed); }"""
+    )
+    page.evaluate(press_download)
+    page.wait_for_timeout(900)
+    closed = page.evaluate("() => window.trailsProfilePanel.lastSave()")
+
     page.evaluate(
         """() => { window.trailsChrome.coarse(null);
         delete navigator.share; delete navigator.canShare; window.__shared = null; }"""
@@ -1674,6 +1697,12 @@ def files_from_the_page(page: Any) -> Check:
             Reading("a finger is handed the share sheet", bool(handed and handed["isFile"]), True, note=str(handed)),
             Reading("with the name on the file itself", handed["name"] if handed else None, written.suggested_filename),
             Reading("and the whole body with it", handed["bytes"] if handed else None, route.stat().st_size),
+            # What is left when the sheet says no: the anchor, and a sentence,
+            # because that browser is about to name the file after the blob.
+            Reading("a refused sheet still saves it", refused, written.suggested_filename),
+            Reading("and the way is recorded", fell_back["way"].startswith("anchor after"), True, note=fell_back["way"]),
+            Reading("and the reader is told the name", written.suggested_filename in fell_back["note"], True),
+            Reading("a closed sheet saves nothing", closed, "closed"),
             Reading("and is a GPX", text.startswith('<?xml version="1.0" encoding="UTF-8"?>'), True),
             # One writer asked from two places, not two that agree today.
             Reading("the plan panel offers the same file", same["name"], written.suggested_filename),

@@ -2689,17 +2689,33 @@ class _ProfilePanel(MacroElement):
                 var file = (typeof File === 'function')
                     ? new File([body], name, {type: type})
                     : ((body instanceof Blob) ? body : new Blob([body], {type: type}));
-                if (shareable(file)) {
-                    navigator.share({files: [file]}).catch(function (failure) {
+                if (shareable()) {
+                    saveSaid = 'sheet';
+                    sayFile('');
+                    navigator.share({files: [file]}).then(function () {
+                        saveSaid = 'shared';
+                    }, function (failure) {
                         // **A closed sheet is not a failure**, and saving the
                         // file anyway would be doing something nobody asked for.
                         // Anything else falls back to the anchor: a wrongly named
                         // file beats a button that does nothing.
-                        if (failure && failure.name === 'AbortError') { return; }
+                        if (failure && failure.name === 'AbortError') {
+                            saveSaid = 'closed';
+                            return;
+                        }
+                        saveSaid = 'anchor after ' + ((failure && failure.name) || 'a refusal');
                         anchorFile(name, file);
+                        // **And the reader is told, because they are about to
+                        // find a file named after a blob.** This browser would
+                        // not take the file through its share sheet and does not
+                        // carry the name on a download either; the one thing
+                        // left to do is say what the file was meant to be called.
+                        sayFile('This browser named the download itself \u2014 it should be ' + name);
                     });
                     return;
                 }
+                saveSaid = 'anchor';
+                sayFile('');
                 anchorFile(name, file);
             }
 
@@ -2707,11 +2723,21 @@ class _ProfilePanel(MacroElement):
             // download. The pointer is asked the same way everything else here
             // asks it — the class the chrome sets, so a check can drive it —
             // falling back to the query for a map built without a chrome.
-            function shareable(file) {
-                if (!window.navigator || !navigator.share || !navigator.canShare) { return false; }
-                if (!map.getContainer().classList.contains('trails-coarse') &&
-                        !(window.matchMedia && window.matchMedia('(pointer: coarse)').matches)) { return false; }
-                try { return navigator.canShare({files: [file]}); } catch (refused) { return false; }
+            // **`canShare` gets no veto any more, and that is a report from a
+            // device.** The gate wanted `navigator.canShare` to exist *and* to
+            // say yes; on iOS Firefox the file still came down named after the
+            // blob while Chrome on the same phone — the same WebKit — got it
+            // right. Whichever half was missing there, the cost of asking anyway
+            // is one rejected promise, and the answer to a rejection is the
+            // anchor, which is exactly where that reader already was.
+            //
+            // `.gpx` is the kind of type a `canShare` is most likely to be wrong
+            // about: Chrome on Android refuses it from a list it keeps, and a
+            // refusal from a list is not a statement about this file.
+            function shareable() {
+                if (!window.navigator || !navigator.share) { return false; }
+                return map.getContainer().classList.contains('trails-coarse') ||
+                    !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
             }
 
             function anchorFile(name, file) {
@@ -2949,6 +2975,16 @@ class _ProfilePanel(MacroElement):
             download.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-right:8px;cursor:pointer';
             var carries = document.createElement('span');
             carries.style.cssText = 'color:var(--trails-ink-2);margin-right:8px';
+            // How the last file left the page, and only where that is worth
+            // saying: a download that carried its name says nothing at all.
+            var saveSaid = '';
+            var savedNote = document.createElement('span');
+            savedNote.className = 'trails-profile-saved';
+            savedNote.style.cssText = 'display:none;color:var(--trails-warn);font-size:11px';
+            function sayFile(message) {
+                savedNote.textContent = message;
+                savedNote.style.display = message ? 'block' : 'none';
+            }
             var licensed = document.createElement('span');
             licensed.className = 'trails-profile-licences';
             licensed.style.cssText = 'color:var(--trails-ink-4);font-size:11px';
@@ -3036,6 +3072,7 @@ class _ProfilePanel(MacroElement):
 
             offer.appendChild(download);
             offer.appendChild(carries);
+            offer.appendChild(savedNote);
             offer.appendChild(licensed);
             offer.appendChild(noted);
             // The button and what the file carries on the left, the colour key
@@ -4649,6 +4686,11 @@ class _ProfilePanel(MacroElement):
                 // of them. Nothing else would redraw it, because nothing about
                 // the chain moved.
                 repaint: function () { showLicences(); render(); },
+                // Which way the last file left the page: through the sheet,
+                // down the anchor, or down the anchor after the sheet refused
+                // it. Only a browser can answer whether that was the right way,
+                // so it is readable rather than assumed.
+                lastSave: function () { return saveSaid; },
                 // Whether this panel was given what a file needs at all. A page
                 // may have a profile and no export — the panel hides its own
                 // button for exactly that — and anything else offering files off

@@ -2481,17 +2481,29 @@ class TestComposedProfile:
         assert "new File([body], name, {type: type})" in html
         assert "anchor.download = name;" in html
 
-    def test_a_finger_is_offered_the_share_sheet_where_there_is_one(self):
+    def test_a_finger_is_offered_the_share_sheet_and_canshare_has_no_veto(self):
         """How a phone saves anything, and the one route that keeps the name
-        whatever the browser does with the anchor. `canShare` decides it and not
-        a user agent string: Chrome on Android refuses a `.gpx` there and falls
-        through to the anchor, which on Android names the file correctly."""
+        whatever the browser does with the anchor. `canShare` used to gate it and
+        does not any more: reported from a device, iOS Firefox still named the
+        file after the blob while Chrome on the same phone — the same WebKit —
+        got it right, and the cost of asking anyway is one rejected promise
+        whose answer is the anchor the reader was already on."""
         html = self.drawn().get_root().render()
         assert "navigator.share({files: [file]})" in html
-        assert "return navigator.canShare({files: [file]});" in html
+        # The call, not the word: the comment above the gate explains why it
+        # is gone, and a test that forbids the word forbids the explanation.
+        assert "canShare({files:" not in html
         # A closed sheet is not a failure, and saving the file anyway would be
         # doing something nobody asked for.
-        assert "if (failure && failure.name === 'AbortError') { return; }" in html
+        assert "if (failure && failure.name === 'AbortError') {" in html
+
+    def test_a_reader_is_told_when_the_name_could_not_be_carried(self):
+        """They are about to find a file named after a blob. The browser would
+        not take it through a sheet and does not carry a name on a download
+        either; the one thing left is to say what it was meant to be called."""
+        html = self.drawn().get_root().render()
+        assert "This browser named the download itself" in html
+        assert "saveSaid = 'anchor after '" in html
 
     def test_the_button_most_routes_are_downloaded_with_names_the_tour(self):
         """It named none of them. This button took the export's own stem

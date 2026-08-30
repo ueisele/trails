@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 218 while one behaviour is being written. What is left out
+  readings instead of 222 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **179 seconds** and say
-whether the page still holds: **218 readings, and it should be green**. If it is
+whether the page still holds: **222 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 218. And **build before driving**: the run reads the page `make map`
+instead of 222. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3093,6 +3093,35 @@ green when both of these were on the screen.
   question. 0.97 in the dark set, unchanged in the light one.
 
 `make drive` reads **218** in **175 seconds**, the source tests **227**.
+
+### And the file name, reported again from a device
+
+**iOS Firefox still named the download after the blob, and Chrome on the same
+phone got it right.** Both are WebKit — every browser on iOS is — so the engine
+is not what separates them: Firefox for iOS takes downloads over itself and does
+not carry the anchor's name.
+
+**The sheet, which is the one route that does carry a name, never ran for it.**
+The gate wanted `navigator.canShare` to exist *and* to answer yes about a
+`.gpx`, and `.gpx` is exactly the kind of type a `canShare` is most likely to be
+wrong about: Chrome on Android refuses it off a list it keeps, and a refusal off
+a list is not a statement about this file. Whichever half was missing on iOS
+Firefox, the cost of asking anyway is **one rejected promise**, and the answer to
+a rejection is the anchor — which is where that reader already was. `canShare`
+has no veto now.
+
+**And when the sheet does refuse, the reader is told.** They are about to find a
+file called `3F2A…`; the browser will not take it through a sheet and will not
+carry a name on a download, so the one thing left is to say what it was meant to
+be called. The panel says it under the button.
+
+Three readings that did not exist: the refused sheet still saves the file and
+under the right name, the way it went is recorded (`anchor after TypeError`), and
+**a closed sheet saves nothing** — a reader who dismisses the sheet has not asked
+for a download, and the fallback must not fire behind their back.
+
+What is still not driveable is iOS Firefox itself. `make drive` reads **222**,
+the source tests **228**.
 
 ### What is still open on a phone
 
