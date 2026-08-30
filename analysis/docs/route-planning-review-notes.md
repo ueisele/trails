@@ -2722,7 +2722,12 @@ answers, and the history went on growing. It took counting one gesture.
 
 - **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the
   no-keyboard case is held by a check; what a real soft keyboard does to it has
-  been seen by nobody.
+  been seen by nobody. **There are exactly three places to see it**, and they are
+  the only three this page asks anybody to type in: the **search** (burger →
+  Search), the **tour's name** and a **stage's name** (burger → Plan a route →
+  tap the count to open the list; the stage field appears once a stage is cut).
+  All three are 40 px of 16 px type under a coarse pointer now — the search had
+  that rule and the other two did not, which was the same omission twice.
 - **~~A real touch pan~~ — replaced, not tested.** `pointerdown` records where
   the gesture began for every pointer, so there is no longer an assumption to
   verify. What a real finger does is still unobserved.

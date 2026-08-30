@@ -1833,6 +1833,23 @@ def undo_undoes_the_last_change(page: Any) -> Check:
     )
     page.wait_for_timeout(1400)
     stages = page.evaluate("() => window.trailsPlan.state().points.filter(p => typeof p.stage === 'string').length")
+
+    # **Measured here because this is where all three exist at once.** A
+    # stage heading has a name field only while a stage does, and iOS Safari
+    # zooms the whole page when a field under 16 px takes focus -- which on a
+    # map is the reader losing their place in order to type a name. The
+    # search got that rule when it was written and these two did not.
+    fields = """() => { const of = sel => { const node = document.querySelector(sel);
+        if (!node || node.offsetParent === null) { return null; }
+        const seen = node.getBoundingClientRect();
+        return [Math.round(seen.height), Math.round(parseFloat(getComputedStyle(node).fontSize))]; };
+      return {tour: of('.trails-plan-title'), stage: of('.trails-plan-stage-name')}; }"""
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.wait_for_timeout(500)
+    finger = page.evaluate(fields)
+    page.evaluate("() => window.trailsChrome.coarse(null)")
+    page.wait_for_timeout(500)
+    mouse = page.evaluate(fields)
     take_back()
     page.wait_for_timeout(600)
     stages_back = page.evaluate("() => window.trailsPlan.state().points.filter(p => typeof p.stage === 'string').length")
@@ -1862,6 +1879,9 @@ def undo_undoes_the_last_change(page: Any) -> Check:
             Reading("a reorder changes no count", len(reordered), len(laid)),
             Reading("and taking it back restores the order", after_move, laid),
             Reading("a stage mark is a change too", stages, 1, note=pressed),
+            Reading("with a finger the tour's name is 40 px of 16 px type", finger["tour"], [40, 16]),
+            Reading("and a stage's name too", finger["stage"], [40, 16]),
+            Reading("with a mouse they are what they were", [mouse["tour"], mouse["stage"]], [[21, 12], [21, 12]]),
             Reading("and taking it back unmarks it", stages_back, 0),
             # **Two readings and not one**, because they are different claims:
             # that the history drains, which is arithmetic and exact, and that

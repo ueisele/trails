@@ -9322,7 +9322,14 @@ class _Chrome(MacroElement):
                 // **16px is not a taste.** iOS Safari zooms the whole page when
                 // a field smaller than that takes focus, which on a map is the
                 // reader losing their place to type a name.
-                '.trails-coarse .trails-search-field',
+                // **Every field a reader types into, not only the search.**
+                // The tour's name and a stage's name are the other two, both at
+                // 12 px, and iOS Safari zooms the whole page when a field under
+                // 16 takes focus. The search got this and they did not, which is
+                // the same omission twice over.
+                '.trails-coarse .trails-search-field,',
+                '.trails-coarse .trails-plan-title,',
+                '.trails-coarse .trails-plan-stage-name',
                 '  { box-sizing: border-box; min-height: 40px !important; font-size: 16px !important; }'
             ].join('\\n');
             document.head.appendChild(sheet);
