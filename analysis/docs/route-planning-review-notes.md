@@ -854,6 +854,29 @@ was invisible to them and visible in thirty seconds of driving: the grip's
 ceiling, the click in a popup, the stuck highlight, the mark under the route, the
 waypoint at the ceiling, the two controls overlapping.
 
+**And it is 140 seconds, which is a thing to spend deliberately.** Three habits,
+the first of which is worth more than the other two together:
+
+- **Run it once and read the file.** Sending the report to a file and grepping
+  the file costs one run; running it twice to see two parts of one report costs
+  two. That was being done, repeatedly, and it doubled every wait a reader had.
+- **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
+  readings instead of 171 while one behaviour is being written. What is left out
+  is not reported at all rather than reported as skipped: a skip means *this
+  could not be driven*, and *you did not ask for it* is a different sentence.
+- **Batch the changes.** Build once, drive once, at the end of a set of edits
+  rather than after each of them — and **build before driving**, or the run
+  reports the page as it was before the change.
+
+**Waiting rather than sleeping, which this suite said about itself and stopped
+doing.** `select` has the rule in its own docstring — a fixed pause is a guess
+that is too long on a fast machine and too short on a slow one — and every check
+written after it carried two- and three-second sleeps behind each edit:
+**109 of them, 120 seconds of the run**. `window.trailsPlan.busy()` answers
+whether anything is still being worked out without composing the route to find
+out, and 26 of those sleeps are now waits. What is left is 59 seconds, most of it
+the 20-second settle after a 40 MB page loads.
+
 **Two kinds of reading, and the split is the whole design.** A `holds` is a
 structural invariant — both axes carrying one scale, a mark on its line, two
 panels not overlapping, the decomposition adding up — and a red one is a defect.

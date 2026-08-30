@@ -400,6 +400,47 @@ def select(page: Any, chain: str) -> bool:
     return True
 
 
+#: Set by ``--only``. Empty means every check runs, which is what a full read of
+#: the page is; a word in it runs the checks whose name contains that word.
+ONLY = ""
+
+
+def wanted(check: Any) -> bool:
+    """Whether a check is one this run was asked for.
+
+    **Iterating on one behaviour should not cost every other.** A full run loads
+    a 40 MB page and drives twenty-odd checks; while a single one is being
+    written that is three minutes to see one line. The checks left out are not
+    reported at all rather than reported as skipped: a skip means *this could not
+    be driven*, and "you did not ask for it" is a different sentence.
+
+    Args:
+        check: The function about to be called
+
+    Returns:
+        Whether to run it
+    """
+    return not ONLY or ONLY in check.__name__
+
+
+def settled(page: Any, within_ms: int = 25_000) -> None:
+    """Wait until plan mode has finished working, rather than until a clock says so.
+
+    **The rule this suite states about itself and stopped keeping.** ``select``
+    says it in as many words: the panel answers a microtask or more after the
+    click, so a fixed pause is a guess that is too long on a fast machine and
+    too short on a slow one. Every check added after it carried two- and
+    three-second sleeps behind each edit — **109 of them, two minutes of a
+    three-minute run** — while a leg usually settles in a fraction of one.
+
+    Args:
+        page: The driven page
+        within_ms: How long to allow before giving up, which is a real failure
+            and not a slow machine: nothing here takes twenty-five seconds.
+    """
+    page.wait_for_function("() => !window.trailsPlan || !window.trailsPlan.busy()", timeout=within_ms)
+
+
 def furniture(page: Any) -> Check:
     """What the page draws before anything is clicked.
 
@@ -699,8 +740,8 @@ def stations_and_list(page: Any, places: list[dict[str, float]]) -> Check:
     """
     for place in places:
         page.evaluate("(at) => window.trailsPlan.place(at.lat, at.lon)", place)
-        page.wait_for_timeout(2000)
-    page.wait_for_timeout(2500)
+        settled(page)
+    settled(page)
     state = page.evaluate("() => window.trailsPlan.state()")
     stations = state.get("stations") or []
     forwards = all(b >= a - 1e-6 for a, b in zip(stations, stations[1:], strict=False))
@@ -719,7 +760,7 @@ def stations_and_list(page: Any, places: list[dict[str, float]]) -> Check:
 
     before = page.evaluate("() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e6))")
     if len(before) >= 4 and page.evaluate(DRAG_ROW, {"from": 3, "to": 1}):
-        page.wait_for_timeout(3000)
+        settled(page)
         after = page.evaluate("() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e6))")
         # A splice and not a swap: the dragged point is taken out and put back
         # in, and everything it passed shifts one place the other way.
@@ -727,7 +768,7 @@ def stations_and_list(page: Any, places: list[dict[str, float]]) -> Check:
 
     was = page.evaluate("() => window.trailsPlan.state().points.length")
     if page.evaluate(REMOVE_ROW, 1):
-        page.wait_for_timeout(3000)
+        settled(page)
         readings.append(Reading("the row's own button takes it out", page.evaluate("() => window.trailsPlan.state().points.length"), was - 1))
     return Check("a route's own points, on the profile and in the list", readings)
 
@@ -1095,7 +1136,7 @@ def a_finger_can_use_it(page: Any) -> Check:
         if (!up) { return false; }
         up.click(); return true; }"""
     )
-    page.wait_for_timeout(2500)
+    settled(page)
     after = page.evaluate("() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e5))")
 
     page.evaluate("() => window.trailsChrome.coarse(null)")
@@ -1246,7 +1287,7 @@ def the_plan_bar(page: Any) -> Check:
         const last = points[points.length - 1];
         window.trailsPlan.place(last.lat + 0.004, last.lon + 0.004); }"""
     )
-    page.wait_for_timeout(2400)
+    settled(page)
     before = page.evaluate("() => window.trailsPlan.state().points.length")
     pressable = page.evaluate(
         """() => { const b = document.querySelectorAll('.trails-planbar button')[0];
@@ -1255,7 +1296,7 @@ def the_plan_bar(page: Any) -> Check:
     )
     pressable["before the place"] = steps_before
     page.evaluate("() => { document.querySelectorAll('.trails-planbar button')[0].click(); }")
-    page.wait_for_timeout(2400)
+    settled(page)
     undone = page.evaluate("() => window.trailsPlan.state().points.length")
 
     # The profile is one tap away rather than gone.
@@ -1356,11 +1397,11 @@ def files_from_the_page(page: Any) -> Check:
         """() => { const standing = window.trailsPlan.state().points.length;
         for (let i = 0; i < standing; i += 1) { window.trailsPlan.undo(); } }"""
     )
-    page.wait_for_timeout(1200)
+    settled(page)
     for at in places:
         page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
-        page.wait_for_timeout(2000)
-    page.wait_for_timeout(2500)
+        settled(page)
+    settled(page)
 
     page.evaluate("() => window.trailsChrome.open('profile')")
     page.wait_for_timeout(900)
@@ -1384,7 +1425,7 @@ def files_from_the_page(page: Any) -> Check:
         const cut = rows[1] && rows[1].querySelector('.trails-plan-cut');
         if (cut) { cut.click(); } }"""
     )
-    page.wait_for_timeout(1600)
+    settled(page)
     members: list[str] = []
     broken: str | None = "the archive was never offered"
     if page.evaluate("() => { const z = document.querySelector('.trails-plan-zip'); return !!(z && z.offsetParent !== null); }"):
@@ -1400,12 +1441,12 @@ def files_from_the_page(page: Any) -> Check:
     page.evaluate("() => { window.trailsPlan.toggle(false); window.trailsPlan.toggle(true); }")
     page.wait_for_timeout(700)
     page.set_input_files(".trails-plan-file", str(route))
-    page.wait_for_timeout(3000)
+    settled(page)
     offer = page.evaluate("() => window.trailsPlan.state().pending")
     restored = None
     if offer:
         page.evaluate("() => window.trailsPlan.take()")
-        page.wait_for_timeout(4500)
+        settled(page)
         restored = page.evaluate("() => window.trailsPlan.state().points.length")
 
     page.set_viewport_size({"width": 1400, "height": 900})
@@ -1465,7 +1506,7 @@ def a_click_is_not_a_pan(page: Any) -> Check:
         """() => { const standing = window.trailsPlan.state().points.length;
         for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
     )
-    page.wait_for_timeout(1600)
+    settled(page)
     empty = page.evaluate("() => window.trailsPlan.state().points.length")
 
     middle = page.evaluate(
@@ -1473,7 +1514,7 @@ def a_click_is_not_a_pan(page: Any) -> Check:
         return {x: Math.round(r.left + r.width * 0.55), y: Math.round(r.top + r.height * 0.42)}; }"""
     )
     page.mouse.click(middle["x"], middle["y"])
-    page.wait_for_timeout(2400)
+    settled(page)
     clicked = page.evaluate("() => window.trailsPlan.state().points.length")
 
     # A pan ends in a click too, and how far the pointer travelled is what tells
@@ -1483,7 +1524,7 @@ def a_click_is_not_a_pan(page: Any) -> Check:
     page.mouse.down()
     page.mouse.move(middle["x"] - 40, middle["y"] + 20, steps=8)
     page.mouse.up()
-    page.wait_for_timeout(2000)
+    settled(page)
     panned = page.evaluate("() => window.trailsPlan.state().points.length")
 
     page.evaluate("() => window.trailsPlan.toggle(false)")
@@ -1767,7 +1808,7 @@ def undo_undoes_the_last_change(page: Any) -> Check:
         const standing = window.trailsPlan.state().points.length;
         for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
     )
-    page.wait_for_timeout(1600)
+    settled(page)
     # **And plan mode goes off to pick the chain.** While it is on the panel
     # stops answering clicks -- the map's clicks are the plan's -- so selecting
     # a chain with it on selects nothing and every reading after that skips.
@@ -1784,13 +1825,13 @@ def undo_undoes_the_last_change(page: Any) -> Check:
     page.wait_for_timeout(500)
     for at in places:
         page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
-        page.wait_for_timeout(2000)
-    page.wait_for_timeout(2500)
+        settled(page)
+    settled(page)
     laid = page.evaluate(ids)
 
     def take_back() -> Any:
         page.evaluate("() => window.trailsPlan.undo()")
-        page.wait_for_timeout(2600)
+        settled(page)
         return page.evaluate(ids)
 
     # 1. an insertion, which is the case reported: it ends in the middle.
@@ -1805,19 +1846,19 @@ def undo_undoes_the_last_change(page: Any) -> Check:
         return {lat: shape.lat[best], lon: shape.lon[best]}; }"""
     )
     page.evaluate("(where) => window.trailsPlan.insert(2, where.lat, where.lon)", between)
-    page.wait_for_timeout(2600)
+    settled(page)
     inserted = page.evaluate(ids)
     after_insert = take_back()
 
     # 2. a removal, which a pop could never take back: it has to put one in.
     page.evaluate("() => window.trailsPlan.remove(1)")
-    page.wait_for_timeout(2600)
+    settled(page)
     shorter = page.evaluate(ids)
     after_remove = take_back()
 
     # 3. a reorder, which changes no count at all.
     page.evaluate("() => window.trailsPlan.moveTo(3, 1)")
-    page.wait_for_timeout(2600)
+    settled(page)
     reordered = page.evaluate(ids)
     after_move = take_back()
 
@@ -1831,7 +1872,7 @@ def undo_undoes_the_last_change(page: Any) -> Check:
         if (!cut) { return 'no cut button on row 2 of ' + rows.length; }
         cut.click(); return 'pressed'; }"""
     )
-    page.wait_for_timeout(1400)
+    settled(page)
     stages = page.evaluate("() => window.trailsPlan.state().points.filter(p => typeof p.stage === 'string').length")
 
     # **Measured here because this is where all three exist at once.** A
@@ -1859,10 +1900,10 @@ def undo_undoes_the_last_change(page: Any) -> Check:
         """() => { for (let i = 0; i < 60; i += 1) { window.trailsPlan.undo(); }
         return window.trailsPlan.state().undoable; }"""
     )
-    page.wait_for_timeout(2600)
+    settled(page)
     emptied = page.evaluate("() => window.trailsPlan.state().points.length")
     page.evaluate("() => { for (let i = 0; i < 5; i += 1) { window.trailsPlan.undo(); } }")
-    page.wait_for_timeout(2000)
+    settled(page)
     still = page.evaluate("() => window.trailsPlan.state().points.length")
     page.evaluate("() => window.trailsPlan.toggle(false)")
     page.wait_for_timeout(400)
@@ -1987,23 +2028,34 @@ def drive(page: Any) -> list[Check]:
     Returns:
         Every check, in the order it ran
     """
-    checks = [furniture(page), map_wheel(page), chrome_layout(page), the_profile_tool(page)]
+    checks = [check(page) for check in (furniture, map_wheel, chrome_layout, the_profile_tool) if wanted(check)]
 
     if not select(page, LONG_CHAIN):
         checks.append(Check("the profile panel", skipped=f"{LONG_CHAIN} is not in this page — see LONG_CHAIN"))
         return checks
 
-    checks.append(sea_level(page))
-    checks.append(crosshair_mark(page))
-    checks.append(curve_wheel(page, zoomable=True))
-    checks.append(true_scale(page))
-    checks.append(zoom_ceiling(page))
-    checks.append(brushing_the_curve(page))
-    checks.append(reading_with_a_finger(page))
-    checks.append(pinch_the_curve(page))
-    checks.append(a_way_back_to_the_whole(page))
-    checks.append(room_on_a_short_screen(page))
-    checks.append(narrow_sheets(page))
+    if wanted(sea_level):
+        checks.append(sea_level(page))
+    if wanted(crosshair_mark):
+        checks.append(crosshair_mark(page))
+    if wanted(curve_wheel):
+        checks.append(curve_wheel(page, zoomable=True))
+    if wanted(true_scale):
+        checks.append(true_scale(page))
+    if wanted(zoom_ceiling):
+        checks.append(zoom_ceiling(page))
+    if wanted(brushing_the_curve):
+        checks.append(brushing_the_curve(page))
+    if wanted(reading_with_a_finger):
+        checks.append(reading_with_a_finger(page))
+    if wanted(pinch_the_curve):
+        checks.append(pinch_the_curve(page))
+    if wanted(a_way_back_to_the_whole):
+        checks.append(a_way_back_to_the_whole(page))
+    if wanted(room_on_a_short_screen):
+        checks.append(room_on_a_short_screen(page))
+    if wanted(narrow_sheets):
+        checks.append(narrow_sheets(page))
     select(page, LONG_CHAIN)
 
     # A chain already drawn finer than its own samples, which is 99 % of them:
@@ -2018,7 +2070,8 @@ def drive(page: Any) -> list[Check]:
     )
     if short and select(page, short):
         if page.evaluate("() => { const v = window.trailsProfilePanel.view(); return v && v.closest <= 1.001; }"):
-            checks.append(curve_wheel(page, zoomable=False))
+            if wanted(curve_wheel):
+                checks.append(curve_wheel(page, zoomable=False))
 
     select(page, LONG_CHAIN)
     places = page.evaluate(
@@ -2045,15 +2098,24 @@ def drive(page: Any) -> list[Check]:
         )
     )
 
-    checks.append(popup_click(page))
-    checks.append(stations_and_list(page, places))
-    checks.append(a_finger_can_use_it(page))
-    checks.append(the_plan_bar(page))
-    checks.append(undo_undoes_the_last_change(page))
-    checks.append(files_from_the_page(page))
-    checks.append(a_click_is_not_a_pan(page))
-    checks.append(the_search_on_a_narrow_panel(page))
-    checks.append(sharing_the_room(page))
+    if wanted(popup_click):
+        checks.append(popup_click(page))
+    if wanted(stations_and_list):
+        checks.append(stations_and_list(page, places))
+    if wanted(a_finger_can_use_it):
+        checks.append(a_finger_can_use_it(page))
+    if wanted(the_plan_bar):
+        checks.append(the_plan_bar(page))
+    if wanted(undo_undoes_the_last_change):
+        checks.append(undo_undoes_the_last_change(page))
+    if wanted(files_from_the_page):
+        checks.append(files_from_the_page(page))
+    if wanted(a_click_is_not_a_pan):
+        checks.append(a_click_is_not_a_pan(page))
+    if wanted(the_search_on_a_narrow_panel):
+        checks.append(the_search_on_a_narrow_panel(page))
+    if wanted(sharing_the_room):
+        checks.append(sharing_the_room(page))
     return checks
 
 
@@ -2109,6 +2171,7 @@ def main() -> int:
     """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--page", default=str(PAGE), help="The built map to drive")
+    parser.add_argument("--only", default="", help="Run only the checks whose name holds this word")
     parser.add_argument("--headed", action="store_true", help="Show the browser rather than hiding it")
     parser.add_argument("--json", action="store_true", help="Print the readings as JSON as well")
     args = parser.parse_args()
@@ -2120,7 +2183,9 @@ def main() -> int:
 
     from playwright.sync_api import sync_playwright
 
-    print(f"driving {page_path} ({page_path.stat().st_size / 1e6:.2f} MB)")
+    global ONLY
+    ONLY = args.only
+    print(f"driving {page_path} ({page_path.stat().st_size / 1e6:.2f} MB)" + (f" -- only {ONLY}" if ONLY else ""))
     with sync_playwright() as playwright:
         browser = playwright.firefox.launch(headless=not args.headed)
         page = browser.new_page(viewport={"width": 1400, "height": 900})

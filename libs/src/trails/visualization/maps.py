@@ -8754,6 +8754,11 @@ class _PlanMode(MacroElement):
                 // answer the click uses to decide that it means an insertion.
                 onRoute: onRoute,
                 toggle: function (want) { switchTo(want === undefined ? !on : !!want); },
+                // **Whether anything is still being worked out, cheaply.**
+                // `state()` answers it too, but composing the whole route to
+                // ask costs 45 ms over a 37 km one — and the one thing that
+                // wants to ask is a check polling until it can carry on.
+                busy: function () { return settling > 0; },
                 // The count is the list's handle inside this control, and the
                 // plan bar is its handle from outside one. Both ask for the
                 // same thing rather than each carrying their own idea of it.
