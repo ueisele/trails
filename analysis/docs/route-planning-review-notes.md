@@ -1889,12 +1889,19 @@ whenever the decisions document grows.
 **Three commands, in this order.** Read this document — it is the one that
 survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
-carries the measurement that justified it. Then `command make drive`, which
-takes two or three minutes and says whether the page still holds: **161
-readings, and it should be green**. If it is not, the report's last line says
-whether an invariant broke or a recorded figure moved, and those are different
-problems — and its **first** check says whether the page ran at all, which is
-the one to read before any other.
+carries the measurement that justified it. Then `command make map` and
+`command make drive`, which take about a minute and **140 seconds** and say
+whether the page still holds: **171 readings, and it should be green**. If it is
+not, the report's last line says whether an invariant broke or a recorded figure
+moved, and those are different problems — and its **first** check says whether
+the page ran at all, which is the one to read before any other.
+
+**Drive it once, into a file, and grep the file.** Running it twice to see two
+parts of one report costs two runs, which was being done and doubled every wait.
+While one behaviour is being written, `ARGS="--only <word>"` is ten readings
+instead of 171. And **build before driving**: the run reads the page `make map`
+last built, so without that it reports the state before the change. All three are
+in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
 **Publishing is two steps and the order matters**: `command make map`, then
 `just deploy` in the infrastructure repository. The deploy does not build, on
