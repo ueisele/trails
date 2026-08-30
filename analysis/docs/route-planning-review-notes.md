@@ -1867,9 +1867,16 @@ whenever the decisions document grows.
 survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make drive`, which
-takes a minute and says whether the page still holds: **48 readings, and it
-should be green**. If it is not, the report's last line says whether an invariant
-broke or a recorded figure moved, and those are different problems.
+takes two or three minutes and says whether the page still holds: **161
+readings, and it should be green**. If it is not, the report's last line says
+whether an invariant broke or a recorded figure moved, and those are different
+problems — and its **first** check says whether the page ran at all, which is
+the one to read before any other.
+
+**Publishing is two steps and the order matters**: `command make map`, then
+`just deploy` in the infrastructure repository. The deploy does not build, on
+purpose, so deploying without building first puts the last build on the web
+however old it is — and says nothing. `atlas.cairn.zone` is where it lands.
 
 Nothing in the profile panel or in plan mode is waiting on a decision. What is
 open is below, in the order I would take it.
@@ -1892,20 +1899,26 @@ three times — `pd.NA` as the text `<NA>`, an empty string counted by `notna`,
 and `Ukjent` read as a name. Every carried column, looked at for values that mean
 absence.
 
-**5. The page on a phone.** The map is published and confirmed — `just deploy` in
-the infrastructure repository, `command make deploy` here — and against a phone
-it does not hold: **590 MB** of memory, 41 % of the file is popups nobody opens,
-no touch handling at all, and no map visible at either test size. The memory has
-since been split — popups **187 MB**, the SVG paths **130**, the graph **95**,
-and a **242 MB floor** under all three. **But weight was not the blocker** — a
-reader used the published map on a phone and reported that it loads fine and that
-a tap on a trail buries the map. Room was. The chrome is built and the room is
-back: **98.2 % of a 390 px screen free at rest** against 23.1, and 55.6 % of a
-desktop with a trail open against 36.8, with every recorded desktop figure
-unmoved. It is all in *What hosting it, and pointing a phone at it, found*
-below, including the four things building it turned up and the four that are
-still open — of which **the point list's HTML5 drag** is the one that stops a
-route being planned with a finger at all.
+**5. ~~The page on a phone.~~ Done, and the section below is the whole of it.**
+Weight was measured (590 MB, split as popups 187 / SVG 130 / graph 95 over a 242
+MB floor) and was **not** the blocker: a reader using the published map reported
+that it loads fine and that a tap on a trail buries the map. Room was. Reading a
+tour, planning one, the search, the gestures, and the file round trip are all
+built and driven. At rest a 390 px screen is **98.2 %** map against 23.1;
+planning leaves **784 px** to tap on against 439; the desktop's every recorded
+figure is unmoved.
+
+**What is left on a phone is three things nobody has observed**, all in *What is
+still open on a phone* below: what a soft keyboard does to the layout, what a
+real finger does to the tap-versus-pan rule, and whether iOS Safari saves a blob
+or opens it in a tab. Two of the three had their assumption removed rather than
+tested, which is better than a green tick and is not one.
+
+**And four reader reports in two days found four defects that 148 browser
+readings and 208 source tests were green over** — a stage file naming itself
+twice, a tool that could not be used and could not say why, undo removing the
+wrong point, and a name collision that quietly turned off a cache. Every one of
+them is now a check. **The suite is what keeps a fix; it is not what finds one.**
 
 **After those, and none of them blocked**: elevation-aware routing, splitting a
 route into days, snapping a waypoint to a hut or a quay. All three are decisions
