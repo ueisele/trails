@@ -228,11 +228,13 @@ command make deploy               # Publish the map make map last built, and pur
 # just looked at" possible — so deploying without building first publishes whatever is in
 # analysis/output/, however old it is.
 #
-# And `make deploy` is not the way in. It needs seven settings from the environment and has
-# no default for any of them, because nothing identifying the Cloudflare account may be
-# committed here: this repository is public. The infrastructure repository holds them and
-# drives the deploy; its own `just deploy` reads them out of state, unlocks the credentials
-# and calls `make deploy` here. See **Publishing** in analysis/README.md.
+# `make deploy` is the target that publishes, and it is not the command anyone types. It
+# needs seven settings from the environment and has no default for any of them, because
+# nothing identifying the Cloudflare account may be committed here: this repository is
+# public. The infrastructure repository holds them and drives the deploy; its own
+# `just deploy` reads them out of state, unlocks the credentials and calls `make deploy`
+# here — so the two are one path and not two. Publishing is `command make map` here, then
+# `just deploy` there. See **Publishing** in analysis/README.md.
 
 # Testing & Quality
 command make check                # Run all checks (format check, lint, type, test)
