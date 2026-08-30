@@ -854,14 +854,14 @@ was invisible to them and visible in thirty seconds of driving: the grip's
 ceiling, the click in a popup, the stuck highlight, the mark under the route, the
 waypoint at the ceiling, the two controls overlapping.
 
-**And it is 165 seconds, which is a thing to spend deliberately.** Three habits,
+**And it is 179 seconds, which is a thing to spend deliberately.** Three habits,
 the first of which is worth more than the other two together:
 
 - **Run it once and read the file.** Sending the report to a file and grepping
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 194 while one behaviour is being written. What is left out
+  readings instead of 205 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1890,8 +1890,8 @@ whenever the decisions document grows.
 survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
-`command make drive`, which take about a minute and **165 seconds** and say
-whether the page still holds: **194 readings, and it should be green**. If it is
+`command make drive`, which take about a minute and **179 seconds** and say
+whether the page still holds: **205 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 194. And **build before driving**: the run reads the page `make map`
+instead of 205. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -2933,6 +2933,46 @@ Refused where the route is not writable yet, and it says why on the button:
 and one that is broken.
 
 `make drive` reads **194**, the source tests **217**.
+
+### And the sources took more of the panel than the curve did
+
+**Reported with a screenshot of a phone held upright.** The licence list and the
+line saying what ground the file covers ran to eleven lines of a 390 px screen,
+above a drawing that got about four.
+
+**They were already folded behind an *i*, and the rule was the wrong one.** The
+measurement that put them there was taken on a phone held *sideways* — 66 px of
+row against a 78 px drawing — so the rule it was given asked about the height
+alone: `map.getSize().y < SHORT`. A portrait phone is not short. It is the same
+lack of room measured on the other axis, and the rule is now
+`size.x < NARROW || size.y < SHORT`.
+
+**And the *i* opens the sheet rather than the drawing.** Unfolding eleven lines
+into the panel gives straight back the room the fold was for. The chrome already
+has one panel that every popup docks into, so the licences go there too, headed
+*Sources and licences* — which is what the reader asked for and also the only
+answer that does not spend the pixels twice.
+
+**One sheet, written once.** The popup path and this one now call the same
+`readInSheet(title, content, asHtml)`, and the flag is the caller's rather than
+sniffed at: a popup's content is markup and a caller's string is text, and the
+day something guesses is the day a place name with an ampersand in it becomes an
+element.
+
+**And the sentence is one derivation.** What goes in the sheet is read off the
+element that shows it in the panel — `licensed.textContent` — rather than
+composed again from the credits. The check asserts exactly that: the panel's
+string appears in the sheet's, character for character.
+
+Driven at 390 x 844: the *i* is offered, the licences and the ground note are
+both out of the panel, the *i* draws the sheet, the chrome says a detail is open,
+it is headed as what it is and holds the sentence itself; at 1400 x 900 the
+licences stay in the panel and there is no *i* at all. And the short-screen check
+that measured the old unfolding was corrected rather than deleted: the row stays
+at **31 px** with the sheet open, where before it grew.
+
+`make drive` reads **205** in **179 seconds**, the source tests **220** — the
+first of which are the chrome's own. It had none.
 
 ### What is still open on a phone
 

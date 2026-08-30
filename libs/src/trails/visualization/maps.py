@@ -2744,6 +2744,7 @@ class _ProfilePanel(MacroElement):
             var carries = document.createElement('span');
             carries.style.cssText = 'color:#333;margin-right:8px';
             var licensed = document.createElement('span');
+            licensed.className = 'trails-profile-licences';
             licensed.style.cssText = 'color:#666;font-size:11px';
             // What kind of ground the file covers, which only a route states:
             // its three marking buckets, and the length no source records a path
@@ -2752,6 +2753,7 @@ class _ProfilePanel(MacroElement):
             // this says what ground it covers, and run together the two read as
             // one longer list of sources.
             var noted = document.createElement('span');
+            noted.className = 'trails-profile-ground';
             noted.style.cssText = 'color:#666;font-size:11px;display:block;margin-top:2px';
             // **The licences fold where there is no room for them, and only
             // there.** Measured on a phone held sideways, this row is **66 px**
@@ -2769,16 +2771,50 @@ class _ProfilePanel(MacroElement):
             more.style.cssText = 'font:inherit;font-size:13px;padding:0 6px;border:0;background:none;' +
                 'color:#0d47a1;cursor:pointer;display:none';
             var licencesOpen = false;
+            // **Narrow counts as no room, and not only short.** The measurement
+            // that put this behind an *i* was taken on a phone held sideways, so
+            // the rule it was given was the short one -- and held upright, where
+            // most readers hold one, the same sentence is eleven lines of a
+            // panel that is trying to draw a curve. It is the same lack of room
+            // measured on the other axis.
+            function noRoomForLicences() {
+                var size = map.getSize();
+                return size.x < NARROW || size.y < SHORT;
+            }
             function showLicences() {
-                var short = map.getSize().y < SHORT;
-                var folded = short && !licencesOpen;
+                var tight = noRoomForLicences();
+                var folded = tight && !licencesOpen;
                 licensed.style.display = folded ? 'none' : '';
                 noted.style.display = folded ? 'none' : 'block';
-                more.style.display = short ? '' : 'none';
-                more.title = licencesOpen ? 'Hide the licences again'
-                    : 'Show the licences and what ground this file covers';
+                more.style.display = tight ? '' : 'none';
+                more.title = 'Which sources this file draws on, and what ground it covers';
             }
-            more.addEventListener('click', function () { licencesOpen = !licencesOpen; showLicences(); });
+            // **Into the sheet the chrome already has**, where there is one: a
+            // page whose popups all dock into one panel should not answer this
+            // by unfolding eleven lines into the middle of the drawing. Where
+            // there is no chrome the fold is still the answer, because the
+            // alternative there is nowhere to put them.
+            more.addEventListener('click', function () {
+                if (window.trailsChrome && window.trailsChrome.detail) {
+                    var box = document.createElement('div');
+                    box.style.cssText = 'font-size:13px;line-height:1.6;color:#333';
+                    var who = document.createElement('div');
+                    // Read off the elements that show it rather than composed
+                    // again: one sentence, in two places, from one derivation.
+                    who.textContent = licensed.textContent;
+                    box.appendChild(who);
+                    if (noted.textContent) {
+                        var ground = document.createElement('div');
+                        ground.style.cssText = 'margin-top:10px;color:#555';
+                        ground.textContent = noted.textContent;
+                        box.appendChild(ground);
+                    }
+                    window.trailsChrome.detail('Sources and licences', box);
+                    return;
+                }
+                licencesOpen = !licencesOpen;
+                showLicences();
+            });
 
             offer.appendChild(download);
             offer.appendChild(carries);
@@ -10108,23 +10144,22 @@ class _Chrome(MacroElement):
                 return 'Details';
             }
 
-            var adopting = false;
-            map.on('popupopen', function (event) {
-                if (adopting) { return; }
-                var popup = event.popup;
-                var content = popup.getContent();
-                // Closed at once rather than a frame later, so it is never seen
-                // to open. Leaflet re-appends the content node into its own box
-                // the next time the same popup opens, which is what makes moving
-                // it out of one safe.
-                adopting = true;
-                map.closePopup(popup);
-                adopting = false;
-                sheetParts.title.textContent = titleFor(popup);
+            // **One sheet, whatever is being read in it.** A popup docks here;
+            // so does anything else the page has that is to be read rather than
+            // glanced at. Two full-screen surfaces on a phone would be two
+            // things that have to agree about which is on top, which is the
+            // defect this chrome exists to end — so this is written once and
+            // called from both.
+            function readInSheet(title, content, asHtml) {
+                sheetParts.title.textContent = title || 'Details';
                 sheetParts.body.innerHTML = '';
                 if (typeof content === 'string') {
                     var wrap = document.createElement('div');
-                    wrap.innerHTML = content;
+                    // A popup's content is markup and a caller's string is text.
+                    // Told apart by the caller rather than sniffed at: the day
+                    // something guesses is the day a place name with an
+                    // ampersand in it becomes an element.
+                    if (asHtml) { wrap.innerHTML = content; } else { wrap.textContent = content; }
                     sheetParts.body.appendChild(wrap);
                 } else if (content) {
                     sheetParts.body.appendChild(content);
@@ -10137,6 +10172,21 @@ class _Chrome(MacroElement):
                 menuOpen = false;
                 paintRail();
                 place();
+            }
+
+            var adopting = false;
+            map.on('popupopen', function (event) {
+                if (adopting) { return; }
+                var popup = event.popup;
+                var content = popup.getContent();
+                // Closed at once rather than a frame later, so it is never seen
+                // to open. Leaflet re-appends the content node into its own box
+                // the next time the same popup opens, which is what makes moving
+                // it out of one safe.
+                adopting = true;
+                map.closePopup(popup);
+                adopting = false;
+                readInSheet(titleFor(popup), content, true);
             });
 
             // A belt to the braces: with every popup adopted none is ever drawn,
@@ -10303,6 +10353,12 @@ class _Chrome(MacroElement):
                     return container.classList.contains('trails-coarse');
                 },
                 open: function (key) { pick(key); },
+                // Anything else that is to be read rather than glanced at, in
+                // the same sheet a popup docks into. The profile panel's
+                // licences come through here: on a phone they are eleven lines
+                // of the panel, and a sheet is where a page this size puts what
+                // a reader has asked to see.
+                detail: function (title, node) { readInSheet(title, node, false); },
                 menu: function () { openMenu(); },
                 close: function () { closeDock(); closeMenu(); closeSheet(); },
                 tools: TOOLS.map(function (tool) { return tool.key; }),

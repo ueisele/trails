@@ -1014,6 +1014,81 @@ def narrow_sheets(page: Any) -> Check:
     )
 
 
+def the_sources_behind_an_i(page: Any) -> Check:
+    """Eleven lines of licence, and the room they take on a phone.
+
+    Reported with a screenshot: on a phone held upright the sources fill more of
+    the profile panel than the curve does. They were already folded behind an
+    *i* -- but the rule was written from a measurement taken with the phone held
+    sideways, so it asked about the height alone and a portrait screen is not
+    short. It is the same lack of room measured on the other axis.
+
+    What the *i* opens is the sheet a popup docks into and not eleven lines
+    unfolded into the drawing: a page whose popups all dock into one panel has
+    somewhere to put this.
+
+    Args:
+        page: The driven page, with a chain selected
+
+    Returns:
+        What the row shows narrow, what the *i* opens, and what it shows wide
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(900)
+    page.evaluate("() => window.trailsChrome.close()")
+    if not select(page, LONG_CHAIN):
+        page.set_viewport_size({"width": 1400, "height": 900})
+        return Check("the sources behind an i", skipped=f"{LONG_CHAIN} is not in this page")
+    page.wait_for_timeout(700)
+
+    # `getClientRects()` and not `offsetParent`: the second is the probe this
+    # suite has already been lied to by once.
+    row = """() => {
+      const box = sel => { const node = document.querySelector(sel);
+        return node ? {drawn: node.getClientRects().length > 0, text: node.textContent} : null; };
+      return {more: box('.trails-profile-more'), licences: box('.trails-profile-licences'),
+              ground: box('.trails-profile-ground')}; }"""
+    narrow = page.evaluate(row)
+
+    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
+    page.wait_for_timeout(700)
+    sheet = page.evaluate(
+        """() => { const node = document.querySelector('.trails-detail');
+        return {drawn: !!node && node.getClientRects().length > 0,
+                text: node ? node.textContent : '',
+                state: window.trailsChrome.state().detail}; }"""
+    )
+
+    page.evaluate("() => window.trailsChrome.close()")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(900)
+    wide = page.evaluate(row)
+
+    licences = (narrow["licences"] or {}).get("text") or ""
+    return Check(
+        "the sources behind an i",
+        [
+            Reading("the i is offered on a narrow screen", narrow["more"]["drawn"], True),
+            Reading("and the licences are not in the panel", narrow["licences"]["drawn"], False),
+            Reading("nor what ground the file covers", narrow["ground"]["drawn"], False),
+            # The room this gives back is the whole point, and it is the
+            # sentence itself that is long. This is a chain's own list, which is
+            # the short case: the panel that was reported was a planned route
+            # drawing on seven sources, and that names them in some 300
+            # characters over eleven lines of a 390 px screen.
+            Reading("what was taking the room", len(licences), 65, within=40, holds=False, note="characters, and a chain's list is the short one"),
+            Reading("the i opens the sheet", sheet["drawn"], True),
+            Reading("and the chrome says so", sheet["state"], True),
+            Reading("headed as what it is", "Sources and licences" in sheet["text"], True),
+            # The same sentence and not a second derivation of it: it is read off
+            # the element that shows it.
+            Reading("holding the licences themselves", licences in sheet["text"], True),
+            Reading("on a wide screen they stay in the panel", wide["licences"]["drawn"], True),
+            Reading("and the i is not offered", wide["more"]["drawn"], False),
+        ],
+    )
+
+
 def room_on_a_short_screen(page: Any) -> Check:
     """A panel at the foot gives room back where there is none to take.
 
@@ -1041,10 +1116,18 @@ def room_on_a_short_screen(page: Any) -> Check:
     page.set_viewport_size({"width": 844, "height": 390})
     page.wait_for_timeout(1200)
     folded = page.evaluate(parts)
+    # **And the i no longer unfolds them into the drawing.** It did, and that
+    # was the answer while the profile panel was the only place this page had to
+    # put a sentence; there is a sheet now, and eleven lines unfolded into a
+    # 390 px drawing gives straight back the room this check exists to protect.
     page.evaluate("() => document.querySelector('.trails-profile-more').click()")
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(600)
     opened = page.evaluate(parts)
-    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
+    opened_sheet = page.evaluate(
+        """() => { const node = document.querySelector('.trails-detail');
+        return !!node && node.getClientRects().length > 0 && /CC BY|ODbL|CC0/.test(node.textContent); }"""
+    )
+    page.evaluate("() => window.trailsChrome.close()")
     page.wait_for_timeout(400)
 
     page.set_viewport_size({"width": 1400, "height": 900})
@@ -1064,7 +1147,11 @@ def room_on_a_short_screen(page: Any) -> Check:
             Reading("with the panel still about half the screen", folded["panel"] <= 215, True, note=f"{folded['panel']} px of 390"),
             # Nothing is withheld: the sentence a reader has to see before
             # pressing Download is one tap away and says so.
-            Reading("the i opens them again", opened["meta"] > folded["meta"], True, note=f"{opened['meta']} px"),
+            Reading("the i opens them in the sheet", opened_sheet, True),
+            # And the row it was folded out of stays folded: the sentence a
+            # reader has to see before pressing Download is one tap away, and
+            # the drawing keeps its pixels while they read it.
+            Reading("and the drawing keeps its room", opened["meta"], folded["meta"], note=f"{opened['meta']} px"),
             # And on a desktop there is nothing to fold, so there is no i.
             Reading("desktop: no i at all", desk["more"], False),
             Reading("desktop: px the row takes", desk["meta"], 33, within=2),
@@ -2287,6 +2374,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(room_on_a_short_screen(page))
     if wanted(narrow_sheets):
         checks.append(narrow_sheets(page))
+    if wanted(the_sources_behind_an_i):
+        checks.append(the_sources_behind_an_i(page))
     select(page, LONG_CHAIN)
 
     # A chain already drawn finer than its own samples, which is 99 % of them:

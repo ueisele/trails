@@ -696,6 +696,33 @@ class TestProfilePanel:
         """The same map, as a fixture."""
         return self.drawn()
 
+    def test_the_licences_fold_on_a_narrow_screen_and_not_only_a_short_one(self, group):
+        """The measurement that put them behind an *i* was taken on a phone held
+        sideways, so the rule it was given asked about the height alone — and
+        held upright, where most readers hold one, the same sentence is eleven
+        lines of a panel that is trying to draw a curve. The same lack of room,
+        measured on the other axis."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "return size.x < NARROW || size.y < SHORT;" in html
+
+    def test_the_i_opens_the_sheet_rather_than_the_drawing(self, group):
+        """A page whose popups all dock into one panel has somewhere to put a
+        sentence this long, and unfolding eleven lines into a 390 px drawing
+        gives straight back the room the fold was for. Where there is no chrome
+        the fold is still the answer, because there is nowhere else."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "window.trailsChrome.detail('Sources and licences', box);" in html
+        # Read off the element that shows it rather than composed again: one
+        # sentence, in two places, from one derivation.
+        assert "who.textContent = licensed.textContent;" in html
+        assert "licencesOpen = !licencesOpen;" in html
+
     def test_the_gradient_bands_and_their_rule_reach_the_page(self, group):
         """The bands are a measurement, not a taste: 15 % sits above the worst
         gradient the height model reads on ground that is level."""
@@ -2790,3 +2817,25 @@ class TestTextLabelSymbols:
         group = maps.add_text_labels(fmap, gdf, name="Names", symbol_field="symbol")
 
         assert any("&lt;b&gt;" in html for html in self._html(group))
+
+
+class TestChrome:
+    """Tests for the rail, the burger, and the one sheet under both."""
+
+    def test_one_sheet_holds_whatever_is_read_in_it(self):
+        """A popup docks here and so does anything else the page has that is to
+        be read rather than glanced at. Two full-screen surfaces on a phone
+        would be two things that have to agree about which is on top, which is
+        the defect this chrome exists to end — so it is written once and called
+        from both."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "function readInSheet(title, content, asHtml)" in html
+        assert "readInSheet(titleFor(popup), content, true)" in html
+        assert "detail: function (title, node) { readInSheet(title, node, false); }," in html
+        # A popup's content is markup and a caller's string is text, told apart
+        # by the caller rather than sniffed at: the day something guesses is the
+        # day a place name with an ampersand in it becomes an element.
+        assert "if (asHtml) { wrap.innerHTML = content; } else { wrap.textContent = content; }" in html
