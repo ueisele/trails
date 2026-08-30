@@ -4,7 +4,10 @@ This project analyzes hiking trail data using Jupyter notebooks with modular Pyt
 
 ## Tech Stack
 - **Package Management**: uv exclusively (no pip, poetry, or conda)
-- **Python**: 3.11+ required
+- **Python**: 3.14. `requires-python = ">=3.14"` is the floor and `.python-version` is the
+  pin uv actually resolves; ruff's `target-version` and mypy's `python_version` say 3.14 too.
+  uv creates `.venv/` and points it at an interpreter it finds — it does not install one
+  inside it — and downloads a managed CPython only when nothing on the machine matches.
 - **Core Libraries**: pandas, numpy, geopandas, matplotlib, folium
 - **Notebooks**: JupyterLab for analysis, PyCharm for development
 - **Testing**: pytest
