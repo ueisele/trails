@@ -2803,7 +2803,17 @@ def a_plan_survives_a_reload(page: Any) -> Check:
 
 
 class _Quiet(http.server.SimpleHTTPRequestHandler):
-    """A file server that does not narrate. One line per tile would bury the report."""
+    """A file server that does not narrate, and counts what it is asked for.
+
+    The count is the point. A worker that caches the map by fetching it again
+    would make the first visit pay for it twice -- 6.58 MB against 13 on a
+    connection where that is forty seconds against eighty -- and nothing on the
+    page would look wrong. The browser's own cache is what makes it free, and
+    *free* is a thing to measure rather than to reason about.
+    """
+
+    #: How often each path was asked for, across every instance.
+    asked: dict[str, int] = {}
 
     def log_message(self, format: str, *args: Any) -> None:
         """Say nothing.
@@ -2812,6 +2822,15 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
             format: Ignored.
             *args: Ignored.
         """
+
+    def send_head(self) -> Any:
+        """Count the request, then answer it as usual.
+
+        Returns:
+            Whatever the handler this one is built on answers.
+        """
+        _Quiet.asked[self.path] = _Quiet.asked.get(self.path, 0) + 1
+        return super().send_head()
 
 
 @contextlib.contextmanager
@@ -2831,6 +2850,7 @@ def served(directory: pathlib.Path) -> Any:
     Yields:
         The origin it is reachable at.
     """
+    _Quiet.asked = {}
     handler = functools.partial(_Quiet, directory=str(directory))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -2895,6 +2915,10 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         first.evaluate("() => window[Object.keys(window).find(k => k.startsWith('map_'))].setZoom(10)")
         first.wait_for_timeout(4000)
         tiles = first.evaluate("async () => (await (await caches.open('trails-tiles')).keys()).length")
+        # **What the first visit paid**, read off the server rather than the
+        # page: the worker keeps the map by asking for it a second time, and if
+        # that second ask crossed the wire the first visit would cost twice.
+        fetched = _Quiet.asked.get(f"/{page_path.name}", 0)
         first.close()
 
         context.set_offline(True)
@@ -2919,6 +2943,10 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         [
             Reading("a worker is registered", bool(registered and registered.get("kept")), True, note=str(registered)),
             Reading("and the page is in its cache", kept, True),
+            # Kept on the **first** visit, and for one download: `cache.add`
+            # goes through the browser's own cache, which was handed the map
+            # seconds earlier. Two would be the whole point undone.
+            Reading("the first visit downloads the map once", fetched, 1),
             # The browser's own cache already keeps a tile five days --
             # `max-age=432000`, measured -- so this is for the walk somebody
             # plans a fortnight out, not for the next minute.

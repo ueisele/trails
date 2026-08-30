@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 252 while one behaviour is being written. What is left out
+  readings instead of 253 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **185 seconds** and say
-whether the page still holds: **252 readings, and it should be green**. If it is
+whether the page still holds: **253 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 252. And **build before driving**: the run reads the page `make map`
+instead of 253. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3607,6 +3607,15 @@ cache keyed on the wrong one of those two answers nothing. It asks `clients` wha
 is open and keeps that. Without it the map is not cached until the *second*
 visit — the first registers a worker that was not there to intercept it — so
 offline would have begun working on the third.
+
+**And the first visit pays for it once, which was worth measuring rather than
+reasoning about.** Keeping the map means asking for it a second time, and a
+second ask that crossed the wire would make a first visit cost 6.58 MB twice —
+on a 1.5 Mbit/s connection, eighty seconds instead of forty, with nothing on the
+page looking wrong. It does not: `cache.add` goes through the browser's own
+cache, which was handed the document seconds earlier under `max-age=300`. Counted
+at the server rather than believed of the browser, and the count is a reading of
+its own now: **one**.
 
 **The tiles are cache-first and bounded at 500**, about 18 MB at the 37 kB a
 Kartverket tile measures. That is for the walk somebody plans a fortnight out and
