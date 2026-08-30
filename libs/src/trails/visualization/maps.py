@@ -5610,6 +5610,10 @@ class _PlanMode(MacroElement):
             // points up in the wrong track.
             var pendingFile = null;
 
+            // What the last file turned out to be, in full. Shown behind the
+            // panel's mark rather than in it.
+            var loadDetail = '';
+
             // Set when a file is taken and cleared by the fit itself, so the map
             // is moved once per load and not once per refresh.
             var fitWanted = false;
@@ -7008,7 +7012,13 @@ class _PlanMode(MacroElement):
                 var standard = panel() ? panel().routeName() : null;
                 tourName = (read.name && read.name !== standard) ? read.name : '';
                 fitWanted = true;
-                loadSaid = describeFile(loaded);
+                // **What the file was goes behind the mark, not into the
+                // panel.** `loadSaid` is for the short sentence a reader needs
+                // now — an error, a drift warning, *back as you left it* — and
+                // `loadDetail` is the description, which is five lines and is
+                // wanted about once.
+                loadDetail = describeFile(loaded);
+                loadSaid = '';
                 pendingFile = null;
                 refresh();
             }
@@ -8162,13 +8172,44 @@ class _PlanMode(MacroElement):
             }
 
             // ---- the control ------------------------------------------------------
+            // **The panel spoke in words where the rest of the page uses
+            // marks.** Measured on a seven-point route: 234 px of a 471 px panel
+            // gone before the first waypoint, twelve buttons carrying words —
+            // *Undo the last change* is twenty characters — and 468 characters
+            // of text above a list. One word is kept, the one that ends the
+            // work; the rest are tools and get a mark, with a title and an
+            // `aria-label`, exactly as the rail beside them does.
+            var PLAN_ICONS = {
+                undo: '<path d="M4 8.5h7.2a3.3 3.3 0 0 1 0 6.6H7"/><path d="M6.8 5.3 3.6 8.5l3.2 3.2"/>',
+                again: '<path d="M14.6 7.4A6 6 0 1 0 15 11"/><path d="M15.4 3.6v3.9h-3.9"/>',
+                load: '<path d="M9 12.4V3.2"/><path d="M5.6 6.6 9 3.2l3.4 3.4"/><path d="M3.4 11.6v2.6a1 1 0 0 0 1 1h9.2a1 1 0 0 0 1-1v-2.6"/>',
+                save: '<path d="M9 3.2v9.2"/><path d="M5.6 9 9 12.4 12.4 9"/><path d="M3.4 11.6v2.6a1 1 0 0 0 1 1h9.2a1 1 0 0 0 1-1v-2.6"/>'
+            };
+            function planIcon(name) {
+                return '<svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" ' +
+                    'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                    PLAN_ICONS[name] + '</svg>';
+            }
+            var TOOL_STYLE = 'flex:none;width:34px;height:34px;display:flex;align-items:center;' +
+                'justify-content:center;border:1px solid var(--trails-rule);border-radius:7px;' +
+                'background:var(--trails-solid);color:var(--trails-ink-3);cursor:pointer;padding:0';
+            function asTool(button, name, explains) {
+                button.innerHTML = planIcon(name);
+                button.title = explains;
+                button.setAttribute('aria-label', explains);
+                button.style.cssText = TOOL_STYLE;
+                return button;
+            }
+
             var toggle = document.createElement('button');
             toggle.type = 'button';
-            toggle.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;cursor:pointer';
+            toggle.className = 'trails-plan-toggle';
+            toggle.style.cssText = 'flex:none;height:34px;padding:0 14px;border-radius:7px;' +
+                'border:1px solid var(--trails-strong);background:var(--trails-strong);' +
+                'color:var(--trails-on-strong);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer';
             var back = document.createElement('button');
             back.type = 'button';
-            back.textContent = 'Undo the last change';
-            back.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-top:4px;cursor:pointer;display:block';
+            asTool(back, 'undo', 'Undo the last change');
             // **The way out of a plan that comes back on its own.** A kept plan
             // is restored on every load until there is nothing to restore, and
             // emptying a twenty-point route one point at a time is not a way
@@ -8178,11 +8219,51 @@ class _PlanMode(MacroElement):
             var fresh = document.createElement('button');
             fresh.type = 'button';
             fresh.className = 'trails-plan-fresh';
-            fresh.textContent = 'Start again';
-            fresh.title = 'Take every point off the map, and forget the plan kept in this browser';
-            fresh.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-top:4px;cursor:pointer;display:block';
+            asTool(fresh, 'again', 'Start again \u2014 take every point off the map');
             var status = document.createElement('div');
-            status.style.cssText = 'margin-top:4px;color:var(--trails-ink-3)';
+            status.style.cssText = 'margin-top:6px;color:var(--trails-ink-2);font-size:13px;' +
+                'display:flex;align-items:center;gap:8px';
+            var statusText = document.createElement('span');
+            statusText.style.cssText = 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;' +
+                'white-space:nowrap;font-variant-numeric:tabular-nums';
+            // **What the last file turned out to be, behind a mark.** It stood in
+            // the panel as five lines of prose above the buttons: *a route this
+            // map wrote: 7 waypoints, 6 legs · 23,379 recorded points · 1 break,
+            // which is a crossing · 4 markers this map placed, skipped*. True,
+            // occasionally wanted, and never worth five lines of a panel that is
+            // trying to show a route.
+            var about = document.createElement('button');
+            about.type = 'button';
+            about.className = 'trails-plan-about';
+            about.textContent = '\u24d8';
+            about.title = 'What this route is, and what the last file turned out to be';
+            about.setAttribute('aria-label', 'What this route is');
+            about.style.cssText = 'flex:none;font:inherit;font-size:14px;line-height:1;padding:0 4px;' +
+                'border:0;background:none;color:var(--trails-accent);cursor:pointer;display:none';
+            about.addEventListener('click', function (event) {
+                event.stopPropagation();
+                if (!window.trailsChrome || !window.trailsChrome.detail) { return; }
+                var standing = window.trailsChrome.state();
+                if (standing.detail && standing.detailKey === 'plan') {
+                    window.trailsChrome.closeDetail();
+                    return;
+                }
+                var told = document.createElement('div');
+                told.style.cssText = 'font-size:13px;line-height:1.65;color:var(--trails-ink-2)';
+                loadDetail.split(' \u00b7 ').forEach(function (line, at) {
+                    var row = document.createElement('div');
+                    row.style.cssText = 'padding:4px 0' + (at ? ';border-top:1px solid var(--trails-rule)' : '');
+                    row.textContent = line;
+                    told.appendChild(row);
+                });
+                var kept = document.createElement('div');
+                kept.style.cssText = 'margin-top:12px;font-size:12px;color:var(--trails-ink-4)';
+                kept.textContent = 'This plan is kept in this browser only \u2014 no account, no other device.';
+                told.appendChild(kept);
+                window.trailsChrome.detail('This route', told, 'plan');
+            });
+            status.appendChild(statusText);
+            status.appendChild(about);
 
             // What can be done to the waypoint the reader has hold of, and only
             // while they have hold of one: a row of buttons that is always there
@@ -8300,6 +8381,42 @@ class _PlanMode(MacroElement):
                 box.style.maxHeight = Math.max(40, room) + 'px';
             }
 
+            // **What a row says where nothing near it is named.** It said the
+            // point's own coordinates -- sixteen characters answering a question
+            // nobody asks of a list. Measured on a seven-point route in this
+            // park, *seven of seven* rows said a coordinate, because out here
+            // there is rarely anything named within reach. What a reader wants
+            // of a row is what the walk into it is made of, and the legs already
+            // know: the coordinate moves into the row's own menu, where it can
+            // be looked up and is not in the way.
+            function groundInto(index) {
+                if (index === 0) { return 'start'; }
+                var leg = legs[index - 1];
+                if (!leg) { return ''; }
+                if (leg.failed) { return 'no way found'; }
+                if (!leg.parts) { return 'working\u2026'; }
+                var crossing = false, straight = false, recorded = false;
+                leg.parts.forEach(function (part) {
+                    if (part.kind === CROSSING || part.kind === 'water' || part.height === null) {
+                        crossing = true;
+                    } else if (part.kind === 'land') {
+                        straight = true;
+                    } else if (part.kind === PLAN.gpx.trackKind) {
+                        recorded = true;
+                    }
+                });
+                if (crossing) { return 'over a crossing'; }
+                if (straight) { return 'drawn straight'; }
+                if (recorded) { return 'as recorded'; }
+                return 'along a path';
+            }
+
+            // One menu open at a time, and none of them across a redraw.
+            function shutMenus() {
+                var open = box ? box.querySelectorAll('.trails-plan-rowmenu, .trails-plan-savemenu') : [];
+                for (var at = 0; at < open.length; at += 1) { open[at].style.display = 'none'; }
+            }
+
             function drawList(stations) {
                 listStations = stations || [];
                 // Never while a row is in the air. A leg settling mid-drag would
@@ -8333,21 +8450,27 @@ class _PlanMode(MacroElement):
                 }
                 points.forEach(function (point, index) {
                     if (heads[index]) { listBox.appendChild(stageHead(heads[index])); }
-                    // One shape for both, because they differ only in which way
-                    // they go and whether there is anywhere to go.
-                    function rowStep(glyph, explains, may, act) {
+                    // **One shape for all four, because all four are now a
+                    // line in a menu.** They were four bare glyphs in the row —
+                    // an em dash that cut a stage, a cross that removed a point,
+                    // and two arrows that only appeared under a coarse pointer.
+                    // Four unlabelled marks is four things to learn; a menu says
+                    // what each one does, and the row keeps its width for the
+                    // thing it is about.
+                    function rowStep(label, explains, may, act) {
                         var made = document.createElement('button');
                         made.type = 'button';
                         made.draggable = false;
-                        made.textContent = glyph;
+                        made.textContent = label;
                         made.title = explains;
-                        made.style.cssText = 'flex:none;font:inherit;line-height:1;padding:0 4px;border:0;' +
-                            'background:none;color:var(--trails-ink-4);cursor:pointer;visibility:' +
-                            (may ? 'visible' : 'hidden');
+                        made.style.cssText = 'display:' + (may ? 'block' : 'none') + ';width:100%;' +
+                            'text-align:left;font:inherit;font-size:12px;padding:7px 10px;border:0;' +
+                            'background:none;color:var(--trails-ink-2);cursor:pointer;white-space:nowrap';
                         made.addEventListener('click', function (event) {
                             // Or the row's own click would take hold of the
                             // point this one is moving.
                             event.stopPropagation();
+                            shutMenus();
                             act();
                         });
                         return made;
@@ -8370,12 +8493,13 @@ class _PlanMode(MacroElement):
                     // position where nothing is. A row that said only "3" would
                     // be the map's numbers again, in a column.
                     var says = document.createElement('span');
-                    says.textContent = called.name
-                        ? called.name
-                        : point.lat.toFixed(4) + ', ' + point.lon.toFixed(4);
+                    var ground = called.name ? null : groundInto(index);
+                    says.textContent = called.name || ground;
                     says.style.cssText = 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;' +
                         'white-space:nowrap;color:' + (called.name ? 'var(--trails-ink-2)' : 'var(--trails-ink-4)');
-                    if (called.name) { says.title = called.name + (called.kind ? ' \u00b7 ' + called.kind : ''); }
+                    says.title = called.name
+                        ? called.name + (called.kind ? ' \u00b7 ' + called.kind : '')
+                        : point.lat.toFixed(4) + ', ' + point.lon.toFixed(4);
                     // How far into the walk it comes, which is the one thing the
                     // profile beside it and the map above it both leave out.
                     var far = document.createElement('span');
@@ -8391,14 +8515,15 @@ class _PlanMode(MacroElement):
                     cut.draggable = false;
                     var isCut = typeof point.stage === 'string';
                     var mayCut = index > 0 && index + 1 < points.length;
-                    cut.textContent = '\u2014';
-                    cut.title = isCut ? 'A stage ends here \u2014 click to join it to the next'
-                        : 'End a stage here';
-                    cut.style.cssText = 'flex:none;font:inherit;font-size:13px;line-height:1;padding:0 3px;' +
-                        'border:0;background:none;cursor:pointer;visibility:' +
-                        (mayCut ? 'visible' : 'hidden') + ';color:' + (isCut ? 'var(--trails-ink)' : 'var(--trails-rule)');
+                    cut.textContent = isCut ? 'Join to the next stage' : 'End a stage here';
+                    cut.title = cut.textContent;
+                    cut.style.cssText = 'display:' + (mayCut ? 'block' : 'none') + ';width:100%;' +
+                        'text-align:left;font:inherit;font-size:12px;padding:7px 10px;border:0;' +
+                        'background:none;cursor:pointer;white-space:nowrap;color:' +
+                        (isCut ? 'var(--trails-accent)' : 'var(--trails-ink-2)');
                     cut.addEventListener('click', function (event) {
                         event.stopPropagation();
+                        shutMenus();
                         cutAt(index, !isCut);
                     });
 
@@ -8411,17 +8536,20 @@ class _PlanMode(MacroElement):
                     out.type = 'button';
                     out.className = 'trails-plan-out';
                     out.draggable = false;
-                    out.textContent = '\u00d7';
+                    out.textContent = 'Remove this point';
                     out.title = 'Take this point out and join the two legs that met at it';
-                    out.style.cssText = 'flex:none;font:inherit;font-size:13px;line-height:1;padding:0 4px;' +
-                        'border:0;background:none;color:var(--trails-ink-4);cursor:pointer';
+                    out.style.cssText = 'display:block;width:100%;text-align:left;font:inherit;' +
+                        'font-size:12px;padding:7px 10px;border:0;background:none;cursor:pointer;' +
+                        'white-space:nowrap;color:var(--trails-extreme, #c62828)';
                     out.addEventListener('click', function (event) {
                         // Or the row's own click would take hold of the point
                         // this one is removing.
                         event.stopPropagation();
+                        shutMenus();
                         remove(index);
                     });
                     row.addEventListener('click', function () {
+                        shutMenus();
                         chosen = chosen === index ? -1 : index;
                         refresh();
                     });
@@ -8462,21 +8590,64 @@ class _PlanMode(MacroElement):
                     // is exactly what one step up or down means. **No new
                     // model, two buttons.** They are drawn only under a coarse
                     // pointer, so a row keeps its 21 px where a mouse is.
-                    var up = rowStep('\u2191', 'Move this point one place earlier in the route',
+                    var up = rowStep('\u2191  One place earlier', 'Move this point one place earlier in the route',
                                      index > 0, function () { moveBy(index, -1); });
                     up.className = 'trails-plan-up';
-                    var down = rowStep('\u2193', 'Move this point one place later in the route',
+                    var down = rowStep('\u2193  One place later', 'Move this point one place later in the route',
                                        index + 1 < points.length, function () { moveBy(index, 1); });
                     down.className = 'trails-plan-down';
 
+                    // **Everything a row can do, in one place a reader can
+                    // open.** The menu is built into the row rather than shared,
+                    // so it scrolls with the row it belongs to and nothing has
+                    // to work out where to put it.
+                    var menu = document.createElement('div');
+                    menu.className = 'trails-plan-rowmenu';
+                    // **In the row and not over it.** Floated above, it was cut
+                    // off by the list's own scroller on every row near the foot
+                    // — seen in a screenshot, with *Remove this point* half
+                    // drawn. Opened inside the row, the row grows, the list
+                    // scrolls to it, and there is nothing to clip.
+                    menu.style.cssText = 'display:none;width:100%;margin:4px 0 2px;' +
+                        'background:var(--trails-sunk);border:1px solid var(--trails-rule);' +
+                        'border-radius:7px;padding:3px';
+                    L.DomEvent.disableClickPropagation(menu);
+                    menu.appendChild(cut);
+                    menu.appendChild(up);
+                    menu.appendChild(down);
+                    menu.appendChild(out);
+                    // The coordinate, which is what the row used to say: kept,
+                    // because it is occasionally exactly what somebody wants, and
+                    // out of the way, because it usually is not.
+                    var where = document.createElement('div');
+                    where.style.cssText = 'padding:6px 10px;margin-top:2px;border-top:1px solid var(--trails-rule);' +
+                        'color:var(--trails-ink-4);font-size:11px;font-variant-numeric:tabular-nums';
+                    where.textContent = point.lat.toFixed(4) + ', ' + point.lon.toFixed(4);
+                    menu.appendChild(where);
+
+                    var more = document.createElement('button');
+                    more.type = 'button';
+                    more.className = 'trails-plan-more';
+                    more.draggable = false;
+                    more.textContent = '\u22ef';
+                    more.title = 'What can be done with this point';
+                    more.setAttribute('aria-label', 'What can be done with this point');
+                    more.style.cssText = 'flex:none;font:inherit;font-size:15px;line-height:1;padding:0 5px;' +
+                        'border:0;background:none;color:var(--trails-ink-4);cursor:pointer';
+                    more.addEventListener('click', function (event) {
+                        event.stopPropagation();
+                        var wasOpen = menu.style.display !== 'none';
+                        shutMenus();
+                        if (!wasOpen) { menu.style.display = 'block'; }
+                    });
+
+                    row.style.flexWrap = 'wrap';
                     row.appendChild(grip);
                     row.appendChild(number);
                     row.appendChild(says);
                     row.appendChild(far);
-                    row.appendChild(up);
-                    row.appendChild(down);
-                    row.appendChild(cut);
-                    row.appendChild(out);
+                    row.appendChild(more);
+                    row.appendChild(menu);
                     listBox.appendChild(row);
                 });
             }
@@ -8526,10 +8697,13 @@ class _PlanMode(MacroElement):
                 var file = document.createElement('button');
                 file.type = 'button';
                 file.className = 'trails-plan-stage-file';
-                file.textContent = 'GPX';
+                file.innerHTML = planIcon('save');
                 file.title = 'Download this stage on its own';
-                file.style.cssText = 'flex:none;font:inherit;font-size:11px;padding:1px 6px;cursor:pointer;' +
-                    'display:' + ((panel() && panel().writes()) ? 'inline-block' : 'none');
+                file.setAttribute('aria-label', 'Download this stage on its own');
+                file.style.cssText = 'flex:none;width:26px;height:22px;align-items:center;' +
+                    'justify-content:center;border:1px solid var(--trails-rule);border-radius:5px;' +
+                    'background:none;color:var(--trails-ink-4);cursor:pointer;padding:0;display:' +
+                    ((panel() && panel().writes()) ? 'flex' : 'none');
                 // Refused while any leg of the route is unsettled, for the
                 // reason the whole tour's is: a file that states it breaks its
                 // track only at crossings must not be written over a hole.
@@ -8581,8 +8755,8 @@ class _PlanMode(MacroElement):
             oneFile.className = 'trails-plan-gpx';
             oneFile.textContent = 'Whole tour (GPX)';
             oneFile.title = 'The whole route as one GPX file, its stage marks and all';
-            oneFile.style.cssText = 'margin-top:4px;margin-right:6px;font:inherit;font-size:11px;' +
-                'padding:1px 6px;cursor:pointer';
+            oneFile.style.cssText = 'display:block;width:100%;text-align:left;font:inherit;font-size:12px;' +
+                'padding:7px 10px;border:0;background:none;color:var(--trails-ink-2);cursor:pointer;white-space:nowrap';
             oneFile.addEventListener('click', function () {
                 try {
                     saveWhole();
@@ -8598,7 +8772,8 @@ class _PlanMode(MacroElement):
             everything.className = 'trails-plan-zip';
             everything.textContent = 'All stages (zip)';
             everything.title = 'Every stage on its own, and the whole tour with its stages, in one archive';
-            everything.style.cssText = 'margin-top:4px;font:inherit;font-size:11px;padding:1px 6px;cursor:pointer';
+            everything.style.cssText = 'display:block;width:100%;text-align:left;font:inherit;font-size:12px;' +
+                'padding:7px 10px;border:0;background:none;color:var(--trails-ink-2);cursor:pointer;white-space:nowrap';
             everything.addEventListener('click', function () {
                 try {
                     saveStages();
@@ -8608,8 +8783,35 @@ class _PlanMode(MacroElement):
             });
 
             titleRow.appendChild(title);
-            titleRow.appendChild(oneFile);
-            titleRow.appendChild(everything);
+
+            // **One mark, and the choice behind it.** Two file buttons side by
+            // side asked the reader to choose before they had asked for
+            // anything; and where a route has one stage there is nothing to
+            // choose, so the second was furniture for most of a tour's life.
+            var saveMenu = document.createElement('div');
+            saveMenu.className = 'trails-plan-savemenu';
+            saveMenu.style.cssText = 'display:none;position:absolute;right:0;top:100%;z-index:6;' +
+                'min-width:170px;background:var(--trails-solid);border:1px solid var(--trails-edge);' +
+                'border-radius:7px;padding:3px;box-shadow:0 2px 10px rgba(0,0,0,0.22)';
+            L.DomEvent.disableClickPropagation(saveMenu);
+            saveMenu.appendChild(oneFile);
+            saveMenu.appendChild(everything);
+
+            var save = document.createElement('button');
+            save.type = 'button';
+            save.className = 'trails-plan-save';
+            asTool(save, 'save', 'Save this route as a file');
+            var saveWrap = document.createElement('div');
+            saveWrap.style.cssText = 'position:relative;flex:none';
+            saveWrap.appendChild(save);
+            saveWrap.appendChild(saveMenu);
+            save.addEventListener('click', function (event) {
+                event.stopPropagation();
+                var wasOpen = saveMenu.style.display !== 'none';
+                shutMenus();
+                if (!wasOpen) { saveMenu.style.display = 'block'; }
+            });
+
 
             // Said rather than discovered. Three gestures share one click here
             // and none of them is guessable from a map that has never had more
@@ -8639,9 +8841,19 @@ class _PlanMode(MacroElement):
 
             var chooser = document.createElement('button');
             chooser.type = 'button';
-            chooser.textContent = 'Load a GPX';
-            chooser.title = 'Read a route or a recorded track back in and carry on from it';
-            chooser.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;cursor:pointer';
+            chooser.className = 'trails-plan-load';
+            asTool(chooser, 'load', 'Load a GPX \u2014 a route or a recorded track, and carry on from it');
+
+            // **The row of tools**, in the order a reader meets them: finish,
+            // step back, start over, bring a file in, take one out.
+            var tools = document.createElement('div');
+            tools.className = 'trails-plan-tools';
+            tools.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0 2px';
+            tools.appendChild(toggle);
+            tools.appendChild(back);
+            tools.appendChild(fresh);
+            tools.appendChild(chooser);
+            tools.appendChild(saveWrap);
 
             var modes = document.createElement('select');
             modes.className = 'trails-plan-mode';
@@ -8653,9 +8865,10 @@ class _PlanMode(MacroElement):
                 modes.appendChild(option);
             });
 
+            // The button has moved into the row of tools; this holds the file
+            // input, which is invisible and has to stay in the document.
             var loading = document.createElement('div');
-            loading.style.cssText = 'margin-top:4px';
-            loading.appendChild(chooser);
+            loading.style.cssText = 'margin:0';
             loading.appendChild(picker);
 
             // ---- the question ------------------------------------------------------
@@ -8782,7 +8995,12 @@ class _PlanMode(MacroElement):
                 box = L.DomUtil.create('div', 'trails-plan-control');
                 box.style.cssText = 'background:var(--trails-panel);padding:6px 8px;border:1px solid var(--trails-edge);' +
                     'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4';
-                box.appendChild(toggle);
+                // **The name and the numbers first**, because that is what a
+                // route is; then the tools; then the list, which is the panel's
+                // actual content. It used to open with five stacked word buttons
+                // and a paragraph, and the first waypoint came 234 px down.
+                box.appendChild(titleRow);
+                box.appendChild(tools);
                 // Loading is how a plan starts from a file, so it is offered
                 // whether or not plan mode is already on — and switching it on
                 // is what loading does.
@@ -8800,11 +9018,7 @@ class _PlanMode(MacroElement):
                 box.appendChild(loading);
                 box.appendChild(offerBox);
                 box.appendChild(loadStatus);
-                box.appendChild(back);
-                box.appendChild(fresh);
-                box.appendChild(edits);
                 box.appendChild(status);
-                box.appendChild(titleRow);
                 box.appendChild(listBox);
                 box.style.overflowY = 'auto';
                 // The wheel is the map's except where this has somewhere left to
@@ -8850,39 +9064,71 @@ class _PlanMode(MacroElement):
             fitList();
 
             function say(message) {
-                status.textContent = message;
+                statusText.textContent = message;
+            }
+
+            // **What a route is, in one line.** Distance, climb, how many points
+            // and how many stages -- the first two being the same figures the
+            // profile's own heading carries, in the same order, because a page
+            // should say one thing one way. Pushed from `present()`, which has
+            // just composed the route: asking for it here would compose it
+            // again, and that is 45 ms over a 37 km route on every refresh.
+            var lastFigures = null;
+            function paintFigures() {
+                var listable = on && points.length > 0;
+                var mark = listable ? (listOpen ? '\\u25be ' : '\\u25b8 ') : '';
+                if (!points.length) {
+                    say(mark + 'Click the map to place the first point.');
+                    return;
+                }
+                var said = [];
+                if (lastFigures) {
+                    said.push((lastFigures.metres / 1000).toFixed(2) + ' km');
+                    if (isFinite(lastFigures.ascent)) {
+                        said.push('\\u2191' + Math.round(lastFigures.ascent) + ' m');
+                    }
+                }
+                said.push(points.length + (points.length === 1 ? ' point' : ' points'));
+                var stages = stagesOf().length;
+                if (stages > 1) { said.push(stages + ' stages'); }
+                if (settling) { said.push('working\\u2026'); }
+                say(mark + said.join(' \\u00b7 '));
             }
 
             function refresh() {
-                toggle.textContent = on ? 'Stop planning' : 'Plan a route';
-                back.style.display = on ? 'block' : 'none';
+                // **One word, and it is the one that ends the work.** The rest
+                // of the row are tools and carry marks.
+                toggle.textContent = on ? 'Done' : 'Plan a route';
                 back.disabled = !history.length;
-                fresh.style.display = (on && points.length) ? 'block' : 'none';
+                back.style.opacity = history.length ? '' : '0.4';
+                fresh.disabled = !points.length;
+                fresh.style.opacity = points.length ? '' : '0.4';
+                back.style.display = on ? '' : 'none';
+                fresh.style.display = on ? '' : 'none';
+                saveWrap.style.display = on ? '' : 'none';
                 // **The profile switch is not here.** It was, and it did
                 // nothing: it called `trailsChrome.profile()` with no argument,
                 // which is the *reading* of that state and not the setting of
                 // it. Rather than fix a third switch, it is gone — the rail
                 // carries it on a wide screen and the plan bar on a narrow one,
                 // which is where a reader planning a route already is.
-                var holds = on && chosen >= 0 && chosen < points.length;
-                edits.style.display = holds ? 'block' : 'none';
-                if (holds) {
-                    holding.textContent = 'Point ' + (chosen + 1) + ' of ' + points.length;
-                    earlier.disabled = chosen === 0;
-                    later.disabled = chosen === points.length - 1;
-                }
+                // **Nor is there a row of edits any more.** *Move earlier*,
+                // *move later* and *Remove* stood in a box of their own that
+                // appeared when a point was picked and was empty the rest of the
+                // time. They are lines in the row's own menu now, beside the
+                // stage mark and the coordinate, which is where a reader looks
+                // when the question is about *that* point.
                 status.style.display = on ? '' : 'none';
-                // The count is the list's handle. It was already naming what the
-                // list holds, and a second heading saying the same number is the
-                // two-panel mistake the legend was cured of.
+                // The figures are the list's handle. They were a bare count and
+                // are now what a route is.
                 var listable = on && points.length > 0;
                 status.style.cursor = listable ? 'pointer' : '';
                 status.title = listable ? 'Show or hide the points, one to a row' : '';
                 listBox.style.display = (listable && listOpen) ? '' : 'none';
-                // The title folds with the list: it names what the list holds,
-                // and a box asking for a name over a route nobody has opened is
-                // a row of the control spent on nothing.
-                titleRow.style.display = (listable && listOpen) ? '' : 'none';
+                // The name stands with the route, above the tools, and only
+                // where there is a route: a box asking what to call nothing is a
+                // row of the control spent on nothing.
+                titleRow.style.display = listable ? '' : 'none';
                 if (document.activeElement !== title) {
                     title.value = tourName;
                     title.placeholder = (panel() && panel().routeName()) || 'This tour';
@@ -8903,11 +9149,7 @@ class _PlanMode(MacroElement):
                 oneFile.title = refusing || 'The whole route as one GPX file, its stage marks and all';
                 everything.style.display = gathered ? '' : 'none';
                 everything.disabled = !!refusing;
-                if (on) {
-                    say((listable ? (listOpen ? '\\u25be ' : '\\u25b8 ') : '')
-                        + (points.length === 0 ? 'Click the map to place the first point.'
-                           : points.length + (points.length === 1 ? ' point' : ' points') + (settling ? ' \\u00b7 working\\u2026' : '')));
-                }
+                if (on) { paintFigures(); }
                 // What the last load turned out to be, and what it cost once
                 // every leg of it has settled. **Stamped here rather than where
                 // the file was read**: the legs settle a microtask or more after
@@ -8925,6 +9167,7 @@ class _PlanMode(MacroElement):
                     // leave the reader looking at the wrong window.
                     if (fitWanted) { fitWanted = false; showRoute(); }
                 }
+                about.style.display = (loadDetail && window.trailsChrome && window.trailsChrome.detail) ? '' : 'none';
                 loadStatus.textContent = loadSaid + (keptSaid ? (loadSaid ? ' \u00b7 ' : '') + keptSaid : '');
                 loadStatus.style.display = (loadSaid || keptSaid) ? '' : 'none';
                 // The question, wherever one stands. **Its wording comes out of
@@ -9114,7 +9357,12 @@ class _PlanMode(MacroElement):
                 // Ahead of what the loader said rather than instead of it: the
                 // file's own description and the drift the panel reports when
                 // the network has moved under a plan are both worth keeping.
-                loadSaid = 'Back as you left it, kept in this browser only. ' + loadSaid;
+                // **Its own sentence, not a prefix.** Glued in front of the
+                // file's description it read "…kept in this browser only. a
+                // route this map wrote: …" — a lower-case word after a full
+                // stop, which is what gluing two sentences written apart always
+                // gives you. The description is behind the mark now.
+                loadSaid = 'Back as you left it.';
                 // **Including whether they were still planning.** A reader who
                 // pressed Done and reloaded should not find every tap placing a
                 // point again; the route stays drawn either way.
@@ -9132,8 +9380,10 @@ class _PlanMode(MacroElement):
             // `state()`, which composes the whole route, on a timer. The same
             // seam the profile panel already uses to say what is selected.
             function sayPlanning(shape) {
-                if (!window.trailsChrome || !window.trailsChrome.planning) { return; }
                 var figure = shape && points.length > 1 ? figuresOf(shape) : null;
+                lastFigures = shape ? {metres: shape.total, ascent: figure ? figure.ascent : NaN} : null;
+                paintFigures();
+                if (!window.trailsChrome || !window.trailsChrome.planning) { return; }
                 window.trailsChrome.planning({
                     on: on,
                     points: points.length,

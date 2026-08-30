@@ -2383,7 +2383,7 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "fresh.textContent = 'Start again';" in planning
+        assert "asTool(fresh, 'again', 'Start again" in planning
         assert "points.length = 0;" in planning
         # The recording goes with it: a waypoint anchored to a file nobody is
         # working from is a point looked up in the wrong track.
@@ -2408,6 +2408,62 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "if (!box.closest || !box.closest('.trails-chrome')) { event.stopPropagation(); }" in planning
+
+    def test_a_row_says_what_the_walk_into_it_is_made_of(self):
+        """It said the point's own coordinates — sixteen characters answering a
+        question nobody asks of a list. Measured on a seven-point route in this
+        park, seven of seven rows said a coordinate, because out here there is
+        rarely anything named within reach."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function groundInto(index)" in planning
+        assert "return 'over a crossing';" in planning
+        assert "return 'along a path';" in planning
+        # The coordinate is kept, in the row's own menu: occasionally exactly
+        # what somebody wants, and usually not.
+        assert "where.textContent = point.lat.toFixed(4) + ', ' + point.lon.toFixed(4);" in planning
+
+    def test_everything_a_row_can_do_is_in_one_menu(self):
+        """Four unlabelled marks — an em dash that cut a stage, a cross that
+        removed a point, two arrows that only appeared under a coarse pointer —
+        plus a box of edits that showed up when a point was picked and was empty
+        the rest of the time."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "menu.className = 'trails-plan-rowmenu';" in planning
+        assert "more.className = 'trails-plan-more';" in planning
+        # In the row and not over it: floated above, the list's own scroller cut
+        # it off on every row near the foot.
+        assert "menu.style.cssText = 'display:none;width:100%;" in planning
+
+    def test_one_word_and_the_rest_are_marks(self):
+        """The word that is kept is the one that ends the work; the rest are
+        tools and carry marks, with a title and an aria-label, exactly as the
+        rail beside them does."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "toggle.textContent = on ? 'Done' : 'Plan a route';" in planning
+        assert "function asTool(button, name, explains)" in planning
+        assert "button.setAttribute('aria-label', explains);" in planning
+        assert "tools.className = 'trails-plan-tools';" in planning
+
+    def test_the_description_is_behind_the_mark_and_is_its_own_sentence(self):
+        """Glued in front of the file's description it read "…kept in this
+        browser only. a route this map wrote: …" — a lower-case word after a full
+        stop, which is what gluing two sentences written apart always gives."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "loadDetail = describeFile(loaded);" in planning
+        assert "loadSaid = 'Back as you left it.';" in planning
+        assert "window.trailsChrome.detail('This route', told, 'plan');" in planning
 
     def test_a_page_without_a_panel_says_so_rather_than_throwing(self):
         """Plan mode composes with the walk the panel owns, so a page carrying

@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 230 while one behaviour is being written. What is left out
+  readings instead of 231 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **179 seconds** and say
-whether the page still holds: **230 readings, and it should be green**. If it is
+whether the page still holds: **231 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 230. And **build before driving**: the run reads the page `make map`
+instead of 231. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3180,6 +3180,58 @@ asks the state first now, `SHOW_TOOL`, which is the same idempotence `select()`
 already carries and for the same reason.
 
 `make drive` reads **230**, the source tests **231**.
+
+### And the plan panel spoke in words where the page speaks in marks
+
+**Reported with a screenshot, and measured before anything was drawn.** On a
+seven-point route at 1400 x 900: **234 px of a 471 px panel gone before the first
+waypoint**, **12 buttons carrying words** — *Undo the last change* is twenty
+characters — **468 characters** of text above the list, and **7 of 7 rows saying
+a coordinate** instead of a name.
+
+**The head is the route.** The name field and one line of figures — `36.70 km ·
+↑1353 m · 7 points · 3 stages` — where five stacked word buttons and a paragraph
+used to be. The first two figures are the ones the profile's own heading carries,
+in the same order: a page should say one thing one way. Pushed from `present()`,
+which has just composed the route; asking here would compose it again.
+
+**One word, and it is the one that ends the work.** *Done*. The rest are tools
+and carry marks — undo, start again, load, save — each with a title and an
+`aria-label`, exactly as the rail beside them does. *Whole tour (GPX)* and *All
+stages (zip)* went behind the save mark: two file buttons side by side asked the
+reader to choose before they had asked for anything, and with one stage there was
+nothing to choose.
+
+**A row says what the walk into it is made of.** `along a path`, `over a
+crossing`, `drawn straight`, `as recorded`, `start` — read off the leg, which
+already knows. The coordinate is not gone, it is in the row's own menu:
+occasionally exactly what somebody wants, and usually not.
+
+**And everything a row can do is in that menu.** Four unlabelled marks — an em
+dash that cut a stage, a cross that removed a point, two arrows drawn only under
+a coarse pointer — plus a box of edits that appeared when a point was picked and
+was empty the rest of the time. One `⋯`, five labelled lines.
+
+**Two things a screenshot caught that no reading did.** The menu floated over the
+row and the list's own scroller **cut it off on every row near the foot** —
+*Remove this point* half drawn. It opens *inside* the row now: the row grows, the
+list scrolls to it, and there is nothing to clip. And the panel would not build
+at all for a moment: `tools.appendChild(chooser)` stood above `var chooser`, so
+it appended `undefined` and the whole of plan mode threw — `window.trailsPlan is
+undefined`, which is what a screenshot script says when a page has no plan mode.
+
+**And the sentence that was glued.** *…kept in this browser only. a route this
+map wrote: …* — a lower-case word after a full stop, which is what gluing two
+sentences written apart always gives. They are apart again: `loadSaid` is the
+short one a reader needs now, `loadDetail` is the description, and the
+description is behind the panel's own ⓘ.
+
+**One reading had to learn to look for what is drawn.** `.trails-plan-out` and
+its neighbours exist on every row now and all but one row's are in a shut menu,
+so `querySelector` answered with a button nobody can see. It takes the first
+*drawn* one — the same lesson as `offsetParent`, from the other end.
+
+`make drive` reads **231**, the source tests **235**.
 
 ### What is still open on a phone
 

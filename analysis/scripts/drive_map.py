@@ -1268,16 +1268,34 @@ def a_finger_can_use_it(page: Any) -> Check:
         return [Math.round(r.width), Math.round(r.height)]; };
       const rows = [...document.querySelectorAll('.trails-plan-points > div')]
         .filter(row => !row.classList.contains('trails-plan-stage'));
+      // **The one that is drawn, not the first in the document.** Every row
+      // holds these now and all but one row's are in a shut menu, so
+      // `querySelector` answers with a button nobody can see.
+      const shown = sel => { const all = [...document.querySelectorAll(sel)];
+        return all.find(n => n.offsetParent !== null) || all[0] || null; };
       return {row: size(rows[0]),
-              out: size(document.querySelector('.trails-plan-out')),
-              up: size(document.querySelector('.trails-plan-up')),
-              grip: size(document.querySelector('.trails-plan-grip')),
+              out: size(shown('.trails-plan-out')),
+              up: size(shown('.trails-plan-up')),
+              more: size(shown('.trails-plan-more')),
+              grip: size(shown('.trails-plan-grip')),
               rows: rows.length}; }"""
 
     fine = page.evaluate(sizes)
     page.evaluate("() => window.trailsChrome.coarse(true)")
     page.wait_for_timeout(500)
     coarse = page.evaluate(sizes)
+
+    # **The edits live in the row's own menu now**, so they are measured with
+    # one open: closed, they are in the document and drawn nowhere, which is the
+    # right answer to *how big is that target* and not a useful one.
+    page.evaluate(
+        """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+          .filter(row => !row.classList.contains('trails-plan-stage'));
+        const more = rows[2] && rows[2].querySelector('.trails-plan-more');
+        if (more) { more.click(); } }"""
+    )
+    page.wait_for_timeout(500)
+    menu = page.evaluate(sizes)
 
     # And the arrows are not decoration: one press swaps a point with its
     # neighbour, which is `moveBy` -- the pin's own gesture, already here.
@@ -1304,8 +1322,10 @@ def a_finger_can_use_it(page: Any) -> Check:
             Reading("with a mouse: no arrows drawn", fine["up"], None),
             Reading("with a mouse: the drag grip is there", fine["grip"] is not None, True),
             Reading("coarse: px the row takes", coarse["row"][1] if coarse["row"] else 0, 44, within=2),
-            Reading("coarse: the × is at least 40 px", min(coarse["out"] or [0, 0]) >= 40, True, note=str(coarse["out"])),
-            Reading("coarse: the arrows are at least 40 px", min(coarse["up"] or [0, 0]) >= 40, True, note=str(coarse["up"])),
+            # The row carries one target now and the rest are lines in its menu.
+            Reading("coarse: the ⋯ is at least 40 px", min(coarse["more"] or [0, 0]) >= 40, True, note=str(coarse["more"])),
+            Reading("coarse: a menu line is at least 40 px", (menu["out"] or [0, 0])[1] >= 40, True, note=str(menu["out"])),
+            Reading("coarse: and the arrows with it", (menu["up"] or [0, 0])[1] >= 40, True, note=str(menu["up"])),
             # A grip that promises a drag no browser here implements is a lie,
             # so it goes and the arrows take its place.
             Reading("coarse: the drag grip is gone", coarse["grip"], None),
