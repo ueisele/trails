@@ -1922,13 +1922,46 @@ brought up to what was actually built:
 | Das Profil zur Hand | `https://claude.ai/code/artifact/9b188d07-156a-4e8c-9413-f0c1652b4005` — hiding the profile, the switch from the plan view, three figures |
 | Sieben Punkte, eine Spalte | `https://claude.ai/code/artifact/f4a5a398-2562-42f5-9d02-4211d0f6dc90` — the plan panel: head, marks, the row's own menu |
 
+**The published map is older than the build.** `analysis/output/` holds a page
+that fetches from nobody, opens with the network off and carries the rebuilt
+profile panel; `atlas.cairn.zone` does not have any of it yet. One `just deploy`
+is all that is between them.
+
 **Publishing is two steps and the order matters**: `command make map`, then
 `just deploy` in the infrastructure repository. The deploy does not build, on
 purpose, so deploying without building first puts the last build on the web
 however old it is — and says nothing. `atlas.cairn.zone` is where it lands.
 
-Nothing in the profile panel or in plan mode is waiting on a decision. What is
-open is below, in the order I would take it.
+Nothing in the profile panel or in plan mode is waiting on a decision.
+
+**Next, and agreed: the seconds.** The network work is finished — the page fetches
+from nobody, the deploy compresses once at brotli 11, and it opens with the
+network off. What is left of *slow* is **not bytes**: measured on the published
+page, 241 ms of network against **2,473 ms to `domInteractive`**, on a desktop
+CPU. A phone parses three to five times slower. The 36.6 MB of HTML compresses
+to 2.80 MB, so cutting source out of it buys almost nothing on the wire and
+almost all of the seconds. What it is made of, measured:
+
+| | uncompressed | what it would buy |
+|---|---:|---|
+| popups built as jQuery DOM **at load** | ~16 MB of the file | the largest parse win, and **187 MB** of the 590 MB the page costs settled |
+| coordinates at 15 decimals | **2.63 MB** over 151,535 numbers | parse, and nothing else — `65.44107796402518` is nanometres |
+| blank lines | **1.09 MB** over 163,317 of them | parse, and it is free |
+| `preferCanvas: true` | 0 | **130 MB** and 12,472 DOM elements down to 882 |
+
+**Three of those four are safe and one is not.** `preferCanvas` breaks every
+probe that counts `.leaflet-overlay-pane path` — it reads **0**, with one
+`canvas` — which is `11,589`, the oldest acceptance figure in this document and
+the one every phase since 3 has been checked against. It has to read both
+renderers before that can go in, and the figure has to be restated rather than
+quietly lost.
+
+**And the popups are the one with a design in it**, not just a deletion: they are
+built on load today, so building them on click means a per-class table of values,
+which is exactly how `figures` and the search names already travel. 15.14 MB of
+popup HTML carries **1.28 MB of values** — a popup is eight per cent information.
+
+What is open besides that is below, in the order I would take it.
 
 **1. Import an exported GPX into Komoot or Outdooractive.** The one acceptance
 criterion of this whole project that **nobody has ever run**;
