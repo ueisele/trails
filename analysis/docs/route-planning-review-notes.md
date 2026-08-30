@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 226 while one behaviour is being written. What is left out
+  readings instead of 230 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **179 seconds** and say
-whether the page still holds: **226 readings, and it should be green**. If it is
+whether the page still holds: **230 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 226. And **build before driving**: the run reads the page `make map`
+instead of 230. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3151,6 +3151,35 @@ spelled out in a panel that is already short of room, above a list that shows
 what it does.
 
 `make drive` reads **226**, the source tests **230**.
+
+### And the sheet was taking the panel away with it
+
+**Reported: pressing the *i* made the plan panel disappear, and closing the sheet
+gave back nothing.** The chrome cleared the open tool outright whenever anything
+docked into the sheet — written for a popup, where a tap on the ground is an
+answer to the map, and wrong for a panel's own button.
+
+**The rule under it was the real one, and it was fixed the wrong way round.** On
+a narrow screen the dock, the menu and the detail are one full-screen sheet and
+only one may be drawn; *which* one was decided by kind, and a tool always
+covered the detail. So the tool had to be cleared for the *i* to be seen at all.
+It is decided by **when** now: the last one opened is on top, and closing it
+gives back what was under it. On a wide screen nothing needs deciding — the dock
+sits by the rail on the right and the sheet on the left.
+
+**And a second press on the *i* closes it**, which is what a button that opened
+something is expected to do. Only where the sheet is still showing *this*: where
+a popup has taken it over since, the press is a request for these figures again.
+`detailKey` is what tells those apart.
+
+**Six readings turned red, and all six were the same thing hidden.** The checks
+opened a tool with `open('plan')` — a *toggle* — and got away with it because
+docking a popup had reliably shut whatever was open first. With nothing being
+cleared any more, a check that meant *make sure this is open* was closing it. It
+asks the state first now, `SHOW_TOOL`, which is the same idempotence `select()`
+already carries and for the same reason.
+
+`make drive` reads **230**, the source tests **231**.
 
 ### What is still open on a phone
 

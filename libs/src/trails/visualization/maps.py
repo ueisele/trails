@@ -3061,11 +3061,23 @@ class _ProfilePanel(MacroElement):
                     box.appendChild(said);
                 });
                 var named = selected && selected.label ? title + ' \\u00b7 ' + selected.label : title;
-                window.trailsChrome.detail(named, box);
+                window.trailsChrome.detail(named, box, 'profile');
             }
             more.addEventListener('click', function (event) {
                 event.stopPropagation();
-                if (sheeted()) { openDetail(); return; }
+                if (sheeted()) {
+                    // **A second press closes it**, which is what a button that
+                    // opened something is expected to do. Only where the sheet is
+                    // still showing *this*: where a popup has taken it over since,
+                    // the press is a request for these figures again.
+                    var standing = window.trailsChrome.state();
+                    if (standing.detail && standing.detailKey === 'profile') {
+                        window.trailsChrome.closeDetail();
+                        return;
+                    }
+                    openDetail();
+                    return;
+                }
                 licencesOpen = !licencesOpen;
                 showLicences();
             });
@@ -10476,6 +10488,7 @@ class _Chrome(MacroElement):
                 }
                 if (openTool === key) { closeDock(); return; }
                 openTool = key;
+                raise('tool');
                 dockParts.title.textContent = tool.label;
                 TOOLS.forEach(function (each) {
                     if (each.holder) { each.holder.style.display = each.key === key ? '' : 'none'; }
@@ -10487,6 +10500,25 @@ class _Chrome(MacroElement):
 
             // A tool closing on a narrow screen gives the detail back rather
             // than throwing it away: it was never closed, only covered.
+            // **Which of them the reader opened last.** On a narrow screen the
+            // dock, the menu and the detail are one full-screen sheet and only
+            // one may be drawn -- and *which* one used to be fixed: a tool always
+            // covered the detail. That is right when a tool is opened over
+            // something being read and wrong the other way round, and the reader
+            // who pressed the panel's own *i* met the wrong way round: the sheet
+            // came up, the plan panel went, and closing the sheet gave back
+            // nothing. Last opened is on top; closing it gives back what was
+            // under it.
+            var opened = {tool: 0, menu: 0, detail: 0}, opening = 0;
+            function raise(what) { opening += 1; opened[what] = opening; }
+            function topmost() {
+                var best = null;
+                if (openTool !== null && (!best || opened.tool > opened[best])) { best = 'tool'; }
+                if (menuOpen && (!best || opened.menu > opened[best])) { best = 'menu'; }
+                if (detailShown && (!best || opened.detail > opened[best])) { best = 'detail'; }
+                return best;
+            }
+
             function closeDock() { openTool = null; paintRail(); place(); }
             function closeMenu() { menuOpen = false; place(); }
             function closeSheet() { detailShown = false; place(); }
@@ -10495,6 +10527,7 @@ class _Chrome(MacroElement):
                 buildMenu();
                 openTool = null;
                 menuOpen = true;
+                raise('menu');
                 paintRail();
                 place();
             }
@@ -10524,7 +10557,8 @@ class _Chrome(MacroElement):
             // things that have to agree about which is on top, which is the
             // defect this chrome exists to end — so this is written once and
             // called from both.
-            function readInSheet(title, content, asHtml) {
+            var detailKey = null;
+            function readInSheet(title, content, asHtml, key) {
                 sheetParts.title.textContent = title || 'Details';
                 sheetParts.body.innerHTML = '';
                 if (typeof content === 'string') {
@@ -10540,10 +10574,14 @@ class _Chrome(MacroElement):
                 }
                 sheetParts.body.scrollTop = 0;
                 detailShown = true;
-                // A tap on the ground is an answer to the map, so whatever was
-                // being read about the map steps aside for it.
-                openTool = null;
-                menuOpen = false;
+                detailKey = key || null;
+                // **It comes to the top and dismisses nothing.** It used to clear
+                // the open tool outright, on the grounds that a tap on the ground
+                // is an answer to the map -- true of a popup, not of a panel's
+                // own *i*, and either way the reader who closes the sheet wants
+                // back what they had. Drawing one at a time on a narrow screen is
+                // the painting's business, not this one's.
+                raise('detail');
                 paintRail();
                 place();
             }
@@ -10560,7 +10598,7 @@ class _Chrome(MacroElement):
                 adopting = true;
                 map.closePopup(popup);
                 adopting = false;
-                readInSheet(titleFor(popup), content, true);
+                readInSheet(titleFor(popup), content, true, 'popup');
             });
 
             // A belt to the braces: with every popup adopted none is ever drawn,
@@ -10616,10 +10654,10 @@ class _Chrome(MacroElement):
 
                 // Drawn from the three facts, in one place. On a narrow
                 // screen a tool covers the detail rather than replacing it.
-                var hidden = narrow && (openTool !== null || menuOpen);
-                menu.style.display = (menuOpen && narrow) ? 'flex' : 'none';
-                dock.style.display = openTool ? 'flex' : 'none';
-                sheet.style.display = (detailShown && !hidden) ? 'flex' : 'none';
+                var top = narrow ? topmost() : null;
+                menu.style.display = (menuOpen && narrow && top === 'menu') ? 'flex' : 'none';
+                dock.style.display = (openTool && (!narrow || top === 'tool')) ? 'flex' : 'none';
+                sheet.style.display = (detailShown && (!narrow || top === 'detail')) ? 'flex' : 'none';
 
                 // The bar stands on the profile panel where one is showing and
                 // at the foot where none is, keeping the 16 px the panel leaves
@@ -10753,7 +10791,11 @@ class _Chrome(MacroElement):
                 // licences come through here: on a phone they are eleven lines
                 // of the panel, and a sheet is where a page this size puts what
                 // a reader has asked to see.
-                detail: function (title, node) { readInSheet(title, node, false); },
+                detail: function (title, node, key) { readInSheet(title, node, false, key); },
+                // Closing the sheet alone, which `close()` cannot do: that shuts
+                // everything, and everything is not what a second press on one
+                // panel's own button means.
+                closeDetail: function () { closeSheet(); },
                 menu: function () { openMenu(); },
                 close: function () { closeDock(); closeMenu(); closeSheet(); },
                 tools: TOOLS.map(function (tool) { return tool.key; }),
@@ -10797,6 +10839,7 @@ class _Chrome(MacroElement):
                         tool: openTool,
                         menu: menuOpen,
                         detail: detailShown,
+                        detailKey: detailKey,
                         profile: !!(profilePanel() && profilePanel().style.display !== 'none'),
                         planning: planOn(),
                         planPoints: planState ? planState.points : 0,

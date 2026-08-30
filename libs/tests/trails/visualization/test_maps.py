@@ -717,7 +717,10 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "window.trailsChrome.detail(named, box);" in html
+        assert "window.trailsChrome.detail(named, box, 'profile');" in html
+        # And a second press closes it, which is what a button that opened
+        # something is expected to do.
+        assert "standing.detailKey === 'profile'" in html
         # Read off the element that shows it rather than composed again: one
         # sentence, in two places, from one derivation.
         assert "said.textContent = part[0];" in html
@@ -2893,13 +2896,30 @@ class TestChrome:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "function readInSheet(title, content, asHtml)" in html
-        assert "readInSheet(titleFor(popup), content, true)" in html
-        assert "detail: function (title, node) { readInSheet(title, node, false); }," in html
+        assert "function readInSheet(title, content, asHtml, key)" in html
+        assert "readInSheet(titleFor(popup), content, true, 'popup')" in html
+        assert "detail: function (title, node, key) { readInSheet(title, node, false, key); }," in html
         # A popup's content is markup and a caller's string is text, told apart
         # by the caller rather than sniffed at: the day something guesses is the
         # day a place name with an ampersand in it becomes an element.
         assert "if (asHtml) { wrap.innerHTML = content; } else { wrap.textContent = content; }" in html
+
+    def test_the_last_one_opened_is_the_one_drawn(self):
+        """On a narrow screen the dock, the menu and the detail are one
+        full-screen sheet and only one may be drawn. Which one used to be fixed —
+        a tool always covered the detail — so a reader pressing the panel's own
+        *i* watched the plan panel go and got nothing back when they closed the
+        sheet."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "function raise(what) { opening += 1; opened[what] = opening; }" in html
+        assert "var top = narrow ? topmost() : null;" in html
+        # And the sheet dismisses nothing: what it covers on a narrow screen it
+        # gives back when it closes.
+        assert "openTool = null;\n                menuOpen = false;\n                paintRail();" not in html
+        assert "closeDetail: function () { closeSheet(); }," in html
 
     def test_one_state_decides_whether_the_profile_stands(self):
         """Three places offer the switch — the rail, the plan bar and the plan

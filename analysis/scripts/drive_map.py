@@ -448,6 +448,18 @@ def settled(page: Any, within_ms: int = 25_000) -> None:
     page.wait_for_function("() => !window.trailsPlan || !window.trailsPlan.busy()", timeout=within_ms)
 
 
+SHOW_TOOL = """(key) => { if (window.trailsChrome.state().tool !== key) { window.trailsChrome.open(key); } }"""
+"""Open a tool and only if it is not the one already open.
+
+**`open` is a toggle**, and a check that presses it blind measures the opposite
+of what it asked for. That used to be hidden: docking a popup cleared the open
+tool outright, so a tool was reliably shut before any of these ran. It is not
+cleared any more -- a reader who closes the detail wants back what they had --
+and six readings turned red at once, all of them measuring a panel that had just
+been closed by the line meant to open it.
+"""
+
+
 def furniture(page: Any) -> Check:
     """What the page draws before anything is clicked.
 
@@ -1071,6 +1083,26 @@ def the_sources_behind_an_i(page: Any) -> Check:
                 state: window.trailsChrome.state().detail}; }"""
     )
 
+    # **What it covers, it gives back.** Reported: pressing the *i* took the plan
+    # panel away and closing the sheet gave back nothing — the chrome cleared the
+    # open tool outright, which is right when a tap on the ground answers the map
+    # and wrong for a panel's own button. And a second press closes it, which is
+    # what a button that opened something is expected to do.
+    page.evaluate("() => window.trailsChrome.close()")
+    page.evaluate(SHOW_TOOL, "plan")
+    page.wait_for_timeout(700)
+    drawn = """() => { const seen = sel => { const node = document.querySelector(sel);
+        return !!node && node.getClientRects().length > 0; };
+      return {dock: seen('.trails-dock'), sheet: seen('.trails-detail'),
+              tool: window.trailsChrome.state().tool,
+              detail: window.trailsChrome.state().detail}; }"""
+    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
+    page.wait_for_timeout(700)
+    over = page.evaluate(drawn)
+    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
+    page.wait_for_timeout(700)
+    back = page.evaluate(drawn)
+
     page.evaluate("() => window.trailsChrome.close()")
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(900)
@@ -1100,6 +1132,12 @@ def the_sources_behind_an_i(page: Any) -> Check:
             Reading("and every figure with them", "high " in sheet["text"] and "low " in sheet["text"], True),
             # The other switch in the heading, which is proposal one's.
             Reading("the × is offered beside it", narrow["hide"]["drawn"], True),
+            # It covers the plan panel and does not dismiss it.
+            Reading("the plan panel is still open under it", over["tool"], "plan"),
+            Reading("covered, not closed", over["sheet"] and not over["dock"], True),
+            # A second press closes the sheet, and the panel comes back.
+            Reading("a second press closes it", back["detail"], False),
+            Reading("and the plan panel is back", back["dock"], True),
             # **And a wide screen is no different now.** The rule used to be
             # about room — first height, then width — and the room was never
             # what made a 300-character list of licences the wrong thing to put
@@ -1208,7 +1246,7 @@ def a_finger_can_use_it(page: Any) -> Check:
     # check before this one taps a trail. Measuring here without opening it
     # again measures a box with no size, which is the detached-DOM trap one
     # level up.
-    page.evaluate("() => window.trailsChrome.open('plan')")
+    page.evaluate(SHOW_TOOL, "plan")
     page.wait_for_timeout(600)
     # And it asks whether the list is open rather than pressing the handle: the
     # handle is a toggle, the check before this one has already opened it, and a
@@ -1419,7 +1457,7 @@ def the_plan_bar(page: Any) -> Check:
     undone = page.evaluate("() => window.trailsPlan.state().points.length")
 
     # The profile is one tap away rather than gone.
-    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.evaluate(SHOW_TOOL, "profile")
     page.wait_for_timeout(900)
     asked = page.evaluate(seen)
 
@@ -1526,7 +1564,8 @@ def the_point_list_takes_the_room(page: Any) -> Check:
         page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
         settled(page)
     settled(page)
-    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.evaluate("() => window.trailsPlan.showList(true)")
+    page.evaluate(SHOW_TOOL, "plan")
     page.wait_for_timeout(1000)
 
     listed = page.evaluate(
@@ -1636,7 +1675,8 @@ def files_from_the_page(page: Any) -> Check:
     # their download is called is asking for the tour in it, and an unnamed tour
     # falls back to a stem that would never show whether the name travels.
     tour = "Vistenfjord runde"
-    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.evaluate("() => window.trailsPlan.showList(true)")
+    page.evaluate(SHOW_TOOL, "plan")
     page.wait_for_timeout(900)
     page.fill(".trails-plan-title", tour)
     # A real blur, because the field commits on one: one name is one change and
@@ -1645,7 +1685,7 @@ def files_from_the_page(page: Any) -> Check:
     settled(page)
     named = page.evaluate("() => window.trailsPlan.state().writable.stem")
 
-    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.evaluate(SHOW_TOOL, "profile")
     page.wait_for_timeout(900)
     out = pathlib.Path(tempfile.mkdtemp(prefix="trails-drive-"))
 
@@ -1713,7 +1753,8 @@ def files_from_the_page(page: Any) -> Check:
     # is the one that has always written this, and on a narrow screen that panel
     # is not on the screen by default -- so the plan control offers it too, and
     # the two must be the same file and not two files that agree today.
-    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.evaluate("() => window.trailsPlan.showList(true)")
+    page.evaluate(SHOW_TOOL, "plan")
     page.wait_for_timeout(700)
     with page.expect_download(timeout=25_000) as caught:
         page.evaluate("() => document.querySelector('.trails-plan-gpx').click()")
@@ -1722,7 +1763,8 @@ def files_from_the_page(page: Any) -> Check:
     same = {"name": caught.value.suggested_filename, "bytes": beside.stat().st_size}
 
     # A stage, and the archive that gathers them.
-    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.evaluate("() => window.trailsPlan.showList(true)")
+    page.evaluate(SHOW_TOOL, "plan")
     page.wait_for_timeout(900)
     page.evaluate(
         """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
@@ -1983,7 +2025,7 @@ def the_profile_tool(page: Any) -> Check:
     page.wait_for_timeout(500)
     at_rest = page.evaluate(button)
 
-    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.evaluate(SHOW_TOOL, "profile")
     page.wait_for_timeout(700)
     opened = page.evaluate(shown)
     titled = page.evaluate("() => document.querySelector('.trails-dock .trails-chrome-title').textContent")
@@ -1998,10 +2040,10 @@ def the_profile_tool(page: Any) -> Check:
     # the map, which is what this tool does where there is room for it.
     tall = "() => { const p = document.querySelector('.trails-profile-panel'); return p ? Math.round(p.getBoundingClientRect().height) : 0; }"
     open_px = page.evaluate(tall)
-    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.evaluate(SHOW_TOOL, "profile")
     page.wait_for_timeout(600)
     folded_px = page.evaluate(tall)
-    page.evaluate("() => window.trailsChrome.open('profile')")
+    page.evaluate(SHOW_TOOL, "profile")
     page.wait_for_timeout(600)
 
     # And it hands the page back the way it found it, or the check after this
@@ -2213,7 +2255,8 @@ def undo_undoes_the_last_change(page: Any) -> Check:
     after_move = take_back()
 
     # 4. a stage mark, which changes no points.
-    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.evaluate("() => window.trailsPlan.showList(true)")
+    page.evaluate(SHOW_TOOL, "plan")
     page.wait_for_timeout(900)
     pressed = page.evaluate(
         """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
@@ -2519,7 +2562,8 @@ def a_plan_survives_a_reload(page: Any) -> Check:
     # survives a reload, and where those controls are drawn is `chrome layout`'s
     # reading.
     tour = "Strompdalen over"
-    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.evaluate("() => window.trailsPlan.showList(true)")
+    page.evaluate(SHOW_TOOL, "plan")
     page.wait_for_timeout(800)
     page.evaluate(
         """(name) => { const title = document.querySelector('.trails-plan-title');
@@ -2567,7 +2611,7 @@ def a_plan_survives_a_reload(page: Any) -> Check:
     # point at a time. It goes through the same edit funnel as everything else,
     # so undo brings it back -- which is what makes clearing the map safe.
     page.evaluate(
-        """() => { window.trailsChrome.open('plan');
+        """() => { if (window.trailsChrome.state().tool !== 'plan') { window.trailsChrome.open('plan'); }
         document.querySelector('.trails-plan-fresh').click(); }"""
     )
     settled(page)
