@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 241 while one behaviour is being written. What is left out
+  readings instead of 245 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **179 seconds** and say
-whether the page still holds: **241 readings, and it should be green**. If it is
+whether the page still holds: **245 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 241. And **build before driving**: the run reads the page `make map`
+instead of 245. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3270,6 +3270,23 @@ Blue, and not a themed colour: the tiles stay light in both sets, so this is
 drawn on the same ground either way.
 
 `make drive` reads **241**, the source tests **239**.
+
+**And a reader standing somewhere this map has never drawn is told so.** The
+first rule was *away from the view*, which is a different question and the wrong
+one: a reader can pan anywhere, and a map that refused because they had scrolled
+off would be refusing its own reader. What cannot be answered is a position on
+ground this map does not hold. So the chrome is handed the extent `create_map`
+fitted the view to — carried on the map object under `MAP_BOUNDS_ATTR`, the same
+pattern as `CHAIN_FIGURES_ATTR` on a feature group, rather than a second argument
+every caller would repeat — and a fix outside it draws nothing, says *your
+position is outside the ground this map draws — about 636 km from it*, and stops
+watching. There is no point following a position that cannot be drawn. Driven
+from Oslo, which is 636 km from the middle of the park.
+
+Where no bounds were given, `DRAWN` is `null` and nothing can refuse anything: a
+page built around a centre draws whatever the reader pans to.
+
+`make drive` reads **245**, the source tests **241**.
 
 ### What is still open on a phone
 

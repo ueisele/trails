@@ -29,6 +29,13 @@ from trails.routing import elevation
 #: Bounding box as (min_lon, min_lat, max_lon, max_lat), matching GeoPandas.
 Bounds = tuple[float, float, float, float]
 
+#: Where :func:`create_map` records the ground it fitted the view to, for
+#: anything later that needs to know what this map actually draws. The same
+#: pattern as :data:`CHAIN_FIGURES_ATTR` on a feature group: a fact about the
+#: object, carried on the object, rather than a second argument every caller
+#: would have to repeat.
+MAP_BOUNDS_ATTR = "_trails_bounds"
+
 
 class _Theme(MacroElement):
     """The colours every panel on this page is drawn from, in two sets.
@@ -269,6 +276,7 @@ def create_map(
     if bounds is not None:
         min_lon, min_lat, max_lon, max_lat = bounds
         fmap.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
+        setattr(fmap, MAP_BOUNDS_ATTR, bounds)
 
     return fmap
 
@@ -10143,6 +10151,10 @@ class _Chrome(MacroElement):
         (function () {
             var map = {{ this._parent.get_name() }};
             var NARROW = {{ this.narrow_px }};
+            // What this map draws. `null` where nobody said, and then nothing
+            // here can refuse anything.
+            var DRAWN = {{ this.extent_json }};
+            var EXTENT = DRAWN ? L.latLngBounds(DRAWN[0], DRAWN[1]) : null;
             var CREDITS = {{ this.credits_json }};
             var container = map.getContainer();
 
@@ -10518,9 +10530,36 @@ class _Chrome(MacroElement):
                 return map.distance(seen.getCenter(), where);
             }
 
+            // How far a fix falls outside the ground this map draws, in metres,
+            // or 0 where it falls on it. **Not the same question as "away from
+            // the view"**: a reader can pan anywhere, and a map that refused
+            // because they had scrolled off would be refusing its own reader.
+            // What cannot be answered is a position on ground never drawn.
+            function outsideMap(where) {
+                if (!EXTENT || EXTENT.contains(where)) { return 0; }
+                return map.distance(EXTENT.getCenter(), where);
+            }
+
+            function faraway(metres) {
+                return metres >= 10000
+                    ? Math.round(metres / 1000).toLocaleString('en-GB') + ' km'
+                    : (metres / 1000).toFixed(1) + ' km';
+            }
+
             function drawHere(position) {
                 var where = L.latLng(position.coords.latitude, position.coords.longitude);
                 var spread = Math.max(1, position.coords.accuracy || 0);
+                // **Outside the drawn ground there is nothing to draw on.** A dot
+                // on a blank square is not an answer, so this says where the
+                // reader is instead of pretending to show them, and stops:
+                // there is no point watching a position this map cannot draw.
+                var beyond = outsideMap(where);
+                if (beyond) {
+                    stopHere('Your position is outside the ground this map draws \u2014 about ' +
+                        faraway(beyond) + ' from it, so there is nothing here to show you. ' +
+                        'Ask again inside the map.');
+                    return;
+                }
                 if (!hereDot) {
                     hereRing = L.circle(where, {radius: spread, color: HERE_BLUE, weight: 1,
                                                 opacity: 0.7, fillColor: HERE_BLUE, fillOpacity: 0.12,
@@ -11244,7 +11283,11 @@ class _Chrome(MacroElement):
         {% endmacro %}
     """)
 
-    def __init__(self, credits: dict[str, list[dict[str, str]]] | None) -> None:
+    def __init__(
+        self,
+        credits: dict[str, list[dict[str, str]]] | None,
+        extent: Bounds | None = None,
+    ) -> None:
         """Initialize the chrome.
 
         Args:
@@ -11252,11 +11295,18 @@ class _Chrome(MacroElement):
                 :func:`source_credits` composes it. Rendered into the *Sources*
                 panel. ``None`` leaves that panel saying it was handed nothing,
                 which is truthful and is not the same as an empty list.
+            extent: The ground this map draws, as (min_lon, min_lat, max_lon,
+                max_lat), or None where the caller did not say. A reader whose
+                own position falls outside it is told so rather than shown a dot
+                on a blank.
         """
         super().__init__()
         self._name = "Chrome"
         self.narrow_px = NARROW_PX
         self.credits_json = _script_json(credits or {})
+        # What this map draws, so the page can tell a reader standing outside it
+        # that there is nothing here to show them. `null` where nobody said.
+        self.extent_json = _script_json(None if extent is None else [[extent[1], extent[0]], [extent[3], extent[2]]])
 
 
 def add_chrome(fmap: folium.Map, credits: dict[str, list[dict[str, str]]] | None = None) -> None:
@@ -11272,4 +11322,4 @@ def add_chrome(fmap: folium.Map, credits: dict[str, list[dict[str, str]]] | None
         credits: What to put in the *Sources* panel, keyed by source, as
             :func:`source_credits` composes it
     """
-    _Chrome(credits).add_to(fmap)
+    _Chrome(credits, getattr(fmap, MAP_BOUNDS_ATTR, None)).add_to(fmap)

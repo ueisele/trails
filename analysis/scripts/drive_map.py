@@ -2504,6 +2504,18 @@ def where_the_reader_is(page: Any) -> Check:
     page.wait_for_timeout(600)
     stopped = page.evaluate(seen)
 
+    # **And a reader standing somewhere this map has never drawn.** Oslo is 500
+    # km from the park: a dot there would be a dot on a blank square, which is
+    # not an answer. It says where they are and stops watching, because there is
+    # no point following a position it cannot draw.
+    page.context.set_geolocation({"latitude": 59.913, "longitude": 10.752, "accuracy": 20})
+    page.evaluate(SHOW_TOOL, "here")
+    page.wait_for_timeout(400)
+    page.evaluate("() => document.querySelector('.trails-here-toggle').click()")
+    page.wait_for_timeout(2500)
+    elsewhere = page.evaluate(seen)
+    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+
     page.evaluate("() => window.trailsChrome.close()")
     page.wait_for_timeout(400)
 
@@ -2533,6 +2545,11 @@ def where_the_reader_is(page: Any) -> Check:
             # And pressing again stops: the watch, the dot and the circle.
             Reading("pressing again stops the watch", stopped["dot"] or stopped["ring"], False),
             Reading("and offers it again", stopped["button"], "Show my position"),
+            # Outside the drawn ground: said, not drawn, and not followed.
+            Reading("a position off the map draws nothing", elsewhere["dot"] or elsewhere["ring"], False),
+            Reading("and says so", "outside the ground this map draws" in elsewhere["said"], True, note=elsewhere["said"][:80]),
+            Reading("with how far off it is", "km from it" in elsewhere["said"], True),
+            Reading("and stops watching", elsewhere["button"], "Show my position"),
         ],
     )
 

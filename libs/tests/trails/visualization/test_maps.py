@@ -3099,6 +3099,31 @@ class TestWhereTheReaderIs:
         assert "if (hereFixes === 1 && !away) {" in html
         assert "function awayFromView(where)" in html
 
+    def test_a_position_off_the_drawn_ground_is_said_and_not_drawn(self):
+        """A dot on a blank square is not an answer. This is not the same
+        question as *away from the view*: a reader can pan anywhere, and a map
+        that refused because they had scrolled off would be refusing its own
+        reader. What cannot be answered is ground never drawn."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "function outsideMap(where)" in html
+        assert "Your position is outside the ground this map draws" in html
+        # And the extent comes from what create_map fitted the view to, carried
+        # on the map object rather than repeated by every caller.
+        assert "var EXTENT = DRAWN ? L.latLngBounds(DRAWN[0], DRAWN[1]) : null;" in html
+        assert "[[65.3, 12.4], [65.7, 13.4]]" in html
+
+    def test_a_map_that_was_given_no_bounds_refuses_nothing(self):
+        """`null` where nobody said, and then nothing here can refuse anything —
+        a page built around a centre draws whatever the reader pans to."""
+        fmap = maps.create_map(center=(65.5, 13.0))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var DRAWN = null;" in html
+
     def test_a_refusal_says_which_refusal_it_was(self):
         """Told not to share, no fix in time, and a device that cannot work it
         out are three different things, and only the first is the reader's own
