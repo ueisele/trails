@@ -1888,9 +1888,9 @@ whenever the decisions document grows.
 
 **Three commands, in this order.** Read this document — it is the one that
 survives a compaction, and everything below assumes it. Then `git log --oneline
--25`, which says what was last done and why, because every commit message here
+-30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
-`command make drive`, which take about a minute and **179 seconds** and say
+`command make drive`, which take about a minute and **185 seconds** and say
 whether the page still holds: **245 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
@@ -1902,6 +1902,25 @@ While one behaviour is being written, `ARGS="--only <word>"` is ten readings
 instead of 245. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
+
+**The CI had never been green**, and that is not in this document because it is
+not about the map: 47 runs, all red, back to the oldest GitHub holds. One step
+did it — `nbqa ruff notebooks/`, a second opinion about a question `make lint`
+already answers with ruff's own notebook support, and the two disagree. The
+workflow runs `make check` now, the same command the developer runs and the hooks
+enforce, and no Python is set up in it: `.python-version` and `requires-python`
+decide, and uv fetches an interpreter. Commits `85fd50c` and `fb61888`.
+
+**The four mockups are outside this repository**, which is the one kind of thing
+a compaction loses outright. Each was drawn against measured figures and then
+brought up to what was actually built:
+
+| | |
+|---|---|
+| Atlas in der Hand | `https://claude.ai/code/artifact/6326dfca-9d19-4840-88a1-45fe9859df5f` — the chrome: rail, burger, dock, sheet |
+| Planen mit einer Hand | `https://claude.ai/code/artifact/d3aa7c34-2bc2-48ed-9711-3d12bcf1777d` — plan mode on a phone, the plan bar |
+| Das Profil zur Hand | `https://claude.ai/code/artifact/9b188d07-156a-4e8c-9413-f0c1652b4005` — hiding the profile, the switch from the plan view, three figures |
+| Sieben Punkte, eine Spalte | `https://claude.ai/code/artifact/f4a5a398-2562-42f5-9d02-4211d0f6dc90` — the plan panel: head, marks, the row's own menu |
 
 **Publishing is two steps and the order matters**: `command make map`, then
 `just deploy` in the infrastructure repository. The deploy does not build, on
@@ -3311,12 +3330,16 @@ page built around a centre draws whatever the reader pans to.
   archive, the zip is worth one more tap when somebody is next in there. It is
   hand-written down to the varints and the DOS stamp, it is the larger of the
   two, and a browser that balks at one may not balk at the other.
-- **The share sheet on iOS — built, and unverified.** The same shape as the
-  keyboard: the page's half is driven, the device's half needs somebody to press
-  it. What to look for is whether *Download GPX* opens a sheet at all, and
-  whether *Save to Files* writes the name the sheet shows. If no sheet appears,
-  `canShare` refused the type and the anchor ran — then the name is Safari's
-  business and the `File` is the only lever left.
+- **The share sheet on iOS — built, reported once, and still unverified.** The
+  reader came back: **iOS Firefox still named the file after the blob, while
+  Chrome on the same phone got it right.** Both are WebKit — every browser on iOS
+  is — so Firefox for iOS taking downloads over itself is what separates them.
+  `canShare` had a veto over the sheet and does not any more, since `.gpx` is
+  exactly the kind of type a `canShare` is most likely to be wrong about. What to
+  look for now: does *Download GPX* open a sheet in iOS Firefox? If it does,
+  *Save to Files* should write the name the sheet shows. If it does not, the
+  panel says the name the file was meant to have, under the button — and then it
+  is that browser's business and there is no lever left on this side.
 - **Coordinates at 6 decimals** and the rest of the weight work, which the memory
   split above orders and which nothing here touched.
 
