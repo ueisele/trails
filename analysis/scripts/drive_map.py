@@ -1741,73 +1741,6 @@ def files_from_the_page(page: Any) -> Check:
         const file = shared.files[0];
         return {name: file.name, type: file.type, bytes: file.size, isFile: file instanceof File}; }"""
     )
-    # **A save on a finger always says something.** Silence used to mean both
-    # *the sheet worked* and *this page is older than you think*, and only a
-    # reader with the device can tell those apart -- which cost a round trip.
-    said_shared = page.evaluate("() => (document.querySelector('.trails-profile-saved') || {}).textContent || ''")
-    # **And the path the reader on iOS Firefox is actually on.** That browser
-    # takes downloads over itself and drops the anchor's name, and the sheet did
-    # not run for it either -- so the sheet refusing has to end somewhere better
-    # than a file called nothing. Driven by making `share` reject.
-    # **And the sheet is asked twice before the anchor gets it.** A refusal off a
-    # list of types is not a statement about this file: Chrome on Android is
-    # measured to refuse a `.gpx` that way, and `application/gpx+xml` is exactly
-    # the kind of type such a list is most likely to be missing. So the same
-    # bytes are offered again under a type nothing keeps a list about.
-    page.evaluate(
-        """() => { window.__asked = [];
-        navigator.share = (data) => { window.__asked.push(data.files[0].type);
-            return Promise.reject(new TypeError('no')); }; }"""
-    )
-    with page.expect_download(timeout=25_000) as caught:
-        page.evaluate(press_download)
-    refused = caught.value.suggested_filename
-    asked_as = page.evaluate("() => window.__asked")
-    fell_back = page.evaluate(
-        """() => ({way: window.trailsProfilePanel.lastSave(),
-        note: (document.querySelector('.trails-profile-saved') || {}).textContent || ''})"""
-    )
-
-    # A closed sheet is not a failure, and must not save the file behind the
-    # reader's back.
-    page.evaluate(
-        """() => { const closed = new Error('closed'); closed.name = 'AbortError';
-        navigator.share = () => Promise.reject(closed); }"""
-    )
-    page.evaluate(press_download)
-    page.wait_for_timeout(900)
-    closed = page.evaluate("() => window.trailsProfilePanel.lastSave()")
-
-    # **And the branch the reader reporting this is actually on, which was the
-    # silent one.** A finger on a browser that offers no share sheet at all: the
-    # anchor is the only way out, WebKit drops its name, and the page said
-    # nothing -- it spoke only where a sheet had refused, and there is none here
-    # to refuse. Reported three times from a device, and twice the page had no
-    # sentence to show for it.
-    page.evaluate("() => { delete navigator.share; delete navigator.canShare; }")
-    with page.expect_download(timeout=25_000) as caught:
-        page.evaluate(press_download)
-    unsheeted = caught.value.suggested_filename
-    without = page.evaluate(
-        """() => ({way: window.trailsProfilePanel.lastSave(),
-        note: (document.querySelector('.trails-profile-saved') || {}).textContent || ''})"""
-    )
-
-    # **And the sentence belongs where the button was pressed.** The plan control
-    # offers the whole tour, and on a narrow screen the profile panel is not on
-    # the screen at all while a route is being planned -- which is exactly when
-    # that button is used. The one line naming the file was being written into a
-    # panel the reader who pressed it could not see.
-    page.evaluate("() => window.trailsPlan.showList(true)")
-    page.evaluate(SHOW_TOOL, "plan")
-    page.wait_for_timeout(700)
-    with page.expect_download(timeout=25_000) as caught:
-        page.evaluate("() => document.querySelector('.trails-plan-gpx').click()")
-    where_said = page.evaluate(
-        """() => ({plan: (document.querySelector('.trails-plan-said') || {}).textContent || '',
-        profile: (document.querySelector('.trails-profile-saved') || {}).textContent || ''})"""
-    )
-
     page.evaluate(
         """() => { window.trailsChrome.coarse(null);
         delete navigator.share; delete navigator.canShare; window.__shared = null; }"""
@@ -1825,13 +1758,6 @@ def files_from_the_page(page: Any) -> Check:
     beside = out / ("beside-" + caught.value.suggested_filename)
     caught.value.save_as(beside)
     same = {"name": caught.value.suggested_filename, "bytes": beside.stat().st_size}
-    # On a mouse the anchor carries the name, so there is nothing to say and
-    # saying it would be noise. Read as *the name is not in either line*, because
-    # this one also carries the sentence about the plan being kept.
-    quiet = page.evaluate(
-        """() => ((document.querySelector('.trails-plan-said') || {}).textContent || '') +
-        ((document.querySelector('.trails-profile-saved') || {}).textContent || '')"""
-    )
 
     # A stage, and the archive that gathers them.
     page.evaluate("() => window.trailsPlan.showList(true)")
@@ -1898,36 +1824,10 @@ def files_from_the_page(page: Any) -> Check:
             Reading("a finger is handed the share sheet", bool(handed and handed["isFile"]), True, note=str(handed)),
             Reading("with the name on the file itself", handed["name"] if handed else None, written.suggested_filename),
             Reading("and the whole body with it", handed["bytes"] if handed else None, route.stat().st_size),
-            Reading("and the sheet says what it handed over", written.suggested_filename in said_shared, True, note=said_shared),
-            # What is left when the sheet says no: the anchor, and a sentence,
-            # because that browser is about to name the file after the blob.
-            Reading("a refused sheet still saves it", refused, written.suggested_filename),
-            Reading("and the way is recorded", fell_back["way"].startswith("anchor after"), True, note=fell_back["way"]),
-            Reading("and the reader is told the name", written.suggested_filename in fell_back["note"], True),
-            Reading(
-                "the sheet is asked twice, the second time as a plain stream",
-                asked_as,
-                ["application/gpx+xml", "application/octet-stream"],
-                note=str(asked_as),
-            ),
-            Reading("a closed sheet saves nothing", closed, "closed"),
-            # **The branch that had no sentence at all.** No sheet to refuse, a
-            # finger, and an anchor whose name WebKit drops: reported three times
-            # from a device, and the page had nothing to show for it twice.
-            Reading("no sheet at all still saves it", unsheeted, written.suggested_filename),
-            Reading("and the way is the plain anchor", without["way"], "anchor"),
-            Reading("and the reader is told the name here too", written.suggested_filename in without["note"], True, note=without["note"]),
-            Reading("and told what this browser did", "offers no share sheet" in without["note"], True),
-            # Where the button was pressed is where the answer belongs.
-            Reading(
-                "the plan panel says it when the plan panel asked", written.suggested_filename in where_said["plan"], True, note=where_said["plan"]
-            ),
-            Reading("and the profile panel does not say it as well", where_said["profile"], ""),
             Reading("and is a GPX", text.startswith('<?xml version="1.0" encoding="UTF-8"?>'), True),
             # One writer asked from two places, not two that agree today.
             Reading("the plan panel offers the same file", same["name"], written.suggested_filename),
             Reading("byte for byte", same["bytes"], route.stat().st_size),
-            Reading("and a mouse is told nothing", written.suggested_filename in quiet, False, note=quiet[:70]),
             Reading("carrying its waypoints", text.count("<wpt ") > 0, True, note=f"{text.count('<wpt ')} wpt"),
             Reading("the list lists the points", rows, 4),
             Reading("a stage is cut", marks, 1),

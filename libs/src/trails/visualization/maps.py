@@ -2689,125 +2689,37 @@ class _ProfilePanel(MacroElement):
             // which on Android names the file correctly; nothing here had to
             // know that in advance, and nothing has to be corrected when it
             // changes.
-            // A type nothing keeps a list about, which the second ask below
-            // offers the same bytes under.
-            var PLAIN_FILE = 'application/octet-stream';
-
-            function saveFile(name, body, asked) {
+            function saveFile(name, body) {
                 // A body already made into a blob keeps its own type: an archive
                 // is not XML and relabelling it would say it was.
-                var type = (body instanceof Blob) ? (body.type || PLAIN_FILE)
+                var type = (body instanceof Blob) ? (body.type || 'application/octet-stream')
                     : 'application/gpx+xml';
-                if (shareable()) {
-                    saveSaid = 'sheet';
-                    sayFile('', asked);
-                    offerSheet(name, body, type, '', asked);
-                    return;
-                }
-                saveSaid = 'anchor';
-                anchorFile(name, fileOf(name, body, type));
-                // **A download that carries its name says nothing; one that may
-                // not has to say the name.** A finger on a browser offering no
-                // share sheet is exactly where the reader reporting this is:
-                // WebKit drops the anchor's name and there is no sheet to carry
-                // it instead, so the file arrives called a line of hex. This was
-                // the silent branch — the page said something only where a sheet
-                // had refused, and said nothing at all where there was none to
-                // refuse. On a mouse the anchor names the file and a note here
-                // would be noise.
-                sayFile(coarsePointer() ? saidAs(name, 'offers no share sheet') : '', asked);
-            }
-
-            // The name on the bytes rather than on an element, so that anything
-            // reading `file.name` finds it.
-            function fileOf(name, body, type) {
-                return (typeof File === 'function')
+                var file = (typeof File === 'function')
                     ? new File([body], name, {type: type})
                     : ((body instanceof Blob) ? body : new Blob([body], {type: type}));
-            }
-
-            // What a reader is told where the name may not survive the download.
-            // It leads with the name, because a file already saved can still be
-            // renamed and that is the useful half; it ends with what this browser
-            // did, because the two ways of arriving here are indistinguishable on
-            // the device and this sentence is the only thing that tells them
-            // apart in a report from one.
-            function saidAs(name, what) {
-                return 'Saved as ' + name + ' \u2014 this browser ' + what +
-                    ', and may name the download itself.';
-            }
-
-            function refusalOf(failure) {
-                return (failure && failure.name) || 'a refusal';
-            }
-
-            // **One refusal is not an answer about this file.** A sheet that will
-            // not take `application/gpx+xml` may take the same bytes offered as a
-            // plain stream: Chrome on Android is measured to refuse a `.gpx` off
-            // a list it keeps, and a refusal off a list is not a statement about
-            // the file in hand. So the sheet is asked twice — once as what the
-            // file is, once as a type nothing keeps a list about — and only then
-            // does the anchor get it. Where both are refused the retry cost one
-            // rejected promise; where there is no sheet at all it never runs.
-            function offerSheet(name, body, type, after, asked) {
-                var file = fileOf(name, body, type);
-                navigator.share({files: [file]}).then(function () {
-                    saveSaid = after ? 'shared after ' + after : 'shared';
-                    // **Every save on a finger says something, and that is what
-                    // makes the other two sentences readable.** Silence used to
-                    // mean two different things — the sheet worked, and this
-                    // page is older than the reader thinks — and telling those
-                    // apart cost a round trip to a device that only has one
-                    // screen to report from. It is the honest half of a sheet
-                    // anyway: the file left under this name.
-                    sayFile('Handed to the share sheet as ' + name + '.', asked);
-                }, function (failure) {
-                    // **A closed sheet is not a failure**, and saving the file
-                    // anyway would be doing something nobody asked for.
-                    if (failure && failure.name === 'AbortError') {
-                        saveSaid = 'closed';
-                        return;
-                    }
-                    var why = (after ? after + ', then ' : '') + refusalOf(failure);
-                    if (!after && type !== PLAIN_FILE) {
-                        saveSaid = 'the sheet again as a plain stream after ' + why;
-                        offerSheet(name, body, PLAIN_FILE, why, asked);
-                        return;
-                    }
-                    // Anything else falls back to the anchor: a wrongly named
-                    // file beats a button that does nothing.
-                    saveSaid = 'anchor after ' + why;
-                    anchorFile(name, file);
-                    sayFile(saidAs(name, 'would not hand it to a share sheet'), asked);
-                });
+                if (shareable(file)) {
+                    navigator.share({files: [file]}).catch(function (failure) {
+                        // **A closed sheet is not a failure**, and saving the
+                        // file anyway would be doing something nobody asked for.
+                        // Anything else falls back to the anchor: a wrongly named
+                        // file beats a button that does nothing.
+                        if (failure && failure.name === 'AbortError') { return; }
+                        anchorFile(name, file);
+                    });
+                    return;
+                }
+                anchorFile(name, file);
             }
 
             // Whether this file should go through a sheet rather than a
             // download. The pointer is asked the same way everything else here
             // asks it — the class the chrome sets, so a check can drive it —
             // falling back to the query for a map built without a chrome.
-            // **`canShare` gets no veto any more, and that is a report from a
-            // device.** The gate wanted `navigator.canShare` to exist *and* to
-            // say yes; on iOS Firefox the file still came down named after the
-            // blob while Chrome on the same phone — the same WebKit — got it
-            // right. Whichever half was missing there, the cost of asking anyway
-            // is one rejected promise, and the answer to a rejection is the
-            // anchor, which is exactly where that reader already was.
-            //
-            // `.gpx` is the kind of type a `canShare` is most likely to be wrong
-            // about: Chrome on Android refuses it from a list it keeps, and a
-            // refusal from a list is not a statement about this file.
-            function shareable() {
-                if (!window.navigator || !navigator.share) { return false; }
-                return coarsePointer();
-            }
-
-            // Whether a finger is what is pointing at this page, asked apart
-            // from the sheet because the anchor has to ask it too: a browser
-            // with no sheet at all is still a browser that may drop the name.
-            function coarsePointer() {
-                return map.getContainer().classList.contains('trails-coarse') ||
-                    !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+            function shareable(file) {
+                if (!window.navigator || !navigator.share || !navigator.canShare) { return false; }
+                if (!map.getContainer().classList.contains('trails-coarse') &&
+                        !(window.matchMedia && window.matchMedia('(pointer: coarse)').matches)) { return false; }
+                try { return navigator.canShare({files: [file]}); } catch (refused) { return false; }
             }
 
             function anchorFile(name, file) {
@@ -3045,26 +2957,6 @@ class _ProfilePanel(MacroElement):
             download.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-right:8px;cursor:pointer';
             var carries = document.createElement('span');
             carries.style.cssText = 'color:var(--trails-ink-2);margin-right:8px';
-            // How the last file left the page, and only where that is worth
-            // saying: a download that carried its name says nothing at all.
-            var saveSaid = '';
-            var savedNote = document.createElement('span');
-            savedNote.className = 'trails-profile-saved';
-            savedNote.style.cssText = 'display:none;color:var(--trails-warn);font-size:11px';
-            // **A file can be asked for from a panel that is not this one.** This
-            // panel writes every file the page offers, including the two the plan
-            // control offers, and it said what became of the name in its own row
-            // — which on a narrow screen is not on the screen at all while a route
-            // is being planned. So the sentence goes to whoever asked: shown here
-            // when this panel's own button did, and handed to the asker otherwise,
-            // because one sentence in two places is the mistake this map keeps
-            // making with the legend and the layer control.
-            var saveWatchers = [];
-            function sayFile(message, asked) {
-                savedNote.textContent = asked ? '' : message;
-                savedNote.style.display = (!asked && message) ? 'block' : 'none';
-                saveWatchers.forEach(function (watcher) { watcher(message, asked || ''); });
-            }
             var licensed = document.createElement('span');
             licensed.className = 'trails-profile-licences';
             licensed.style.cssText = 'color:var(--trails-ink-4);font-size:11px';
@@ -3164,7 +3056,6 @@ class _ProfilePanel(MacroElement):
 
             offer.appendChild(download);
             offer.appendChild(carries);
-            offer.appendChild(savedNote);
             offer.appendChild(licensed);
             offer.appendChild(noted);
             // The button and what the file carries on the left, the colour key
@@ -4778,11 +4669,6 @@ class _ProfilePanel(MacroElement):
                 // of them. Nothing else would redraw it, because nothing about
                 // the chain moved.
                 repaint: function () { showLicences(); render(); },
-                // Which way the last file left the page: through the sheet,
-                // down the anchor, or down the anchor after the sheet refused
-                // it. Only a browser can answer whether that was the right way,
-                // so it is readable rather than assumed.
-                lastSave: function () { return saveSaid; },
                 // Whether this panel was given what a file needs at all. A page
                 // may have a profile and no export — the panel hides its own
                 // button for exactly that — and anything else offering files off
@@ -4794,11 +4680,6 @@ class _ProfilePanel(MacroElement):
                 // Safari drops the anchor's name and a phone saves through a
                 // sheet anyway.
                 save: saveFile,
-                // Told whenever a file has left the page and there is something
-                // to say about what became of its name, with the word the caller
-                // handed `save` so that a panel can pick out its own. See
-                // `sayFile`: the sentence belongs where the button was pressed.
-                whenSaved: function (watcher) { saveWatchers.push(watcher); },
                 // Several files as one download. The plan says which files,
                 // because it is the only thing that knows what a stage is.
                 saveZip: function (files, plan) {
@@ -4819,9 +4700,7 @@ class _ProfilePanel(MacroElement):
                     // `stem` is the file's name and `name` is the track's; the
                     // two are never each other's fallback.
                     var stem = (plan && plan.stem) || EXPORT.route.fileStem;
-                    // Asked for in the plan control and nowhere else, so that is
-                    // where whatever has to be said about the name is said.
-                    return zipOf(files).then(function (blob) { saveFile(fileNameOf(stem, '.zip'), blob, 'plan'); });
+                    return zipOf(files).then(function (blob) { saveFile(fileNameOf(stem, '.zip'), blob); });
                 }
             };
 
@@ -7821,27 +7700,7 @@ class _PlanMode(MacroElement):
                 refresh();
             }
 
-            // **What became of the name belongs where the button was pressed.**
-            // Every file this panel offers is written by the profile panel, which
-            // says in its own row where a name may not have survived — and on a
-            // narrow screen that panel is not on the screen at all while a route
-            // is being planned, which is exactly when these two buttons are used.
-            // Registered on the first save rather than at build time, because
-            // `panel()` is lazy and the order the two controls are added in is
-            // not this file's to assume.
-            var toldOfFiles = false;
-            function listenForFiles() {
-                if (toldOfFiles || !panel() || !panel().whenSaved) { return; }
-                toldOfFiles = true;
-                panel().whenSaved(function (message, asked) {
-                    if (asked !== 'plan') { return; }
-                    loadSaid = message;
-                    refresh();
-                });
-            }
-
             function saveStages() {
-                listenForFiles();
                 var made = stagesOf().map(function (stage) {
                     var shape = composeRoute(stage.from, stage.to);
                     return panel().routeFile(figuresOf(shape), shape, told(shape),
@@ -7858,19 +7717,17 @@ class _PlanMode(MacroElement):
             // the profile panel's own button makes, so the three cannot come
             // apart: one writer, asked from three places.
             function saveWhole() {
-                listenForFiles();
                 var shape = composeRoute();
                 var made = panel().routeFile(figuresOf(shape), shape, told(shape), writable());
-                panel().save(made.name, made.text, 'plan');
+                panel().save(made.name, made.text);
             }
 
             function saveStage(stage) {
-                listenForFiles();
                 var shape = composeRoute(stage.from, stage.to);
                 var made = panel().routeFile(figuresOf(shape), shape, told(shape),
                                              writableRange(stage.from, stage.to, stageTitle(stage)),
                                              stageName(stage));
-                panel().save(made.name, made.text, 'plan');
+                panel().save(made.name, made.text);
             }
 
             // ---- the legs ---------------------------------------------------------
@@ -9057,9 +8914,6 @@ class _PlanMode(MacroElement):
             drop.addEventListener('click', function () { dismissFile(); });
 
             var loadStatus = document.createElement('div');
-            // Named, because what this line says about a file is now a reading
-            // and not something to find by position.
-            loadStatus.className = 'trails-plan-said';
             loadStatus.style.cssText = 'margin-top:4px;color:var(--trails-ink-3);max-width:22em';
 
             chooser.addEventListener('click', function () { picker.click(); });

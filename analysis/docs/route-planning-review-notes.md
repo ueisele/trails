@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 254 while one behaviour is being written. What is left out
+  readings instead of 241 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **185 seconds** and say
-whether the page still holds: **254 readings, and it should be green**. If it is
+whether the page still holds: **241 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 254. And **build before driving**: the run reads the page `make map`
+instead of 241. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3113,34 +3113,66 @@ green when both of these were on the screen.
 
 `make drive` reads **218** in **175 seconds**, the source tests **227**.
 
-### And the file name, reported again from a device
+### The file name on iOS Firefox, built three times and taken back out
 
-**iOS Firefox still named the download after the blob, and Chrome on the same
-phone got it right.** Both are WebKit — every browser on iOS is — so the engine
-is not what separates them: Firefox for iOS takes downloads over itself and does
-not carry the anchor's name.
+**Reported three times from the device, and the third report ended it.** iOS
+Firefox names a download after the blob; Chrome on the same phone gets it right.
+Both are WebKit — every browser on iOS is — so the engine is not what separates
+them: **Firefox for iOS takes downloads over itself and does not carry the
+anchor's name.** That is the browser's behaviour and not this page's, and it is
+the whole finding.
 
-**The sheet, which is the one route that does carry a name, never ran for it.**
-The gate wanted `navigator.canShare` to exist *and* to answer yes about a
-`.gpx`, and `.gpx` is exactly the kind of type a `canShare` is most likely to be
-wrong about: Chrome on Android refuses it off a list it keeps, and a refusal off
-a list is not a statement about this file. Whichever half was missing on iOS
-Firefox, the cost of asking anyway is **one rejected promise**, and the answer to
-a rejection is the anchor — which is where that reader already was. `canShare`
-has no veto now.
+**Three things were built against it and all three are gone again.** They are
+recorded here so that the next person to meet a cryptic file name does not build
+them a second time:
 
-**And when the sheet does refuse, the reader is told.** They are about to find a
-file called `3F2A…`; the browser will not take it through a sheet and will not
-carry a name on a download, so the one thing left is to say what it was meant to
-be called. The panel says it under the button.
+- **`canShare` lost its veto over the share sheet**, on the reasoning that
+  `.gpx` is the kind of type such a list is most likely to be missing and that
+  the cost of asking anyway is one rejected promise.
+- **The sheet was asked twice**, the second time as `application/octet-stream`,
+  on the same reasoning one step further.
+- **The page said what became of the name** — one sentence for a refused sheet
+  and one for a browser offering none, routed to whichever panel the button was
+  pressed in.
 
-Three readings that did not exist: the refused sheet still saves the file and
-under the right name, the way it went is recorded (`anchor after TypeError`), and
-**a closed sheet saves nothing** — a reader who dismisses the sheet has not asked
-for a download, and the fallback must not fire behind their back.
+**None of it moved the reported symptom**, because none of it could: if a
+browser exposes no Web Share for files, a static page has nothing else to put a
+name on a file with. There is no server — the file is composed in the browser —
+and a third-party iOS browser gets no service worker. **The reader uses Chrome
+on that phone, which was always the shorter answer.**
 
-What is still not driveable is iOS Firefox itself. `make drive` reads **222**,
-the source tests **228**.
+**What the whole episode is really about is the order the work was done in.**
+Three rounds of building preceded the one question that settled it, which was
+*is this possible at all in that browser* — and that question was answerable
+from a desk in a minute. **A workaround for a browser nobody here can run is a
+guess, however well argued, and a guess belongs after the feasibility question
+rather than before it.** The same rule this document already keeps for figures:
+the ten-minute check first, the phase after it.
+
+**Two things it left behind that are worth keeping**, both established rather
+than built:
+
+- **`make deploy` does not build, so *the fix never reached the server* is
+  always the first thing to eliminate**, and it costs one `curl`: the object's
+  `last-modified`, then the page itself compared byte for byte against
+  `analysis/output/`. Twice in one evening the answer was that the server was
+  current and the phone was not. A 41 MB document with `max-age=300` is a thing
+  a phone will happily go on running; a query string on the URL is the way to be
+  certain.
+- **Desktop Firefox was never wrong**, and the suite says so on every run: the
+  download arrives as `lomsdal-visten-Vistenfjord-runde.gpx`. Reading *Firefox*
+  in a report as *this browser* rather than *this browser on this operating
+  system* would have sent the work somewhere else entirely.
+
+What stands now is what stood before any of it: the name rides on a `File`
+rather than only on the anchor, a coarse pointer with a sheet that will take the
+file gets the sheet, and everything else gets the anchor.
+
+Taking it out put `make drive` at **241** and the source tests at **240**, both
+*below* the figures the sections above this one record. That is the one place in
+this document where the ledger goes backwards, and it is the entry it is worth
+having: twelve readings and five tests were the cost of driving three guesses
+about a browser nobody here can run.
 
 ### Four things in the plan panel, and three of them were one thing
 
@@ -3307,63 +3339,6 @@ page built around a centre draws whatever the reader pans to.
 
 `make drive` reads **245**, the source tests **241**.
 
-### And the name a third time, from a browser with nothing to say
-
-**The deploy was ruled out first, and it cost one `curl`.** `make deploy` does
-not build, so *the fix never reached the server* is always the cheapest thing to
-eliminate: the published object's `last-modified`, then the page itself against
-the local build. Byte-identical, and its `shareable()` no longer asks `canShare`
-— so the reader had the repaired page and still got a line of hex.
-
-**What was left is the branch that had nothing to say.** Where a browser offers
-a sheet, the file goes through it; where the sheet refuses, the anchor takes it
-and the panel says what the file should have been called. **Where there is no
-sheet at all, neither of those runs** — `shareable()` is false, the anchor takes
-the file, and the page said nothing whatever. That is precisely what a reader on
-iOS Firefox meets: a file named after a blob and not one word about it anywhere
-on the screen. Two reports in a row landed in that branch, and it was silent in
-both.
-
-A finger is told the name now whether or not a sheet was ever offered; a mouse is
-not, because there the anchor carries the name and a note would be noise. So the
-pointer is asked apart from the sheet — `coarsePointer()` — a distinction the old
-gate never had to draw, because the only sentence it could produce came after a
-sheet had spoken.
-
-**And the sentence was going to a panel the reader could not see.** Every file
-this page offers is written by the profile panel, including the two the plan
-control offers, and it said what became of the name in its own row — which on a
-narrow screen is not on the screen at all while a route is being planned, which
-is exactly when those two buttons are used. It goes to whoever asked now, and to
-one of them: `save(name, body, 'plan')` and a `whenSaved` the plan control
-filters on its own word. One sentence in two places is the mistake this map
-already made with the legend and the layer control.
-
-**The two sentences differ on purpose.** *Saved as X — this browser offers no
-share sheet…* and *…would not hand it to a share sheet…* are indistinguishable
-events on the device, and the only instrument that will ever tell them apart is a
-reader reading one of them off a screen. Both lead with the name, because a file
-already saved can still be renamed and that is the useful half.
-
-**And the sheet is asked twice.** A refusal off a list of types is not a
-statement about this file: Chrome on Android is measured to refuse a `.gpx` that
-way, and `application/gpx+xml` is exactly the kind of type such a list is most
-likely to be missing. The same bytes go again as `application/octet-stream`, and
-only then does the anchor get them — once, because a second refusal is an answer.
-Where both are refused it cost one rejected promise; where there is no sheet it
-never runs at all. **That retry is the last lever on this side**, and whether it
-moves anything is the device's answer to give.
-
-**And every save on a finger says something now, which is the half that was
-missing.** Silence meant two different things — *the sheet worked* and *this page
-is older than you think* — and the only instrument that can tell those apart is a
-reader with the device, so it cost a round trip to find out that the answer was
-the second one. A sheet that worked names what it handed over; the two failing
-ways name the file and say which of them it was; only a sheet the reader closed
-themselves stays quiet, and they know they closed it.
-
-`make drive` reads **254**, the source tests **245**.
-
 ### What is still open on a phone
 
 - **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the
@@ -3387,29 +3362,13 @@ themselves stays quiet, and they know they closed it.
   archive, the zip is worth one more tap when somebody is next in there. It is
   hand-written down to the varints and the DOS stamp, it is the larger of the
   two, and a browser that balks at one may not balk at the other.
-- **The share sheet on iOS — built, reported three times, still unverified.**
-  The reader has come back twice: **iOS Firefox names the file after the blob,
-  while Chrome on the same phone gets it right.** Both are WebKit — every browser
-  on iOS is — so Firefox for iOS taking downloads over itself is what separates
-  them. `canShare` lost its veto after the second report; after the third the
-  page stopped being silent where there is no sheet to refuse at all, and the
-  sheet is now asked twice, the second time as a plain stream.
-
-  **The next observation is one screenshot, and the page writes the answer into
-  it.** Press *Download GPX*, or *Whole tour (GPX)* while planning, and read the
-  line under the button:
-
-  - *…this browser offers no share sheet…* — there is no Web Share here, the
-    retry never ran, and there is nothing left on this side. The name in that
-    line is what the file should have been called.
-  - *…would not hand it to a share sheet…* — a sheet exists and refused both the
-    GPX type and a plain stream. That is the one of the three that could still be
-    argued with.
-  - *Handed to the share sheet as…* — the sheet opened, and *Save to Files*
-    should write the name it showed.
-  - **no line at all** — the page is older than it looks. It is 41,558,841 bytes
-    and `cache-control: max-age=300`, so a phone will happily go on running the
-    copy it already has; open it with a query string on the end to be sure.
+- **~~The file name in iOS Firefox~~ — closed, and not by fixing it.** That
+  browser takes downloads over itself and drops the anchor's name; Chrome on the
+  same phone is correct, and so is Firefox on a desktop. Three workarounds were
+  built and all three taken back out, for the reason and with the lesson in *The
+  file name on iOS Firefox* above. **The reader uses Chrome on that phone.** Do
+  not reopen this without first answering whether that browser exposes Web Share
+  for files at all, because nothing else on a static page can name a file on iOS.
 - **Coordinates at 6 decimals** and the rest of the weight work, which the memory
   split above orders and which nothing here touched.
 
@@ -5166,6 +5125,16 @@ So they are not quietly reopened:
   the only thing that would settle the question above. It needs an account and a
   second loading path, which is exactly why the module uses the WFS. Open by
   decision, and nothing is blocked on it.
+- **No workaround for the file name in iOS Firefox.** It takes downloads over
+  itself and drops the anchor's name. Three were built — dropping `canShare`'s
+  veto, asking the sheet a second time as a plain stream, and having the page say
+  what became of the name — and all three came back out, because a static page
+  has no other way to put a name on a file it composed itself: no server, and no
+  service worker in a third-party iOS browser. Chrome on the same phone is
+  correct, Safari is correct, desktop Firefox is correct and is driven on every
+  run. **Reopen this only after establishing that the browser exposes Web Share
+  for files**, which is the question that should have come first. Written up
+  under *The file name on iOS Firefox*.
 - **No park in the names of the Makefile targets.** `make map` and `make graph`
   exist, and both scripts hard-code `PARK_NAME`. Naming the targets for the park
   would be noise on every invocation while there is only one; the park is in

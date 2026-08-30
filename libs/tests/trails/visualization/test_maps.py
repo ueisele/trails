@@ -2373,28 +2373,6 @@ class TestPlanMode:
         # difference between a button that is waiting and one that is broken.
         assert "oneFile.title = refusing ||" in planning
 
-    def test_this_panel_is_told_what_became_of_the_name_it_asked_for(self):
-        """Every file this panel offers is written by the profile panel, which
-        says in its own row where a name may not have survived the download —
-        and on a narrow screen that panel is not on the screen at all while a
-        route is being planned, which is exactly when these buttons are used. So
-        the sentence was landing where the reader who pressed the button could
-        not see it.
-
-        Registered on the first save rather than at build time, because
-        `panel()` is lazy and the order the two controls are added in is not
-        this file's to assume; and filtered on the word this panel handed
-        `save`, so that a file asked for over the profile is not reported twice.
-        """
-        fmap, _ = self.drawn()
-        maps.add_plan_mode(fmap, self.planned())
-
-        planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "panel().save(made.name, made.text, 'plan');" in planning
-        assert "panel().whenSaved(function (message, asked) {" in planning
-        assert "if (asked !== 'plan') { return; }" in planning
-        assert "loadStatus.className = 'trails-plan-said';" in planning
-
     def test_a_plan_that_comes_back_on_its_own_has_a_way_out(self):
         """A kept plan is restored on every load until there is nothing left to
         restore, and emptying a twenty-point route a point at a time is not a
@@ -2582,76 +2560,17 @@ class TestComposedProfile:
         assert "new File([body], name, {type: type})" in html
         assert "anchor.download = name;" in html
 
-    def test_a_finger_is_offered_the_share_sheet_and_canshare_has_no_veto(self):
+    def test_a_finger_is_offered_the_share_sheet_where_there_is_one(self):
         """How a phone saves anything, and the one route that keeps the name
-        whatever the browser does with the anchor. `canShare` used to gate it and
-        does not any more: reported from a device, iOS Firefox still named the
-        file after the blob while Chrome on the same phone — the same WebKit —
-        got it right, and the cost of asking anyway is one rejected promise
-        whose answer is the anchor the reader was already on."""
+        whatever the browser does with the anchor. `canShare` decides it and not
+        a user agent string: Chrome on Android refuses a `.gpx` there and falls
+        through to the anchor, which on Android names the file correctly."""
         html = self.drawn().get_root().render()
         assert "navigator.share({files: [file]})" in html
-        # The call, not the word: the comment above the gate explains why it
-        # is gone, and a test that forbids the word forbids the explanation.
-        assert "canShare({files:" not in html
+        assert "return navigator.canShare({files: [file]});" in html
         # A closed sheet is not a failure, and saving the file anyway would be
         # doing something nobody asked for.
-        assert "if (failure && failure.name === 'AbortError') {" in html
-        # And a sheet that worked says so, because silence otherwise means both
-        # *the sheet worked* and *this page is older than the reader thinks* —
-        # and only somebody holding the device can tell those apart.
-        assert "sayFile('Handed to the share sheet as ' + name + '.', asked);" in html
-
-    def test_a_reader_is_told_when_the_name_could_not_be_carried(self):
-        """They are about to find a file named after a blob. The browser would
-        not take it through a sheet and does not carry a name on a download
-        either; the one thing left is to say what it was meant to be called.
-
-        The sentence leads with the name, because a file already saved can still
-        be renamed and that is the useful half, and ends with what this browser
-        did, because the two ways of arriving here are indistinguishable on the
-        device and this is the only thing that tells them apart in a report."""
-        html = self.drawn().get_root().render()
-        assert "'Saved as ' + name + '" in html
-        assert "would not hand it to a share sheet" in html
-        assert "saveSaid = 'anchor after '" in html
-
-    def test_a_browser_offering_no_sheet_at_all_was_the_silent_branch(self):
-        """Reported three times from a device, and twice the page had nothing to
-        show for it. It spoke only where a sheet had *refused* — and iOS Firefox
-        offers none to refuse, so the anchor ran, WebKit dropped its name, and
-        the reader was left with a line of hex and no sentence anywhere.
-
-        A finger is told the name whether or not a sheet was ever offered. A
-        mouse is not: there the anchor carries the name and a note would be
-        noise, which is why the pointer is asked apart from the sheet."""
-        html = self.drawn().get_root().render()
-        assert "sayFile(coarsePointer() ? saidAs(name, 'offers no share sheet') : '', asked);" in html
-        assert "function coarsePointer()" in html
-
-    def test_the_sheet_is_asked_twice_before_the_anchor_gets_it(self):
-        """A refusal off a list of types is not a statement about this file:
-        Chrome on Android is measured to refuse a `.gpx` that way, and
-        `application/gpx+xml` is exactly the kind of type such a list is most
-        likely to be missing. The same bytes go again under a type nothing keeps
-        a list about, and only then does the anchor get them — once, because a
-        second refusal is an answer."""
-        html = self.drawn().get_root().render()
-        assert "var PLAIN_FILE = 'application/octet-stream';" in html
-        assert "if (!after && type !== PLAIN_FILE) {" in html
-        assert "offerSheet(name, body, PLAIN_FILE, why, asked);" in html
-
-    def test_what_became_of_the_name_is_said_where_the_button_was_pressed(self):
-        """This panel writes every file the page offers, including the two the
-        plan control offers, and it said so in its own row — which on a narrow
-        screen is not on the screen at all while a route is being planned, which
-        is exactly when those two buttons are used. One sentence in two places is
-        the mistake this map already made with the legend and the layer control,
-        so it goes to whoever asked rather than to both."""
-        html = self.drawn().get_root().render()
-        assert "whenSaved: function (watcher) { saveWatchers.push(watcher); }," in html
-        assert "savedNote.textContent = asked ? '' : message;" in html
-        assert "saveWatchers.forEach(function (watcher) { watcher(message, asked || ''); });" in html
+        assert "if (failure && failure.name === 'AbortError') { return; }" in html
 
     def test_the_button_most_routes_are_downloaded_with_names_the_tour(self):
         """It named none of them. This button took the export's own stem
