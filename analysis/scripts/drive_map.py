@@ -1465,6 +1465,18 @@ def files_from_the_page(page: Any) -> Check:
         delete navigator.share; delete navigator.canShare; window.__shared = null; }"""
     )
 
+    # **The same file, from the plan's own panel.** The button over the profile
+    # is the one that has always written this, and on a narrow screen that panel
+    # is not on the screen by default -- so the plan control offers it too, and
+    # the two must be the same file and not two files that agree today.
+    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.wait_for_timeout(700)
+    with page.expect_download(timeout=25_000) as caught:
+        page.evaluate("() => document.querySelector('.trails-plan-gpx').click()")
+    beside = out / ("beside-" + caught.value.suggested_filename)
+    caught.value.save_as(beside)
+    same = {"name": caught.value.suggested_filename, "bytes": beside.stat().st_size}
+
     # A stage, and the archive that gathers them.
     page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
     page.wait_for_timeout(900)
@@ -1530,6 +1542,9 @@ def files_from_the_page(page: Any) -> Check:
             Reading("with the name on the file itself", handed["name"] if handed else None, written.suggested_filename),
             Reading("and the whole body with it", handed["bytes"] if handed else None, route.stat().st_size),
             Reading("and is a GPX", text.startswith('<?xml version="1.0" encoding="UTF-8"?>'), True),
+            # One writer asked from two places, not two that agree today.
+            Reading("the plan panel offers the same file", same["name"], written.suggested_filename),
+            Reading("byte for byte", same["bytes"], route.stat().st_size),
             Reading("carrying its waypoints", text.count("<wpt ") > 0, True, note=f"{text.count('<wpt ')} wpt"),
             Reading("the list lists the points", rows, 4),
             Reading("a stage is cut", marks, 1),

@@ -2298,6 +2298,22 @@ class TestPlanMode:
         assert "keptWhen = setTimeout(writeKept, KEEP_AFTER_MS);" in planning
         assert "window.addEventListener('pagehide'" in planning
 
+    def test_the_whole_tour_is_offered_where_the_route_is_made(self):
+        """The panel over the profile writes exactly this file and has always
+        offered it — but on a narrow screen that panel is not on the screen by
+        default, so a reader planning on a phone had no way to the one file they
+        came for. One writer asked from three places: this button, the profile's
+        own, and the archive's tour member."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "oneFile.textContent = 'Whole tour (GPX)';" in planning
+        assert "var made = panel().routeFile(figuresOf(shape), shape, told(shape), writable());" in planning
+        # Why it is refused, where it is: 'still working out 2 legs' is the
+        # difference between a button that is waiting and one that is broken.
+        assert "oneFile.title = refusing ||" in planning
+
     def test_a_plan_that_comes_back_on_its_own_has_a_way_out(self):
         """A kept plan is restored on every load until there is nothing left to
         restore, and emptying a twenty-point route a point at a time is not a

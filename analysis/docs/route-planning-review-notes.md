@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 192 while one behaviour is being written. What is left out
+  readings instead of 194 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **165 seconds** and say
-whether the page still holds: **192 readings, and it should be green**. If it is
+whether the page still holds: **194 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 192. And **build before driving**: the run reads the page `make map`
+instead of 194. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -2911,8 +2911,28 @@ further reason the panel says a tour worth keeping is worth downloading.
 
 **And the run is 165 seconds now, not 140.** The reload is 25 of them. It is one
 check and it runs last, because everything after it would be reading a page in a
-state nothing before it had set up. `make drive` reads **192**, the source tests
-**216**.
+state nothing before it had set up.
+
+### And the one file a reader plans for was in the other panel
+
+**Reported with a screenshot of the plan control:** the whole tour's GPX is
+reachable only through the button over the profile, and on a phone that panel is
+not on the screen by default. Everything else about a planned route is in the
+plan control — the name, the stages, a file per stage, the archive of all of
+them — and the one file most readers came for was somewhere else.
+
+It is beside *All stages (zip)* now, as *Whole tour (GPX)*, and it is **the same
+call**: `panel().routeFile(...)` composed from the whole route, which is what the
+profile's own button writes and what the archive puts in as its tour member. One
+writer asked from three places rather than three that agree today. Driven, both
+buttons hand over `lomsdal-visten-Vistenfjord-runde.gpx` at **796,840 bytes** —
+the same name and byte for byte.
+
+Refused where the route is not writable yet, and it says why on the button:
+*still working out 2 legs* is the difference between a control that is waiting
+and one that is broken.
+
+`make drive` reads **194**, the source tests **217**.
 
 ### What is still open on a phone
 

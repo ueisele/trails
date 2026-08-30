@@ -7391,6 +7391,16 @@ class _PlanMode(MacroElement):
                 return panel().saveZip(made, writable()).catch(fileFailed);
             }
 
+            // **The whole route as one file, composed and not gathered.** The
+            // same call the archive makes for its tour member and the same one
+            // the profile panel's own button makes, so the three cannot come
+            // apart: one writer, asked from three places.
+            function saveWhole() {
+                var shape = composeRoute();
+                var made = panel().routeFile(figuresOf(shape), shape, told(shape), writable());
+                panel().save(made.name, made.text);
+            }
+
             function saveStage(stage) {
                 var shape = composeRoute(stage.from, stage.to);
                 var made = panel().routeFile(figuresOf(shape), shape, told(shape),
@@ -8207,6 +8217,27 @@ class _PlanMode(MacroElement):
             // Leaflet binds its own shortcuts to the container, so a typed '+'
             // would zoom the map mid-word.
             L.DomEvent.on(title, 'keydown keypress keyup', L.DomEvent.stopPropagation);
+            // **The whole tour as one file, where a reader planning one can
+            // reach it.** The panel over the profile writes exactly this file
+            // and has always offered it — but on a narrow screen that panel is
+            // not on the screen by default, so a reader planning on a phone had
+            // no way to the one file they came for without first going to look
+            // for the profile. The same file from the same writer, offered in
+            // the place the route is being made.
+            var oneFile = document.createElement('button');
+            oneFile.type = 'button';
+            oneFile.className = 'trails-plan-gpx';
+            oneFile.textContent = 'Whole tour (GPX)';
+            oneFile.title = 'The whole route as one GPX file, its stage marks and all';
+            oneFile.style.cssText = 'margin-top:4px;margin-right:6px;font:inherit;font-size:11px;' +
+                'padding:1px 6px;cursor:pointer';
+            oneFile.addEventListener('click', function () {
+                try {
+                    saveWhole();
+                } catch (failure) {
+                    fileFailed(failure);
+                }
+            });
             // Offered only where there are stages to gather. With one stage it
             // would hand over the same file the button already offers, twice,
             // under two names.
@@ -8225,6 +8256,7 @@ class _PlanMode(MacroElement):
             });
 
             titleRow.appendChild(title);
+            titleRow.appendChild(oneFile);
             titleRow.appendChild(everything);
 
             // Said rather than discovered. Three gestures share one click here
@@ -8500,8 +8532,18 @@ class _PlanMode(MacroElement):
                 // where the panel can write a file at all.
                 var writes = !!(panel() && panel().writes());
                 var gathered = writes && listOpen && stagesOf().length > 1;
+                // A route of one point is not a file, and the reason the button
+                // is not merely disabled there is the same one the profile panel
+                // gives: an offer over nothing is furniture.
+                var refusing = writable().why;
+                oneFile.style.display = (writes && listOpen && points.length > 1) ? '' : 'none';
+                oneFile.disabled = !!refusing;
+                // Why it is refused, where it is: 'still working out 2 legs' is
+                // the difference between a button that is waiting and one that
+                // is broken.
+                oneFile.title = refusing || 'The whole route as one GPX file, its stage marks and all';
                 everything.style.display = gathered ? '' : 'none';
-                everything.disabled = !!writable().why;
+                everything.disabled = !!refusing;
                 if (on) {
                     say((listable ? (listOpen ? '\\u25be ' : '\\u25b8 ') : '')
                         + (points.length === 0 ? 'Click the map to place the first point.'
