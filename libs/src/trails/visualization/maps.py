@@ -2484,11 +2484,61 @@ class _ProfilePanel(MacroElement):
                 return out.join('\\n') + '\\n';
             }
 
+            // **The name is the point, and an anchor does not always carry
+            // one.** `a.download` names the file on a desktop browser. On iOS
+            // Safari a `blob:` URL is saved under the blob's own identifier and
+            // the attribute is ignored, so a reader gets a line of hex where the
+            // tour and the stage should be — reported from the device, on a
+            // file this page had already named correctly.
+            //
+            // So the name travels two further ways, neither of which is that
+            // attribute. It goes on a `File` rather than a `Blob`, riding with
+            // the bytes instead of sitting on an element; and where the browser
+            // offers a share sheet for files and the pointer is a finger, the
+            // file goes through the sheet, which is how a phone saves anything,
+            // reads `file.name`, and hands the route to a walking app in the
+            // same gesture.
+            //
+            // **`canShare` decides that and not a user agent string.** Chrome on
+            // Android refuses a `.gpx` there and falls through to the anchor,
+            // which on Android names the file correctly; nothing here had to
+            // know that in advance, and nothing has to be corrected when it
+            // changes.
             function saveFile(name, body) {
-                // A body already made into a blob is handed on as it is: an
-                // archive is not XML and wrapping it again would label it so.
-                var blob = (body instanceof Blob) ? body : new Blob([body], {type: 'application/gpx+xml'});
-                var url = URL.createObjectURL(blob);
+                // A body already made into a blob keeps its own type: an archive
+                // is not XML and relabelling it would say it was.
+                var type = (body instanceof Blob) ? (body.type || 'application/octet-stream')
+                    : 'application/gpx+xml';
+                var file = (typeof File === 'function')
+                    ? new File([body], name, {type: type})
+                    : ((body instanceof Blob) ? body : new Blob([body], {type: type}));
+                if (shareable(file)) {
+                    navigator.share({files: [file]}).catch(function (failure) {
+                        // **A closed sheet is not a failure**, and saving the
+                        // file anyway would be doing something nobody asked for.
+                        // Anything else falls back to the anchor: a wrongly named
+                        // file beats a button that does nothing.
+                        if (failure && failure.name === 'AbortError') { return; }
+                        anchorFile(name, file);
+                    });
+                    return;
+                }
+                anchorFile(name, file);
+            }
+
+            // Whether this file should go through a sheet rather than a
+            // download. The pointer is asked the same way everything else here
+            // asks it — the class the chrome sets, so a check can drive it —
+            // falling back to the query for a map built without a chrome.
+            function shareable(file) {
+                if (!window.navigator || !navigator.share || !navigator.canShare) { return false; }
+                if (!map.getContainer().classList.contains('trails-coarse') &&
+                        !(window.matchMedia && window.matchMedia('(pointer: coarse)').matches)) { return false; }
+                try { return navigator.canShare({files: [file]}); } catch (refused) { return false; }
+            }
+
+            function anchorFile(name, file) {
+                var url = URL.createObjectURL(file);
                 var anchor = document.createElement('a');
                 anchor.href = url;
                 anchor.download = name;
@@ -4171,7 +4221,16 @@ class _ProfilePanel(MacroElement):
                     if (!selected || !selected.runs) { return; }
                     if (selected.composed) {
                         if (!selected.plan || selected.plan.why) { return; }
-                        saveFile(fileNameOf(EXPORT.route.fileStem),
+                        // **The tour's name, where it has one.** This is the
+                        // button most routes are downloaded with, and it was the
+                        // one place that never asked the plan what the file is
+                        // called: every route came off it as `-route.gpx`
+                        // however carefully the tour had been named, while the
+                        // stage buttons two panels away got it right. Same rule
+                        // as `routeFile` — `stem` is the file's name, and the
+                        // export's own stem is what a tour nobody named falls
+                        // back to.
+                        saveFile(fileNameOf((selected.plan.stem) || EXPORT.route.fileStem),
                                  routeGpxOf(selected.figure, selected.shape, selected.runs, selected.plan, selected.told, crossings()));
                         return;
                     }
@@ -4309,9 +4368,11 @@ class _ProfilePanel(MacroElement):
                 // button for exactly that — and anything else offering files off
                 // the back of it has to ask rather than assume.
                 writes: function () { return !!EXPORT; },
-                // Handing a name and a body to the browser, which is one place
-                // and not two: the anchor has to be in the document for the
-                // click to count, and that was measured rather than assumed.
+                // Handing a name and a body to the browser, which is one
+                // place and not two: an anchor, or a share sheet where the
+                // pointer is a finger and the browser offers one, because iOS
+                // Safari drops the anchor's name and a phone saves through a
+                // sheet anyway.
                 save: saveFile,
                 // Several files as one download. The plan says which files,
                 // because it is the only thing that knows what a stage is.

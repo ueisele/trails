@@ -1382,6 +1382,13 @@ def files_from_the_page(page: Any) -> Check:
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(900)
     page.evaluate("() => window.trailsChrome.close()")
+    # **And plan mode goes off to pick the chain**, for the reason the undo
+    # check names: while it is on, the panel stops answering clicks, so
+    # selecting a chain selects nothing and this check skips itself. Which it
+    # did under `--only`, where nothing before it had turned plan mode off --
+    # a check that only runs in one order is a check that can stop running.
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(500)
     if not select(page, LONG_CHAIN):
         page.set_viewport_size({"width": 1400, "height": 900})
         return Check("files written and read back", skipped=f"{LONG_CHAIN} is not in this page")
@@ -1403,6 +1410,19 @@ def files_from_the_page(page: Any) -> Check:
         settled(page)
     settled(page)
 
+    # **Named, because the name is what the file is for.** A reader asking what
+    # their download is called is asking for the tour in it, and an unnamed tour
+    # falls back to a stem that would never show whether the name travels.
+    tour = "Vistenfjord runde"
+    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.wait_for_timeout(900)
+    page.fill(".trails-plan-title", tour)
+    # A real blur, because the field commits on one: one name is one change and
+    # not one per keystroke.
+    page.keyboard.press("Tab")
+    settled(page)
+    named = page.evaluate("() => window.trailsPlan.state().writable.stem")
+
     page.evaluate("() => window.trailsChrome.open('profile')")
     page.wait_for_timeout(900)
     out = pathlib.Path(tempfile.mkdtemp(prefix="trails-drive-"))
@@ -1416,6 +1436,34 @@ def files_from_the_page(page: Any) -> Check:
     written.save_as(route)
     text = route.read_text(encoding="utf-8")
 
+    # **The name has to leave the page, and the anchor is not the only way out
+    # of it.** iOS Safari saves a `blob:` URL under the blob's own identifier
+    # and ignores the anchor's name -- the cryptic file a reader reported, on a
+    # route this page had already named correctly. Firefox offers no share sheet
+    # to drive, so what is read here is this page's half of the bargain: given a
+    # browser that offers one and a finger, the file goes through the sheet as a
+    # `File` carrying the name and the whole body. The other half belongs to the
+    # device and cannot be driven from here.
+    page.evaluate(
+        """() => { window.__shared = null;
+        navigator.canShare = () => true;
+        navigator.share = (data) => { window.__shared = data; return Promise.resolve(); }; }"""
+    )
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.wait_for_timeout(500)
+    page.evaluate(press_download)
+    page.wait_for_timeout(500)
+    handed = page.evaluate(
+        """() => { const shared = window.__shared;
+        if (!shared || !shared.files || !shared.files.length) { return null; }
+        const file = shared.files[0];
+        return {name: file.name, type: file.type, bytes: file.size, isFile: file instanceof File}; }"""
+    )
+    page.evaluate(
+        """() => { window.trailsChrome.coarse(null);
+        delete navigator.share; delete navigator.canShare; window.__shared = null; }"""
+    )
+
     # A stage, and the archive that gathers them.
     page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
     page.wait_for_timeout(900)
@@ -1426,9 +1474,25 @@ def files_from_the_page(page: Any) -> Check:
         if (cut) { cut.click(); } }"""
     )
     settled(page)
+    rows = page.evaluate(
+        """() => [...document.querySelectorAll('.trails-plan-points > div')]
+          .filter(row => !row.classList.contains('trails-plan-stage')).length"""
+    )
+    # **Whether the cut took, said outright.** The archive is offered only where
+    # there are stages to gather, so a cut that quietly did nothing reads as an
+    # archive that was never offered -- which says nothing about why.
+    marks = page.evaluate("() => window.trailsPlan.state().points.filter(point => typeof point.stage === 'string').length")
+    offered = page.evaluate(
+        """() => { const zip = document.querySelector('.trails-plan-zip');
+        const box = zip ? zip.getBoundingClientRect() : null;
+        return {there: !!zip, shown: !!(zip && zip.offsetParent !== null),
+                boxes: zip ? zip.getClientRects().length : 0,
+                wide: box ? Math.round(box.width) : 0, high: box ? Math.round(box.height) : 0,
+                tool: window.trailsChrome.state().tool}; }"""
+    )
     members: list[str] = []
     broken: str | None = "the archive was never offered"
-    if page.evaluate("() => { const z = document.querySelector('.trails-plan-zip'); return !!(z && z.offsetParent !== null); }"):
+    if offered["there"]:
         with page.expect_download(timeout=35_000) as caught:
             page.evaluate("() => document.querySelector('.trails-plan-zip').click()")
         archive = out / caught.value.suggested_filename
@@ -1457,8 +1521,25 @@ def files_from_the_page(page: Any) -> Check:
         "files written and read back",
         [
             Reading("a route downloads", written.suggested_filename.endswith(".gpx"), True, note=written.suggested_filename),
+            Reading("the tour takes a name", named, tour),
+            Reading("under the tour's own name", tour.replace(" ", "-") in written.suggested_filename, True),
+            # What a phone does instead, because on a phone the anchor's name is
+            # not carried and the sheet's is.
+            Reading("a finger is handed the share sheet", bool(handed and handed["isFile"]), True, note=str(handed)),
+            Reading("with the name on the file itself", handed["name"] if handed else None, written.suggested_filename),
+            Reading("and the whole body with it", handed["bytes"] if handed else None, route.stat().st_size),
             Reading("and is a GPX", text.startswith('<?xml version="1.0" encoding="UTF-8"?>'), True),
             Reading("carrying its waypoints", text.count("<wpt ") > 0, True, note=f"{text.count('<wpt ')} wpt"),
+            Reading("the list lists the points", rows, 4),
+            Reading("a stage is cut", marks, 1),
+            # **Whether the button is there, and not whether it is drawn.**
+            # The guard here used to be `offsetParent !== null`, which is a lie
+            # about a panel the chrome adopts into a holder: driven on its own,
+            # the dock is shut, the button measures 0 x 0 and the archive was
+            # silently never asked for -- the reading below then said the
+            # archive did not open, which was never the question. Where the
+            # panel is drawn is `chrome layout`'s reading, not this one's.
+            Reading("the archive is offered", offered["there"] if offered else None, True, note=str(offered)),
             Reading("the archive opens", broken, None),
             Reading("holding a stage each and the tour", len(members), 3, note="; ".join(members)),
             # The defect this check exists for: a stage's file name must carry
@@ -2197,7 +2278,10 @@ def main() -> int:
         # was a blank grey box with 11,589 paths that never existed.
         thrown: list[str] = []
         page.on("pageerror", lambda error: thrown.append(str(error)))
-        page.goto(page_path.resolve().as_uri())
+        # A 40 MB page is 25 seconds of parsing on a good day, and the
+        # default 30 is a margin thin enough to fail on a busy machine -- which
+        # reads as a broken run rather than as the slow load it is.
+        page.goto(page_path.resolve().as_uri(), timeout=120_000)
         page.wait_for_timeout(SETTLE_MS)
         checks = [Check("the page ran at all", [Reading("errors thrown while loading", len(thrown), 0, note="; ".join(thrown[:2]))])]
         if thrown:

@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 171 while one behaviour is being written. What is left out
+  readings instead of 179 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **140 seconds** and say
-whether the page still holds: **171 readings, and it should be green**. If it is
+whether the page still holds: **179 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 171. And **build before driving**: the run reads the page `make map`
+instead of 179. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -2793,6 +2793,67 @@ come with them. The check in the suite dispatches its touches and says so — th
 proves the handler and not the delivery, which is the caveat this document
 already carries about dragging. `make drive` reads **171**.
 
+### And the file a phone saves was called nothing in particular
+
+**Reported from the device: the download had a cryptic name.** Asked for the
+tour or the stage in it, *as on desktop*. Two separate things were wrong, and
+only one of them is Safari's.
+
+**The button most routes are downloaded with never asked what the tour was
+called.** The profile panel's *Download GPX* took `EXPORT.route.fileStem`
+outright, so every planned route came off it as `lomsdal-visten-route.gpx`
+however carefully the tour had been named — while the *stage* buttons two panels
+away, in the plan control, read `plan.stem` and got it right. That is the same
+rule stated in two places and followed in one, which is the shape this document
+keeps recording. Driven with a tour named *Vistenfjord runde*, the file is
+`lomsdal-visten-Vistenfjord-runde.gpx` now, and the archive's members are
+`-Vistenfjord-runde-1-2.gpx`, `-Vistenfjord-runde-2-4.gpx` and the tour.
+
+**The other half is Safari, and the name simply never left the page.** The name
+travelled on `a.download` and nowhere else. iOS Safari saves a `blob:` URL under
+the blob's own identifier and ignores that attribute — which is the line of hex
+the reader saw, on a file the page had by then named correctly. So the name
+takes two further routes, neither of which is that attribute:
+
+- **A `File`, not a `Blob`.** The name rides with the bytes instead of sitting on
+  an element, so anything that reads `file.name` finds it.
+- **The share sheet, where the pointer is a finger and the browser offers one.**
+  Which is how a phone saves anything: it keeps `file.name`, and it hands the
+  route straight to a walking app in the same gesture. A closed sheet is not a
+  failure and does not then save the file behind the reader's back; anything else
+  falls back to the anchor, because a wrongly named file beats a button that does
+  nothing.
+
+**`canShare` decides that, not a user agent string.** Chrome on Android refuses a
+`.gpx` there and falls through to the anchor — which on Android names the file
+correctly. Nothing had to know that in advance, and nothing has to be corrected
+when it changes.
+
+**What a check can hold of it.** Firefox has no share sheet to drive, so the
+check stubs `navigator.share`, forces the coarse class the chrome already
+exposes for exactly this, and reads what the page hands over: a `File` named
+`lomsdal-visten-Vistenfjord-runde.gpx` carrying all **796,840 bytes** — the whole
+body, not a truncation. This page's half of the bargain. The device's half is
+still the device's.
+
+**And the check had stopped running without saying so.** Two ways, both worth
+keeping in mind:
+
+- **It skipped under `--only`.** It selects a chain to lay its own route along,
+  and while plan mode is on the panel stops answering clicks — so with nothing
+  before it to turn plan mode off, it selected nothing and reported *is not in
+  this page*. **A check that only runs in one order is a check that can stop
+  running.** It turns plan mode off itself now, as the undo check already did.
+- **Its archive guard was `offsetParent !== null`**, which is a lie about a panel
+  the chrome adopts into a holder. Driven on its own, the dock is shut, the
+  button measures 0 x 0 — and the archive was never asked for, while the reading
+  underneath said *the archive did not open*, which was never the question. It
+  asks whether the button is **there** now; where it is drawn is `chrome
+  layout`'s reading, not this one's. The same probe this document already records
+  as one of the two that lie.
+
+`make drive` reads **179**, and the source tests **211**.
+
 ### What is still open on a phone
 
 - **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the
@@ -2816,6 +2877,12 @@ already carries about dragging. `make drive` reads **171**.
   archive, the zip is worth one more tap when somebody is next in there. It is
   hand-written down to the varints and the DOS stamp, it is the larger of the
   two, and a browser that balks at one may not balk at the other.
+- **The share sheet on iOS — built, and unverified.** The same shape as the
+  keyboard: the page's half is driven, the device's half needs somebody to press
+  it. What to look for is whether *Download GPX* opens a sheet at all, and
+  whether *Save to Files* writes the name the sheet shows. If no sheet appears,
+  `canShare` refused the type and the anchor ran — then the name is Safari's
+  business and the `File` is the only lever left.
 - **Coordinates at 6 decimals** and the rest of the weight work, which the memory
   split above orders and which nothing here touched.
 

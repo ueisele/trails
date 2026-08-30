@@ -2334,7 +2334,37 @@ class TestComposedProfile:
         phase. This is that phase, and restoring it is its visible outcome."""
         html = self.drawn().get_root().render()
         assert "function routeGpxOf(figure, shape, runs, plan, extra, crossings)" in html
-        assert "saveFile(fileNameOf(EXPORT.route.fileStem)," in html
+        assert "saveFile(fileNameOf((selected.plan.stem) || EXPORT.route.fileStem)," in html
+
+    def test_the_name_rides_with_the_bytes_and_not_only_on_the_anchor(self):
+        """iOS Safari saves a `blob:` URL under the blob's own identifier and
+        ignores `a.download`, which is a reader getting a line of hex where the
+        tour should be — reported from the device, on a file this page had
+        already named correctly. A `File` carries the name itself."""
+        html = self.drawn().get_root().render()
+        assert "new File([body], name, {type: type})" in html
+        assert "anchor.download = name;" in html
+
+    def test_a_finger_is_offered_the_share_sheet_where_there_is_one(self):
+        """How a phone saves anything, and the one route that keeps the name
+        whatever the browser does with the anchor. `canShare` decides it and not
+        a user agent string: Chrome on Android refuses a `.gpx` there and falls
+        through to the anchor, which on Android names the file correctly."""
+        html = self.drawn().get_root().render()
+        assert "navigator.share({files: [file]})" in html
+        assert "return navigator.canShare({files: [file]});" in html
+        # A closed sheet is not a failure, and saving the file anyway would be
+        # doing something nobody asked for.
+        assert "if (failure && failure.name === 'AbortError') { return; }" in html
+
+    def test_the_button_most_routes_are_downloaded_with_names_the_tour(self):
+        """It named none of them. This button took the export's own stem
+        outright, so every route came off it as `-route.gpx` however carefully
+        the tour had been named, while the stage buttons two panels away read
+        `stem` and got it right. `stem` is the file's name; the export's stem is
+        what a tour nobody named falls back to."""
+        html = self.drawn().get_root().render()
+        assert "saveFile(fileNameOf(EXPORT.route.fileStem)," not in html
 
     def test_the_file_says_what_the_panel_above_the_button_says(self):
         """One sentence written once. Handed `plan` instead of what the panel was
