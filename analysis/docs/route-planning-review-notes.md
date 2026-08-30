@@ -854,14 +854,14 @@ was invisible to them and visible in thirty seconds of driving: the grip's
 ceiling, the click in a popup, the stuck highlight, the mark under the route, the
 waypoint at the ceiling, the two controls overlapping.
 
-**And it is 140 seconds, which is a thing to spend deliberately.** Three habits,
+**And it is 165 seconds, which is a thing to spend deliberately.** Three habits,
 the first of which is worth more than the other two together:
 
 - **Run it once and read the file.** Sending the report to a file and grepping
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 179 while one behaviour is being written. What is left out
+  readings instead of 192 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1890,8 +1890,8 @@ whenever the decisions document grows.
 survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
-`command make drive`, which take about a minute and **140 seconds** and say
-whether the page still holds: **179 readings, and it should be green**. If it is
+`command make drive`, which take about a minute and **165 seconds** and say
+whether the page still holds: **192 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 179. And **build before driving**: the run reads the page `make map`
+instead of 192. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -2853,6 +2853,66 @@ keeping in mind:
   as one of the two that lie.
 
 `make drive` reads **179**, and the source tests **211**.
+
+### And a reload threw the plan away
+
+**Reported: the tour is gone when the page is reloaded.** It is the one thing a
+reader cannot get back by clicking again — the route is theirs and the page was
+the only place it existed — so it is kept in the browser now and comes back on
+the next load as it was left.
+
+**What is kept is the file this page already writes.** The route has a
+serialised form, the GPX the download button offers, and that form already has a
+reader: the picker's, which restores the points, the stage marks, the tour's
+name and the stretches a load kept as recorded. A shorter payload of its own
+would be a second recording of one decision — the failure this document records
+three times over, in the file name, the mode wording and the ascent.
+
+It costs bytes, and the cost is the point of the trade. A restored plan's routed
+stretches are **routed again rather than copied**, so every `<trkpt>` in the kept
+copy is weight nothing reads: **549 kB for a 19 km route**. What was feared was
+the write: composing the route and building 549 kB of XML on every edit. Driven,
+it is **33 ms**, behind a 1.2 s debounce that only fires when the editing stops —
+so the fear was worth measuring and not worth acting on.
+
+**Driven the only way this can be driven: by reloading the page.** Every other
+reading in the suite is taken inside one page load; this one is about what a
+browser does between two. The plan goes in, the page reloads, and the plan comes
+back — **3 points, 1 stage mark, the tour's name, and 19,106 m of the same
+ground**, in 21.3 s including the 25-second page load. The ground is the reading
+that matters: it is routed again from the waypoints, so an equal figure means the
+same route and not a remembered number.
+
+**Faithful about whether they were still planning.** A reader who pressed *Done*
+and reloaded should not find every tap placing a point again; the route stays
+drawn either way. One key holds the file and one holds that flag.
+
+**Three things it is careful about**, and each is a way this could have been a
+trap rather than a feature:
+
+- **A key that outlives a build.** folium hashes the map container's id afresh
+  every time the page is written, so a plan keyed on that would be thrown away on
+  every deploy — the one moment a reader would least expect to lose something.
+  The key is the export's own file prefix: `trails.plan.lomsdal-visten`.
+- **A full quota is said, not swallowed.** A reader who believes their plan is
+  being kept and finds it gone is worse off than one who was told it is too large
+  to keep. And a payload that cannot be read is let go of **once** — anything
+  else is a page that fails the same way on every load with no way to clear it.
+- **A way out, because it comes back on its own.** *Start again* takes every
+  point off the map and the kept copy with them. It goes through the same edit
+  funnel as every other change, so **undo brings it back** — which is what makes
+  a button that clears the map safe to offer. Driven: 3 points, cleared to 0, the
+  kept copy gone, and undo restores the 3.
+
+**In this browser only, and the sentence says so.** Nothing leaves the page: no
+account, no sync, another device knows nothing about it. iOS clears
+script-written storage for a site nobody has visited in seven days, which is a
+further reason the panel says a tour worth keeping is worth downloading.
+
+**And the run is 165 seconds now, not 140.** The reload is 25 of them. It is one
+check and it runs last, because everything after it would be reading a page in a
+state nothing before it had set up. `make drive` reads **192**, the source tests
+**216**.
 
 ### What is still open on a phone
 

@@ -4357,6 +4357,12 @@ class _ProfilePanel(MacroElement):
                 // the plan can offer it as a placeholder and tell a name a
                 // reader chose apart from the one every file carries by default.
                 routeName: function () { return EXPORT ? EXPORT.route.name : null; },
+                // What this map is called where a name has to outlive a build.
+                // **Not the container's id**, which folium hashes afresh every
+                // time the page is written: anything keyed on that would be
+                // thrown away on every deploy, which is the one moment a reader
+                // would least expect to lose something.
+                prefix: function () { return EXPORT ? EXPORT.filePrefix : null; },
                 // **Drawn again without anything having changed in the data.**
                 // What the panel *says* can go stale on its own: the hint names
                 // the gestures, and a pointer becoming coarse renames every one
@@ -7808,6 +7814,18 @@ class _PlanMode(MacroElement):
             back.type = 'button';
             back.textContent = 'Undo the last change';
             back.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-top:4px;cursor:pointer;display:block';
+            // **The way out of a plan that comes back on its own.** A kept plan
+            // is restored on every load until there is nothing to restore, and
+            // emptying a twenty-point route one point at a time is not a way
+            // out. It goes through the same edit funnel as everything else, so
+            // undo brings it back — which is what makes a button that clears the
+            // map safe to offer.
+            var fresh = document.createElement('button');
+            fresh.type = 'button';
+            fresh.className = 'trails-plan-fresh';
+            fresh.textContent = 'Start again';
+            fresh.title = 'Take every point off the map, and forget the plan kept in this browser';
+            fresh.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-top:4px;cursor:pointer;display:block';
             var status = document.createElement('div');
             status.style.cssText = 'margin-top:4px;color:#555';
 
@@ -8403,6 +8421,7 @@ class _PlanMode(MacroElement):
                 box.appendChild(offerBox);
                 box.appendChild(loadStatus);
                 box.appendChild(back);
+                box.appendChild(fresh);
                 box.appendChild(edits);
                 box.appendChild(status);
                 box.appendChild(titleRow);
@@ -8452,6 +8471,7 @@ class _PlanMode(MacroElement):
                 toggle.textContent = on ? 'Stop planning' : 'Plan a route';
                 back.style.display = on ? 'block' : 'none';
                 back.disabled = !history.length;
+                fresh.style.display = (on && points.length) ? 'block' : 'none';
                 var holds = on && chosen >= 0 && chosen < points.length;
                 edits.style.display = holds ? 'block' : 'none';
                 if (holds) {
@@ -8504,8 +8524,8 @@ class _PlanMode(MacroElement):
                     // leave the reader looking at the wrong window.
                     if (fitWanted) { fitWanted = false; showRoute(); }
                 }
-                loadStatus.textContent = loadSaid;
-                loadStatus.style.display = loadSaid ? '' : 'none';
+                loadStatus.textContent = loadSaid + (keptSaid ? (loadSaid ? ' \u00b7 ' : '') + keptSaid : '');
+                loadStatus.style.display = (loadSaid || keptSaid) ? '' : 'none';
                 // The question, wherever one stands. **Its wording comes out of
                 // the one table** rather than being assembled here: the sentence
                 // under the selector and the mode it describes are one decision,
@@ -8539,6 +8559,9 @@ class _PlanMode(MacroElement):
                 present();
                 // Last, because everything above it can change how tall this is.
                 fitList();
+                // And after all of it, because what is kept is what the reader
+                // is now looking at.
+                keepLater();
             }
 
             // What only this side knows and the file cannot be written without:
@@ -8567,6 +8590,135 @@ class _PlanMode(MacroElement):
                         return (leg.parts || []).map(function (part) { return {kind: part.kind, length: part.length}; });
                     })
                 };
+            }
+
+            // ---- keeping a plan across a reload -----------------------------------
+            // **A reload threw the plan away**, and that is the one thing a
+            // reader cannot get back by clicking again: the route is theirs, and
+            // the page was the only place it existed. So it is kept in this
+            // browser and comes back on the next load as it was left.
+            //
+            // **What is kept is the file this page writes**, and not a second
+            // description of the plan beside it. The route already has a
+            // serialised form -- the GPX the download button offers -- and that
+            // form already has a reader: the picker's, which restores the
+            // points, the stage marks, the tour's name and the stretches a load
+            // kept as recorded. A shorter payload of its own would be a second
+            // recording of one decision, and two recordings of one decision
+            // drifting apart is the failure this page has found three times.
+            //
+            // It costs bytes. A restored plan's routed stretches are routed
+            // again rather than copied, so every `<trkpt>` in the kept copy is
+            // weight nothing reads -- 27 km of route is about 800 kB. That is
+            // the price of one writer and one reader, and the quota is caught
+            // and said rather than guessed at.
+            //
+            // **In this browser only**, and the sentence a reader is shown says
+            // so. Nothing leaves the page: no account, no sync, and another
+            // device knows nothing about it. iOS clears script-written storage
+            // for a site nobody has visited in seven days, which is a further
+            // reason the panel says a tour worth keeping is worth downloading.
+            var KEEP_AFTER_MS = 1200;
+            var keptWhen = null;
+            var keptSaid = '';
+            var keptMs = null;
+            var keptBytes = 0;
+
+            // Resolved every time rather than once: the profile panel's script
+            // may not have run when this one does, and a key of 'map' written
+            // in that instant would be a plan kept where nothing looks for it.
+            function keptKey() {
+                var prefix = panel() ? panel().prefix() : null;
+                return 'trails.plan.' + (prefix || 'map');
+            }
+
+            function forgetKept() {
+                try {
+                    window.localStorage.removeItem(keptKey());
+                    window.localStorage.removeItem(keptKey() + '.on');
+                } catch (blocked) { return; }
+                keptBytes = 0;
+            }
+
+            // **Written when the editing stops, not while it happens.** A drag
+            // refreshes at the rate the pointer reports and composing the route
+            // and writing the file is the most expensive thing on this page that
+            // nobody asked for.
+            function keepLater() {
+                if (keptWhen) { clearTimeout(keptWhen); }
+                keptWhen = setTimeout(writeKept, KEEP_AFTER_MS);
+            }
+
+            function writeKept() {
+                if (keptWhen) { clearTimeout(keptWhen); }
+                keptWhen = null;
+                var was = keptSaid;
+                try {
+                    // Nothing on the map is nothing to keep, and it is also how
+                    // a reader throws a plan away: take the points out and the
+                    // kept copy goes with them.
+                    if (!points.length || !panel() || !panel().writes()) { forgetKept(); keptSaid = ''; return; }
+                    var plan = writable();
+                    // **A route with a hole refuses to be written to a file**,
+                    // and the kept copy is that file. A plan still working out
+                    // its legs keeps the copy it had until it has.
+                    if (plan.why) { return; }
+                    var began = performance.now();
+                    var shape = composeRoute();
+                    var made = panel().routeFile(figuresOf(shape), shape, told(shape), plan);
+                    window.localStorage.setItem(keptKey(), made.text);
+                    window.localStorage.setItem(keptKey() + '.on', on ? '1' : '0');
+                    keptMs = performance.now() - began;
+                    keptBytes = made.text.length;
+                    keptSaid = '';
+                } catch (refused) {
+                    // **Said and not swallowed.** A quota that is quietly full is
+                    // a reader who believes their plan is being kept.
+                    forgetKept();
+                    keptSaid = (refused && refused.name === 'QuotaExceededError')
+                        ? 'This tour is too large to keep in this browser \u2014 download it to keep it.'
+                        : 'This browser is not keeping the plan: ' +
+                          (refused && refused.message ? refused.message : String(refused));
+                } finally {
+                    // Only where the sentence changed, or the refresh this asks
+                    // for would schedule the write that asked for the refresh.
+                    if (keptSaid !== was) { refresh(); }
+                }
+            }
+
+            // **The last event a discarded tab is given.** A phone closes tabs
+            // without asking and iOS delivers no `beforeunload` at all, so a
+            // plan edited and left is written here or not at all.
+            window.addEventListener('pagehide', function () { if (keptWhen) { writeKept(); } });
+
+            function restoreKept() {
+                var text = null, was = null;
+                try {
+                    text = window.localStorage.getItem(keptKey());
+                    was = window.localStorage.getItem(keptKey() + '.on');
+                } catch (blocked) { return; }
+                if (!text) { return; }
+                keptBytes = text.length;
+                try {
+                    loadGpx(text, 'asis');
+                } catch (unreadable) {
+                    // **A payload that cannot be read is let go of, once.**
+                    // Anything else is a page that fails the same way on every
+                    // load with no way for a reader to clear it.
+                    forgetKept();
+                    loadSaid = 'The plan kept in this browser could not be read, so it has been let go.';
+                    refresh();
+                    return;
+                }
+                // Ahead of what the loader said rather than instead of it: the
+                // file's own description and the drift the panel reports when
+                // the network has moved under a plan are both worth keeping.
+                loadSaid = 'Back as you left it, kept in this browser only. ' + loadSaid;
+                // **Including whether they were still planning.** A reader who
+                // pressed Done and reloaded should not find every tap placing a
+                // point again; the route stays drawn either way.
+                if (was === '0') { switchTo(false); }
+                refresh();
             }
 
             // What the panel is shown. The route's series is composed here and
@@ -8658,6 +8810,22 @@ class _PlanMode(MacroElement):
 
             toggle.addEventListener('click', function () { switchTo(!on); });
             back.addEventListener('click', undo);
+            fresh.addEventListener('click', function () {
+                if (!points.length) { return; }
+                // The legs are not touched: they follow from the points, and
+                // relink is what works out that none of them is on the route any
+                // more. The recording goes too — a waypoint anchored to a file
+                // nobody is working from is a point looked up in the wrong
+                // track — and the kept copy goes with the last point, because
+                // nothing on the map is nothing to keep.
+                applyEdit(function () {
+                    points.length = 0;
+                    chosen = -1;
+                    loaded = null;
+                    tourName = '';
+                    loadSaid = '';
+                });
+            });
 
             // ---- the clicks --------------------------------------------------------
             // One handler for every click on the map, whatever it lands on.
@@ -8820,6 +8988,19 @@ class _PlanMode(MacroElement):
                 // ask costs 45 ms over a 37 km one — and the one thing that
                 // wants to ask is a check polling until it can carry on.
                 busy: function () { return settling > 0; },
+                // What is kept in this browser, so a check can read it without
+                // knowing the key, and what writing it cost.
+                kept: function () {
+                    var text = null;
+                    try { text = window.localStorage.getItem(keptKey()); } catch (blocked) { return null; }
+                    if (text === null) { return null; }
+                    return {key: keptKey(), bytes: text.length, ms: keptMs,
+                            on: window.localStorage.getItem(keptKey() + '.on') === '1',
+                            said: keptSaid};
+                },
+                keep: function () { writeKept(); },
+                restore: restoreKept,
+                forget: forgetKept,
                 // The count is the list's handle inside this control, and the
                 // plan bar is its handle from outside one. Both ask for the
                 // same thing rather than each carrying their own idea of it.
@@ -8901,6 +9082,15 @@ class _PlanMode(MacroElement):
             // Said once, loudly, rather than thrown at the first click.
             if (panel()) {
                 refresh();
+                // **After the graph and not before it.** Reading the kept file
+                // is parsing, and every leg of the plan is routed again on the
+                // way in; both belong after the payload the page already waits
+                // for rather than in front of a reader watching it load.
+                if (window.trailsGraph) {
+                    window.trailsGraph.ready.then(function () { restoreKept(); }, function () {});
+                } else {
+                    restoreKept();
+                }
             } else {
                 console.error('plan mode: there is no profile panel in this page, so nothing can be planned');
                 toggle.disabled = true;

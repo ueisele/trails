@@ -38,6 +38,7 @@ import argparse
 import json
 import pathlib
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -2100,6 +2101,140 @@ def reading_with_a_finger(page: Any) -> Check:
 # ---------------------------------------------------------------------------
 
 
+def a_plan_survives_a_reload(page: Any) -> Check:
+    """Reloading the page, and finding the plan still there.
+
+    **The only check here that reloads**, and the only one that can answer this
+    at all: what is being measured is what a browser does between two page
+    loads, and every other reading in this file is taken inside one. It costs
+    the page load again -- about 25 seconds -- which is why it runs last and why
+    it is one check and not four.
+
+    What has to come back is not just the points. A plan is its waypoints, the
+    marks that cut it into stages, the tour's name, and whether the reader was
+    still planning when they left; the route between the points is routed again
+    rather than restored, which is deliberate and is what brings the ground back
+    with it.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        The plan before the reload, the plan after it, and what keeping cost
+    """
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(600)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.wait_for_timeout(500)
+    if not select(page, LONG_CHAIN):
+        return Check("a plan survives a reload", skipped=f"{LONG_CHAIN} is not in this page")
+    places = page.evaluate(
+        """() => { const shape = window.trailsProfile.shape;
+        return [0.1, 0.4, 0.7].map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
+    )
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+    for at in places:
+        page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
+        settled(page)
+    settled(page)
+
+    # A name and a cut, both through the controls a reader uses. `.click()` and
+    # `focus()`/`blur()` rather than a real press: this check is about what
+    # survives a reload, and where those controls are drawn is `chrome layout`'s
+    # reading.
+    tour = "Strompdalen over"
+    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.wait_for_timeout(800)
+    page.evaluate(
+        """(name) => { const title = document.querySelector('.trails-plan-title');
+        title.focus(); title.value = name; title.blur(); }""",
+        tour,
+    )
+    settled(page)
+    page.evaluate(
+        """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+          .filter(row => !row.classList.contains('trails-plan-stage'));
+        const cut = rows[1] && rows[1].querySelector('.trails-plan-cut');
+        if (cut) { cut.click(); } }"""
+    )
+    settled(page)
+
+    reading = """() => { const state = window.trailsPlan.state();
+        return {points: state.points.length, stem: state.writable.stem,
+                walked: Math.round(state.walked), on: state.on,
+                cuts: state.points.filter(point => typeof point.stage === 'string').length}; }"""
+    before = page.evaluate(reading)
+    # Written on the spot rather than waited for: the debounce is 1.2 s after
+    # the last edit, and a check that slept for it would be measuring the sleep.
+    page.evaluate("() => window.trailsPlan.keep()")
+    kept = page.evaluate("() => window.trailsPlan.kept()")
+
+    began = time.monotonic()
+    page.reload(timeout=120_000)
+    page.wait_for_timeout(SETTLE_MS)
+    restored = True
+    try:
+        page.wait_for_function(
+            "() => window.trailsPlan && window.trailsPlan.state().points.length > 0",
+            timeout=60_000,
+        )
+    except Exception:
+        restored = False
+    if restored:
+        settled(page)
+    took = round(time.monotonic() - began, 1)
+    after = page.evaluate(reading) if restored else {}
+    said = page.evaluate("() => window.trailsPlan.state().loaded") if restored else None
+
+    # **And the way out of it.** A plan restored on every load has to have one,
+    # or a reader who wants a clean map has to empty a twenty-point route a
+    # point at a time. It goes through the same edit funnel as everything else,
+    # so undo brings it back -- which is what makes clearing the map safe.
+    page.evaluate(
+        """() => { window.trailsChrome.open('plan');
+        document.querySelector('.trails-plan-fresh').click(); }"""
+    )
+    settled(page)
+    page.evaluate("() => window.trailsPlan.keep()")
+    cleared = page.evaluate("() => ({points: window.trailsPlan.state().points.length, kept: window.trailsPlan.kept()})")
+    page.evaluate("() => window.trailsPlan.undo()")
+    settled(page)
+    again = page.evaluate("() => window.trailsPlan.state().points.length")
+
+    return Check(
+        "a plan survives a reload",
+        [
+            Reading("a plan is kept at all", bool(kept), True, note=str(kept and kept["key"])),
+            # The price of one writer and one reader: the kept copy is the file
+            # the download button offers, `<trkpt>` and all, and those are
+            # routed again on the way back in rather than read.
+            Reading("what it weighs", round((kept["bytes"] if kept else 0) / 1024), 549, within=250, holds=False, note="kB"),
+            Reading("and what writing it cost", kept["ms"] if kept else None, 34, within=40, holds=False, note="ms"),
+            Reading("the points come back", after.get("points"), before["points"]),
+            Reading("the stage marks come back", after.get("cuts"), before["cuts"]),
+            Reading("the tour's name comes back", after.get("stem"), before["stem"]),
+            # Routed again, not copied -- so this is the same ground and not a
+            # remembered number.
+            Reading("and the same ground under them", after.get("walked"), before["walked"], within=1),
+            # A reader who was planning is still planning; one who had finished
+            # does not find every tap placing a point.
+            Reading("still planning, as they were", after.get("on"), before["on"]),
+            Reading("what the reader is told", "Back as you left it" in ((said or {}).get("said") or ""), True, note=(said or {}).get("said") or ""),
+            Reading("and how long it took to come back", took, 21, within=20, holds=False, note="s, load included"),
+            Reading("starting again clears the map", cleared["points"], 0),
+            Reading("and forgets what was kept", cleared["kept"], None),
+            Reading("and undo brings it back", again, before["points"]),
+        ],
+    )
+
+
 def drive(page: Any) -> list[Check]:
     """Run every check in one browser session.
 
@@ -2197,6 +2332,10 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_search_on_a_narrow_panel(page))
     if wanted(sharing_the_room):
         checks.append(sharing_the_room(page))
+    # **Last, because it reloads the page.** Everything after it would be
+    # reading a page in a state nothing before it had set up.
+    if wanted(a_plan_survives_a_reload):
+        checks.append(a_plan_survives_a_reload(page))
     return checks
 
 

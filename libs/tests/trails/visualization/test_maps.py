@@ -2250,6 +2250,70 @@ class TestPlanMode:
         # fights the hand moving it.
         assert "if (dragging && dragging.at === i) { continue; }" in planning
 
+    def test_a_plan_is_kept_as_the_file_the_page_already_writes(self):
+        """A reload threw the plan away, which is the one thing a reader cannot
+        get back by clicking again. What is kept is the GPX the download button
+        offers and it comes back through the picker's own reader — a shorter
+        payload of its own would be a second recording of one decision, which is
+        how the file name, the mode wording and the ascent all came apart."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "var made = panel().routeFile(figuresOf(shape), shape, told(shape), plan);" in planning
+        assert "window.localStorage.setItem(keptKey(), made.text);" in planning
+        assert "loadGpx(text, 'asis');" in planning
+
+    def test_the_key_outlives_a_build(self):
+        """folium hashes the container's id afresh every time the page is
+        written, so a plan keyed on that would be thrown away on every deploy —
+        the one moment a reader would least expect to lose something."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "return 'trails.plan.' + (prefix || 'map');" in planning
+        assert "var prefix = panel() ? panel().prefix() : null;" in planning
+
+    def test_a_full_quota_is_said_and_not_swallowed(self):
+        """A reader who believes their plan is being kept and finds it gone is
+        worse off than one who was told it is too large to keep."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "refused.name === 'QuotaExceededError'" in planning
+        assert "too large to keep in this browser" in planning
+        # And a payload that cannot be read is let go of once, or the page fails
+        # the same way on every load with no way for a reader to clear it.
+        assert "could not be read, so it has been let go." in planning
+
+    def test_the_plan_is_written_when_the_editing_stops_and_when_the_tab_goes(self):
+        """A drag refreshes at the rate the pointer reports, and a phone closes
+        tabs without asking — iOS delivers no beforeunload at all."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "keptWhen = setTimeout(writeKept, KEEP_AFTER_MS);" in planning
+        assert "window.addEventListener('pagehide'" in planning
+
+    def test_a_plan_that_comes_back_on_its_own_has_a_way_out(self):
+        """A kept plan is restored on every load until there is nothing left to
+        restore, and emptying a twenty-point route a point at a time is not a
+        way out. It goes through the same edit funnel as every other change, so
+        undo brings it back — which is what makes a button that clears the map
+        safe to offer."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "fresh.textContent = 'Start again';" in planning
+        assert "points.length = 0;" in planning
+        # The recording goes with it: a waypoint anchored to a file nobody is
+        # working from is a point looked up in the wrong track.
+        assert "loaded = null;" in planning
+
     def test_a_page_without_a_panel_says_so_rather_than_throwing(self):
         """Plan mode composes with the walk the panel owns, so a page carrying
         one and not the other can plan nothing — said once, loudly."""
