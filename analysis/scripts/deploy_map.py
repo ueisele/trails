@@ -126,11 +126,40 @@ def check(source: Path) -> int:
     return size
 
 
+def squeezed(source: Path) -> tuple[Path, int]:
+    """Compress the map once, properly, so the reader does not wait for the edge to do it badly.
+
+    **Measured on the published map**, which is 41.8 MB of HTML: Cloudflare
+    compresses on the fly and its brotli came out at **7.84 MB**, which is
+    *worse* than its own gzip at 7.57 -- a low quality level, chosen for the
+    server's time rather than the reader's. The same bytes at brotli 11 are
+    **6.58 MB**. On a 1.5 Mbit/s connection that difference is about seven
+    seconds, spent before anything at all is on the screen.
+
+    The object is then stored compressed and served with ``Content-Encoding:
+    br``, which every browser since 2017 understands over HTTPS. A client that
+    does not is handed brotli it cannot read -- that is the standing trade of
+    pre-compressed static hosting, and it is the reason this is said out loud
+    rather than done quietly.
+
+    Args:
+        source: The built map.
+
+    Returns:
+        The compressed file, and how many bytes it holds.
+    """
+    import brotli
+
+    squeezed_file = source.with_suffix(source.suffix + ".br")
+    squeezed_file.write_bytes(brotli.compress(source.read_bytes(), quality=11))
+    return squeezed_file, squeezed_file.stat().st_size
+
+
 def upload(source: Path, key: str, config: dict[str, str]) -> None:
     """Copy the map into the bucket with the content type that makes it open rather than download.
 
     Args:
-        source: The built map.
+        source: The compressed map, from :func:`squeezed`.
         key: Object key to write.
         config: The settings from :func:`settings`.
 
@@ -142,6 +171,7 @@ def upload(source: Path, key: str, config: dict[str, str]) -> None:
         "--endpoint-url", config["TRAILS_MAP_S3_ENDPOINT"],
         "--region", "auto",
         "--content-type", CONTENT_TYPE,
+        "--content-encoding", "br",
         "--no-progress",
     ]  # fmt: skip
     try:
@@ -219,13 +249,15 @@ def main() -> None:
     urls = [f"https://{host}/{args.map}", f"https://{host}/{args.map}/", f"https://{host}/{key}"]
 
     if args.dry_run:
-        print(f"Would upload {source} ({size / 1e6:.1f} MB)")
-        print(f"          to s3://{config['TRAILS_MAP_BUCKET']}/{key} as {CONTENT_TYPE}")
+        print(f"Would compress {source} ({size / 1e6:.1f} MB) at brotli 11")
+        print(f"      upload it to s3://{config['TRAILS_MAP_BUCKET']}/{key} as {CONTENT_TYPE}, Content-Encoding: br")
         print("      purge " + ("nothing (--no-purge)" if args.no_purge else ", ".join(urls)))
         return
 
-    print(f"⬆️  {source.name} ({size / 1e6:.1f} MB) → s3://{config['TRAILS_MAP_BUCKET']}/{key}")
-    upload(source, key, config)
+    body, packed = squeezed(source)
+    print(f"🗜️  {source.name}: {size / 1e6:.1f} → {packed / 1e6:.2f} MB at brotli 11 (the edge managed 7.84)")
+    print(f"⬆️  → s3://{config['TRAILS_MAP_BUCKET']}/{key}, Content-Encoding: br")
+    upload(body, key, config)
 
     if args.no_purge:
         print("↩️  Edge cache left alone (--no-purge); it holds the old map for up to 5 minutes.")

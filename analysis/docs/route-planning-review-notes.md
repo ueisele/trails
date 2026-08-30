@@ -3431,6 +3431,105 @@ anything. The rule the panel's key has kept since phase 4, now kept in the sheet
 
 `make drive` reads **245**, the source tests **246**.
 
+### What the page costs to load, and the half of it that was the probe
+
+**Asked for a slow connection, and it decomposes into two problems with
+different causes.** Measured against the published map before anything was
+changed:
+
+| the bytes | |
+|---|---:|
+| served, Cloudflare's own brotli | **7,835,839** |
+| served, its own gzip | 7,569,043 |
+| the same file at brotli 11 | **6,510,407** |
+| of that, the graph payload alone | **3,697,159 — 57 %** |
+| of that, all 36.6 MB of the rest | **2,801,183** |
+
+Two things fall out of that table. **The edge compresses badly** — its brotli is
+worse than its own gzip, which is a quality level chosen for the server's time
+rather than the reader's. And **the HTML compresses 13:1**, so cutting source
+out of it — the popups, the fifteen-decimal coordinates, the 163,317 blank
+lines — buys almost nothing on the wire. The payload is the wire. The HTML is
+the seconds:
+
+| the seconds, on a fast line | ms |
+|---|---:|
+| response complete | 241 |
+| `domInteractive` | **2,473** |
+| `load` | 2,885 |
+| the graph ready | 2,930 |
+| of which inflate and decode | **410** |
+
+**241 ms of network and 2.2 seconds of parsing**, on a desktop CPU. A phone is
+three to five times slower. The payload is not what costs the time.
+
+**And the first reading said 10.06 seconds, which was the probe.**
+`graph.ready` is a promise that resolves to the graph itself — 948,465 vertices
+as typed arrays — and `page.evaluate` serialises whatever an evaluate returns.
+Awaiting it across the bridge measured Playwright. The page's own clock says
+2.93 s. **Never await a promise across the bridge when it resolves to the
+thing you built**, which is the nearest-point trap in a new place.
+
+### And 832 kB over four hosts, which on a slow link is worse than it looks
+
+Ten files, and the bytes are not the point: **four DNS lookups and four TLS
+handshakes**, about 2.8 seconds at a 200 ms round trip, spent before a single
+byte of any of them arrives. Each was taken out of a built page **on its own**
+and the page driven — the method this document already records for proving a
+driver is worth something.
+
+| taken out | uncompressed | what it did |
+|---|---:|---|
+| `bootstrap.min.css` | 194,901 | **nothing measurable** |
+| `bootstrap.bundle.min.js` | 80,496 | **nothing measurable** |
+| `bootstrap-glyphicons.css` | 13,018 | the attribution's size, and nothing else |
+| `all.min.css` + `fa-solid-900.woff2` | 252,256 | **four glyphs** |
+
+The first two are gone for what they were really providing: a border-box reset,
+without which the zoom control measures 65 px instead of 64, and a font family
+for the document outside the map. **288 kB and a whole host for three rules.**
+
+**And the webfont drew four shapes.** Measured in the built page, the markers
+ask for `house-chimney` 113 times, `campground` 36, `ship` 32, `anchor` 17, and
+for nothing else at all. Those four outlines are in `MARKER_ICONS` now, drawn as
+white SVG in a background image, so the markers are unchanged to the pixel and
+awesome-markers still writes the same `<i class="fa fa-...">`. 252 kB became
+about 4. The CC BY 4.0 notice travels with the outlines, as it did in the
+stylesheet it replaces.
+
+**What is left of the four hosts is written into the page**: Leaflet, its
+stylesheet, jQuery and the rotate stylesheet, fetched once into `.cache/vendor/`
+and inlined. That costs **73,914 compressed bytes** and buys three fewer hosts —
+a handshake cannot be pipelined and a download can. awesome-markers stays
+linked, because its stylesheet reaches for four sprite images by relative path
+and inlining it would break them; it is the one third-party host the page still
+has.
+
+**And the deploy compresses once, properly.** `brotli 11` takes the built page
+from 41.85 MB to **6.58** in 36 seconds, stored compressed and served with
+`Content-Encoding: br`. Against what the edge was doing that is **7.84 → 6.58
+MB, −16 %** — about seven seconds on a 1.5 Mbit/s connection, spent before
+anything is on the screen. It is the one place in this project where a
+dependency was added for a single measured figure, and `brotli` is in `dev`
+because only the deploy uses it.
+
+**Two defects, both mine, and both about where a thing is written.**
+
+- **An inlined library must be an `Element` in the figure's header, not a
+  `MacroElement` on the map.** A macro's `header` block renders with the map's
+  *children*, and folium writes its own `<script src>` links while rendering the
+  map — so an inlined Leaflet landed **after** the script that uses it and the
+  page came up `L is not defined`. Two hundred and forty-five readings said
+  nothing; the first check did, which is what it is for.
+- **Two source tests began reading Leaflet instead of the page.** Its own source
+  names `http://` addresses and defines a function called
+  `disableScrollPropagation`, so *this panel does not swallow the wheel* and
+  *this panel fetches nothing* both went red about somebody else's code. The
+  inlined blocks are fenced by a comment naming each, which a reader wants
+  anyway, and the tests cut them out with `ours()`.
+
+`make drive` reads **245**, the source tests **250**.
+
 ### What is still open on a phone
 
 - **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the

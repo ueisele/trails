@@ -12,6 +12,7 @@ visually::
 
 import hashlib
 import json
+import pathlib
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -21,7 +22,7 @@ from typing import Any
 import folium
 import geopandas as gpd
 import pandas as pd
-from branca.element import MacroElement
+from branca.element import Element, Figure, MacroElement
 from jinja2 import Template
 
 from trails.routing import elevation
@@ -35,6 +36,133 @@ Bounds = tuple[float, float, float, float]
 #: object, carried on the object, rather than a second argument every caller
 #: would have to repeat.
 MAP_BOUNDS_ATTR = "_trails_bounds"
+
+
+#: The four glyphs the markers ask for, as Font Awesome's own outlines.
+#:
+#: **252 kB of stylesheet and webfont bought exactly four of them.** Measured
+#: on the built page, `house-chimney` is asked for 113 times, `campground` 36,
+#: `ship` 32, `anchor` 17, and nothing else is asked for at all -- so the page
+#: linked `all.min.css` and pulled `fa-solid-900.woff2` from a third host to
+#: draw four shapes. These are the same outlines, so the markers are unchanged
+#: to the pixel, and awesome-markers still writes the same `<i class="fa fa-">`.
+#:
+#: Font Awesome Free 6.2.0 by @fontawesome, https://fontawesome.com --
+#: Icons: CC BY 4.0. Copyright 2022 Fonticons, Inc. The notice travels with the
+#: outlines into every built page, as it does in the stylesheet this replaces.
+MARKER_ICONS: dict[str, tuple[str, str]] = {
+    "house-chimney": (
+        "0 0 576 512",
+        "M543.8 287.6c17 0 32-14 32-32.1c1-9-3-17-11-24L512 185V64c0-17.7-14.3-32-32-32H448c-17.7 0-32 14.3-32 32"
+        "v36.7L309.5 7c-6-5-14-7-21-7s-15 1-22 8L10 231.5c-7 7-10 15-10 24c0 18 14 32.1 32 32.1h32v69.7c-.1 .9-.1 1.8"
+        "-.1 2.8V472c0 22.1 17.9 40 40 40h16c1.2 0 2.4-.1 3.6-.2c1.5 .1 3 .2 4.5 .2H160h24c22.1 0 40-17.9 40-40V448 384"
+        "c0-17.7 14.3-32 32-32h64c17.7 0 32 14.3 32 32v64 24c0 22.1 17.9 40 40 40h24 32.5c1.4 0 2.8 0 4.2-.1c1.1 .1 2.2 .1 3.3 .1"
+        "h16c22.1 0 40-17.9 40-40V455.8c.3-2.6 .5-5.3 .5-8.1l-.7-160.2h32z",
+    ),
+    "campground": (
+        "0 0 576 512",
+        "M377 52c11-13.8 8.8-33.9-5-45s-33.9-8.8-45 5L288 60.8 249 12c-11-13.8-31.2-16-45-5s-16 31.2-5 45l48 60L12.3 405.4"
+        "C4.3 415.4 0 427.7 0 440.4V464c0 26.5 21.5 48 48 48H288 528c26.5 0 48-21.5 48-48V440.4c0-12.7-4.3-25.1"
+        "-12.3-35L329 112l48-60zM288 448H168.5L288 291.7 407.5 448H288z",
+    ),
+    "ship": (
+        "0 0 576 512",
+        "M192 32c0-17.7 14.3-32 32-32H352c17.7 0 32 14.3 32 32V64h48c26.5 0 48 21.5 48 48V240l44.4 14.8c23.1 7.7 29.5 37.5 11.5 53.9"
+        "l-101 92.6c-16.2 9.4-34.7 15.1-50.9 15.1c-19.6 0-40.8-7.7-59.2-20.3c-22.1-15.5-51.6-15.5-73.7 0c-17.1 11.8"
+        "-38 20.3-59.2 20.3c-16.2 0-34.7-5.7-50.9-15.1l-101-92.6c-18-16.5-11.6-46.2 11.5-53.9L96 240V112c0-26.5 21.5"
+        "-48 48-48h48V32zM160 218.7l107.8-35.9c13.1-4.4 27.3-4.4 40.5 0L416 218.7V128H160v90.7zM306.5 421.9C329 437.4 356.5 448 384 448"
+        "c26.9 0 55.4-10.8 77.4-26.1l0 0c11.9-8.5 28.1-7.8 39.2 1.7c14.4 11.9 32.5 21 50.6 25.2c17.2 4 27.9 21.2 23.9 38.4"
+        "s-21.2 27.9-38.4 23.9c-24.5-5.7-44.9-16.5-58.2-25C449.5 501.7 417 512 384 512c-31.9 0-60.6-9.9-80.4-18.9"
+        "c-5.8-2.7-11.1-5.3-15.6-7.7c-4.5 2.4-9.7 5.1-15.6 7.7c-19.8 9-48.5 18.9-80.4 18.9c-33 0-65.5-10.3-94.5"
+        "-25.8c-13.4 8.4-33.7 19.3-58.2 25c-17.2 4-34.4-6.7-38.4-23.9s6.7-34.4 23.9-38.4c18.1-4.2 36.2-13.3 50.6"
+        "-25.2c11.1-9.4 27.3-10.1 39.2-1.7l0 0C136.7 437.2 165.1 448 192 448c27.5 0 55-10.6 77.5-26.1c11.1-7.9 25.9"
+        "-7.9 37 0z",
+    ),
+    "anchor": (
+        "0 0 576 512",
+        "M256 96c0-17.7 14.3-32 32-32s32 14.3 32 32s-14.3 32-32 32s-32-14.3-32-32zm85.1 80C367 158.8 384 129.4 384 96"
+        "c0-53-43-96-96-96s-96 43-96 96c0 33.4 17 62.8 42.9 80H224c-17.7 0-32 14.3-32 32s14.3 32 32 32h32V448H208"
+        "c-53 0-96-43-96-96v-6.1l7 7c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9L97 263c-9.4-9.4-24.6-9.4-33.9 0L7 319"
+        "c-9.4 9.4-9.4 24.6 0 33.9s24.6 9.4 33.9 0l7-7V352c0 88.4 71.6 160 160 160h80 80c88.4 0 160-71.6 160-160v"
+        "-6.1l7 7c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-56-56c-9.4-9.4-24.6-9.4-33.9 0l-56 56c-9.4 9.4-9.4 24.6 0 33.9"
+        "s24.6 9.4 33.9 0l7-7V352c0 53-43 96-96 96H320V240h32c17.7 0 32-14.3 32-32s-14.3-32-32-32H341.1z",
+    ),
+}
+
+
+#: Where a third party's file is kept once it has been fetched. A build needs
+#: the network for it exactly once, and after that never again -- the same
+#: bargain every other download in this project makes.
+VENDOR_CACHE = pathlib.Path(".cache/vendor")
+
+
+def vendored(url: str) -> str:
+    """Fetch a third-party file once, keep it, and return its text.
+
+    **Written into the page rather than linked from a CDN.** Measured on the
+    published map, the four hosts it linked to cost 832 kB and, more to the
+    point on a slow connection, four DNS lookups and four TLS handshakes before
+    a single byte of any of them arrives -- some 2.8 seconds at a 200 ms round
+    trip, spent before the map can draw. Inlined they arrive in the stream the
+    reader is already downloading.
+
+    Kept under ``.cache/`` and keyed by the whole URL, so a version folium
+    changes is a different key and not a stale file. Nothing is committed: this
+    is somebody else's code and the repository does not carry it.
+
+    Args:
+        url: What to fetch, once.
+
+    Returns:
+        The file's text.
+    """
+    VENDOR_CACHE.mkdir(parents=True, exist_ok=True)
+    kept = VENDOR_CACHE / (hashlib.sha256(url.encode()).hexdigest()[:16] + "-" + url.rsplit("/", 1)[-1])
+    if not kept.exists():
+        import requests
+
+        answer = requests.get(url, timeout=60)
+        answer.raise_for_status()
+        kept.write_bytes(answer.content)
+    return kept.read_text(encoding="utf-8")
+
+
+class _Inlined(Element):
+    """A third party's script or stylesheet, written into the page itself.
+
+    The body goes through a variable rather than into the template, because a
+    minified library is full of ``{{`` and ``{%`` by accident and Jinja would
+    read them as its own.
+
+    **An `Element` and not a `MacroElement`, which cost a build.** A macro's
+    `header` block is rendered with the map's *children*, and folium adds its own
+    `<script src>` links while rendering the map itself -- so an inlined Leaflet
+    landed **after** the script that uses it and the page came up with
+    `L is not defined`. Added straight to the figure's header instead, it is
+    first because nothing has been added there yet.
+    """
+
+    _template = Template("""{{ this.body }}""")
+
+    def __init__(self, body: str, css: bool, name: str) -> None:
+        """Hold the file.
+
+        **Fenced by a comment naming it**, for two reasons. A reader looking at
+        the source can see where somebody else's code begins and ends, which is
+        the least a page owes a library it carries; and a check asking what
+        *this* page says can cut them out. Both were wanted the moment Leaflet
+        went inline: its own source carries `http://` addresses and defines a
+        `disableScrollPropagation`, and two tests about this page's behaviour
+        began reading Leaflet's instead.
+
+        Args:
+            body: The file's text.
+            css: Whether it is a stylesheet rather than a script.
+            name: What the file is, for the fence.
+        """
+        super().__init__()
+        wrapped = ("<style>" + body + "</style>") if css else ("<script>" + body + "</script>")
+        self.body = f"<!-- vendored:{name} -->\n{wrapped}\n<!-- /vendored:{name} -->"
 
 
 class _Theme(MacroElement):
@@ -147,9 +275,20 @@ class _Theme(MacroElement):
         }
         .leaflet-bar { border-color: var(--trails-edge) !important; }
         .leaflet-bar a:hover { background-color: var(--trails-sunk) !important; }
+        /* **What Bootstrap was actually providing, in three rules.** Two
+           stylesheets and a script came to 288 kB and one whole host for a
+           border-box reset, a font stack and the attribution's size -- measured
+           by removing each from a built page on its own and driving it. */
+        *, *::before, *::after { box-sizing: border-box; }
+        body { margin: 0; font-family: system-ui, -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
         .leaflet-control-attribution {
             background: var(--trails-panel) !important;
             color: var(--trails-ink-4) !important;
+            /* 10 px and a 14 px line, which is what the glyphicons sheet was
+               holding it at. The panel above leaves it 16 px of map; a credit
+               that grew to 22 would be taking some of that back. */
+            font-size: 10px !important;
+            line-height: 14px !important;
         }
         .leaflet-control-attribution a { color: var(--trails-accent) !important; }
         .leaflet-control-scale-line {
@@ -173,6 +312,7 @@ class _Theme(MacroElement):
         .trails-basemap, .trails-chrome, .leaflet-popup-content {
             color: var(--trails-ink);
         }
+        {{ this.icons }}
         </style>
         {% endmacro %}
     """)
@@ -181,6 +321,19 @@ class _Theme(MacroElement):
         """Initialize the theme."""
         super().__init__()
         self._name = "Theme"
+        # **The marker glyphs, drawn from their outlines rather than from a
+        # webfont.** Written here because this is the one stylesheet every page
+        # gets, and built from :data:`MARKER_ICONS` rather than written out a
+        # second time: one derivation, and a name that is wrong is wrong once.
+        rules = [
+            '.awesome-marker i[class*="fa-"] { width: 14px; height: 14px; background-repeat: no-repeat;'
+            " background-position: center; background-size: contain; }"
+        ]
+        for name, (box, path) in MARKER_ICONS.items():
+            drawing = f"<svg xmlns='http://www.w3.org/2000/svg' viewBox='{box}'><path fill='white' d='{path}'/></svg>"
+            encoded = drawing.replace("<", "%3C").replace(">", "%3E").replace("#", "%23")
+            rules.append(f'.awesome-marker i.fa-{name} {{ background-image: url("data:image/svg+xml,{encoded}"); }}')
+        self.icons = "\n        ".join(rules)
 
 
 class BaseMap(Enum):
@@ -256,6 +409,52 @@ def create_map(
     # Base layers are attached explicitly rather than via Map(tiles=...), which
     # would label the layer control with the raw tile URL instead of the name.
     fmap = folium.Map(location=list(center), zoom_start=zoom, tiles=None, control_scale=True)
+    # **Three of folium's defaults, dropped after being measured rather than
+    # after being reasoned about.** They cost 288 kB uncompressed and, between
+    # them, a whole host: `netdna.bootstrapcdn.com` served one file and nothing
+    # else. Each was taken out of a built page on its own and the page driven:
+    #
+    # - `bootstrap.min.css` (194,901 B) -- **no measurable effect at all**, once
+    #   the two rules it was really providing are said here: the border-box
+    #   reset, without which the zoom control measures 65 px instead of 64, and
+    #   a font family for the document outside the map.
+    # - `bootstrap.bundle.min.js` (80,496 B) -- **no measurable effect.** Nothing
+    #   on this page is a Bootstrap component.
+    # - `bootstrap-glyphicons.css` (13,018 B) -- its one effect is the
+    #   attribution's size, 10 px against 16 without it. `glyphicon` appears
+    #   once in the built page and that occurrence is this link; the markers ask
+    #   for `prefix="fa"`.
+    #
+    # What stays is what the map is made of: Leaflet, jQuery (folium builds
+    # every popup with it) and awesome-markers with the font its icons come from.
+    fmap.default_js = [(name, url) for name, url in fmap.default_js if "bootstrap" not in name]
+    fmap.default_css = [(name, url) for name, url in fmap.default_css if name not in {"bootstrap_css", "glyphicons_css", "awesome_markers_font_css"}]
+    # **And what is left of them goes into the page rather than over a wire.**
+    # Two whole hosts fall away with these four -- `cdn.jsdelivr.net` and
+    # `code.jquery.com` -- which on a slow link is worth more than the 80 kB
+    # they add to the stream: a handshake cannot be pipelined and a download can.
+    # awesome-markers stays linked for now, because its stylesheet reaches for
+    # four sprite images by relative path and inlining it would break them.
+    inline = {"leaflet", "jquery"}
+    fmap.default_js, remote_js = (
+        [(name, url) for name, url in fmap.default_js if name not in inline],
+        [(name, url) for name, url in fmap.default_js if name in inline],
+    )
+    fmap.default_css, remote_css = (
+        [(name, url) for name, url in fmap.default_css if name not in {"leaflet_css", "awesome_rotate_css"}],
+        [(name, url) for name, url in fmap.default_css if name in {"leaflet_css", "awesome_rotate_css"}],
+    )
+    # `get_root` is typed as returning any `Element`; for a map it is the
+    # `Figure` that owns the document, and the header is where a page's scripts
+    # and stylesheets go. Asserted rather than cast, so a folium that ever
+    # returns something else says so here instead of failing in a browser.
+    figure = fmap.get_root()
+    assert isinstance(figure, Figure), "a map's root should be the figure that carries the document"
+    header = figure.header
+    for name, url in remote_js:
+        header.add_child(_Inlined(vendored(url), css=False, name=name), name=name)
+    for name, url in remote_css:
+        header.add_child(_Inlined(vendored(url), css=True, name=name), name=name)
 
     for index, source in enumerate((base, *(extra for extra in extra_bases if extra is not base))):
         layer = _BASE_LAYERS[source]

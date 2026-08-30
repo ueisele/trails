@@ -45,6 +45,30 @@ def shelters() -> gpd.GeoDataFrame:
     )
 
 
+#: Everything between a `vendored:` fence and its close, which is somebody
+#: else's file written into the page.
+VENDORED = re.compile(r"<!-- vendored:.*?/vendored:[a-z_]+ -->", re.S)
+
+
+def ours(html: str) -> str:
+    """The page with the third-party files it carries inline taken out.
+
+    Leaflet and jQuery are written into the page rather than linked from a CDN,
+    which on a slow connection is worth three DNS lookups and three TLS
+    handshakes. Their source is not this page's, though: Leaflet carries
+    `http://` addresses in its own comments and defines a function called
+    `disableScrollPropagation`, and two checks about what *this* page does began
+    reading what Leaflet does.
+
+    Args:
+        html: A rendered page.
+
+    Returns:
+        The same page without the fenced third-party blocks.
+    """
+    return VENDORED.sub("", html)
+
+
 class TestCreateMap:
     """Tests for create_map."""
 
@@ -96,6 +120,80 @@ class TestCreateMap:
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), base=maps.BaseMap.OPENSTREETMAP, extra_bases=(maps.BaseMap.OPENSTREETMAP,))
         tile_layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
         assert len(tile_layers) == 1
+
+
+class TestWhatThePageFetches:
+    """What a reader has to reach a third party for, and what they do not.
+
+    Measured on the published map before any of this: **832 kB over four hosts**,
+    and on a slow link the four DNS lookups and four TLS handshakes cost more
+    than the bytes -- some 2.8 seconds at a 200 ms round trip, spent before the
+    map can draw a line.
+    """
+
+    def built(self) -> str:
+        """A rendered page with nothing added to it."""
+        return maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+
+    def test_three_of_foliums_defaults_are_dropped(self):
+        """Each was taken out of a built page on its own and the page driven.
+
+        `bootstrap.min.css` (194,901 B) and `bootstrap.bundle.min.js` (80,496 B)
+        changed **nothing measurable** once the two rules they were really
+        providing are said here. `bootstrap-glyphicons.css` (13,018 B) had one
+        effect, the attribution's size, and it came from its own host.
+        """
+        html = self.built()
+        assert "bootstrap.min.css" not in html
+        assert "bootstrap.bundle.min.js" not in html
+        assert "bootstrap-glyphicons.css" not in html
+        # What they were for, said in three rules rather than 288 kB.
+        assert "*, *::before, *::after { box-sizing: border-box; }" in html
+        assert "font-size: 10px !important;" in html
+
+    def test_the_webfont_is_gone_and_the_four_outlines_are_not(self):
+        """252 kB of stylesheet and webfont bought exactly four glyphs.
+
+        The outlines are Font Awesome's own, so the markers are unchanged to the
+        pixel, and awesome-markers still writes the same `<i class="fa fa-...">`.
+        """
+        html = self.built()
+        assert "fontawesome-free" not in html
+        assert set(maps.MARKER_ICONS) == {"house-chimney", "campground", "ship", "anchor"}
+        for name in maps.MARKER_ICONS:
+            assert f".awesome-marker i.fa-{name} {{ background-image:" in html
+        # And the notice travels with them, as it does in the stylesheet this
+        # replaces: the icons are CC BY 4.0.
+        assert "CC BY 4.0" in maps.__doc__ or "Fonticons" in pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+
+    def test_leaflet_and_jquery_are_written_into_the_page(self):
+        """A handshake cannot be pipelined and a download can.
+
+        Fenced by a comment naming each, so a reader can see where somebody
+        else's code begins and a check can cut it out.
+        """
+        html = self.built()
+        assert "<!-- vendored:leaflet -->" in html
+        assert "<!-- vendored:jquery -->" in html
+        assert "leaflet@1.9.3/dist/leaflet.js" not in html
+        assert 'src="https://code.jquery.com' not in html
+        # **An `Element` and not a `MacroElement`, which cost a build.** A
+        # macro's header block renders with the map's *children*, and folium
+        # writes its own `<script src>` links while rendering the map -- so an
+        # inlined Leaflet landed after the script that uses it and the page came
+        # up with `L is not defined`. Leaflet has to be first in the header.
+        head = html[: html.index("</head>")]
+        assert head.index("<!-- vendored:leaflet -->") < head.index("leaflet.awesome-markers")
+
+    def test_only_one_third_party_host_is_left(self):
+        """awesome-markers, whose stylesheet reaches for four sprite images by
+        relative path -- inlining it would break them. Everything else is either
+        in the page or not asked for at all."""
+        # Through `ours`, because Leaflet's own attribution names leafletjs.com
+        # and that is a string it writes, not a file the page fetches.
+        html = ours(self.built())
+        hosts = {address.split("/")[2] for address in re.findall(r'(?:src|href)="(https://[^"]+)"', html)}
+        assert hosts == {"cdnjs.cloudflare.com"}, hosts
 
 
 class TestPopup:
@@ -1175,14 +1273,28 @@ class TestProfilePanel:
         file it produces. Nothing resolves either, and the schema location
         beside the second is a hint to a validator that will never see this
         page."""
+        namespaces = ("http://www.w3.org/2000/svg", "http://www.topografix.com/GPX/1/1", "http://www.w3.org/2001/XMLSchema-instance")
+
+        def addresses(html: str) -> int:
+            """How many places a page names, once the namespaces are taken out.
+
+            Both sides go through this and not just the panel's. The page
+            carries Leaflet inline, whose own comments name addresses; and the
+            marker outlines carry the SVG namespace, which stands in every page
+            whether a panel was added or not. Subtracting on one side only
+            compares two different questions.
+            """
+            bare_text = ours(html)
+            for namespace in namespaces:
+                bare_text = bare_text.replace(namespace, "")
+            return bare_text.count("://")
+
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
-        with_panel = fmap.get_root().render()
-        for namespace in ("http://www.w3.org/2000/svg", "http://www.topografix.com/GPX/1/1", "http://www.w3.org/2001/XMLSchema-instance"):
-            with_panel = with_panel.replace(namespace, "")
+        with_panel = addresses(fmap.get_root().render())
 
         bare, _ = self.drawn()
-        assert with_panel.count("://") == bare.get_root().render().count("://")
+        assert with_panel == addresses(bare.get_root().render())
 
     def test_the_wheel_still_reaches_the_map(self, group):
         """disableClickPropagation, and deliberately not the scroll one: a panel
@@ -1190,7 +1302,7 @@ class TestProfilePanel:
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
-        html = fmap.get_root().render()
+        html = ours(fmap.get_root().render())
         assert "disableClickPropagation" in html
         assert "disableScrollPropagation" not in html
 

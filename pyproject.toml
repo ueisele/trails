@@ -31,6 +31,10 @@ jupyter = [
     "ipyleaflet>=0.20.0",
 ]
 dev = [
+    # Used by the deploy alone. The edge compresses on the fly and does it badly
+    # -- measured, its brotli is worse than its own gzip -- and one pass at
+    # quality 11 takes the published map from 7.84 MB to 6.58.
+    "brotli>=1.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.3",
