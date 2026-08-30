@@ -696,17 +696,17 @@ class TestProfilePanel:
         """The same map, as a fixture."""
         return self.drawn()
 
-    def test_the_licences_fold_on_a_narrow_screen_and_not_only_a_short_one(self, group):
-        """The measurement that put them behind an *i* was taken on a phone held
-        sideways, so the rule it was given asked about the height alone — and
-        held upright, where most readers hold one, the same sentence is eleven
-        lines of a panel that is trying to draw a curve. The same lack of room,
-        measured on the other axis."""
+    def test_the_figures_and_the_sources_are_one_tap_away_on_every_screen(self, group):
+        """First the licences folded on a short screen, then on a narrow one as
+        well — a width rule for something that was never about width. The
+        heading carries the three figures a walk is decided on and everything
+        else is behind the *i*, on a phone and on a desktop alike."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "return size.x < NARROW || size.y < SHORT;" in html
+        assert "var folded = sheeted() || !licencesOpen;" in html
+        assert "size.y < SHORT" not in html.split("function showLicences")[1][:400]
 
     def test_the_i_opens_the_sheet_rather_than_the_drawing(self, group):
         """A page whose popups all dock into one panel has somewhere to put a
@@ -717,11 +717,34 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "window.trailsChrome.detail('Sources and licences', box);" in html
+        assert "window.trailsChrome.detail(named, box);" in html
         # Read off the element that shows it rather than composed again: one
         # sentence, in two places, from one derivation.
-        assert "who.textContent = licensed.textContent;" in html
+        assert "said.textContent = part[0];" in html
         assert "licencesOpen = !licencesOpen;" in html
+
+    def test_the_heading_shows_three_of_the_list_the_sheet_shows_all_of(self, group):
+        """Six lines of figures over a drawing that got four. The heading takes
+        how far, how much climb and how steep at worst; the sheet takes the same
+        list entire, in the same order — a second list for the second rendering
+        is how a page comes to tell two stories about one route."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "summary.textContent = lines.slice(0, 3).join(" in html
+        assert "saidLines.forEach(function (line, at) {" in html
+
+    def test_the_panel_can_be_put_away_only_where_something_brings_it_back(self, group):
+        """A control that strands a reader is worse than no control: a page built
+        without the chrome has no way back to the panel once it is gone."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "hide.className = 'trails-profile-hide';" in html
+        assert "window.trailsChrome.profile(false);" in html
+        assert "hide.style.display = (window.trailsChrome && window.trailsChrome.profile) ? '' : 'none';" in html
 
     def test_the_gradient_bands_and_their_rule_reach_the_page(self, group):
         """The bands are a measurement, not a taste: 15 % sits above the worst
@@ -2839,3 +2862,32 @@ class TestChrome:
         # by the caller rather than sniffed at: the day something guesses is the
         # day a place name with an ampersand in it becomes an element.
         assert "if (asHtml) { wrap.innerHTML = content; } else { wrap.textContent = content; }" in html
+
+    def test_one_state_decides_whether_the_profile_stands(self):
+        """Three places offer the switch — the rail, the plan bar and the plan
+        control — and a second flag beside this one is two switches that can
+        disagree. Three values and not two: null means nobody has said, and the
+        default then depends on where the reader is."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "profileAsked = (want === undefined || want === null) ? !profileOn() : !!want;" in html
+        assert "return profileAsked === null ? profileDefault() : profileAsked;" in html
+        # While planning on a narrow screen the map is what is being tapped.
+        assert "return !(map.getSize().x < NARROW && planOn());" in html
+        assert "profile: function (want) {" in html
+
+    def test_the_rail_takes_the_corner_the_burger_already_has(self):
+        """It stood at the left and pushed Leaflet's whole top-left corner 56 px
+        aside to make room — which put the zoom buttons at 66, exactly where the
+        dock opened, so every tool a reader opened covered the zoom. Moved to the
+        right it needs room from nobody, and nothing touches a corner it did not
+        make."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "rail.style.cssText = 'position:absolute;right:10px;top:10px;width:46px" in html
+        assert "corner.style.marginLeft" not in html
+        assert "dock.style.right = '66px';" in html

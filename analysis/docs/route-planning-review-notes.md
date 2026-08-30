@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 205 while one behaviour is being written. What is left out
+  readings instead of 211 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **179 seconds** and say
-whether the page still holds: **205 readings, and it should be green**. If it is
+whether the page still holds: **211 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 205. And **build before driving**: the run reads the page `make map`
+instead of 211. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -2973,6 +2973,69 @@ at **31 px** with the sheet open, where before it grew.
 
 `make drive` reads **205** in **179 seconds**, the source tests **220** — the
 first of which are the chrome's own. It had none.
+
+### And then the panel got a way out, and the leiste changed corners
+
+Four things out of one mockup, and they are independent of each other — which
+was worth saying out loud, because a reader looking at three drawings assumes
+they are three versions of one thing.
+
+**The × in the heading.** The panel had a fold and no way out: the heading
+collapses the drawing and leaves a 35 px bar, and *put this away* had no gesture
+at all — the rail's Profile tool clicked that fold on a wide screen, so one tool
+meant two different things at two widths. It hides the panel now, on every
+screen, and the heading keeps the fold. **The × is offered only where something
+can bring the panel back**: a page built without the chrome would strand a
+reader, and a control that strands a reader is worse than no control.
+
+**One state, three switches.** The rail, the plan bar and the plan control all
+set the same value and none keeps one of its own. It is a *tri-state* and not a
+boolean: `null` means nobody has said, and the default then depends on where the
+reader is — planning on a narrow screen holds the panel back, because the map is
+what is being tapped, and **784 px of it against 462** is what that rule is
+worth. `true` and `false` are the reader overriding that, in either direction.
+
+**And starting or stopping planning takes the default back**, which the driving
+found rather than the design. A reader who put the panel away while planning
+meant this panel; one who asked for it meant this route; neither meant *from now
+on*. Without that, a tool pressed twice on a desktop left the answer standing
+and the phone opened the panel over the ground being tapped: 462 px instead of
+784, and six readings red.
+
+**Three figures in the heading, everything else behind the ⓘ.** The heading
+carried the whole list — `+2,831 / −2,668 m · 67.93 km on foot · high 903 m ·
+low 0 m · steepest 53 % · 3 crossings, 1.90 km · 0.17 km drawn straight · 37.47
+km in Lomsdal-Visten nasjonalpark`, six lines of a 390 px screen over a drawing
+that got four. It shows `42.44 km · +1,722 / −1,867 m towards E · steepest 81 %`
+now, and the sheet shows the same list entire. **One list, two renderings**: the
+heading is `slice(0, 3)` of exactly what the sheet draws, and the order in
+`planned()` was rearranged so the first three are the ones a walk is decided on
+— which the file's own description is written from too, so the two cannot drift.
+
+**The rail changed corners, and that was not a preference.** It stood at the
+left, and to make room the chrome pushed *Leaflet's whole top-left corner* 56 px
+aside — which put the zoom buttons at 66, exactly where the dock opens, so every
+tool a reader opened covered the zoom. In the corner the burger already has, it
+needs room from nobody: the line that moved somebody else's furniture is gone,
+the zoom is back at the 10 Leaflet gives it, and the dock opens to the left of
+the rail on the same arithmetic, mirrored. The reader asked for it on the
+grounds that it matches the phone; it turned out to also delete a defect.
+
+**Two things the driving caught, both of a shape this document keeps recording:**
+
+- **A repaint that reached into another panel.** The chrome tells plan mode to
+  redraw, because the plan control draws the profile switch. Plan mode's refresh
+  ends in `present()`, which feeds the profile panel — and with no points it
+  feeds it *nothing*. Driven, hiding the profile over a selected chain deselected
+  the chain. It only repaints while plan mode is on now, which is the only time
+  that button stands.
+- **Buttons pressed by position.** The plan bar's checks used
+  `button[0]` and `button[1]`; the bar grew a third button and every one of them
+  moved by one — undo pressed the profile switch, *Done* pressed undo, and four
+  readings failed saying nothing about what had changed. They press by class
+  now. The same lesson as `offsetParent`, in a second place.
+
+`make drive` reads **211**, the source tests **224**.
 
 ### What is still open on a phone
 

@@ -140,6 +140,8 @@ FURNITURE = with_map("""() => {
   const rail = document.querySelector('.trails-rail');
   const zoom = document.querySelector('.leaflet-control-zoom');
   const at = node => node ? Math.round(node.getBoundingClientRect().left) : null;
+  const frame = document.querySelector('.leaflet-container').getBoundingClientRect();
+  const fromRight = node => node ? Math.round(frame.right - node.getBoundingClientRect().right) : null;
   return {
     paths: paths.length,
     // A chain drawn as a line, and a chain drawn as a circle marker: Leaflet
@@ -161,7 +163,10 @@ FURNITURE = with_map("""() => {
     // The rail takes the top-left corner and the zoom steps aside for it. Left
     // rather than top, because both stand at 10 from the top and only the one
     // that moved says whether the corner made room.
-    controls: [at(rail), at(zoom)],
+    // The rail is measured from the *right* and the zoom from the left,
+    // because that is the corner each of them keeps: the rail is in the one the
+    // burger already had, and Leaflet's is Leaflet's again.
+    controls: [fromRight(rail), at(zoom)],
     layerControls: document.querySelectorAll('.leaflet-control-layers').length}; }""")
 
 # The scale, read so that neither axis takes part in proving the other: the
@@ -452,7 +457,7 @@ def furniture(page: Any) -> Check:
         The counts, against what the last build measured
     """
     seen = page.evaluate(FURNITURE)
-    rail, zoom = (seen["controls"] + [None, None])[:2]
+    rail_right, zoom = (seen["controls"] + [None, None])[:2]
     return Check(
         "the page's furniture",
         [
@@ -481,11 +486,14 @@ def furniture(page: Any) -> Check:
             # unwanted ones off again, and nothing else will.
             Reading("tile layers actually on the map", seen["tiles"], 1),
             Reading("separate layer controls", seen["layerControls"], 0),
-            # The rail takes the corner and the zoom steps aside for it. A
-            # zoom still at 10 would mean the corner never made room and the two
-            # are stacked on each other, which is what this replaced.
-            Reading("the tool rail, px from the left", rail, 10, within=1),
-            Reading("zoom buttons, px from the left", zoom, 66, within=1),
+            # **The rail takes the right and Leaflet keeps the left.** It stood
+            # at the left and the chrome pushed Leaflet's whole top-left corner
+            # 56 px aside for it — which put the zoom at 66, exactly where the
+            # dock opens, so every tool a reader opened covered the zoom. The
+            # rail is now in the corner the burger already has, and the zoom is
+            # back at the 10 Leaflet gives it.
+            Reading("the tool rail, px from the right", rail_right, 10, within=1),
+            Reading("zoom buttons, px from the left", zoom, 10, within=1),
         ],
     )
 
@@ -1046,8 +1054,11 @@ def the_sources_behind_an_i(page: Any) -> Check:
     row = """() => {
       const box = sel => { const node = document.querySelector(sel);
         return node ? {drawn: node.getClientRects().length > 0, text: node.textContent} : null; };
+      const head = document.querySelector('.trails-profile-head');
       return {more: box('.trails-profile-more'), licences: box('.trails-profile-licences'),
-              ground: box('.trails-profile-ground')}; }"""
+              ground: box('.trails-profile-ground'),
+              hide: box('.trails-profile-hide'),
+              summary: head ? head.lastElementChild.previousElementSibling.textContent : null}; }"""
     narrow = page.evaluate(row)
 
     page.evaluate("() => document.querySelector('.trails-profile-more').click()")
@@ -1083,8 +1094,21 @@ def the_sources_behind_an_i(page: Any) -> Check:
             # The same sentence and not a second derivation of it: it is read off
             # the element that shows it.
             Reading("holding the licences themselves", licences in sheet["text"], True),
-            Reading("on a wide screen they stay in the panel", wide["licences"]["drawn"], True),
-            Reading("and the i is not offered", wide["more"]["drawn"], False),
+            # And the figures the heading dropped, in the same order it kept the
+            # first three of.
+            Reading("and every figure with them", "high " in sheet["text"] and "low " in sheet["text"], True),
+            # The other switch in the heading, which is proposal one's.
+            Reading("the × is offered beside it", narrow["hide"]["drawn"], True),
+            # **And a wide screen is no different now.** The rule used to be
+            # about room — first height, then width — and the room was never
+            # what made a 300-character list of licences the wrong thing to put
+            # above a drawing. The heading carries three figures everywhere and
+            # the *i* carries the rest everywhere.
+            Reading("a wide screen is the same", wide["licences"]["drawn"], False),
+            Reading("and the i is offered there too", wide["more"]["drawn"], True),
+            # The three the heading keeps, on both: how far, how much climb, how
+            # steep at worst.
+            Reading("the heading is three figures", (wide["summary"] or "").count(" \u00b7 "), 2, note=wide["summary"] or ""),
         ],
     )
 
@@ -1152,8 +1176,10 @@ def room_on_a_short_screen(page: Any) -> Check:
             # reader has to see before pressing Download is one tap away, and
             # the drawing keeps its pixels while they read it.
             Reading("and the drawing keeps its room", opened["meta"], folded["meta"], note=f"{opened['meta']} px"),
-            # And on a desktop there is nothing to fold, so there is no i.
-            Reading("desktop: no i at all", desk["more"], False),
+            # **The i is offered on a desktop too now.** The heading carries
+            # three figures on every screen and everything else is behind it:
+            # what was a width rule is not one any more.
+            Reading("desktop: the i is there too", desk["more"], True),
             Reading("desktop: px the row takes", desk["meta"], 33, within=2),
             Reading("desktop: px the drawing takes", desk["chart"], 205, within=2),
         ],
@@ -1378,12 +1404,16 @@ def the_plan_bar(page: Any) -> Check:
     settled(page)
     before = page.evaluate("() => window.trailsPlan.state().points.length")
     pressable = page.evaluate(
-        """() => { const b = document.querySelectorAll('.trails-planbar button')[0];
+        """() => { const b = document.querySelector('.trails-planbar-undo');
         return {there: !!(b && b.offsetParent !== null), off: b ? b.disabled : null,
                 steps: window.trailsPlan.state().undoable}; }"""
     )
     pressable["before the place"] = steps_before
-    page.evaluate("() => { document.querySelectorAll('.trails-planbar button')[0].click(); }")
+    # **By name and not by position.** These were `button[0]` and `button[1]`,
+    # and the day the bar grew a third button every one of these readings moved
+    # by one: undo pressed the profile switch, Done pressed undo, and four
+    # readings failed saying nothing about what had changed.
+    page.evaluate("() => { document.querySelector('.trails-planbar-undo').click(); }")
     settled(page)
     undone = page.evaluate("() => window.trailsPlan.state().points.length")
 
@@ -1392,7 +1422,16 @@ def the_plan_bar(page: Any) -> Check:
     page.wait_for_timeout(900)
     asked = page.evaluate(seen)
 
-    page.evaluate("() => { document.querySelectorAll('.trails-planbar button')[1].click(); }")
+    # The switch on the bar, pressed twice: away and back.
+    bar_switch = {"there": page.evaluate("() => !!document.querySelector('.trails-planbar-profile')")}
+    page.evaluate("() => { document.querySelector('.trails-planbar-profile').click(); }")
+    page.wait_for_timeout(700)
+    bar_switch["after"] = page.evaluate(seen)["profile"]
+    page.evaluate("() => { document.querySelector('.trails-planbar-profile').click(); }")
+    page.wait_for_timeout(700)
+    bar_switch["again"] = page.evaluate(seen)["profile"]
+
+    page.evaluate("() => { document.querySelector('.trails-planbar-done').click(); }")
     page.wait_for_timeout(900)
     done = page.evaluate(seen)
 
@@ -1427,6 +1466,12 @@ def the_plan_bar(page: Any) -> Check:
             Reading("one tap undoes it", undone, before - 1),
             Reading("and leaves what was there", page.evaluate(laid), was),
             Reading("and the profile is one tap away", bool(asked["profile"]), True),
+            # From the bar itself, which is the tap: the rail is behind the
+            # burger while planning, so the way to the curve was three taps
+            # through a menu that is not about planning.
+            Reading("the bar carries the switch", bar_switch["there"], True),
+            Reading("and one tap on it puts the curve away", bar_switch["after"], None),
+            Reading("and another brings it back", bar_switch["again"] is not None, True),
             Reading(
                 "with the bar still above it",
                 bool(asked["bar"] and asked["profile"] and asked["bar"]["top"] < asked["profile"]["top"]),
