@@ -924,7 +924,7 @@ The probes, with what they read now:
 | | |
 |---|---|
 | `.leaflet-marker-pane > *` | **198** with no route down, **203** with five waypoints |
-| `.leaflet-marker-icon` | **0** with no route down, **5** with five waypoints — folium overwrites the class on its own markers, and phase 7's are Leaflet's own |
+| `.leaflet-marker-icon` | **198** with no route down, **203** with five waypoints. It read 0 and 5 for as long as folium drew the markers, because awesome-markers overwrote Leaflet's class on them; the map draws its own pins now and they carry it like any other marker |
 | `.leaflet-overlay-pane path` | **11,589**, of which exactly **1** has `pointer-events: none` |
 | checkboxes in the legend | **30**, of which 7 start off — there is no `.leaflet-control-layers` any more |
 | children of `.leaflet-top.leaflet-left`, by `getBoundingClientRect().top` | search **10 px**, zoom **60** |
@@ -3529,6 +3529,55 @@ because only the deploy uses it.
   anyway, and the tests cut them out with `ours()`.
 
 `make drive` reads **245**, the source tests **250**.
+
+### And the map draws its own pins
+
+**The last third-party host, and a size that was reported.** awesome-markers is
+3,789 bytes of script, 2,225 of stylesheet, 36,669 of rotation rules and four
+sprite images fetched by relative path from `cdnjs.cloudflare.com` — and what it
+draws is a coloured teardrop with a glyph in it. This page already speaks in
+inline SVG twice, in the rail and in the plan control.
+
+**It cost nothing on the wire, which was not expected.** The built file grew
+from 41,847,418 to **42,016,592** — 198 pins written out one by one — and the
+transfer went from 6,584,321 to **6,583,675**, which is 646 bytes *smaller*.
+Two hundred copies of one drawing compress to nothing, and awesome-markers' own
+markup went with it. **The page now fetches nothing from anybody**: what is left
+in it are three addresses it prints and never asks for — Leaflet's attribution,
+`ut.no` and `lomsdalvisten.no`.
+
+**And they are smaller, most of all zoomed out.** 35 × 45 at every zoom, 198 of
+them over the terrain at the zoom this park opens at. They are 28 × 36 now and
+**scaled** by the zoom rather than resized: seven tenths at 9 and below, where a
+reader is looking at the park, full size from 13, where they are looking at one
+place. Scaled about the **tip**, because Leaflet puts its own transform on the
+icon element to place it — so the scale lives on a span inside, with
+`transform-origin: bottom center`, and the point of the pin stays on the
+position it marks at every scale.
+
+**Three things it turned up, and two were the same mistake.**
+
+- **`line-height: 0`, or the tip lifts off the ground.** An inline `<svg>` in a
+  block gets a descender's worth of space under it: measured, the span came out
+  30 px tall around a 36 px drawing at 0.7, and scaled about the bottom that
+  puts the point above the position by the difference.
+- **A palette narrowed to what one caller asks for is an API narrowed.**
+  `PIN_COLOURS` began as the five this map draws and five tests said `KeyError:
+  'red'` at once, because `add_points` takes a colour by name and always has.
+  The whole awesome-markers palette is there now.
+- **And the same again with the icons, where narrowing is right** — this page
+  carries the outlines it draws and cannot carry the whole of Font Awesome. So
+  it raises **by name, with the answer in the message**, rather than a `KeyError`
+  with one word in it. The default was `home`, which is not one of the four, and
+  that is where the five failures came from.
+
+**One documented probe moved and no recorded figure did.**
+`.leaflet-marker-icon` read 0 with no route and 5 with five waypoints for as
+long as awesome-markers overwrote Leaflet's class on folium's markers. Our own
+pins carry it, so it is **198 and 203** now. It lives in this document's probe
+table and not in the suite, which is why `make drive` stayed at 245 green.
+
+`make drive` reads **245**, the source tests **254**.
 
 ### What is still open on a phone
 

@@ -90,6 +90,53 @@ MARKER_ICONS: dict[str, tuple[str, str]] = {
 }
 
 
+#: What awesome-markers called each colour, as the colour it drew.
+#:
+#: **The whole palette and not the five this map uses.** `add_points` takes a
+#: colour by name and always has; narrowing it to what one caller happens to ask
+#: for turns a working argument into a `KeyError` for the next one, which is
+#: what five tests said the moment it was tried.
+#:
+#: The five in use were sampled off the built page rather than looked up, and
+#: four of the five agree with the palette the library documents to within the
+#: gradient its sprite is drawn with. The fifth sample landed on an overlapping
+#: neighbour, which is why the documented values are what is written here.
+PIN_COLOURS: dict[str, str] = {
+    "red": "#d33d2a",
+    "darkred": "#a23336",
+    "lightred": "#ff8e7f",
+    "orange": "#f69730",
+    "beige": "#ffcb92",
+    "green": "#70af00",
+    "darkgreen": "#728224",
+    "lightgreen": "#bbf970",
+    "blue": "#38aadd",
+    "darkblue": "#0067a3",
+    "cadetblue": "#436978",
+    "lightblue": "#8adaff",
+    "purple": "#d152b8",
+    "darkpurple": "#5b396b",
+    "pink": "#ff91ea",
+    "white": "#fbfbfb",
+    "gray": "#575757",
+    "lightgray": "#a3a3a3",
+    "black": "#303030",
+}
+
+#: How large a pin is drawn, before the zoom has its say. awesome-markers drew
+#: 35 x 45 at every zoom; reported from a phone, that is too much of the map at
+#: the zoom this park opens at, where 198 of them stand over the terrain.
+PIN_WIDTH = 28
+PIN_HEIGHT = 36
+
+#: The bulb and the tip that sits on the position, as one path -- so a pin is one
+#: element, and the shadow awesome-markers drew is gone with its sprite.
+PIN_SHAPE = (
+    "M14 0C6.3 0 0 6.3 0 14c0 3.6 1.6 7.4 4 11 2.4 3.6 5.4 7 8.1 9.9"
+    "a2.6 2.6 0 0 0 3.8 0C18.6 32 21.6 28.6 24 25c2.4-3.6 4-7.4 4-11 0-7.7-6.3-14-14-14z"
+)
+
+
 #: Where a third party's file is kept once it has been fetched. A build needs
 #: the network for it exactly once, and after that never again -- the same
 #: bargain every other download in this project makes.
@@ -125,6 +172,84 @@ def vendored(url: str) -> str:
         answer.raise_for_status()
         kept.write_bytes(answer.content)
     return kept.read_text(encoding="utf-8")
+
+
+def _pin(colour: str, icon: str) -> str:
+    """Draw one map pin, bulb and glyph, as a single SVG.
+
+    **The last third-party host, drawn instead of fetched.** awesome-markers is
+    3,789 bytes of script, 2,225 of stylesheet, 36,669 of rotation rules and four
+    sprite images fetched by relative path from `cdnjs.cloudflare.com` -- and all
+    it draws is a coloured teardrop with a glyph in it. This page already speaks
+    in inline SVG twice over, in the rail and in the plan control.
+
+    The glyph is a nested ``<svg>`` with its own viewBox, so Font Awesome's
+    outline scales into the bulb without a number being worked out by hand.
+
+    Args:
+        colour: What awesome-markers called the colour, e.g. ``darkred``.
+        icon: Which of :data:`MARKER_ICONS` to draw in it.
+
+    Returns:
+        The pin, wrapped in the element the zoom scales.
+
+    Raises:
+        ValueError: If the colour or the icon is one this page does not draw. A
+            marker with no glyph is a marker that says nothing, and a page that
+            drew it silently would be worse than one that refuses to build.
+    """
+    # **Said, and not a KeyError with one word in it.** This page carries the
+    # outlines it draws and nothing else -- a webfont for the whole of Font
+    # Awesome was 252 kB for four glyphs -- so asking for a fifth is a thing to
+    # be told about at build time, by name, with the answer in the message.
+    if colour not in PIN_COLOURS:
+        raise ValueError(f"no pin colour called {colour!r}; there is " + ", ".join(sorted(PIN_COLOURS)))
+    if icon not in MARKER_ICONS:
+        raise ValueError(f"no outline for {icon!r}; this page draws " + ", ".join(sorted(MARKER_ICONS)))
+    fill = PIN_COLOURS[colour]
+    box, path = MARKER_ICONS[icon]
+    glyph = f"<svg x='{PIN_WIDTH / 2 - 6.5:.1f}' y='7' width='13' height='13' viewBox='{box}'><path fill='white' d='{path}'/></svg>"
+    return (
+        f'<span class="trails-pin"><svg width="{PIN_WIDTH}" height="{PIN_HEIGHT}" '
+        f'viewBox="0 0 {PIN_WIDTH} {PIN_HEIGHT}" xmlns="http://www.w3.org/2000/svg">'
+        f'<path fill="{fill}" d="{PIN_SHAPE}"/>{glyph}</svg></span>'
+    )
+
+
+class _PinSize(MacroElement):
+    """How large the pins are drawn, which depends on how far out the reader is.
+
+    **Reported: they are too big, and most of all zoomed out.** 198 of them at
+    35 x 45 stand over the terrain at the zoom this park opens at, which is the
+    one view where a reader is looking at the ground rather than at a hut.
+
+    Scaled rather than resized, and about the **tip**: Leaflet positions the icon
+    element with a transform of its own, so the scale goes on an element inside
+    it, and ``transform-origin: bottom center`` keeps the point of the pin on the
+    position it marks whatever the scale is.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+            (function () {
+                var map = {{ this._parent.get_name() }};
+                function sized() {
+                    // Full size from zoom 13, where a reader is looking at one
+                    // place; seven tenths at 9 and below, where they are looking
+                    // at the park.
+                    var scale = Math.max(0.7, Math.min(1, 0.7 + (map.getZoom() - 9) * 0.075));
+                    map.getContainer().style.setProperty('--trails-pin', scale.toFixed(3));
+                }
+                map.on('zoomend', sized);
+                sized();
+            })();
+        {% endmacro %}
+    """)
+
+    def __init__(self) -> None:
+        """Initialize the sizing."""
+        super().__init__()
+        self._name = "PinSize"
 
 
 class _Inlined(Element):
@@ -313,6 +438,15 @@ class _Theme(MacroElement):
             color: var(--trails-ink);
         }
         {{ this.icons }}
+        /* **Scaled about the tip.** Leaflet puts its own transform on the icon
+           element to place it, so the scale lives on a span inside, and the
+           point of the pin stays on the position it marks at every zoom. */
+        /* `line-height: 0`, because an inline `<svg>` in a block gets a
+           descender's worth of space under it -- measured, the span came out
+           30 px tall around a 36 px drawing at 0.7, which scaled about the
+           bottom would lift the pin's tip off the position it marks. */
+        .trails-pin { display: block; line-height: 0; transform-origin: bottom center; transform: scale(var(--trails-pin, 1)); }
+        .trails-pin svg { display: block; }
         </style>
         {% endmacro %}
     """)
@@ -427,8 +561,9 @@ def create_map(
     #
     # What stays is what the map is made of: Leaflet, jQuery (folium builds
     # every popup with it) and awesome-markers with the font its icons come from.
-    fmap.default_js = [(name, url) for name, url in fmap.default_js if "bootstrap" not in name]
-    fmap.default_css = [(name, url) for name, url in fmap.default_css if name not in {"bootstrap_css", "glyphicons_css", "awesome_markers_font_css"}]
+    fmap.default_js = [(name, url) for name, url in fmap.default_js if "bootstrap" not in name and name != "awesome_markers"]
+    dropped = {"bootstrap_css", "glyphicons_css", "awesome_markers_font_css", "awesome_markers_css", "awesome_rotate_css"}
+    fmap.default_css = [(name, url) for name, url in fmap.default_css if name not in dropped]
     # **And what is left of them goes into the page rather than over a wire.**
     # Two whole hosts fall away with these four -- `cdn.jsdelivr.net` and
     # `code.jquery.com` -- which on a slow link is worth more than the 80 kB
@@ -441,8 +576,8 @@ def create_map(
         [(name, url) for name, url in fmap.default_js if name in inline],
     )
     fmap.default_css, remote_css = (
-        [(name, url) for name, url in fmap.default_css if name not in {"leaflet_css", "awesome_rotate_css"}],
-        [(name, url) for name, url in fmap.default_css if name in {"leaflet_css", "awesome_rotate_css"}],
+        [(name, url) for name, url in fmap.default_css if name != "leaflet_css"],
+        [(name, url) for name, url in fmap.default_css if name == "leaflet_css"],
     )
     # `get_root` is typed as returning any `Element`; for a map it is the
     # `Figure` that owns the document, and the header is where a page's scripts
@@ -471,6 +606,7 @@ def create_map(
     # as inline styles, and an inline style resolves its variables against the
     # document — so the document has to have said them.
     _Theme().add_to(fmap)
+    _PinSize().add_to(fmap)
 
     if bounds is not None:
         min_lon, min_lat, max_lon, max_lat = bounds
@@ -1334,7 +1470,7 @@ def add_points(
     gdf: gpd.GeoDataFrame,
     name: str,
     color: str = "red",
-    icon: str = "home",
+    icon: str = "house-chimney",
     popup_fields: dict[str, str] | None = None,
     label_field: str | None = "name",
     search_field: str | None = None,
@@ -1348,7 +1484,8 @@ def add_points(
         fmap: Map to add the layer to
         gdf: GeoDataFrame with point geometries; reprojected to WGS84 if needed
         name: Layer name shown in the layer control
-        color: Marker color; must be one of Folium's named icon colors
+        color: Marker colour; one of :data:`PIN_COLOURS`, which is the palette
+            awesome-markers named
             (e.g. "red", "darkblue", "green"), not a CSS hex value
         icon: Glyph name from the Font Awesome set bundled with Folium
         popup_fields: Mapping of column name to popup label
@@ -1391,7 +1528,7 @@ def add_points(
         marker = folium.Marker(
             location=(geometry.y, geometry.x),
             tooltip=tooltip,
-            icon=folium.Icon(color=color, icon=icon, prefix="fa"),
+            icon=folium.DivIcon(html=_pin(color, icon), icon_size=(PIN_WIDTH, PIN_HEIGHT), icon_anchor=(PIN_WIDTH // 2, PIN_HEIGHT)),
             **options,
         )
         if popup_html:

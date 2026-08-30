@@ -182,18 +182,68 @@ class TestWhatThePageFetches:
         # writes its own `<script src>` links while rendering the map -- so an
         # inlined Leaflet landed after the script that uses it and the page came
         # up with `L is not defined`. Leaflet has to be first in the header.
-        head = html[: html.index("</head>")]
-        assert head.index("<!-- vendored:leaflet -->") < head.index("leaflet.awesome-markers")
+        assert html.index("<!-- vendored:leaflet -->") < html.index("L.map(")
 
-    def test_only_one_third_party_host_is_left(self):
-        """awesome-markers, whose stylesheet reaches for four sprite images by
-        relative path -- inlining it would break them. Everything else is either
-        in the page or not asked for at all."""
-        # Through `ours`, because Leaflet's own attribution names leafletjs.com
-        # and that is a string it writes, not a file the page fetches.
+    def test_no_third_party_host_is_left(self):
+        """**None.** The map draws its own pins now, which is what awesome-markers
+        was for -- 42,683 bytes of script, stylesheet and rotation rules plus four
+        sprite images, for a coloured teardrop with a glyph in it.
+
+        Read through `ours`, because Leaflet's own attribution names
+        leafletjs.com and that is a string it writes, not a file it fetches.
+        """
         html = ours(self.built())
         hosts = {address.split("/")[2] for address in re.findall(r'(?:src|href)="(https://[^"]+)"', html)}
-        assert hosts == {"cdnjs.cloudflare.com"}, hosts
+        assert hosts == set(), hosts
+
+
+class TestPins:
+    """The map draws its own pins, which is what the last third-party host was for."""
+
+    def test_a_pin_is_a_colour_and_an_outline(self):
+        """awesome-markers was 42,683 bytes of script, stylesheet and rotation
+        rules plus four sprite images, for a coloured teardrop with a glyph in
+        it. The glyph is a nested `<svg>` with its own viewBox, so Font Awesome's
+        outline scales into the bulb without a number worked out by hand."""
+        drawn = maps._pin("darkred", "house-chimney")
+        assert 'fill="#a23336"' in drawn
+        assert maps.PIN_SHAPE in drawn
+        assert maps.MARKER_ICONS["house-chimney"][1] in drawn
+        assert 'class="trails-pin"' in drawn
+
+    def test_an_outline_this_page_does_not_carry_is_said(self):
+        """A `KeyError` with one word in it is not an answer. The page carries
+        the outlines it draws and nothing else -- a webfont for the whole of Font
+        Awesome was 252 kB for four glyphs -- so asking for a fifth is a thing to
+        be told about at build time, with the answer in the message."""
+        with pytest.raises(ValueError, match="this page draws"):
+            maps._pin("darkred", "home")
+        with pytest.raises(ValueError, match="no pin colour"):
+            maps._pin("puce", "ship")
+
+    def test_the_palette_is_the_whole_one_and_not_the_five_in_use(self):
+        """`add_points` takes a colour by name and always has. Narrowing it to
+        what one caller happens to ask for turns a working argument into a
+        `KeyError` for the next one, which is what five tests said when it was
+        tried."""
+        assert {"red", "green", "orange", "black"} <= set(maps.PIN_COLOURS)
+        assert maps.PIN_COLOURS["darkred"] == "#a23336"
+
+    def test_the_pins_shrink_when_the_reader_is_far_out(self):
+        """Reported: they are too big, and most of all zoomed out -- 198 of them
+        at 35 x 45 over the terrain at the zoom this park opens at.
+
+        Scaled and not resized, and about the **tip**: Leaflet puts its own
+        transform on the icon element to place it, so the scale lives on a span
+        inside, and `transform-origin: bottom center` keeps the point of the pin
+        on the position it marks at every zoom.
+        """
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "map.getContainer().style.setProperty('--trails-pin', scale.toFixed(3));" in html
+        assert "transform-origin: bottom center; transform: scale(var(--trails-pin, 1));" in html
+        # An inline `<svg>` in a block gets a descender's worth of space under
+        # it, which scaled about the bottom lifts the tip off the position.
+        assert ".trails-pin { display: block; line-height: 0;" in html
 
 
 class TestPopup:
