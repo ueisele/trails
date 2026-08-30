@@ -210,7 +210,7 @@ command make notebook-clean       # Clear all notebook outputs
 # The map
 command make map                  # Build the Lomsdal-Visten map into analysis/output/
 command make graph                # Build the routing graph and report its numbers
-command make drive                # Drive the built page in a real browser (137 readings)
+command make drive                # Drive the built page in a real browser (161 readings)
 command make deploy               # Publish the map make map last built, and purge the edge cache
 # map/graph/drive/deploy all take ARGS="...", e.g. make deploy ARGS="--dry-run".
 #

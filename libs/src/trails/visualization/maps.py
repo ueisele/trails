@@ -7183,6 +7183,11 @@ class _PlanMode(MacroElement):
             // there would make a stage of no legs.
             function cutAt(at, wanted) {
                 if (at < 1 || at + 1 >= points.length) { return; }
+                // Remembered like any other change: it does not re-route, so it
+                // never went through `applyEdit`, and an undo that stepped over
+                // it would take a point away instead — which is the very defect
+                // the history exists to end.
+                rememberChange();
                 points[at].stage = wanted ? (points[at].stage || '') : null;
                 refresh();
             }
@@ -7204,6 +7209,8 @@ class _PlanMode(MacroElement):
                 // ground added after it is the next stage.
                 if (name === '' && typeof points[at].stage !== 'string') { return; }
                 if (points[at].stage === name) { return; }
+                // On blur, so one name is one change and not one per keystroke.
+                rememberChange();
                 points[at].stage = name;
                 refresh();
             }
@@ -7361,7 +7368,43 @@ class _PlanMode(MacroElement):
             // position into a waypoint and a pair of waypoints into a leg, and a
             // route half-edited while it arrives would be a second state to keep
             // in step with this one.
-            function applyEdit(change) {
+            // **A history, because "the last point" stopped being "the last
+            // thing you did" the moment inserting existed.** Until phase 7 every
+            // edit was an append and `points.pop()` *was* an undo; phase 7 added
+            // inserting, removing, reordering and dragging, and this was never
+            // revisited. Reported by a reader and reproduced: on a six-point
+            // route, a point placed between 5 and 6 becomes point 6 — and taking
+            // back "the last point" removed point **7**, which is the one that
+            // had been 6. The button did the opposite of undoing.
+            //
+            // A snapshot is the plan and nothing derived from it: the legs are
+            // rebuilt from the points, which is what `applyEdit` does anyway.
+            // **The point objects are kept rather than copied**, because a leg
+            // survives exactly while it runs between the same two waypoint
+            // objects — copying them would re-route the whole route on every
+            // undo. Their `stage` is copied beside them, because that one is
+            // written in place.
+            var HISTORY_MAX = 50;
+            var history = [];
+
+            // **Named apart from the height cache's `remember`, which had the
+            // name first and is in this same scope.** Two function declarations
+            // of one name in one scope is not a shadow, it is a replacement: the
+            // later one wins outright, so calling this `remember` silently
+            // stopped the freehand-leg height cache from caching and made every
+            // arriving answer push a history entry instead. Found because an
+            // undo restored a state that already held the point just placed.
+            function rememberChange() {
+                history.push({
+                    points: points.map(function (point) { return {point: point, stage: point.stage}; }),
+                    tourName: tourName,
+                    loaded: loaded
+                });
+                if (history.length > HISTORY_MAX) { history.shift(); }
+            }
+
+            function applyEdit(change, remembering) {
+                if (remembering !== false) { rememberChange(); }
                 // Counted as outstanding from the gesture, not from the moment
                 // the graph answers. A reader who has clicked is waiting, and a
                 // state that reads 'nothing in hand' for the microtask in
@@ -7466,11 +7509,22 @@ class _PlanMode(MacroElement):
             // back is the gesture a reader reaches for before they know the rest
             // of these are there.
             function undo() {
+                if (!history.length) { return; }
+                var was = history.pop();
                 applyEdit(function () {
-                    if (!points.length) { return; }
-                    points.pop();
+                    // The array is emptied and refilled rather than replaced:
+                    // a load reassigns `points`, so anything holding the old one
+                    // is already stale, and this way nothing else has to know.
+                    points.length = 0;
+                    was.points.forEach(function (each) {
+                        if (each.stage === undefined) { delete each.point.stage; }
+                        else { each.point.stage = each.stage; }
+                        points.push(each.point);
+                    });
                     if (chosen >= points.length) { chosen = points.length - 1; }
-                });
+                }, false);
+                tourName = was.tourName;
+                loaded = was.loaded;
             }
 
             // ---- dragging ---------------------------------------------------------
@@ -7635,7 +7689,7 @@ class _PlanMode(MacroElement):
             toggle.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;cursor:pointer';
             var back = document.createElement('button');
             back.type = 'button';
-            back.textContent = 'Take back the last point';
+            back.textContent = 'Undo the last change';
             back.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-top:4px;cursor:pointer;display:block';
             var status = document.createElement('div');
             status.style.cssText = 'margin-top:4px;color:#555';
@@ -8280,7 +8334,7 @@ class _PlanMode(MacroElement):
             function refresh() {
                 toggle.textContent = on ? 'Stop planning' : 'Plan a route';
                 back.style.display = on ? 'block' : 'none';
-                back.disabled = !points.length;
+                back.disabled = !history.length;
                 var holds = on && chosen >= 0 && chosen < points.length;
                 edits.style.display = holds ? 'block' : 'none';
                 if (holds) {
@@ -8348,9 +8402,16 @@ class _PlanMode(MacroElement):
                     // 'This replaces your plan' over an empty map is a warning
                     // about nothing, and a reader who is warned about nothing
                     // stops reading warnings.
+                    // **"There is no way back" was true and is not any more.**
+                    // The history covers a load, so undo restores the plan the
+                    // file replaced — points, tour name and all. The question is
+                    // still worth asking: it says what the file turned out to be
+                    // and what each mode would do to it, which is the half that
+                    // was never about the way back.
                     offerCosts.textContent = points.length
                         ? 'This replaces the ' + points.length +
-                          (points.length === 1 ? ' point' : ' points') + ' on the map. There is no way back.'
+                          (points.length === 1 ? ' point' : ' points') +
+                          ' on the map. Undo brings them back.'
                         : '';
                     offerCosts.style.display = points.length ? '' : 'none';
                 }
@@ -8408,6 +8469,7 @@ class _PlanMode(MacroElement):
                     points: points.length,
                     metres: shape ? shape.total : 0,
                     ascent: figure ? figure.ascent : null,
+                    undoable: history.length,
                     working: settling > 0
                 });
             }
@@ -8648,6 +8710,10 @@ class _PlanMode(MacroElement):
                     var shape = composeRoute();
                     return {
                         on: on, working: settling > 0, chosen: chosen, dragging: !!dragging,
+                        // How many changes there are to step back through, so a
+                        // check reads it rather than pressing the button to find
+                        // out what pressing the button would do.
+                        undoable: history.length,
                         // A file read and not yet taken, with what it turned out
                         // to be and which mode is standing. Null while no
                         // question is on the screen, which is the same thing the
@@ -8658,7 +8724,13 @@ class _PlanMode(MacroElement):
                             legs: pendingFile.read.legs.length,
                             says: READINGS[pendingFile.kind][pendingFile.mode]
                         },
-                        points: points.map(function (point) { return {lat: point.lat, lon: point.lon, node: point.node}; }),
+                        // **With its stage mark**, which was left out and is
+                        // part of what a point is: whether a stage ends here is
+                        // the one thing about a waypoint that no position says,
+                        // and a check reading this could not see it at all.
+                        points: points.map(function (point) {
+                            return {lat: point.lat, lon: point.lon, node: point.node, stage: point.stage};
+                        }),
                         legs: legs.map(function (leg) {
                             return {
                                 settled: !!leg.parts, failed: leg.failed, provisional: leg.provisional,
@@ -9475,7 +9547,7 @@ class _Chrome(MacroElement):
                 made.innerHTML = label;
                 return made;
             }
-            var planUndo = planAction(icon('undo', 17), 'Take the last point back');
+            var planUndo = planAction(icon('undo', 17), 'Undo the last change');
             var planDone = document.createElement('button');
             planDone.type = 'button';
             planDone.textContent = 'Done';
@@ -9521,8 +9593,12 @@ class _Chrome(MacroElement):
                     planSays.textContent = said;
                     planHint.textContent = planState.working ? 'working\u2026' : 'tap for the list';
                 }
-                planUndo.disabled = !count;
-                planUndo.style.opacity = count ? '' : '0.35';
+                // What there is to step back through, not how many points are
+                // down: after an insertion those are different numbers, which is
+                // the whole reason this button was rebuilt.
+                var steps = planState ? planState.undoable : 0;
+                planUndo.disabled = !steps;
+                planUndo.style.opacity = steps ? '' : '0.35';
             }
 
             // ---- the profile panel, which is shown by having something to show

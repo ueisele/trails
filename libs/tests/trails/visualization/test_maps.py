@@ -1420,10 +1420,15 @@ class TestPlanMode:
         assert "points = pointsForLoaded(graph);" in taking
         assert "loaded = read;" in taking
 
-        # And the loss is said before it happens, as a count rather than as a
-        # warning about files in general.
+        # And what it costs is said before it happens, as a count rather than
+        # as a warning about files in general. **It no longer says there is no
+        # way back**: the history covers a load, so undo restores the plan the
+        # file replaced. The sentence was true when it was written and the
+        # question is still worth asking -- it says what the file turned out to
+        # be and what each mode would do to it, which was never the half about
+        # the way back.
         assert "' points' ) + ' on the map." not in planning
-        assert "on the map. There is no way back." in planning
+        assert "on the map. Undo brings them back." in planning
 
     def test_a_plan_is_restored_from_its_own_leg_list(self):
         """*Take it as it is*, read as what the file describes. The seam is

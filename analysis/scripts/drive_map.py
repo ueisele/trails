@@ -383,7 +383,15 @@ def select(page: Any, chain: str) -> bool:
     Returns:
         Whether the chain was found and its series arrived
     """
-    if not page.evaluate(SELECT_CHAIN, chain):
+    # **Idempotent, because firing a chain's click is a toggle.** Selecting one
+    # that is already selected clears it, and every reading after that skips or
+    # reads an empty panel — quietly, which is the worst way for a suite to go
+    # wrong. It has bitten two checks; it belongs here and not in each of them.
+    already = page.evaluate(
+        "(cls) => !!(window.trailsProfile && window.trailsProfile.className === cls)",
+        chain,
+    )
+    if not already and not page.evaluate(SELECT_CHAIN, chain):
         return False
     try:
         page.wait_for_function("() => window.trailsProfile && window.trailsProfile.shape", timeout=15_000)
@@ -1226,6 +1234,26 @@ def the_plan_bar(page: Any) -> Check:
 
     page.evaluate("() => window.trailsChrome.close()")
     page.wait_for_timeout(500)
+    # **A point placed here on purpose.** Undo takes back the last *change*, and
+    # the check before this one ends with a reorder — pressing undo then would
+    # restore an order and leave the count where it was, which is right and
+    # would read here as the button doing nothing.
+    laid = "() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e5))"
+    was = page.evaluate(laid)
+    steps_before = page.evaluate("() => window.trailsPlan.state().undoable")
+    page.evaluate(
+        """() => { const points = window.trailsPlan.state().points;
+        const last = points[points.length - 1];
+        window.trailsPlan.place(last.lat + 0.004, last.lon + 0.004); }"""
+    )
+    page.wait_for_timeout(2400)
+    before = page.evaluate("() => window.trailsPlan.state().points.length")
+    pressable = page.evaluate(
+        """() => { const b = document.querySelectorAll('.trails-planbar button')[0];
+        return {there: !!(b && b.offsetParent !== null), off: b ? b.disabled : null,
+                steps: window.trailsPlan.state().undoable}; }"""
+    )
+    pressable["before the place"] = steps_before
     page.evaluate("() => { document.querySelectorAll('.trails-planbar button')[0].click(); }")
     page.wait_for_timeout(2400)
     undone = page.evaluate("() => window.trailsPlan.state().points.length")
@@ -1262,7 +1290,13 @@ def the_plan_bar(page: Any) -> Check:
             # has no climb: driven on open water the bar once read "+NaN m".
             Reading("and never says NaN", "NaN" in (planning["says"] or ""), False),
             Reading("one tap reaches the list", reached["rows"] > 0, True, note=f"{reached['rows']} rows"),
-            Reading("one tap undoes a point", undone, before - 1),
+            # **One place, one entry.** It read two until the history's own
+            # function was renamed apart from the height cache's: a freehand
+            # leg's heights arriving called what it thought was the cache and
+            # was the history.
+            Reading("one place is one change", pressable["steps"] - pressable["before the place"], 1),
+            Reading("one tap undoes it", undone, before - 1),
+            Reading("and leaves what was there", page.evaluate(laid), was),
             Reading("and the profile is one tap away", bool(asked["profile"]), True),
             Reading(
                 "with the bar still above it",
@@ -1425,11 +1459,13 @@ def a_click_is_not_a_pan(page: Any) -> Check:
     """
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(true); }")
     page.wait_for_timeout(700)
+    # Removed rather than undone: undo steps back a change now, and a route
+    # emptied by undoing would be emptied only where every change was a place.
     page.evaluate(
         """() => { const standing = window.trailsPlan.state().points.length;
-        for (let i = 0; i < standing; i += 1) { window.trailsPlan.undo(); } }"""
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
     )
-    page.wait_for_timeout(1200)
+    page.wait_for_timeout(1600)
     empty = page.evaluate("() => window.trailsPlan.state().points.length")
 
     middle = page.evaluate(
@@ -1701,6 +1737,146 @@ def brushing_the_curve(page: Any) -> Check:
     )
 
 
+def undo_undoes_the_last_change(page: Any) -> Check:
+    """Taking back what was just done, whatever it was.
+
+    Reported by a reader: a point placed on the leg between 5 and 6 became point
+    6, and *Take back the last point* removed point 7 — the one that had been 6.
+    Reproduced exactly. Until phase 7 every edit was an append and
+    ``points.pop()`` **was** an undo; inserting, removing, reordering and
+    dragging arrived and the button was never revisited, so it did the opposite
+    of undoing on four of the five things a reader can do.
+
+    The four cases below are the ones a pop can never get right: an insertion
+    ends somewhere other than the end, a removal has to put something **back**,
+    a reorder changes no count at all, and a stage mark changes no points.
+
+    Args:
+        page: The driven page, with a chain selected
+
+    Returns:
+        What each change did and what taking it back left behind
+    """
+    ids = "() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e5) + '/' + Math.round(p.lon * 1e5))"
+
+    # **Cleared by removing, not by undoing.** Undoing steps back a *change*
+    # now, which is the whole point of this check — using it to empty the list
+    # would be assuming the thing under test.
+    page.evaluate(
+        """() => { window.trailsChrome.close();
+        const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    page.wait_for_timeout(1600)
+    # **And plan mode goes off to pick the chain.** While it is on the panel
+    # stops answering clicks -- the map's clicks are the plan's -- so selecting
+    # a chain with it on selects nothing and every reading after that skips.
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(500)
+    if not select(page, LONG_CHAIN):
+        return Check("undo undoes the last change", skipped=f"{LONG_CHAIN} is not in this page")
+    places = page.evaluate(
+        """() => { const shape = window.trailsProfile.shape;
+        return [0.05, 0.3, 0.55, 0.8].map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
+    )
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(500)
+    for at in places:
+        page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
+        page.wait_for_timeout(2000)
+    page.wait_for_timeout(2500)
+    laid = page.evaluate(ids)
+
+    def take_back() -> Any:
+        page.evaluate("() => window.trailsPlan.undo()")
+        page.wait_for_timeout(2600)
+        return page.evaluate(ids)
+
+    # 1. an insertion, which is the case reported: it ends in the middle.
+    between = page.evaluate(
+        """() => { const shape = window.trailsProfile.shape;
+        const stations = window.trailsPlan.state().stations;
+        const target = (stations[1] + stations[2]) / 2;
+        let best = 0, gap = Infinity;
+        for (let i = 0; i < shape.along.length; i += 1) {
+          const away = Math.abs(shape.along[i] - target);
+          if (away < gap) { gap = away; best = i; } }
+        return {lat: shape.lat[best], lon: shape.lon[best]}; }"""
+    )
+    page.evaluate("(where) => window.trailsPlan.insert(2, where.lat, where.lon)", between)
+    page.wait_for_timeout(2600)
+    inserted = page.evaluate(ids)
+    after_insert = take_back()
+
+    # 2. a removal, which a pop could never take back: it has to put one in.
+    page.evaluate("() => window.trailsPlan.remove(1)")
+    page.wait_for_timeout(2600)
+    shorter = page.evaluate(ids)
+    after_remove = take_back()
+
+    # 3. a reorder, which changes no count at all.
+    page.evaluate("() => window.trailsPlan.moveTo(3, 1)")
+    page.wait_for_timeout(2600)
+    reordered = page.evaluate(ids)
+    after_move = take_back()
+
+    # 4. a stage mark, which changes no points.
+    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.wait_for_timeout(900)
+    pressed = page.evaluate(
+        """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+          .filter(row => !row.classList.contains('trails-plan-stage'));
+        const cut = rows[1] && rows[1].querySelector('.trails-plan-cut');
+        if (!cut) { return 'no cut button on row 2 of ' + rows.length; }
+        cut.click(); return 'pressed'; }"""
+    )
+    page.wait_for_timeout(1400)
+    stages = page.evaluate("() => window.trailsPlan.state().points.filter(p => typeof p.stage === 'string').length")
+    take_back()
+    page.wait_for_timeout(600)
+    stages_back = page.evaluate("() => window.trailsPlan.state().points.filter(p => typeof p.stage === 'string').length")
+
+    # And it stops rather than eating the route when there is nothing left.
+    drained = page.evaluate(
+        """() => { for (let i = 0; i < 60; i += 1) { window.trailsPlan.undo(); }
+        return window.trailsPlan.state().undoable; }"""
+    )
+    page.wait_for_timeout(2600)
+    emptied = page.evaluate("() => window.trailsPlan.state().points.length")
+    page.evaluate("() => { for (let i = 0; i < 5; i += 1) { window.trailsPlan.undo(); } }")
+    page.wait_for_timeout(2000)
+    still = page.evaluate("() => window.trailsPlan.state().points.length")
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(400)
+
+    return Check(
+        "undo undoes the last change",
+        [
+            Reading("an insertion lands in the middle", len(inserted), len(laid) + 1),
+            # The reported defect, exactly: the pop took the point that had been
+            # renumbered rather than the one just placed.
+            Reading("and taking it back leaves what was there", after_insert, laid),
+            Reading("a removal takes one out", len(shorter), len(laid) - 1),
+            Reading("and taking it back puts it back where it was", after_remove, laid),
+            Reading("a reorder changes no count", len(reordered), len(laid)),
+            Reading("and taking it back restores the order", after_move, laid),
+            Reading("a stage mark is a change too", stages, 1, note=pressed),
+            Reading("and taking it back unmarks it", stages_back, 0),
+            # **Two readings and not one**, because they are different claims:
+            # that the history drains, which is arithmetic and exact, and that
+            # undoing past the end changes nothing, which is the guard. A
+            # long shared session can leave one no-op entry behind that a run of
+            # this check alone does not — measured, remembered with points still
+            # down, and not explained. It costs a press that does nothing, so it
+            # is written down rather than asserted away.
+            Reading("draining it empties it", drained, 0),
+            Reading("and the route with it", emptied, 0),
+            Reading("and undoing past the end changes nothing", still, 0),
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -1774,6 +1950,7 @@ def drive(page: Any) -> list[Check]:
     checks.append(stations_and_list(page, places))
     checks.append(a_finger_can_use_it(page))
     checks.append(the_plan_bar(page))
+    checks.append(undo_undoes_the_last_change(page))
     checks.append(files_from_the_page(page))
     checks.append(a_click_is_not_a_pan(page))
     checks.append(the_search_on_a_narrow_panel(page))

@@ -2636,6 +2636,74 @@ The check holds the thing that makes it a lens rather than a slider: **the zoom
 and the width shown are one number seen twice** — 42,442 / 11,188 = 3.79 = the
 zoom. `make drive` reads **148**.
 
+### And undo did not undo, which a reader found
+
+**"I added a point on the leg between 5 and 6. It became point 7. Then I chose
+*take back last point*, and it removed point 6."** Reproduced exactly, and the
+numbering is the only part the report got the wrong way round: inserting between
+5 and 6 makes the new point **6** and renumbers the old 6 to **7**, and the
+button removed 7. What it did was remove *the point that had been renumbered*,
+which is the same complaint either way — **it did not take back what had just
+been done.**
+
+**`undo()` was `points.pop()`.** Until phase 7 every edit was an append, so a pop
+*was* an undo; phase 7 added inserting, removing, reordering and dragging, and
+this was never revisited. On four of the five things a reader can do it did the
+opposite of undoing, and on a removal it could not possibly be right — an undo
+there has to put something **back**.
+
+There is a history now, taken in `applyEdit`, which is the one funnel every edit
+already went through. **A snapshot is the plan and nothing derived from it**: the
+legs are rebuilt from the points, which `applyEdit` does anyway. The point
+objects are **kept rather than copied**, because a leg survives exactly while it
+runs between the same two waypoint objects and copying them would re-route the
+whole route on every undo; their `stage` is copied beside them, because that one
+is written in place. Bounded at 50.
+
+A stage mark joins it too. It does not re-route, so it never went through
+`applyEdit`, and an undo that stepped over it would take a point away instead —
+which is the very defect this exists to end. `nameStage` fires on blur, so one
+name is one change and not one per keystroke.
+
+**And a load is in it, so a sentence had to change.** The picker said *There is
+no way back*; it now says *Undo brings them back*, and the snapshot carries the
+tour's name and the file it came from so that it is true. The question is still
+worth asking — it says what the file turned out to be and what each mode would do
+to it, which was never the half about the way back.
+
+### The worse bug was the one the fix introduced
+
+**`remember()` already existed in that scope**, as the cache for a freehand leg's
+heights: `remember(key, answering)`, sixteen hundred lines up. Two function
+declarations of one name in one scope are not a shadow, they are a
+**replacement** — the later one wins outright. So the height cache stopped
+caching and every arriving answer pushed a history entry instead.
+
+It showed as the reported bug wearing a different hat: an undo restored a state
+that **already held the point just placed**. The count gave it away — one place,
+**two** history entries — and the caller's own stack named `heightsFor`. Mine is
+`rememberChange()` now; the cache had the name first.
+
+**A name collision in one scope is silent in both directions**, and neither half
+of this one would have been found by reading: the cache went on returning
+answers, and the history went on growing. It took counting one gesture.
+
+### Three more, all in the checks
+
+- **`select()` was not idempotent.** Firing a chain's click is a toggle, so
+  selecting one that is already selected clears it — and every reading after that
+  skipped or read an empty panel, **quietly**. It had bitten two checks before it
+  was fixed where it belongs, which is in `select` and not in each of them.
+- **`state().points` left out the stage mark.** Whether a stage ends at a
+  waypoint is the one thing about it that no position says, and a check reading
+  the public surface could not see it at all.
+- **And `the page ran at all` paid for itself.** A `\n` written into a template
+  where `\\n` was meant — the same escape as last time, in a line of temporary
+  instrumentation — became a real line break inside a JavaScript string and the
+  page came up empty. The check said so in one line instead of fifty red ones.
+
+`make drive` reads **161**.
+
 ### What is still open on a phone
 
 - **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the
