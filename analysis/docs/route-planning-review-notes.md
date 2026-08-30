@@ -2718,6 +2718,51 @@ answers, and the history went on growing. It took counting one gesture.
 
 `make drive` reads **161**.
 
+### And a finger could not read the curve at all
+
+**Reported by the reader with the device**, and it is the sharpest of the four
+so far: *on a phone I cannot pick a place on the profile and be told the height,
+the gradient and where it is, the way I can on the desktop.* There was no way.
+The reading, the blue rule and the mark on the map all hung off `mousemove`, and
+a finger never fires one — **the one thing this panel exists for was mouse-only**,
+and had been since phase 4.
+
+What a finger got instead was worse than nothing: one finger *moved the window*,
+and only where `view.zoom > 1`. On the **99 % of chains already drawn finer than
+their own readings** there is nothing to zoom into, so a finger on the curve did
+precisely nothing at all.
+
+**One finger reads now and two move and zoom**, which is where a map puts them.
+The pinch keeps the wheel's proviso — no detail to reach, gesture not taken — and
+it moves the window with the fingers as well as scaling it, because two fingers
+that could zoom and not walk would leave a reader stuck in the window they
+opened.
+
+`readAt` came out of the `mousemove` handler so that a touch asks for the **same**
+answer rather than a second version of it. That mattered more than it looks: the
+reading is a distance, a height, a gradient and a band, and two implementations
+of that is two roundings and two thresholds.
+
+**And the hint is written in the pointer's own words.** A line telling a reader
+to shift-drag is a line telling them to do something they cannot. On a coarse
+pointer it reads *Touch the curve to read it, or pinch…*; on a mouse, *Drag a
+stretch to look into it, or scroll…*. Where a chain has no detail to reach there
+was no line at all — right for a mouse, wrong for a finger, because hovering
+tells a mouse the panel answers and nothing tells a finger. It now says **Touch
+the curve to read it**, drawn inside the plot so it costs no row.
+
+**Which turned up that what a panel *says* can go stale on its own.** The hint is
+written at draw time, and the pointer changing renames every gesture in it
+without a thing about the chain moving — so nothing redrew it. The panel has a
+`repaint()` now and the chrome calls it when the class actually changes.
+
+Driven with a **real** `page.touchscreen.tap` in a touch context: a tap at 45 %
+of the 42 km chain reads **16.02 km · 652 m · +2 %**, one at 75 % reads
+**31.62 km · 597 m · −17 %, steep**, and the blue rule and the mark on the map
+come with them. The check in the suite dispatches its touches and says so — that
+proves the handler and not the delivery, which is the caveat this document
+already carries about dragging. `make drive` reads **171**.
+
 ### What is still open on a phone
 
 - **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the

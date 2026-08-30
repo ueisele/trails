@@ -1897,6 +1897,84 @@ def undo_undoes_the_last_change(page: Any) -> Check:
     )
 
 
+def reading_with_a_finger(page: Any) -> Check:
+    """What is under a touch, which is the one thing this panel is for.
+
+    Reported by a reader: on a phone there is no way to pick a place on the curve
+    and be told its height, its gradient and where it is. There was not — the
+    reading, the blue rule and the mark on the map all hung off ``mousemove``,
+    and a finger never fires one. **The panel's whole purpose was mouse-only.**
+
+    One finger reads now and two move and zoom, which is where a map puts them;
+    a finger used to move the window, which meant a reader with one could never
+    get the reading at all — and on the 99 % of chains with nothing to zoom into
+    it did not even do that.
+
+    **The events here are dispatched and the delivery is proved elsewhere.** A
+    synthetic touch drives the handler and says nothing about whether a browser
+    starts one, which is the caveat this suite already carries about dragging.
+    Driven separately with ``page.touchscreen.tap`` in a real touch context, a
+    tap at 45 % of the 42 km chain reads *16.02 km · 652 m · +2 %* and one at
+    75 % reads *31.62 km · 597 m · −17 %, steep*.
+
+    Args:
+        page: The driven page, with a chain selected
+
+    Returns:
+        What a touch put on the panel and on the map
+
+    """
+    touch = """(where) => { const chart = document.querySelector('.trails-profile-panel svg');
+      const box = chart.getBoundingClientRect();
+      const at = {clientX: box.left + box.width * where, clientY: box.top + box.height / 2};
+      const fire = kind => { const event = new Event(kind, {bubbles: true, cancelable: true});
+        event.touches = kind === 'touchend' ? [] : [at];
+        event.changedTouches = [at];
+        chart.dispatchEvent(event); };
+      fire('touchstart'); fire('touchmove'); fire('touchend'); }"""
+    seen = """() => { const chart = document.querySelector('.trails-profile-panel svg');
+      const shown = [...chart.querySelectorAll('text')].filter(n => n.style.display !== 'none')
+        .map(n => n.textContent);
+      const rules = [...chart.querySelectorAll('line')]
+        .filter(n => n.getAttribute('stroke') === '#1565c0' && n.style.display !== 'none').length;
+      const pane = document.querySelector('.leaflet-trailsProfileHere-pane');
+      const mark = pane ? [...pane.children].filter(n => n.style.display !== 'none').length : 0;
+      return {reading: shown.find(s => / km /.test(s)) || null, rules: rules, mark: mark,
+              hint: [...chart.querySelectorAll('text')].map(n => n.textContent)
+                .find(s => /read it|stretch|Touch/.test(s)) || null}; }"""
+
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.wait_for_timeout(500)
+    before = page.evaluate(seen)
+    page.evaluate(touch, 0.45)
+    page.wait_for_timeout(700)
+    near = page.evaluate(seen)
+    page.evaluate(touch, 0.75)
+    page.wait_for_timeout(700)
+    far = page.evaluate(seen)
+    coarse_hint = far["hint"]
+    page.evaluate("() => window.trailsChrome.coarse(null)")
+    page.wait_for_timeout(500)
+    mouse_hint = page.evaluate(seen)["hint"]
+
+    return Check(
+        "reading the curve with a finger",
+        [
+            Reading("nothing is read until something is touched", before["reading"], None),
+            Reading("a touch reads a place", bool(near["reading"]), True, note=near["reading"]),
+            Reading("with the blue rule on it", near["rules"], 1),
+            # The mark on the map is the other half of the answer: a reader
+            # following a climb wants to see where it is.
+            Reading("and the mark on the map", near["mark"], 1),
+            Reading("touching elsewhere reads elsewhere", far["reading"] != near["reading"], True, note=far["reading"]),
+            # A line telling a reader to shift-drag is a line telling them to do
+            # something they cannot.
+            Reading("the hint is in the finger's words", "ouch" in (coarse_hint or ""), True, note=coarse_hint),
+            Reading("and in the mouse's on a mouse", "rag" in (mouse_hint or ""), True, note=mouse_hint),
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -1921,6 +1999,7 @@ def drive(page: Any) -> list[Check]:
     checks.append(true_scale(page))
     checks.append(zoom_ceiling(page))
     checks.append(brushing_the_curve(page))
+    checks.append(reading_with_a_finger(page))
     checks.append(pinch_the_curve(page))
     checks.append(a_way_back_to_the_whole(page))
     checks.append(room_on_a_short_screen(page))

@@ -3601,16 +3601,32 @@ class _ProfilePanel(MacroElement):
                 // their own readings neither line ever appears: there is nothing
                 // under the drawing to reach, and offering it would be a claim
                 // to detail that does not exist.
+                // **Said in the pointer's own words.** The gestures are not
+                // the same ones, so a line telling a reader to shift-drag is a
+                // line telling them to do something they cannot.
+                var byFinger = map.getContainer().classList.contains('trails-coarse');
                 if (view.zoom > 1.001) {
                     chart.appendChild(text(box.left, box.top + 8, (shown / 1000).toFixed(2) + ' km of '
-                        + (shape.total / 1000).toFixed(2)
-                        + ' \\u00b7 drag a stretch \\u00b7 shift-drag to move \\u00b7 double-click for all', 'start'));
+                        + (shape.total / 1000).toFixed(2) + ' \\u00b7 '
+                        + (byFinger
+                            ? 'touch to read \\u00b7 two fingers to zoom and move \\u00b7 double tap for all'
+                            : 'drag a stretch \\u00b7 shift-drag to move \\u00b7 double-click for all'), 'start'));
                 } else if (closest > 1.05) {
                     var hint = text(box.left, box.top + 8,
-                        'Drag a stretch to look into it, or scroll: the readings hold '
+                        (byFinger ? 'Touch the curve to read it, or pinch: the readings hold '
+                            : 'Drag a stretch to look into it, or scroll: the readings hold ')
                         + closest.toFixed(1) + '\\u00d7 more detail than this', 'start');
                     hint.setAttribute('fill', '#9e9e9e');
                     chart.appendChild(hint);
+                } else if (byFinger) {
+                    // The one thing a finger cannot discover: there is no hover,
+                    // so nothing on this panel says it answers a touch at all.
+                    // It costs no row -- it is drawn inside the plot -- and it is
+                    // not a claim about detail, which is what the line above it
+                    // deliberately is.
+                    var say = text(box.left, box.top + 8, 'Touch the curve to read it', 'start');
+                    say.setAttribute('fill', '#9e9e9e');
+                    chart.appendChild(say);
                 }
 
                 // The crosshair's own parts, made once and moved afterwards.
@@ -3647,19 +3663,24 @@ class _ProfilePanel(MacroElement):
                 return low;
             }
 
-            chart.addEventListener('mousemove', function (event) {
-                // Not while the window is being dragged: the pointer is moving
-                // the curve then, and a reading that chased it would name a
-                // different place every frame without the pointer leaving the
-                // ground it started on.
-                if (dragging || brushing) { return; }
+            // **What is under a pointer, whatever kind of pointer it is.** A
+            // finger never fires a `mousemove`, so on a phone the reading, the
+            // rule and the mark on the map did not exist at all — the one thing
+            // this panel is for was mouse-only. Taken out of the handler so a
+            // touch can ask for the same answer rather than a second version.
+            function readAt(clientX) {
+                // Not while the window is being moved or a stretch picked: the
+                // pointer is moving the curve then, and a reading that chased it
+                // would name a different place every frame without the pointer
+                // leaving the ground it started on.
+                if (dragging || brushing || pinching) { return; }
                 if (!crosshair || !selected || !selected.shape) { return; }
                 var shape = selected.shape;
                 // The drawing is scaled to whatever width the panel ended up
                 // with, so a pointer position has to go back through the
                 // viewBox before it means anything in the chart's own units.
                 var rect = chart.getBoundingClientRect();
-                var px = ((event.clientX - rect.left) / rect.width) * crosshair.width;
+                var px = ((clientX - rect.left) / rect.width) * crosshair.width;
                 // At a true scale a steep chain leaves width unused — 433 px of
                 // 1,238 on the 3 km one — and there is no ground out there to
                 // report. Before this the curve always filled the box, so the
@@ -3701,7 +3722,9 @@ class _ProfilePanel(MacroElement):
                 }
                 crosshair.reading.textContent = (shape.distance[at] / 1000).toFixed(2) + ' km \\u00b7 '
                     + (read ? metres(value) + ' m' : 'not read') + gradient;
-            });
+            }
+
+            chart.addEventListener('mousemove', function (event) { readAt(event.clientX); });
 
             // Everything the crosshair is showing, taken back: the rule, the
             // reading, and the mark on the map. In one place because they have to
@@ -3892,27 +3915,46 @@ class _ProfilePanel(MacroElement):
                 return Math.max(1, Math.sqrt(dx * dx + dy * dy));
             }
 
+            function midOf(touches) {
+                return {x: (touches[0].clientX + touches[1].clientX) / 2,
+                        y: (touches[0].clientY + touches[1].clientY) / 2};
+            }
+
             var pinching = null;
             chart.addEventListener('touchstart', function (event) {
-                if (!crosshair || !(crosshair.closest > 1.001)) { return; }
+                if (!crosshair) { return; }
                 if (event.touches.length === 2) {
+                    // The pinch keeps the wheel's proviso: where there is nothing
+                    // under the drawing to reach, the gesture is not taken and
+                    // Leaflet's own gets it.
+                    if (!(crosshair.closest > 1.001)) { return; }
                     forget();
                     var rect = chart.getBoundingClientRect();
-                    var midX = (event.touches[0].clientX + event.touches[1].clientX) / 2;
-                    var px = ((midX - rect.left) / rect.width) * crosshair.width;
+                    var mid = midOf(event.touches);
+                    var px = ((mid.x - rect.left) / rect.width) * crosshair.width;
                     // The ground between the two fingers stays between them,
                     // which is what makes a pinch a lens rather than a slider.
                     // The wheel's own rule, written once more for the other
                     // pointer, off the same three numbers.
-                    pinching = {span: spanOf(event.touches), zoom: view.zoom, px: px,
+                    pinching = {span: spanOf(event.touches), zoom: view.zoom, px: px, mid: mid,
+                                centre: view.centre, scale: crosshair.width / rect.width,
                                 under: crosshair.from + (px - crosshair.box.left) * crosshair.mpp};
                     dragging = null;
                     event.preventDefault();
-                } else if (event.touches.length === 1 && view.zoom > 1.001) {
-                    forget();
-                    dragging = {x: event.touches[0].clientX, y: event.touches[0].clientY,
-                                at: view.at, centre: view.centre, mpp: crosshair.mpp};
+                    return;
+                }
+                if (event.touches.length === 1) {
+                    // **One finger reads.** There is no hover on a phone, so the
+                    // only way to ask what is under a place is to touch it — and
+                    // this is what the panel is *for*. It used to move the
+                    // window instead, which meant a reader with a finger could
+                    // never get the reading at all, and on the 99 % of chains
+                    // with nothing to zoom into it did not even do that.
+                    // Moving went to two fingers, beside the zoom, which is
+                    // where a map puts it.
                     pinching = null;
+                    dragging = null;
+                    readAt(event.touches[0].clientX);
                     event.preventDefault();
                 }
             }, {passive: false});
@@ -3921,17 +3963,25 @@ class _ProfilePanel(MacroElement):
                 if (pinching && event.touches.length === 2) {
                     var wanted = Math.min(crosshair.closest,
                         Math.max(1, pinching.zoom * (spanOf(event.touches) / pinching.span)));
+                    var mid = midOf(event.touches);
+                    // **Zoom about the fingers and move with them, in one
+                    // gesture.** Two fingers are the map's own way of doing
+                    // both, and separating them here would leave a zoomed
+                    // window with no way to walk along it.
+                    var mpp = crosshair.base / wanted;
+                    var carried = (mid.x - pinching.mid.x) * pinching.scale;
                     view.zoom = wanted;
-                    view.at = pinching.under - (pinching.px - crosshair.box.left) * (crosshair.base / wanted);
+                    view.at = pinching.under - (pinching.px - crosshair.box.left) * mpp - carried * mpp;
+                    if (pinching.centre !== null) {
+                        view.centre = pinching.centre + (mid.y - pinching.mid.y) * pinching.scale * mpp;
+                    }
                     event.preventDefault();
                     redraw();
                     return;
                 }
-                if (dragging && event.touches.length === 1) {
-                    view.at = dragging.at - (event.touches[0].clientX - dragging.x) * dragging.mpp;
-                    view.centre = dragging.centre + (event.touches[0].clientY - dragging.y) * dragging.mpp;
+                if (event.touches.length === 1) {
+                    readAt(event.touches[0].clientX);
                     event.preventDefault();
-                    redraw();
                 }
             }, {passive: false});
 
@@ -4248,6 +4298,12 @@ class _ProfilePanel(MacroElement):
                 // the plan can offer it as a placeholder and tell a name a
                 // reader chose apart from the one every file carries by default.
                 routeName: function () { return EXPORT ? EXPORT.route.name : null; },
+                // **Drawn again without anything having changed in the data.**
+                // What the panel *says* can go stale on its own: the hint names
+                // the gestures, and a pointer becoming coarse renames every one
+                // of them. Nothing else would redraw it, because nothing about
+                // the chain moved.
+                repaint: function () { render(); },
                 // Whether this panel was given what a file needs at all. A page
                 // may have a profile and no export — the panel hides its own
                 // button for exactly that — and anything else offering files off
@@ -9338,7 +9394,14 @@ class _Chrome(MacroElement):
             var forcedCoarse = null;
             function paintCoarse() {
                 var on = forcedCoarse === null ? !!(pointer && pointer.matches) : forcedCoarse;
+                if (container.classList.contains('trails-coarse') === on) { return; }
                 container.classList.toggle('trails-coarse', on);
+                // The profile's hint tells a reader which gestures to use, and
+                // these are not the same gestures. A line telling somebody to
+                // shift-drag is a line telling them to do something they cannot.
+                if (window.trailsProfilePanel && window.trailsProfilePanel.repaint) {
+                    window.trailsProfilePanel.repaint();
+                }
             }
             if (pointer && pointer.addEventListener) { pointer.addEventListener('change', paintCoarse); }
             paintCoarse();
