@@ -137,6 +137,139 @@ PIN_SHAPE = (
 )
 
 
+SERVICE_WORKER = """// The map's service worker. Written by the build, stamped with the page it was
+// built beside, so a deploy is a new worker and an unchanged page is not.
+//
+// **What it is for.** The document is served with `max-age=300`, so five minutes
+// after a visit the browser must revalidate -- and offline a revalidation fails,
+// which means the map does not open at all. Everything else it needs is already
+// in it: measured, selecting a chain and reading its whole elevation profile
+// costs zero requests, and so does routing, because the Dijkstra is in the page.
+var VERSION = "__VERSION__";
+var PAGE = "trails-page-" + VERSION;
+var TILES = "trails-tiles";
+
+// About 18 MB of terrain at the 37 kB a Kartverket tile measures. The browser's
+// own cache already keeps them five days -- `max-age=432000`, measured -- so
+// this is for the walk somebody plans a fortnight out, not for the next minute.
+var TILE_CAP = 500;
+var TILE_HOST = "cache.kartverket.no";
+
+self.addEventListener("install", function () {
+    // Nothing is precached from a list. The worker does not know what the map is
+    // called: the object is `lomsdal-visten.html` in the bucket and is served at
+    // `/lomsdal-visten`, and a cache keyed on the wrong one of those two answers
+    // nothing. What is open is what is kept -- see `keepWhatIsOpen`.
+    self.skipWaiting();
+});
+
+self.addEventListener("activate", function (event) {
+    event.waitUntil(
+        caches.keys().then(function (names) {
+            return Promise.all(names.map(function (name) {
+                var stale = name.indexOf("trails-page-") === 0 && name !== PAGE;
+                return stale ? caches.delete(name) : null;
+            }));
+        }).then(function () { return self.clients.claim(); }).then(keepWhatIsOpen)
+    );
+});
+
+// **Keep the page that is open, by the address it was opened at.**
+//
+// Without this the map is not in the cache until the *second* visit -- the first
+// registers a worker that was not there to intercept it -- and offline would
+// therefore work from the third. Asking for it again is very nearly free: it was
+// loaded seconds ago and is served `max-age=300`, so the browser's own cache
+// answers. If it does not, one extra fetch buys a map that opens without a
+// network, which is the whole point.
+function keepWhatIsOpen() {
+    return Promise.all([caches.open(PAGE), self.clients.matchAll({type: "window"})]).then(function (both) {
+        var cache = both[0];
+        return Promise.all(both[1].map(function (client) {
+            return cache.match(client.url).then(function (kept) {
+                return kept ? null : cache.add(client.url).catch(function () { return null; });
+            });
+        }));
+    });
+}
+
+function tell(what) {
+    return self.clients.matchAll().then(function (open) {
+        open.forEach(function (client) { client.postMessage({trails: what}); });
+    });
+}
+
+// Whether two answers are the same map. The object carries `last-modified` and
+// no etag -- measured on the published page -- so that is what is compared, and
+// an answer carrying neither is treated as unchanged rather than as news.
+function moved(kept, fresh) {
+    var was = kept.headers.get("last-modified") || kept.headers.get("etag");
+    var now = fresh.headers.get("last-modified") || fresh.headers.get("etag");
+    return !!(was && now && was !== now);
+}
+
+// **Stale first, and the network behind it.** The reader gets the map they
+// already have, immediately and at no bytes; the new one lands in the cache for
+// the next visit and the page is told there is one.
+function pageFor(request) {
+    return caches.open(PAGE).then(function (cache) {
+        return cache.match(request).then(function (kept) {
+            var fresh = fetch(request).then(function (answer) {
+                if (answer && answer.ok) {
+                    cache.put(request, answer.clone());
+                    if (kept && moved(kept, answer)) { tell("newer"); }
+                }
+                return answer;
+            }).catch(function (failure) {
+                if (kept) { return kept; }
+                throw failure;
+            });
+            return kept || fresh;
+        });
+    });
+}
+
+// **Cache first, because terrain does not change while somebody walks over it.**
+function tileFor(request) {
+    return caches.open(TILES).then(function (cache) {
+        return cache.match(request).then(function (kept) {
+            if (kept) { return kept; }
+            return fetch(request).then(function (answer) {
+                if (answer && answer.ok) {
+                    cache.put(request, answer.clone()).then(function () { return trim(cache); });
+                }
+                return answer;
+            });
+        });
+    });
+}
+
+// Oldest first, which is what `keys()` answers in. Not a true least-recently-used
+// -- reading a tile does not move it -- and saying so is cheaper than pretending.
+function trim(cache) {
+    return cache.keys().then(function (keys) {
+        if (keys.length <= TILE_CAP) { return null; }
+        return Promise.all(keys.slice(0, keys.length - TILE_CAP).map(function (key) {
+            return cache.delete(key);
+        }));
+    });
+}
+
+self.addEventListener("fetch", function (event) {
+    var request = event.request;
+    if (request.method !== "GET") { return; }
+    // The document, and only the document: `sw.js` is the one other thing at
+    // this origin and the browser has its own rules about that one.
+    if (request.mode === "navigate") {
+        event.respondWith(pageFor(request));
+        return;
+    }
+    if (new URL(request.url).hostname === TILE_HOST) {
+        event.respondWith(tileFor(request));
+    }
+});
+"""
+
 #: Where a third party's file is kept once it has been fetched. A build needs
 #: the network for it exactly once, and after that never again -- the same
 #: bargain every other download in this project makes.
@@ -172,6 +305,26 @@ def vendored(url: str) -> str:
         answer.raise_for_status()
         kept.write_bytes(answer.content)
     return kept.read_text(encoding="utf-8")
+
+
+def write_service_worker(beside: pathlib.Path) -> pathlib.Path:
+    """Write the map's service worker next to the page it belongs to.
+
+    **Stamped with the page's own digest**, because a browser installs a worker
+    only when its bytes change. A deploy that changes the map therefore changes
+    the worker, which changes the cache name, which drops the old map -- and a
+    rebuild that changes nothing changes nothing.
+
+    Args:
+        beside: The built page.
+
+    Returns:
+        Where the worker was written.
+    """
+    stamp = hashlib.sha256(beside.read_bytes()).hexdigest()[:16]
+    written = beside.with_name("sw.js")
+    written.write_text(SERVICE_WORKER.replace("__VERSION__", stamp), encoding="utf-8")
+    return written
 
 
 def _pin(colour: str, icon: str) -> str:
@@ -250,6 +403,73 @@ class _PinSize(MacroElement):
         """Initialize the sizing."""
         super().__init__()
         self._name = "PinSize"
+
+
+class _ServiceWorker(MacroElement):
+    """Register the worker, and say when it is holding a newer map.
+
+    **Only where there is one to register.** A worker needs a secure origin, so
+    a page opened off the disk gets none -- which is also why the suite has to
+    serve the built page over HTTP to drive any of this, and does.
+
+    The reader is told when the worker has fetched a newer map, because
+    stale-first means the fix they are waiting for arrives one visit late. The
+    line is a plain one in the corner with a way to dismiss it, not a sheet: a
+    panel that opens itself is a panel that interrupts.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+            (function () {
+                var map = {{ this._parent.get_name() }};
+                var secure = location.protocol === 'https:' ||
+                    location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+                window.trailsWorker = {kept: false, newer: false, why: null};
+                if (!('serviceWorker' in navigator) || !secure) {
+                    window.trailsWorker.why = 'serviceWorker' in navigator ? 'not a secure origin' : 'no worker in this browser';
+                    return;
+                }
+                navigator.serviceWorker.register('sw.js').then(function () {
+                    window.trailsWorker.kept = true;
+                }, function (failure) {
+                    window.trailsWorker.why = String(failure);
+                });
+                navigator.serviceWorker.addEventListener('message', function (event) {
+                    if (!event.data || event.data.trails !== 'newer') { return; }
+                    window.trailsWorker.newer = true;
+                    say();
+                });
+
+                function say() {
+                    if (document.querySelector('.trails-newer')) { return; }
+                    var line = document.createElement('div');
+                    line.className = 'trails-newer';
+                    line.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);' +
+                        'z-index:1100;display:flex;gap:10px;align-items:center;padding:6px 10px;font-size:12px;' +
+                        'border:1px solid var(--trails-rule);border-radius:8px;background:var(--trails-panel);' +
+                        'color:var(--trails-ink-2);box-shadow:0 1px 6px rgba(0,0,0,0.2)';
+                    var said = document.createElement('span');
+                    said.textContent = 'A newer map is ready \u2014 reload to see it.';
+                    var shut = document.createElement('button');
+                    shut.type = 'button';
+                    shut.className = 'trails-newer-close';
+                    shut.textContent = '\u00d7';
+                    shut.setAttribute('aria-label', 'Leave it for now');
+                    shut.style.cssText = 'font:inherit;font-size:15px;line-height:1;padding:0 4px;border:0;' +
+                        'background:none;color:var(--trails-ink-3);cursor:pointer';
+                    shut.addEventListener('click', function () { line.remove(); });
+                    line.appendChild(said);
+                    line.appendChild(shut);
+                    map.getContainer().appendChild(line);
+                }
+            })();
+        {% endmacro %}
+    """)
+
+    def __init__(self) -> None:
+        """Initialize the registration."""
+        super().__init__()
+        self._name = "ServiceWorker"
 
 
 class _Inlined(Element):
@@ -600,6 +820,12 @@ def create_map(
             overlay=False,
             control=True,
             show=index == 0,
+            # **Asked for across origins, so a cache can hold them plainly.**
+            # An `<img>` without this fetches no-cors and the answer is opaque:
+            # storable, unreadable, and charged against the origin's quota at a
+            # padded size rather than its own. Kartverket answers
+            # `access-control-allow-origin: *` -- measured, not assumed.
+            cross_origin=True,
         ).add_to(fmap)
 
     # Every page gets the colours, chrome or no chrome: the panels carry them
@@ -607,6 +833,7 @@ def create_map(
     # document — so the document has to have said them.
     _Theme().add_to(fmap)
     _PinSize().add_to(fmap)
+    _ServiceWorker().add_to(fmap)
 
     if bounds is not None:
         min_lon, min_lat, max_lon, max_lat = bounds

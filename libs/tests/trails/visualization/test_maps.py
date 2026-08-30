@@ -197,6 +197,69 @@ class TestWhatThePageFetches:
         assert hosts == set(), hosts
 
 
+class TestServiceWorker:
+    """The map, when there is no network to fetch it with."""
+
+    def test_the_worker_is_stamped_with_the_page_it_was_built_beside(self, tmp_path):
+        """A browser installs a worker only when its bytes change. So the stamp
+        is the page's own digest: a deploy that changes the map changes the
+        worker, which changes the cache name, which drops the old map -- and a
+        rebuild that changes nothing changes nothing."""
+        page = tmp_path / "lomsdal-visten.html"
+        page.write_text("<html>a map</html>", encoding="utf-8")
+        written = maps.write_service_worker(page)
+        assert written.name == "sw.js"
+        first = written.read_text(encoding="utf-8")
+        assert "__VERSION__" not in first
+        assert maps.write_service_worker(page).read_text(encoding="utf-8") == first
+
+        page.write_text("<html>a different map</html>", encoding="utf-8")
+        assert maps.write_service_worker(page).read_text(encoding="utf-8") != first
+
+    def test_it_keeps_the_page_by_the_address_it_was_opened_at(self):
+        """The worker does not know what the map is called: the object is
+        `lomsdal-visten.html` in the bucket and is served at `/lomsdal-visten`,
+        and a cache keyed on the wrong one of those answers nothing.
+
+        Without this the map is not cached until the *second* visit -- the first
+        registers a worker that was not there to intercept it -- so offline would
+        work from the third."""
+        assert "function keepWhatIsOpen()" in maps.SERVICE_WORKER
+        assert 'self.clients.matchAll({type: "window"})' in maps.SERVICE_WORKER
+        assert "cache.add(client.url)" in maps.SERVICE_WORKER
+
+    def test_the_document_is_stale_first_and_the_tiles_are_cache_first(self):
+        """A reader gets the map they already have, at no bytes, and the new one
+        lands for the next visit. Terrain does not change while somebody walks
+        over it, so a tile that is held is simply served."""
+        assert 'if (request.mode === "navigate")' in maps.SERVICE_WORKER
+        assert "return kept || fresh;" in maps.SERVICE_WORKER
+        assert "if (kept) { return kept; }" in maps.SERVICE_WORKER
+        # Bounded, because a cache with no ceiling is a quota with no floor.
+        assert "var TILE_CAP = 500;" in maps.SERVICE_WORKER
+        assert "function trim(cache)" in maps.SERVICE_WORKER
+
+    def test_it_is_registered_only_where_a_worker_can_exist(self):
+        """A worker needs a secure origin, so a page opened off the disk gets
+        none -- which is also why the suite serves the built page over HTTP to
+        drive any of this."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "navigator.serviceWorker.register('sw.js')" in html
+        assert "location.protocol === 'https:'" in html
+        assert "location.hostname === 'localhost'" in html
+        # And why it is not there, when it is not: a page that silently has no
+        # offline copy looks exactly like one that has.
+        assert "window.trailsWorker.why" in html
+
+    def test_a_reader_is_told_when_a_newer_map_is_waiting(self):
+        """Stale-first means a fix arrives one visit late. The line is a plain
+        one in the corner with a way out, not a sheet: a panel that opens itself
+        is a panel that interrupts."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "A newer map is ready" in html
+        assert "trails-newer-close" in html
+
+
 class TestPins:
     """The map draws its own pins, which is what the last third-party host was for."""
 

@@ -35,10 +35,14 @@ shell — or run the script directly.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import functools
+import http.server
 import json
 import pathlib
 import re
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -2798,6 +2802,137 @@ def a_plan_survives_a_reload(page: Any) -> Check:
     )
 
 
+class _Quiet(http.server.SimpleHTTPRequestHandler):
+    """A file server that does not narrate. One line per tile would bury the report."""
+
+    def log_message(self, format: str, *args: Any) -> None:
+        """Say nothing.
+
+        Args:
+            format: Ignored.
+            *args: Ignored.
+        """
+
+
+@contextlib.contextmanager
+def served(directory: pathlib.Path) -> Any:
+    """Serve a directory over HTTP for as long as the block runs.
+
+    **A service worker needs an origin**, and every other check in this suite
+    reads the page off the disk. `file://` is not a secure context, so a worker
+    cannot be registered there at all -- which would have left the one thing this
+    project says about itself, that anything visible is driven before it is
+    believed, unkept for the one feature whose whole job is to work when nothing
+    else does.
+
+    Args:
+        directory: What to serve, which is where the build writes.
+
+    Yields:
+        The origin it is reachable at.
+    """
+    handler = functools.partial(_Quiet, directory=str(directory))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+#: Whether the page this is running in is in the worker's own cache, asked of
+#: the cache rather than of the worker: what matters is that the bytes are there
+#: under the address the reader used, not that a registration succeeded.
+CACHED_PAGE = """async () => {
+    for (const name of await caches.keys()) {
+        if (!name.startsWith('trails-page-')) { continue; }
+        const cache = await caches.open(name);
+        if (await cache.match(location.href)) { return true; }
+    }
+    return false; }"""
+
+
+def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) -> Check:
+    """The map, served by its own worker, with the network switched off.
+
+    **Today it does not open at all.** The document is served `max-age=300`, so
+    five minutes after a visit the browser must revalidate, and offline a
+    revalidation fails. Everything the map needs is already inside it -- measured,
+    reading a chain's whole elevation profile costs zero requests and so does
+    routing -- so the only thing between a reader and an offline map was the
+    document itself.
+
+    Two visits, in one context so the worker survives between them: the first
+    registers it and it keeps what is open, the second is made with the network
+    off and has to be answered from the cache.
+
+    Args:
+        browser: The browser to open a fresh context in.
+        page_path: The built page, whose directory is what gets served.
+
+    Returns:
+        What the worker kept, and what opened without a network.
+    """
+    with served(page_path.parent) as origin:
+        address = f"{origin}/{page_path.name}"
+        context = browser.new_context(viewport={"width": 1400, "height": 900})
+        first = context.new_page()
+        first.goto(address, timeout=180_000)
+        # **Waiting rather than sleeping**, which this suite says about itself
+        # and had stopped doing twice already. Two settles of twenty seconds took
+        # the run from 180 to 315; the page says when it is ready.
+        first.wait_for_function("() => window.trailsWorker", timeout=120_000)
+        registered = first.evaluate("() => window.trailsWorker")
+        kept = True
+        try:
+            first.wait_for_function(CACHED_PAGE, timeout=60_000)
+        except Exception:
+            kept = False
+        # Move, so that some terrain is asked for while the worker is in the way
+        # of it. The tiles the first paint fetched went out before it took over.
+        first.evaluate("() => window[Object.keys(window).find(k => k.startsWith('map_'))].setZoom(10)")
+        first.wait_for_timeout(4000)
+        tiles = first.evaluate("async () => (await (await caches.open('trails-tiles')).keys()).length")
+        first.close()
+
+        context.set_offline(True)
+        second = context.new_page()
+        thrown: list[str] = []
+        second.on("pageerror", lambda error: thrown.append(str(error)))
+        second.goto(address, timeout=180_000)
+        second.wait_for_function(
+            "() => document.querySelectorAll('.leaflet-overlay-pane path').length > 11000",
+            timeout=120_000,
+        )
+        offline = second.evaluate(
+            """() => ({paths: document.querySelectorAll('.leaflet-overlay-pane path').length,
+                       markers: document.querySelectorAll('.leaflet-marker-pane > *').length,
+                       graph: !!(window.trailsGraph && window.trailsGraph.header)})"""
+        )
+        context.set_offline(False)
+        context.close()
+
+    return Check(
+        "the map opens with the network off",
+        [
+            Reading("a worker is registered", bool(registered and registered.get("kept")), True, note=str(registered)),
+            Reading("and the page is in its cache", kept, True),
+            # The browser's own cache already keeps a tile five days --
+            # `max-age=432000`, measured -- so this is for the walk somebody
+            # plans a fortnight out, not for the next minute.
+            Reading("terrain it was shown is kept too", tiles > 0, True, note=f"{tiles} tiles"),
+            Reading("nothing threw with the network off", len(thrown), 0, note="; ".join(thrown[:2])),
+            # The whole map, not a shell of one: every line, every marker, and
+            # the graph that routes over them.
+            Reading("offline: paths drawn", offline["paths"], 11589),
+            Reading("offline: markers", offline["markers"], 198),
+            Reading("offline: the routing graph is there", offline["graph"], True),
+        ],
+    )
+
+
 def drive(page: Any) -> list[Check]:
     """Run every check in one browser session.
 
@@ -3007,6 +3142,16 @@ def main() -> int:
             return report(checks)
         page.evaluate("() => window.trailsGraph.ready")
         checks += drive(page)
+        # **Last, and in a context of its own.** A service worker outlives the
+        # page that registered it and would answer for every check after it.
+        #
+        # And the driven page is closed first, which is not tidiness: this page
+        # costs about 590 MB settled, and a second one beside it took the browser
+        # down mid-load -- `TargetClosedError` at the first wait, with nothing
+        # said about why. Two 42 MB documents at once is not a thing to ask for.
+        if wanted(the_map_opens_with_the_network_off):
+            page.close()
+            checks.append(the_map_opens_with_the_network_off(browser, page_path))
         browser.close()
 
     code = report(checks)

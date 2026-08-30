@@ -155,6 +155,37 @@ def squeezed(source: Path) -> tuple[Path, int]:
     return squeezed_file, squeezed_file.stat().st_size
 
 
+def upload_worker(source: Path, config: dict[str, str]) -> None:
+    """Copy the service worker up, uncompressed and told not to be cached.
+
+    **Not brotli, and `no-cache`.** It is three kilobytes, so compressing it
+    saves nothing worth a decompression; and it is the one object whose whole
+    job is to be noticed when it changes -- an edge holding yesterday's worker
+    would hold yesterday's map with it, for as long as the header said to.
+
+    Args:
+        source: The worker, written beside the map by the build.
+        config: The settings from :func:`settings`.
+
+    Raises:
+        SystemExit: If the aws CLI is absent or the copy fails.
+    """
+    command = [
+        "aws", "s3", "cp", str(source), f"s3://{config['TRAILS_MAP_BUCKET']}/{source.name}",
+        "--endpoint-url", config["TRAILS_MAP_S3_ENDPOINT"],
+        "--region", "auto",
+        "--content-type", "text/javascript; charset=utf-8",
+        "--cache-control", "no-cache",
+        "--no-progress",
+    ]  # fmt: skip
+    try:
+        subprocess.run(command, check=True, env={**os.environ, **CHECKSUM_ENV})
+    except FileNotFoundError:
+        sys.exit("aws (the AWS CLI) is not installed — it is what talks to R2's S3 API.")
+    except subprocess.CalledProcessError as error:
+        sys.exit(f"Uploading the service worker failed (exit {error.returncode}).")
+
+
 def upload(source: Path, key: str, config: dict[str, str]) -> None:
     """Copy the map into the bucket with the content type that makes it open rather than download.
 
@@ -246,10 +277,11 @@ def main() -> None:
 
     # Every address the same object answers at, because each is its own cache entry: the clean one
     # the rewrite rule serves, the one a trailing slash produces, and the object's own name.
-    urls = [f"https://{host}/{args.map}", f"https://{host}/{args.map}/", f"https://{host}/{key}"]
+    urls = [f"https://{host}/{args.map}", f"https://{host}/{args.map}/", f"https://{host}/{key}", f"https://{host}/sw.js"]
 
     if args.dry_run:
         print(f"Would compress {source} ({size / 1e6:.1f} MB) at brotli 11")
+        print(f"      upload {source.with_name('sw.js').name} uncompressed, no-cache")
         print(f"      upload it to s3://{config['TRAILS_MAP_BUCKET']}/{key} as {CONTENT_TYPE}, Content-Encoding: br")
         print("      purge " + ("nothing (--no-purge)" if args.no_purge else ", ".join(urls)))
         return
@@ -258,6 +290,16 @@ def main() -> None:
     print(f"🗜️  {source.name}: {size / 1e6:.1f} → {packed / 1e6:.2f} MB at brotli 11 (the edge managed 7.84)")
     print(f"⬆️  → s3://{config['TRAILS_MAP_BUCKET']}/{key}, Content-Encoding: br")
     upload(body, key, config)
+
+    # **The worker goes up after the map and never before it.** It is what makes
+    # a reader's next visit serve the copy they already have, so a worker that
+    # arrived first would hand out the old map while announcing the new one.
+    worker = source.with_name("sw.js")
+    if worker.exists():
+        print(f"⬆️  {worker.name} ({worker.stat().st_size / 1e3:.1f} kB) → s3://{config['TRAILS_MAP_BUCKET']}/{worker.name}, no-cache")
+        upload_worker(worker, config)
+    else:
+        print("⚠️  No sw.js beside the map — readers get no offline copy. Was this built by `make map`?")
 
     if args.no_purge:
         print("↩️  Edge cache left alone (--no-purge); it holds the old map for up to 5 minutes.")

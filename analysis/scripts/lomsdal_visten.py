@@ -1883,6 +1883,13 @@ def main() -> int:
     fmap.save(str(map_path))
     print(f"  Map: {map_path} ({map_path.stat().st_size / 1e6:.1f} MB)")
 
+    # **Written after the page and stamped with it.** A browser installs a
+    # worker only when its bytes change, so the stamp is the page's own digest:
+    # a deploy that changes the map changes the worker and drops the old copy,
+    # and a rebuild that changes nothing changes nothing.
+    worker = maps.write_service_worker(map_path)
+    print(f"  Worker: {worker} ({worker.stat().st_size / 1e3:.1f} kB)")
+
     # Built from the chains, not from the raw sources, so one geometry serves
     # the map, the exports and the router. At full source precision: the
     # simplified copy above is the drawn one and goes nowhere near this.

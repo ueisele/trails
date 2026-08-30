@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 245 while one behaviour is being written. What is left out
+  readings instead of 252 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **185 seconds** and say
-whether the page still holds: **245 readings, and it should be green**. If it is
+whether the page still holds: **252 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 245. And **build before driving**: the run reads the page `make map`
+instead of 252. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3578,6 +3578,77 @@ pins carry it, so it is **198 and 203** now. It lives in this document's probe
 table and not in the suite, which is why `make drive` stayed at 245 green.
 
 `make drive` reads **245**, the source tests **254**.
+
+### And the map opens with the network off
+
+**Everything it needs was already inside it.** Measured: selecting a chain and
+reading its whole elevation profile costs **zero** requests, and so does routing,
+because the Dijkstra is in the page. The only thing standing between a reader and
+an offline map was the document itself — served `max-age=300`, so five minutes
+after a visit the browser must revalidate, and offline a revalidation fails.
+**The map did not open at all.**
+
+A service worker, written by the build beside the page and **stamped with the
+page's own digest**, because a browser installs a worker only when its bytes
+change: a deploy that changes the map changes the worker, which changes the cache
+name, which drops the old map, and a rebuild that changes nothing changes
+nothing.
+
+**The document is stale-first.** The reader gets the map they already have,
+immediately and at no bytes, and the new one lands in the cache for the next
+visit. That means a fix arrives one visit late, so the page says so — a plain
+line in the corner with a way out, not a sheet, because a panel that opens itself
+is a panel that interrupts.
+
+**And it keeps the page by the address it was opened at**, which is the part that
+took a correction. The worker does not know what the map is called: the object is
+`lomsdal-visten.html` in the bucket and is served at `/lomsdal-visten`, and a
+cache keyed on the wrong one of those two answers nothing. It asks `clients` what
+is open and keeps that. Without it the map is not cached until the *second*
+visit — the first registers a worker that was not there to intercept it — so
+offline would have begun working on the third.
+
+**The tiles are cache-first and bounded at 500**, about 18 MB at the 37 kB a
+Kartverket tile measures. That is for the walk somebody plans a fortnight out and
+not for the next minute: the browser's own cache already keeps a tile **five
+days**, `max-age=432000`, measured. And they are fetched across origins now —
+Kartverket answers `access-control-allow-origin: *`, measured rather than assumed
+— because an `<img>` without that fetches no-cors, and an opaque response is
+storable, unreadable, and charged against the quota at a padded size rather than
+its own.
+
+**Driven, and that is the expensive part.** A worker needs a secure origin, and
+every other check in this suite reads the page off `file://` — where one cannot
+be registered at all. So the run now serves `analysis/output/` over HTTP for the
+length of one check and drives two visits in a context of its own: the first
+registers the worker, the second is made with **the network switched off** and
+has to be answered from the cache. It reads 11,589 paths, 198 markers, the
+routing graph present, 58 tiles kept, and nothing thrown.
+
+| | |
+|---|---:|
+| `make drive`, before | 245 readings, ~180 s |
+| after | **252 readings, ~278 s** |
+
+Two 42 MB page loads are what the difference is, and they were **20 seconds worse
+than that** until the two fixed settles became waits on what the page says — the
+rule this suite states in its own docstring and had now stopped keeping for a
+third time.
+
+**And the driven page has to be closed before the check runs.** Not tidiness: a
+second 42 MB document beside the first took the browser down mid-load, and what
+came back was `TargetClosedError` at the first wait with nothing said about why.
+The page costs about 590 MB settled; two at once is not a thing to ask for.
+
+**What it does not do.** It does not help the first visit — not one byte — which
+is the case *slow network* usually means, and which the work above it was for.
+And it does not download the park: 6,308 tiles and 563 MB at zoom ≤ 14 is its own
+project, with PMTiles, a progress bar, `navigator.storage.persist()` and
+Kartverket's terms to read first. Offline, terrain appears for ground already
+looked at since the worker took over; everything else — every line, every
+profile, the routing, the files — works with nothing plugged in.
+
+`make drive` reads **252**, the source tests **259**.
 
 ### What is still open on a phone
 
