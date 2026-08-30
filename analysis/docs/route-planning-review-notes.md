@@ -1908,11 +1908,12 @@ built and driven. At rest a 390 px screen is **98.2 %** map against 23.1;
 planning leaves **784 px** to tap on against 439; the desktop's every recorded
 figure is unmoved.
 
-**What is left on a phone is three things nobody has observed**, all in *What is
-still open on a phone* below: what a soft keyboard does to the layout, what a
-real finger does to the tap-versus-pan rule, and whether iOS Safari saves a blob
-or opens it in a tab. Two of the three had their assumption removed rather than
-tested, which is better than a green tick and is not one.
+**What is left on a phone is two things nobody has observed**: what a soft
+keyboard does to the layout, and what a real finger does to the tap-versus-pan
+rule. Both had their assumption removed rather than tested, which is better than
+a green tick and is not one. The third — whether iOS Safari saves a blob or
+opens it in a tab — **has been observed and it saves**, reported by the reader
+with the device, which is the only way that one was ever going to be answered.
 
 **And four reader reports in two days found four defects that 148 browser
 readings and 208 source tests were green over** — a stage file naming itself
@@ -2725,9 +2726,16 @@ answers, and the history went on growing. It took counting one gesture.
 - **~~A real touch pan~~ — replaced, not tested.** `pointerdown` records where
   the gesture began for every pointer, so there is no longer an assumption to
   verify. What a real finger does is still unobserved.
-- **Writing a file on iOS.** A blob and `<a download>`; until iOS 16.4 that
-  opened the file in a tab rather than saving it. Everything else about the file
-  round trip is driven and green.
+- **~~Writing a file on iOS~~ — observed, and it works.** Reported by the reader
+  who has the device: a download from Safari saved the file. That was the one
+  item on this list a check could never reach — the mechanism is a blob and an
+  `<a download>`, and until iOS 16.4 that opened the file in a tab instead of
+  saving it. **The only way to know was for somebody to press it.**
+
+  What the report covers is a download; if it was the GPX rather than the
+  archive, the zip is worth one more tap when somebody is next in there. It is
+  hand-written down to the varints and the DOS stamp, it is the larger of the
+  two, and a browser that balks at one may not balk at the other.
 - **Coordinates at 6 decimals** and the rest of the weight work, which the memory
   split above orders and which nothing here touched.
 
