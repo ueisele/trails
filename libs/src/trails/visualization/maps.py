@@ -8163,17 +8163,6 @@ class _PlanMode(MacroElement):
             // out. It goes through the same edit funnel as everything else, so
             // undo brings it back — which is what makes a button that clears the
             // map safe to offer.
-            // **The same switch, for the reader who is already in this panel.**
-            // It sets the chrome's one state and keeps none of its own, so this
-            // button, the plan bar's and the rail's cannot come to disagree
-            // about whether the panel is standing.
-            var seeProfile = document.createElement('button');
-            seeProfile.type = 'button';
-            seeProfile.className = 'trails-plan-profile';
-            seeProfile.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-top:4px;cursor:pointer;display:block';
-            seeProfile.addEventListener('click', function () {
-                if (window.trailsChrome && window.trailsChrome.profile) { window.trailsChrome.profile(); }
-            });
             var fresh = document.createElement('button');
             fresh.type = 'button';
             fresh.className = 'trails-plan-fresh';
@@ -8288,7 +8277,14 @@ class _PlanMode(MacroElement):
                 // The floor is deliberate: under it the list is not worth showing
                 // and the box's own overflow takes over. A scrollbar on the whole
                 // control beats a control holding rows that cannot be reached.
-                listBox.style.maxHeight = Math.max(40, Math.min(220, room - fixed)) + 'px';
+                // **The room there is, and not a constant.** It was capped at
+                // 220 px whatever the screen: on a 900 px window a twelve-point
+                // route showed a 220 px scroller inside a 552 px panel with 350
+                // px of room under it, and a reader scrolling the rows ran off
+                // the end of a list that had no reason to end. The cap that
+                // matters is the one measured — how much room stands above the
+                // profile panel — and that is `room`.
+                listBox.style.maxHeight = Math.max(40, room - fixed) + 'px';
                 box.style.maxHeight = Math.max(40, room) + 'px';
             }
 
@@ -8606,10 +8602,6 @@ class _PlanMode(MacroElement):
             // Said rather than discovered. Three gestures share one click here
             // and none of them is guessable from a map that has never had more
             // than one.
-            var hint = document.createElement('div');
-            hint.style.cssText = 'margin-top:2px;color:var(--trails-ink-4);max-width:16em';
-            hint.textContent = 'Drag a point to move it \u00b7 click one to work on it \u00b7 ' +
-                'click the route to put one in \u00b7 click the count for the list';
 
             // What the last load turned out to be, or what went wrong with it.
             var loadSaid = '';
@@ -8796,7 +8788,6 @@ class _PlanMode(MacroElement):
                 box.appendChild(loading);
                 box.appendChild(offerBox);
                 box.appendChild(loadStatus);
-                box.appendChild(seeProfile);
                 box.appendChild(back);
                 box.appendChild(fresh);
                 box.appendChild(edits);
@@ -8810,12 +8801,18 @@ class _PlanMode(MacroElement):
                 // so the two nest rather than fight.
                 box.addEventListener('wheel', function (event) {
                     var spare = box.scrollHeight - box.clientHeight;
-                    if (spare <= 0) { return; }
-                    if (event.deltaY < 0 ? box.scrollTop > 0 : box.scrollTop < spare - 1) {
+                    if (spare > 0 && (event.deltaY < 0 ? box.scrollTop > 0 : box.scrollTop < spare - 1)) {
                         event.stopPropagation();
+                        return;
                     }
+                    // **Nothing left to scroll here, and the map is still not
+                    // next.** Reported: scrolling over the waypoints zoomed the
+                    // map. Where the chrome holds this panel the chrome is the
+                    // boundary and gets its turn at the rows below; where there
+                    // is no chrome, the boundary is this box. Either way a wheel
+                    // that started over a panel does not end in a zoom.
+                    if (!box.closest || !box.closest('.trails-chrome')) { event.stopPropagation(); }
                 }, {passive: true});
-                box.appendChild(hint);
                 // Clicking inside the control must not reach the map, and the
                 // wheel must, or the map reads as frozen under it.
                 L.DomEvent.disableClickPropagation(box);
@@ -8849,18 +8846,12 @@ class _PlanMode(MacroElement):
                 back.style.display = on ? 'block' : 'none';
                 back.disabled = !history.length;
                 fresh.style.display = (on && points.length) ? 'block' : 'none';
-                // Offered only where something can act on it: a page without the
-                // chrome has no panel to show or hide.
-                var chromed = !!(window.trailsChrome && window.trailsChrome.profile);
-                seeProfile.style.display = (on && chromed) ? 'block' : 'none';
-                if (chromed) {
-                    var standing = window.trailsChrome.profile();
-                    seeProfile.textContent = standing ? 'Hide the profile' : 'Show the profile';
-                    seeProfile.title = standing
-                        ? 'Put the elevation profile away and keep the map'
-                        : 'Show the elevation profile of this route';
-                    seeProfile.setAttribute('aria-pressed', String(standing));
-                }
+                // **The profile switch is not here.** It was, and it did
+                // nothing: it called `trailsChrome.profile()` with no argument,
+                // which is the *reading* of that state and not the setting of
+                // it. Rather than fix a third switch, it is gone — the rail
+                // carries it on a wide screen and the plan bar on a narrow one,
+                // which is where a reader planning a route already is.
                 var holds = on && chosen >= 0 && chosen < points.length;
                 edits.style.display = holds ? 'block' : 'none';
                 if (holds) {
@@ -8869,7 +8860,6 @@ class _PlanMode(MacroElement):
                     later.disabled = chosen === points.length - 1;
                 }
                 status.style.display = on ? '' : 'none';
-                hint.style.display = on ? '' : 'none';
                 // The count is the list's handle. It was already naming what the
                 // list holds, and a second heading saying the same number is the
                 // two-panel mistake the legend was cured of.
@@ -10084,12 +10074,18 @@ class _Chrome(MacroElement):
                 // scrolls now.
                 box.addEventListener('wheel', function (event) {
                     var scroller = box.querySelector('.trails-chrome-body');
-                    if (!scroller) { return; }
-                    var room = scroller.scrollHeight - scroller.clientHeight;
-                    if (room <= 0) { return; }
-                    if (event.deltaY < 0 ? scroller.scrollTop > 0 : scroller.scrollTop < room - 1) {
+                    var room = scroller ? scroller.scrollHeight - scroller.clientHeight : 0;
+                    if (room > 0 &&
+                            (event.deltaY < 0 ? scroller.scrollTop > 0 : scroller.scrollTop < room - 1)) {
                         event.stopPropagation();
+                        return;
                     }
+                    // **The outermost panel is where a wheel stops.** Anything
+                    // inside has already taken what it could use; what is left
+                    // is a wheel over a panel, and a wheel over a panel that
+                    // zooms the map behind it reads as the page losing hold of
+                    // the pointer.
+                    event.stopPropagation();
                 }, {passive: true});
                 chrome.appendChild(box);
                 return box;

@@ -2386,6 +2386,26 @@ class TestPlanMode:
         # working from is a point looked up in the wrong track.
         assert "loaded = null;" in planning
 
+    def test_the_list_is_capped_by_the_room_and_not_by_a_constant(self):
+        """It was 220 px whatever the screen: a twelve-point route scrolled
+        inside a panel with 350 px of room under it, and running off the end of
+        that scroller is what handed the wheel to the map."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "listBox.style.maxHeight = Math.max(40, room - fixed) + 'px';" in planning
+
+    def test_a_wheel_over_a_panel_does_not_end_in_a_zoom(self):
+        """Each scroller inside takes what it can use and the outermost panel
+        swallows the rest. Where the chrome holds this control the chrome is that
+        boundary; where there is none, this box is."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "if (!box.closest || !box.closest('.trails-chrome')) { event.stopPropagation(); }" in planning
+
     def test_a_page_without_a_panel_says_so_rather_than_throwing(self):
         """Plan mode composes with the walk the panel owns, so a page carrying
         one and not the other can plan nothing — said once, loudly."""

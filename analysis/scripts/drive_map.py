@@ -1484,6 +1484,94 @@ def the_plan_bar(page: Any) -> Check:
     )
 
 
+def the_point_list_takes_the_room(page: Any) -> Check:
+    """A list of waypoints on a screen that has room for them.
+
+    Reported: scrolling over the waypoints zooms the map, and the rows are a
+    scroller although there is room below. One cause. The list was capped at
+    220 px whatever the screen, so a twelve-point route scrolled inside a panel
+    with 350 px of room under it -- and running off the end of that scroller is
+    what handed the wheel to the map, because the panel gave the turn up as soon
+    as it had nothing left to scroll.
+
+    **A wheel that started over a panel does not end in a zoom.** Each scroller
+    inside takes what it can use; the outermost panel swallows the rest.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the list measures, whether it has to scroll, and what the wheel did
+    """
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(600)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.wait_for_timeout(500)
+    if not select(page, LONG_CHAIN):
+        return Check("the point list takes the room", skipped=f"{LONG_CHAIN} is not in this page")
+    places = page.evaluate(
+        """() => { const shape = window.trailsProfile.shape;
+        return [0.05, 0.14, 0.23, 0.32, 0.41, 0.5, 0.59, 0.68, 0.77, 0.86]
+          .map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
+    )
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+    for at in places:
+        page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
+        settled(page)
+    settled(page)
+    page.evaluate("() => { window.trailsPlan.showList(true); window.trailsChrome.open('plan'); }")
+    page.wait_for_timeout(1000)
+
+    listed = page.evaluate(
+        """() => { const rows = document.querySelector('.trails-plan-points');
+        const seen = getComputedStyle(rows);
+        return {h: Math.round(rows.getBoundingClientRect().height),
+                cap: Math.round(parseFloat(seen.maxHeight)),
+                over: rows.scrollHeight - rows.clientHeight,
+                rows: [...rows.children].length}; }"""
+    )
+
+    # A wheel over the rows, at the far end of whatever they can scroll, which is
+    # where the panel used to give the turn to the map.
+    zoom = "() => window[Object.keys(window).find(k => k.startsWith('map_'))].getZoom()"
+    before = page.evaluate(zoom)
+    page.evaluate("() => { const rows = document.querySelector('.trails-plan-points'); rows.scrollTop = rows.scrollHeight; }")
+    where = page.evaluate(
+        """() => { const box = document.querySelector('.trails-plan-points').getBoundingClientRect();
+        return {x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2)}; }"""
+    )
+    page.mouse.move(where["x"], where["y"])
+    page.mouse.wheel(0, 320)
+    page.wait_for_timeout(700)
+    page.mouse.wheel(0, -320)
+    page.wait_for_timeout(700)
+    after = page.evaluate(zoom)
+
+    page.evaluate("() => window.trailsChrome.close()")
+    page.wait_for_timeout(400)
+
+    return Check(
+        "the point list takes the room",
+        [
+            Reading("ten points make ten rows", listed["rows"], 10),
+            # The cap that matters is the room measured above the profile panel,
+            # not a constant somebody once picked.
+            Reading("the list is given more than 220 px", listed["cap"] > 220, True, note=f"{listed['cap']} px"),
+            Reading("and does not have to scroll", listed["over"], 0, note=f"{listed['h']} px tall"),
+            # The reported one: a wheel that started over a panel does not end in
+            # a zoom, whether or not there was anything left to scroll.
+            Reading("a wheel over the rows leaves the map alone", after, before),
+        ],
+    )
+
+
 def files_from_the_page(page: Any) -> Check:
     """Writing a file and reading one back, on a phone-sized page.
 
@@ -2605,6 +2693,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_finger_can_use_it(page))
     if wanted(the_plan_bar):
         checks.append(the_plan_bar(page))
+    if wanted(the_point_list_takes_the_room):
+        checks.append(the_point_list_takes_the_room(page))
     if wanted(undo_undoes_the_last_change):
         checks.append(undo_undoes_the_last_change(page))
     if wanted(files_from_the_page):

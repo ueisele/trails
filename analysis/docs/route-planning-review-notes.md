@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 222 while one behaviour is being written. What is left out
+  readings instead of 226 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **179 seconds** and say
-whether the page still holds: **222 readings, and it should be green**. If it is
+whether the page still holds: **226 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 222. And **build before driving**: the run reads the page `make map`
+instead of 226. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3122,6 +3122,35 @@ for a download, and the fallback must not fire behind their back.
 
 What is still not driveable is iOS Firefox itself. `make drive` reads **222**,
 the source tests **228**.
+
+### Four things in the plan panel, and three of them were one thing
+
+**A switch that did nothing.** *Show the profile* in the plan control called
+`window.trailsChrome.profile()` with no argument — which is the *reading* of that
+state and not the setting of it. Rather than fix a third switch it is gone: the
+rail carries it on a wide screen and the plan bar on a narrow one, which is where
+a reader planning a route already is. Three switches were one too many.
+
+**The list scrolled although there was room, and scrolling it zoomed the map.**
+One cause. It was capped at **220 px whatever the screen**: measured on a 900 px
+window, a twelve-point route showed a 220 px scroller inside a 552 px panel with
+350 px of room under it. And running off the end of that scroller is what handed
+the wheel to the map — the panel gave the turn up as soon as it had nothing left
+to scroll, which is the bargain the legend struck and the wrong one over a list.
+The cap is `room - fixed` now, the room actually measured above the profile
+panel: **607 px of allowance, 208 px used by ten rows, nothing to scroll.**
+
+**And a wheel that started over a panel does not end in a zoom.** Each scroller
+inside takes what it can use; the outermost panel swallows the rest. Where the
+chrome holds a control the chrome is that boundary, and where there is no chrome
+the control is — asked with `closest('.trails-chrome')` rather than assumed.
+
+**The hint line is gone.** *Drag a point to move it · click one to work on it ·
+click the route to put one in · click the count for the list* — four gestures
+spelled out in a panel that is already short of room, above a list that shows
+what it does.
+
+`make drive` reads **226**, the source tests **230**.
 
 ### What is still open on a phone
 
