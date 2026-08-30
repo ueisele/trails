@@ -2597,6 +2597,10 @@ class TestComposedProfile:
         # A closed sheet is not a failure, and saving the file anyway would be
         # doing something nobody asked for.
         assert "if (failure && failure.name === 'AbortError') {" in html
+        # And a sheet that worked says so, because silence otherwise means both
+        # *the sheet worked* and *this page is older than the reader thinks* —
+        # and only somebody holding the device can tell those apart.
+        assert "sayFile('Handed to the share sheet as ' + name + '.', asked);" in html
 
     def test_a_reader_is_told_when_the_name_could_not_be_carried(self):
         """They are about to find a file named after a blob. The browser would

@@ -1741,6 +1741,10 @@ def files_from_the_page(page: Any) -> Check:
         const file = shared.files[0];
         return {name: file.name, type: file.type, bytes: file.size, isFile: file instanceof File}; }"""
     )
+    # **A save on a finger always says something.** Silence used to mean both
+    # *the sheet worked* and *this page is older than you think*, and only a
+    # reader with the device can tell those apart -- which cost a round trip.
+    said_shared = page.evaluate("() => (document.querySelector('.trails-profile-saved') || {}).textContent || ''")
     # **And the path the reader on iOS Firefox is actually on.** That browser
     # takes downloads over itself and drops the anchor's name, and the sheet did
     # not run for it either -- so the sheet refusing has to end somewhere better
@@ -1894,6 +1898,7 @@ def files_from_the_page(page: Any) -> Check:
             Reading("a finger is handed the share sheet", bool(handed and handed["isFile"]), True, note=str(handed)),
             Reading("with the name on the file itself", handed["name"] if handed else None, written.suggested_filename),
             Reading("and the whole body with it", handed["bytes"] if handed else None, route.stat().st_size),
+            Reading("and the sheet says what it handed over", written.suggested_filename in said_shared, True, note=said_shared),
             # What is left when the sheet says no: the anchor, and a sentence,
             # because that browser is about to name the file after the blob.
             Reading("a refused sheet still saves it", refused, written.suggested_filename),

@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 253 while one behaviour is being written. What is left out
+  readings instead of 254 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **185 seconds** and say
-whether the page still holds: **253 readings, and it should be green**. If it is
+whether the page still holds: **254 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 253. And **build before driving**: the run reads the page `make map`
+instead of 254. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3354,7 +3354,15 @@ Where both are refused it cost one rejected promise; where there is no sheet it
 never runs at all. **That retry is the last lever on this side**, and whether it
 moves anything is the device's answer to give.
 
-`make drive` reads **253**, the source tests **245**.
+**And every save on a finger says something now, which is the half that was
+missing.** Silence meant two different things — *the sheet worked* and *this page
+is older than you think* — and the only instrument that can tell those apart is a
+reader with the device, so it cost a round trip to find out that the answer was
+the second one. A sheet that worked names what it handed over; the two failing
+ways name the file and say which of them it was; only a sheet the reader closed
+themselves stays quiet, and they know they closed it.
+
+`make drive` reads **254**, the source tests **245**.
 
 ### What is still open on a phone
 
@@ -3397,8 +3405,11 @@ moves anything is the device's answer to give.
   - *…would not hand it to a share sheet…* — a sheet exists and refused both the
     GPX type and a plain stream. That is the one of the three that could still be
     argued with.
-  - **no line at all** — the sheet opened, and *Save to Files* should then write
-    the name the sheet showed.
+  - *Handed to the share sheet as…* — the sheet opened, and *Save to Files*
+    should write the name it showed.
+  - **no line at all** — the page is older than it looks. It is 41,558,841 bytes
+    and `cache-control: max-age=300`, so a phone will happily go on running the
+    copy it already has; open it with a query string on the end to be sure.
 - **Coordinates at 6 decimals** and the rest of the weight work, which the memory
   split above orders and which nothing here touched.
 

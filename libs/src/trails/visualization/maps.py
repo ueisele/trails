@@ -2753,6 +2753,14 @@ class _ProfilePanel(MacroElement):
                 var file = fileOf(name, body, type);
                 navigator.share({files: [file]}).then(function () {
                     saveSaid = after ? 'shared after ' + after : 'shared';
+                    // **Every save on a finger says something, and that is what
+                    // makes the other two sentences readable.** Silence used to
+                    // mean two different things — the sheet worked, and this
+                    // page is older than the reader thinks — and telling those
+                    // apart cost a round trip to a device that only has one
+                    // screen to report from. It is the honest half of a sheet
+                    // anyway: the file left under this name.
+                    sayFile('Handed to the share sheet as ' + name + '.', asked);
                 }, function (failure) {
                     // **A closed sheet is not a failure**, and saving the file
                     // anyway would be doing something nobody asked for.
