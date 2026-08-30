@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 211 while one behaviour is being written. What is left out
+  readings instead of 218 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -25`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **179 seconds** and say
-whether the page still holds: **211 readings, and it should be green**. If it is
+whether the page still holds: **218 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 211. And **build before driving**: the run reads the page `make map`
+instead of 218. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3036,6 +3036,63 @@ grounds that it matches the phone; it turned out to also delete a defect.
   now. The same lesson as `offsetParent`, in a second place.
 
 `make drive` reads **211**, the source tests **224**.
+
+### And the furniture turns with the machine, while the ground does not
+
+**Reported with a screenshot: the map's panels stay white on a dark machine.**
+The tiles staying light was never in question — a Kartverket sheet arrives as a
+finished raster and an inverted slope is not a dark slope, it is a wrong one. The
+question was the furniture, and the furniture had no theme at all: **0 occurrences
+of `prefers-color-scheme` in the page**, and every colour a literal in an inline
+style — some **eighty** of them, `#333` and `#555` and `#666` across six controls.
+An inline style beats a stylesheet, so nothing outside those elements could ever
+have changed one.
+
+They are `var(--trails-…)` now, said once in a `<style>` every page gets, in
+three blocks: bare `:root` for light, `prefers-color-scheme` guarded against an
+explicit light choice, and a `[data-theme="dark"]` stamp. There is no switch on
+the page; the stamps are what one would need and cost nothing until then.
+
+**Two things could not be tokens.** The chart draws with *SVG attributes*, and
+`setAttribute('fill', 'var(--x)')` paints nothing — `var()` is a CSS value, not
+an attribute value. So the panel reads its ink out of the document at stroke
+time, in `refreshInk()` at the top of `render()`, and listens to
+`prefers-color-scheme` so a machine that turns dark under a drawing already on
+the screen gets a fresh one. And **Leaflet's own furniture** arrives painted from
+its stylesheet: the zoom buttons, the scale bar, the attribution and the popups
+take `!important`, which is the honest tool where the page is overriding a third
+party's rule.
+
+**What does not turn is the data.** The four gradient bands, the route's black,
+the sea line, the colours the legend gives each source: green meaning *gentle* in
+the morning and something else at night would be the drawing lying to keep up
+with the panels. The check asserts that the bands' stroke is the same string in
+both sets and that nothing is done to the tiles.
+
+**Driven with `emulate_media`**, which is the real media query and not a class
+the page sets for itself — the one part of a theme that needs a browser. The
+panel goes `rgba(255,255,255,0.94)` to `rgba(20,25,28,0.97)`, the rail and the
+zoom buttons with it, the bands do not move, and the tiles carry no filter in
+either set.
+
+**And a reading found the defect that mattered: 1.4 : 1.** Not one panel set a
+`color` — they inherited the document's black, which is right on a white panel
+and unreadable on a dark one. Said on the panel classes rather than on the map
+container, because what a label drawn on the terrain is coloured is the label's
+business. **13.9 : 1** now, against 15.1 in the light set.
+
+**Two things only a screenshot showed.** A number is not a look: the run was
+green when both of these were on the screen.
+
+- **The detail sheet ran 66 px into the profile panel.** Its ceiling was the
+  dock's, measured from the top of the map — and the sheet starts 66 px lower
+  now, below the zoom buttons it no longer covers. It has its own ceiling.
+- **A bright map bleeds more into a dark panel than into a white one.** At 0.95
+  the terrain was faintly legible through the curve; the pixels said
+  `(33, 39, 41)`, exactly the arithmetic, and the arithmetic was not the
+  question. 0.97 in the dark set, unchanged in the light one.
+
+`make drive` reads **218** in **175 seconds**, the source tests **227**.
 
 ### What is still open on a phone
 

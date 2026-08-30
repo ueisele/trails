@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -1851,7 +1852,10 @@ def the_profile_tool(page: Any) -> Check:
         Whether it opens, what it says, and whether it gets out of the way
     """
     button = """() => { const b = document.querySelector('.trails-rail button[data-tool=profile]');
-      return b ? {title: b.title, disabled: b.disabled, colour: b.style.color} : null; }"""
+      // **Computed and not the inline value.** These carry `var(--trails-...)`
+      // now, and `style.color` gives back the declaration rather than a colour.
+      return b ? {title: b.title, disabled: b.disabled,
+                  colour: getComputedStyle(b).color} : null; }"""
     shown = """() => { const open = [...document.querySelectorAll('.trails-chrome-body > div')]
         .filter(node => node.offsetParent !== null);
       const empty = document.querySelector('.trails-profile-empty');
@@ -2205,8 +2209,14 @@ def reading_with_a_finger(page: Any) -> Check:
     seen = """() => { const chart = document.querySelector('.trails-profile-panel svg');
       const shown = [...chart.querySelectorAll('text')].filter(n => n.style.display !== 'none')
         .map(n => n.textContent);
+      // **Against the token and not a hex this check remembers.** The
+      // crosshair's blue is the page's accent now — one blue, in the rail and on
+      // the curve — and a check holding the old literal reads zero rules and
+      // says the crosshair is gone.
+      const accent = getComputedStyle(document.documentElement)
+        .getPropertyValue('--trails-accent').trim();
       const rules = [...chart.querySelectorAll('line')]
-        .filter(n => n.getAttribute('stroke') === '#1565c0' && n.style.display !== 'none').length;
+        .filter(n => n.getAttribute('stroke') === accent && n.style.display !== 'none').length;
       const pane = document.querySelector('.leaflet-trailsProfileHere-pane');
       const mark = pane ? [...pane.children].filter(n => n.style.display !== 'none').length : 0;
       return {reading: shown.find(s => / km /.test(s)) || null, rules: rules, mark: mark,
@@ -2246,6 +2256,101 @@ def reading_with_a_finger(page: Any) -> Check:
 
 
 # ---------------------------------------------------------------------------
+
+
+def the_dark_set(page: Any) -> Check:
+    """Two sets of colours for the furniture, and one for the ground.
+
+    **The tiles cannot turn and must not.** A Kartverket sheet arrives as a
+    finished raster; an inverted slope is not a dark slope, it is a wrong one.
+    So this asks two separate questions: whether the panels followed the
+    machine, and whether the drawing stayed where the data put it.
+
+    Driven with ``emulate_media``, which is the actual media query and not a
+    class this page sets for itself -- the one thing about the theme a browser
+    is needed for.
+
+    Args:
+        page: The driven page, with a chain selected
+
+    Returns:
+        What the panels measure in each set, the contrast in each, and what did
+        not move between them
+    """
+    read = """() => {
+      const paint = sel => { const node = document.querySelector(sel);
+        if (!node) { return null; }
+        const seen = getComputedStyle(node);
+        return {bg: seen.backgroundColor, fg: seen.color}; };
+      const band = document.querySelector('.trails-profile-panel svg polyline, .trails-profile-panel svg path');
+      const tile = document.querySelector('.leaflet-tile');
+      return {panel: paint('.trails-profile-panel'), rail: paint('.trails-rail'),
+              zoom: paint('.leaflet-control-zoom a'),
+              band: band ? getComputedStyle(band).stroke : null,
+              tiles: tile ? getComputedStyle(tile).filter : null}; }"""
+
+    def channels(colour: str) -> tuple[float, float, float]:
+        """Pull the three channels out of an rgb() or rgba() string."""
+        numbers = [float(part) for part in re.findall(r"[\d.]+", colour or "")][:3]
+        return tuple(numbers) if len(numbers) == 3 else (0.0, 0.0, 0.0)  # type: ignore[return-value]
+
+    def contrast(front: str, back: str) -> float:
+        """WCAG contrast between two rgb strings, 1 to 21."""
+
+        def light(colour: str) -> float:
+            parts = []
+            for raw in channels(colour):
+                unit = raw / 255
+                parts.append(unit / 12.92 if unit <= 0.03928 else ((unit + 0.055) / 1.055) ** 2.4)
+            return 0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]
+
+        first, second = light(front), light(back)
+        high, low = max(first, second), min(first, second)
+        return (high + 0.05) / (low + 0.05)
+
+    page.emulate_media(color_scheme="light")
+    page.wait_for_timeout(500)
+    light = page.evaluate(read)
+    page.emulate_media(color_scheme="dark")
+    page.wait_for_timeout(700)
+    dark = page.evaluate(read)
+    page.emulate_media(color_scheme="light")
+    page.wait_for_timeout(400)
+
+    def darker(part: str) -> bool:
+        return sum(channels(dark[part]["bg"])) < sum(channels(light[part]["bg"])) - 90
+
+    return Check(
+        "the furniture turns and the ground does not",
+        [
+            Reading("the profile panel turns", darker("panel"), True, note=f"{light['panel']['bg']} to {dark['panel']['bg']}"),
+            Reading("the tool rail turns", darker("rail"), True),
+            # Leaflet's own buttons come painted from its stylesheet, so they
+            # need the page to say otherwise or they stay white on a dark map.
+            Reading("and so do the zoom buttons", darker("zoom"), True, note=f"{light['zoom']['bg']} to {dark['zoom']['bg']}"),
+            # A panel nobody can read is not a dark theme. 4.5 is the ordinary
+            # text threshold; these are 12 px labels, so it is the right one.
+            Reading(
+                "readable in the light set",
+                round(contrast(light["panel"]["fg"], light["panel"]["bg"]), 1),
+                15.1,
+                within=3.0,
+                holds=False,
+            ),
+            Reading(
+                "and readable in the dark one",
+                contrast(dark["panel"]["fg"], dark["panel"]["bg"]) >= 4.5,
+                True,
+                note=f"{contrast(dark['panel']['fg'], dark['panel']['bg']):.1f}:1",
+            ),
+            # **The drawing is not furniture.** Green meaning gentle in the
+            # morning and something else at night would be the curve lying to
+            # keep up with the panels.
+            Reading("the gradient bands do not turn", dark["band"], light["band"]),
+            # And the terrain least of all: no filter, in either set.
+            Reading("nor is anything done to the tiles", dark["tiles"], light["tiles"], note=str(light["tiles"])),
+        ],
+    )
 
 
 def a_plan_survives_a_reload(page: Any) -> Check:
@@ -2481,6 +2586,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_search_on_a_narrow_panel(page))
     if wanted(sharing_the_room):
         checks.append(sharing_the_room(page))
+    if wanted(the_dark_set):
+        checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be
     # reading a page in a state nothing before it had set up.
     if wanted(a_plan_survives_a_reload):

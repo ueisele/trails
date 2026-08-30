@@ -1237,7 +1237,10 @@ class TestProfilePanel:
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_profile_panel(fmap, [])
 
-        assert "trails-profile-panel" not in fmap.get_root().render()
+        # The class name alone is no longer proof: the theme's stylesheet names
+        # every panel it colours, whether or not one was added. What only a real
+        # panel produces is the call that makes one.
+        assert "L.DomUtil.create('div', 'trails-profile-panel')" not in fmap.get_root().render()
 
     def test_without_figures_nothing_is_added(self):
         """A layer nobody measured has no profile to offer."""
@@ -1246,7 +1249,10 @@ class TestProfilePanel:
         layer = maps.add_trails(fmap, gdf, name="Chains", group_field="chain_id")
         maps.add_profile_panel(fmap, [layer])
 
-        assert "trails-profile-panel" not in fmap.get_root().render()
+        # The class name alone is no longer proof: the theme's stylesheet names
+        # every panel it colours, whether or not one was added. What only a real
+        # panel produces is the call that makes one.
+        assert "L.DomUtil.create('div', 'trails-profile-panel')" not in fmap.get_root().render()
 
     def test_it_starts_folded(self, group):
         fmap, layer = group
@@ -2891,3 +2897,56 @@ class TestChrome:
         assert "rail.style.cssText = 'position:absolute;right:10px;top:10px;width:46px" in html
         assert "corner.style.marginLeft" not in html
         assert "dock.style.right = '66px';" in html
+
+
+class TestTheme:
+    """Tests for the two sets of colours the furniture is drawn from."""
+
+    def test_three_blocks_and_not_two(self):
+        """A web page has three theme states, not two: an explicit choice stamps
+        `data-theme` on the root and the default setting stamps nothing at all,
+        so `prefers-color-scheme` alone separates light from dark for most
+        readers while a stamped choice has to beat it in both directions."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+
+        html = fmap.get_root().render()
+        assert ":root {" in html
+        assert "@media (prefers-color-scheme: dark)" in html
+        assert ':root:not([data-theme="light"])' in html
+        assert ':root[data-theme="dark"]' in html
+        # Native controls — the legend's checkboxes, the search field — are the
+        # browser's to paint, and this is how it is told which set to use.
+        assert "color-scheme: dark;" in html
+
+    def test_the_data_keeps_its_own_colours(self):
+        """The four gradient bands, the route's black and the sea line are
+        statements about the ground, not furniture. Green meaning *gentle* in the
+        morning and something else at night would be the drawing lying to keep up
+        with the panels."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        gdf = gpd.GeoDataFrame(
+            {
+                "chain_id": ["ut-no-1-2-3"],
+                "ascent": [996.4],
+                "geometry": [LineString([(12.8, 65.4), (12.81, 65.41)])],
+            },
+            crs="EPSG:4326",
+        )
+        layer = maps.add_trails(fmap, gdf, name="Chains", group_field="chain_id", figure_fields={"ascent": "ascent"})
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        for _, _, colour, _ in maps.GRADIENT_BANDS:
+            assert colour in html
+        assert "var ROUTE = '#111111'" in html or "'#111111'" in html
+        assert "var SEA = '#4fa3c7';" in html
+
+    def test_the_panels_say_their_own_ink(self):
+        """Not one of them set a `color`: they inherited the document's black,
+        which is right on a white panel and 1.4:1 on a dark one — measured in a
+        browser, which is the only place it could have been."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+
+        html = fmap.get_root().render()
+        assert ".trails-profile-panel, .trails-plan-control, .trails-legend, .trails-search," in html
+        assert "color: var(--trails-ink);" in html

@@ -30,6 +30,152 @@ from trails.routing import elevation
 Bounds = tuple[float, float, float, float]
 
 
+class _Theme(MacroElement):
+    """The colours every panel on this page is drawn from, in two sets.
+
+    **The tiles stay as they are and only the furniture turns.** A Kartverket
+    sheet arrives as a finished raster and cannot be darkened without lying
+    about the terrain: an inverted slope is not a dark slope, it is a wrong one.
+    So dark here means dark panels over a light map, which is the state a reader
+    wants at dusk with the phone in their hand and is the only one honestly
+    available.
+
+    **Named colours and not a second set of literals.** Every panel on this page
+    carried its colours as inline styles -- some fifty of them, `#333` and `#555`
+    and `#666` scattered across six controls -- and an inline style beats a
+    stylesheet, so nothing outside the element could ever have changed one. They
+    are `var(--trails-...)` now, which an inline style resolves against whatever
+    the document says, and this says it once.
+
+    **Three blocks and not two**, for the same reason a web page needs three: an
+    explicit choice stamps ``data-theme`` on the root, and the default setting
+    stamps nothing at all -- so ``prefers-color-scheme`` alone separates light
+    from dark for most readers, while a stamped choice has to beat it in both
+    directions. There is no switch on the page today; the stamps are what one
+    would need, and cost nothing until then.
+
+    **What does not turn: the data.** The four gradient bands, the route's own
+    black and the colours the legend gives each source are statements about the
+    ground, not furniture. Green meaning *gentle* in the morning and something
+    else at night would be the drawing lying to keep up with the panels.
+    """
+
+    _template = Template("""
+        {% macro header(this, kwargs) %}
+        <style>
+        :root {
+            color-scheme: light;
+            --trails-panel: rgba(255,255,255,0.94);
+            --trails-solid: #ffffff;
+            --trails-sunk: #f2f4f4;
+            --trails-edge: #999999;
+            --trails-rule: #dddddd;
+            --trails-rule-soft: #eeeeee;
+            --trails-ink: #1d282c;
+            --trails-ink-2: #333333;
+            --trails-ink-3: #555555;
+            --trails-ink-4: #777777;
+            --trails-ink-5: #8a9a9e;
+            --trails-accent: #0d47a1;
+            --trails-on-accent: #ffffff;
+            --trails-strong: #111111;
+            --trails-on-strong: #ffffff;
+            --trails-warn: #8a5000;
+            --trails-grip: #c4c4c4;
+            --trails-grip-held: #8a8a8a;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                color-scheme: dark;
+                --trails-panel: rgba(20,25,28,0.97);
+                --trails-solid: #1b2124;
+                --trails-sunk: #232a2d;
+                --trails-edge: #4b5457;
+                --trails-rule: #333c3f;
+                --trails-rule-soft: #2b3235;
+                --trails-ink: #e9e6de;
+                --trails-ink-2: #d5dad9;
+                --trails-ink-3: #b4bcbc;
+                --trails-ink-4: #96a0a1;
+                --trails-ink-5: #7f8a8c;
+                --trails-accent: #7fb0f0;
+                --trails-on-accent: #10192a;
+                --trails-strong: #e9e6de;
+                --trails-on-strong: #14191b;
+                --trails-warn: #e6a75e;
+                --trails-grip: #414a4d;
+                --trails-grip-held: #6b7679;
+            }
+        }
+        :root[data-theme="dark"] {
+            color-scheme: dark;
+            --trails-panel: rgba(20,25,28,0.97);
+            --trails-solid: #1b2124;
+            --trails-sunk: #232a2d;
+            --trails-edge: #4b5457;
+            --trails-rule: #333c3f;
+            --trails-rule-soft: #2b3235;
+            --trails-ink: #e9e6de;
+            --trails-ink-2: #d5dad9;
+            --trails-ink-3: #b4bcbc;
+            --trails-ink-4: #96a0a1;
+            --trails-ink-5: #7f8a8c;
+            --trails-accent: #7fb0f0;
+            --trails-on-accent: #10192a;
+            --trails-strong: #e9e6de;
+            --trails-on-strong: #14191b;
+            --trails-warn: #e6a75e;
+            --trails-grip: #414a4d;
+            --trails-grip-held: #6b7679;
+        }
+
+        /* Leaflet's own furniture, which arrives from its stylesheet already
+           painted. `!important` because that is a third party's rule and this
+           is the page overriding it -- the one place where it is the honest
+           tool rather than a shortcut. */
+        .leaflet-bar, .leaflet-bar a, .leaflet-touch .leaflet-bar a {
+            background-color: var(--trails-solid) !important;
+            color: var(--trails-ink) !important;
+            border-bottom-color: var(--trails-rule) !important;
+        }
+        .leaflet-bar { border-color: var(--trails-edge) !important; }
+        .leaflet-bar a:hover { background-color: var(--trails-sunk) !important; }
+        .leaflet-control-attribution {
+            background: var(--trails-panel) !important;
+            color: var(--trails-ink-4) !important;
+        }
+        .leaflet-control-attribution a { color: var(--trails-accent) !important; }
+        .leaflet-control-scale-line {
+            background: var(--trails-panel) !important;
+            color: var(--trails-ink-2) !important;
+            border-color: var(--trails-ink-4) !important;
+        }
+        .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+            background: var(--trails-solid) !important;
+            color: var(--trails-ink) !important;
+        }
+        .leaflet-container a { color: var(--trails-accent); }
+
+        /* **The panels say their own ink.** Not one of them set a `color`: they
+           inherited the document's black, which is right on a white panel and is
+           1.4:1 on a dark one — measured, and the reason this rule exists. Said
+           on the panels themselves rather than on the map container, because
+           what a text label on the terrain is coloured is the label's business
+           and not the furniture's. */
+        .trails-profile-panel, .trails-plan-control, .trails-legend, .trails-search,
+        .trails-basemap, .trails-chrome, .leaflet-popup-content {
+            color: var(--trails-ink);
+        }
+        </style>
+        {% endmacro %}
+    """)
+
+    def __init__(self) -> None:
+        """Initialize the theme."""
+        super().__init__()
+        self._name = "Theme"
+
+
 class BaseMap(Enum):
     """Available base layers.
 
@@ -114,6 +260,11 @@ def create_map(
             control=True,
             show=index == 0,
         ).add_to(fmap)
+
+    # Every page gets the colours, chrome or no chrome: the panels carry them
+    # as inline styles, and an inline style resolves its variables against the
+    # document — so the document has to have said them.
+    _Theme().add_to(fmap)
 
     if bounds is not None:
         min_lon, min_lat, max_lon, max_lat = bounds
@@ -461,7 +612,7 @@ def _build_popup(
             continue
         # Values come from third-party data, so they must not be able to inject markup.
         rows.append(
-            f"<tr><td style='padding:2px 8px 2px 0;color:#555'>{escape(str(label))}</td>"
+            f"<tr><td style='padding:2px 8px 2px 0;color:var(--trails-ink-3)'>{escape(str(label))}</td>"
             f"<td style='padding:2px 0'><b>{escape(str(value))}</b></td></tr>"
         )
 
@@ -476,7 +627,7 @@ def _build_popup(
         # no description on the park's site would otherwise get a heading over
         # nothing at all.
         if link_heading and not written:
-            rows.append(f"<tr><td colspan='2' style='padding:7px 0 1px;color:#777'>{escape(str(link_heading))}</td></tr>")
+            rows.append(f"<tr><td colspan='2' style='padding:7px 0 1px;color:var(--trails-ink-4)'>{escape(str(link_heading))}</td></tr>")
         written += 1
         # noopener keeps the opened page from reaching back into this one.
         rows.append(
@@ -488,7 +639,10 @@ def _build_popup(
     if source:
         # Set off by a rule, so it reads as provenance rather than as another
         # attribute of the feature.
-        rows.append(f"<tr><td colspan='2' style='padding:5px 0 0;border-top:1px solid #ddd;color:#777'>Source: {escape(str(source))}</td></tr>")
+        rows.append(
+            f"<tr><td colspan='2' style='padding:5px 0 0;border-top:1px solid var(--trails-rule);"
+            f"color:var(--trails-ink-4)'>Source: {escape(str(source))}</td></tr>"
+        )
 
     if not rows:
         return None
@@ -776,15 +930,15 @@ class _NameSearch(MacroElement):
             input.placeholder = {{ this.placeholder_json }};
             input.autocomplete = 'off';
             input.className = 'trails-search-field';
-            input.style.cssText = 'width:210px;font-size:12px;padding:3px 6px;border:1px solid #bbb;border-radius:3px';
+            input.style.cssText = 'width:210px;font-size:12px;padding:3px 6px;border:1px solid var(--trails-rule);border-radius:3px';
 
             var count = document.createElement('span');
-            count.style.cssText = 'margin-left:8px;color:#666';
+            count.style.cssText = 'margin-left:8px;color:var(--trails-ink-4)';
 
             var control = L.control({position: 'topleft'});
             control.onAdd = function () {
                 var box = L.DomUtil.create('div', 'trails-search');
-                box.style.cssText = 'background:rgba(255,255,255,0.95);padding:6px 8px;border:1px solid #999;' +
+                box.style.cssText = 'background:var(--trails-panel);padding:6px 8px;border:1px solid var(--trails-edge);' +
                     'border-radius:4px;font-family:sans-serif;font-size:12px';
                 box.appendChild(input);
                 box.appendChild(count);
@@ -1697,7 +1851,30 @@ class _ProfilePanel(MacroElement):
             var PAD = {left: 52, right: 16, top: 12, bottom: 22};
             // Blue, deliberately: the steepest gradient band is red, and a red rule
             // over a red stretch of curve reads as part of the data.
+            // **Read from the document rather than written here**, because
+            // this is the one part of the panel that draws with SVG attributes,
+            // and `var()` is a CSS value: `setAttribute('fill', 'var(--x)')`
+            // paints nothing at all. The starting values are the light set and
+            // the fallback if a page is ever built without the theme.
             var AXIS = '#9e9e9e', TEXT = '#555', CROSS = '#1565c0';
+            var PAPER = '#ffffff', GRID = '#eceff1', MARK = '#111111', FAINT = '#9e9e9e';
+            function refreshInk() {
+                if (!window.getComputedStyle) { return; }
+                var css = getComputedStyle(map.getContainer());
+                function token(name, fallback) {
+                    var got = css.getPropertyValue('--trails-' + name);
+                    return (got && got.trim()) || fallback;
+                }
+                AXIS = token('ink-5', '#9e9e9e');
+                TEXT = token('ink-3', '#555');
+                CROSS = token('accent', '#1565c0');
+                PAPER = token('solid', '#ffffff');
+                GRID = token('rule-soft', '#eceff1');
+                MARK = token('ink', '#111111');
+                FAINT = token('ink-5', '#9e9e9e');
+                STATION = MARK;
+                STATION_UNREAD = FAINT;
+            }
             // Sea level, which is the one height on this panel that is not a
             // choice: every other line is drawn where the data happens to be.
             var SEA = '#4fa3c7';
@@ -2681,13 +2858,14 @@ class _ProfilePanel(MacroElement):
             whole.textContent = 'whole chain';
             whole.title = 'Draw the whole of it again';
             whole.style.cssText = 'font:inherit;font-weight:400;font-size:11px;padding:2px 8px;flex:none;' +
-                'border:1px solid #bbb;border-radius:10px;background:#fff;color:#333;cursor:pointer;display:none';
+                'border:1px solid var(--trails-rule);border-radius:10px;background:var(--trails-solid);' +
+                'color:var(--trails-ink-2);cursor:pointer;display:none';
             var body = document.createElement('div');
             // Right of the title, not under it. It reads as what the title is
             // about rather than as a second thing to look at, and when nothing
             // is selected the whole panel is one line.
             var summary = document.createElement('span');
-            summary.style.cssText = 'flex:1 1 auto;min-width:0;font-weight:400;color:#333;text-align:right';
+            summary.style.cssText = 'flex:1 1 auto;min-width:0;font-weight:400;color:var(--trails-ink-2);text-align:right';
             // **Two switches at the end of the heading, and they are not the
             // same switch.** The heading itself folds: the drawing goes and the
             // line of figures stays, which is what a reader wants who is coming
@@ -2704,7 +2882,7 @@ class _ProfilePanel(MacroElement):
             hide.title = 'Put the profile away';
             hide.setAttribute('aria-label', 'Put the profile away');
             hide.style.cssText = 'font:inherit;font-size:16px;line-height:1;padding:0 5px;border:0;' +
-                'background:none;color:#55666b;cursor:pointer;display:none';
+                'background:none;color:var(--trails-ink-3);cursor:pointer;display:none';
             hide.addEventListener('click', function (event) {
                 // The heading folds on a click and this is inside it.
                 event.stopPropagation();
@@ -2725,7 +2903,7 @@ class _ProfilePanel(MacroElement):
             // What the colours mean, once, beside the figures. A curve that
             // changes colour is unreadable without it.
             var key = document.createElement('div');
-            key.style.cssText = 'margin:0 0 2px;color:#666;font-size:11px';
+            key.style.cssText = 'margin:0 0 2px;color:var(--trails-ink-4);font-size:11px';
             GRADE.bands.forEach(function (band, index) {
                 var swatch = document.createElement('span');
                 swatch.style.cssText = 'display:inline-block;width:14px;height:0;vertical-align:middle;margin:0 4px 0 ' +
@@ -2770,10 +2948,10 @@ class _ProfilePanel(MacroElement):
             download.textContent = 'Download GPX';
             download.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-right:8px;cursor:pointer';
             var carries = document.createElement('span');
-            carries.style.cssText = 'color:#333;margin-right:8px';
+            carries.style.cssText = 'color:var(--trails-ink-2);margin-right:8px';
             var licensed = document.createElement('span');
             licensed.className = 'trails-profile-licences';
-            licensed.style.cssText = 'color:#666;font-size:11px';
+            licensed.style.cssText = 'color:var(--trails-ink-4);font-size:11px';
             // What kind of ground the file covers, which only a route states:
             // its three marking buckets, and the length no source records a path
             // along. A chain leaves this row empty. A line of its own and
@@ -2782,7 +2960,7 @@ class _ProfilePanel(MacroElement):
             // one longer list of sources.
             var noted = document.createElement('span');
             noted.className = 'trails-profile-ground';
-            noted.style.cssText = 'color:#666;font-size:11px;display:block;margin-top:2px';
+            noted.style.cssText = 'color:var(--trails-ink-4);font-size:11px;display:block;margin-top:2px';
             // **Everything about this line except the three figures.** The
             // heading carried all of it — measured on a phone held upright, six
             // lines of figures and eleven of licences over a drawing that got
@@ -2801,7 +2979,7 @@ class _ProfilePanel(MacroElement):
             more.title = 'Every figure, and the sources this draws on';
             more.setAttribute('aria-label', 'Every figure, and the sources this draws on');
             more.style.cssText = 'font:inherit;font-size:14px;line-height:1;padding:0 4px;border:0;' +
-                'background:none;color:#0d47a1;cursor:pointer;display:none';
+                'background:none;color:var(--trails-accent);cursor:pointer;display:none';
             tools.appendChild(more);
             tools.appendChild(hide);
             var licencesOpen = false;
@@ -2821,14 +2999,14 @@ class _ProfilePanel(MacroElement):
             }
             function openDetail() {
                 var box = document.createElement('div');
-                box.style.cssText = 'font-size:13px;line-height:1.65;color:#333';
+                box.style.cssText = 'font-size:13px;line-height:1.65;color:var(--trails-ink-2)';
                 // The same lines the heading shows the first three of, in the
                 // same order. One derivation, two renderings.
                 saidLines.forEach(function (line, at) {
                     var row = document.createElement('div');
                     row.style.cssText = 'padding:3px 0' +
-                        (at < 3 ? ';font-weight:600' : ';color:#555') +
-                        (at ? ';border-top:1px solid #eee' : '');
+                        (at < 3 ? ';font-weight:600' : ';color:var(--trails-ink-3)') +
+                        (at ? ';border-top:1px solid var(--trails-rule-soft)' : '');
                     row.textContent = line;
                     box.appendChild(row);
                 });
@@ -2836,10 +3014,10 @@ class _ProfilePanel(MacroElement):
                  [noted.textContent, 'The ground this covers']].forEach(function (part) {
                     if (!part[0]) { return; }
                     var head = document.createElement('div');
-                    head.style.cssText = 'margin-top:14px;font-weight:600;font-size:12px;color:#55666b';
+                    head.style.cssText = 'margin-top:14px;font-weight:600;font-size:12px;color:var(--trails-ink-3)';
                     head.textContent = part[1];
                     var said = document.createElement('div');
-                    said.style.cssText = 'margin-top:3px;font-size:12px;color:#555;line-height:1.6';
+                    said.style.cssText = 'margin-top:3px;font-size:12px;color:var(--trails-ink-3);line-height:1.6';
                     // Read off the element that shows it rather than composed
                     // again: one sentence, in two places, from one derivation.
                     said.textContent = part[0];
@@ -2886,7 +3064,7 @@ class _ProfilePanel(MacroElement):
             grip.style.cssText = 'height:7px;margin:-4px -10px 1px;cursor:ns-resize;' +
                 'display:flex;align-items:center;justify-content:center';
             var grabbed = document.createElement('div');
-            grabbed.style.cssText = 'width:38px;height:3px;border-radius:2px;background:#c4c4c4';
+            grabbed.style.cssText = 'width:38px;height:3px;border-radius:2px;background:var(--trails-grip)';
             grip.appendChild(grabbed);
             // The chart height the panel was last **laid out** with, which
             // is not the same as the height it has been asked for: a redraw is
@@ -2894,8 +3072,8 @@ class _ProfilePanel(MacroElement):
             // box on the page still measures the old one.
             var laidOut = chartHeight;
             var stretching = null, awaiting = false;
-            grip.addEventListener('mouseenter', function () { grabbed.style.background = '#8a8a8a'; });
-            grip.addEventListener('mouseleave', function () { if (!stretching) { grabbed.style.background = '#c4c4c4'; } });
+            grip.addEventListener('mouseenter', function () { grabbed.style.background = 'var(--trails-grip-held)'; });
+            grip.addEventListener('mouseleave', function () { if (!stretching) { grabbed.style.background = 'var(--trails-grip)'; } });
 
             function stretchTo(pixels) {
                 // **Only while the panel is open**, and that is not tidiness.
@@ -2977,7 +3155,7 @@ class _ProfilePanel(MacroElement):
                 // The panel is anchored to the bottom of the map, so it grows
                 // upwards and a pointer moving up asks for more.
                 stretching = {from: event.clientY, height: chartHeight};
-                grabbed.style.background = '#8a8a8a';
+                grabbed.style.background = 'var(--trails-grip-held)';
                 event.preventDefault();
             });
             document.addEventListener('mousemove', function (event) {
@@ -2987,7 +3165,7 @@ class _ProfilePanel(MacroElement):
             document.addEventListener('mouseup', function () {
                 if (!stretching) { return; }
                 stretching = null;
-                grabbed.style.background = '#c4c4c4';
+                grabbed.style.background = 'var(--trails-grip)';
             });
 
             // And with a finger, because the height is resolution on a steep
@@ -2999,7 +3177,7 @@ class _ProfilePanel(MacroElement):
                 if (!open || event.touches.length !== 1) { return; }
                 readerSized = true;
                 stretching = {from: event.touches[0].clientY, height: chartHeight};
-                grabbed.style.background = '#8a8a8a';
+                grabbed.style.background = 'var(--trails-grip-held)';
                 event.preventDefault();
             }, {passive: false});
             document.addEventListener('touchmove', function (event) {
@@ -3010,14 +3188,14 @@ class _ProfilePanel(MacroElement):
             document.addEventListener('touchend', function () {
                 if (!stretching) { return; }
                 stretching = null;
-                grabbed.style.background = '#c4c4c4';
+                grabbed.style.background = 'var(--trails-grip)';
             });
 
             var control = L.control({position: 'bottomleft'});
             var box = null;
             control.onAdd = function () {
                 box = L.DomUtil.create('div', 'trails-profile-panel');
-                box.style.cssText = 'background:rgba(255,255,255,0.94);padding:6px 10px;border:1px solid #999;' +
+                box.style.cssText = 'background:var(--trails-panel);padding:6px 10px;border:1px solid var(--trails-edge);' +
                     'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4;' +
                     // Clear of the attribution, which sits in the corner opposite
                     // and would otherwise be covered by a panel this wide.
@@ -3052,7 +3230,7 @@ class _ProfilePanel(MacroElement):
                 // it started on is no longer above a chart, and picking the drag
                 // up again on reopening would jump the height by however far the
                 // pointer travelled in between.
-                if (!open && stretching) { stretching = null; grabbed.style.background = '#c4c4c4'; }
+                if (!open && stretching) { stretching = null; grabbed.style.background = 'var(--trails-grip)'; }
                 var named = open && selected && selected.label ? ' \\u00b7 ' + selected.label : '';
                 name.textContent = (open ? '\\u25be ' : '\\u25b8 ') + title + named;
                 body.style.display = open ? '' : 'none';
@@ -3094,7 +3272,7 @@ class _ProfilePanel(MacroElement):
             var SHAFT = 'M48 76 L48 28 M38 41 L48 24 L58 41';
             // The gentlest band's colour: the arrow says which way, not how
             // steep, so it takes the curve's base colour rather than a band.
-            ['#ffffff', GRADE.bands[0].colour].forEach(function (colour, index) {
+            [PAPER, GRADE.bands[0].colour].forEach(function (colour, index) {
                 var stroke = document.createElementNS(SVG, 'path');
                 stroke.setAttribute('d', SHAFT);
                 stroke.setAttribute('fill', 'none');
@@ -3132,7 +3310,7 @@ class _ProfilePanel(MacroElement):
             here.style.cssText = 'position:absolute;margin:-11px 0 0 -11px;overflow:visible;display:none';
             // A pale disc under a dark one, like the arrow: over a dark line, or
             // over the dark green of a forest, a bare dot disappears.
-            ['#ffffff', CROSS].forEach(function (colour, index) {
+            [PAPER, CROSS].forEach(function (colour, index) {
                 var ring = document.createElementNS(SVG, 'circle');
                 ring.setAttribute('cx', '11'); ring.setAttribute('cy', '11');
                 ring.setAttribute('r', index ? '4' : '6.5');
@@ -3221,9 +3399,11 @@ class _ProfilePanel(MacroElement):
             // The waypoint pins' own ink. Plan mode names it ROUTE and draws
             // its pins with it; a station on this panel is the same point seen
             // from the side, and two colours for one point would be two points.
-            var STATION = '#111111', STATION_R = 7;
-            // And the ink for one the height model has nothing to say about.
-            var STATION_UNREAD = '#9e9e9e';
+            var STATION_R = 7;
+            // The waypoint marks on the curve: panel ink, not the route's own
+            // black, which is drawn on the map and stays as it is.
+            var STATION = '#111111', STATION_UNREAD = '#9e9e9e';
+
 
             var crosshair = null;
 
@@ -3408,6 +3588,9 @@ class _ProfilePanel(MacroElement):
             }
 
             function render() {
+                // Before anything is drawn, because the reader may have turned
+                // their whole machine dark since the last stroke.
+                refreshInk();
                 while (chart.firstChild) { chart.removeChild(chart.firstChild); }
                 whole.style.display = view.zoom > 1.001 ? '' : 'none';
                 crosshair = null;
@@ -3577,7 +3760,7 @@ class _ProfilePanel(MacroElement):
                     if (lastY !== null && Math.abs(at - lastY) < 12) { return; }
                     lastY = at;
                     drawnHeights.push(value);
-                    chart.appendChild(line(plot.left, at, plot.right, at, '#eceff1'));
+                    chart.appendChild(line(plot.left, at, plot.right, at, GRID));
                     chart.appendChild(text(plot.left - 6, at + 3, metres(value) + ' m', 'end'));
                 });
                 // One number of decimals for the whole axis, decided by how far
@@ -3606,7 +3789,7 @@ class _ProfilePanel(MacroElement):
                 var decimals = shown < 2000 ? 2 : 1;
                 var alongs = Math.max(2, Math.min(6, Math.round(plot.width / 110)));
                 ticks(from, to, alongs).forEach(function (value) {
-                    chart.appendChild(line(x(value), box.top, x(value), box.bottom, '#eceff1'));
+                    chart.appendChild(line(x(value), box.top, x(value), box.bottom, GRID));
                     chart.appendChild(text(x(value), box.bottom + 14, (value / 1000).toFixed(decimals), 'middle'));
                 });
                 chart.appendChild(text(plot.right, box.bottom + 14, 'km', 'end'));
@@ -3710,7 +3893,7 @@ class _ProfilePanel(MacroElement):
                     var disc = document.createElementNS(SVG, 'circle');
                     disc.setAttribute('cx', here); disc.setAttribute('cy', level);
                     disc.setAttribute('r', String(STATION_R));
-                    disc.setAttribute('fill', '#ffffff');
+                    disc.setAttribute('fill', PAPER);
                     disc.setAttribute('stroke', ink);
                     disc.setAttribute('stroke-width', '1.5');
                     marks.appendChild(disc);
@@ -3741,7 +3924,7 @@ class _ProfilePanel(MacroElement):
                         (byFinger ? 'Touch the curve to read it, or pinch: the readings hold '
                             : 'Drag a stretch to look into it, or scroll: the readings hold ')
                         + closest.toFixed(1) + '\\u00d7 more detail than this', 'start');
-                    hint.setAttribute('fill', '#9e9e9e');
+                    hint.setAttribute('fill', FAINT);
                     chart.appendChild(hint);
                 } else if (byFinger) {
                     // The one thing a finger cannot discover: there is no hover,
@@ -3750,7 +3933,7 @@ class _ProfilePanel(MacroElement):
                     // not a claim about detail, which is what the line above it
                     // deliberately is.
                     var say = text(box.left, box.top + 8, 'Touch the curve to read it', 'start');
-                    say.setAttribute('fill', '#9e9e9e');
+                    say.setAttribute('fill', FAINT);
                     chart.appendChild(say);
                 }
 
@@ -4556,6 +4739,17 @@ class _ProfilePanel(MacroElement):
             // is what clears the selection on empty terrain — the same rule the
             // click-highlight follows, so the two cannot drift apart.
             map.on('click', function () { if (!suspended) { show(null); } });
+            // **The machine can turn dark under a drawing that is already on
+            // the screen.** Everything painted through CSS follows on its own;
+            // the curve does not, because it is drawn with attributes read at
+            // stroke time.
+            if (window.matchMedia) {
+                var scheme = window.matchMedia('(prefers-color-scheme: dark)');
+                if (scheme.addEventListener) {
+                    scheme.addEventListener('change', function () { render(); });
+                }
+            }
+
             // A panel this wide is sized against the map, so a resized window
             // has to size it again before anything is drawn into it.
             map.on('resize', function () {
@@ -7945,7 +8139,7 @@ class _PlanMode(MacroElement):
             fresh.title = 'Take every point off the map, and forget the plan kept in this browser';
             fresh.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-top:4px;cursor:pointer;display:block';
             var status = document.createElement('div');
-            status.style.cssText = 'margin-top:4px;color:#555';
+            status.style.cssText = 'margin-top:4px;color:var(--trails-ink-3)';
 
             // What can be done to the waypoint the reader has hold of, and only
             // while they have hold of one: a row of buttons that is always there
@@ -7957,7 +8151,7 @@ class _PlanMode(MacroElement):
             var edits = document.createElement('div');
             edits.style.cssText = 'margin-top:4px;display:none';
             var holding = document.createElement('div');
-            holding.style.cssText = 'margin-bottom:2px;color:#333';
+            holding.style.cssText = 'margin-bottom:2px;color:var(--trails-ink-2)';
             var buttons = document.createElement('div');
             edits.appendChild(holding);
             edits.appendChild(buttons);
@@ -8098,7 +8292,7 @@ class _PlanMode(MacroElement):
                         made.textContent = glyph;
                         made.title = explains;
                         made.style.cssText = 'flex:none;font:inherit;line-height:1;padding:0 4px;border:0;' +
-                            'background:none;color:#777;cursor:pointer;visibility:' +
+                            'background:none;color:var(--trails-ink-4);cursor:pointer;visibility:' +
                             (may ? 'visible' : 'hidden');
                         made.addEventListener('click', function (event) {
                             // Or the row's own click would take hold of the
@@ -8113,12 +8307,12 @@ class _PlanMode(MacroElement):
                     row.draggable = true;
                     row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 3px;' +
                         'border-radius:3px;cursor:pointer;' +
-                        (index === chosen ? 'background:#e8eaf6' : '');
+                        (index === chosen ? 'background:color-mix(in srgb, var(--trails-accent) 14%, transparent)' : '');
                     var grip = document.createElement('span');
                     grip.className = 'trails-plan-grip';
                     grip.textContent = '\u2261';
                     grip.title = 'Drag to move this point in the route';
-                    grip.style.cssText = 'cursor:grab;color:#9e9e9e;flex:none';
+                    grip.style.cssText = 'cursor:grab;color:var(--trails-ink-5);flex:none';
                     var number = document.createElement('span');
                     number.textContent = String(index + 1);
                     number.style.cssText = 'flex:none;min-width:14px;text-align:right;font-weight:600;color:' + ROUTE;
@@ -8130,12 +8324,12 @@ class _PlanMode(MacroElement):
                         ? called.name
                         : point.lat.toFixed(4) + ', ' + point.lon.toFixed(4);
                     says.style.cssText = 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;' +
-                        'white-space:nowrap;color:' + (called.name ? '#333' : '#777');
+                        'white-space:nowrap;color:' + (called.name ? 'var(--trails-ink-2)' : 'var(--trails-ink-4)');
                     if (called.name) { says.title = called.name + (called.kind ? ' \u00b7 ' + called.kind : ''); }
                     // How far into the walk it comes, which is the one thing the
                     // profile beside it and the map above it both leave out.
                     var far = document.createElement('span');
-                    far.style.cssText = 'flex:none;color:#777;font-variant-numeric:tabular-nums';
+                    far.style.cssText = 'flex:none;color:var(--trails-ink-4);font-variant-numeric:tabular-nums';
                     far.textContent = listStations.length > index
                         ? (listStations[index] / 1000).toFixed(2) + ' km' : '';
                     // **Where a stage ends**, on the point it ends at. Not
@@ -8152,7 +8346,7 @@ class _PlanMode(MacroElement):
                         : 'End a stage here';
                     cut.style.cssText = 'flex:none;font:inherit;font-size:13px;line-height:1;padding:0 3px;' +
                         'border:0;background:none;cursor:pointer;visibility:' +
-                        (mayCut ? 'visible' : 'hidden') + ';color:' + (isCut ? ROUTE : '#ccc');
+                        (mayCut ? 'visible' : 'hidden') + ';color:' + (isCut ? 'var(--trails-ink)' : 'var(--trails-rule)');
                     cut.addEventListener('click', function (event) {
                         event.stopPropagation();
                         cutAt(index, !isCut);
@@ -8170,7 +8364,7 @@ class _PlanMode(MacroElement):
                     out.textContent = '\u00d7';
                     out.title = 'Take this point out and join the two legs that met at it';
                     out.style.cssText = 'flex:none;font:inherit;font-size:13px;line-height:1;padding:0 4px;' +
-                        'border:0;background:none;color:#777;cursor:pointer';
+                        'border:0;background:none;color:var(--trails-ink-4);cursor:pointer';
                     out.addEventListener('click', function (event) {
                         // Or the row's own click would take hold of the point
                         // this one is removing.
@@ -8247,7 +8441,7 @@ class _PlanMode(MacroElement):
                 var head = document.createElement('div');
                 head.className = 'trails-plan-stage';
                 head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:4px;' +
-                    'padding:2px 3px;border-top:1px solid #ddd;color:#555';
+                    'padding:2px 3px;border-top:1px solid var(--trails-rule);color:var(--trails-ink-3)';
 
                 // The name, and the two points it runs between where nobody has
                 // given it one. A placeholder rather than a value, so that a
@@ -8260,9 +8454,9 @@ class _PlanMode(MacroElement):
                 called.placeholder = stageName(stage);
                 called.title = 'What this stage is called in its own file';
                 called.style.cssText = 'flex:1 1 auto;min-width:0;font:inherit;font-size:12px;' +
-                    'padding:1px 3px;border:1px solid transparent;background:none;color:#333';
+                    'padding:1px 3px;border:1px solid transparent;background:none;color:var(--trails-ink-2)';
                 called.addEventListener('focus', function () {
-                    called.style.borderColor = '#bbb';
+                    called.style.borderColor = 'var(--trails-edge)';
                     namingRow = stage.at;
                 });
                 called.addEventListener('blur', function () {
@@ -8317,7 +8511,7 @@ class _PlanMode(MacroElement):
             title.className = 'trails-plan-title';
             title.title = 'What this tour is called, in its files and in their names';
             title.style.cssText = 'width:100%;box-sizing:border-box;font:inherit;font-size:12px;' +
-                'padding:1px 3px;border:1px solid #ddd;border-radius:3px;background:none;color:#333';
+                'padding:1px 3px;border:1px solid var(--trails-rule);border-radius:3px;background:none;color:var(--trails-ink-2)';
             title.addEventListener('blur', function () {
                 tourName = title.value.trim();
                 refresh();
@@ -8371,7 +8565,7 @@ class _PlanMode(MacroElement):
             // and none of them is guessable from a map that has never had more
             // than one.
             var hint = document.createElement('div');
-            hint.style.cssText = 'margin-top:2px;color:#777;max-width:16em';
+            hint.style.cssText = 'margin-top:2px;color:var(--trails-ink-4);max-width:16em';
             hint.textContent = 'Drag a point to move it \u00b7 click one to work on it \u00b7 ' +
                 'click the route to put one in \u00b7 click the count for the list';
 
@@ -8427,10 +8621,10 @@ class _PlanMode(MacroElement):
             // as a warning about files in general.
             var offerBox = document.createElement('div');
             offerBox.className = 'trails-plan-offer';
-            offerBox.style.cssText = 'margin-top:4px;padding-top:4px;border-top:1px solid #ddd;max-width:22em';
+            offerBox.style.cssText = 'margin-top:4px;padding-top:4px;border-top:1px solid var(--trails-rule);max-width:22em';
 
             var offerSaid = document.createElement('div');
-            offerSaid.style.cssText = 'color:#555';
+            offerSaid.style.cssText = 'color:var(--trails-ink-3)';
 
             var offerRow = document.createElement('div');
             offerRow.style.cssText = 'margin-top:4px';
@@ -8446,7 +8640,7 @@ class _PlanMode(MacroElement):
             offerMeans.style.cssText = 'margin-top:4px';
 
             var offerCosts = document.createElement('div');
-            offerCosts.style.cssText = 'margin-top:4px;color:#8a5000';
+            offerCosts.style.cssText = 'margin-top:4px;color:var(--trails-warn)';
 
             var offerButtons = document.createElement('div');
             offerButtons.style.cssText = 'margin-top:4px';
@@ -8495,7 +8689,7 @@ class _PlanMode(MacroElement):
             drop.addEventListener('click', function () { dismissFile(); });
 
             var loadStatus = document.createElement('div');
-            loadStatus.style.cssText = 'margin-top:4px;color:#555;max-width:22em';
+            loadStatus.style.cssText = 'margin-top:4px;color:var(--trails-ink-3);max-width:22em';
 
             chooser.addEventListener('click', function () { picker.click(); });
 
@@ -8540,7 +8734,7 @@ class _PlanMode(MacroElement):
             var box = null;
             control.onAdd = function () {
                 box = L.DomUtil.create('div', 'trails-plan-control');
-                box.style.cssText = 'background:rgba(255,255,255,0.94);padding:6px 8px;border:1px solid #999;' +
+                box.style.cssText = 'background:var(--trails-panel);padding:6px 8px;border:1px solid var(--trails-edge);' +
                     'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4';
                 box.appendChild(toggle);
                 // Loading is how a plan starts from a file, so it is offered
@@ -9431,7 +9625,7 @@ class _Legend(MacroElement):
                 // map at y = -206 the moment a profile opened, which is the
                 // profile grip's old defect in a second place. The chrome caps
                 // it against the profile panel now, the way the plan control is.
-                box.style.cssText = 'background:rgba(255,255,255,0.92);padding:8px 12px;border:1px solid #999;' +
+                box.style.cssText = 'background:var(--trails-panel);padding:8px 12px;border:1px solid var(--trails-edge);' +
                     'border-radius:4px;font-family:sans-serif;font-size:12px;line-height:1.4;' +
                     'overflow-y:auto';
 
@@ -9452,7 +9646,7 @@ class _Legend(MacroElement):
                 // question from which overlays are on, and on a narrow screen
                 // the two cannot share one list.
                 picked.className = 'trails-basemap';
-                picked.style.cssText = 'margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #ddd';
+                picked.style.cssText = 'margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--trails-rule)';
                 bases.forEach(function (layer, index) {
                     if (!baseShown[index] && map.hasLayer(layer)) { map.removeLayer(layer); }
                     var line = document.createElement('label');
@@ -9833,14 +10027,14 @@ class _Chrome(MacroElement):
             var chrome = document.createElement('div');
             chrome.className = 'trails-chrome';
             chrome.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;z-index:1100;' +
-                'pointer-events:none;font-family:sans-serif;font-size:12px;line-height:1.4;color:#1d282c';
+                'pointer-events:none;font-family:sans-serif;font-size:12px;line-height:1.4;color:var(--trails-ink)';
             container.appendChild(chrome);
 
             function frame(cls) {
                 var box = document.createElement('div');
                 box.className = cls;
                 box.style.cssText = 'position:absolute;display:none;flex-direction:column;overflow:hidden;' +
-                    'pointer-events:auto;background:rgba(255,255,255,0.96);box-shadow:0 2px 10px rgba(0,0,0,0.16)';
+                    'pointer-events:auto;background:var(--trails-panel);box-shadow:0 2px 10px rgba(0,0,0,0.16)';
                 L.DomEvent.disableClickPropagation(box);
                 // The wheel is the map's except where this still has somewhere
                 // to scroll — the bargain the legend and the plan list already
@@ -9863,7 +10057,7 @@ class _Chrome(MacroElement):
                 var bar = document.createElement('div');
                 bar.className = 'trails-chrome-bar';
                 bar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:9px 11px;' +
-                    'border-bottom:1px solid #dfe4e5;flex:none';
+                    'border-bottom:1px solid var(--trails-rule);flex:none';
                 var title = document.createElement('div');
                 title.className = 'trails-chrome-title';
                 title.style.cssText = 'flex:1;min-width:0;font-weight:600;font-size:14px;' +
@@ -9876,8 +10070,8 @@ class _Chrome(MacroElement):
                 // 40 px square. The point list's own buttons are 15 x 13 and
                 // 9 x 17, which is the one kind of defect a finger cannot work
                 // around by trying again.
-                shut.style.cssText = 'flex:none;width:40px;height:40px;border:1px solid #d3dbdc;' +
-                    'border-radius:8px;background:#fff;cursor:pointer;font-size:19px;line-height:1;color:#55666b';
+                shut.style.cssText = 'flex:none;width:40px;height:40px;border:1px solid var(--trails-rule);' +
+                    'border-radius:8px;background:var(--trails-solid);cursor:pointer;font-size:19px;line-height:1;color:var(--trails-ink-3)';
                 shut.addEventListener('click', onClose);
                 bar.appendChild(title);
                 bar.appendChild(shut);
@@ -9912,11 +10106,11 @@ class _Chrome(MacroElement):
                     (CREDITS[key] || []).forEach(function (credit) {
                         if (seen[credit.name]) { return; }
                         seen[credit.name] = true;
-                        out += '<div style="padding:8px 0;border-top:1px solid #e8ecec">' +
+                        out += '<div style="padding:8px 0;border-top:1px solid var(--trails-rule)">' +
                             '<div style="font-weight:600">' + esc(credit.name) + '</div>' +
-                            '<div style="color:#55666b">' + esc(credit.licence) +
+                            '<div style="color:var(--trails-ink-3)">' + esc(credit.licence) +
                             (credit.version ? ' \\u00b7 ' + esc(credit.version) : '') + '</div>' +
-                            (credit.note ? '<div style="color:#8a9a9e;font-size:11px;margin-top:2px">' +
+                            (credit.note ? '<div style="color:var(--trails-ink-5);font-size:11px;margin-top:2px">' +
                                 esc(credit.note) + '</div>' : '') +
                             (credit.url ? '<div style="margin-top:3px"><a href="' + esc(credit.url) +
                                 '" target="_blank" rel="noopener noreferrer">' +
@@ -9924,7 +10118,7 @@ class _Chrome(MacroElement):
                             '</div>';
                     });
                 });
-                sourcesHolder.innerHTML = out || '<p style="color:#8a9a9e">No sources were handed to this page.</p>';
+                sourcesHolder.innerHTML = out || '<p style="color:var(--trails-ink-5)">No sources were handed to this page.</p>';
             })();
             byKey.info.holder = sourcesHolder;
 
@@ -9940,7 +10134,7 @@ class _Chrome(MacroElement):
             profileHolder.innerHTML =
                 '<p style="margin:0 0 8px">The height of what you pick, drawn along the ' +
                 'foot of the map.</p>' +
-                '<p style="margin:0;color:#55666b">Tap a path or a route on the map and its ' +
+                '<p style="margin:0;color:var(--trails-ink-3)">Tap a path or a route on the map and its ' +
                 'climb appears here \u2014 or plan a route with <b>Plan a route</b> and this ' +
                 'draws the walk.</p>';
             byKey.profile.holder = profileHolder;
@@ -9967,7 +10161,7 @@ class _Chrome(MacroElement):
             // instruments and keep the left, while search, layers, base map,
             // plan, profile and sources are the *page's* and take the right.
             rail.style.cssText = 'position:absolute;right:10px;top:10px;width:46px;pointer-events:auto;' +
-                'background:rgba(255,255,255,0.94);border:1px solid #999;border-radius:8px;overflow:hidden;' +
+                'background:var(--trails-panel);border:1px solid var(--trails-edge);border-radius:8px;overflow:hidden;' +
                 'box-shadow:0 1px 3px rgba(0,0,0,0.18)';
             L.DomEvent.disableClickPropagation(rail);
             chrome.appendChild(rail);
@@ -9981,8 +10175,8 @@ class _Chrome(MacroElement):
                 button.setAttribute('data-tool', tool.key);
                 button.innerHTML = icon(tool.key);
                 button.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;' +
-                    'height:44px;border:0;background:none;cursor:pointer;color:#55666b;' +
-                    'border-bottom:' + (index < TOOLS.length - 1 ? '1px solid #e3e8e8' : '0');
+                    'height:44px;border:0;background:none;cursor:pointer;color:var(--trails-ink-3);' +
+                    'border-bottom:' + (index < TOOLS.length - 1 ? '1px solid var(--trails-rule)' : '0');
                 button.addEventListener('click', function () { pick(tool.key); });
                 rail.appendChild(button);
                 railButtons[tool.key] = button;
@@ -9999,8 +10193,8 @@ class _Chrome(MacroElement):
             burger.innerHTML = icon('burger', 21);
             burger.style.cssText = 'position:absolute;right:10px;top:10px;width:46px;height:46px;' +
                 'pointer-events:auto;display:none;align-items:center;justify-content:center;' +
-                'background:rgba(255,255,255,0.94);border:1px solid #999;border-radius:10px;' +
-                'cursor:pointer;color:#1d282c;box-shadow:0 1px 3px rgba(0,0,0,0.18)';
+                'background:var(--trails-panel);border:1px solid var(--trails-edge);border-radius:10px;' +
+                'cursor:pointer;color:var(--trails-ink);box-shadow:0 1px 3px rgba(0,0,0,0.18)';
             L.DomEvent.disableClickPropagation(burger);
             burger.addEventListener('click', function () { openMenu(); });
             chrome.appendChild(burger);
@@ -10031,7 +10225,7 @@ class _Chrome(MacroElement):
             var planbar = document.createElement('div');
             planbar.className = 'trails-planbar';
             planbar.style.cssText = 'position:absolute;left:0;right:0;height:44px;display:none;' +
-                'pointer-events:auto;background:#ffffff;border-top:1px solid #999;box-sizing:border-box;' +
+                'pointer-events:auto;background:var(--trails-solid);border-top:1px solid var(--trails-edge);box-sizing:border-box;' +
                 'align-items:center;gap:8px;padding:0 8px 0 12px';
             L.DomEvent.disableClickPropagation(planbar);
 
@@ -10042,7 +10236,7 @@ class _Chrome(MacroElement):
             planSays.style.cssText = 'display:block;font-size:14px;line-height:1.15;' +
                 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
             var planHint = document.createElement('span');
-            planHint.style.cssText = 'display:block;font-size:10.5px;color:#8a9a9e;line-height:1.1';
+            planHint.style.cssText = 'display:block;font-size:10.5px;color:var(--trails-ink-5);line-height:1.1';
             planFigures.appendChild(planSays);
             planFigures.appendChild(planHint);
 
@@ -10051,8 +10245,8 @@ class _Chrome(MacroElement):
                 made.type = 'button';
                 made.title = explains;
                 made.setAttribute('aria-label', explains);
-                made.style.cssText = 'flex:none;width:40px;height:40px;border:1px solid #d3dbdc;' +
-                    'border-radius:8px;background:#fff;cursor:pointer;color:#55666b;' +
+                made.style.cssText = 'flex:none;width:40px;height:40px;border:1px solid var(--trails-rule);' +
+                    'border-radius:8px;background:var(--trails-solid);cursor:pointer;color:var(--trails-ink-3);' +
                     'display:flex;align-items:center;justify-content:center';
                 made.innerHTML = label;
                 return made;
@@ -10068,8 +10262,8 @@ class _Chrome(MacroElement):
             planDone.type = 'button';
             planDone.className = 'trails-planbar-done';
             planDone.textContent = 'Done';
-            planDone.style.cssText = 'flex:none;height:40px;padding:0 14px;border:1px solid #111;' +
-                'border-radius:8px;background:#111;color:#fff;cursor:pointer;font:inherit;' +
+            planDone.style.cssText = 'flex:none;height:40px;padding:0 14px;border:1px solid var(--trails-strong);' +
+                'border-radius:8px;background:var(--trails-strong);color:var(--trails-on-strong);cursor:pointer;font:inherit;' +
                 'font-size:13px;font-weight:600';
 
             planbar.appendChild(planFigures);
@@ -10121,8 +10315,8 @@ class _Chrome(MacroElement):
                 // Lit from the one state, like the rail's own icon, so the two
                 // cannot say different things about the same panel.
                 var showing = profileOn();
-                planProfile.style.color = showing ? '#0d47a1' : '#55666b';
-                planProfile.style.borderColor = showing ? '#0d47a1' : '#d3dbdc';
+                planProfile.style.color = showing ? 'var(--trails-accent)' : 'var(--trails-ink-3)';
+                planProfile.style.borderColor = showing ? 'var(--trails-accent)' : 'var(--trails-rule)';
                 planProfile.setAttribute('aria-pressed', String(showing));
             }
 
@@ -10192,13 +10386,13 @@ class _Chrome(MacroElement):
                     var button = railButtons[tool.key];
                     if (!button) { return; }
                     var lit = openTool === tool.key;
-                    button.style.background = lit ? '#0d47a1' : 'none';
+                    button.style.background = lit ? 'var(--trails-accent)' : 'none';
                     // A tool the reader has switched on rather than opened:
                     // plan mode outlives its panel, and the profile panel stands
                     // at the foot rather than in the dock.
                     var running = (tool.key === 'plan' && planOn()) ||
                         (tool.key === 'profile' && profileShowing());
-                    button.style.color = lit ? '#ffffff' : (running ? '#0d47a1' : '#55666b');
+                    button.style.color = lit ? 'var(--trails-on-accent)' : (running ? 'var(--trails-accent)' : 'var(--trails-ink-3)');
                     button.setAttribute('aria-pressed', String(lit));
                 });
             }
@@ -10213,14 +10407,14 @@ class _Chrome(MacroElement):
                     // 48 px, which is a finger, and the reason every row here is
                     // a whole line rather than an icon beside a word.
                     row.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;min-height:48px;' +
-                        'padding:8px 4px;border:0;border-bottom:1px solid #e3e8e8;background:none;' +
-                        'cursor:pointer;text-align:left;color:#1d282c;font:inherit';
+                        'padding:8px 4px;border:0;border-bottom:1px solid var(--trails-rule);background:none;' +
+                        'cursor:pointer;text-align:left;color:var(--trails-ink);font:inherit';
                     row.innerHTML = '<span style="flex:none;width:26px;display:flex;justify-content:center;' +
-                        'color:#55666b">' + icon(tool.key) + '</span>' +
+                        'color:var(--trails-ink-3)">' + icon(tool.key) + '</span>' +
                         '<span style="flex:1;min-width:0"><b style="display:block;font-size:14px">' +
-                        esc(tool.label) + '</b><span style="display:block;font-size:11.5px;color:#8a9a9e">' +
+                        esc(tool.label) + '</b><span style="display:block;font-size:11.5px;color:var(--trails-ink-5)">' +
                         esc(tool.hint) + '</span></span>' +
-                        '<span style="flex:none;color:#8a9a9e">' + icon('chevron', 15) + '</span>';
+                        '<span style="flex:none;color:var(--trails-ink-5)">' + icon('chevron', 15) + '</span>';
                     row.addEventListener('click', function () { pick(tool.key); });
                     menuParts.body.appendChild(row);
                 });
@@ -10418,7 +10612,7 @@ class _Chrome(MacroElement):
                         box.style.height = Math.max(40, floor) + 'px';
                         box.style.maxHeight = 'none';
                         box.style.border = '0';
-                        box.style.borderBottom = '1px solid #999';
+                        box.style.borderBottom = '1px solid var(--trails-edge)';
                         box.style.borderRadius = '0';
                     });
                     if (landscape) {
@@ -10426,7 +10620,7 @@ class _Chrome(MacroElement):
                         // the detail becomes a column and the map keeps the rest.
                         sheet.style.right = 'auto';
                         sheet.style.width = Math.min(340, Math.round(size.x * 0.44)) + 'px';
-                        sheet.style.borderRight = '1px solid #999';
+                        sheet.style.borderRight = '1px solid var(--trails-edge)';
                     } else {
                         sheet.style.borderRight = '0';
                     }
@@ -10448,7 +10642,7 @@ class _Chrome(MacroElement):
                     dock.style.width = ((byKey[openTool] && byKey[openTool].width) || 320) + 'px';
                     dock.style.height = 'auto';
                     dock.style.maxHeight = capped + 'px';
-                    dock.style.border = '1px solid #999';
+                    dock.style.border = '1px solid var(--trails-edge)';
                     dock.style.borderRadius = '4px';
                     // **Opposite the dock, because both can stand at once on a
                     // wide screen** — reading a popup with the layer list open is
@@ -10460,9 +10654,14 @@ class _Chrome(MacroElement):
                     sheet.style.bottom = 'auto';
                     sheet.style.width = '352px';
                     sheet.style.height = 'auto';
-                    sheet.style.maxHeight = capped + 'px';
-                    sheet.style.border = '1px solid #999';
-                    sheet.style.borderRight = '1px solid #999';
+                    // **Its own ceiling, because it no longer starts at 10.**
+                    // The dock's cap is measured from the top of the map; the
+                    // sheet begins 66 px lower, below the zoom, and reusing that
+                    // number ran it 66 px into the profile panel — seen in a
+                    // screenshot, not in a reading.
+                    sheet.style.maxHeight = Math.max(40, capped - 66) + 'px';
+                    sheet.style.border = '1px solid var(--trails-edge)';
+                    sheet.style.borderRight = '1px solid var(--trails-edge)';
                     sheet.style.borderRadius = '4px';
                 }
             }
