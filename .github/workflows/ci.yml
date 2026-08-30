@@ -23,8 +23,13 @@ jobs:
       # decision — and the one that stood here, `setup-python` at 3.11, was
       # three releases behind the floor and had no effect either way: uv
       # downloaded its own 3.14 and used that.
+      # **An exact tag, because this action has no moving one past v7.** Most
+      # actions publish `v10` alongside `v10.0.1`; this one stops at `v7`, and
+      # `@v10` is an unresolvable reference that fails the run before a single
+      # step is set up. Checked against the tags rather than assumed — the first
+      # attempt assumed.
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
 
