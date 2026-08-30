@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 241 while one behaviour is being written. What is left out
+  readings instead of 245 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **185 seconds** and say
-whether the page still holds: **241 readings, and it should be green**. If it is
+whether the page still holds: **245 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 241. And **build before driving**: the run reads the page `make map`
+instead of 245. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -3338,6 +3338,98 @@ Where no bounds were given, `DRAWN` is `null` and nothing can refuse anything: a
 page built around a centre draws whatever the reader pans to.
 
 `make drive` reads **245**, the source tests **241**.
+
+### And the profile panel wrote two lines on top of each other
+
+**Reported with a screenshot of a phone: text overlapping in the profile, the
+hint is unnecessary, and the panel looks overloaded.** All three were true and
+the third was the largest.
+
+**The overlap is arithmetic, not rendering.** The hint is written from
+`box.left` and the reading from `box.right`, both to `box.top + 8`. On a desktop
+they never meet. Measured at 390 px:
+
+| | x | width |
+|---|---|---:|
+| the hint | 61 → **443** | 382 px |
+| the reading | 253 → 365 | 112 px |
+
+The reading lies **wholly inside** the hint, and the hint runs 53 px off the
+screen. SVG text does not wrap and does not move aside; it draws over.
+
+**And the finding that turned the whole design round.** The panel draws at a true
+scale — one metre per pixel for both axes — so on a long route the *width* binds.
+Measured on a 33.66 km route at 390 px: **111.4 m to the pixel**, relief 627 m,
+and the drawn band is therefore **5.6 px tall in a 186 px box**. The panel was
+spending 334 px of an 844 px screen to show five and a half pixels of curve.
+
+**So the freed pixels cannot go to the drawing.** Giving the chart more height
+draws nothing at all while the width binds, which is the opposite of what the
+grip does on a steep chain. They go to the map. That is why the panel got
+*shorter* rather than the chart taller, and it is not something reading the code
+would have suggested.
+
+**What was built, after a mockup and four rounds of it.** The heading is one line
+of marks: the caret, three figures, and `⭳ ⓘ ×`. The panel's own name is gone
+from the panel — the sheet's own bar has carried *Elevation profile · <what>*
+all along, and on a wide screen the rail beside it names the same tool the same
+way, so the heading was spending its one line on a word standing twice
+elsewhere. The colour key, the point count, the licences and the ground note are
+all in the sheet, and with a chrome the panel is a heading and a curve; **without
+one the row stays exactly as it was**, because there is nowhere else.
+
+**Both hints are gone, on both pointers, and nothing replaces them** — not in the
+sheet either. *A gesture that has to be described is not discovered by describing
+it.* What a reader sees instead is state: the *whole chain* button, which stands
+exactly while there is something to go back from, and the heading itself, which
+**becomes** the reading while a pointer is on the curve. That last one is what
+makes the collision impossible rather than merely fixed: there is no second place
+for a reading to be drawn. What stays in the plot is *12.34 km of 42.44*, which
+is state and not instruction.
+
+**And the sheet's order is an argument.** The figures, then what the file would
+hold, then *The ground this covers*, then *Sources and licences*, then *How the
+curve is coloured* last — because the colour key is the only thing in the sheet
+that says nothing about **this** route. It explains a drawing rule that holds for
+every walk there will ever be, and it used to stand permanently in the panel, two
+rows of it on a phone, for a question a reader asks once.
+
+| at 390 × 844 | before | after |
+|---|---:|---:|
+| the panel | 334 px | **248** |
+| held sideways | 195 px | **152** |
+| the drawing | 186 px | 186, unmoved |
+| text in the plot | two lines, overlapping | **none** |
+
+On a desktop the row measures **0** and the drawing is unmoved at 205 px. The
+panel was never in trouble there — 70 px of furniture and a heading on one line —
+and the reason to change it anyway is that there is now **one** panel rather than
+two layouts that drift, which is the mistake this map has already made twice.
+
+**Three defects, all mine, all found by driving rather than by reading.**
+
+- **A mark in the heading put a second `<svg>` in the panel, ahead of the
+  chart.** `panel svg` had meant the drawing since phase 4 and quietly began
+  meaning a 17 px icon: a drag aimed at the curve landed on the mark, pressed it
+  and folded the panel — and downloaded the file. The chart is
+  `.trails-profile-chart` now and sixteen probes moved with it. **The same family
+  as addressing a button by which comes first**, which this document already
+  records twice, and it took one run to appear.
+- **A mark in the heading has to stop the heading's own click.** Every other
+  control up there does; this one was written while it stood in the body. Without
+  it a reader asking for the file loses the drawing with it.
+- **A state read off a colour cannot be read back.** The heading turns the accent
+  colour while it is a reading, and a probe comparing `getComputedStyle().color`
+  against the token's hex never matches: `rgb(127, 176, 240)` is not `#7fb0f0`.
+  It is a class now — *which of the two it is saying, as a fact and not as a
+  colour.*
+
+**And one where the check was wrong about the page.** It asked the sheet for five
+band rows; four is right, because the dashed *drawn straight* line is drawn only
+where something in the panel is dashed and a chain is never drawn straight across
+anything. The rule the panel's key has kept since phase 4, now kept in the sheet.
+
+`make drive` reads **245**, the source tests **246**.
 
 ### What is still open on a phone
 

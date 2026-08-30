@@ -174,7 +174,7 @@ FURNITURE = with_map("""() => {
 # horizontal comes off the distance marks the axis draws, that names which
 # sample the crosshair dot sits on, and the vertical falls out of its height.
 SCALE = """() => {
-  const svg = document.querySelector('.trails-profile-panel svg');
+  const svg = document.querySelector('.trails-profile-chart');
   const rect = svg.getBoundingClientRect();
   const width = parseFloat(svg.getAttribute('viewBox').split(' ')[2]);
   const view = window.trailsProfilePanel.view();
@@ -226,7 +226,7 @@ SCALE = """() => {
           panel: view.metresPerPixel}; }"""
 
 WHEEL_ON_CHART = """(spec) => {
-  const chart = document.querySelector('.trails-profile-panel svg');
+  const chart = document.querySelector('.trails-profile-chart');
   const rect = chart.getBoundingClientRect();
   for (let i = 0; i < spec.times; i += 1) {
     chart.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true,
@@ -246,7 +246,7 @@ PANES = """() => {
 # this reports the distance to the line and not the distance along it — on an
 # out-and-back the nearest pass is not always the right one.
 MARK = with_map("""() => {
-  const svg = document.querySelector('.trails-profile-panel svg');
+  const svg = document.querySelector('.trails-profile-chart');
   const rect = svg.getBoundingClientRect();
   const view = window.trailsProfilePanel.view();
   const shape = window.trailsProfile.shape;
@@ -275,7 +275,7 @@ MARK = with_map("""() => {
   return {shown: true, away: best, px: best / step}; }""")
 
 SEA = """() => {
-  const svg = document.querySelector('.trails-profile-panel svg');
+  const svg = document.querySelector('.trails-profile-chart');
   const height = parseFloat(svg.getAttribute('height'));
   const view = window.trailsProfilePanel.view();
   const carries = (height - 34) * view.metresPerPixel;
@@ -550,7 +550,7 @@ def true_scale(page: Any) -> Check:
         The two scales at three zooms, and how far apart they are
     """
     page.evaluate(
-        """() => { const chart = document.querySelector('.trails-profile-panel svg');
+        """() => { const chart = document.querySelector('.trails-profile-chart');
         chart.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true})); }"""
     )
     page.wait_for_timeout(400)
@@ -918,7 +918,7 @@ def pinch_the_curve(page: Any) -> Check:
         Where the window went, spreading and then closing the fingers
     """
     gesture = """(spread) => {
-      const chart = document.querySelector('.trails-profile-panel svg');
+      const chart = document.querySelector('.trails-profile-chart');
       const box = chart.getBoundingClientRect();
       const midX = box.left + box.width / 2, midY = box.top + box.height / 2;
       const fire = (kind, half) => {
@@ -938,7 +938,7 @@ def pinch_the_curve(page: Any) -> Check:
     # From the whole chain, put there rather than assumed: the check before this
     # one leaves the window at the ceiling, and a gesture measured from an
     # unknown starting point measures nothing.
-    reset = """() => { const chart = document.querySelector('.trails-profile-panel svg');
+    reset = """() => { const chart = document.querySelector('.trails-profile-chart');
         chart.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true})); }"""
     page.evaluate(reset)
     page.wait_for_timeout(500)
@@ -1071,15 +1071,24 @@ def the_sources_behind_an_i(page: Any) -> Check:
       return {more: box('.trails-profile-more'), licences: box('.trails-profile-licences'),
               ground: box('.trails-profile-ground'),
               hide: box('.trails-profile-hide'),
-              summary: head ? head.lastElementChild.previousElementSibling.textContent : null}; }"""
+              summary: (document.querySelector('.trails-profile-figures') || {}).textContent || null}; }"""
     narrow = page.evaluate(row)
 
     page.evaluate("() => document.querySelector('.trails-profile-more').click()")
     page.wait_for_timeout(700)
     sheet = page.evaluate(
         """() => { const node = document.querySelector('.trails-detail');
+        const said = node ? node.textContent : '';
+        // **The sheet is built at the moment it is asked for**, so its blocks
+        // exist only in a browser: a typo in the one that draws the colours
+        // would be invisible to every source test and to a green build alike.
+        const key = node ? node.querySelector('.trails-profile-key') : null;
         return {drawn: !!node && node.getClientRects().length > 0,
-                text: node ? node.textContent : '',
+                text: said,
+                ground: said.indexOf('The ground this covers'),
+                sources: said.indexOf('Sources and licences'),
+                colours: said.indexOf('How the curve is coloured'),
+                bands: key ? key.children.length : 0,
                 state: window.trailsChrome.state().detail}; }"""
     )
 
@@ -1124,6 +1133,21 @@ def the_sources_behind_an_i(page: Any) -> Check:
             Reading("the i opens the sheet", sheet["drawn"], True),
             Reading("and the chrome says so", sheet["state"], True),
             Reading("headed as what it is", "Sources and licences" in sheet["text"], True),
+            # **The order is the argument.** What a walk covers is about this
+            # route, who may be asked about it is about the file, and the colour
+            # key is the only thing in the sheet that says nothing about this
+            # route at all -- it explains a drawing rule that holds for every
+            # walk there will ever be, so it goes last.
+            Reading("the ground comes before the sources", sheet["ground"] < sheet["sources"], True),
+            Reading("and the colours after both", sheet["colours"] > sheet["sources"], True),
+            # **Four, and the fifth is right to be missing.** The dashed line
+            # is drawn only where something in the panel is dashed, and a chain
+            # is never drawn straight across anything -- the rule the panel's own
+            # key has kept since phase 4, now kept in the sheet as well. Asking
+            # for five here was the check being wrong about the page.
+            Reading("with a line for each band", sheet["bands"], 4),
+            # And what the file would hold, which used to sit beside the button.
+            Reading("and the count the button used to carry", "points" in sheet["text"], True),
             # The same sentence and not a second derivation of it: it is read off
             # the element that shows it.
             Reading("holding the licences themselves", licences in sheet["text"], True),
@@ -1201,25 +1225,30 @@ def room_on_a_short_screen(page: Any) -> Check:
         "a short screen gets its drawing back",
         [
             Reading("sideways: the licences are folded", folded["more"], True),
-            Reading("sideways: px the row takes", folded["meta"], 33, within=12, holds=False),
+            # **Not a shorter row: no row.** It folded to 33 px behind an *i*;
+            # with a sheet to put it in there is nothing left in the panel at all,
+            # and the pixels go to the map rather than to a drawing that cannot
+            # use them -- 111 metres to the pixel on a route this long, where the
+            # width binds and extra height draws nothing at all.
+            Reading("sideways: px the row takes", folded["meta"], 0),
             # And the freed pixels go to the drawing rather than to the map:
             # the share is on the chart while the furniture is what it costs, so
             # shrinking the furniture without moving the share gives the map the
             # room and the curve none of it.
             Reading("and the drawing gets them", folded["chart"], 109, within=6, note="78 px before"),
-            Reading("with the panel still about half the screen", folded["panel"] <= 215, True, note=f"{folded['panel']} px of 390"),
+            Reading("and the panel is what is left", folded["panel"], 152, within=6, holds=False, note="of 390, against 195 before"),
             # Nothing is withheld: the sentence a reader has to see before
             # pressing Download is one tap away and says so.
             Reading("the i opens them in the sheet", opened_sheet, True),
             # And the row it was folded out of stays folded: the sentence a
             # reader has to see before pressing Download is one tap away, and
             # the drawing keeps its pixels while they read it.
-            Reading("and the drawing keeps its room", opened["meta"], folded["meta"], note=f"{opened['meta']} px"),
+            Reading("and the panel keeps its room", opened["meta"], folded["meta"], note=f"{opened['meta']} px"),
             # **The i is offered on a desktop too now.** The heading carries
             # three figures on every screen and everything else is behind it:
             # what was a width rule is not one any more.
             Reading("desktop: the i is there too", desk["more"], True),
-            Reading("desktop: px the row takes", desk["meta"], 33, within=2),
+            Reading("desktop: px the row takes", desk["meta"], 0),
             Reading("desktop: px the drawing takes", desk["chart"], 205, within=2),
         ],
     )
@@ -1351,7 +1380,7 @@ def a_way_back_to_the_whole(page: Any) -> Check:
         Whether the way back appears, works, and puts itself away again
     """
     zoom = """(spread) => {
-      const chart = document.querySelector('.trails-profile-panel svg');
+      const chart = document.querySelector('.trails-profile-chart');
       const box = chart.getBoundingClientRect();
       const midX = box.left + box.width / 2, midY = box.top + box.height / 2;
       const fire = (kind, half) => {
@@ -1364,7 +1393,7 @@ def a_way_back_to_the_whole(page: Any) -> Check:
       fire('touchstart', 40); fire('touchmove', 40 * spread); fire('touchend', null); }"""
 
     tap = """() => {
-      const chart = document.querySelector('.trails-profile-panel svg');
+      const chart = document.querySelector('.trails-profile-chart');
       const box = chart.getBoundingClientRect();
       const at = {clientX: box.left + box.width / 2, clientY: box.top + box.height / 2};
       const fire = () => { const event = new Event('touchend', {bubbles: true, cancelable: true});
@@ -1709,8 +1738,11 @@ def files_from_the_page(page: Any) -> Check:
     page.wait_for_timeout(900)
     out = pathlib.Path(tempfile.mkdtemp(prefix="trails-drive-"))
 
-    press_download = """() => { const panel = document.querySelector('.trails-profile-panel');
-        [...panel.querySelectorAll('button')].find(b => /Download/.test(b.textContent)).click(); }"""
+    # **Named, not found by its words.** The button carries a mark now, like
+    # every other tool on this page, so there is no text to match on -- and a
+    # probe that aims by what a control *says* is a probe with an expiry date,
+    # which this suite has already learned twice about aiming by position.
+    press_download = """() => { document.querySelector('.trails-profile-gpx').click(); }"""
     with page.expect_download(timeout=25_000) as caught:
         page.evaluate(press_download)
     written = caught.value
@@ -2084,8 +2116,8 @@ def brushing_the_curve(page: Any) -> Check:
         What a drag picked, what a click did not, and what shift still does
     """
     view = "() => window.trailsProfilePanel.view()"
-    rects = "() => document.querySelectorAll('.trails-profile-panel svg rect').length"
-    reset = """() => { const chart = document.querySelector('.trails-profile-panel svg');
+    rects = "() => document.querySelectorAll('.trails-profile-chart rect').length"
+    reset = """() => { const chart = document.querySelector('.trails-profile-chart');
         chart.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true})); }"""
 
     page.evaluate(reset)
@@ -2094,7 +2126,7 @@ def brushing_the_curve(page: Any) -> Check:
     at_rest = page.evaluate(rects)
 
     box = page.evaluate(
-        """() => { const r = document.querySelector('.trails-profile-panel svg').getBoundingClientRect();
+        """() => { const r = document.querySelector('.trails-profile-chart').getBoundingClientRect();
         return {left: r.left, top: r.top, w: r.width, h: r.height}; }"""
     )
     middle = box["top"] + box["h"] / 2
@@ -2349,7 +2381,7 @@ def reading_with_a_finger(page: Any) -> Check:
         What a touch put on the panel and on the map
 
     """
-    touch = """(where) => { const chart = document.querySelector('.trails-profile-panel svg');
+    touch = """(where) => { const chart = document.querySelector('.trails-profile-chart');
       const box = chart.getBoundingClientRect();
       const at = {clientX: box.left + box.width * where, clientY: box.top + box.height / 2};
       const fire = kind => { const event = new Event(kind, {bubbles: true, cancelable: true});
@@ -2357,7 +2389,7 @@ def reading_with_a_finger(page: Any) -> Check:
         event.changedTouches = [at];
         chart.dispatchEvent(event); };
       fire('touchstart'); fire('touchmove'); fire('touchend'); }"""
-    seen = """() => { const chart = document.querySelector('.trails-profile-panel svg');
+    seen = """() => { const chart = document.querySelector('.trails-profile-chart');
       const shown = [...chart.querySelectorAll('text')].filter(n => n.style.display !== 'none')
         .map(n => n.textContent);
       // **Against the token and not a hex this check remembers.** The
@@ -2370,9 +2402,18 @@ def reading_with_a_finger(page: Any) -> Check:
         .filter(n => n.getAttribute('stroke') === accent && n.style.display !== 'none').length;
       const pane = document.querySelector('.leaflet-trailsProfileHere-pane');
       const mark = pane ? [...pane.children].filter(n => n.style.display !== 'none').length : 0;
-      return {reading: shown.find(s => / km /.test(s)) || null, rules: rules, mark: mark,
-              hint: [...chart.querySelectorAll('text')].map(n => n.textContent)
-                .find(s => /read it|stretch|Touch/.test(s)) || null}; }"""
+      // **The reading is in the heading now, and the heading's colour says
+      // so.** It used to be a `<text>` at `box.right` on the same line a hint was
+      // written to from `box.left`, and on 390 px the two lay over each other.
+      // There is no second place for it to be drawn any more, which is what
+      // makes that collision impossible rather than merely fixed.
+      const head = document.querySelector('.trails-profile-figures');
+      const said = head ? head.textContent : '';
+      const reading = (head && head.classList.contains('trails-profile-reading')) ? said : null;
+      return {reading: reading, rules: rules, mark: mark, said: said,
+              // Nothing in the plot may tell a reader what to do: both hints are
+              // gone, on every pointer, and nothing stands in for them.
+              told: shown.find(s => /read it|stretch|Touch|drag|pinch/i.test(s)) || null}; }"""
 
     page.evaluate("() => window.trailsChrome.coarse(true)")
     page.wait_for_timeout(500)
@@ -2383,10 +2424,9 @@ def reading_with_a_finger(page: Any) -> Check:
     page.evaluate(touch, 0.75)
     page.wait_for_timeout(700)
     far = page.evaluate(seen)
-    coarse_hint = far["hint"]
     page.evaluate("() => window.trailsChrome.coarse(null)")
     page.wait_for_timeout(500)
-    mouse_hint = page.evaluate(seen)["hint"]
+    on_a_mouse = page.evaluate(seen)
 
     return Check(
         "reading the curve with a finger",
@@ -2398,10 +2438,13 @@ def reading_with_a_finger(page: Any) -> Check:
             # following a climb wants to see where it is.
             Reading("and the mark on the map", near["mark"], 1),
             Reading("touching elsewhere reads elsewhere", far["reading"] != near["reading"], True, note=far["reading"]),
-            # A line telling a reader to shift-drag is a line telling them to do
-            # something they cannot.
-            Reading("the hint is in the finger's words", "ouch" in (coarse_hint or ""), True, note=coarse_hint),
-            Reading("and in the mouse's on a mouse", "rag" in (mouse_hint or ""), True, note=mouse_hint),
+            # **And nothing in the plot tells a reader what to do.** Both hint
+            # lines are gone, on both pointers, and nothing replaces them here or
+            # in the sheet. What a reader sees instead is state: the *whole
+            # chain* button, which stands exactly while there is something to go
+            # back from.
+            Reading("no instruction is drawn on a finger", far["told"], None),
+            Reading("and none on a mouse", on_a_mouse["told"], None),
         ],
     )
 
@@ -2549,7 +2592,7 @@ def the_dark_set(page: Any) -> Check:
         if (!node) { return null; }
         const seen = getComputedStyle(node);
         return {bg: seen.backgroundColor, fg: seen.color}; };
-      const band = document.querySelector('.trails-profile-panel svg polyline, .trails-profile-panel svg path');
+      const band = document.querySelector('.trails-profile-chart polyline, .trails-profile-chart path');
       const tile = document.querySelector('.leaflet-tile');
       return {panel: paint('.trails-profile-panel'), rail: paint('.trails-rail'),
               zoom: paint('.leaflet-control-zoom a'),

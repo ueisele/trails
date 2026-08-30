@@ -2853,8 +2853,18 @@ class _ProfilePanel(MacroElement):
             var header = document.createElement('div');
             header.className = 'trails-profile-head';
             header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none;' +
-                'display:flex;gap:12px;align-items:baseline;justify-content:space-between';
+                'display:flex;gap:8px;align-items:baseline';
+            // **The panel's own name is gone from the panel.** The sheet the
+            // *i* opens carries `Elevation profile . <what>` in its own bar, and
+            // on a wide screen the rail beside the panel names the same tool the
+            // same way -- so the heading was spending its one line on a word
+            // that already stands twice elsewhere. What is left of it is the
+            // caret: the fold is a gesture a reader has, and taking a working
+            // gesture away to save ten pixels is the trade this document keeps
+            // arguing against.
             var name = document.createElement('span');
+            name.className = 'trails-profile-fold';
+            name.style.cssText = 'flex:none;color:var(--trails-ink-4);font-weight:400';
             // **A way back that can be found.** Double-clicking the curve has
             // put the whole chain back since the zoom was built, and nothing
             // says so — an undiscoverable gesture is a gesture most readers do
@@ -2873,7 +2883,15 @@ class _ProfilePanel(MacroElement):
             // about rather than as a second thing to look at, and when nothing
             // is selected the whole panel is one line.
             var summary = document.createElement('span');
-            summary.style.cssText = 'flex:1 1 auto;min-width:0;font-weight:400;color:var(--trails-ink-2);text-align:right';
+            // **One line, and it ends in an ellipsis rather than wrapping.**
+            // The three figures are 47 characters and a 390 px heading holds
+            // about 40 of them beside a caret and three marks; wrapping would
+            // put the head back at two rows, which is the defect this panel is
+            // being cured of. What is cut off is one tap away, whole, and the
+            // list it is cut from is the same list the sheet renders entire.
+            summary.className = 'trails-profile-figures';
+            summary.style.cssText = 'flex:1 1 auto;min-width:0;font-weight:400;color:var(--trails-ink-2);' +
+                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
             // **Two switches at the end of the heading, and they are not the
             // same switch.** The heading itself folds: the drawing goes and the
             // line of figures stays, which is what a reader wants who is coming
@@ -2902,24 +2920,46 @@ class _ProfilePanel(MacroElement):
                 }
             });
             header.appendChild(name);
-            header.appendChild(whole);
             header.appendChild(summary);
+            header.appendChild(whole);
             header.appendChild(tools);
             var chart = document.createElementNS(SVG, 'svg');
+            // **Named, because it is no longer the only `<svg>` in the panel.**
+            // The download mark carries one now, and it stands in the heading --
+            // ahead of the chart in document order -- so `panel svg` quietly
+            // began meaning a 17 px icon. Driven, a drag aimed at the curve
+            // landed on the mark, pressed it, and folded the panel: the same
+            // family as addressing a button by which comes first, and it took
+            // one run to appear.
+            chart.setAttribute('class', 'trails-profile-chart');
             chart.setAttribute('height', chartHeight);
             chart.style.cssText = 'display:block;width:100%;height:' + chartHeight + 'px;cursor:crosshair';
             // What the colours mean, once, beside the figures. A curve that
             // changes colour is unreadable without it.
+            // **One derivation, two renderings.** The key is drawn in the sheet
+            // the *i* opens and, on a page built without a chrome, in the panel
+            // itself. A second wording of *gentle under 15 %* would be the
+            // two-panel mistake in miniature, and this map has made it twice.
+            function bandLabel(at) {
+                var band = GRADE.bands[at];
+                if (!at) { return band.label + ' under ' + GRADE.bands[1].from + ' %'; }
+                return band.label + (GRADE.bands[at + 1]
+                    ? ' ' + band.from + '\u2013' + GRADE.bands[at + 1].from + ' %'
+                    : ' over ' + band.from + ' %');
+            }
+            function bandSwatch(width, colour, dashed) {
+                var swatch = document.createElement('span');
+                swatch.style.cssText = 'display:inline-block;width:14px;height:0;vertical-align:middle;' +
+                    'margin:0 6px 0 0;border-top:' + width + 'px ' + (dashed ? 'dashed ' : 'solid ') + colour;
+                return swatch;
+            }
             var key = document.createElement('div');
             key.style.cssText = 'margin:0 0 2px;color:var(--trails-ink-4);font-size:11px';
             GRADE.bands.forEach(function (band, index) {
-                var swatch = document.createElement('span');
-                swatch.style.cssText = 'display:inline-block;width:14px;height:0;vertical-align:middle;margin:0 4px 0 ' +
-                    (index ? '12px' : '0') + ';border-top:' + band.width + 'px solid ' + band.colour;
+                var swatch = bandSwatch(band.width, band.colour, false);
+                if (index) { swatch.style.marginLeft = '12px'; }
                 var caption = document.createElement('span');
-                caption.textContent = band.label + (GRADE.bands[index + 1] ? ' ' + band.from + '\u2013' + GRADE.bands[index + 1].from + ' %'
-                    : ' over ' + band.from + ' %');
-                if (!index) { caption.textContent = band.label + ' under ' + GRADE.bands[1].from + ' %'; }
+                caption.textContent = bandLabel(index);
                 key.appendChild(swatch);
                 key.appendChild(caption);
             });
@@ -2951,10 +2991,22 @@ class _ProfilePanel(MacroElement):
             // short enough that flex never had to choose.
             var offer = document.createElement('div');
             offer.style.cssText = 'margin:4px 0 2px;display:none';
+            // **A mark, like every other tool on this page.** The plan control
+            // gave up its words a fortnight ago and this was the last panel
+            // speaking in them. The same glyph the plan control's save carries,
+            // written here rather than reached for across a scope: two controls
+            // agreeing today is not one derivation.
             var download = document.createElement('button');
             download.type = 'button';
-            download.textContent = 'Download GPX';
-            download.style.cssText = 'font:inherit;font-size:12px;padding:2px 8px;margin-right:8px;cursor:pointer';
+            download.className = 'trails-profile-gpx';
+            download.innerHTML = '<svg width="17" height="17" viewBox="0 0 18 18" fill="none" ' +
+                'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" ' +
+                'aria-hidden="true"><path d="M9 3.2v9.2"/><path d="M5.6 9 9 12.4 12.4 9"/>' +
+                '<path d="M3.4 11.6v2.6a1 1 0 0 0 1 1h9.2a1 1 0 0 0 1-1v-2.6"/></svg>';
+            download.title = 'Download this as a GPX file';
+            download.setAttribute('aria-label', 'Download this as a GPX file');
+            download.style.cssText = 'font:inherit;line-height:0;padding:2px 4px;border:0;background:none;' +
+                'color:var(--trails-accent);cursor:pointer;display:none';
             var carries = document.createElement('span');
             carries.style.cssText = 'color:var(--trails-ink-2);margin-right:8px';
             var licensed = document.createElement('span');
@@ -2988,6 +3040,7 @@ class _ProfilePanel(MacroElement):
             more.setAttribute('aria-label', 'Every figure, and the sources this draws on');
             more.style.cssText = 'font:inherit;font-size:14px;line-height:1;padding:0 4px;border:0;' +
                 'background:none;color:var(--trails-accent);cursor:pointer;display:none';
+            tools.appendChild(download);
             tools.appendChild(more);
             tools.appendChild(hide);
             var licencesOpen = false;
@@ -2998,6 +3051,14 @@ class _ProfilePanel(MacroElement):
                 return !!(window.trailsChrome && window.trailsChrome.detail);
             }
             function showLicences() {
+                // **With a chrome, the panel is a heading and a curve.** The
+                // colour key, the point count, the licences and the ground note
+                // all stand in the sheet the *i* opens -- a place a reader goes
+                // rather than one they look past, and the whole of what this
+                // row cost was that it was never looked at and always there.
+                // Without a chrome there is nowhere else, so the row stays
+                // exactly as it was.
+                meta.style.display = sheeted() ? 'none' : '';
                 var folded = sheeted() || !licencesOpen;
                 licensed.style.display = folded ? 'none' : '';
                 noted.style.display = folded ? 'none' : 'block';
@@ -3010,7 +3071,12 @@ class _ProfilePanel(MacroElement):
                 box.style.cssText = 'font-size:13px;line-height:1.65;color:var(--trails-ink-2)';
                 // The same lines the heading shows the first three of, in the
                 // same order. One derivation, two renderings.
-                saidLines.forEach(function (line, at) {
+                // The figures, and after them what the file would hold -- a count
+                // that used to sit beside the button and is about the file
+                // rather than about the walk, which is why it reads better at
+                // the end of this list than in a heading nobody asked.
+                var figures = saidLines.concat(carries.textContent ? [carries.textContent] : []);
+                figures.forEach(function (line, at) {
                     var row = document.createElement('div');
                     row.style.cssText = 'padding:3px 0' +
                         (at < 3 ? ';font-weight:600' : ';color:var(--trails-ink-3)') +
@@ -3018,8 +3084,11 @@ class _ProfilePanel(MacroElement):
                     row.textContent = line;
                     box.appendChild(row);
                 });
-                [[licensed.textContent, 'Sources and licences'],
-                 [noted.textContent, 'The ground this covers']].forEach(function (part) {
+                // **The ground before the sources.** What a walk covers is about
+                // this route; who may be asked about it is about the file. The
+                // nearer question first.
+                [[noted.textContent, 'The ground this covers'],
+                 [licensed.textContent, 'Sources and licences']].forEach(function (part) {
                     if (!part[0]) { return; }
                     var head = document.createElement('div');
                     head.style.cssText = 'margin-top:14px;font-weight:600;font-size:12px;color:var(--trails-ink-3)';
@@ -3032,6 +3101,35 @@ class _ProfilePanel(MacroElement):
                     box.appendChild(head);
                     box.appendChild(said);
                 });
+                // **And the colour key last, because it is the only thing here
+                // that says nothing about this route.** Every line above it is a
+                // measurement of the walk in hand; this explains a drawing rule
+                // that holds for every walk there will ever be. It used to stand
+                // permanently in the panel, two rows of it on a phone, for a
+                // question a reader asks once.
+                var colours = document.createElement('div');
+                colours.className = 'trails-profile-key';
+                colours.style.cssText = 'margin-top:3px;font-size:12px;line-height:1.9;color:var(--trails-ink-3)';
+                GRADE.bands.forEach(function (band, at) {
+                    var row = document.createElement('div');
+                    row.appendChild(bandSwatch(band.width, band.colour, false));
+                    row.appendChild(document.createTextNode(bandLabel(at)));
+                    colours.appendChild(row);
+                });
+                // Shown only where something in the panel is dashed, which is
+                // the rule the panel's own key already kept: a chain is never
+                // drawn straight across anything.
+                if (freeKey.style.display !== 'none') {
+                    var free = document.createElement('div');
+                    free.appendChild(bandSwatch(1.6, GRADE.bands[0].colour, true));
+                    free.appendChild(document.createTextNode('drawn straight, not a path'));
+                    colours.appendChild(free);
+                }
+                var coloured = document.createElement('div');
+                coloured.style.cssText = 'margin-top:14px;font-weight:600;font-size:12px;color:var(--trails-ink-3)';
+                coloured.textContent = 'How the curve is coloured';
+                box.appendChild(coloured);
+                box.appendChild(colours);
                 var named = selected && selected.label ? title + ' \\u00b7 ' + selected.label : title;
                 window.trailsChrome.detail(named, box, 'profile');
             }
@@ -3054,7 +3152,6 @@ class _ProfilePanel(MacroElement):
                 showLicences();
             });
 
-            offer.appendChild(download);
             offer.appendChild(carries);
             offer.appendChild(licensed);
             offer.appendChild(noted);
@@ -3251,8 +3348,7 @@ class _ProfilePanel(MacroElement):
                 // up again on reopening would jump the height by however far the
                 // pointer travelled in between.
                 if (!open && stretching) { stretching = null; grabbed.style.background = 'var(--trails-grip)'; }
-                var named = open && selected && selected.label ? ' \\u00b7 ' + selected.label : '';
-                name.textContent = (open ? '\\u25be ' : '\\u25b8 ') + title + named;
+                name.textContent = open ? '\\u25be' : '\\u25b8';
                 body.style.display = open ? '' : 'none';
                 header.style.marginBottom = open ? '4px' : '0';
                 // **Edge to edge where the screen is narrow**, and inset where
@@ -3932,29 +4028,26 @@ class _ProfilePanel(MacroElement):
                 // **Said in the pointer's own words.** The gestures are not
                 // the same ones, so a line telling a reader to shift-drag is a
                 // line telling them to do something they cannot.
-                var byFinger = map.getContainer().classList.contains('trails-coarse');
+                // **What is left here is state, not instruction.** Both hint
+                // lines are gone. Reported from a phone: the one anchored at
+                // `box.left` and the reading anchored at `box.right` are written
+                // to the same `box.top + 8`, and on 390 px the reading lay
+                // wholly inside the hint -- 61 to 443 against 253 to 365, with
+                // the hint running 53 px off the screen. Taken out on a wide
+                // screen too, where the two never meet and it was still a line
+                // of prose inside a drawing.
+                //
+                // **Nothing replaces them, here or in the sheet.** A gesture
+                // that has to be described is not discovered by describing it.
+                // What a reader sees instead is state: the *whole chain* button,
+                // which stands exactly while there is something to go back from.
+                //
+                // The window stays, because *12.34 km of 42.44* is not a hint --
+                // it says which stretch is drawn, which nothing else says once
+                // the whole chain is no longer on the panel.
                 if (view.zoom > 1.001) {
                     chart.appendChild(text(box.left, box.top + 8, (shown / 1000).toFixed(2) + ' km of '
-                        + (shape.total / 1000).toFixed(2) + ' \\u00b7 '
-                        + (byFinger
-                            ? 'touch to read \\u00b7 two fingers to zoom and move \\u00b7 double tap for all'
-                            : 'drag a stretch \\u00b7 shift-drag to move \\u00b7 double-click for all'), 'start'));
-                } else if (closest > 1.05) {
-                    var hint = text(box.left, box.top + 8,
-                        (byFinger ? 'Touch the curve to read it, or pinch: the readings hold '
-                            : 'Drag a stretch to look into it, or scroll: the readings hold ')
-                        + closest.toFixed(1) + '\\u00d7 more detail than this', 'start');
-                    hint.setAttribute('fill', FAINT);
-                    chart.appendChild(hint);
-                } else if (byFinger) {
-                    // The one thing a finger cannot discover: there is no hover,
-                    // so nothing on this panel says it answers a touch at all.
-                    // It costs no row -- it is drawn inside the plot -- and it is
-                    // not a claim about detail, which is what the line above it
-                    // deliberately is.
-                    var say = text(box.left, box.top + 8, 'Touch the curve to read it', 'start');
-                    say.setAttribute('fill', FAINT);
-                    chart.appendChild(say);
+                        + (shape.total / 1000).toFixed(2), 'start'));
                 }
 
                 // The crosshair's own parts, made once and moved afterwards.
@@ -3965,14 +4058,14 @@ class _ProfilePanel(MacroElement):
                 var rule = line(plot.left, box.top, plot.left, box.bottom, CROSS);
                 var dot = document.createElementNS(SVG, 'circle');
                 dot.setAttribute('r', '2.5'); dot.setAttribute('fill', CROSS);
-                // Against the box rather than the band: the reading has to sit
-                // in the same place whether the chain drew 150 pixels tall or 20.
-                var reading = text(box.right, box.top + 8, '', 'end');
-                reading.setAttribute('fill', CROSS);
+                // **The reading is not drawn in the plot at all any more.** It
+                // stood at `box.right` on the same line the hint stood at from
+                // `box.left`, which is a collision waiting for a narrow enough
+                // screen -- and 390 px is narrow enough. It goes into the
+                // heading now: one row, one place, and no text inside the
+                // drawing to run into anything.
                 [rule, dot].forEach(function (node) { node.style.display = 'none'; inside.appendChild(node); });
-                reading.style.display = 'none';
-                chart.appendChild(reading);
-                crosshair = {rule: rule, dot: dot, reading: reading, plot: plot, width: width, x: x, y: y, at: -1,
+                crosshair = {rule: rule, dot: dot, plot: plot, width: width, x: x, y: y, at: -1,
                              slope: slope, box: box, from: from, shown: shown, mpp: metresPerPixel,
                              base: base, closest: closest};
             }
@@ -4040,7 +4133,6 @@ class _ProfilePanel(MacroElement):
                     crosshair.dot.setAttribute('cx', here);
                     crosshair.dot.setAttribute('cy', crosshair.y(value));
                 }
-                crosshair.reading.style.display = '';
                 var steep = crosshair.slope[at];
                 var gradient = '';
                 if (!isNaN(steep)) {
@@ -4048,8 +4140,9 @@ class _ProfilePanel(MacroElement):
                     gradient = ' \\u00b7 ' + (steep < 0 ? '\\u2212' : '+') + Math.round(Math.abs(steep)) + ' %'
                         + (bandOf(steep) ? ', ' + band.label : '');
                 }
-                crosshair.reading.textContent = (shape.distance[at] / 1000).toFixed(2) + ' km \\u00b7 '
+                readingNow = (shape.distance[at] / 1000).toFixed(2) + ' km \\u00b7 '
                     + (read ? metres(value) + ' m' : 'not read') + gradient;
+                paintSummary();
             }
 
             chart.addEventListener('mousemove', function (event) { readAt(event.clientX); });
@@ -4061,7 +4154,9 @@ class _ProfilePanel(MacroElement):
             function forget() {
                 if (crosshair && crosshair.at !== -1) {
                     crosshair.at = -1;
-                    [crosshair.rule, crosshair.dot, crosshair.reading].forEach(function (node) { node.style.display = 'none'; });
+                    [crosshair.rule, crosshair.dot].forEach(function (node) { node.style.display = 'none'; });
+                    readingNow = '';
+                    paintSummary();
                 }
                 if (standing) { standing = null; placeHere(); }
             }
@@ -4378,15 +4473,37 @@ class _ProfilePanel(MacroElement):
             // route, which this one has managed three times.
             var saidLines = [];
 
+            // **The heading says one of two things, and only one at a time.**
+            // At rest it is the first three figures; while a pointer is on the
+            // curve it *is* the reading, in the crosshair's own colour. That is
+            // what makes the collision impossible rather than merely fixed:
+            // there is no second place for a reading to be drawn.
+            var saidText = '';
+            var readingNow = '';
+            function paintSummary() {
+                summary.textContent = readingNow || saidText;
+                summary.style.color = readingNow ? 'var(--trails-accent)' : 'var(--trails-ink-2)';
+                // **Which of the two it is saying, as a fact and not as a
+                // colour.** A probe comparing a computed `rgb()` against the
+                // token's hex never matches -- and a state that can only be read
+                // back off a colour is a state recorded twice, once for the eye
+                // and once for nobody.
+                summary.classList.toggle('trails-profile-reading', !!readingNow);
+            }
+
             function sayLines(lines) {
                 saidLines = lines;
-                summary.textContent = lines.slice(0, 3).join(' \\u00b7 ');
+                saidText = lines.slice(0, 3).join(' \\u00b7 ');
+                readingNow = '';
+                paintSummary();
                 showLicences();
             }
 
             function say(message) {
                 saidLines = [];
-                summary.textContent = message;
+                saidText = message;
+                readingNow = '';
+                paintSummary();
                 showLicences();
             }
 
@@ -4475,7 +4592,13 @@ class _ProfilePanel(MacroElement):
                 // what it composed cannot be written out: the file has to say
                 // what its legs are and where its waypoints went, and a button
                 // this panel could not honour is worse than no button at all.
-                offer.style.display = (selected && (!selected.composed || selected.plan)) ? 'block' : 'none';
+                var writable = !!(selected && (!selected.composed || selected.plan));
+                offer.style.display = writable ? 'block' : 'none';
+                // The mark now stands in the heading rather than in that row, so
+                // it needs the condition said to it as well: a panel showing a
+                // series nobody described cannot write a file, and a mark that
+                // does nothing is worse than no mark.
+                download.style.display = writable ? '' : 'none';
                 noted.textContent = '';
                 if (!selected || (selected.composed && !selected.plan)) { return; }
                 if (!selected.shape) {
@@ -4517,7 +4640,11 @@ class _ProfilePanel(MacroElement):
             }
 
             if (EXPORT) {
-                download.addEventListener('click', function () {
+                download.addEventListener('click', function (event) {
+                    // The heading folds on a click and this now sits inside it,
+                    // beside two marks that have always said so. Without this a
+                    // reader who asks for the file loses the drawing as well.
+                    event.stopPropagation();
                     if (!selected || !selected.runs) { return; }
                     if (selected.composed) {
                         if (!selected.plan || selected.plan.why) { return; }

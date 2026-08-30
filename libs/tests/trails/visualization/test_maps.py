@@ -735,8 +735,109 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "summary.textContent = lines.slice(0, 3).join(" in html
-        assert "saidLines.forEach(function (line, at) {" in html
+        assert "saidText = lines.slice(0, 3).join(" in html
+        assert "figures.forEach(function (line, at) {" in html
+
+    def test_the_heading_is_one_line_of_marks_and_carries_no_title(self, group):
+        """Measured on a phone: 46 px of heading on two lines, over a drawing
+        that got 186. The panel's own name is the one thing it can give up for
+        nothing — the sheet's bar carries `Elevation profile · <what>` already,
+        and on a wide screen the rail beside the panel names the same tool the
+        same way. What is left of it is the caret, because the fold is a gesture
+        a reader has and it costs one character."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "name.className = 'trails-profile-fold';" in html
+        assert "name.textContent = open ? '\\u25be' : '\\u25b8';" in html
+        # One line, ending in an ellipsis rather than wrapping to a second.
+        assert "white-space:nowrap;overflow:hidden;text-overflow:ellipsis'" in html
+
+    def test_the_file_is_a_mark_beside_the_other_two(self, group):
+        """The plan control gave up its words a fortnight ago and this was the
+        last panel speaking in them. It is addressed by a class rather than by
+        what it says: a probe aiming at a control's words has an expiry date,
+        which this suite has already learned twice about aiming by position."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "download.className = 'trails-profile-gpx';" in html
+        assert "download.textContent = 'Download GPX';" not in html
+        assert "tools.appendChild(download);" in html
+        # **A mark in the heading has to stop the heading's own click.** Every
+        # other control up there says so; this one was written while it stood in
+        # the body, and without it a reader asking for the file loses the drawing
+        # with it. Driven before it was added, and it folded.
+        assert "download.addEventListener('click', function (event) {" in html
+        # And the chart is named, because the mark put a second `<svg>` in the
+        # panel ahead of it: `panel svg` had quietly begun meaning a 17 px icon.
+        assert "chart.setAttribute('class', 'trails-profile-chart');" in html
+
+    def test_with_a_sheet_the_panel_is_a_heading_and_a_curve(self, group):
+        """The colour key, the point count, the licences and the ground note all
+        stand in the sheet the *i* opens. Without a chrome there is nowhere else,
+        so the row stays exactly as it was — the same rule the licences have
+        followed since they were folded."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "meta.style.display = sheeted() ? 'none' : '';" in html
+
+    def test_neither_hint_is_drawn_and_nothing_stands_in_for_them(self, group):
+        """Reported from a phone: the hint anchored at `box.left` and the reading
+        anchored at `box.right` are written to the same `box.top + 8`, and on
+        390 px the reading lay wholly inside the hint. Taken out on a wide screen
+        too, where the two never meet and it was still prose inside a drawing.
+
+        Nothing replaces them, in the sheet or anywhere: a gesture that has to be
+        described is not discovered by describing it. What stays is the window —
+        *12.34 km of 42.44* is state and not instruction."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "Touch the curve to read it" not in html
+        assert "Drag a stretch to look into it" not in html
+        assert "more detail than this" not in html
+        assert "' km of '" in html
+
+    def test_the_reading_goes_into_the_heading_and_not_into_the_plot(self, group):
+        """That is what makes the collision impossible rather than merely fixed:
+        there is no second place for a reading to be drawn. It takes the
+        crosshair's own colour, off the same token the crosshair reads."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "crosshair = {rule: rule, dot: dot, plot: plot" in html
+        assert "reading: reading" not in html
+        assert "readingNow = (shape.distance[at] / 1000).toFixed(2)" in html
+        assert "summary.style.color = readingNow ? 'var(--trails-accent)' : 'var(--trails-ink-2)';" in html
+        # And which of the two it is saying is a fact rather than a colour: a
+        # probe comparing a computed rgb() against the token's hex never matches.
+        assert "summary.classList.toggle('trails-profile-reading', !!readingNow);" in html
+
+    def test_the_sheet_takes_the_count_the_ground_then_the_sources_then_the_key(self, group):
+        """The order is an argument. What a walk covers is about this route; who
+        may be asked about it is about the file; and the colour key is the only
+        thing in the sheet that says nothing about this route at all — it
+        explains a drawing rule that holds for every walk there will ever be. So
+        it goes last, and it is built from the same two functions the panel's own
+        key uses, because a second wording of *gentle under 15 %* is the
+        two-panel mistake in miniature."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "var figures = saidLines.concat(carries.textContent ? [carries.textContent] : []);" in html
+        assert "[[noted.textContent, 'The ground this covers']," in html
+        assert "[licensed.textContent, 'Sources and licences']].forEach(function (part) {" in html
+        assert "coloured.textContent = 'How the curve is coloured';" in html
+        assert "function bandLabel(at) {" in html
+        assert "row.appendChild(bandSwatch(band.width, band.colour, false));" in html
 
     def test_the_panel_can_be_put_away_only_where_something_brings_it_back(self, group):
         """A control that strands a reader is worse than no control: a page built
@@ -2594,7 +2695,11 @@ class TestComposedProfile:
         """The file has to say what its legs are and where its waypoints went. A
         button this panel could not honour is worse than no button at all."""
         html = self.drawn().get_root().render()
-        assert "offer.style.display = (selected && (!selected.composed || selected.plan)) ? 'block' : 'none';" in html
+        assert "var writable = !!(selected && (!selected.composed || selected.plan));" in html
+        assert "offer.style.display = writable ? 'block' : 'none';" in html
+        # The mark stands in the heading now, so the condition has to be said to
+        # it as well: a mark that does nothing is worse than no mark.
+        assert "download.style.display = writable ? '' : 'none';" in html
 
     def test_a_route_with_a_hole_in_it_is_refused_and_said(self):
         """The file states that it breaks its track only at crossings. A leg
