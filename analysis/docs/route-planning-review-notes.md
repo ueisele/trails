@@ -1944,13 +1944,18 @@ coordinates at six decimals (1.35) and the figures table's field names said once
 (1.26). The whole of it, and the two things that could have gone wrong, is in
 *The seconds, and the eight per cent of a popup that was information* below.
 
-**What is left is measured there too**, and the next round is a different kind
-of work: drawing a layer's features from a loop rather than one statement each
-(**2.5 MB**), one `<symbol>` per pin (**0.46**), and the routing graph out of
-the document altogether (**4.93 MB** that blocks the first paint and that no
-reader needs until they plan a route). **`preferCanvas` is still the unsafe
-one** — no bytes at all, 130 MB of memory, and it takes `.leaflet-overlay-pane
-path` to 0.
+**And then the map went into a canvas**, which was the other half of package B
+and buys no bytes at all: **13,193 DOM elements down to 1,603, and a move at
+390 x 844 from 51 ms to 33.** The tolerance the drawing is simplified at was
+asked about at the same time and **stays at 8 m** — the whole of both, with the
+five figures that did not move and the three proposals that died on their own
+measurements, is in *The map draws into a canvas* below.
+
+**What is left after that**, and it is a different kind of work: drawing a
+layer's features from a loop rather than one statement each (**2.5 MB**), one
+`<symbol>` per pin (**0.46**), and the routing graph out of the document
+altogether (**4.93 MB** that blocks the first paint and that no reader needs
+until they plan a route).
 
 What is open besides that is below, in the order I would take it.
 
@@ -3821,6 +3826,132 @@ read it and one of them *finds the chain to click by walking the DOM*;
 and a restated figure, not a flag.
 
 `make drive` reads **253**, unmoved, and the source tests **270**.
+
+### The map draws into a canvas, and the tolerance stayed at eight metres
+
+Two questions asked together, because they trade against each other, and the
+measurements sent them opposite ways.
+
+| | SVG | canvas |
+|---|---:|---:|
+| DOM elements | 13,193 | **1,603** |
+| paths in the overlay pane | 11,589 | 0, and one `<canvas>` |
+| a move at 390 x 844, median of six | 51.0 ms | **33.0 ms** |
+| to `domInteractive` | 787 ms | **661 ms** |
+| to `load` | 1,422 ms | 1,418 ms |
+
+**A third off every gesture, and an eighth of the elements.** Leaflet writes a
+`d` attribute per path on every move; with 11,589 of them that write is the
+largest single cost of a pan, and it is the one canvas removes. Measured on a
+desktop CPU in a phone-sized viewport, so a real phone is three to five times
+each of these.
+
+**The saving is flat, not proportional**, which is the number to keep: at four
+times the drawn detail the same measurement reads 91 ms with SVG against 74 with
+canvas. Canvas removes the DOM write; the projection and the per-zoom
+simplification are untouched and grow with the vertices. So canvas does not buy
+room to draw finer -- **canvas at 0.25 m (74 ms) is still worse than SVG at 8 m
+was (51)**.
+
+**`load` looked 875 ms worse and was noise.** One reading said 2,297; three more
+said 1,418, 1,418 and 1,669. A single measurement at this scale is not one.
+
+#### The figures did not move, and that was the point
+
+`.leaflet-overlay-pane path` reads **0** under canvas, and 11,589 is the oldest
+acceptance figure in this document. It is not restated: the checks read it off
+the map's own layers now, which is what it was always about -- the same lines on
+the same map, counted where they live rather than where a renderer happened to
+put them. All five hold: **11,589 paths, 11,290 lines, 298 circle markers, 1
+carrying no chain class, 1 deaf to the pointer.** A circle marker is now the one
+that can say how big it is rather than the one whose `d` has an arc in it, and
+*deaf* is `options.interactive === false` rather than a computed style.
+
+**And the first walk counted everything twice.** 23,178 for 11,589, 596 for 298.
+`LayerGroup.onAdd` hands every child to `map.addLayer`, so `map._layers` holds
+the group **and** each leaf under it: `eachLayer` is already flat, and recursing
+into groups counts every leaf a second time. The check's own decomposition was
+green through this -- 22,580 + 596 + 2 does add to 23,178 -- and only the three
+anchored figures beside it said anything. **A self-consistent decomposition says
+nothing about whether it decomposed the right thing.**
+
+#### Two things in the page were drawn by a renderer, and one was invisible
+
+**The search filter hid a line with `layer._path.style.display`.** Under canvas
+there is no `_path`, the function would have returned early on every layer, and
+**the search would have stopped filtering the map with nothing failing.** A
+canvas layer is drawn out of its own options every frame, so *visible* has to be
+an option -- and `stroke` and `fill` rather than `opacity`, because opacity is
+what `_ClickHighlight` says *emphasised* with. The two stay independent
+properties, exactly as they were when one of them was `style.display`. Two
+details came with it: the original `fill` has to be read before the first hide
+(and arrives through Leaflet's prototype, because `_lean` drops a fill that
+matches the shape's own default), and canvas hit-tests off `options.interactive`
+rather than off a class, so a hidden line would otherwise still take a click
+that looks like empty ground.
+
+**And the search for what would break was the wrong search.** Grepping for
+`_path` found that one place and nothing else. What actually matters is
+`className:` on anything Leaflet *draws*, and there are three: `trails-plan-pin`
+is a `divIcon` and survives, because a marker keeps its element under either
+renderer; `trails-here-ring` and `trails-here-dot` are paths and do not. The run
+found the second one, not I -- twenty seconds of waiting for a dot that never
+reaches the document. Its check also measured the accuracy circle with
+`getBoundingClientRect().width`, and there is no box to measure: it comes off
+the circle's own `getBounds()` projected to the screen now, which is the same
+question under either renderer and **one pixel more honest** -- 6 px where the
+rectangle counted the 1 px stroke as well.
+
+#### And the drawn tolerance stays at 8 m
+
+Asked because 6 decimals of coordinate looked like a loss of accuracy. It is not
+-- 0.056 m is **0.22 px** at zoom 18, the deepest the tiles go -- but the
+question found something real one order of magnitude up: **the drawn geometry is
+simplified at 8 m**, which is 32 px at that zoom, and has been since long before
+any of this.
+
+| | 8 m | 5 m | 1 m | 0.25 m |
+|---|---:|---:|---:|---:|
+| px at zoom 18 | 32.2 | 20.1 | 4.0 | 1.0 |
+| px at zoom 16 | 8.0 | 5.0 | 1.0 | 0.3 |
+| vertices | 77,451 | 100,687 | 219,920 | 332,207 |
+| page, brotli | 5.19 MB | — | 5.66 | 6.01 |
+| a move, canvas | 33 ms | — | 56.5 | 74 |
+
+**What 8 m actually removes is 1.25 % of the drawn length** -- 6,020.7 km against
+6,096.8 at full detail. That is the honest measure, because positional accuracy
+and shape fidelity are different losses: a source surveyed to ±10 m puts every
+vertex somewhere in a circle, which misleads nobody, while Douglas-Peucker
+*removes form* and a flattened switchback claims a straight path. By source:
+
+| | vertices at full | at 8 m | km | shape lost |
+|---|---:|---:|---:|---:|
+| FKB | 305,101 | 32,223 | 1,972.5 | 1.88 % |
+| UT.no | 62,158 | 4,728 | 375.1 | 2.28 % |
+| N50 paths | 61,619 | 12,579 | 1,054.1 | 1.10 % |
+| N50 roads | 54,637 | 15,302 | 1,509.9 | 0.51 % |
+| OSM | 30,901 | 9,176 | 689.1 | 1.06 % |
+| Turrutebasen | 25,644 | 2,914 | 234.6 | 1.58 % |
+| ferries | 832 | 435 | 148.6 | 0.07 % |
+
+And the tail is thin: of **5,264 chains over 200 m, 39 lose 5 % or more**, the
+worst 10 %.
+
+**Three things were proposed and all three are recorded as not done.** 5 m is a
+factor of 1.6 -- still 20 px at zoom 18 -- for 23,000 vertices; a half step that
+misses both ends. A **tolerance per layer**, 1 m where the source is surveyed to
+a metre, dies on its own measurement: **FKB is both the biggest loser and 56 %
+of all vertices** at 32 % of the length, so targeting it pays almost the whole
+bill of doing it everywhere. And the **delta-varint encoding** that would make
+1 m affordable buys 4.28 MB raw and **0.12 MB on the wire** -- brotli already
+compresses JSON coordinates well, and this page's remaining problem is not the
+wire.
+
+**The second-worst source is the one where smoothing is probably right.** UT.no
+loses 2.28 %, and those are GPS recordings: some of what 8 m takes off them is
+receiver noise, not path.
+
+`make drive` reads **253**, unmoved, and the source tests **275**.
 
 ### What is still open on a phone
 

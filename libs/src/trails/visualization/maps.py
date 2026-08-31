@@ -907,7 +907,18 @@ def create_map(
 
     # Base layers are attached explicitly rather than via Map(tiles=...), which
     # would label the layer control with the raw tile URL instead of the name.
-    fmap = folium.Map(location=list(center), zoom_start=zoom, tiles=None, control_scale=True)
+    # **Drawn into a canvas rather than into twelve thousand SVG elements.**
+    # Leaflet writes a `d` attribute per path on every move, and with 11,589 of
+    # them that write is the largest single cost of a pan. Measured on a built
+    # page at 390 x 844 with a coarse pointer, the median of six `setView`
+    # steps: **51 ms with SVG against 34 with canvas**, a third off every
+    # gesture, and 12,472 DOM elements down to 882.
+    #
+    # **The saving is flat, not proportional**, which is worth knowing before
+    # anybody spends it: at four times the drawn detail the same measurement
+    # reads 91 ms against 74. Canvas removes the DOM write; the projection and
+    # the per-zoom simplification are unchanged and grow with the vertices.
+    fmap = folium.Map(location=list(center), zoom_start=zoom, tiles=None, control_scale=True, prefer_canvas=True)
     # **Three of folium's defaults, dropped after being measured rather than
     # after being reasoned about.** They cost 288 kB uncompressed and, between
     # them, a whole host: `netdna.bootstrapcdn.com` served one file and nothing
@@ -1858,15 +1869,38 @@ class _NameSearch(MacroElement):
             var revealed = [];
 
             function display(layer, visible) {
-                var value = visible ? '' : 'none';
-                // A layer is drawn either as a path or as an icon, never both.
-                var element = layer._path || layer._icon;
-                // Reading the current value is cheap; writing one that is already
-                // set is not, and with twelve thousand features that is the whole
-                // difference between a filter that keeps up and one that stalls.
-                if (!element || element.style.display === value) { return; }
-                element.style.display = value;
-                if (layer._shadow) { layer._shadow.style.display = value; }
+                // A layer is drawn either as an icon, or by a renderer, never
+                // both -- and a marker keeps its icon whichever renderer the
+                // map uses, so this case is first and is unconditional.
+                var element = layer._icon || layer._path;
+                if (element) {
+                    var value = visible ? '' : 'none';
+                    // Reading the current value is cheap; writing one that is
+                    // already set is not, and with twelve thousand features
+                    // that is the whole difference between a filter that keeps
+                    // up and one that stalls.
+                    if (element.style.display === value) { return; }
+                    element.style.display = value;
+                    if (layer._shadow) { layer._shadow.style.display = value; }
+                    return;
+                }
+                // **A canvas layer has no element to hide.** It is drawn out of
+                // its own options every frame, so *visible* has to be an option
+                // -- and `stroke` and `fill` rather than `opacity`, because
+                // opacity is what `_ClickHighlight` says *emphasised* with. The
+                // two stay independent properties, exactly as they were when
+                // one of them was `style.display`.
+                if (!layer.setStyle || layer.options.stroke === visible) { return; }
+                // Read before anything is hidden, and read through the
+                // prototype: `_lean` drops a fill that matches the shape's own
+                // default, so a circle marker's `true` and a line's `false`
+                // both arrive from Leaflet rather than from the page.
+                if (layer._trailsFill === undefined) { layer._trailsFill = !!layer.options.fill; }
+                // Canvas hit-tests off this rather than off a class, so a
+                // hidden line has to stop answering clicks as well as stop
+                // being drawn.
+                layer.options.interactive = visible;
+                layer.setStyle({stroke: visible, fill: visible && layer._trailsFill});
             }
 
             var query = '';

@@ -542,6 +542,70 @@ class TestLabelledPoints:
         assert "Stavassgården" in getattr(group, maps.SEARCH_NAMES_ATTR).values()
 
 
+class TestCanvas:
+    """The map draws into a canvas, and what had to move with it."""
+
+    def test_the_map_draws_into_a_canvas(self):
+        """Leaflet writes a `d` attribute per path on every move, and with
+        11,589 of them that write is the largest single cost of a pan. Measured
+        at 390 x 844 with a coarse pointer, the median of six `setView` steps:
+        51 ms with SVG against 34 with canvas, and 12,472 DOM elements to 882.
+        """
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+
+        assert '"preferCanvas": true' in html
+
+    def test_the_search_hides_a_canvas_layer_without_an_element(self, trails):
+        """A canvas layer has no element to give `display: none` to: it is drawn
+        out of its own options every frame, so being visible has to be one of
+        them."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="Paths", search_field="trail_name")
+        maps.add_search(fmap, [group])
+
+        html = fmap.get_root().render()
+        assert "if (!layer.setStyle || layer.options.stroke === visible) { return; }" in html
+        assert "layer.setStyle({stroke: visible, fill: visible && layer._trailsFill});" in html
+
+    def test_visible_and_emphasised_stay_different_properties(self, trails):
+        """The search decides what is *visible* and the highlight what is
+        *emphasised*, and the two are used together -- so the search must not
+        reach for `opacity`, which is the highlight's."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="Paths", search_field="trail_name")
+        maps.add_search(fmap, [group])
+        maps.add_click_highlight(fmap, [group])
+
+        html = fmap.get_root().render()
+        hiding = html[html.index("function display(layer, visible) {") :]
+        hiding = hiding[: hiding.index("var query = ")]
+        # The comments say why, at length; this is about what the code does.
+        code = "\n".join(line for line in hiding.splitlines() if not line.strip().startswith("//"))
+        assert "opacity" not in code
+        assert "stroke: visible" in code
+
+    def test_a_hidden_line_stops_answering_clicks(self, trails):
+        """Canvas hit-tests off the option rather than off a class, so a line
+        the search has hidden would still take a click that looks like empty
+        ground."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="Paths", search_field="trail_name")
+        maps.add_search(fmap, [group])
+
+        assert "layer.options.interactive = visible;" in fmap.get_root().render()
+
+    def test_a_marker_is_still_hidden_by_its_icon(self, shelters):
+        """A marker keeps its icon whichever renderer the map uses, so that case
+        is first and is unconditional."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_points(fmap, shelters, name="Huts", label_field="name")
+        maps.add_search(fmap, [group])
+
+        html = fmap.get_root().render()
+        assert "var element = layer._icon || layer._path;" in html
+        assert "if (layer._shadow) { layer._shadow.style.display = value; }" in html
+
+
 class TestClickHighlight:
     """Tests for add_click_highlight."""
 

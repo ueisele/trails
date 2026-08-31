@@ -133,8 +133,30 @@ SELECT_CHAIN = with_map("""(cls) => {
   if (window.trailsChrome) { window.trailsChrome.close(); }
   return true; }""")
 
-FURNITURE = with_map("""() => {
-  const paths = [...document.querySelectorAll('.leaflet-overlay-pane path')];
+#: Every drawn thing the map holds, whatever renderer drew it.
+#:
+#: **The map is drawn into a canvas now**, so `.leaflet-overlay-pane path`
+#: reads 0 and one `<canvas>` where it used to read 11,589. The figures did not
+#: move -- the same lines are drawn on the same map -- so they are read off the
+#: map's own layers instead of off the elements a renderer happened to emit,
+#: which is what they were always about.
+#:
+#: **A group's children are on the map in their own right.** `LayerGroup.onAdd`
+#: hands every child to `map.addLayer`, so `map._layers` holds the group *and*
+#: each leaf under it -- and a walk that recurses into groups counts every leaf
+#: twice, which is how this first read 23,178 for 11,589. `eachLayer` is already
+#: flat; the only thing to do is leave the groups out of it, and they answer
+#: `setStyle` too because they forward it.
+DRAWN = """
+  const drawn = [];
+  __MAP__.eachLayer(layer => { if (layer.setStyle && !layer.eachLayer) { drawn.push(layer); } });
+  const chained = drawn.filter(l => (l.options.className || '').indexOf('trail-group-') === 0);
+"""
+
+FURNITURE = with_map(
+    """() => {"""
+    + DRAWN
+    + """
   // The legend and the base-map picker are panels the chrome owns now, so they
   // are addressed by their own names rather than by the corner they used to
   // stand in. They are in the document whether or not anybody has them open --
@@ -148,18 +170,19 @@ FURNITURE = with_map("""() => {
   const frame = document.querySelector('.leaflet-container').getBoundingClientRect();
   const fromRight = node => node ? Math.round(frame.right - node.getBoundingClientRect().right) : null;
   return {
-    paths: paths.length,
-    // A chain drawn as a line, and a chain drawn as a circle marker: Leaflet
-    // draws a CircleMarker as a path of two arcs, and 298 of these chains are
-    // short enough to be drawn that way. Both carry a chain class, which is why
-    // counting the class alone gives 11,588 and not the 11,290 the decomposition
-    // in the notes names.
-    lines: paths.filter(p => [...p.classList].some(c => c.indexOf('trail-group-') === 0)
-                             && !/a[\\d.]/i.test(p.getAttribute('d') || '')).length,
-    circles: paths.filter(p => [...p.classList].some(c => c.indexOf('trail-group-') === 0)
-                               && /a[\\d.]/i.test(p.getAttribute('d') || '')).length,
-    loose: paths.filter(p => ![...p.classList].some(c => c.indexOf('trail-group-') === 0)).length,
-    deaf: paths.filter(p => getComputedStyle(p).pointerEvents === 'none').length,
+    paths: drawn.length,
+    // A chain drawn as a line, and a chain drawn as a circle marker: 298 of
+    // these chains are short enough to be drawn as a dot. Both carry a chain
+    // class, which is why counting the class alone gives 11,588 and not the
+    // 11,290 the decomposition in the notes names. A circle marker is the one
+    // that can say how big it is.
+    lines: chained.filter(l => !l.getRadius).length,
+    circles: chained.filter(l => l.getRadius).length,
+    loose: drawn.length - chained.length,
+    // The park boundary, which opts out of the pointer so that a click reaches
+    // the trails under its fill. Under canvas that is the option itself and no
+    // longer a computed style.
+    deaf: drawn.filter(l => l.options.interactive === false).length,
     markers: document.querySelectorAll('.leaflet-marker-pane > *').length,
     boxes: legend.filter(i => i.type === 'checkbox').length,
     off: legend.filter(i => i.type === 'checkbox' && !i.checked).length,
@@ -172,7 +195,8 @@ FURNITURE = with_map("""() => {
     // because that is the corner each of them keeps: the rail is in the one the
     // burger already had, and Leaflet's is Leaflet's again.
     controls: [fromRight(rail), at(zoom)],
-    layerControls: document.querySelectorAll('.leaflet-control-layers').length}; }""")
+    layerControls: document.querySelectorAll('.leaflet-control-layers').length}; }"""
+)
 
 # The scale, read so that neither axis takes part in proving the other: the
 # horizontal comes off the distance marks the axis draws, that names which
@@ -2486,13 +2510,24 @@ def where_the_reader_is(page: Any) -> Check:
     page.evaluate(SHOW_TOOL, "here")
     page.wait_for_timeout(600)
 
-    seen = """() => { const dot = document.querySelector('.trails-here-dot');
-      const ring = document.querySelector('.trails-here-ring');
+    seen = """() => {
       const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
-      // **Leaflet draws a circle as a path**, so there is no `r` to read: the
-      // question is how wide it comes out on the screen, which is the question
-      // anyway — the circle has to be the reported accuracy at this map's scale.
-      const across = ring ? Math.round(ring.getBoundingClientRect().width) : 0;
+      // **Drawn into the canvas, so there is no element to ask.** The dot and
+      // the ring are layers on the map and are found as layers; a reader who
+      // has stopped the watch has neither, which is what this used to learn
+      // from `querySelector` answering null.
+      let dot = null, ring = null;
+      map.eachLayer(l => { const cls = l.options && l.options.className;
+        if (cls === 'trails-here-dot') { dot = l; }
+        if (cls === 'trails-here-ring') { ring = l; } });
+      // **A circle has no `r` to read either way**: the question is how wide it
+      // comes out on the screen, which is the question anyway — the circle has
+      // to be the reported accuracy at this map's scale. Its own bounds,
+      // projected, answer that under either renderer.
+      let across = 0;
+      if (ring) { const box = ring.getBounds();
+        across = Math.round(map.latLngToContainerPoint(box.getSouthEast()).x
+                            - map.latLngToContainerPoint(box.getNorthWest()).x); }
       const metres = map.distance(map.containerPointToLatLng([0, 0]),
                                   map.containerPointToLatLng([100, 0])) / 100;
       return {dot: !!dot, ring: !!ring, across: across,
@@ -2503,7 +2538,14 @@ def where_the_reader_is(page: Any) -> Check:
 
     before = page.evaluate(seen)
     page.evaluate("() => document.querySelector('.trails-here-toggle').click()")
-    page.wait_for_function("() => !!document.querySelector('.trails-here-dot')", timeout=20_000)
+    page.wait_for_function(
+        with_map(
+            """() => { let seen = false;
+            __MAP__.eachLayer(l => { if (l.options && l.options.className === 'trails-here-dot') { seen = true; } });
+            return seen; }"""
+        ),
+        timeout=20_000,
+    )
     page.wait_for_timeout(600)
     after = page.evaluate(seen)
     # **Read with the dock shut.** An open tool's button is lit white on the
@@ -2926,14 +2968,15 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         thrown: list[str] = []
         second.on("pageerror", lambda error: thrown.append(str(error)))
         second.goto(address, timeout=180_000)
-        second.wait_for_function(
-            "() => document.querySelectorAll('.leaflet-overlay-pane path').length > 11000",
-            timeout=120_000,
-        )
+        second.wait_for_function(with_map("() => {" + DRAWN + " return drawn.length > 11000; }"), timeout=120_000)
         offline = second.evaluate(
-            """() => ({paths: document.querySelectorAll('.leaflet-overlay-pane path').length,
-                       markers: document.querySelectorAll('.leaflet-marker-pane > *').length,
-                       graph: !!(window.trailsGraph && window.trailsGraph.header)})"""
+            with_map(
+                """() => {"""
+                + DRAWN
+                + """ return {paths: drawn.length,
+                              markers: document.querySelectorAll('.leaflet-marker-pane > *').length,
+                              graph: !!(window.trailsGraph && window.trailsGraph.header)}; }"""
+            )
         )
         context.set_offline(False)
         context.close()
@@ -3005,11 +3048,14 @@ def drive(page: Any) -> list[Check]:
     # A chain already drawn finer than its own samples, which is 99 % of them:
     # there the wheel belongs to the map and the chart must not touch it.
     short = page.evaluate(
-        """(long) => {
-        for (const path of document.querySelectorAll('.leaflet-overlay-pane path')) {
-          const cls = [...path.classList].find(c => c.indexOf('trail-group-') === 0);
-          if (cls && cls !== long) { return cls; } }
-        return null; }""",
+        with_map(
+            """(long) => {"""
+            + DRAWN
+            + """ for (const layer of chained) {
+                    const cls = layer.options.className;
+                    if (cls !== long) { return cls; } }
+                  return null; }"""
+        ),
         LONG_CHAIN,
     )
     if short and select(page, short):
