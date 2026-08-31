@@ -7,7 +7,7 @@ visually::
     fmap = create_map(bounds=park.total_bounds, base=BaseMap.KARTVERKET_TOPO)
     add_boundary(fmap, park, name="National park")
     add_trails(fmap, trails, name="Turrutebasen", color="#1b5e20")
-    fmap.save("map.html")
+    save_map(fmap, pathlib.Path("map.html"))
 """
 
 import hashlib
@@ -135,6 +135,79 @@ PIN_SHAPE = (
     "M14 0C6.3 0 0 6.3 0 14c0 3.6 1.6 7.4 4 11 2.4 3.6 5.4 7 8.1 9.9"
     "a2.6 2.6 0 0 0 3.8 0C18.6 32 21.6 28.6 24 25c2.4-3.6 4-7.4 4-11 0-7.7-6.3-14-14-14z"
 )
+
+
+#: How many decimals a drawn coordinate is written with.
+#:
+#: **The page carries the precision it can draw, not the precision it was
+#: given.** A projected metre answered as a float comes out as
+#: ``65.44107796402518`` -- seventeen digits, of which the eighth is already
+#: eleven centimetres at this latitude and the ninth is a millimetre. Nothing on
+#: this map reads a drawn coordinate back; they are handed to Leaflet, which
+#: rounds them to the pixel. Measured on the built page, the eleven thousand
+#: location arrays weigh 3.21 MB and 2.03 at six decimals.
+#:
+#: Six is 11.1 cm of latitude and 4.6 cm of longitude at 65.4 deg N -- below the
+#: metre the sources themselves are surveyed to, and the same rule
+#: :func:`add_points` already applies to the named-point table.
+DRAWN_DECIMALS = 6
+
+#: What Leaflet already believes about a path, which folium writes out for every
+#: feature regardless.
+#:
+#: **Folium names every Leaflet option in its own signature**, so
+#: ``path_options`` returns all fourteen of them whether or not a caller said
+#: anything, and each one is written into the page once per feature. Measured on
+#: the built page: 12,700 option objects, **4.59 MB**, of which the varying part
+#: -- the class, the colour, the width, the opacity -- is under a quarter.
+#:
+#: **Only what nothing reads is dropped.** ``color``, ``weight`` and ``opacity``
+#: stay whatever they are, because :class:`_ClickHighlight` captures those three
+#: off ``layer.options`` before it restyles anything and hands them back to
+#: ``setStyle`` afterwards; dropping one that happened to equal Leaflet's
+#: default would restore it as ``undefined``. The rest are decoration nothing in
+#: this page ever asks about.
+_LEAFLET_PATH_DEFAULTS: dict[str, Any] = {
+    "bubblingMouseEvents": True,
+    "dashArray": None,
+    "dashOffset": None,
+    "fillOpacity": 0.2,
+    "fillRule": "evenodd",
+    "lineCap": "round",
+    "lineJoin": "round",
+    "noClip": False,
+    "smoothFactor": 1.0,
+    "stroke": True,
+}
+
+
+def _lean(options: dict[str, Any], *, filled: bool) -> dict[str, Any]:
+    """Drop from a Leaflet options object what Leaflet would have assumed anyway.
+
+    See :data:`_LEAFLET_PATH_DEFAULTS` for what is dropped and what is kept on
+    purpose.
+
+    Args:
+        options: What folium built, as it will be written into the page.
+        filled: Whether the shape fills by default -- ``L.Polyline`` does not
+            and ``L.CircleMarker`` does, and that is the one default that
+            differs between the two.
+
+    Returns:
+        The same options with the assumable ones removed.
+    """
+    lean = {}
+    for key, value in options.items():
+        if key in _LEAFLET_PATH_DEFAULTS and value == _LEAFLET_PATH_DEFAULTS[key]:
+            continue
+        # Leaflet paints the fill with ``fillColor || color``, so a fill colour
+        # that repeats the stroke colour is the same drawing said twice.
+        if key == "fillColor" and value == options.get("color"):
+            continue
+        if key == "fill" and value is filled:
+            continue
+        lean[key] = value
+    return lean
 
 
 SERVICE_WORKER = """// The map's service worker. Written by the build, stamped with the page it was
@@ -325,6 +398,78 @@ def write_service_worker(beside: pathlib.Path) -> pathlib.Path:
     written = beside.with_name("sw.js")
     written.write_text(SERVICE_WORKER.replace("__VERSION__", stamp), encoding="utf-8")
     return written
+
+
+def _squeezed(html: str) -> str:
+    """Take the indentation out of a rendered page.
+
+    **Folium's templates are indented for the template**, not for the document:
+    every feature arrives inside four nested macros and comes out under twelve
+    to sixteen spaces, with three or four empty lines between one feature and
+    the next. Measured on the built page, 340,856 lines carried 163,377 blank
+    ones and 2.78 MB of leading whitespace -- **2.88 MB** in all, none of which
+    any reader or any browser has a use for.
+
+    **It is worth almost nothing on the wire and something on the clock.** The
+    deploy compresses at brotli 11, where whitespace is nearly free; what it
+    saves is bytes the browser's parser has to walk, and the page's cost is
+    parse and not network -- 241 ms of transfer against 2,473 ms to
+    ``domInteractive``.
+
+    **A template literal is left exactly as it was.** A newline inside backticks
+    is part of the string, and folium's tooltip is written across three lines,
+    so lines between an opening backtick and its closing one are copied
+    untouched. Everything else is JavaScript or markup, where a run of
+    whitespace outside a string means nothing -- and only whole-line whitespace
+    is removed, so a newline still stands between any two tags that had one.
+
+    Args:
+        html: The rendered page.
+
+    Returns:
+        The same page with its whitespace taken out.
+
+    Raises:
+        AssertionError: If a template literal is still open at the end, which
+            means the parity this walks by does not hold and nothing was safe
+            to remove.
+    """
+    out: list[str] = []
+    inside = False
+    for line in html.split("\n"):
+        odd = line.count("`") % 2 == 1
+        if inside:
+            # Inside the string: every character of it is the string's.
+            out.append(line)
+            inside = not odd
+            continue
+        if odd:
+            # The indentation is still the document's; the tail is the string's.
+            inside = True
+            out.append(line.lstrip())
+            continue
+        line = line.strip()
+        if line:
+            out.append(line)
+    assert not inside, "a template literal was left open, so the page's backtick parity does not hold"
+    return "\n".join(out)
+
+
+def save_map(fmap: folium.Map, path: pathlib.Path) -> pathlib.Path:
+    """Render a map and write it, without the whitespace it renders with.
+
+    Stands in for :meth:`folium.Map.save`, which renders and writes in one step
+    and leaves nowhere to put :func:`_squeezed`.
+
+    Args:
+        fmap: The map to write.
+        path: Where to write it.
+
+    Returns:
+        Where it was written.
+    """
+    path.write_text(_squeezed(fmap.get_root().render()), encoding="utf-8")
+    return path
 
 
 def _pin(colour: str, icon: str) -> str:
@@ -834,6 +979,10 @@ def create_map(
     _Theme().add_to(fmap)
     _PinSize().add_to(fmap)
     _ServiceWorker().add_to(fmap)
+    # Before any layer, because every layer's own script calls it: folium
+    # renders a map's children in the order they were added, and the layers are
+    # added by the caller after this returns.
+    _PopupText().add_to(fmap)
 
     if bounds is not None:
         min_lon, min_lat, max_lon, max_lat = bounds
@@ -1148,17 +1297,59 @@ def _figure_values(row: pd.Series, fields: dict[str, str]) -> dict[str, object]:
     return values
 
 
-def _build_popup(
-    row: pd.Series,
+def _packed_figures(figures: dict[str, dict[str, object]]) -> dict[str, object]:
+    """Lay a chain-figures table out positionally, so its field names travel once.
+
+    **Every figure has the same twelve fields** -- :func:`_figure_values` writes
+    one entry per field whether the row said anything or not -- and written as
+    objects that is twelve field names per chain. Measured on the built page:
+    11,290 chains, 2.84 MB, of which **1.26 MB is the word `ascent` and its
+    eleven siblings**, said 11,290 times each.
+
+    The page puts the objects back together on load (:class:`_ProfilePanel`), so
+    everything that reads a figure reads it by name as it always did. What is
+    saved is source the browser's parser has to walk, which is where this page's
+    seconds are.
+
+    Args:
+        figures: Mapping of CSS class to the figures of the line carrying it
+
+    Returns:
+        The field names once, and one list of values per chain in that order
+    """
+    fields = list(dict.fromkeys(key for figure in figures.values() for key in figure))
+    return {
+        "fields": fields,
+        "rows": {name: [figure.get(key) for key in fields] for name, figure in figures.items()},
+    }
+
+
+def _popup_shape(
+    gdf: gpd.GeoDataFrame,
     fields: dict[str, str],
     link_fields: dict[str, str] | None = None,
     source: str | None = None,
     link_heading: str | None = None,
-) -> str | None:
-    """Render a popup table from selected fields.
+) -> dict[str, Any] | None:
+    """Work out the part of a popup that is the same for a whole layer.
+
+    **A popup used to be built at load, once per feature, as markup.** Measured
+    on the built page that was 12,898 popups, **16.62 MB** of ``$(`<div>...`)``
+    handed to jQuery before the map drew anything, and 187 MB of the 590 MB the
+    page settles at -- to show one of them at a time. Of that HTML, **1.28 MB
+    was the values**: a popup was eight per cent information and the rest was
+    the same eleven labels and the same inline styles written out again.
+
+    So the labels, the link texts, the heading and the source travel **once per
+    layer** and the values travel per feature (:func:`_popup_values`), and the
+    page builds the table when somebody opens one -- see :class:`_PopupText`.
+
+    **Which columns count is settled here rather than per row**, because a
+    column the frame does not have is missing from every row of it, and the
+    values are positional against these labels.
 
     Args:
-        row: Row of a GeoDataFrame
+        gdf: The layer, for the columns it actually has
         fields: Mapping of column name to display label
         link_fields: Mapping of a column holding a URL to the link text to show
             for it. Rendered below the table rows, one link per line. Values that
@@ -1171,52 +1362,56 @@ def _build_popup(
             line rather than as the recording somebody else published.
 
     Returns:
-        HTML table, or None if the row has nothing to show at all
+        The layer's popup shape, or None if no feature of it could show anything
     """
-    rows = []
-    for column, label in fields.items():
-        if column not in row:
-            continue
-        value = row[column]
-        if pd.isna(value) or value == "":
-            continue
-        # Values come from third-party data, so they must not be able to inject markup.
-        rows.append(
-            f"<tr><td style='padding:2px 8px 2px 0;color:var(--trails-ink-3)'>{escape(str(label))}</td>"
-            f"<td style='padding:2px 0'><b>{escape(str(value))}</b></td></tr>"
-        )
-
-    written = 0
-    for column, text in (link_fields or {}).items():
-        if column not in row:
-            continue
-        url = row[column]
-        if pd.isna(url) or not str(url).startswith(_LINK_SCHEMES):
-            continue
-        # Above the first link that survives, not above the block: a route with
-        # no description on the park's site would otherwise get a heading over
-        # nothing at all.
-        if link_heading and not written:
-            rows.append(f"<tr><td colspan='2' style='padding:7px 0 1px;color:var(--trails-ink-4)'>{escape(str(link_heading))}</td></tr>")
-        written += 1
-        # noopener keeps the opened page from reaching back into this one.
-        rows.append(
-            f"<tr><td colspan='2' style='padding:3px 0'>"
-            f'<a href="{escape(str(url), quote=True)}" target="_blank" rel="noopener noreferrer">{escape(str(text))}</a>'
-            f"</td></tr>"
-        )
-
-    if source:
-        # Set off by a rule, so it reads as provenance rather than as another
-        # attribute of the feature.
-        rows.append(
-            f"<tr><td colspan='2' style='padding:5px 0 0;border-top:1px solid var(--trails-rule);"
-            f"color:var(--trails-ink-4)'>Source: {escape(str(source))}</td></tr>"
-        )
-
-    if not rows:
+    columns = [column for column in fields if column in gdf.columns]
+    links = [column for column in (link_fields or {}) if column in gdf.columns]
+    if not columns and not links and not source:
         return None
-    return f"<table style='font-family:sans-serif;font-size:12px'>{''.join(rows)}</table>"
+    shape: dict[str, Any] = {
+        "labels": [str(fields[column]) for column in columns],
+        "links": [str((link_fields or {})[column]) for column in links],
+        "columns": columns,
+        "linkColumns": links,
+    }
+    if link_heading:
+        shape["heading"] = str(link_heading)
+    if source:
+        shape["source"] = str(source)
+    return shape
+
+
+def _popup_values(row: pd.Series, shape: dict[str, Any]) -> list[str | None] | None:
+    """Pick one feature's popup values out of its row.
+
+    **Everything travels as text**, including numbers: that is what
+    :class:`_PopupText` writes and what the page has always shown, and a numpy
+    scalar is not JSON anyway.
+
+    Args:
+        row: Row of a GeoDataFrame
+        shape: What :func:`_popup_shape` worked out for the layer
+
+    Returns:
+        One entry per label and then one per link, ``None`` where the row says
+        nothing -- or None altogether if the row fills no slot and the layer has
+        no source line to fall back on
+    """
+    values: list[str | None] = []
+    for column in shape["columns"]:
+        value = row[column]
+        values.append(None if pd.isna(value) or value == "" else str(value))
+    for column in shape["linkColumns"]:
+        url = row[column]
+        values.append(None if pd.isna(url) or not str(url).startswith(_LINK_SCHEMES) else str(url))
+    if not any(value is not None for value in values) and "source" not in shape:
+        return None
+    # Trailing empties say nothing the builder cannot assume, and there are a lot
+    # of them: a positional list is read against the labels, so a short one is
+    # read exactly as a padded one.
+    while values and values[-1] is None:
+        values.pop()
+    return values
 
 
 def add_trails(
@@ -1277,6 +1472,7 @@ def add_trails(
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
     search_names: dict[str, str] = {}
     figures: dict[str, dict[str, object]] = {}
+    shape = _popup_shape(gdf, popup_fields or {}, link_fields, source, link_heading) if (popup_fields or link_fields or source) else None
 
     for _, row in gdf.iterrows():
         geometry = row.geometry
@@ -1284,7 +1480,7 @@ def add_trails(
             continue
 
         lines = list(geometry.geoms) if geometry.geom_type == "MultiLineString" else [geometry]
-        popup_html = _build_popup(row, popup_fields or {}, link_fields, source, link_heading) if (popup_fields or link_fields or source) else None
+        popup = _popup_values(row, shape) if shape else None
 
         tooltip = None
         if tooltip_field and tooltip_field in row and pd.notna(row[tooltip_field]):
@@ -1308,7 +1504,7 @@ def add_trails(
 
         for line in lines:
             polyline = folium.PolyLine(
-                locations=[(lat, lon) for lon, lat in line.coords],
+                locations=[(round(lat, DRAWN_DECIMALS), round(lon, DRAWN_DECIMALS)) for lon, lat in line.coords],
                 color=color,
                 weight=weight,
                 opacity=opacity,
@@ -1316,14 +1512,124 @@ def add_trails(
                 tooltip=tooltip,
                 class_name=class_name,
             )
-            if popup_html:
-                polyline.add_child(folium.Popup(popup_html, max_width=320))
+            polyline.options = _lean(polyline.options, filled=False)
+            if popup is not None:
+                polyline.options["popup"] = popup
             polyline.add_to(group)
 
+    if shape:
+        group.add_child(_LazyPopups(shape))
     _record_search_names(group, search_names)
     _record_chain_figures(group, figures)
     group.add_to(fmap)
     return group
+
+
+class _PopupText(MacroElement):
+    """The one place a popup's table is written, and it runs in the browser.
+
+    **The markup used to be built in Python, per feature, at build time**, and
+    every one of the 12,898 tables was written into the page whole -- the same
+    eleven labels, the same eight inline styles, the same source line, over and
+    over, and handed to jQuery on load. This is that function, once, in the
+    language that has a reader in front of it.
+
+    It is handed the layer's shape (:func:`_popup_shape`) and the feature's
+    values (:func:`_popup_values`) and puts them together the way the build did,
+    down to the styles: the page looks the same and weighs 17 MB less.
+
+    **The escaping came across with it.** Values are third-party data and must
+    not be able to inject markup, which was ``html.escape`` and is now the same
+    five characters by hand -- ``&#x27;`` for an apostrophe included, so a name
+    escaped here and one escaped in an exported file read alike.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        window.trailsPopup = (function () {
+            var MARKUP = /[&<>"']/g;
+            var AS = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;'};
+            function esc(text) { return String(text).replace(MARKUP, function (c) { return AS[c]; }); }
+
+            return function (shape, values) {
+                var rows = [];
+                var at = 0;
+                var i;
+                for (i = 0; i < shape.labels.length; i++, at++) {
+                    if (values[at] === null || values[at] === undefined) { continue; }
+                    rows.push("<tr><td style='padding:2px 8px 2px 0;color:var(--trails-ink-3)'>" + esc(shape.labels[i])
+                        + "</td><td style='padding:2px 0'><b>" + esc(values[at]) + "</b></td></tr>");
+                }
+                // Above the first link that survives, not above the block: a
+                // route with no description on the park's site would otherwise
+                // get a heading over nothing at all.
+                var written = 0;
+                for (i = 0; i < shape.links.length; i++, at++) {
+                    if (values[at] === null || values[at] === undefined) { continue; }
+                    if (shape.heading && !written) {
+                        rows.push("<tr><td colspan='2' style='padding:7px 0 1px;color:var(--trails-ink-4)'>"
+                            + esc(shape.heading) + "</td></tr>");
+                    }
+                    written += 1;
+                    // noopener keeps the opened page from reaching back into this one.
+                    rows.push("<tr><td colspan='2' style='padding:3px 0'><a href=\\"" + esc(values[at])
+                        + "\\" target=\\"_blank\\" rel=\\"noopener noreferrer\\">" + esc(shape.links[i]) + "</a></td></tr>");
+                }
+                // Set off by a rule, so it reads as provenance rather than as
+                // another attribute of the feature.
+                if (shape.source) {
+                    rows.push("<tr><td colspan='2' style='padding:5px 0 0;border-top:1px solid var(--trails-rule);"
+                        + "color:var(--trails-ink-4)'>Source: " + esc(shape.source) + "</td></tr>");
+                }
+                if (!rows.length) { return null; }
+                return "<table style='font-family:sans-serif;font-size:12px'>" + rows.join('') + "</table>";
+            };
+        })();
+        {% endmacro %}
+    """)
+
+
+class _LazyPopups(MacroElement):
+    """Give a layer's features a popup that is built when one is opened.
+
+    Rendered as the last child of the feature group it belongs to, so every
+    feature of that group already exists when it runs -- the same rule as
+    :class:`_ClickHighlight`, one level down.
+
+    **Leaflet takes a function as popup content** and calls it on open, handing
+    it the layer, which is the whole mechanism: the shape is captured once in
+    this closure, the values ride on the layer, and no table is built until
+    somebody asks for one.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function () {
+            var shape = {{ this.shape_json }};
+            {{ this._parent.get_name() }}.eachLayer(function (layer) {
+                // An empty list is a feature whose only line is the source, and
+                // an empty list is falsy -- so this asks whether the option is
+                // there and not whether it says anything.
+                if (!layer.options || layer.options.popup === undefined) { return; }
+                layer.bindPopup(function (source) {
+                    return window.trailsPopup(shape, source.options.popup);
+                }, {maxWidth: 320});
+            });
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, shape: dict[str, Any]) -> None:
+        """Bind a layer's popups.
+
+        Args:
+            shape: What :func:`_popup_shape` worked out for this layer. Only the
+                labels, links, heading and source travel: the columns they were
+                read from are the build's business.
+        """
+        super().__init__()
+        self._name = "LazyPopups"
+        self.shape_json = json.dumps({key: value for key, value in shape.items() if key not in ("columns", "linkColumns")})
 
 
 class _ClickHighlight(MacroElement):
@@ -1734,6 +2040,7 @@ def add_points(
 
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
     named: list[dict[str, object]] = []
+    shape = _popup_shape(gdf, popup_fields or {}, source=source) if (popup_fields or source) else None
 
     for _, row in gdf.iterrows():
         geometry = row.geometry
@@ -1744,7 +2051,7 @@ def add_points(
         if label_field and label_field in row and pd.notna(row[label_field]):
             tooltip = str(row[label_field])
 
-        popup_html = _build_popup(row, popup_fields or {}, source=source) if (popup_fields or source) else None
+        popup = _popup_values(row, shape) if shape else None
         # Unlike a path, a marker keeps whatever options it is handed, so the
         # searchable text can travel on the layer itself.
         found_by = search_field or label_field
@@ -1753,18 +2060,20 @@ def add_points(
             options["searchName"] = str(row[found_by])
 
         marker = folium.Marker(
-            location=(geometry.y, geometry.x),
+            location=(round(geometry.y, DRAWN_DECIMALS), round(geometry.x, DRAWN_DECIMALS)),
             tooltip=tooltip,
             icon=folium.DivIcon(html=_pin(color, icon), icon_size=(PIN_WIDTH, PIN_HEIGHT), icon_anchor=(PIN_WIDTH // 2, PIN_HEIGHT)),
             **options,
         )
-        if popup_html:
-            marker.add_child(folium.Popup(popup_html, max_width=320))
+        if popup is not None:
+            marker.options["popup"] = popup
         marker.add_to(group)
 
         if point_type and tooltip:
-            named.append({"name": tooltip, "type": point_type, "lat": round(geometry.y, 6), "lon": round(geometry.x, 6)})
+            named.append({"name": tooltip, "type": point_type, "lat": round(geometry.y, DRAWN_DECIMALS), "lon": round(geometry.x, DRAWN_DECIMALS)})
 
+    if shape:
+        group.add_child(_LazyPopups(shape))
     _record_named_points(group, named)
     group.add_to(fmap)
     return group
@@ -1818,6 +2127,7 @@ def add_labelled_points(
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
     search_names: dict[str, str] = {}
     named: list[dict[str, object]] = []
+    shape = _popup_shape(gdf, popup_fields or {}, source=source) if (popup_fields or source) else None
 
     for _, row in gdf.iterrows():
         geometry = row.geometry
@@ -1835,7 +2145,7 @@ def add_labelled_points(
             search_names[class_name] = label
 
         marker = folium.CircleMarker(
-            location=(geometry.y, geometry.x),
+            location=(round(geometry.y, DRAWN_DECIMALS), round(geometry.x, DRAWN_DECIMALS)),
             radius=radius,
             color=color,
             weight=1,
@@ -1845,15 +2155,18 @@ def add_labelled_points(
             class_name=class_name,
             tooltip=folium.Tooltip(label, permanent=permanent, direction="right"),
         )
+        marker.options = _lean(marker.options, filled=True)
 
-        popup_html = _build_popup(row, popup_fields or {}, source=source) if (popup_fields or source) else None
-        if popup_html:
-            marker.add_child(folium.Popup(popup_html, max_width=320))
+        popup = _popup_values(row, shape) if shape else None
+        if popup is not None:
+            marker.options["popup"] = popup
         marker.add_to(group)
 
         if point_type:
-            named.append({"name": label, "type": point_type, "lat": round(geometry.y, 6), "lon": round(geometry.x, 6)})
+            named.append({"name": label, "type": point_type, "lat": round(geometry.y, DRAWN_DECIMALS), "lon": round(geometry.x, DRAWN_DECIMALS)})
 
+    if shape:
+        group.add_child(_LazyPopups(shape))
     _record_search_names(group, search_names)
     _record_named_points(group, named)
     group.add_to(fmap)
@@ -1928,7 +2241,7 @@ def add_text_labels(
         )
         # A zero-sized icon keeps Leaflet from reserving a box around the text.
         folium.Marker(
-            location=(geometry.y, geometry.x),
+            location=(round(geometry.y, DRAWN_DECIMALS), round(geometry.x, DRAWN_DECIMALS)),
             icon=folium.DivIcon(icon_size=(0, 0), icon_anchor=(0, 0), html=html),
             searchName=str(row[label_field]),
         ).add_to(group)
@@ -2407,7 +2720,19 @@ class _ProfilePanel(MacroElement):
         (function () {
             var map = {{ this._parent.get_name() }};
             var groups = [{{ this.group_names|join(', ') }}];
-            var figures = {{ this.figures_json }};
+            // Put back together from the positional table the build writes;
+            // see `_packed_figures` for why it is written that way. Everything
+            // below reads a figure by name, as it always has.
+            var figures = (function (packed) {
+                var out = {}, fields = packed.fields, name, values, figure, i;
+                for (name in packed.rows) {
+                    values = packed.rows[name];
+                    figure = {};
+                    for (i = 0; i < fields.length; i++) { figure[fields[i]] = values[i]; }
+                    out[name] = figure;
+                }
+                return out;
+            })({{ this.figures_json }});
             var title = {{ this.title_json }};
             var startingChartHeight = {{ this.chart_height }};
             var chartHeight = startingChartHeight;
@@ -5501,7 +5826,7 @@ class _ProfilePanel(MacroElement):
         super().__init__()
         self._name = "ProfilePanel"
         self.group_names = [group.get_name() for group in groups]
-        self.figures_json = _script_json(figures)
+        self.figures_json = _script_json(_packed_figures(figures))
         self.title_json = _script_json(title)
         self.chart_height = int(chart_height)
         self.narrow_px = NARROW_PX
@@ -11663,7 +11988,13 @@ class _Chrome(MacroElement):
             map.on('popupopen', function (event) {
                 if (adopting) { return; }
                 var popup = event.popup;
+                // **The content is a function now**, because a popup is built
+                // when it is opened and not when the page is written -- see
+                // `_LazyPopups`. Leaflet calls it for its own box; this asks
+                // for the same thing rather than reading the box's node back
+                // out, and it is handed the layer the way Leaflet hands it.
                 var content = popup.getContent();
+                if (typeof content === 'function') { content = content(popup._source || popup); }
                 // Closed at once rather than a frame later, so it is never seen
                 // to open. Leaflet re-appends the content node into its own box
                 // the next time the same popup opens, which is what makes moving

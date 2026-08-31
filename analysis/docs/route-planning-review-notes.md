@@ -1923,9 +1923,10 @@ brought up to what was actually built:
 | Sieben Punkte, eine Spalte | `https://claude.ai/code/artifact/f4a5a398-2562-42f5-9d02-4211d0f6dc90` — the plan panel: head, marks, the row's own menu |
 
 **The published map is older than the build.** `analysis/output/` holds a page
-that fetches from nobody, opens with the network off and carries the rebuilt
-profile panel; `atlas.cairn.zone` does not have any of it yet. One `just deploy`
-is all that is between them.
+that fetches from nobody, opens with the network off, carries the rebuilt
+profile panel and weighs **15.6 MB against the published 42.0**;
+`atlas.cairn.zone` does not have any of it yet. One `just deploy` is all that is
+between them.
 
 **Publishing is two steps and the order matters**: `command make map`, then
 `just deploy` in the infrastructure repository. The deploy does not build, on
@@ -1934,32 +1935,22 @@ however old it is — and says nothing. `atlas.cairn.zone` is where it lands.
 
 Nothing in the profile panel or in plan mode is waiting on a decision.
 
-**Next, and agreed: the seconds.** The network work is finished — the page fetches
-from nobody, the deploy compresses once at brotli 11, and it opens with the
-network off. What is left of *slow* is **not bytes**: measured on the published
-page, 241 ms of network against **2,473 ms to `domInteractive`**, on a desktop
-CPU. A phone parses three to five times slower. The 36.6 MB of HTML compresses
-to 2.80 MB, so cutting source out of it buys almost nothing on the wire and
-almost all of the seconds. What it is made of, measured:
+**Done, and the seconds it bought.** The page is **15.6 MB** where it was 42.0,
+and **787 ms to `domInteractive`** where it was 1,394 — both built and timed on
+this machine, in the same browser, off a local server. Five cuts, each measured
+on its own: popups built on open (19.4 MB), Leaflet's own defaults not written
+out per feature (3.23), the whitespace folium's templates render with (2.88),
+coordinates at six decimals (1.35) and the figures table's field names said once
+(1.26). The whole of it, and the two things that could have gone wrong, is in
+*The seconds, and the eight per cent of a popup that was information* below.
 
-| | uncompressed | what it would buy |
-|---|---:|---|
-| popups built as jQuery DOM **at load** | ~16 MB of the file | the largest parse win, and **187 MB** of the 590 MB the page costs settled |
-| coordinates at 15 decimals | **2.63 MB** over 151,535 numbers | parse, and nothing else — `65.44107796402518` is nanometres |
-| blank lines | **1.09 MB** over 163,317 of them | parse, and it is free |
-| `preferCanvas: true` | 0 | **130 MB** and 12,472 DOM elements down to 882 |
-
-**Three of those four are safe and one is not.** `preferCanvas` breaks every
-probe that counts `.leaflet-overlay-pane path` — it reads **0**, with one
-`canvas` — which is `11,589`, the oldest acceptance figure in this document and
-the one every phase since 3 has been checked against. It has to read both
-renderers before that can go in, and the figure has to be restated rather than
-quietly lost.
-
-**And the popups are the one with a design in it**, not just a deletion: they are
-built on load today, so building them on click means a per-class table of values,
-which is exactly how `figures` and the search names already travel. 15.14 MB of
-popup HTML carries **1.28 MB of values** — a popup is eight per cent information.
+**What is left is measured there too**, and the next round is a different kind
+of work: drawing a layer's features from a loop rather than one statement each
+(**2.5 MB**), one `<symbol>` per pin (**0.46**), and the routing graph out of
+the document altogether (**4.93 MB** that blocks the first paint and that no
+reader needs until they plan a route). **`preferCanvas` is still the unsafe
+one** — no bytes at all, 130 MB of memory, and it takes `.leaflet-overlay-pane
+path` to 0.
 
 What is open besides that is below, in the order I would take it.
 
@@ -3691,6 +3682,145 @@ looked at since the worker took over; everything else — every line, every
 profile, the routing, the files — works with nothing plugged in.
 
 `make drive` reads **252**, the source tests **259**.
+
+### The seconds, and the eight per cent of a popup that was information
+
+**The network work was already done** — the page fetches from nobody, the deploy
+compresses once at brotli 11, and it opens with the network off — and what was
+left of *slow* is the browser reading 42 MB of source. So this buys seconds and
+almost no bytes, which is the finding as much as the work is.
+
+| | bytes | brotli 11 | to `domInteractive` | to `load` |
+|---|---:|---:|---:|---:|
+| before | 42,019,288 | 6,587,159 | 1,394 ms | 1,959 ms |
+| after | **15,598,427** | **5,193,470** | **787 ms** | **1,422 ms** |
+| | −63 % | −21 % | **−44 %** | −27 % |
+
+**Both pages were built and timed on this machine, in the same Firefox, off a
+local server** — the 2,473 ms this document quotes elsewhere was the published
+page over the internet and is not the same measurement. Network here is 2 ms
+either way, so what moved is parse and nothing else. A phone parses three to
+five times slower, which is what the 607 ms is really worth.
+
+**And the DOM is identical: 13,193 elements, 11,589 paths, before and after.**
+Nothing was taken off the map. Every byte cut described something the page
+already drew.
+
+#### The popups were four fifths of it
+
+Every one of the 12,898 was markup in the file, handed to jQuery on load —
+16.62 MB of `$(...)[0]`, plus 0.99 MB of `L.popup({maxWidth: 320})`, 1.15 MB of
+`setContent` and 0.62 of `bindPopup`. **19.4 MB to show one table at a time**,
+and 187 MB of the 590 the page settles at. Of that HTML, **1.28 MB was values**:
+a popup was eight per cent information and the rest was the same eleven labels
+and the same eight inline styles, written out again per feature.
+
+So the labels, the link texts, the heading and the source travel **once per
+layer** — 23 of them, about 5 kB in all — the values ride on the layer as a
+positional list, and the table is built when a reader opens one. **Leaflet takes
+a function as popup content** and calls it on open with the layer, which is the
+whole mechanism; one closure per group holds the shape. 19.4 MB became **1.97**,
+and the sheet still holds the same 13 rows it held when the markup was in the
+file.
+
+**Two things had to move with it.** The escaping, which was `html.escape` in the
+build and is the same five characters in the page — `&#x27;` for an apostrophe
+included — because values are third-party data and must not be able to inject
+markup. And the docking sheet, which called `popup.getContent()` and now gets a
+**function** back; it calls it the way Leaflet does rather than reading the
+rendered node out of a box.
+
+#### Folium writes fourteen Leaflet options per feature whether or not anyone asked
+
+`path_options` names them all in its own signature, so every path carried
+`bubblingMouseEvents`, `lineCap`, `lineJoin`, `fillRule`, `noClip`,
+`smoothFactor`, `stroke`, `dashOffset` and the rest: **12,700 objects, 4.59 MB**,
+of which the varying part was under a quarter. Dropped where the value is what
+Leaflet would have assumed anyway — **4.59 MB to 1.36**.
+
+**Only what nothing reads was dropped**, and that is the whole care in it.
+`color`, `weight` and `opacity` stay whatever they are, *including* where they
+equal Leaflet's default, because `_ClickHighlight` captures those three off
+`layer.options` before it restyles anything and hands them back to `setStyle`
+afterwards — one dropped for matching a default would come back `undefined`, and
+`undefined + boost` is `NaN`. `fillColor` needed the same thought the other way:
+Leaflet paints with `fillColor || color`, so a fill colour repeating the stroke
+colour is the same drawing said twice. And `fill` defaults to `false` for a
+polyline and `true` for a circle marker, which is why `_lean` is told which of
+the two it is looking at.
+
+#### A projected metre answered as a float is seventeen digits
+
+`65.44107796402518` — the eighth digit is already eleven centimetres at this
+latitude and the ninth is a millimetre. Nothing on this map reads a drawn
+coordinate back; they go to Leaflet, which rounds them to the pixel. Six
+decimals is **11.1 cm of latitude and 4.6 cm of longitude at 65.4° N**, below
+the metre the sources are surveyed to, and the same rule the named-point table
+already applied. The 11,291 location arrays weighed 3.21 MB and weigh **1.85**.
+
+#### Folium's templates are indented for the template, not for the document
+
+Every feature arrives through four nested macros and comes out under twelve to
+sixteen spaces, with three or four empty lines between one and the next:
+**163,377 blank lines and 2.78 MB of leading whitespace**, 2.88 MB in all.
+340,856 lines became 177,481. Taken out after the render rather than by fighting
+the templates — which is why `save_map` exists at all: `folium.Map.save` renders
+and writes in one step and leaves nowhere to stand.
+
+**A newline inside backticks is part of the string**, and that is the one thing
+that could have gone wrong: folium writes its tooltip across three lines, so
+lines between an opening backtick and its closing one are copied untouched.
+Parity is walked and checked — **1,542 literals opened and 1,542 closed, exactly
+the tooltip count** — and one left open at the end raises rather than guessing.
+Proved on the built page by stripping all whitespace from both sides and
+comparing: **not one non-whitespace character moved.**
+
+#### And the figures table said `ascent` eleven thousand times
+
+Every chain carries the same twelve fields — `_figure_values` writes an entry
+per field whether the row said anything or not — so written as objects the table
+was twelve field names per chain: **1.26 MB of the 2.84 was the field names.**
+It travels positionally now and the page rebuilds the objects on load, so all
+six things that read a figure still read it by name and nothing else changed.
+2.84 MB → **1.57**.
+
+#### What it did not buy, and what is left
+
+**The wire, and that was expected.** 42.0 MB compressed to 6.59 and 15.6
+compresses to 5.19: **1.39 MB off a download against 26.4 MB off what the
+browser has to read.** On this page a byte of source is worth about six times
+more to the clock than to the connection — which is the rule to carry into the
+next round, and the reason the round after the CDN work was this one.
+
+| what is left | | |
+|---|---:|---|
+| the routing graph | 4.93 MB | base64, and one string rather than source |
+| popup values | 1.97 MB | the information itself |
+| coordinates | 1.85 MB | at six decimals already |
+| the figures | 1.57 MB | positional already |
+| `var poly_line_<32 hex> = L.polyline(` and `).addTo(...)` | 1.53 MB | folium's names, twice per feature |
+| the class, colour, width and opacity per path | 1.37 MB | three of the four are constant per layer |
+| the 865 pins | 0.51 MB | each carrying its whole Font Awesome path inline |
+
+**Three of those are one more round, and it is a different kind of work.**
+Drawing a layer's features from a loop over a data array is worth about **2.5
+MB** and means writing what `folium.PolyLine` writes rather than pruning it. The
+pins are **0.46 MB** for one `<symbol>` per colour and glyph — `ship` is 900
+characters and stands 32 times. And the graph is **4.93 MB no reader needs
+before they plan a route**: out of the document it stops blocking the first
+paint, at the price of a second request on a first visit and a service worker
+that has to keep both.
+
+**`preferCanvas` is still not done, and the reason is unchanged.** It is worth
+**130 MB of the 590** and takes 12,472 DOM elements to 882 — nothing at all on
+the wire — and it takes `.leaflet-overlay-pane path` to **0** with one `canvas`,
+which is `11,589`, the oldest acceptance figure in this document. Three checks
+read it and one of them *finds the chain to click by walking the DOM*;
+`popup_click` already shows the other way, `map.eachLayer` against
+`layer.options.className`, which canvas does not touch. So it is a probe rewrite
+and a restated figure, not a flag.
+
+`make drive` reads **253**, unmoved, and the source tests **270**.
 
 ### What is still open on a phone
 

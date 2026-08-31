@@ -1880,7 +1880,9 @@ def main() -> int:
     maps.add_chrome(fmap, credits=source_credits(loaded.versions))
 
     map_path = output_dir / "lomsdal-visten.html"
-    fmap.save(str(map_path))
+    # Not `fmap.save`: that renders and writes in one step, and the page is
+    # written without the indentation folium's templates render with.
+    maps.save_map(fmap, map_path)
     print(f"  Map: {map_path} ({map_path.stat().st_size / 1e6:.1f} MB)")
 
     # **Written after the page and stamped with it.** A browser installs a

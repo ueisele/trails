@@ -309,115 +309,204 @@ class TestPins:
         assert ".trails-pin { display: block; line-height: 0;" in html
 
 
-class TestPopup:
-    """Tests for popup rendering."""
+class TestPopupShape:
+    """What a whole layer's popups have in common, worked out once.
 
-    def test_skips_missing_and_empty_values(self, trails):
-        html = maps._build_popup(trails.iloc[0], {"trail_name": "Route", "absent": "Absent"})
-        assert "Sjøbergmarsjen" in html
-        assert "Absent" not in html
+    A popup used to be markup built per feature at build time. It is a shape per
+    layer and a list of values per feature now, put together in the browser when
+    a reader opens one -- so these say what travels, and `TestPopupText` says
+    what the page makes of it.
+    """
 
-    def test_returns_none_when_nothing_populated(self, trails):
-        assert maps._build_popup(trails.iloc[1], {"trail_name": "Route", "difficulty": "Difficulty"}) is None
+    def test_the_labels_travel_and_the_columns_do_not_leave_the_build(self, trails):
+        shape = maps._popup_shape(trails, {"trail_name": "Route", "difficulty": "Difficulty"})
 
-    def test_shows_the_source_as_a_footer(self, trails):
-        html = maps._build_popup(trails.iloc[0], {"trail_name": "Route"}, source="Turrutebasen")
+        assert shape["labels"] == ["Route", "Difficulty"]
+        assert shape["columns"] == ["trail_name", "difficulty"]
 
-        assert "Source: Turrutebasen" in html
-        assert html.index("Sjøbergmarsjen") < html.index("Source:")
+    def test_a_column_the_layer_does_not_have_is_dropped_once(self, trails):
+        """Not per row: a column the frame lacks is missing from every row of it,
+        and the values are read positionally against these labels."""
+        shape = maps._popup_shape(trails, {"trail_name": "Route", "absent": "Absent"})
+
+        assert shape["labels"] == ["Route"]
+        assert shape["columns"] == ["trail_name"]
+
+    def test_a_layer_with_nothing_to_show_has_no_shape(self, trails):
+        assert maps._popup_shape(trails, {"absent": "Absent"}) is None
+
+    def test_the_source_and_the_heading_travel_once(self, trails):
+        gdf = trails.copy()
+        gdf["ut_url"] = "https://ut.no/turforslag/1113860"
+        shape = maps._popup_shape(gdf, {"trail_name": "Route"}, {"ut_url": "Route page"}, "Turrutebasen", "Published elsewhere")
+
+        assert shape["source"] == "Turrutebasen"
+        assert shape["heading"] == "Published elsewhere"
+        assert shape["links"] == ["Route page"]
+
+    def test_a_source_alone_is_enough_for_a_shape(self, trails):
+        """A feature the source says nothing else about should still name it."""
+        assert maps._popup_shape(trails, {"absent": "Absent"}, source="N50") is not None
+
+    def test_only_the_shape_reaches_the_page_and_not_the_columns(self, trails):
+        """The column a value was read from is the build's business, and there
+        are eleven of them per layer."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_trails(fmap, trails, name="Paths [N50]", popup_fields={"trail_name": "Route"}, source="N50")
+
+        html = fmap.get_root().render()
+        assert '"labels": ["Route"]' in html
+        assert '"source": "N50"' in html
+        assert '"columns"' not in html
+
+
+class TestPopupValues:
+    """What one feature carries, positionally, against its layer's labels."""
+
+    def test_a_missing_value_is_a_hole_and_not_a_row(self, trails):
+        shape = maps._popup_shape(trails, {"trail_name": "Route", "difficulty": "Difficulty"})
+
+        assert maps._popup_values(trails.iloc[0], shape) == ["Sjøbergmarsjen", "Easy (Green)"]
+
+    def test_a_row_that_fills_nothing_carries_nothing(self, trails):
+        shape = maps._popup_shape(trails, {"trail_name": "Route", "difficulty": "Difficulty"})
+
+        assert maps._popup_values(trails.iloc[1], shape) is None
 
     def test_a_source_alone_is_enough_for_a_popup(self, trails):
-        """A feature the source says nothing else about should still name it."""
-        assert maps._build_popup(trails.iloc[1], {"trail_name": "Route"}, source="N50") is not None
+        """The empty list is the feature whose only line is its source, and it
+        is not the same as no popup at all."""
+        shape = maps._popup_shape(trails, {"trail_name": "Route"}, source="N50")
 
-    def test_without_a_source_nothing_is_appended(self, trails):
-        html = maps._build_popup(trails.iloc[0], {"trail_name": "Route"})
+        assert maps._popup_values(trails.iloc[1], shape) == []
 
-        assert "Source:" not in html
+    def test_trailing_holes_are_dropped(self, trails):
+        """A short list is read exactly as a padded one, and most rows are short."""
+        gdf = trails.copy()
+        gdf["ut_url"] = None
+        shape = maps._popup_shape(gdf, {"trail_name": "Route"}, {"ut_url": "Route page"})
 
-    def test_source_is_escaped(self, trails):
-        html = maps._build_popup(trails.iloc[0], {"trail_name": "Route"}, source="N50 <b>x</b>")
+        assert maps._popup_values(gdf.iloc[0], shape) == ["Sjøbergmarsjen"]
 
-        assert "<b>x</b>" not in html
+    def test_everything_travels_as_text(self, trails):
+        """What the build wrote into the markup, and what JSON can carry: a
+        numpy float is neither."""
+        gdf = trails.copy()
+        gdf["length_km"] = [4.2, 7.0]
+        shape = maps._popup_shape(gdf, {"length_km": "Length"})
 
-    def test_renders_link_fields_as_anchors(self, trails):
-        row = trails.iloc[0].copy()
-        row["ut_url"] = "https://ut.no/turforslag/1113860"
+        assert maps._popup_values(gdf.iloc[0], shape) == ["4.2"]
 
-        html = maps._build_popup(row, {"trail_name": "Route"}, {"ut_url": "Open on ut.no"})
-
-        assert 'href="https://ut.no/turforslag/1113860"' in html
-        assert "Open on ut.no</a>" in html
-        assert 'rel="noopener noreferrer"' in html
-
-    def test_a_link_alone_is_enough_for_a_popup(self, trails):
+    def test_a_link_travels_as_its_url(self, trails):
         row = trails.iloc[1].copy()
         row["ut_url"] = "https://ut.no/turforslag/1"
+        gdf = trails.copy()
+        gdf["ut_url"] = "https://ut.no/turforslag/1"
+        shape = maps._popup_shape(gdf, {}, {"ut_url": "Route"})
 
-        assert maps._build_popup(row, {}, {"ut_url": "Route"}) is not None
-
-    def test_link_heading_is_written_once_above_the_links(self, trails):
-        row = trails.iloc[0].copy()
-        row["ut_url"] = "https://ut.no/turforslag/1"
-        row["gpx_url"] = "https://ut.no/api/gpx/trip/1"
-
-        html = maps._build_popup(
-            row,
-            {"trail_name": "Route"},
-            {"ut_url": "Route page", "gpx_url": "Their GPX"},
-            link_heading="Published elsewhere",
-        )
-
-        assert html.count("Published elsewhere") == 1
-        assert html.index("Published elsewhere") < html.index("Route page")
-
-    def test_no_link_heading_where_no_link_survives(self, trails):
-        """A route with no description elsewhere must not get a heading over nothing."""
-        row = trails.iloc[0].copy()
-        row["guide_url_en"] = None
-
-        html = maps._build_popup(
-            row,
-            {"trail_name": "Route"},
-            {"guide_url_en": "Description"},
-            link_heading="Published elsewhere",
-        )
-
-        assert "Published elsewhere" not in html
-
-    def test_escapes_the_link_heading(self, trails):
-        row = trails.iloc[0].copy()
-        row["ut_url"] = "https://ut.no/turforslag/1"
-
-        html = maps._build_popup(row, {"trail_name": "Route"}, {"ut_url": "Route page"}, link_heading="a <b>heading</b>")
-
-        assert "<b>heading</b>" not in html
-
-    def test_skips_missing_link_values(self, trails):
-        row = trails.iloc[0].copy()
-        row["guide_url_en"] = None
-
-        html = maps._build_popup(row, {"trail_name": "Route"}, {"guide_url_en": "Description", "absent": "Absent"})
-
-        assert "<a " not in html
+        assert maps._popup_values(row, shape) == ["https://ut.no/turforslag/1"]
 
     def test_rejects_non_http_links(self, trails):
-        """A URL from a data file must not be able to run script on click."""
+        """A URL from a data file must not be able to run script on click, and
+        the browser is handed no chance to try: it never leaves the build."""
         row = trails.iloc[0].copy()
         row["ut_url"] = "javascript:alert(1)"
+        gdf = trails.copy()
+        gdf["ut_url"] = "javascript:alert(1)"
+        shape = maps._popup_shape(gdf, {"trail_name": "Route"}, {"ut_url": "Open"})
 
-        html = maps._build_popup(row, {"trail_name": "Route"}, {"ut_url": "Open"})
+        assert maps._popup_values(row, shape) == ["Sjøbergmarsjen"]
 
-        assert "javascript:" not in html
+    def test_a_missing_link_is_a_hole(self, trails):
+        gdf = trails.copy()
+        gdf["guide_url_en"] = None
+        shape = maps._popup_shape(gdf, {"trail_name": "Route"}, {"guide_url_en": "Description"})
 
-    def test_link_url_is_escaped(self, trails):
-        row = trails.iloc[0].copy()
-        row["ut_url"] = 'https://ut.no/x?a=1"><script>alert(1)</script>'
+        assert maps._popup_values(gdf.iloc[0], shape) == ["Sjøbergmarsjen"]
 
-        html = maps._build_popup(row, {"trail_name": "Route"}, {"ut_url": "Open"})
 
-        assert "<script>" not in html
-        assert "&quot;&gt;&lt;script&gt;" in html
+class TestPopupText:
+    """The table itself, which is written once and runs in the browser.
+
+    Every popup on the built page used to be markup in the file -- 12,898 of
+    them, 16.62 MB, handed to jQuery before the map drew anything, to show one
+    at a time. This is the same table, built when a reader opens one.
+    """
+
+    @pytest.fixture
+    def page(self, trails) -> str:
+        """A page with a layer whose popups carry a value, a link and a source."""
+        gdf = trails.copy()
+        gdf["ut_url"] = "https://ut.no/turforslag/1113860"
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_trails(
+            fmap,
+            gdf,
+            name="UT.no",
+            popup_fields={"trail_name": "Route"},
+            link_fields={"ut_url": "Route page"},
+            source="UT.no",
+            link_heading="Published elsewhere",
+        )
+        return fmap.get_root().render()
+
+    def test_it_is_built_when_one_is_opened(self, page):
+        """Leaflet takes a function as popup content and calls it on open, which
+        is the whole mechanism."""
+        assert "layer.bindPopup(function (source) {" in page
+        assert "return window.trailsPopup(shape, source.options.popup);" in page
+
+    def test_a_feature_with_no_popup_is_passed_over_and_an_empty_one_is_not(self, page):
+        """An empty list is a feature whose only line is the source, and an empty
+        list is falsy."""
+        assert "if (!layer.options || layer.options.popup === undefined) { return; }" in page
+
+    def test_the_values_ride_on_the_layer(self, trails):
+        gdf = trails.copy()
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, gdf, name="Paths [N50]", popup_fields={"trail_name": "Route"}, source="N50")
+
+        lines = [child for child in group._children.values() if isinstance(child, folium.PolyLine)]
+        # Three lines from two rows, because the second row is a
+        # MultiLineString -- and it fills no field, so both of its lines carry
+        # the empty list and show the source alone.
+        assert [line.options["popup"] for line in lines] == [["Sjøbergmarsjen"], [], []]
+
+    def test_the_rows_are_the_rows_the_build_wrote(self, page):
+        assert "\"<tr><td style='padding:2px 8px 2px 0;color:var(--trails-ink-3)'>\" + esc(shape.labels[i])" in page
+        assert '"</td><td style=\'padding:2px 0\'><b>" + esc(values[at]) + "</b></td></tr>"' in page
+        assert "return \"<table style='font-family:sans-serif;font-size:12px'>\" + rows.join('') + \"</table>\";" in page
+
+    def test_every_string_it_writes_is_escaped(self, page):
+        """Values are third-party data and must not be able to inject markup."""
+        assert "var AS = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#x27;'};" in page
+        assert "function esc(text) { return String(text).replace(MARKUP, function (c) { return AS[c]; }); }" in page
+        for written in ("shape.labels[i]", "values[at]", "shape.heading", "shape.links[i]", "shape.source"):
+            assert f"esc({written})" in page
+
+    def test_a_link_cannot_reach_back_into_this_page(self, page):
+        assert 'target=\\"_blank\\" rel=\\"noopener noreferrer\\"' in page
+
+    def test_the_heading_stands_above_the_first_link_that_survives(self, page):
+        """A route with no description elsewhere must not get a heading over nothing."""
+        assert "if (shape.heading && !written) {" in page
+        assert page.index("if (shape.heading && !written) {") < page.index('esc(shape.links[i]) + "</a></td></tr>"')
+
+    def test_the_source_is_set_off_by_a_rule(self, page):
+        assert "border-top:1px solid var(--trails-rule);" in page
+        assert '"color:var(--trails-ink-4)\'>Source: " + esc(shape.source)' in page
+
+    def test_a_table_with_no_rows_is_not_a_popup(self, page):
+        assert "if (!rows.length) { return null; }" in page
+
+    def test_it_is_written_before_any_layer_that_calls_it(self, trails):
+        """Folium renders a map's children in the order they were added, and the
+        layers are added after `create_map` returns."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_trails(fmap, trails, name="Paths [N50]", popup_fields={"trail_name": "Route"})
+
+        html = fmap.get_root().render()
+        assert html.index("window.trailsPopup = (function () {") < html.index("window.trailsPopup(shape,")
 
 
 class TestLabelledPoints:
@@ -429,22 +518,22 @@ class TestLabelledPoints:
         group = maps.add_labelled_points(fmap, shelters, name="Places [SSR]", popup_fields={"name": "Name"}, source="SSR")
 
         markers = [child for child in group._children.values() if isinstance(child, folium.CircleMarker)]
-        popups = [c for m in markers for c in m._children.values() if isinstance(c, folium.Popup)]
-        assert len(popups) == 1
+        # The second shelter has no name, so it is not drawn at all.
+        assert [marker.options.get("popup") for marker in markers] == [["Stavassgården"]]
 
     def test_the_popup_names_its_source(self, shelters):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_labelled_points(fmap, shelters, name="Places [SSR]", popup_fields={"name": "Name"}, source="SSR")
 
-        assert "Source: SSR" in fmap.get_root().render()
+        assert '"source": "SSR"' in fmap.get_root().render()
 
     def test_without_popup_fields_only_the_tooltip_remains(self, shelters):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         group = maps.add_labelled_points(fmap, shelters, name="Places")
 
         markers = [child for child in group._children.values() if isinstance(child, folium.CircleMarker)]
-        popups = [c for m in markers for c in m._children.values() if isinstance(c, folium.Popup)]
-        assert not popups
+        assert not any("popup" in marker.options for marker in markers)
+        assert "window.trailsPopup(shape," not in fmap.get_root().render()
 
     def test_labels_are_recorded_for_the_search(self, shelters):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
@@ -520,9 +609,11 @@ class TestAddTrails:
         group = maps.add_trails(fmap, trails, name="Paths [N50]", popup_fields={"trail_name": "Route"}, source="N50")
 
         lines = [child for child in group._children.values() if isinstance(child, folium.PolyLine)]
-        popups = [c for line in lines for c in line._children.values() if isinstance(c, folium.Popup)]
-        # Every drawn line gets one, including the row with no populated field.
-        assert len(popups) == len(lines) == 3
+        # Every drawn line gets one, including the row with no populated field,
+        # and the source itself is said once for the layer.
+        assert len(lines) == 3
+        assert all("popup" in line.options for line in lines)
+        assert '"source": "N50"' in fmap.get_root().render()
 
     def test_link_fields_reach_the_popup(self, trails):
         gdf = trails.copy()
@@ -639,7 +730,8 @@ class TestNamedPoints:
     """Tests for the table a waypoint takes its name from.
 
     The markers themselves cannot answer *what is at this position*: their names
-    are inside the popup HTML they were given, which is markup and not a lookup.
+    are one unlabelled entry in the popup values they carry, read positionally
+    against the layer's labels, which is not a lookup.
     """
 
     @pytest.fixture
@@ -1365,6 +1457,18 @@ class TestProfilePanel:
         html = fmap.get_root().render()
         assert "trail-group-ut-no-1-2-3" in html
         assert "996.4" in html
+
+    def test_the_field_names_travel_once_and_the_page_puts_them_back(self, group):
+        """Every figure has the same twelve fields, so written as objects the
+        table is twelve field names per chain -- 1.26 MB of the 2.84 the built
+        page carried. Everything that reads a figure still reads it by name."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert '"fields": ["id", "ascent"' in html
+        assert '"trail-group-ut-no-1-2-3": ["ut-no-1-2-3", 996.4' in html
+        assert "for (i = 0; i < fields.length; i++) { figure[fields[i]] = values[i]; }" in html
 
     def test_it_draws_nothing_on_the_map(self, group):
         """The arrow belongs in a container of its own: anything drawn into the
@@ -2218,7 +2322,8 @@ class TestPlanMode:
     def test_the_named_points_reach_the_page_as_a_table(self):
         """A waypoint set beside a hut can only be called after it if the page
         holds a table of what is where. 1,411 circle markers and 865 markers
-        keep their names inside popup HTML, which is markup and not a lookup."""
+        keep their names as one unlabelled entry in the popup values they carry,
+        which is not a lookup."""
         fmap, _ = self.drawn()
         huts = gpd.GeoDataFrame({"name": ["Lavasshytta"], "geometry": [Point(12.98079, 65.77416)]}, crs="EPSG:4326")
         layer = maps.add_points(fmap, huts, name="Huts", point_type="hut")
@@ -3192,11 +3297,14 @@ class TestLegendEscaping:
         assert "\\u003c/script>" in html
 
     def test_popup_values_are_escaped(self, trails):
-        row = trails.iloc[0].copy()
-        row["trail_name"] = "Sti <b>merket</b>"
+        """The escaping moved into the browser with the table; see
+        `TestPopupText`. What the build must not do is escape it twice, or a
+        name with an ampersand in it arrives reading `&amp;amp;`."""
+        gdf = trails.copy()
+        gdf["trail_name"] = "Sti <b>merket</b>"
+        shape = maps._popup_shape(gdf, {"trail_name": "Route"})
 
-        html = maps._build_popup(row, {"trail_name": "Route"})
-        assert "&lt;b&gt;merket&lt;/b&gt;" in html
+        assert maps._popup_values(gdf.iloc[0], shape) == ["Sti <b>merket</b>"]
 
     def test_label_text_is_escaped(self):
         gdf = gpd.GeoDataFrame({"name": ["Dal <test>"], "geometry": [Point(13.1, 65.6)]}, crs="EPSG:4326")
