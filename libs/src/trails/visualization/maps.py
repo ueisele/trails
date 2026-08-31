@@ -3166,6 +3166,27 @@ class _ProfilePanel(MacroElement):
             // register draws. The *lengths* beside it are not measured here:
             // they come from the build, which measured them against the
             // register's full precision.
+            //
+            // **A crossing is walked with the rest of the route.** It writes no
+            // track points -- GPX cannot say a segment is a boat -- but it is
+            // ground the route passes over, and its boundary crossings are as
+            // computable as any. Walking only the written runs, and starting
+            // each of them with an empty list, lost every crossing that
+            // happened inside a break in both directions: walk into a reserve,
+            // ferry out of it, carry on outside, and the file said *Enters
+            // Sirijorda naturreservat* and never that the route left.
+            //
+            // **The gap's own line is sampled, because its vertices are not a
+            // series.** A ferry from N50 has a source's corners and a water leg
+            // the reader's two points, so a boundary between two of them would
+            // put the marker at their midpoint -- hundreds of metres out, where
+            // the runs are accurate to a few. Stepped at the height model's own
+            // 5 m, so a marker on water is placed exactly as one on land is.
+            // How finely a crossing's own line is stepped, in metres. The
+            // height model samples at 5 and the runs inherit that spacing, so
+            // this is the runs' own accuracy rather than a number of its own.
+            var CROSSING_STEP_M = 5;
+
             function crossingsOf(shape, runs) {
                 var graph = window.trailsGraph;
                 if (!graph || !graph.areasAt) { return []; }
@@ -3183,13 +3204,40 @@ class _ProfilePanel(MacroElement):
                     return ids;
                 }
 
-                runs.forEach(function (run) {
-                    var before = [];
-                    for (var i = 0; i < run.lon.length; i += 1) {
-                        var here = named(graph.areasAt(run.lon[i], run.lat[i]));
+                function stepped(gap) {
+                    var lon = [], lat = [], i, k, steps;
+                    for (i = 0; i < gap.lon.length; i += 1) {
                         if (i > 0) {
-                            var from = {lon: run.lon[i - 1], lat: run.lat[i - 1]};
-                            var to = {lon: run.lon[i], lat: run.lat[i]};
+                            steps = Math.ceil(metresBetween(gap.lon[i - 1], gap.lat[i - 1], gap.lon[i], gap.lat[i]) / CROSSING_STEP_M);
+                            for (k = 1; k < steps; k += 1) {
+                                lon.push(gap.lon[i - 1] + (gap.lon[i] - gap.lon[i - 1]) * k / steps);
+                                lat.push(gap.lat[i - 1] + (gap.lat[i] - gap.lat[i - 1]) * k / steps);
+                            }
+                        }
+                        lon.push(gap.lon[i]); lat.push(gap.lat[i]);
+                    }
+                    return {lon: lon, lat: lat};
+                }
+
+                // One walk over the whole route, gaps in their place, and a
+                // single list of what it is inside that is never restarted.
+                var series = [];
+                var gaps = shape.gaps || [];
+                for (var r = 0; r <= runs.length; r += 1) {
+                    gaps.forEach(function (gap) { if (gap.before === r) { series.push(stepped(gap)); } });
+                    if (r < runs.length) { series.push(runs[r]); }
+                }
+
+                var before = [], last = null, started = false;
+                series.forEach(function (part) {
+                    for (var i = 0; i < part.lon.length; i += 1) {
+                        var here = named(graph.areasAt(part.lon[i], part.lat[i]));
+                        // The route's own first point sets what it began inside
+                        // and marks nothing, which is the rule above: beginning
+                        // inside an area is not a crossing.
+                        if (started) {
+                            var from = {lon: last.lon, lat: last.lat};
+                            var to = {lon: part.lon[i], lat: part.lat[i]};
                             here.forEach(function (id) {
                                 if (reported[id] && before.indexOf(id) < 0) { mark(reported[id], true, from, to); }
                             });
@@ -3198,6 +3246,8 @@ class _ProfilePanel(MacroElement):
                             });
                         }
                         before = here;
+                        last = {lon: part.lon[i], lat: part.lat[i]};
+                        started = true;
                     }
                 });
                 return out;
@@ -8176,7 +8226,7 @@ class _PlanMode(MacroElement):
                 var first = fromLeg === undefined || fromLeg === null ? 0 : fromLeg;
                 var last = toLeg === undefined || toLeg === null ? legs.length : toLeg;
                 var lon = [], lat = [], along = [], height = [], distance = [], free = [];
-                var stretches = [], stretch = null, tally = blankTally();
+                var stretches = [], stretch = null, tally = blankTally(), gaps = [];
                 var walked = 0, crossings = 0, crossed = 0, straight = 0, read = false, joined = false;
                 // **Where the heights came from, carried apart from whether
                 // there are any.** A routed part's are the build's DTM1 samples
@@ -8227,6 +8277,18 @@ class _PlanMode(MacroElement):
                             crossings += 1;
                             crossed += part.length;
                             breakHere();
+                            // **The ground under a crossing is known and only
+                            // the track cannot say it.** A routed ferry carries
+                            // N50's own line and a water leg the reader's two
+                            // points; either way the boundary it crosses is as
+                            // computable as one on land. It is dropped from the
+                            // written points because GPX cannot call a segment a
+                            // boat -- and `crossingsOf` used to read only those,
+                            // so a route that ferried out of a reserve entered
+                            // it in the file and never left. Kept apart, in
+                            // order, and walked for what it passes through and
+                            // for nothing else.
+                            gaps.push({before: stretches.length, lon: part.lon, lat: part.lat});
                             return;
                         }
                         if (part.kind === 'land') { straight += part.length; }
@@ -8255,7 +8317,7 @@ class _PlanMode(MacroElement):
                 // other end.
                 if (last > first || points.length) { stations.push(walked); }
                 return {lon: lon, lat: lat, along: along, height: height, distance: distance, free: free,
-                        stations: stations,
+                        stations: stations, gaps: gaps,
                         stretches: stretches, tally: tally, total: walked, read: read,
                         modelled: modelled, fromFile: fromFile,
                         // Filtered once, here, and read by the sentence above

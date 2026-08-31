@@ -1969,8 +1969,12 @@ rests on it, and the file has been rewritten four times since anybody looked.
 the obvious one: the header cannot verify itself, so the decoder has to be handed
 the layout it was written for.
 
-**3. A boundary crossed inside a break gets one marker, not a pair.** Wants a
-decision about what a marker on water would claim, and then a figure.
+**3. ~~A boundary crossed inside a break gets one marker, not a pair.~~ Fixed,
+and it never fired.** It wanted no decision at all — the ferry's own line is in
+the payload, so the crossing on it is as computable as one on a path. What the
+measurement found instead is that **the only protected area any ferry here
+touches is invisible to every route that crosses it**, which *is* a decision.
+Both are in *A boundary crossed inside a break* below.
 
 **4. The placeholder sweep.** An hour, and the same shape of bug has now appeared
 three times — `pd.NA` as the text `<NA>`, an empty string counted by `notna`,
@@ -2039,6 +2043,10 @@ own.**
   where a route begins or ends inside an area — reads either way here, and the
   alternative is a generated waypoint at a position on water the track does not
   draw. It wants a decision about what such a marker claims, and then a figure.
+  **Fixed since, and this framing is wrong**: the ferry's own line is in the
+  payload, so nothing about the position was ever unknown, and a straight leg
+  over *land* has carried markers all along. See *A boundary crossed inside a
+  break* below, including why it never fired.
 - **`PAYLOAD_VERSION` is written and never checked.** `encode_graph` puts it in
   the header and the page's decoder never compares it, so a stale stream would
   be read as a current one and produce a confidently wrong graph rather than an
@@ -3826,6 +3834,71 @@ read it and one of them *finds the chain to click by walking the DOM*;
 and a restated figure, not a flag.
 
 `make drive` reads **253**, unmoved, and the source tests **270**.
+
+### A boundary crossed inside a break, and the area no route can see
+
+**The defect was real and my reason for calling it a decision was wrong.**
+`crossingsOf` walked the runs the file is written from and restarted its list of
+what the route was inside at every one of them. A crossing writes no run — GPX
+cannot say a segment is a boat, so it is a gap — and everything that happened
+across that gap was lost **in both directions**: walk into a reserve, ferry out,
+carry on outside, and the file said *Enters* and never that the route left; ferry
+*into* one and the file never said it was entered.
+
+**The position was never unknown.** A routed ferry carries N50's own line in the
+payload —
+
+    parts.push(kind === CROSSING
+        ? {kind: CROSSING, lon: laid.lon, lat: laid.lat, ...
+
+— and `composeRoute` drops those points because they must not become track
+points, not because they do not exist. The boundary crossing along a ferry is as
+computable as one on a path. What this needed was a lookup, not a decision, and
+the note that stood here asking *what would a marker on water claim* was asking
+about a precision the data already had. A straight leg over **land** has carried
+boundary markers all along; water asserts nothing new.
+
+**The fix is one walk over the whole route** with the gaps in their place and a
+single membership list that is never restarted. The gap's own line is stepped at
+**5 m** — the height model's spacing, which the runs inherit — because a ferry
+from N50 has a source's corners and a water leg two points, and a boundary
+between two of them would put the marker at their midpoint, hundreds of metres
+out where the runs are accurate to a few. The rule that beginning inside an area
+is not a crossing survives: the route's own first point sets state and marks
+nothing.
+
+#### And it cannot fire on this park's data, which is the acceptance figure
+
+The note asked for a figure and there is none to be had. Measured over the whole
+payload — 116,967 vertices and all 58 ferry edges:
+
+| | |
+|---|---|
+| protected areas in the payload | 31 |
+| touched by **any** ferry | **1 — Innervisten**, 62 ferry points over two crossings |
+| Innervisten's walked ground | **0.25 edge-shares**, a few metres |
+| before an area is reported at all | **100 m** (`DEFAULT_TOUCHED_M`) |
+
+`crossingsOf` marks only areas the route already reports, and reporting is
+walked metres. Innervisten never reaches the threshold, so it is never reported
+and never marked — **with the defect or without it**. The fix removes a latent
+defect that fires the day a reserve with walkable ground sits at a quay; it
+changes nothing that anybody can see today, and a check written against this
+ground would run over terrain that never exercises it.
+
+#### The bigger thing, and it is a decision nobody has taken
+
+The *ferried* column of that measurement is **empty**. Not small — the build
+records no protected share on a ferry edge at all, and `addProtected` skips
+crossings besides. So a route can be carried **8,181 m through Innervisten** and
+the file says nothing about it: not the sentence, not the figure, not a marker.
+
+That follows from a deliberate choice — a ferry is not walked ground and must
+not be counted as distance — but its consequence has not been weighed: **the one
+protected area this network's ferries touch is invisible to every route that
+crosses it.** A marine reserve has rules that apply to boats. Whether a route
+should name ground it is *carried* through, and how that sentence would differ
+from one about ground it walked, is open.
 
 ### The map draws into a canvas, and the tolerance stayed at eight metres
 

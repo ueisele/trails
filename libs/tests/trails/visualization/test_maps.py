@@ -2383,6 +2383,19 @@ class TestPlanMode:
         assert "element.style.pointerEvents = on ? 'auto' : 'none';" in planning
         assert "record.marker.dragging.enable(); } else { record.marker.dragging.disable();" in planning
 
+    def test_a_crossing_keeps_the_ground_it_covers(self):
+        """A crossing writes no track points -- GPX cannot say a segment is a
+        boat -- but a routed ferry carries N50's own line and a water leg the
+        reader's two points, so where it crosses a boundary is as computable as
+        anywhere. It used to be dropped along with the points, and every
+        boundary crossed inside a break was lost with it."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned(), [])
+
+        html = fmap.get_root().render()
+        assert "gaps.push({before: stretches.length, lon: part.lon, lat: part.lat});" in html
+        assert "stations: stations, gaps: gaps," in html
+
     def test_the_named_points_reach_the_page_as_a_table(self):
         """A waypoint set beside a hut can only be called after it if the page
         holds a table of what is where. 1,411 circle markers and 865 markers
@@ -3134,6 +3147,35 @@ class TestComposedProfile:
         assert "crossings: crossings" in html
         # And not in the row that is rebuilt on every click.
         assert "selected.runs = runsOf(selected.shape);\n                var points = pointsIn(selected.runs);" in html
+
+    def test_a_boundary_crossed_inside_a_break_is_still_a_pair(self):
+        """Walk into a reserve, ferry out of it, carry on outside: the file used
+        to say *Enters Sirijorda naturreservat* and never that the route left.
+        `crossingsOf` restarted its list of what it was inside at every written
+        run, and a crossing writes none -- so what happened across the break was
+        lost in both directions."""
+        html = self.drawn().get_root().render()
+        # One list over the whole route, never restarted per run.
+        assert "var before = [], last = null, started = false;" in html
+        # The gaps stand in their place in the walk rather than beside it.
+        assert "gaps.forEach(function (gap) { if (gap.before === r) { series.push(stepped(gap)); } });" in html
+
+    def test_a_crossing_is_stepped_as_finely_as_the_runs_are(self):
+        """A ferry from N50 has a source's corners and a water leg two points, so
+        a boundary between two of them would put the marker at their midpoint --
+        hundreds of metres out, where the runs are accurate to a few."""
+        html = self.drawn().get_root().render()
+        assert "var CROSSING_STEP_M = 5;" in html
+        assert "/ CROSSING_STEP_M);" in html
+
+    def test_beginning_inside_an_area_is_still_not_a_crossing(self):
+        """The rule survives the rewrite: the route's own first point sets what
+        it began inside and marks nothing."""
+        html = self.drawn().get_root().render()
+        walk = html[html.index("var before = [], last = null, started = false;") :]
+        walk = walk[: walk.index("return out;")]
+        assert "if (started) {" in walk
+        assert "started = true;" in walk
 
     def test_only_the_areas_the_route_reports_get_a_marker(self):
         """The threshold is applied once, where the figures are, so a boundary
