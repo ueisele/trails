@@ -4193,30 +4193,64 @@ at z16**, 30 m at z17 and 20 m at z18, and no reading is shared by two zooms.
 That also makes a screenshot readable back to a zoom, which every report about
 this page has so far had to reconstruct by eye.
 
-### The page had never said how wide a phone is
+### A finding that was a grep, and the tag it could not see
 
-**There is no `<meta name="viewport">` in this document and there never has
-been.** Folium writes none, branca writes only the content-type meta, and nothing
-in this project added one. A mobile browser with no viewport meta lays a page out
-at **980 CSS pixels** and scales the result down to the screen — so the whole map
-has been arriving on a real phone at roughly two-fifths of the size it was
-designed at, for the entire life of this page.
+**It said the page had no viewport meta. The page has always had one.** Folium's
+own map template writes it — `width=device-width, initial-scale=1.0,
+maximum-scale=1.0, user-scalable=no` — and it is on `atlas.cairn.zone` and in
+every build this project has ever made. So the paragraph that stood here, saying
+a phone had been laying this map out at 980 CSS pixels and scaling it down for
+the whole life of the page, was **wrong from end to end**, and so is the sentence
+about it in commit `0d37b0d`.
 
-**No check here could see it, and the reason is structural.** Every phone reading
-in this document was taken by driving a *desktop engine in a narrow window* —
-"axes are viewport width (a desktop window at 390 px breaks identically)", as an
-earlier section puts it. A desktop browser has no 980-pixel fallback: told the
-window is 390 px, it lays out at 390 px. So the suite measured a layout that on
-the actual target never happened, and every figure recorded about 40 px tap
-targets and 16 px type and a panel folding at 390 px was recorded somewhere those
-things were true.
+**What went wrong is one character of tool behaviour.** The tag is written across
+two lines:
 
-**It is one line, and it is in.** What it changes is not nothing: the phone now
-gets the layout that was designed for it, which means everything on it gets
-larger and the folding decisions finally fire at the widths they were written
-for. That is the right outcome and it is also a change nobody here has seen, so
-it goes on the list below with the keyboard and the finger — **it can only be
-looked at on the device.**
+```html
+<meta name="viewport" content="width=device-width,
+initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+```
+
+and the search was `grep -o '<meta[^>]*>'`, which is line-based: `[^>]*` cannot
+cross a newline, so a tag with one in it does not exist as far as that command is
+concerned. The follow-up search that would have caught it — `grep -c viewport` —
+was run, answered **5**, and was read as *five mentions in comments* because the
+first search had already established there was no tag. **A negative from one tool
+was allowed to interpret the positive from the next.**
+
+**A duplicate was built on it and taken back out.** The head this work adds
+carried a second viewport meta for one build. It was not merely redundant: it is
+written before folium's, so folium's would have won anyway, and the page uses no
+`safe-area-inset`, so the `viewport-fit=cover` it added bought nothing either.
+The docstring on `_Head` now says why there is none there, so that the next
+person to search for one and find nothing does not add it a third time.
+
+**Two things are worth keeping from it.**
+
+The first is a rule for this page specifically: **`_squeezed` takes out the
+indentation folium renders with and leaves folium's own line breaks inside
+tags**, so the built document has tags that span lines. Anything asking this page
+what is in its head has to be able to cross a newline — `python -c` with
+`re.finditer`, not `grep -o`.
+
+The second is about the shape of the claim rather than the tooling. The
+paragraph was persuasive because it explained a *lot*: it accounted for every
+phone figure in this document at once, by way of a mechanism nobody here could
+check. **A finding that explains everything and can only be verified somewhere
+you cannot go is the one to re-derive twice before writing it down** — and it
+took one `curl` of the published page to settle, which is a command this document
+already recommends for exactly this purpose two hundred lines above.
+
+The test that stands now counts rather than matches: `html.count('name="viewport"')
+== 1`. That is the only form of the assertion that would have failed on *both*
+mistakes — on a page with none, and on a page with two.
+
+**One thing this did turn up, and it is real.** Folium's meta carries
+`maximum-scale=1.0, user-scalable=no`, which takes the browser's own pinch-zoom
+away from the whole document. On a map whose own pinch works that is defensible
+and it is what folium has always done here; as an accessibility default it is
+not, and nothing in this project chose it. Left alone, and recorded here so that
+it is a decision the next time somebody looks at it.
 
 ### What is still open on a phone
 
@@ -4251,12 +4285,6 @@ looked at on the device.**
 - **Coordinates at 6 decimals** and the rest of the weight work, which the memory
   split above orders and which nothing here touched.
 
-- **The layout at the phone's own width** — new, and the largest of these.
-  Until now this page carried no viewport meta at all, so a mobile browser laid
-  it out at 980 px and scaled the result down; it now says `width=device-width`
-  and the phone gets the layout everything here was designed against. Everything
-  will be bigger. **Nobody has seen it**, and the checks structurally cannot —
-  see *The page had never said how wide a phone is* above.
 - **Whether a worker exists in the browser being used**, which the Offline panel
   now says in its first line and which takes one tap to read. If it says *not
   available*, that is Chrome or Firefox on iOS and the answer is Safari or the

@@ -610,6 +610,14 @@ class _Head(Element):
     above it**: a macro's ``header`` block adds a child to the figure's header
     while the figure is rendering that very header, and branca raises
     ``OrderedDict mutated during iteration``. It cost this file a build twice.
+
+    **There is no viewport meta here, and that is not an omission.** Folium's own
+    map template writes one -- ``width=device-width, initial-scale=1.0,
+    maximum-scale=1.0, user-scalable=no`` -- and it renders *after* this, so a
+    second one here is dead weight that merely looks authoritative. It was added
+    once, on a search that had reported none: the tag is written across **two
+    lines**, and ``grep -o '<meta[^>]*>'`` is line-based and cannot see a tag
+    with a newline in it. Search this page's head with something that is not.
     """
 
     _template = Template("""{{ this.body }}""")
@@ -624,7 +632,6 @@ class _Head(Element):
         named = escape(title, quote=True)
         self.body = (
             f"<title>{named}</title>\n"
-            '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
             '<meta name="apple-mobile-web-app-capable" content="yes">\n'
             '<meta name="mobile-web-app-capable" content="yes">\n'
             '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n'

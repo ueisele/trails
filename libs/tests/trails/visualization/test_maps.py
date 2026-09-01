@@ -531,16 +531,20 @@ class TestManifest:
         assert '<link rel="apple-touch-icon" href="data:image/png;base64,' in html
         assert '<meta name="apple-mobile-web-app-capable" content="yes">' in html
 
-    def test_a_map_on_a_phone_is_laid_out_at_the_phone_s_width(self):
-        """**Which this page has never said, and no check here could see.** A
-        mobile browser with no viewport meta lays a page out at 980 CSS pixels
-        and scales the result down; every phone reading in this project was
-        driven as a *narrow desktop window*, where that fallback does not exist.
-        So the whole page has been arriving on a real phone at roughly two-fifths
-        of the size it was designed at, and every figure recorded about a 390 px
-        layout was recorded somewhere that layout never happened."""
+    def test_the_page_says_a_phone_s_own_width_exactly_once(self):
+        """**A tag written across two lines is a tag `grep` cannot see.** Folium's
+        map template writes the viewport meta itself, broken over a newline
+        inside the tag, and a line-based search for `<meta[^>]*>` reports that
+        the page has none. It has had one all along. A second one was added on
+        that reading and taken straight back out: folium's renders after the
+        head this builds, so the duplicate would have been dead weight that
+        merely looked authoritative.
+
+        This asserts the count rather than the text, which is the only form of
+        this assertion that could have caught either mistake."""
         html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), title="Lomsdal-Visten").get_root().render()
-        assert '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">' in html
+        assert html.count('name="viewport"') == 1
+        assert "width=device-width" in html
 
     def test_a_map_without_a_title_carries_none_of_it(self):
         """`create_map` is used by a dozen tests and by anything else that wants
