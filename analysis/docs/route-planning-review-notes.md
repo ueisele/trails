@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 269 while one behaviour is being written. What is left out
+  readings instead of 275 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **400 seconds** and say
-whether the page still holds: **269 readings, and it should be green**. If it is
+whether the page still holds: **275 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 269. And **build before driving**: the run reads the page `make map`
+instead of 275. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -1922,15 +1922,27 @@ brought up to what was actually built:
 | Das Profil zur Hand | `https://claude.ai/code/artifact/9b188d07-156a-4e8c-9413-f0c1652b4005` — hiding the profile, the switch from the plan view, three figures |
 | Sieben Punkte, eine Spalte | `https://claude.ai/code/artifact/f4a5a398-2562-42f5-9d02-4211d0f6dc90` — the plan panel: head, marks, the row's own menu |
 
-**The build is ahead of the published map.** As of 2026-09-01 the offline work
-below — the Offline panel, the terrain cache, the manifest and the viewport
-meta — is built and driven and **not deployed**. What is on `atlas.cairn.zone`
-is the 2026-08-31 build, which was verified rather than assumed at the time: the
-live page's SHA-256 was the built file's to the last byte, `5,809,394` bytes on
-the wire under `content-encoding: br` against 15,602,410 decompressed, and
-`sw.js` carried `VERSION = "dbd954ed4ab5ff84"` — the first sixteen digits of that
-same digest, which is what makes the cache name turn over and the old map fall
-out of it.
+**The offline work is published**, and **a digest cannot verify that** — which
+is the correction the last verification needs. The build is **not
+reproducible**: folium gives every element a fresh `uuid4().hex` on every run, so
+two builds of identical source differ in thousands of places (`map_5132edb9…`
+against `map_2857f399…`). The 2026-08-31 check worked only because it compared
+the deployed object against *the very file that had been uploaded*, with no
+rebuild in between; run it after a `make map` and it says the deploy is stale
+when it is current.
+
+**What can be checked, and was**: the live page carries the whole of this work —
+`trails-terrain`, `trails-offline` thirteen times, the zoom line, the manifest
+link, `cache: 'reload'` — and carries **no** `user-scalable`, which only the
+`_scalable` rewrite produces. `sw.js` is byte-identical to the local one once the
+stamp is normalised, and its `VERSION = "e4fcbeed4d2db59e"` is the first sixteen
+digits of the SHA-256 of *the page actually being served*, so the worker and the
+document it caches are the same build. The manifest's icons decode to identical
+pixels; only their deflate streams differ.
+
+**So the rule for next time**: verify a deploy by its content and by the worker's
+own stamp against the served page, or keep the artefact and compare that. Never
+by rebuilding and comparing digests.
 
 **The deploy now carries three objects, not two.** `manifest.webmanifest` goes up
 beside `sw.js` as `application/manifest+json`; without it the map cannot be
@@ -4192,6 +4204,58 @@ nobody can choose between. The pairing is arithmetic rather than a lookup —
 at z16**, 30 m at z17 and 20 m at z18, and no reading is shared by two zooms.
 That also makes a screenshot readable back to a zoom, which every report about
 this page has so far had to reconstruct by eye.
+
+### What reviewing the offline work found, including one that would have lied
+
+**Three suspicions, measured rather than argued, and two of them were wrong.**
+Working out how much ground a scope is costs at worst **99 ms** on this machine
+— *everything drawn* at z16, 46,537 tiles — and 94 ms for a viewport at z18. On
+a phone that is three to five times as much and still not a freeze, so the
+walk-and-halve is fast enough and there is nothing to move off the main thread.
+The plan panel's route is recomposed on every redraw, which sounded expensive
+and could not be shown to be.
+
+**The third was real, and it was the one thing this panel exists to prevent.**
+Driven with the network off: a download of 40 tiles kept **0** and turned
+offline mode **on**. Every fetch had failed, the loop finished, and the switch
+went on because the loop had finished — which hands the reader exactly the blank
+map the chooser was built to stop, and tells them it is what they asked for. It
+now asks the *cache* what is there rather than the counter what it believes, and
+a run that kept nothing leaves the switch alone and says so on the panel: *nothing
+arrived — all 40 were refused, so offline mode is still off*.
+
+**Two smaller things came out of the same read.** The chooser was being rebuilt
+from scratch every 25 tiles for the progress line — ten buttons, a full
+recomposition of the planned route to decide whether to offer *This route*, and
+the focus taken off whatever the reader was on, including the Stop button they
+were reaching for. It is built once when a run starts and once when it ends. And
+the ceiling on *everything drawn* was only ever painted on the button:
+`choose('all', 18)` sailed past it. It is clamped in the chooser itself now, so
+it is a property of the scope rather than of the screen.
+
+**And three sentences that were not true in some state the page can reach.** A
+page opened off the disk was told *not available in this browser — not a secure
+origin. On iOS that means Safari*, which sends that reader after entirely the
+wrong thing; the two refusals are now two sentences. A run with nothing to fetch
+reported *all 0 were refused*. And the panel never said that only the sheet
+**showing** is kept — topo and grayscale share a host and keeping both would
+double every figure here — so switching sheets with no signal gives a blank map
+and nothing on the page would have explained why. It says so now.
+
+**The check for all of it had gone hollow, and the clamp is what hollowed it.**
+The suite keeps one batch, switches offline mode on, and keeps a second batch
+*through* the worker — which is the regression test for the blank-tile defect.
+It asked for z12 and then z13; the chooser floors at z14, so after the clamp both
+asks became the same set, every tile of the second was skipped as already kept,
+and **no fetch was made at all**. The reading stayed green throughout. It asks
+z14 and then z15 now, and a reading beside it holds that the second ask is more
+ground than the first — because a check whose subject has quietly gone missing
+is worth less than no check, and this document has that entry twice already.
+
+**The other half of the blank-tile design is now driven too.** Offline at the
+view the terrain was kept for: 24 tiles drawn, none blank. Offline at a view
+nobody kept: **28 of 30 blank**, nothing thrown. Ground you did not keep is
+supposed to be blank rather than broken, and that had never been asserted.
 
 ### A finding that was a grep, and the tag it could not see
 

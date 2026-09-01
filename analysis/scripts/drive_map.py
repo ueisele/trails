@@ -3021,11 +3021,39 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         terrain.append(Reading("switching it on with nothing kept asks first", asked["chooser"], True))
         terrain.append(Reading("and does not claim to be on", asked["on"], False))
 
-        # A small, real download: a tight view at a coarse zoom is a few dozen
-        # tiles from Kartverket, which is a check and not a bulk fetch.
-        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 12)"))
+        # **A run that keeps nothing must switch nothing on.** Driven with the
+        # context offline, which is the case this actually happens in: every
+        # fetch fails, the loop finishes, and turning the switch on there hands
+        # over exactly the blank map the chooser exists to prevent. It did, and
+        # it is driven here rather than later because the cache is empty at this
+        # point anyway -- a `forget()` in the middle of this check would take
+        # away the terrain the offline visit below has to draw.
+        first.evaluate("async () => await window.trailsOffline.choose('view', 14)")
+        context.set_offline(True)
+        first.evaluate("() => window.trailsOffline.keep()")
+        first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
+        context.set_offline(False)
+        starved = first.evaluate("() => window.trailsOffline.state()")
+        terrain.append(Reading("a run where everything is refused keeps nothing", starved["kept"]["tiles"], 0))
+        terrain.append(Reading("and switches nothing on", starved["on"], False))
+        terrain.append(
+            Reading(
+                "and says so rather than leaving it to be found",
+                "Nothing arrived" in first.evaluate("() => (document.querySelector('.trails-offline-figures') || {}).textContent || ''"),
+                True,
+            )
+        )
+
+        # A small, real download: a tight view at the coarsest zoom the chooser
+        # offers is a few dozen tiles from Kartverket, which is a check and not
+        # a bulk fetch. **Zoomed in first**, and the two asks below are z14 and
+        # z15 rather than z12 and z13: the chooser floors at z14, so two asks
+        # under it would clamp to the same set, the second run would skip every
+        # tile as already kept, and the regression it exists for -- a download
+        # made *through* the worker with the switch on -- would never happen.
+        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
         first.wait_for_timeout(1500)
-        first.evaluate("async () => await window.trailsOffline.choose('view', 12)")
+        first.evaluate("async () => await window.trailsOffline.choose('view', 14)")
         first_ask = first.evaluate("() => window.trailsOffline.needed()")
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
@@ -3038,7 +3066,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # with a blank -- unless it lets `cache: 'reload'` past. Without that
         # branch every one of these is 68 bytes of transparent PNG written into
         # the terrain cache as terrain, and the panel reports success.
-        first.evaluate("async () => await window.trailsOffline.choose('view', 13)")
+        first.evaluate("async () => await window.trailsOffline.choose('view', 15)")
         second_ask = first.evaluate("() => window.trailsOffline.needed()")
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
@@ -3054,6 +3082,14 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 }
                 return {kept: keys.length, smallest: smallest, sampled: Math.min(40, keys.length)};
             }"""
+        )
+        terrain.append(
+            Reading(
+                "the second ask is more ground than the first",
+                second_ask["tiles"] > first_ask["tiles"],
+                True,
+                note=f"{first_ask['tiles']} then {second_ask['tiles']}",
+            )
         )
         terrain.append(Reading("keeping more while it is on keeps all of it", weighed["kept"], second_ask["tiles"]))
         # A blank tile is 68 bytes. Anything Kartverket drew is thousands.
@@ -3083,8 +3119,12 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             )
         )
         # And with the network off, what was kept is what is drawn: the tiles
-        # come back from the cache and none of them is the worker's blank.
-        second.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 12)"))
+        # come back from the cache and none of them is the worker's blank. **At
+        # the view it was kept for**, which is the part that has to be said: the
+        # terrain above was chosen for a z14 viewport, and looking at z12
+        # instead asks for ground nobody kept and is answered, correctly, with
+        # 22 blanks.
+        second.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
         second.wait_for_timeout(3000)
         drawn_terrain = second.evaluate(
             """() => {
@@ -3097,6 +3137,27 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         )
         terrain.append(Reading("offline, the kept ground draws", drawn_terrain["good"] > 0, True, note=f"{drawn_terrain['good']} tiles"))
         terrain.append(Reading("and none of it is a broken image", drawn_terrain["blank"], 0))
+
+        # **And ground nobody kept is blank rather than broken**, which is the
+        # other half of the same design: offline the worker answers an unkept
+        # tile with a 1x1 transparent PNG so Leaflet draws the page's own ground
+        # instead of a torn image over it.
+        second.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 11)"))
+        second.wait_for_timeout(3000)
+        unkept = second.evaluate(
+            """() => {
+                let blank = 0, tiles = 0;
+                document.querySelectorAll('img.leaflet-tile').forEach(img => {
+                    tiles += 1;
+                    if (img.naturalWidth <= 1) { blank += 1; }
+                });
+                return {tiles: tiles, blank: blank};
+            }"""
+        )
+        terrain.append(
+            Reading("ground that was not kept comes back blank", unkept["blank"] > 0, True, note=f"{unkept['blank']} of {unkept['tiles']}")
+        )
+        terrain.append(Reading("and still threw nothing", len(thrown), 0, note="; ".join(thrown[:2])))
         # And the reader can have the space back from inside the thing that took
         # it, which is the last of the four this panel is for.
         emptied = second.evaluate("async () => { var s = await window.trailsOffline.forget(); return {tiles: s.kept.tiles, on: s.on}; }")

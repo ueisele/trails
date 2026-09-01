@@ -11399,11 +11399,11 @@ class _OfflinePanel(MacroElement):
                     {key: 'view', label: 'What I can see', pad: 0, ceiling: TOP,
                      hint: 'The map as it stands on the screen right now.'},
                     {key: 'all', label: 'Everything drawn', pad: 1, ceiling: 16,
-                     hint: 'A band along every path on this map, all 6,020 km of them.'}
+                     hint: 'A band along every path this map draws, which is most of the park.'}
                 ];
 
                 var scope = 'route', zoom = 16, chooser = false;
-                var counted = null, counting = false, working = null, snapshot = null;
+                var counted = null, working = null, snapshot = null, lastRun = null;
                 var holder = null, said = {};
 
                 // ---- tiles ---------------------------------------------------
@@ -11530,6 +11530,11 @@ class _OfflinePanel(MacroElement):
                 // The base layer that is actually showing. Only one is fetched:
                 // topo and grayscale share a host, and keeping both would
                 // silently double every figure on this panel.
+                function baseName() {
+                    var layer = base();
+                    return layer && layer.options && layer.options.name ? layer.options.name : 'current';
+                }
+
                 function base() {
                     var found = null;
                     map.eachLayer(function (layer) {
@@ -11638,6 +11643,7 @@ class _OfflinePanel(MacroElement):
                     if (working) { return working.done_; }
                     if (!window.caches) { return Promise.resolve(); }
                     var list = wanted().urls;
+                    lastRun = null;
                     var state = {total: list.length, done: 0, failed: 0, stop: false, done_: null};
                     working = state;
                     var at = 0;
@@ -11667,13 +11673,26 @@ class _OfflinePanel(MacroElement):
                         // A run that was stopped leaves the chooser where it
                         // was: what the reader wants next is almost always to
                         // pick a coarser zoom, not to find the panel again.
-                        if (!state.stop) {
+                        if (state.stop) { return refresh(); }
+                        // **And a run that kept nothing switches nothing on.**
+                        // Every fetch failing is almost always the network, and
+                        // turning the switch on then hands over exactly the
+                        // blank map this chooser exists to prevent -- while
+                        // saying it is what the reader asked for. Asked of the
+                        // cache rather than of the counter, because what matters
+                        // is what is there and not what the loop believes.
+                        return kept().then(function (there) {
+                            lastRun = {total: state.total, kept: there.tiles, failed: state.failed};
+                            if (!there.tiles) { return refresh(); }
                             chooser = false;
                             remember(true);
                             tellWorker(true);
-                        }
-                        return refresh();
+                            return refresh();
+                        });
                     });
+                    // Once, so the Stop button appears; `draw` leaves the
+                    // chooser alone for the rest of the run.
+                    drawChooser();
                     draw();
                     return state.done_;
                 }
@@ -11721,7 +11740,10 @@ class _OfflinePanel(MacroElement):
                     said.switchRow.appendChild(said.toggle);
                     said.figures = document.createElement('p');
                     said.figures.className = 'trails-offline-figures';
-                    said.figures.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-3);font-size:12px';
+                    said.figures.style.cssText = 'margin:0 0 6px;color:var(--trails-ink-3);font-size:12px';
+                    said.sheet = document.createElement('p');
+                    said.sheet.className = 'trails-offline-sheet';
+                    said.sheet.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-5);font-size:11px';
                     said.chooser = document.createElement('div');
                     said.chooser.className = 'trails-offline-chooser';
                     said.tools = document.createElement('div');
@@ -11740,6 +11762,7 @@ class _OfflinePanel(MacroElement):
                     holder.appendChild(said.state);
                     holder.appendChild(said.switchRow);
                     holder.appendChild(said.figures);
+                    holder.appendChild(said.sheet);
                     holder.appendChild(said.chooser);
                     holder.appendChild(said.tools);
                     // **Left detached on purpose.** The dock is what puts a
@@ -11857,8 +11880,17 @@ class _OfflinePanel(MacroElement):
                         said.state.textContent = 'This map is kept on your device. Terrain is what is left, ' +
                             'and it is what you choose to keep.';
                     } else if (have.why) {
-                        said.state.textContent = 'Not available in this browser — ' + have.why +
-                            '. On iOS that means Safari, or this map added to the Home Screen.';
+                        // **Two different refusals, and only one of them is
+                        // about the browser.** A page opened off the disk gets
+                        // no worker because the origin is not secure, and
+                        // telling that reader to use Safari sends them after
+                        // the wrong thing entirely.
+                        said.state.textContent = have.why.indexOf('secure') === -1
+                            ? 'Not available in this browser — ' + have.why +
+                              '. On iOS a worker exists in Safari and in this map added to the Home Screen, ' +
+                              'and in no other browser.'
+                            : 'Not available here — ' + have.why +
+                              '. This is the map opened from a file rather than from a web address.';
                     } else {
                         // Neither kept nor refused: the registration has not
                         // settled. Saying *not available* here would be a wrong
@@ -11872,8 +11904,16 @@ class _OfflinePanel(MacroElement):
                     if (working) {
                         said.figures.textContent = 'Keeping ' + count(working.done) + ' of ' +
                             count(working.total) + (working.failed ? ' · ' + working.failed + ' refused' : '');
+                    } else if (lastRun && !lastRun.kept && lastRun.total) {
+                        // **Said, rather than left to be discovered.** A run
+                        // where nothing arrived looks exactly like a run that
+                        // was never started, and the switch being still off is
+                        // the only other evidence there is.
+                        said.figures.textContent = 'Nothing arrived — all ' + count(lastRun.total) +
+                            ' were refused, so offline mode is still off. Check the connection and try again.';
                     } else {
                         var lines = [count((have.kept || {}).tiles || 0) + ' tiles kept'];
+                        if (lastRun && lastRun.failed) { lines.push(count(lastRun.failed) + ' refused'); }
                         if (have.storage && have.storage.usage !== null) {
                             lines.push(megabytes(have.storage.usage) + ' of ' + megabytes(have.storage.quota) + ' used');
                         }
@@ -11882,7 +11922,20 @@ class _OfflinePanel(MacroElement):
                     }
                     said.forget.disabled = !((have.kept || {}).tiles);
                     said.forget.style.opacity = (have.kept || {}).tiles ? '1' : '0.5';
-                    drawChooser();
+                    // **Said, because otherwise it is found the hard way.** Only
+                    // the sheet that is showing is kept -- topo and grayscale
+                    // share a host and keeping both would double every figure
+                    // here -- so switching sheets with no signal gives a blank
+                    // map, and nothing else on the page would explain why.
+                    said.sheet.textContent = (have.kept || {}).tiles
+                        ? 'Kept for the ' + baseName() + ' sheet. Switching sheets with no signal shows nothing.'
+                        : '';
+                    // **Not while a run is going.** Progress arrives every 25
+                    // tiles, and rebuilding the chooser that often rebuilds ten
+                    // buttons, re-reads the plan's whole route to decide whether
+                    // to offer *This route*, and takes the focus off whatever
+                    // the reader was on -- including the Stop button.
+                    if (!working) { drawChooser(); }
                 }
 
                 // **On, with nothing kept, opens the chooser instead.** A switch
@@ -11919,6 +11972,13 @@ class _OfflinePanel(MacroElement):
                     choose: function (which, level) {
                         if (which) { scope = which; }
                         if (level) { zoom = level; }
+                        // Clamped here and not only on the button, so the
+                        // ceiling is a property of the scope rather than a
+                        // thing the screen happens to draw.
+                        var here = SCOPES.filter(function (each) { return each.key === scope; })[0];
+                        if (here && zoom > here.ceiling) { zoom = here.ceiling; }
+                        if (zoom > TOP) { zoom = TOP; }
+                        if (zoom < FLOOR) { zoom = FLOOR; }
                         counted = null;
                         return refresh();
                     },

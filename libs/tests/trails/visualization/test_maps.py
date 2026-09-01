@@ -352,7 +352,12 @@ class TestOfflinePanel:
         silent about it."""
         panel = self.panel()
         assert "Not available in this browser" in panel
-        assert "Safari, or this map added to the Home Screen" in panel
+        assert "a worker exists in Safari and in this map added to the Home Screen" in panel
+        # And the other refusal, which is not about the browser at all: a page
+        # opened off the disk gets no worker because the origin is not secure,
+        # and sending that reader after Safari sends them after the wrong thing.
+        assert "opened from a file rather than from a web address" in panel
+        assert "have.why.indexOf('secure') === -1" in panel
         # Three states and not two: the registration settles after load, and
         # answering *not available* while it is pending is a wrong answer rather
         # than a slow one.
@@ -412,6 +417,40 @@ class TestOfflinePanel:
         """Topo and grayscale share a host, so keeping both would silently double
         every figure on this panel."""
         assert "function base()" in self.panel()
+
+    def test_a_run_that_kept_nothing_switches_nothing_on(self):
+        """**Measured, not reasoned about**: with the network down, a download of
+        40 tiles kept 0 and turned offline mode on anyway — which hands over
+        exactly the blank map this chooser exists to prevent, while saying it is
+        what the reader asked for. It is asked of the cache rather than of the
+        loop's own counter, because what matters is what is there."""
+        panel = self.panel()
+        settle = panel.split("}).then(function () {\n                        working = null;")[1]
+        assert "return kept().then(function (there) {" in settle
+        assert "if (!there.tiles) { return refresh(); }" in settle
+        assert settle.index("if (!there.tiles)") < settle.index("remember(true)")
+        # And it is said, because a run where nothing arrived looks exactly like
+        # a run that was never started.
+        assert "Nothing arrived" in panel
+
+    def test_the_chooser_is_not_rebuilt_every_twenty_five_tiles(self):
+        """Progress arrives every 25 tiles, and rebuilding the chooser that often
+        rebuilds ten buttons, re-reads the plan's whole route to decide whether
+        to offer *This route*, and takes the focus off whatever the reader was
+        on — including the Stop button they are reaching for."""
+        panel = self.panel()
+        assert "if (!working) { drawChooser(); }" in panel
+        # Built once when the run starts, so Stop is there to be pressed.
+        assert panel.count("drawChooser();") == 2
+
+    def test_the_ceiling_belongs_to_the_scope_and_not_to_the_button(self):
+        """Disabling a button is what the screen does; it is not what is true.
+        `choose('all', 18)` has to come back clamped, or the invariant is
+        painted on rather than held."""
+        panel = self.panel()
+        chosen = panel.split("choose: function (which, level)")[1].split("},")[0]
+        assert "zoom > here.ceiling" in chosen
+        assert "zoom > TOP" in chosen and "zoom < FLOOR" in chosen
 
     def test_the_reader_can_get_the_space_back(self):
         """A gigabyte somebody cannot get rid of from inside the thing that took

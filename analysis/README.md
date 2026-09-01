@@ -163,7 +163,7 @@ route has settled the map goes to it.
 command make drive
 ```
 
-Drives the built map in a browser and reports **269 readings** — the counts the
+Drives the built map in a browser and reports **275 readings** — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,
@@ -175,7 +175,7 @@ the worker's own blank.
 
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs. While one behaviour is being written,
-`ARGS="--only <word>"` is ten readings instead of 269. And **build before
+`ARGS="--only <word>"` is ten readings instead of 275. And **build before
 driving**: the run reads the page `command make map` last built.
 
 **It does not overlap with `command make test`.** The tests assert on the page's
