@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 253 while one behaviour is being written. What is left out
+  readings instead of 269 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1890,8 +1890,8 @@ whenever the decisions document grows.
 survives a compaction, and everything below assumes it. Then `git log --oneline
 -30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
-`command make drive`, which take about a minute and **280 seconds** and say
-whether the page still holds: **253 readings, and it should be green**. If it is
+`command make drive`, which take about a minute and **400 seconds** and say
+whether the page still holds: **269 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 253. And **build before driving**: the run reads the page `make map`
+instead of 269. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -1922,12 +1922,20 @@ brought up to what was actually built:
 | Das Profil zur Hand | `https://claude.ai/code/artifact/9b188d07-156a-4e8c-9413-f0c1652b4005` — hiding the profile, the switch from the plan view, three figures |
 | Sieben Punkte, eine Spalte | `https://claude.ai/code/artifact/f4a5a398-2562-42f5-9d02-4211d0f6dc90` — the plan panel: head, marks, the row's own menu |
 
-**The published map is the build**, deployed on 2026-08-31 and verified rather
-than assumed: the live page's SHA-256 is the built file's to the last byte,
-`5,809,394` bytes on the wire under `content-encoding: br` against 15,602,410
-decompressed, and `sw.js` carries `VERSION = "dbd954ed4ab5ff84"` — the first
-sixteen digits of that same digest, which is what makes the cache name turn over
-and the old map fall out of it.
+**The build is ahead of the published map.** As of 2026-09-01 the offline work
+below — the Offline panel, the terrain cache, the manifest and the viewport
+meta — is built and driven and **not deployed**. What is on `atlas.cairn.zone`
+is the 2026-08-31 build, which was verified rather than assumed at the time: the
+live page's SHA-256 was the built file's to the last byte, `5,809,394` bytes on
+the wire under `content-encoding: br` against 15,602,410 decompressed, and
+`sw.js` carried `VERSION = "dbd954ed4ab5ff84"` — the first sixteen digits of that
+same digest, which is what makes the cache name turn over and the old map fall
+out of it.
+
+**The deploy now carries three objects, not two.** `manifest.webmanifest` goes up
+beside `sw.js` as `application/manifest+json`; without it the map cannot be
+added to a Home Screen, and without that iOS sweeps everything it kept after
+seven days of not being opened.
 
 **One header does not arrive as the deploy asks for it.** `sw.js` is uploaded
 with `--cache-control no-cache` and is served `max-age=300`. Nothing is broken by
@@ -4038,6 +4046,178 @@ receiver noise, not path.
 
 `make drive` reads **253**, unmoved, and the source tests **275**.
 
+### The park in the pocket, and the three shapes that ground can have
+
+**Everything but the ground already worked with the network off.** Selecting a
+chain and reading its whole elevation profile costs zero requests, routing costs
+zero because the Dijkstra is in the page, the search and the exports are in the
+document, and the worker keeps the page itself. What was left was Kartverket's
+tiles — kept opportunistically, whatever the reader happened to pan over, capped
+at 500 and trimmed oldest-first. **That is not a map anybody can walk with, and
+nothing on the page ever said so.**
+
+**The first of the four things this adds is the one that matters most, and it is
+one line.** The page has computed `window.trailsWorker.why` since the worker was
+written and showed it *nowhere*. On iOS a service worker exists in Safari and in
+a home-screen web app and **in no third-party browser** — so for a reader on
+Chrome for iOS every offline feature in this project was already dead, and the
+page was silent about it. The panel now says which of the three it is: *this map
+is kept on your device*, *not available in this browser — <reason>*, or *asking*,
+because the registration settles after the load and answering "not available"
+while it is pending is a **wrong** answer rather than a slow one. That was the
+first thing built and it should have been the first thing built the last time
+too; it is the same lesson as *The file name on iOS Firefox* two hundred lines
+above, which cost three rounds of building before anybody asked whether the
+browser could do it at all.
+
+The other three: **a switch**, which makes the worker answer tiles from the cache
+and never touch the network, so coverage is checkable at home rather than
+discoverable in a valley; **a chooser**, because a switch that silently gives a
+blank map is a switch that lied, so turning it on with nothing kept opens the
+chooser instead; and **delete**, because a gigabyte somebody cannot get rid of
+from inside the thing that took it is a gigabyte taken without asking.
+
+**A corridor along the line, never a box around it — measured, not argued.** On
+UT.no's *Rundtur i Lomsdal-Visten*, a real 42.3 km loop of 16,421 points:
+
+| up to | corridor ±2 | its bounding box | |
+|---|---:|---:|---:|
+| z14 | 31 MB | 38 MB | 1.3× |
+| z15 | 50 MB | 78 MB | 1.5× |
+| z16 | **95 MB** | 227 MB | 2.4× |
+| z17 | 146 MB | 529 MB | 3.6× |
+| z18 | **279 MB** | 2,017 MB | **7.2×** |
+
+A round trip's box is mostly the hole in the middle, which nobody walks. And
+because the margin is counted in **tiles** rather than in metres, the band is
+about 2 km wide at z14 and 250 m at z18 — coarse ground far out and fine ground
+under the feet. That is the right shape and not a compromise on one.
+
+**Three scopes, and only one of them is a rectangle.** *This route* is that
+corridor at ±2 tiles. *What I can see* is `map.getBounds()`, which is a rectangle
+because a viewport is one. *Everything drawn* is a corridor at ±1 around all
+11,589 chains — the pad is narrower there because 6,020 km of dense network
+already covers its own ground, and ±2 would add 800 MB of country nobody walks.
+All three are computed in the browser from geometry the page already holds, so
+the figure on the screen is the count and not an estimate of one.
+
+**The ceiling is Kartverket's**, established in one command rather than assumed:
+the topo cache answers to **z18** and returns `400` at z19 and z20. Mean tile
+weights, twelve samples per zoom taken *on the network* rather than over the
+park — a park-wide sample is full of sea tiles a fraction of the size and makes
+every estimate optimistic: z13 74 kB, z14 70 kB, z15 46 kB, z16 51 kB, z17 29 kB,
+z18 37 kB. Not monotonic, because the cartography changes between zooms.
+
+**What each scope costs**, cumulative, from the exported GPX at ±1:
+
+| up to | everything drawn | |
+|---|---:|---:|
+| z14 | 5,284 tiles | **377 MB** |
+| z15 | 14,988 | **823 MB** |
+| z16 | 40,702 | **2.1 GB** |
+| z17 | 106,953 | 4.0 GB |
+| z18 | ~250,000 | ~9 GB |
+
+So *everything drawn* is offered to z16 and refused above it, which is where the
+numbers stop being a download and start being an archive. The page's own
+arithmetic, over the *drawn* geometry rather than the full-resolution exports,
+reads 5,561 tiles at z≤14 and 46,537 at z≤16 — within a tenth of the figures
+above, computed a different way, which is as good a cross-check as this gets.
+
+**And a per-scope ceiling is not enough, which the driving found.** It catches
+*everything drawn* at z17; it does not catch a viewport zoomed out over the
+county, which asks for **22 GB** and looks as reasonable as any other choice on
+the screen. So the chooser also weighs what it wants against
+`navigator.storage.estimate()` and refuses what will not fit — a Firefox profile
+answered 3.3 GB of quota, and a phone will answer something else again.
+
+**Two caches, because they are two different promises.** `trails-tiles` is what
+panning left behind, capped at 500 and trimmed oldest-first. `trails-terrain` is
+what the reader chose, and is **never** trimmed — a deliberate nine-hundred-tile
+download into an LRU of five hundred would evict itself on the way in and the
+panel would report that it had worked. Neither is stamped with a version, so
+neither is swept when a deploy turns the page cache over: a reader who kept the
+park before a typo was fixed would otherwise be asked to download it again after
+it.
+
+**The switch has to survive the worker being killed.** A service worker is not a
+process that stays alive — the browser starts it for a fetch and stops it again,
+and every variable it held goes with it. A flag living only in that scope would
+be true on the first tile of a walk and false on the second. So it is one entry
+in the terrain cache under a synthetic URL, read once and memoised, and the memo
+is replaced rather than dropped when the page says the switch has moved.
+
+**And the defect that would have been silent, which is the one worth carrying
+forward.** The download runs in the page, and every tile it fetches goes out
+through the worker — which, with the switch on, answers an unkept tile with a
+1×1 transparent PNG so Leaflet draws the page's own ground instead of a broken
+image. Put those two together and a download begun while the switch was on
+writes **68 bytes of transparent PNG into the terrain cache as terrain**, several
+thousand times, and tells the reader their park is kept. It would have been found
+on a mountain. The fix is one line — the worker passes `cache: "reload"` straight
+through, which is what the page asks for and what it means anyway — and it sits
+*after* the navigate branch on purpose, because pressing reload makes a
+navigation with the same flag and offline that has to be answered from the cache
+rather than sent to a network that is not there. The check for it does not read
+the source: it keeps a batch with the switch already on and then **weighs the
+kept tiles**, because a blank is 68 bytes and anything Kartverket drew is
+thousands.
+
+**Installable, which is not decoration.** WebKit deletes storage a script created
+once an origin has gone seven days without a visit — exactly the walk somebody
+keeps the terrain for a fortnight before. The two exemptions are persisted
+storage and a home-screen install, so the build now writes a
+`manifest.webmanifest` beside `sw.js` and the page asks for `persist()` **from
+the press** rather than at load, because an origin nobody has touched asking to
+be kept for ever is what that rule exists to refuse. The mark is drawn by the
+build — two peaks, scanline with the edge pixels of each row blended, 1.5 kB at
+180 px — and rides in the manifest and the head as `data:` URIs, so the deploy
+gains one small text object and no binaries and the repository carries no PNG.
+`start_url` is relative, the way the worker already has to deal with the object
+being `lomsdal-visten.html` and being served at `/lomsdal-visten`.
+
+**Kartverket's terms were read before any of it.** The open data is CC BY 4.0 and
+the attribution is already on the map. The clause that speaks to this one is
+that the cache services carry **Geovekst data at zoom 12–20** whose copying wants
+the rights holders' permission — which is why the chooser is scoped to what a
+reader is going to walk over rather than to a county, and why no archive is
+pre-built and re-hosted anywhere. Settled by the reader for this map: a personal
+cache for a personal walk, held for a while, on a page nobody promotes.
+
+**And the scale bar says which zoom it is**, which is not a garnish: the chooser
+asks the reader for a zoom, and a number nobody ever meets again is a number
+nobody can choose between. The pairing is arithmetic rather than a lookup —
+`L.control.scale` uses `maxWidth: 100` and the ground resolution at 65.5° N is
+64,917 / 2^z — so the bar reads 500 m at z13, 300 m at z14, 100 m at z15, **50 m
+at z16**, 30 m at z17 and 20 m at z18, and no reading is shared by two zooms.
+That also makes a screenshot readable back to a zoom, which every report about
+this page has so far had to reconstruct by eye.
+
+### The page had never said how wide a phone is
+
+**There is no `<meta name="viewport">` in this document and there never has
+been.** Folium writes none, branca writes only the content-type meta, and nothing
+in this project added one. A mobile browser with no viewport meta lays a page out
+at **980 CSS pixels** and scales the result down to the screen — so the whole map
+has been arriving on a real phone at roughly two-fifths of the size it was
+designed at, for the entire life of this page.
+
+**No check here could see it, and the reason is structural.** Every phone reading
+in this document was taken by driving a *desktop engine in a narrow window* —
+"axes are viewport width (a desktop window at 390 px breaks identically)", as an
+earlier section puts it. A desktop browser has no 980-pixel fallback: told the
+window is 390 px, it lays out at 390 px. So the suite measured a layout that on
+the actual target never happened, and every figure recorded about 40 px tap
+targets and 16 px type and a panel folding at 390 px was recorded somewhere those
+things were true.
+
+**It is one line, and it is in.** What it changes is not nothing: the phone now
+gets the layout that was designed for it, which means everything on it gets
+larger and the folding decisions finally fire at the widths they were written
+for. That is the right outcome and it is also a change nobody here has seen, so
+it goes on the list below with the keyboard and the finger — **it can only be
+looked at on the device.**
+
 ### What is still open on a phone
 
 - **~~The keyboard~~ — built, and unverified.** The arithmetic is in and the
@@ -4071,13 +4251,24 @@ receiver noise, not path.
 - **Coordinates at 6 decimals** and the rest of the weight work, which the memory
   split above orders and which nothing here touched.
 
-**Offline is a different project, and it decomposes.** Vendoring the four CDN
-scripts plus a service worker already gives every line, every profile and the
-routing in a dead spot — only the background would be blank. The tiles are the
-work: for the drawn extent, **6,308 tiles and 563 MB at zoom ≤ 14** (~4 m/px at
-65.5° N), measured against real tile sizes; z15 would be 2.1 GB. That wants
-PMTiles, a download with progress, `navigator.storage.persist()`, and Kartverket's
-terms read before bulk-fetching anything.
+- **The layout at the phone's own width** — new, and the largest of these.
+  Until now this page carried no viewport meta at all, so a mobile browser laid
+  it out at 980 px and scaled the result down; it now says `width=device-width`
+  and the phone gets the layout everything here was designed against. Everything
+  will be bigger. **Nobody has seen it**, and the checks structurally cannot —
+  see *The page had never said how wide a phone is* above.
+- **Whether a worker exists in the browser being used**, which the Offline panel
+  now says in its first line and which takes one tap to read. If it says *not
+  available*, that is Chrome or Firefox on iOS and the answer is Safari or the
+  Home Screen — and every offline feature in this project depends on the answer.
+
+**Offline is done, and what is left of it is a download nobody should offer.**
+Every line, every profile, the routing and the exports worked in a dead spot
+already; the terrain is now kept on purpose, at a zoom the reader picks, with a
+switch that proves it and a way to delete it. What is *not* here is the whole
+park at fine detail — 4.0 GB at z17 and about 9 GB at z18, a quarter of a
+million requests to somebody else's service — and no pre-built PMTiles archive,
+which is the one thing Kartverket's Geovekst clause actually speaks to.
 
 ## What the profile zoom found
 

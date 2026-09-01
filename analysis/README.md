@@ -129,6 +129,25 @@ stage and the whole tour with its marks in one archive. Name the tour in the box
 above the list; the marks travel in the file, so loading it back gives you the
 tour and its stages.
 
+**The ground can be kept on the device**, under *Offline* in the menu. It says
+first whether this browser can keep anything at all — a service worker exists in
+Safari and in a map added to the Home Screen, and in no third-party browser on
+iOS, so that line is the one to read before anything else. Then a switch, which
+makes the map answer from what it holds and never reach for a network, so
+coverage is checkable at home rather than in a valley; switching it on with
+nothing kept opens the chooser instead of handing over a blank map.
+
+The chooser asks two things and shows the exact consequence of both: **what** —
+a band along the route you planned, the map as it stands on the screen, or a band
+along every path drawn here — and **how fine**, from z14 down to z18, which is
+where Kartverket's own tiles stop. A 42 km tour is about 95 MB at z16 and 279 MB
+at z18; everything drawn is 377 MB at z14 and 2.1 GB at z16, and is refused above
+that. Anything larger than the device will hold is refused too, with the room it
+actually has. *Delete* gives the space back.
+
+Everything else already worked with no signal: every line, every profile, the
+routing, the search and the files are inside the document.
+
 **A GPX can be loaded back.** The file is read and described first — a route
 this map wrote, a chain export, or somebody else's track — and then it asks how to
 read it, with the sensible answer already chosen and a sentence saying what each
@@ -144,15 +163,19 @@ route has settled the map goes to it.
 command make drive
 ```
 
-Drives the built map in a browser and reports **253 readings** — the counts the
+Drives the built map in a browser and reports **269 readings** — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
-and that the map opens with the network off. **About 280 seconds**, most of it
-loading the page: 15.6 MB of HTML, twice over for the offline check.
+which zoom the scale bar says it is on, that the map opens with the network off,
+and that terrain the reader asked for is kept and drawn and can be deleted again.
+**About 400 seconds**, most of it loading the page — 15.6 MB of HTML, twice over
+for the offline check — and about two minutes of it fetching real tiles from
+Kartverket, which is what it costs to prove that a kept tile is terrain and not
+the worker's own blank.
 
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs. While one behaviour is being written,
-`ARGS="--only <word>"` is ten readings instead of 253. And **build before
+`ARGS="--only <word>"` is ten readings instead of 269. And **build before
 driving**: the run reads the page `command make map` last built.
 
 **It does not overlap with `command make test`.** The tests assert on the page's
@@ -172,6 +195,12 @@ command make deploy ARGS="--dry-run"     # says what it would do, changes nothin
 It **does not build**. That separation is deliberate: a deploy that rebuilt first would make
 "publish the thing I just looked at" impossible, and the thing you just looked at is the only one
 worth publishing.
+
+It puts up **three objects**: the compressed page, `sw.js` (uncompressed,
+`no-cache`, so an edge holding yesterday's worker cannot hold yesterday's map
+with it), and `manifest.webmanifest` (uncompressed, `application/manifest+json`).
+Without the last of those the map cannot be added to a Home Screen — and without
+that, iOS deletes everything the map kept after seven days of not being opened.
 
 Where it goes is not configured here. This repository is public, so the bucket, endpoint, hostname
 and zone would be account identifiers in a public place; they come from the environment instead —

@@ -213,13 +213,13 @@ command make notebook-clean       # Clear all notebook outputs
 # The map
 command make map                  # Build the Lomsdal-Visten map into analysis/output/
 command make graph                # Build the routing graph and report its numbers
-command make drive                # Drive the built page in a real browser (253 readings, ~280 s)
+command make drive                # Drive the built page in a real browser (269 readings, ~400 s)
 command make drive ARGS="--only the_plan_bar"   # ...or one check while working on it
 command make deploy               # Publish the map make map last built, and purge the edge cache
 # map/graph/drive/deploy all take ARGS="...", e.g. make deploy ARGS="--dry-run".
 #
-# DRIVE ONCE AND READ THE FILE. `make drive` is 280 seconds; running it twice to
-# see two parts of one report is 360. Send it to a file and grep the file. And it
+# DRIVE ONCE AND READ THE FILE. `make drive` is 400 seconds; running it twice to
+# see two parts of one report is 800. Send it to a file and grep the file. And it
 # reads the page `make map` last built, so build first or the run reports the
 # state before the change.
 #
