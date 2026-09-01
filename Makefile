@@ -1,3 +1,24 @@
+# This Makefile runs with this project's own toolchain in front of whatever the caller had.
+#
+# The deploy needs the AWS CLI — analysis/scripts/deploy_map.py shells out to `aws s3 cp` — and it is
+# declared in mise.toml here. A caller that reached this file by cd-ing in from another repository
+# carries the PATH of wherever *its* shell was activated: mise sets that at the prompt, and a `cd`
+# inside a script does not re-run the hook. `just deploy` in home/trails-map is exactly that shape,
+# and it failed with the script's own "aws (the AWS CLI) is not installed" while the tool sat
+# installed a directory away.
+#
+# Put here rather than in the caller, because the caller has no business knowing how this repository
+# finds its tools — and every other caller would have needed the same knowledge. Put at the top
+# rather than in the deploy recipe alone, because the next tool this project declares would
+# otherwise arrive with the same bug.
+#
+# Guarded so it stays a no-op where mise is absent: CI installs uv directly and runs `make check`
+# without ever seeing mise, and that has to keep working.
+MISE := $(shell command -v mise 2>/dev/null)
+ifneq ($(MISE),)
+export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
+endif
+
 .PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy
 
 # Default target
