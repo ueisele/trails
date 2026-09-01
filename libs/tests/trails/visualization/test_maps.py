@@ -776,6 +776,51 @@ class TestOfflinePanel:
         assert "pick.setAttribute('aria-pressed', String(each.key === scope));" in html
         assert "pick.setAttribute('aria-pressed', String(level === zoom));" in html
 
+    def test_the_screen_is_held_awake_for_the_length_of_the_run(self):
+        """The download is six `fetch` calls from the page and nothing else — no
+        Background Fetch, no worker doing it out of sight — so a phone that locks
+        freezes it. 130,000 tiles is not a run anybody watches to the end holding
+        the thing."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "navigator.wakeLock.request('screen')" in html
+        # Taken again on the way back: the browser drops the lock whenever the
+        # page is hidden and does not hand it back.
+        assert "if (document.visibilityState === 'visible' && working) { keepAwake(); }" in html
+        # And let go when the run ends, or the screen stays on for as long as the
+        # tab lives.
+        assert "letSleep();" in html
+
+    def test_holding_the_screen_is_optional_in_every_branch(self):
+        """The API is absent on older iOS and refused off a secure origin. A run
+        without it wants babysitting; a run that threw on the way to asking for
+        it would keep nothing at all."""
+        panel = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        panel = panel.split("class _OfflinePanel")[1].split("\nclass ")[0]
+        assert "if (awake || !navigator.wakeLock || !navigator.wakeLock.request) { return; }" in panel
+        assert "}).catch(function () { awake = null; });" in panel
+        # The run can end while the request is in flight, and a lock nobody
+        # releases is a screen that never sleeps again.
+        assert "if (!working) { held.release(); return; }" in panel
+
+    def test_the_run_says_what_a_progress_bar_cannot(self):
+        """That it needs this page in front is a property of where it runs; that
+        stopping is free is a property of the cache being checked before every
+        tile. Neither is visible, and guessing either one wrong costs an
+        evening."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "the run stops when the phone locks or you switch app" in html
+        assert "Stopping costs nothing: it carries on from where it got to." in html
+        # And the claim it makes is one the loop keeps: every tile is asked of
+        # the cache before it is fetched.
+        assert "return cache.match(url).then(function (there) {" in html
+        assert "if (there) { return null; }" in html
+
 
 class TestScaleZoom:
     """The map saying which zoom it is on."""

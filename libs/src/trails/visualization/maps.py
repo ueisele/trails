@@ -12361,6 +12361,44 @@ class _OfflinePanel(MacroElement):
                 // it a download started while the switch was on would be
                 // answered by the worker's own blank tile, and the reader would
                 // be told their park was kept.
+                // **The screen stays awake for the length of the run.** The
+                // download is six `fetch` calls from this page and nothing else:
+                // no Background Fetch, no worker doing it out of sight. A phone
+                // that locks freezes the JavaScript, and 130,000 tiles is not a
+                // run anybody watches to the end holding the thing.
+                //
+                // Every branch of it is optional. The API is absent on older
+                // iOS and refused off a secure origin, and a run without it is
+                // slower to babysit rather than broken -- so nothing here is
+                // allowed to throw or to hold the run up waiting for an answer.
+                var awake = null;
+
+                function keepAwake() {
+                    if (awake || !navigator.wakeLock || !navigator.wakeLock.request) { return; }
+                    navigator.wakeLock.request('screen').then(function (held) {
+                        // The run can end while the request is still in flight,
+                        // and a lock nobody releases keeps the screen on for as
+                        // long as the tab lives.
+                        if (!working) { held.release(); return; }
+                        awake = held;
+                        held.addEventListener('release', function () { awake = null; });
+                    }).catch(function () { awake = null; });
+                }
+
+                function letSleep() {
+                    if (!awake) { return; }
+                    try { awake.release(); } catch (gone) { /* already released */ }
+                    awake = null;
+                }
+
+                // **Taken again when the reader comes back.** The browser drops
+                // the lock whenever the page is hidden, and does not return it:
+                // without this, one glance at a message leaves the rest of the
+                // download to a screen that will lock again.
+                document.addEventListener('visibilitychange', function () {
+                    if (document.visibilityState === 'visible' && working) { keepAwake(); }
+                });
+
                 function keep() {
                     if (working) { return working.done_; }
                     if (!window.caches) { return Promise.resolve(); }
@@ -12392,6 +12430,7 @@ class _OfflinePanel(MacroElement):
                         return Promise.all(runners);
                     }).then(function () {
                         working = null;
+                        letSleep();
                         // A run that was stopped leaves the chooser where it
                         // was: what the reader wants next is almost always to
                         // pick a coarser zoom, not to find the panel again.
@@ -12412,6 +12451,7 @@ class _OfflinePanel(MacroElement):
                             return refresh();
                         });
                     });
+                    keepAwake();
                     // Once, so the Stop button appears; `draw` leaves the
                     // chooser alone for the rest of the run.
                     drawChooser();
@@ -12862,9 +12902,17 @@ class _OfflinePanel(MacroElement):
                     // share a host and keeping both would double every figure
                     // here -- so switching sheets with no signal gives a blank
                     // map, and nothing else on the page would explain why.
-                    said.sheet.textContent = (have.kept || {}).tiles
-                        ? 'Kept for the ' + baseName() + ' sheet. Switching sheets with no signal shows nothing.'
-                        : '';
+                    // **What a reader cannot work out from a progress bar.**
+                    // That the run needs this page in front is a property of
+                    // where it runs, and that stopping is free is a property of
+                    // the cache being checked before every tile -- neither is
+                    // visible, and guessing either one wrong costs an evening.
+                    said.sheet.textContent = working
+                        ? 'Keep this page in front \u2014 the run stops when the phone locks or you switch app. ' +
+                          'Stopping costs nothing: it carries on from where it got to.'
+                        : ((have.kept || {}).tiles
+                            ? 'Kept for the ' + baseName() + ' sheet. Switching sheets with no signal shows nothing.'
+                            : '');
                     // **Not while a run is going.** Progress arrives every 25
                     // tiles, and rebuilding the chooser that often rebuilds ten
                     // buttons, re-reads the plan's whole route to decide which
