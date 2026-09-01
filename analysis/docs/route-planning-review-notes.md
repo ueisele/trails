@@ -1922,8 +1922,15 @@ brought up to what was actually built:
 | Das Profil zur Hand | `https://claude.ai/code/artifact/9b188d07-156a-4e8c-9413-f0c1652b4005` — hiding the profile, the switch from the plan view, three figures |
 | Sieben Punkte, eine Spalte | `https://claude.ai/code/artifact/f4a5a398-2562-42f5-9d02-4211d0f6dc90` — the plan panel: head, marks, the row's own menu |
 
-**The offline work is published**, and **a digest cannot verify that** — which
-is the correction the last verification needs. The build is **not
+**The offline work is published, and the repository has since moved past it.**
+`atlas.cairn.zone` carries the Offline panel, the terrain cache, the manifest and
+the zoom line as of 2026-09-01; the review fixes after it — the switch no longer
+turning on after a run that kept nothing, and the readings that hold it — are
+committed and **not deployed**. Publishing is `command make map` here, then
+`just deploy` in the infrastructure repository, in that order.
+
+**A digest cannot verify a deploy** — which is the correction the last
+verification needs. The build is **not
 reproducible**: folium gives every element a fresh `uuid4().hex` on every run, so
 two builds of identical source differ in thousands of places (`map_5132edb9…`
 against `map_2857f399…`). The 2026-08-31 check worked only because it compared
@@ -4269,7 +4276,19 @@ ground nobody kept, online, with the switch on: **0 tiles drawn and 24 blank.**
 That is the difference between *offline mode works* and *the network happened to
 be missing* — and it is the whole reason the switch is worth having indoors,
 because checking coverage before walking out is the only cheap way to find out
-what was not kept. Until now nothing in the suite could tell those two apart.
+what was not kept. Until now nothing in the suite could tell those two apart:
+every offline reading was taken with the network switched off, where a worker
+ignoring its own flag would have passed all of them.
+
+**And the consequence of all that, which the page does not say and should be a
+decision rather than a surprise.** While the switch is on, `pageFor` returns the
+kept copy and never reaches for the network — so a reader with offline mode on
+**never receives a newer map**, and the *A newer map is ready* line cannot appear
+for them at all. That is the correct reading of the word *offline* and it is not
+a defect; it does mean that after a deploy the sequence is switch off, reload,
+switch on, and that nothing on the page tells anybody so. One sentence in the
+panel would close it. Not built, because it was not asked for, and recorded here
+so that it is not rediscovered as a bug.
 
 ### A finding that was a grep, and the tag it could not see
 
