@@ -4245,12 +4245,29 @@ The test that stands now counts rather than matches: `html.count('name="viewport
 == 1`. That is the only form of the assertion that would have failed on *both*
 mistakes — on a page with none, and on a page with two.
 
-**One thing this did turn up, and it is real.** Folium's meta carries
-`maximum-scale=1.0, user-scalable=no`, which takes the browser's own pinch-zoom
-away from the whole document. On a map whose own pinch works that is defensible
-and it is what folium has always done here; as an accessibility default it is
-not, and nothing in this project chose it. Left alone, and recorded here so that
-it is a decision the next time somebody looks at it.
+**One thing this did turn up, and it is real, and it is out.** Folium's meta
+carries `maximum-scale=1.0, user-scalable=no`, which takes the browser's own
+pinch and double-tap zoom away from the whole document. Nothing in this project
+chose it. `save_map` now rewrites the tag to `width=device-width,
+initial-scale=1` on the way to disk, and asserts on the way past — one tag,
+carrying `user-scalable=no` — so a folium that stops writing it says so at build
+time rather than leaving a rewrite that matches nothing while every check stays
+green.
+
+**What that does *not* achieve is most of it, and the difference is the point.**
+Leaflet sets `touch-action: none` on `.leaflet-container` for a touch device,
+and this page's furniture — the dock, the sheet, every panel — is appended
+*inside* that container, which fills the screen. **A descendant cannot re-grant
+what an ancestor took away**, so no gesture comes back on this page today. And on
+the phone this map is actually read on it never mattered either way: Safari has
+disregarded `user-scalable` since iOS 10. So this removes a restriction the page
+was making without meaning to, and that is the whole claim.
+
+**The panels' text is still not zoomable by any gesture**, and that is a real
+gap rather than a solved one. What works today is the browser's own text setting
+— this page sets no `text-size-adjust`, so Safari's *AA → Text Size* applies.
+What would actually fix it is moving the chrome out of `.leaflet-container`,
+which is a structural change to `_Chrome` and its own piece of work.
 
 ### What is still open on a phone
 

@@ -697,6 +697,46 @@ def _squeezed(html: str) -> str:
     return "\n".join(out)
 
 
+#: Folium's own map template, which is where the page's viewport meta comes from.
+#: Matched rather than compared, because it is written across two lines and the
+#: indentation is gone by the time this runs.
+_VIEWPORT = re.compile(r'<meta\s+name="viewport"[^>]*>')
+
+
+def _scalable(html: str) -> str:
+    """Give the browser its own zoom back.
+
+    **Folium hardcodes ``maximum-scale=1.0, user-scalable=no``** into every map
+    it writes, and nothing in this project chose that: it takes the browser's
+    pinch and double-tap zoom away from the whole document, which is a thing to
+    decide rather than to inherit.
+
+    **What it does not do, which is most of it.** Leaflet sets
+    ``touch-action: none`` on ``.leaflet-container`` for a touch device, and this
+    page's furniture -- the dock, the sheet, every panel -- is appended *inside*
+    that container, which fills the screen. A descendant cannot re-grant what an
+    ancestor took away, so removing the meta restores no gesture here today. And
+    on iOS it never mattered either way: Safari has disregarded ``user-scalable``
+    since iOS 10. This removes a restriction the page was making without meaning
+    to; it does not make the panels zoomable, and saying otherwise would be a
+    claim about ground nobody has walked.
+
+    Asserted rather than replaced quietly. If a folium release stops writing the
+    tag, writes two, or drops ``user-scalable`` of its own accord, this says so
+    at build time instead of leaving a stale rewrite in place for a year.
+
+    Args:
+        html: The rendered page.
+
+    Returns:
+        The page, with the viewport meta saying only what it needs to.
+    """
+    found = _VIEWPORT.findall(html)
+    assert len(found) == 1, f"expected one viewport meta from folium, found {len(found)}"
+    assert "user-scalable=no" in found[0], f"folium no longer writes user-scalable=no ({found[0]!r}) -- is this still needed?"
+    return _VIEWPORT.sub('<meta name="viewport" content="width=device-width, initial-scale=1" />', html, count=1)
+
+
 def save_map(fmap: folium.Map, path: pathlib.Path) -> pathlib.Path:
     """Render a map and write it, without the whitespace it renders with.
 
@@ -710,7 +750,7 @@ def save_map(fmap: folium.Map, path: pathlib.Path) -> pathlib.Path:
     Returns:
         Where it was written.
     """
-    path.write_text(_squeezed(fmap.get_root().render()), encoding="utf-8")
+    path.write_text(_scalable(_squeezed(fmap.get_root().render())), encoding="utf-8")
     return path
 
 

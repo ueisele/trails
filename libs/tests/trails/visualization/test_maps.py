@@ -531,6 +531,34 @@ class TestManifest:
         assert '<link rel="apple-touch-icon" href="data:image/png;base64,' in html
         assert '<meta name="apple-mobile-web-app-capable" content="yes">' in html
 
+    def test_the_written_page_leaves_the_browser_its_own_zoom(self, tmp_path):
+        """Folium hardcodes `maximum-scale=1.0, user-scalable=no` into every map
+        it writes, and nothing in this project chose it: it takes the browser's
+        pinch and double-tap zoom away from the whole document.
+
+        **What it does not achieve is most of it**, and the docstring says so.
+        Leaflet sets `touch-action: none` on `.leaflet-container` for a touch
+        device and this page's furniture is appended inside that container, which
+        fills the screen; a descendant cannot re-grant what an ancestor took
+        away. On iOS it never mattered either way. This removes a restriction the
+        page was making without meaning to, and no more than that."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), title="Lomsdal-Visten")
+        written = maps.save_map(fmap, tmp_path / "map.html")
+        page = written.read_text(encoding="utf-8")
+        assert page.count('name="viewport"') == 1
+        assert "width=device-width" in page
+        assert "user-scalable" not in page
+        assert "maximum-scale" not in page
+
+    def test_a_folium_that_stops_writing_it_says_so_at_build_time(self):
+        """Rather than leaving a rewrite in place that matches nothing. A silent
+        no-op here would put `user-scalable=no` back on the published map and
+        every check would stay green."""
+        with pytest.raises(AssertionError, match="found 0"):
+            maps._scalable("<html><head></head></html>")
+        with pytest.raises(AssertionError, match="no longer writes"):
+            maps._scalable('<meta name="viewport" content="width=device-width" />')
+
     def test_the_page_says_a_phone_s_own_width_exactly_once(self):
         """**A tag written across two lines is a tag `grep` cannot see.** Folium's
         map template writes the viewport meta itself, broken over a newline
