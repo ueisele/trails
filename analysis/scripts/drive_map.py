@@ -3200,6 +3200,12 @@ SCOPES_OFFERED = "() => Array.from(document.querySelectorAll('.trails-offline-sc
 #: What the chooser says the selection is, which includes the line it took.
 SAID_NEEDED = "() => (document.querySelector('.trails-offline-needed') || {}).textContent || ''"
 
+#: What the panel says while a run is going: `Keeping <done> of <total>`. The
+#: figure that matters is the one it opens with — a run resumed after a lock or a
+#: tunnel counts what is already kept as done, and used to start at zero and race
+#: up through tiles it was skipping, which reads as starting the download again.
+SAID_FIGURES = "() => (document.querySelector('.trails-offline-figures') || {}).textContent || ''"
+
 
 def painted_ground(page: Any) -> tuple[float, float, str]:
     """How much ground the preview has coloured in, and how much it says it has.
@@ -3493,8 +3499,47 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # the terrain cache as terrain, and the panel reports success.
         first.evaluate("async () => await window.trailsOffline.choose('draw', 15)")
         second_ask = first.evaluate("() => window.trailsOffline.needed()")
-        first.evaluate("() => window.trailsOffline.keep()")
+        # **The panel has to be on the screen to be read.** Its holder is left
+        # detached until the dock puts it somewhere — the same seam `Where I am`
+        # and `Sources` use — so `querySelector` finds nothing while the tool is
+        # shut, and a check reading it would report the run was over before it
+        # started. Every step around this one drives the API instead, which is
+        # why it never came up.
+        # **Started without being waited on.** `keep` returns the run's own
+        # promise and `evaluate` awaits whatever it is handed, so asking for it
+        # the usual way does not return until the download is finished — and the
+        # reading below, which is about a figure that only exists mid-run, then
+        # measures a run that is over. The braces are what make it undefined.
+        first.evaluate("() => { window.trailsOffline.keep(); }")
+        # **Read while it is running, because that is the only time it exists.**
+        # The claim is that a resumed run opens at what is already kept rather
+        # than at zero — which is a frame of the panel and not a figure any API
+        # reports. Polled rather than slept on: the first draw lands once
+        # `keys()` has answered, and that is a different moment on every machine.
+        # **Asked of the state and not of the panel.** The figure lives in one
+        # line of a holder that is detached until the dock shows it, and a run of
+        # a few hundred tiles is over in under a second — two ways for a check to
+        # read nothing and call it a pass.
+        opened = first.evaluate(
+            """async () => {
+                for (let i = 0; i < 200; i += 1) {
+                    const said = window.trailsOffline.state();
+                    if (said.busy && said.done !== null) { return said.done; }
+                    if (!said.busy && i > 3) { return -1; }
+                    await new Promise(r => setTimeout(r, 5));
+                }
+                return -1;
+            }"""
+        )
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
+        terrain.append(
+            Reading(
+                "a resumed run opens at what is already kept",
+                opened,
+                first_ask["tiles"],
+                note="it used to open at 0 and race up through the tiles it was skipping",
+            )
+        )
         weighed = first.evaluate(
             """async () => {
                 const cache = await caches.open('trails-terrain');

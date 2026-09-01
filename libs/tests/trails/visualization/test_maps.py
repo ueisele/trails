@@ -815,11 +815,34 @@ class TestOfflinePanel:
 
         html = fmap.get_root().render()
         assert "the run stops when the phone locks or you switch app" in html
-        assert "Stopping costs nothing: it carries on from where it got to." in html
-        # And the claim it makes is one the loop keeps: every tile is asked of
-        # the cache before it is fetched.
-        assert "return cache.match(url).then(function (there) {" in html
-        assert "if (there) { return null; }" in html
+        assert "Stopping costs nothing: the count picks up where it got to." in html
+        # And the claim it makes is one the loop keeps: what is already there is
+        # counted before anything is fetched, and only the rest is asked for.
+        assert "var missing = list.filter(function (url) { return !have[url]; });" in html
+        assert "state.done = list.length - missing.length;" in html
+
+    def test_a_resumed_run_counts_from_what_is_already_there(self):
+        """It opened at `Keeping 0 of 130,000` and raced up through tiles it was
+        skipping, which reads as starting again — the one thing it does not do.
+        One `keys()` instead of a `match` per tile, and the count starts where
+        the last run stopped."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "return cache.keys().then(function (keys) {" in html
+        assert "state.done = list.length - missing.length;" in html
+        # Drawn before the first fetch answers, or the resumed figure appears 25
+        # tiles later and the opening frame still says zero.
+        keep = html.split("state.done = list.length - missing.length;")[1].split("return missing;")[0]
+        assert "draw();" in keep
+        # The loop walks what is missing, so a skipped tile is never counted twice.
+        assert "if (state.stop || at >= missing.length) { return Promise.resolve(); }" in html
+        # **And no figure before it is one.** `done` is 0 until `keys()` answers,
+        # which is not the same as nothing being kept — the run has not looked
+        # yet. Driven, the panel was caught opening at 0 for that window.
+        assert "'Checking what is already kept" in html
+        assert "done: working && working.counted ? working.done : null," in html
 
 
 class TestScaleZoom:

@@ -12331,7 +12331,17 @@ class _OfflinePanel(MacroElement):
                             available: !!(window.trailsWorker && window.trailsWorker.kept),
                             why: window.trailsWorker ? window.trailsWorker.why : 'the page has not asked yet',
                             on: on(), kept: both[0], storage: both[1],
-                            busy: working !== null, chooser: chooser, scope: scope, zoom: zoom,
+                            busy: working !== null,
+                            // **The progress, and not only that there is some.**
+                            // A resumed run opens at what is already kept rather
+                            // than at zero, and until this the only place that
+                            // figure existed was one line of the panel — which
+                            // is detached until the dock shows it, and gone again
+                            // a second later. A claim nothing can read is a claim
+                            // nothing can check.
+                            done: working && working.counted ? working.done : null,
+                            total: working ? working.total : null,
+                            chooser: chooser, scope: scope, zoom: zoom,
                             corners: drawn.length, counted: counted
                         };
                         draw();
@@ -12404,30 +12414,55 @@ class _OfflinePanel(MacroElement):
                     if (!window.caches) { return Promise.resolve(); }
                     var list = wanted().urls;
                     lastRun = null;
-                    var state = {total: list.length, done: 0, failed: 0, stop: false, done_: null};
+                    // `counted` is false until `keys()` has answered. Until then
+                    // `done` is 0 and it is not a fact -- the run has not looked
+                    // yet -- so the panel says what it is doing instead of
+                    // quoting a figure it is about to correct.
+                    var state = {total: list.length, done: 0, counted: false, failed: 0, stop: false, done_: null};
                     working = state;
                     var at = 0;
                     state.done_ = caches.open(TERRAIN).then(function (cache) {
-                        function one() {
-                            if (state.stop || at >= list.length) { return Promise.resolve(); }
-                            var url = list[at];
-                            at += 1;
-                            return cache.match(url).then(function (there) {
-                                if (there) { return null; }
+                        // **What is already here is counted before anything is
+                        // fetched, and the count starts there.** The loop has
+                        // always skipped a tile it already had -- that is what
+                        // makes a stopped run free to resume -- but it counted
+                        // the skips one at a time from zero, so a run picked up
+                        // after a lock or a tunnel opened at `Keeping 0 of
+                        // 130,000` and raced. What that reads as is *starting
+                        // again*, which is the one thing it does not do.
+                        //
+                        // Asked with `keys()` rather than a `match` per tile: it
+                        // is one pass instead of 130,000, and the panel already
+                        // pays for it on every refresh to say how much is kept.
+                        return cache.keys().then(function (keys) {
+                            var have = {}, i;
+                            for (i = 0; i < keys.length; i += 1) { have[keys[i].url] = 1; }
+                            var missing = list.filter(function (url) { return !have[url]; });
+                            state.done = list.length - missing.length;
+                            state.counted = true;
+                            // So the resumed figure is on the screen before the
+                            // first fetch answers, rather than 25 tiles later.
+                            draw();
+                            return missing;
+                        }).then(function (missing) {
+                            function one() {
+                                if (state.stop || at >= missing.length) { return Promise.resolve(); }
+                                var url = missing[at];
+                                at += 1;
                                 return fetch(url, {cache: 'reload', mode: 'cors'}).then(function (answer) {
                                     if (answer && answer.ok) { return cache.put(url, answer); }
                                     state.failed += 1;
                                     return null;
-                                }).catch(function () { state.failed += 1; return null; });
-                            }).then(function () {
-                                state.done += 1;
-                                if (state.done % 25 === 0) { draw(); }
-                                return one();
-                            });
-                        }
-                        var runners = [], i;
-                        for (i = 0; i < 6; i += 1) { runners.push(one()); }
-                        return Promise.all(runners);
+                                }).catch(function () { state.failed += 1; return null; }).then(function () {
+                                    state.done += 1;
+                                    if (state.done % 25 === 0) { draw(); }
+                                    return one();
+                                });
+                            }
+                            var runners = [], i;
+                            for (i = 0; i < 6; i += 1) { runners.push(one()); }
+                            return Promise.all(runners);
+                        });
                     }).then(function () {
                         working = null;
                         letSleep();
@@ -12840,6 +12875,19 @@ class _OfflinePanel(MacroElement):
 
                 function draw() {
                     if (!holder) { return; }
+                    // **The three fields a run moves are refreshed here, because
+                    // `refresh` does not run during one.** The snapshot is built
+                    // once when something settles; progress arrives every 25
+                    // tiles and goes only to the panel's own text. So
+                    // `state().busy` was answering from before the run started —
+                    // true by the time anything waited on it, but stale in the
+                    // window that matters, and `done` would have been null
+                    // throughout the one thing it exists to report.
+                    if (snapshot) {
+                        snapshot.busy = working !== null;
+                        snapshot.done = working && working.counted ? working.done : null;
+                        snapshot.total = working ? working.total : null;
+                    }
                     var have = snapshot || {};
                     if (have.available) {
                         said.state.textContent = 'This map is kept on your device. Terrain is what is left, ' +
@@ -12877,8 +12925,10 @@ class _OfflinePanel(MacroElement):
                     said.toggle.disabled = !have.available;
                     said.toggle.style.opacity = have.available ? '1' : '0.5';
                     if (working) {
-                        said.figures.textContent = 'Keeping ' + count(working.done) + ' of ' +
-                            count(working.total) + (working.failed ? ' \\u00b7 ' + working.failed + ' refused' : '');
+                        said.figures.textContent = working.counted
+                            ? 'Keeping ' + count(working.done) + ' of ' + count(working.total) +
+                              (working.failed ? ' \\u00b7 ' + working.failed + ' refused' : '')
+                            : 'Checking what is already kept\\u2026';
                     } else if (lastRun && !lastRun.kept && lastRun.total) {
                         // **Said, rather than left to be discovered.** A run
                         // where nothing arrived looks exactly like a run that
@@ -12909,7 +12959,7 @@ class _OfflinePanel(MacroElement):
                     // visible, and guessing either one wrong costs an evening.
                     said.sheet.textContent = working
                         ? 'Keep this page in front \u2014 the run stops when the phone locks or you switch app. ' +
-                          'Stopping costs nothing: it carries on from where it got to.'
+                          'Stopping costs nothing: the count picks up where it got to.'
                         : ((have.kept || {}).tiles
                             ? 'Kept for the ' + baseName() + ' sheet. Switching sheets with no signal shows nothing.'
                             : '');
