@@ -144,10 +144,16 @@ route has settled the map goes to it.
 command make drive
 ```
 
-Drives the built map in a browser and reports 48 readings — the counts the page
-draws, the profile's scale at several zooms, the wheel, the crosshair's mark, the
-point list, and the two panels not covering each other. About a minute, of which
-25 seconds is loading 39.6 MB of HTML.
+Drives the built map in a browser and reports **253 readings** — the counts the
+page draws, the profile's scale at several zooms, the wheel, the crosshair's
+mark, the point list, plan mode and the file it writes, the chrome on a phone,
+and that the map opens with the network off. **About 280 seconds**, most of it
+loading the page: 15.6 MB of HTML, twice over for the offline check.
+
+**Drive it once, into a file, and grep the file.** Running it twice to see two
+parts of one report costs two runs. While one behaviour is being written,
+`ARGS="--only <word>"` is ten readings instead of 253. And **build before
+driving**: the run reads the page `command make map` last built.
 
 **It does not overlap with `command make test`.** The tests assert on the page's
 source; this asks a running browser what the page actually does, which is the
@@ -171,6 +177,12 @@ Where it goes is not configured here. This repository is public, so the bucket, 
 and zone would be account identifiers in a public place; they come from the environment instead —
 `.env.example` names them, `.env` is git-ignored. The infrastructure that receives the upload lives
 in a separate private repository as an OpenTofu module, whose `just deploy-env` prints every value.
+
+**So `command make deploy` is the target that publishes and not the command anyone types.** It needs
+seven settings and has a default for none of them. The infrastructure repository holds them and
+drives the deploy: its own `just deploy` reads them out of state, unlocks the credentials and calls
+this target. Publishing is therefore **`command make map` here, then `just deploy` there** — two
+steps, in that order, because this one does not build.
 
 A map named `<name>` is uploaded as `<name>.html` and is then readable at `https://<host>/<name>`.
 Publishing a second map needs nothing but a second upload.

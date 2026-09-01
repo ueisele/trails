@@ -1890,7 +1890,7 @@ whenever the decisions document grows.
 survives a compaction, and everything below assumes it. Then `git log --oneline
 -30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
-`command make drive`, which take about a minute and **185 seconds** and say
+`command make drive`, which take about a minute and **280 seconds** and say
 whether the page still holds: **253 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
@@ -1922,11 +1922,23 @@ brought up to what was actually built:
 | Das Profil zur Hand | `https://claude.ai/code/artifact/9b188d07-156a-4e8c-9413-f0c1652b4005` — hiding the profile, the switch from the plan view, three figures |
 | Sieben Punkte, eine Spalte | `https://claude.ai/code/artifact/f4a5a398-2562-42f5-9d02-4211d0f6dc90` — the plan panel: head, marks, the row's own menu |
 
-**The published map is older than the build.** `analysis/output/` holds a page
-that fetches from nobody, opens with the network off, carries the rebuilt
-profile panel and weighs **15.6 MB against the published 42.0**;
-`atlas.cairn.zone` does not have any of it yet. One `just deploy` is all that is
-between them.
+**The published map is the build**, deployed on 2026-08-31 and verified rather
+than assumed: the live page's SHA-256 is the built file's to the last byte,
+`5,809,394` bytes on the wire under `content-encoding: br` against 15,602,410
+decompressed, and `sw.js` carries `VERSION = "dbd954ed4ab5ff84"` — the first
+sixteen digits of that same digest, which is what makes the cache name turn over
+and the old map fall out of it.
+
+**One header does not arrive as the deploy asks for it.** `sw.js` is uploaded
+with `--cache-control no-cache` and is served `max-age=300`. Nothing is broken by
+it: a browser bypasses the HTTP cache for a worker script anyway — `register()`
+is called without options, so `updateViaCache` is `"imports"` and only scripts
+the worker itself imports would be cached, and it imports none. **Where the
+header is lost is not knowable from here**: the page sets no `cache-control` at
+all and is served the same `max-age=300`, so a default from below fits, but so
+does the flag never being applied. `aws s3api head-object --key sw.js` from the
+infrastructure repository settles it in one command, and until it has been run
+the docstring in `deploy_map.py` claims more than arrives.
 
 **Publishing is two steps and the order matters**: `command make map`, then
 `just deploy` in the infrastructure repository. The deploy does not build, on
