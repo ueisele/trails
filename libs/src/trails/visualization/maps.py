@@ -1162,6 +1162,19 @@ class _Theme(MacroElement):
             background: var(--trails-panel) !important;
             color: var(--trails-ink-2) !important;
             border-color: var(--trails-ink-4) !important;
+            /* **Leaflet draws these figures twice.** Its own rule is
+               `text-shadow: 1px 1px #fff` -- a white copy a pixel down and
+               right, which is how you keep a number legible over a *translucent*
+               box with the map showing through it. This box is not translucent:
+               the rule above gives it the panel's own background, so the second
+               copy has nothing to do but smear the first. Reported from a phone
+               as `20 km` looking blurred, "doubled about half a millimetre
+               apart", which is exactly what it is.
+
+               It was wrong in both sets and worse in one. Dark ink under a white
+               ghost is a smudge; the light ink of the dark theme under a white
+               ghost is very nearly a double exposure. */
+            text-shadow: none !important;
         }
         /* **The same box, and deliberately not the same line.** Leaflet's scale
            lines carry a rule along the bottom that *is* the measured distance;

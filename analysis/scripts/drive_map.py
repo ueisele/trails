@@ -215,6 +215,13 @@ FURNITURE = with_map(
     // burger already had, and Leaflet's is Leaflet's again.
     controls: [fromRight(rail), at(zoom)],
     scaleBars: document.querySelectorAll('.leaflet-control-scale-line').length,
+    // Asked of the browser and not of the stylesheet: `!important` against a
+    // third party's rule is exactly the kind of override that can lose, and
+    // losing it looks like a slightly blurred number rather than an error.
+    scaleShadow: (() => {
+      const bar = document.querySelector('.leaflet-control-scale-line');
+      return bar ? getComputedStyle(bar).textShadow : null;
+    })(),
     // A tool whose icon is missing is an error nowhere: `icon()` builds an
     // `<svg>` around `undefined`, so the row goes out with a blank column and
     // nothing anywhere says so. Counting the strokes is what notices.
@@ -559,6 +566,7 @@ def furniture(page: Any) -> Check:
             # and imperial, one above the other, and with the zoom line under
             # them that corner reads as the same control drawn twice.
             Reading("bars in the scale control", seen["scaleBars"], 1),
+            Reading("and the figures drawn once, not twice", seen["scaleShadow"], "none"),
             Reading("strokes in the offline tool's drawing", seen["offlineStrokes"] > 0, True, note=f"{seen['offlineStrokes']} paths"),
             # **The rail takes the right and Leaflet keeps the left.** It stood
             # at the left and the chrome pushed Leaflet's whole top-left corner

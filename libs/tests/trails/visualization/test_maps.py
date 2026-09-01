@@ -539,6 +539,22 @@ class TestScaleZoom:
         # it explaining why the bare one is not wanted.
         assert "L.control.scale().addTo" not in html
 
+    def test_the_figures_are_drawn_once(self):
+        """Leaflet's own rule is `text-shadow: 1px 1px #fff` — a white copy of
+        the number a pixel down and right, which is how you keep it legible over
+        a translucent box with the map showing through. This box is opaque, so
+        the copy only smears; reported from a phone as `20 km` looking blurred,
+        doubled about half a millimetre apart."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        # **Ours, and not the first block carrying that selector.** Leaflet's own
+        # stylesheet is inlined into this page and declares it too — which is the
+        # whole reason there is something here to override.
+        blocks = [block.split("}")[0] for block in html.split(".leaflet-control-scale-line {")[1:]]
+        theirs = [block for block in blocks if "text-shadow: 1px 1px #fff" in block]
+        ours = [block for block in blocks if "--trails-panel" in block]
+        assert theirs, "Leaflet stopped shipping the rule this overrides"
+        assert ours and "text-shadow: none !important;" in ours[0]
+
     def test_it_takes_the_box_and_not_the_measuring_bar(self):
         """A line with a rule under it in that corner is claiming to be a
         distance, and this one is not."""
