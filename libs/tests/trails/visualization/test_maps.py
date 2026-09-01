@@ -743,6 +743,39 @@ class TestOfflinePanel:
         assert "geometry: function () {" in planning
         assert "return {lon: shape.lon, lat: shape.lat};" in planning
 
+    def test_a_figure_that_was_never_built_is_not_quoted_as_one(self):
+        """A level far over the budget is priced from the ring's area instead of
+        by building its tile set — and that number lands in the button's own
+        sentence, where a reader reads it. Three significant figures is a claim
+        the panel cannot support about an estimate."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        # The panel is only on the page when the chrome puts it there.
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "return bytes > budget() * 2 ? {tiles: Math.round(tiles), bytes: bytes, guessed: true} : null;" in html
+        assert "(known.guessed ? 'roughly ' : '')" in html
+
+    def test_the_box_follows_the_legend(self):
+        """`mapBox` walks 11,303 rings, so it is remembered — but the legend can
+        take a layer off the map, and if the outermost line was on it the box
+        being offered is no longer the box this map draws. The band scope it
+        replaced had no such gap: it re-read the layers every time."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        # The panel is only on the page when the chrome puts it there.
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "map.on('layeradd layerremove', function () { box = null; });" in html
+
+    def test_the_chooser_says_which_chip_is_chosen(self):
+        """Chosen was a background colour and nothing else, which a screen reader
+        cannot see. Five other controls on this page already say it out loud."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        # The panel is only on the page when the chrome puts it there.
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "pick.setAttribute('aria-pressed', String(each.key === scope));" in html
+        assert "pick.setAttribute('aria-pressed', String(level === zoom));" in html
+
 
 class TestScaleZoom:
     """The map saying which zoom it is on."""

@@ -11855,6 +11855,16 @@ class _OfflinePanel(MacroElement):
                     return box;
                 }
 
+                // **Kept until the drawing changes, and not a moment longer.**
+                // Walking 11,303 rings for a bounding box on every repaint is
+                // what the memo above is for, but the legend can take a layer off
+                // the map -- and if the outermost line was on it, the box the
+                // reader is being offered is no longer the box this map draws.
+                // The old band scope had no such gap because it re-read the
+                // layers every time; measured then, switching five layers off
+                // moved it from 5,561 tiles to 5,326.
+                map.on('layeradd layerremove', function () { box = null; });
+
                 function ringFor(which) {
                     if (which === 'rect') {
                         var from = source();
@@ -12647,6 +12657,11 @@ class _OfflinePanel(MacroElement):
                         var pick = small(button(each.label, each.key === scope));
                         pick.className = 'trails-offline-scope';
                         pick.setAttribute('data-scope', each.key);
+                        // Chosen is a background colour and nothing else here,
+                        // which a screen reader cannot see. Five other controls
+                        // on this page already say it out loud; these two were
+                        // the ones that never learned to.
+                        pick.setAttribute('aria-pressed', String(each.key === scope));
                         pick.title = each.hint;
                         pick.addEventListener('click', function () {
                             scope = each.key;
@@ -12690,12 +12705,22 @@ class _OfflinePanel(MacroElement):
                             var pick = small(button('z' + level, level === zoom));
                             pick.className = 'trails-offline-zoom';
                             pick.setAttribute('data-zoom', String(level));
+                            pick.setAttribute('aria-pressed', String(level === zoom));
                             var known = memo[sig(scope, level)];
                             var why = null;
                             if (level > here.ceiling) {
                                 why = 'Too much ground at this zoom \\u2014 that is an archive, not a download.';
                             } else if (cap !== null && known && known.bytes > cap) {
-                                why = 'Over the budget: ' + megabytes(known.bytes) + ' against ' + megabytes(cap) +
+                                // **`roughly` where the figure was never built.**
+                                // A level far over the budget is priced from the
+                                // ring's area rather than by building its tile
+                                // set -- that is the whole point of `guessed` --
+                                // and the number lands here, in a sentence the
+                                // reader gets to read. Quoting an estimate to
+                                // three significant figures is a claim the panel
+                                // cannot support.
+                                why = 'Over the budget: ' + (known.guessed ? 'roughly ' : '') +
+                                    megabytes(known.bytes) + ' against ' + megabytes(cap) +
                                     ', which is what the whole map costs at z' + CAP_ZOOM + '.';
                             }
                             if (why) {
