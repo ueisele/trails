@@ -11496,12 +11496,54 @@ class _OfflinePanel(MacroElement):
     - *Delete*, because a gigabyte somebody cannot get rid of from inside the
       thing that took it is a gigabyte taken without asking.
 
-    **A corridor along the route, never a box around it.** Measured on a real
-    42.3 km loop, the bounding box costs 2.4x the corridor at z16 and **7.2x at
-    z18** -- a round trip's box is mostly the hole in the middle, which nobody
-    walks. And because the margin is counted in tiles rather than metres, the
-    band is about 2 km wide at z14 and 250 m at z18: coarse ground far out and
-    fine ground under the feet, which is the right shape and not a compromise.
+    **Four pieces of ground, and one of them is a box on purpose.** The chooser
+    used to offer a band along the route, the viewport, and a band along
+    *everything drawn*. The last was the wrong shape for the ground it was for:
+    in Lomsdal-Visten one walks off the path, and a band along the paths puts a
+    white tile under anybody who leaves one. So *the whole map* is now every tile
+    in the box this map draws paths in -- read off the layers rather than written
+    down here, so it cannot go stale when the sources move -- and the viewport,
+    which was never a piece of terrain so much as a piece of screen, is gone in
+    favour of an area the reader draws.
+
+    - *The whole map*: the bounding box, north-up, capped at z16.
+    - *Along the route*: the band, kept, because it is still the cheapest useful
+      shape by a long way. Measured on a real 42.3 km loop, 1,722 tiles at z16
+      against 131,033 for the box.
+    - *A box round it*: the smallest enclosing rectangle, **turned** -- a convex
+      hull and rotating calipers, worked in metres about the line's own centre,
+      because an angle in degrees of latitude and longitude is not an angle on
+      the ground. A north-up box round a diagonal walk is mostly ground nobody
+      is near.
+    - *Drawn*: corners tapped on the map, which is the only one of the four that
+      can say *this valley and the ridge behind it*.
+
+    **One budget, and it is a measured thing rather than a written one.** What
+    *the whole map* costs at z16 -- 6.76 GB, and the panel works it out at load
+    rather than quoting that figure -- is the ceiling every scope is held to. Any
+    zoom whose result would go over it is disabled with the reason on it, and
+    ``choose()`` clamps down to the finest level that fits, because disabling a
+    button is what the screen does and not what is true.
+
+    **The selection is drawn on the map, and drawing it is where two obvious
+    implementations are wrong.** It is a ``GridLayer`` whose tiles are canvases,
+    so Leaflet only ever makes the tiles in view and the preview costs the same
+    at 131,000 kept tiles as at 400. Inside one of those canvases: testing only
+    the screen tile's centre paints nothing at all when zoomed out, and filling
+    the whole screen tile when it holds *any* kept tile turns a valley into a
+    county -- reported from a phone, where an area a few kilometres across was
+    painted a hundred kilometres wide. What is right is drawing the kept tiles as
+    sub-rectangles of the screen tile, and drawing nothing at all once they are
+    under a pixel rather than rounding a speck up to the whole tile.
+
+    **The set is computed once at the chosen zoom and halved down to z11.** A
+    tile at z-1 is the tile at z with both coordinates shifted right, so one pass
+    answers every level below it. Each level gets its own one-tile margin, but
+    what is passed downwards is the **unpadded** set -- otherwise the margin
+    compounds on the way down and z11 ends up several tiles wider than it was
+    asked for. ``FLOOR`` is the coarsest zoom a reader may *pick*; it is not the
+    floor of the pyramid, which is z11, because a map that cannot be zoomed out
+    of is not a map anybody navigates with.
 
     **The download does not go through the worker**, and the reason is a defect
     it would otherwise have. Requests are made with ``cache: 'reload'``, which
@@ -11523,7 +11565,17 @@ class _OfflinePanel(MacroElement):
                 var KEY = 'trails-offline';
                 // Kartverket's topo cache ends here: z19 and z20 answer 400.
                 var TOP = 18;
+                // The coarsest zoom a reader may *pick*.
                 var FLOOR = 14;
+                // **And the floor of the pyramid, which is a different number.**
+                // Whatever is kept is carried down to z11 as well, because a map
+                // that cannot be zoomed out of is not a map anybody navigates
+                // with, and the coarse levels are almost free: the whole box at
+                // z11 is 168 tiles against 97,000 at z16.
+                var BOTTOM = 11;
+                // Where the whole map stops being a download and starts being an
+                // archive -- and with it the budget every other scope is held to.
+                var CAP_ZOOM = 16;
                 // What a kept tile weighs, from twelve samples per zoom taken on
                 // the trail network rather than over the park: the sea tiles a
                 // bounding box is full of are a fraction of the size and would
@@ -11531,23 +11583,32 @@ class _OfflinePanel(MacroElement):
                 var WEIGHT = {11: 73914, 12: 73914, 13: 73914, 14: 70170,
                               15: 45898, 16: 51295, 17: 28637, 18: 37037};
 
-                // **Three scopes, three genuinely different shapes.** The
-                // viewport is the only one that is a rectangle, because a
-                // viewport is one. `ceiling` is where a scope stops being a
-                // download and starts being an archive: everything drawn is
-                // 2.1 GB at z16, 4.0 GB at z17 and about 9 GB at z18.
+                // **Four scopes, and only one of them follows the paths.** In
+                // this park one walks off them, so a band along everything drawn
+                // -- which is what the third scope used to be -- hands a white
+                // tile to anybody who leaves one. `pad` is the margin in tiles
+                // laid on every level, which is why the band is about 2 km wide
+                // at z14 and 250 m at z18: coarse ground far out and fine ground
+                // underfoot, which is the right shape rather than a compromise.
                 var SCOPES = [
-                    {key: 'route', label: 'This route', pad: 2, ceiling: TOP,
-                     hint: 'A band along the route you planned, wider at the coarse zooms.'},
-                    {key: 'view', label: 'What I can see', pad: 0, ceiling: TOP,
-                     hint: 'The map as it stands on the screen right now.'},
-                    {key: 'all', label: 'Everything drawn', pad: 1, ceiling: 16,
-                     hint: 'A band along every path this map draws, which is most of the park.'}
+                    {key: 'all', label: 'The whole map', pad: 1, ceiling: CAP_ZOOM,
+                     hint: 'Every tile in the box this map draws paths in, including the ground no path crosses.'},
+                    {key: 'band', label: 'Along the route', pad: 2, ceiling: TOP,
+                     hint: 'A band along the line, wider at the coarse zooms and narrow underfoot.'},
+                    {key: 'rect', label: 'A box round it', pad: 1, ceiling: TOP,
+                     hint: 'The smallest rectangle round the line, turned so it lies close, with room to leave it by.'},
+                    {key: 'draw', label: 'Draw it myself', pad: 1, ceiling: TOP,
+                     hint: 'Tap the corners on the map. Three of them make an area.'}
                 ];
 
-                var scope = 'route', zoom = 16, chooser = false;
+                var scope = 'band', zoom = 16, chooser = false, margin = 1000;
+                var drawn = [], picked = -1, handles = [];
                 var counted = null, working = null, snapshot = null, lastRun = null;
                 var holder = null, said = {};
+
+                function scopeOf(which) {
+                    return SCOPES.filter(function (each) { return each.key === which; })[0] || SCOPES[0];
+                }
 
                 // ---- tiles ---------------------------------------------------
 
@@ -11556,6 +11617,15 @@ class _OfflinePanel(MacroElement):
                     var s = Math.sin(lat * Math.PI / 180);
                     return {x: (lon + 180) / 360 * n,
                             y: (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n};
+                }
+
+                // The way back, which the preview needs: a screen tile knows its
+                // own coordinates and has to ask what is kept under them.
+                function lonAt(x, z) { return x / Math.pow(2, z) * 360 - 180; }
+
+                function latAt(y, z) {
+                    var n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
+                    return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
                 }
 
                 // **Walked, not sampled at the ends.** The drawn geometry is
@@ -11577,6 +11647,123 @@ class _OfflinePanel(MacroElement):
 
                 function key(x, y) { return x + ',' + y; }
 
+                function bandAt(line, z) {
+                    var out = {}, i;
+                    for (i = 0; i + 1 < line.length; i += 1) {
+                        walk(line[i], line[i + 1], z, function (x, y) { out[key(x, y)] = [x, y]; });
+                    }
+                    return out;
+                }
+
+                // A filled rectangle in tile space, which is what a north-up box
+                // is. Not a band round its edge and not a walk along anything:
+                // every tile between the corners, which is the whole point of
+                // this scope.
+                function boxAt(box, z) {
+                    var a = fracTile(box.n, box.w, z), b = fracTile(box.s, box.e, z);
+                    var out = {}, x, y;
+                    for (x = Math.floor(a.x); x <= Math.floor(b.x); x += 1) {
+                        for (y = Math.floor(a.y); y <= Math.floor(b.y); y += 1) { out[key(x, y)] = [x, y]; }
+                    }
+                    return out;
+                }
+
+                function inside(lat, lon, ring) {
+                    var hit = false, i, j;
+                    for (i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+                        var yi = ring[i][0], xi = ring[i][1], yj = ring[j][0], xj = ring[j][1];
+                        if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) { hit = !hit; }
+                    }
+                    return hit;
+                }
+
+                // Any ring, tested tile by tile over its own bounding box. A tile
+                // is in if its centre or any corner is: the margin below covers
+                // the sliver that misses at the edge, and an exact clip would be
+                // a lot of code for tiles that are kept either way.
+                function ringAt(ring, z) {
+                    var n = -90, s = 90, e = -180, w = 180, out = {}, i, x, y;
+                    for (i = 0; i < ring.length; i += 1) {
+                        n = Math.max(n, ring[i][0]); s = Math.min(s, ring[i][0]);
+                        e = Math.max(e, ring[i][1]); w = Math.min(w, ring[i][1]);
+                    }
+                    var a = fracTile(n, w, z), b = fracTile(s, e, z);
+                    for (x = Math.floor(a.x); x <= Math.floor(b.x); x += 1) {
+                        for (y = Math.floor(a.y); y <= Math.floor(b.y); y += 1) {
+                            var probes = [[x + 0.5, y + 0.5], [x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]], p;
+                            for (p = 0; p < probes.length; p += 1) {
+                                if (inside(latAt(probes[p][1], z), lonAt(probes[p][0], z), ring)) {
+                                    out[key(x, y)] = [x, y];
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    return out;
+                }
+
+                // ---- the turned rectangle -------------------------------------
+                // **Convex hull, then rotating calipers.** The minimum-area
+                // enclosing rectangle always has one side flush with a hull edge,
+                // so trying each edge in turn is the whole algorithm. Worked in
+                // local metres about the line's own centre, because an angle in
+                // degrees of latitude and longitude is not an angle on the
+                // ground -- at 65 degrees north a degree of longitude is 46 km
+                // and a degree of latitude 111.
+
+                function convex(points) {
+                    var sorted = points.slice().sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+                    var cross = function (o, a, b) {
+                        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+                    };
+                    var lower = [], upper = [], i;
+                    for (i = 0; i < sorted.length; i += 1) {
+                        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], sorted[i]) <= 0) { lower.pop(); }
+                        lower.push(sorted[i]);
+                    }
+                    for (i = sorted.length - 1; i >= 0; i -= 1) {
+                        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], sorted[i]) <= 0) { upper.pop(); }
+                        upper.push(sorted[i]);
+                    }
+                    return lower.slice(0, -1).concat(upper.slice(0, -1));
+                }
+
+                // The rectangle as four lat/lon corners, grown by `by` metres on
+                // every side.
+                function rectRing(points, by) {
+                    if (!points || points.length < 3) { return null; }
+                    var mid = points.reduce(function (sum, at) { return [sum[0] + at[0], sum[1] + at[1]]; }, [0, 0]);
+                    mid = [mid[0] / points.length, mid[1] / points.length];
+                    var kx = 111320 * Math.cos(mid[0] * Math.PI / 180), ky = 111320;
+                    var hull = convex(points.map(function (at) {
+                        return [(at[1] - mid[1]) * kx, (at[0] - mid[0]) * ky];
+                    }));
+                    if (hull.length < 3) { return null; }
+                    var best = null, i, j;
+                    for (i = 0; i < hull.length; i += 1) {
+                        var a = hull[i], b = hull[(i + 1) % hull.length];
+                        var ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+                        var c = Math.cos(-ang), s = Math.sin(-ang);
+                        var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+                        for (j = 0; j < hull.length; j += 1) {
+                            var u = hull[j][0] * c - hull[j][1] * s, v = hull[j][0] * s + hull[j][1] * c;
+                            lo[0] = Math.min(lo[0], u); hi[0] = Math.max(hi[0], u);
+                            lo[1] = Math.min(lo[1], v); hi[1] = Math.max(hi[1], v);
+                        }
+                        var area = (hi[0] - lo[0]) * (hi[1] - lo[1]);
+                        if (!best || area < best.area) { best = {area: area, ang: ang, lo: lo, hi: hi}; }
+                    }
+                    var cs = Math.cos(best.ang), sn = Math.sin(best.ang), out = [];
+                    var low = [best.lo[0] - by, best.lo[1] - by], high = [best.hi[0] + by, best.hi[1] + by];
+                    [[low[0], low[1]], [high[0], low[1]], [high[0], high[1]], [low[0], high[1]]].forEach(function (at) {
+                        var x = at[0] * cs - at[1] * sn, y = at[0] * sn + at[1] * cs;
+                        out.push([mid[0] + y / ky, mid[1] + x / kx]);
+                    });
+                    return out;
+                }
+
+                // ---- what the shapes are drawn round ---------------------------
+
                 // The route as the plan panel composes it, which is the same
                 // geometry the exported file is written from.
                 function routeLine() {
@@ -11587,6 +11774,25 @@ class _OfflinePanel(MacroElement):
                         out.push([shape.lat[i], shape.lon[i]]);
                     }
                     return out.length > 1 ? [out] : [];
+                }
+
+                // **What the band and the box are drawn round, and it is said
+                // out loud on the panel.** A planned route first, because a
+                // reader who has planned one is keeping ground for that; the
+                // track they have selected otherwise. Neither, and both scopes
+                // are simply not offered -- the same rule the route scope has
+                // always followed, rather than a button that answers nothing.
+                function source() {
+                    var planned = routeLine();
+                    if (planned.length) { return {line: planned[0], from: 'the route you planned'}; }
+                    var showing = window.trailsProfile, shape = showing && showing.shape;
+                    if (!shape || !shape.lat || !shape.lon) { return null; }
+                    var out = [], i;
+                    for (i = 0; i < shape.lon.length; i += 1) {
+                        if (shape.lon[i] === null || shape.lat[i] === null) { continue; }
+                        out.push([shape.lat[i], shape.lon[i]]);
+                    }
+                    return out.length > 1 ? {line: out, from: 'the track you have selected'} : null;
                 }
 
                 // Every chain drawn on this map. `eachLayer` is flat -- a group
@@ -11602,6 +11808,10 @@ class _OfflinePanel(MacroElement):
                     var out = [];
                     map.eachLayer(function (layer) {
                         if (!layer.getLatLngs || layer.getRadius) { return; }
+                        // The outline this panel draws is a layer on this map
+                        // like any other, and counting it would let the selection
+                        // move the box the selection is measured against.
+                        if (layer.options && layer.options.trailsOffline) { return; }
                         // **Down to whatever depth the geometry had.** A
                         // polyline answers a list of points, a polygon a list of
                         // rings and a multipolygon a list of those; taking the
@@ -11616,43 +11826,56 @@ class _OfflinePanel(MacroElement):
                     return out;
                 }
 
-                // **Computed once at the finest zoom and halved down.** A tile
-                // at z-1 is the tile at z with both coordinates shifted right,
-                // so one walk answers every level below it as well; walking the
-                // whole network five times over would be five times the work for
-                // a set that is already implied.
-                function coresFor(which, top) {
-                    var here = SCOPES.filter(function (each) { return each.key === which; })[0];
-                    var fine = {}, z;
-                    if (which === 'view') {
-                        var box = map.getBounds();
-                        var a = fracTile(box.getNorth(), box.getWest(), top);
-                        var b = fracTile(box.getSouth(), box.getEast(), top);
-                        var x, y;
-                        for (x = Math.floor(a.x); x <= Math.floor(b.x); x += 1) {
-                            for (y = Math.floor(a.y); y <= Math.floor(b.y); y += 1) { fine[key(x, y)] = [x, y]; }
+                // **The box this map draws paths in, asked of the map itself.**
+                // Written down here it would be a number that goes stale the
+                // first time the sources move; read off the layers it is
+                // whatever this build actually drew -- 65.175 to 65.921 N and
+                // 12.094 to 13.694 E as this one stands, about 74 by 83 km.
+                // Held after the first ask, because it walks every line on the
+                // page and the answer cannot change while the page is open.
+                var box = null;
+                function mapBox() {
+                    if (box) { return box; }
+                    var n = -90, s = 90, e = -180, w = 180, any = false;
+                    drawnLines().forEach(function (line) {
+                        line.forEach(function (at) {
+                            any = true;
+                            n = Math.max(n, at[0]); s = Math.min(s, at[0]);
+                            e = Math.max(e, at[1]); w = Math.min(w, at[1]);
+                        });
+                    });
+                    // A map with nothing drawn on it is not one this panel has
+                    // an opinion about; the view is the only honest answer, and
+                    // it is not remembered because it moves.
+                    if (!any) {
+                        var seen = map.getBounds();
+                        return {n: seen.getNorth(), s: seen.getSouth(), e: seen.getEast(), w: seen.getWest()};
+                    }
+                    box = {n: n, s: s, e: e, w: w};
+                    return box;
+                }
+
+                function ringFor(which) {
+                    if (which === 'rect') {
+                        var from = source();
+                        return from ? rectRing(from.line, margin) : null;
+                    }
+                    if (which === 'draw') { return drawn.length >= 3 ? drawn.slice() : null; }
+                    return null;
+                }
+
+                // The one function that says what a scope *is*, handed to
+                // `levelsFor` to be asked once at the finest zoom.
+                function coreOf(which) {
+                    return function (z) {
+                        if (which === 'all') { return boxAt(mapBox(), z); }
+                        if (which === 'band') {
+                            var from = source();
+                            return from ? bandAt(from.line, z) : {};
                         }
-                    } else {
-                        var lines = which === 'route' ? routeLine() : drawnLines();
-                        lines.forEach(function (line) {
-                            var i;
-                            for (i = 0; i + 1 < line.length; i += 1) {
-                                walk(line[i], line[i + 1], top, function (x, y) { fine[key(x, y)] = [x, y]; });
-                            }
-                        });
-                    }
-                    var levels = {}, below = fine;
-                    levels[top] = fine;
-                    for (z = top - 1; z >= 11; z -= 1) {
-                        var up = {};
-                        Object.keys(below).forEach(function (each) {
-                            var at = below[each], x = at[0] >> 1, y = at[1] >> 1;
-                            up[key(x, y)] = [x, y];
-                        });
-                        levels[z] = up;
-                        below = up;
-                    }
-                    return {levels: levels, pad: here.pad};
+                        var ring = ringFor(which);
+                        return ring ? ringAt(ring, z) : {};
+                    };
                 }
 
                 function padded(core, pad) {
@@ -11668,6 +11891,143 @@ class _OfflinePanel(MacroElement):
                         }
                     });
                     return out;
+                }
+
+                // **Computed once at the finest zoom and halved down.** A tile
+                // at z-1 is the tile at z with both coordinates shifted right,
+                // so one pass answers every level below it as well; walking the
+                // whole network five times over would be five times the work for
+                // a set that is already implied.
+                //
+                // **The margin is laid on every level and the unpadded set is
+                // what goes down.** Padding first and halving the padded set
+                // compounds the margin all the way to z11, where the box came
+                // out several tiles wider on each side than the ground it was
+                // asked for -- which at z11 is 8 km a tile.
+                function levelsFor(coreAt, top, pad) {
+                    var out = {}, below = coreAt(top), z;
+                    out[top] = padded(below, pad);
+                    for (z = top - 1; z >= BOTTOM; z -= 1) {
+                        var up = {};
+                        Object.keys(below).forEach(function (each) {
+                            var at = below[each], x = at[0] >> 1, y = at[1] >> 1;
+                            up[key(x, y)] = [x, y];
+                        });
+                        out[z] = padded(up, pad);
+                        below = up;
+                    }
+                    return out;
+                }
+
+                function weigh(levels) {
+                    var tiles = 0, bytes = 0;
+                    Object.keys(levels).forEach(function (z) {
+                        var n = Object.keys(levels[z]).length;
+                        tiles += n;
+                        bytes += n * (WEIGHT[z] || 45000);
+                    });
+                    return {tiles: tiles, bytes: bytes};
+                }
+
+                // **Buffered, because the zoom row prices every level it draws.**
+                // Without this a repaint recomputes z17 and z18 for a turned
+                // rectangle -- a few hundred thousand point-in-polygon tests --
+                // on every tap of anything on the panel.
+                //
+                // **And the key carries every corner, not their number and the
+                // last one.** Dragging a handle moves a point in the middle and
+                // leaves both of those alone; the panel would answer out of the
+                // buffer with the area the shape used to have.
+                function sig(which, level) {
+                    if (which === 'rect') { return 'rect|' + level + '|' + margin; }
+                    if (which === 'draw') {
+                        return 'draw|' + level + '|' + drawn.map(function (at) {
+                            return at[0].toFixed(5) + ',' + at[1].toFixed(5);
+                        }).join(';');
+                    }
+                    return which + '|' + level;
+                }
+
+                // The buffer holds figures and never tile sets: the zoom row
+                // prices every level it offers, and holding the whole map at z14,
+                // z15 and z16 at once is 173,000 tiles of arrays kept alive for
+                // two lines of text.
+                var memo = {};
+                function cost(which, level) {
+                    var at = sig(which, level);
+                    if (!memo[at]) {
+                        var guess = guessed(which, level);
+                        memo[at] = guess || weigh(levelsFor(coreOf(which), level, scopeOf(which).pad));
+                    }
+                    return memo[at];
+                }
+
+                // **What a ring would cost, without building it.** The shoelace
+                // area of the ring in tile space is what the set is about to be,
+                // exact to its own perimeter and O(4) rather than a
+                // point-in-polygon test per tile. The levels below add a third
+                // -- each is a quarter of the one above -- and the margin a
+                // little more, which is what the 1.4 is.
+                //
+                // **A bounding box would not do**, and this is the one place it
+                // matters: the turned rectangle is deliberately diagonal, and
+                // its north-up box is up to twice itself. Refusing z18 for a
+                // rectangle that fits the budget would take away the scope's
+                // whole reason for turning.
+                function ringTiles(ring, level) {
+                    var sum = 0, i, j;
+                    for (i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+                        var a = fracTile(ring[i][0], ring[i][1], level);
+                        var b = fracTile(ring[j][0], ring[j][1], level);
+                        sum += (b.x + a.x) * (b.y - a.y);
+                    }
+                    return Math.abs(sum / 2) * 1.4;
+                }
+
+                // **Refused on the estimate rather than built and then refused.**
+                // An area drawn round the whole park, priced at z18, is 1.5
+                // million tiles at the top level alone: a few hundred megabytes
+                // of arrays and about a second, spent working out a figure that
+                // was always going to be a refusal -- and the chooser prices
+                // every level it offers, so simply drawing that area would do it
+                // without anybody asking for z18. Twice the budget is the line,
+                // so the largest set ever actually built is about 490,000 tiles.
+                function guessed(which, level) {
+                    var ring = ringFor(which);
+                    if (!ring) { return null; }
+                    var tiles = ringTiles(ring, level), bytes = tiles * (WEIGHT[level] || 45000);
+                    return bytes > budget() * 2 ? {tiles: Math.round(tiles), bytes: bytes, guessed: true} : null;
+                }
+
+                // **The budget is measured, not written down.** It is what the
+                // whole map costs at the zoom that scope is capped at -- 6.76 GB
+                // on this build -- and every other scope is held to it, so no
+                // choice on this panel can quietly cost more than the one that
+                // keeps everything.
+                var cap = null;
+                function budget() {
+                    if (cap === null) { cap = cost('all', CAP_ZOOM).bytes; }
+                    return cap;
+                }
+
+                // The one selection that is drawn and downloaded. Its tiles are
+                // kept, unlike the buffer's, because the preview and the download
+                // both read them.
+                var chosen = null;
+                function recount() {
+                    // **The same refusal the buttons make, held here too.**
+                    // Switching scope keeps the zoom, and a zoom that was
+                    // affordable for a band along a line need not be for an area
+                    // drawn round a county.
+                    while (zoom > FLOOR && cost(scope, zoom).bytes > budget()) { zoom -= 1; }
+                    var at = sig(scope, zoom);
+                    if (chosen && chosen.at === at) { return chosen; }
+                    var levels = levelsFor(coreOf(scope), zoom, scopeOf(scope).pad);
+                    var sum = weigh(levels);
+                    memo[at] = sum;
+                    chosen = {at: at, levels: levels, top: zoom, scope: scope, zoom: zoom,
+                              tiles: sum.tiles, bytes: sum.bytes};
+                    return chosen;
                 }
 
                 // The base layer that is actually showing. Only one is fetched:
@@ -11695,20 +12055,196 @@ class _OfflinePanel(MacroElement):
                 }
 
                 function wanted() {
-                    var found = coresFor(scope, zoom), layer = base(), urls = [], bytes = 0, z;
-                    if (!layer) { return {urls: [], bytes: 0}; }
-                    for (z = 11; z <= zoom; z += 1) {
-                        var set = padded(found.levels[z], found.pad);
+                    var picked = recount(), layer = base(), urls = [], z;
+                    if (!layer) { return {urls: [], bytes: picked.bytes}; }
+                    for (z = BOTTOM; z <= picked.top; z += 1) {
+                        var set = picked.levels[z];
+                        if (!set) { continue; }
                         Object.keys(set).forEach(function (each) {
                             var at = set[each];
                             urls.push(urlFor(layer, at[0], at[1], z));
                         });
-                        bytes += Object.keys(set).length * (WEIGHT[z] || 45000);
                     }
-                    return {urls: urls, bytes: bytes};
+                    return {urls: urls, bytes: picked.bytes};
                 }
 
-                // ---- what is kept --------------------------------------------
+                // ---- what it would keep, drawn on the map ----------------------
+
+                // The accent this page is painted in, read rather than repeated,
+                // so the preview follows the theme the reader picked instead of
+                // being a blue that is right in one of the two.
+                function accent(alpha) {
+                    var said = '';
+                    if (window.getComputedStyle) {
+                        said = (getComputedStyle(document.documentElement).getPropertyValue('--trails-accent') || '').trim();
+                    }
+                    if (!/^#[0-9a-fA-F]{6}$/.test(said)) { said = '#7fb0f0'; }
+                    if (alpha === undefined) { return said; }
+                    return 'rgba(' + parseInt(said.slice(1, 3), 16) + ',' + parseInt(said.slice(3, 5), 16) +
+                        ',' + parseInt(said.slice(5, 7), 16) + ',' + alpha + ')';
+                }
+
+                // Between the terrain and the paths: the selection tints the
+                // ground it would keep, and the lines somebody is choosing it
+                // for stay on top of the tint rather than under it.
+                if (!map.getPane('trailsOffline')) {
+                    map.createPane('trailsOffline');
+                    map.getPane('trailsOffline').style.zIndex = 350;
+                    map.getPane('trailsOffline').style.pointerEvents = 'none';
+                }
+
+                // **A grid layer and not 131,000 rectangles.** Leaflet only ever
+                // creates the tiles in view, so the preview costs what the screen
+                // costs however large the selection is -- and it is exact,
+                // because it asks the same set the download would use rather than
+                // an outline standing in for it.
+                var Preview = L.GridLayer.extend({
+                    // **A canvas, because a screen tile is not a kept tile.**
+                    // Two ways of drawing this are wrong and both were built:
+                    // testing only the screen tile's centre against the selection
+                    // paints nothing at all once you are zoomed out, because the
+                    // centre almost never lands in a kept tile; and filling the
+                    // whole screen tile whenever it holds *any* kept one turns a
+                    // valley into a county -- reported from a phone, where a
+                    // hand-drawn area a few kilometres across was painted as a
+                    // block a hundred kilometres wide.
+                    //
+                    // What is right is drawing the kept tiles as sub-rectangles
+                    // *inside* the screen tile. Same information, no lie, and one
+                    // canvas per tile on screen.
+                    createTile: function (coords) {
+                        var side = 256;
+                        var canvas = document.createElement('canvas');
+                        canvas.width = side;
+                        canvas.height = side;
+                        if (!chooser || !chosen) { return canvas; }
+                        var z = Math.min(chosen.top, Math.max(BOTTOM, coords.z));
+                        var set = chosen.levels[z];
+                        if (!set) { return canvas; }
+                        var ink = canvas.getContext('2d');
+                        ink.fillStyle = accent(0.42);
+                        var step = Math.pow(2, z - coords.z);
+                        if (step <= 1) {
+                            // The screen is the finer of the two: this tile is
+                            // inside a kept one or it is not.
+                            var at = fracTile(latAt(coords.y + 0.5, coords.z), lonAt(coords.x + 0.5, coords.z), z);
+                            if (set[key(Math.floor(at.x), Math.floor(at.y))]) { ink.fillRect(0, 0, side, side); }
+                            return canvas;
+                        }
+                        // Coarser screen: this tile covers step by step kept
+                        // tiles, each of them side/step pixels across. Past 256
+                        // they are under a pixel and the fill would be invisible
+                        // anyway, so it draws nothing rather than rounding a
+                        // speck up to the whole tile.
+                        if (step > side) { return canvas; }
+                        var px = side / step, x0 = coords.x * step, y0 = coords.y * step, i, j;
+                        for (i = 0; i < step; i += 1) {
+                            for (j = 0; j < step; j += 1) {
+                                if (set[key(x0 + i, y0 + j)]) { ink.fillRect(i * px, j * px, px, px); }
+                            }
+                        }
+                        return canvas;
+                    }
+                });
+
+                var preview = null, outline = null;
+
+                function paint() {
+                    if (outline) { map.removeLayer(outline); outline = null; }
+                    if (!chooser) {
+                        if (preview && map.hasLayer(preview)) { map.removeLayer(preview); }
+                        return;
+                    }
+                    if (!preview) { preview = new Preview({pane: 'trailsOffline'}); }
+                    if (!map.hasLayer(preview)) { preview.addTo(map); }
+                    // `trailsOffline` on the options is what keeps this line out
+                    // of `drawnLines`, and so out of the box it is drawn from.
+                    var edge = {color: accent(), weight: 2, fill: false, interactive: false, trailsOffline: true};
+                    if (scope === 'all') {
+                        var seen = mapBox();
+                        outline = L.rectangle([[seen.s, seen.w], [seen.n, seen.e]], edge);
+                    } else if (scope === 'band') {
+                        var from = source();
+                        if (from) { outline = L.polyline(from.line, edge); }
+                    } else {
+                        var ring = ringFor(scope);
+                        if (ring) { outline = L.polygon(ring, edge); }
+                    }
+                    if (outline) { outline.addTo(map); }
+                    preview.redraw();
+                }
+
+                // ---- the corners a reader places -------------------------------
+
+                function handleIcon(lit) {
+                    // 44 px of transparent target around a 15 px dot: the dot is
+                    // what a finger aims at and the target is what it hits.
+                    return L.divIcon({
+                        className: 'trails-offline-handle', iconSize: [44, 44], iconAnchor: [22, 22],
+                        html: '<div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center">' +
+                            '<span style="width:' + (lit ? 19 : 15) + 'px;height:' + (lit ? 19 : 15) + 'px;' +
+                            'border-radius:50%;background:' + (lit ? 'var(--trails-strong)' : accent()) + ';' +
+                            'border:2px solid var(--trails-panel);box-shadow:0 0 0 1.5px ' +
+                            (lit ? 'var(--trails-strong)' : accent()) + '"></span></div>'
+                    });
+                }
+
+                function syncHandles() {
+                    handles.forEach(function (each) { map.removeLayer(each); });
+                    handles = [];
+                    if (!chooser || scope !== 'draw') { return; }
+                    drawn.forEach(function (at, index) {
+                        var handle = L.marker(at, {draggable: true, icon: handleIcon(index === picked),
+                                                   zIndexOffset: 1000, trailsOffline: true}).addTo(map);
+                        handle.on('click', function (event) {
+                            // Or the map's own click would place a new corner
+                            // directly on top of the one just tapped.
+                            L.DomEvent.stopPropagation(event);
+                            picked = (picked === index ? -1 : index);
+                            // The whole chooser, because which corner is picked
+                            // is on the panel as well as under the finger.
+                            drawChooser();
+                        });
+                        // **Outline while dragging, tiles when it lands.**
+                        // Re-counting on every drag frame is a point-in-polygon
+                        // pass over the whole bounding box, dozens of times a
+                        // second, on a phone.
+                        handle.on('drag', function () {
+                            var to = handle.getLatLng();
+                            drawn[index] = [to.lat, to.lng];
+                            if (outline && outline.setLatLngs && drawn.length >= 3) { outline.setLatLngs(drawn); }
+                        });
+                        handle.on('dragend', function () {
+                            var to = handle.getLatLng();
+                            drawn[index] = [to.lat, to.lng];
+                            picked = index;
+                            again();
+                        });
+                        handles.push(handle);
+                    });
+                }
+
+                // **Corners are joined in the order they were tapped.** Tapped
+                // across each other they make a tangled shape, and it is drawn
+                // and counted as tangled rather than quietly straightened into a
+                // convex hull -- which would keep ground nobody asked for and
+                // give no way of saying so.
+                map.on('click', function (event) {
+                    if (!chooser || scope !== 'draw' || working) { return; }
+                    drawn.push([event.latlng.lat, event.latlng.lng]);
+                    picked = drawn.length - 1;
+                    again();
+                });
+
+                // What every change to the selection does: throw the count away
+                // and let the panel work it out again off the paint.
+                function again() {
+                    counted = null;
+                    chosen = null;
+                    return refresh();
+                }
+
+                // ---- what is kept ----------------------------------------------
 
                 function kept() {
                     if (!window.caches) { return Promise.resolve({tiles: 0, bytes: 0}); }
@@ -11761,14 +12297,30 @@ class _OfflinePanel(MacroElement):
                     return Promise.resolve(true);
                 }
 
+                // Which scopes have something to be drawn round. A band and a box
+                // with neither a planned route nor a selected track are two
+                // buttons that answer nothing, so they are not offered at all.
+                function offered() {
+                    var from = source();
+                    return SCOPES.filter(function (each) {
+                        return from || (each.key !== 'band' && each.key !== 'rect');
+                    });
+                }
+
                 function refresh() {
+                    // Held here rather than only on the buttons: a route can be
+                    // cleared while the panel is open, and the scope it was
+                    // drawn round has to stop being the selection at that moment
+                    // and not the next time somebody looks.
+                    var still = offered().filter(function (each) { return each.key === scope; });
+                    if (!still.length) { scope = 'all'; counted = null; chosen = null; }
                     return Promise.all([kept(), room()]).then(function (both) {
                         snapshot = {
                             available: !!(window.trailsWorker && window.trailsWorker.kept),
                             why: window.trailsWorker ? window.trailsWorker.why : 'the page has not asked yet',
                             on: on(), kept: both[0], storage: both[1],
                             busy: working !== null, chooser: chooser, scope: scope, zoom: zoom,
-                            counted: counted
+                            corners: drawn.length, counted: counted
                         };
                         draw();
                         // **Said out loud, because the switch shows outside this
@@ -11790,7 +12342,7 @@ class _OfflinePanel(MacroElement):
                     });
                 }
 
-                // ---- keeping it ----------------------------------------------
+                // ---- keeping it ------------------------------------------------
 
                 // **Six at a time, and never through the worker.** `cache:
                 // 'reload'` is what the worker passes through untouched: without
@@ -11863,10 +12415,10 @@ class _OfflinePanel(MacroElement):
                     }).then(refresh);
                 }
 
-                // ---- the panel ------------------------------------------------
+                // ---- the panel --------------------------------------------------
 
                 function megabytes(bytes) {
-                    if (bytes === null || bytes === undefined) { return '—'; }
+                    if (bytes === null || bytes === undefined) { return '\\u2014'; }
                     if (bytes >= 1e9) { return (bytes / 1e9).toFixed(2) + ' GB'; }
                     return Math.round(bytes / 1e6) + ' MB';
                 }
@@ -11881,6 +12433,26 @@ class _OfflinePanel(MacroElement):
                         'border-radius:7px;cursor:pointer;border:1px solid ' +
                         (strong ? 'var(--trails-strong);background:var(--trails-strong);color:var(--trails-on-strong)'
                                 : 'var(--trails-rule);background:transparent;color:var(--trails-ink-2)');
+                    return made;
+                }
+
+                function small(made) {
+                    made.style.fontSize = '12px';
+                    made.style.padding = '6px 10px';
+                    return made;
+                }
+
+                function label(text) {
+                    var made = document.createElement('p');
+                    made.textContent = text;
+                    made.style.cssText = 'margin:0 0 4px;color:var(--trails-ink-5);font-size:11px;' +
+                        'text-transform:uppercase;letter-spacing:.04em';
+                    return made;
+                }
+
+                function row() {
+                    var made = document.createElement('div');
+                    made.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px';
                     return made;
                 }
 
@@ -11902,11 +12474,125 @@ class _OfflinePanel(MacroElement):
                     said.sheet = document.createElement('p');
                     said.sheet.className = 'trails-offline-sheet';
                     said.sheet.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-5);font-size:11px';
+
+                    // **The chooser is built once and filled, not rebuilt.** The
+                    // margin slider is a control somebody drags, and a drag on an
+                    // element that is thrown away and made again on every count
+                    // ends the moment the first figure arrives.
                     said.chooser = document.createElement('div');
                     said.chooser.className = 'trails-offline-chooser';
+                    said.chooser.style.cssText = 'margin:0 0 10px;padding:10px;border:1px solid var(--trails-rule);' +
+                        'border-radius:8px;display:none';
+                    said.which = row();
+                    said.which.className = 'trails-offline-scopes';
+                    said.chooser.appendChild(said.which);
+
+                    said.drawWrap = document.createElement('div');
+                    said.drawWrap.style.display = 'none';
+                    said.drawSaid = label('Corners');
+                    said.drawSaid.className = 'trails-offline-corners';
+                    said.drawWrap.appendChild(said.drawSaid);
+                    var tools = row();
+                    said.undo = small(button('Corner back', false));
+                    said.undo.className = 'trails-offline-undo';
+                    said.undo.addEventListener('click', function () {
+                        if (!drawn.length) { return; }
+                        drawn.pop();
+                        picked = -1;
+                        again();
+                    });
+                    said.drop = small(button('Remove the one picked', false));
+                    said.drop.className = 'trails-offline-drop';
+                    said.drop.addEventListener('click', function () {
+                        if (picked < 0 || picked >= drawn.length) { return; }
+                        drawn.splice(picked, 1);
+                        picked = -1;
+                        again();
+                    });
+                    said.clear = small(button('Clear', false));
+                    said.clear.className = 'trails-offline-clear';
+                    said.clear.addEventListener('click', function () {
+                        drawn = [];
+                        picked = -1;
+                        again();
+                    });
+                    tools.appendChild(said.undo);
+                    tools.appendChild(said.drop);
+                    tools.appendChild(said.clear);
+                    said.drawWrap.appendChild(tools);
+                    said.chooser.appendChild(said.drawWrap);
+
+                    said.marginWrap = document.createElement('div');
+                    said.marginWrap.style.cssText = 'display:none;margin:0 0 8px';
+                    said.marginSaid = label('Room round the line');
+                    said.marginSaid.className = 'trails-offline-margin-said';
+                    said.margin = document.createElement('input');
+                    said.margin.type = 'range';
+                    said.margin.className = 'trails-offline-margin';
+                    said.margin.min = '0';
+                    said.margin.max = '5000';
+                    said.margin.step = '250';
+                    said.margin.value = String(margin);
+                    said.margin.style.width = '100%';
+                    said.margin.addEventListener('input', function () {
+                        margin = Number(said.margin.value);
+                        again();
+                    });
+                    said.marginWrap.appendChild(said.marginSaid);
+                    said.marginWrap.appendChild(said.margin);
+                    said.chooser.appendChild(said.marginWrap);
+
+                    said.chooser.appendChild(label('Finest zoom'));
+                    said.fine = row();
+                    said.fine.className = 'trails-offline-zooms';
+                    said.chooser.appendChild(said.fine);
+
+                    said.says = document.createElement('p');
+                    said.says.className = 'trails-offline-needed';
+                    said.says.style.cssText = 'margin:0 0 6px;color:var(--trails-ink-3);font-size:12px';
+                    said.chooser.appendChild(said.says);
+
+                    said.bar = document.createElement('div');
+                    said.bar.className = 'trails-offline-bar';
+                    said.bar.style.cssText = 'height:8px;border-radius:4px;background:var(--trails-rule);' +
+                        'overflow:hidden;margin:0 0 4px';
+                    said.fill = document.createElement('i');
+                    said.fill.style.cssText = 'display:block;height:100%;width:0;background:var(--trails-accent)';
+                    said.bar.appendChild(said.fill);
+                    said.chooser.appendChild(said.bar);
+
+                    said.budget = document.createElement('p');
+                    said.budget.className = 'trails-offline-budget';
+                    said.budget.style.cssText = 'margin:0 0 6px;color:var(--trails-ink-5);font-size:11px';
+                    said.chooser.appendChild(said.budget);
+
+                    said.layer = document.createElement('p');
+                    said.layer.className = 'trails-offline-layer';
+                    said.layer.style.cssText = 'margin:0 0 8px;color:var(--trails-ink-5);font-size:11px';
+                    said.chooser.appendChild(said.layer);
+
+                    said.refused = document.createElement('p');
+                    said.refused.className = 'trails-offline-refused';
+                    said.refused.style.cssText = 'margin:0 0 8px;color:var(--trails-ink-2);font-size:12px;display:none';
+                    said.chooser.appendChild(said.refused);
+
+                    said.go = button('Keep it', true);
+                    said.go.className = 'trails-offline-go';
+                    said.go.addEventListener('click', function () {
+                        if (working) { working.stop = true; return; }
+                        if (said.go.disabled) { return; }
+                        // Asked from the press and not at load, because that is
+                        // when a browser will grant it: an origin nobody has
+                        // touched asking to be kept for ever is what the rule
+                        // about user gestures exists to refuse.
+                        if (navigator.storage && navigator.storage.persist) { navigator.storage.persist(); }
+                        keep();
+                    });
+                    said.chooser.appendChild(said.go);
+
                     said.tools = document.createElement('div');
                     said.tools.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
-                    said.keep = button('Keep terrain…', false);
+                    said.keep = button('Keep terrain\\u2026', false);
                     said.keep.className = 'trails-offline-keep';
                     said.keep.addEventListener('click', function () { chooser = !chooser; refresh(); });
                     said.forget = button('Delete', false);
@@ -11929,106 +12615,160 @@ class _OfflinePanel(MacroElement):
                     // This is the same seam `Where I am` and `Sources` use.
                 }
 
+                // **Which of the levels is the one being coloured in, and how
+                // much ground it covers.** Every level carries its own one-tile
+                // margin, so the same selection is 223 km2 at z15 and 1,712 km2
+                // at z11, where a tile is eight kilometres across. The preview
+                // draws the level matching the map's zoom, which is honest and,
+                // without this line, unreadable: the shape looks as though it
+                // grew when the reader zoomed out.
+                function sayLayer() {
+                    if (!chosen || !chooser) { said.layer.textContent = ''; return; }
+                    var z = Math.min(chosen.top, Math.max(BOTTOM, map.getZoom()));
+                    var set = chosen.levels[z];
+                    if (!set) { said.layer.textContent = ''; return; }
+                    var seen = mapBox();
+                    var side = 156543.03392 * Math.cos((seen.n + seen.s) / 2 * Math.PI / 180) /
+                        Math.pow(2, z) * 256 / 1000;
+                    var n = Object.keys(set).length;
+                    said.layer.textContent = 'Coloured in: level z' + z + ' \\u2014 ' + count(n) +
+                        ' tiles of ' + side.toFixed(2) + ' km, about ' + count(Math.round(n * side * side)) + ' km2. ' +
+                        (z < chosen.top ? 'Zooming in shows the finer levels, which lie closer.'
+                                        : 'This is the finest level chosen.');
+                }
+
                 function drawChooser() {
-                    said.chooser.innerHTML = '';
-                    if (!chooser) { return; }
-                    said.chooser.style.cssText = 'margin:0 0 10px;padding:10px;border:1px solid var(--trails-rule);' +
-                        'border-radius:8px';
-                    var which = document.createElement('div');
-                    which.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px';
-                    SCOPES.forEach(function (each) {
-                        if (each.key === 'route' && !routeLine().length) { return; }
-                        var pick = button(each.label, each.key === scope);
+                    said.chooser.style.display = chooser ? '' : 'none';
+                    if (!chooser) { paint(); syncHandles(); return; }
+
+                    var here = scopeOf(scope);
+                    said.which.innerHTML = '';
+                    offered().forEach(function (each) {
+                        var pick = small(button(each.label, each.key === scope));
                         pick.className = 'trails-offline-scope';
                         pick.setAttribute('data-scope', each.key);
-                        pick.style.fontSize = '12px';
-                        pick.style.padding = '6px 10px';
                         pick.title = each.hint;
                         pick.addEventListener('click', function () {
                             scope = each.key;
                             if (zoom > each.ceiling) { zoom = each.ceiling; }
-                            counted = null;
-                            refresh();
+                            again();
                         });
-                        which.appendChild(pick);
+                        said.which.appendChild(pick);
                     });
-                    said.chooser.appendChild(which);
 
-                    var here = SCOPES.filter(function (each) { return each.key === scope; })[0];
-                    var fine = document.createElement('div');
-                    fine.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px';
+                    said.drawWrap.style.display = scope === 'draw' ? '' : 'none';
+                    if (scope === 'draw') {
+                        said.drawSaid.textContent = 'Corners \\u2014 ' + drawn.length +
+                            (picked >= 0 ? ', no. ' + (picked + 1) + ' picked' : ', none picked');
+                        // Greyed as well as disabled: nothing else on this
+                        // panel refuses a press without looking as though it
+                        // will, and *Remove the one picked* with nothing picked
+                        // is the one somebody presses first.
+                        [[said.undo, !drawn.length], [said.drop, picked < 0], [said.clear, !drawn.length]]
+                            .forEach(function (each) {
+                                each[0].disabled = each[1];
+                                each[0].style.opacity = each[1] ? '0.4' : '1';
+                                each[0].style.cursor = each[1] ? 'default' : 'pointer';
+                            });
+                    }
+
+                    said.marginWrap.style.display = scope === 'rect' ? '' : 'none';
+                    if (scope === 'rect') {
+                        said.marginSaid.textContent = 'Room round the line \\u2014 ' + (margin / 1000).toFixed(2) + ' km';
+                    }
+
+                    // **Every level that would go over the budget is refused,
+                    // and it says why.** The buffer is read rather than filled
+                    // here: pricing five levels of a turned rectangle on the way
+                    // to painting a row of buttons is what makes a panel feel
+                    // broken. Whatever is not in it yet is worked out on the tick
+                    // below, and this row is drawn again straight after.
+                    said.fine.innerHTML = '';
                     var z;
                     for (z = FLOOR; z <= TOP; z += 1) {
                         (function (level) {
-                            var pick = button('z' + level, level === zoom);
+                            var pick = small(button('z' + level, level === zoom));
                             pick.className = 'trails-offline-zoom';
                             pick.setAttribute('data-zoom', String(level));
-                            pick.style.fontSize = '12px';
-                            pick.style.padding = '6px 10px';
+                            var known = memo[sig(scope, level)];
+                            var why = null;
                             if (level > here.ceiling) {
+                                why = 'Too much ground at this zoom \\u2014 that is an archive, not a download.';
+                            } else if (cap !== null && known && known.bytes > cap) {
+                                why = 'Over the budget: ' + megabytes(known.bytes) + ' against ' + megabytes(cap) +
+                                    ', which is what the whole map costs at z' + CAP_ZOOM + '.';
+                            }
+                            if (why) {
                                 pick.disabled = true;
                                 pick.style.opacity = '0.4';
                                 pick.style.cursor = 'default';
-                                pick.title = 'Too much ground at this zoom — that is an archive, not a download.';
+                                pick.title = why;
                             } else {
-                                pick.addEventListener('click', function () { zoom = level; counted = null; refresh(); });
+                                pick.addEventListener('click', function () {
+                                    // Held here as well, because a button drawn
+                                    // before its level had been priced is a
+                                    // button that is enabled and should not be.
+                                    if (cost(scope, level).bytes > budget()) { drawChooser(); return; }
+                                    zoom = level;
+                                    again();
+                                });
                             }
-                            fine.appendChild(pick);
+                            said.fine.appendChild(pick);
                         })(z);
                     }
-                    said.chooser.appendChild(fine);
 
-                    var says = document.createElement('p');
-                    says.className = 'trails-offline-needed';
-                    says.style.cssText = 'margin:0 0 8px;color:var(--trails-ink-3);font-size:12px';
+                    var from = scope === 'band' || scope === 'rect' ? source() : null;
+                    var hint = here.hint + (from ? ' Drawn round ' + from.from + '.' : '');
                     if (counted === null) {
-                        says.textContent = 'Working out how much that is…';
+                        said.says.textContent = 'Working out how much that is\\u2026';
+                        said.fill.style.width = '0';
+                        said.budget.textContent = '';
+                        // **Off the paint, and every level of the row with it.**
+                        // The whole map at z16 is 131,000 tiles and about half a
+                        // second of arithmetic; done inline, the panel would open
+                        // frozen and the reader would have been given no reason.
                         window.setTimeout(function () {
                             if (counted !== null || !chooser) { return; }
-                            var found = wanted();
-                            counted = {tiles: found.urls.length, bytes: found.bytes, scope: scope, zoom: zoom};
+                            var picking = recount();
+                            counted = {tiles: picking.tiles, bytes: picking.bytes, scope: scope, zoom: zoom};
+                            budget();
+                            var level;
+                            for (level = FLOOR; level <= here.ceiling; level += 1) { cost(scope, level); }
                             refresh();
                         }, 0);
                     } else {
-                        says.textContent = count(counted.tiles) + ' tiles · about ' + megabytes(counted.bytes) +
-                            ' · ' + here.hint;
+                        said.says.textContent = count(counted.tiles) + ' tiles \\u00b7 about ' +
+                            megabytes(counted.bytes) + ' \\u00b7 ' + hint;
+                        var share = cap ? counted.bytes / cap : 0;
+                        said.fill.style.width = Math.min(100, share * 100) + '%';
+                        said.fill.style.background = share > 1 ? 'var(--trails-bad, #e07a6a)' : 'var(--trails-accent)';
+                        said.budget.textContent = Math.round(share * 100) + '% of the budget (' + megabytes(cap) +
+                            ', which is what the whole map costs at z' + CAP_ZOOM + ')';
                     }
-                    said.chooser.appendChild(says);
 
                     // **Refused against the room there actually is, not against
-                    // a number written here.** A ceiling per scope catches
-                    // *everything drawn* at z17; it does not catch a viewport
-                    // zoomed out over the county, which asks for 22 GB and looks
-                    // as reasonable as any other choice on the screen. This is
-                    // measured on the device: a Firefox profile answered 3.3 GB,
-                    // and a phone will answer something else again.
-                    var free = null, room = (snapshot || {}).storage;
-                    if (room && room.quota !== null && room.usage !== null) { free = room.quota - room.usage; }
+                    // a number written here.** A ceiling per scope catches the
+                    // whole map above z16; it does not catch a phone that has
+                    // 3 GB free and a selection that fits the budget twice over.
+                    // This is measured on the device: a Firefox profile answered
+                    // 3.3 GB, and a phone will answer something else again.
+                    var free = null, space = (snapshot || {}).storage;
+                    if (space && space.quota !== null && space.usage !== null) { free = space.quota - space.usage; }
                     var tooMuch = counted !== null && free !== null && counted.bytes > free * 0.9;
+                    said.refused.style.display = tooMuch ? '' : 'none';
                     if (tooMuch) {
-                        var refused = document.createElement('p');
-                        refused.className = 'trails-offline-refused';
-                        refused.style.cssText = 'margin:0 0 8px;color:var(--trails-ink-2);font-size:12px';
-                        refused.textContent = 'That is more than this device will hold — ' +
+                        said.refused.textContent = 'That is more than this device will hold \\u2014 ' +
                             megabytes(free) + ' free. Pick a coarser zoom or a smaller piece of ground.';
-                        said.chooser.appendChild(refused);
                     }
 
-                    var go = button(working ? 'Stop' : 'Keep it', !working);
-                    go.className = working ? 'trails-offline-stop' : 'trails-offline-go';
-                    go.disabled = !working && (counted === null || tooMuch);
-                    go.style.opacity = go.disabled ? '0.5' : '1';
-                    go.addEventListener('click', function () {
-                        if (working) { working.stop = true; return; }
-                        if (go.disabled) { return; }
-                        // Asked from the press and not at load, because that is
-                        // when a browser will grant it: an origin nobody has
-                        // touched asking to be kept for ever is what the rule
-                        // about user gestures exists to refuse.
-                        if (navigator.storage && navigator.storage.persist) { navigator.storage.persist(); }
-                        keep();
-                    });
-                    said.chooser.appendChild(go);
+                    said.go.textContent = working ? 'Stop' : 'Keep it';
+                    said.go.className = working ? 'trails-offline-stop' : 'trails-offline-go';
+                    said.go.disabled = !working && (counted === null || !counted.tiles || tooMuch);
+                    said.go.style.opacity = said.go.disabled ? '0.5' : '1';
+
+                    paint();
+                    syncHandles();
+                    sayLayer();
                 }
 
                 function draw() {
@@ -12050,20 +12790,20 @@ class _OfflinePanel(MacroElement):
                         // exactly one, so the sentence hands it over ready to
                         // tap rather than describing it.
                         said.state.textContent = have.why.indexOf('secure') === -1
-                            ? 'Not available in this browser — ' + have.why +
+                            ? 'Not available in this browser \\u2014 ' + have.why +
                               '. On iOS a worker exists in Safari and in this map added to the Home Screen, ' +
                               'and in no other browser.'
                             : location.protocol === 'file:'
-                                ? 'Not available here — ' + have.why +
+                                ? 'Not available here \\u2014 ' + have.why +
                                   '. This is the map opened from a file rather than from a web address.'
-                                : 'Not available here — ' + have.why +
-                                  '. The address is http, not https — open https://' +
+                                : 'Not available here \\u2014 ' + have.why +
+                                  '. The address is http, not https \\u2014 open https://' +
                                   location.host + location.pathname + ' and offline mode is there.';
                     } else {
                         // Neither kept nor refused: the registration has not
                         // settled. Saying *not available* here would be a wrong
                         // answer rather than a slow one.
-                        said.state.textContent = 'Asking this browser whether it can keep the map…';
+                        said.state.textContent = 'Asking this browser whether it can keep the map\\u2026';
                     }
                     said.toggle.textContent = have.on ? 'Offline mode is on' : 'Offline mode is off';
                     said.toggle.setAttribute('aria-pressed', have.on ? 'true' : 'false');
@@ -12071,13 +12811,13 @@ class _OfflinePanel(MacroElement):
                     said.toggle.style.opacity = have.available ? '1' : '0.5';
                     if (working) {
                         said.figures.textContent = 'Keeping ' + count(working.done) + ' of ' +
-                            count(working.total) + (working.failed ? ' · ' + working.failed + ' refused' : '');
+                            count(working.total) + (working.failed ? ' \\u00b7 ' + working.failed + ' refused' : '');
                     } else if (lastRun && !lastRun.kept && lastRun.total) {
                         // **Said, rather than left to be discovered.** A run
                         // where nothing arrived looks exactly like a run that
                         // was never started, and the switch being still off is
                         // the only other evidence there is.
-                        said.figures.textContent = 'Nothing arrived — all ' + count(lastRun.total) +
+                        said.figures.textContent = 'Nothing arrived \\u2014 all ' + count(lastRun.total) +
                             ' were refused, so offline mode is still off. Check the connection and try again.';
                     } else {
                         var lines = [count((have.kept || {}).tiles || 0) + ' tiles kept'];
@@ -12086,7 +12826,7 @@ class _OfflinePanel(MacroElement):
                             lines.push(megabytes(have.storage.usage) + ' of ' + megabytes(have.storage.quota) + ' used');
                         }
                         if (have.storage && have.storage.persisted) { lines.push('storage is persistent'); }
-                        said.figures.textContent = lines.join(' · ');
+                        said.figures.textContent = lines.join(' \\u00b7 ');
                     }
                     said.forget.disabled = !((have.kept || {}).tiles);
                     said.forget.style.opacity = (have.kept || {}).tiles ? '1' : '0.5';
@@ -12100,11 +12840,19 @@ class _OfflinePanel(MacroElement):
                         : '';
                     // **Not while a run is going.** Progress arrives every 25
                     // tiles, and rebuilding the chooser that often rebuilds ten
-                    // buttons, re-reads the plan's whole route to decide whether
-                    // to offer *This route*, and takes the focus off whatever
-                    // the reader was on -- including the Stop button.
+                    // buttons, re-reads the plan's whole route to decide which
+                    // scopes to offer, and takes the focus off whatever the
+                    // reader was on -- including the Stop button.
                     if (!working) { drawChooser(); }
                 }
+
+                // Only the one line moves, because the level being coloured in is
+                // the only thing a zoom changes: the selection is the same set at
+                // z11 as at z16, which is exactly what this line exists to say.
+                map.on('zoomend', function () { if (chooser) { sayLayer(); } });
+                // A theme picked in the menu never touches `prefers-color-scheme`,
+                // and a canvas keeps the colour it was painted with.
+                document.addEventListener('trails:theme', function () { if (chooser) { paint(); } });
 
                 // **On, with nothing kept, opens the chooser instead.** A switch
                 // that answers with a blank map is a switch that lied.
@@ -12143,12 +12891,26 @@ class _OfflinePanel(MacroElement):
                         // Clamped here and not only on the button, so the
                         // ceiling is a property of the scope rather than a
                         // thing the screen happens to draw.
-                        var here = SCOPES.filter(function (each) { return each.key === scope; })[0];
-                        if (here && zoom > here.ceiling) { zoom = here.ceiling; }
+                        var here = scopeOf(scope);
+                        if (zoom > here.ceiling) { zoom = here.ceiling; }
                         if (zoom > TOP) { zoom = TOP; }
                         if (zoom < FLOOR) { zoom = FLOOR; }
-                        counted = null;
-                        return refresh();
+                        // **And against the budget, for the same reason.** A
+                        // disabled button is what the screen does; it is not
+                        // what is true, and something asking for a level nobody
+                        // may have has to come back holding one they may.
+                        while (zoom > FLOOR && cost(scope, zoom).bytes > budget()) { zoom -= 1; }
+                        return again();
+                    },
+                    // **Setting the drawn area from outside**, because there is
+                    // no way to tap four corners from a script and have the map
+                    // believe it -- and the check that this panel keeps what it
+                    // says it will keep has to ask for a piece of ground small
+                    // enough to be a check rather than a bulk download.
+                    area: function (ring) {
+                        drawn = (ring || []).map(function (at) { return [at[0], at[1]]; });
+                        picked = -1;
+                        return again();
                     },
                     // What the chooser would fetch, computed rather than
                     // estimated, so a check reads the figure the panel shows.

@@ -39,6 +39,7 @@ import contextlib
 import functools
 import http.server
 import json
+import math
 import pathlib
 import re
 import sys
@@ -3103,6 +3104,221 @@ def the_zoom_the_scale_says(page: Any) -> Check:
     return Check("the scale bar says which zoom it is", readings)
 
 
+#: The piece of ground the offline check keeps, and the shape of it matters.
+#:
+#: **The chooser's viewport scope is gone**, so the small real download below is
+#: an area the reader drew, set through ``area()`` -- which is the seam that
+#: exists for exactly this. About 5 x 9 km round 65.55 N 13.05 E: 176 tiles at
+#: z14 and 416 at z15, which is a check and not a bulk fetch off somebody else's
+#: service, and wide enough to cover the 1400 x 900 viewport the offline visit
+#: looks at, so that *the kept ground draws* is asking about coverage rather than
+#: about luck.
+KEPT_AREA = [[65.528, 12.955], [65.572, 12.955], [65.572, 13.145], [65.528, 13.145]]
+
+#: Set that area and take the coarsest zoom the chooser offers.
+KEEP_AREA = """async (ring) => {
+    await window.trailsOffline.area(ring);
+    return await window.trailsOffline.choose('draw', 14);
+}"""
+
+#: What the preview has actually coloured in, in tiles' worth of paint.
+#:
+#: **Counted in pixels and not in tiles**, because the whole question is whether
+#: a screen tile was filled in whole where only a corner of it was kept. A tile
+#: left over from the zoom that just happened is still in the pane, drawn scaled;
+#: its bounding rectangle says so, and it is not counted, because it belongs to a
+#: level nobody is looking at any more.
+PAINTED = """() => {
+    const pane = document.querySelector('.leaflet-trailsOffline-pane');
+    if (!pane) { return null; }
+    let filled = 0, seen = 0;
+    pane.querySelectorAll('canvas').forEach(canvas => {
+        const box = canvas.getBoundingClientRect();
+        if (Math.abs(box.width - 256) > 2) { return; }
+        seen += 1;
+        const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        let lit = 0;
+        for (let i = 3; i < data.length; i += 4) { if (data[i]) { lit += 1; } }
+        filled += lit / (canvas.width * canvas.height);
+    });
+    return {tiles: seen, filled: filled};
+}"""
+
+#: What the panel says it is colouring in, which the reading above is held
+#: against. The line exists because the same selection is a different number of
+#: tiles on every level, and without it the shape looks as though it grew when
+#: the reader zoomed out.
+SAID_LAYER = "() => (document.querySelector('.trails-offline-layer') || {}).textContent || ''"
+
+#: Which pieces of ground the chooser is offering. Two of the four need a line
+#: to be drawn round and are not offered when there is none.
+SCOPES_OFFERED = "() => Array.from(document.querySelectorAll('.trails-offline-scope')).map(b => b.getAttribute('data-scope'))"
+
+#: What the chooser says the selection is, which includes the line it took.
+SAID_NEEDED = "() => (document.querySelector('.trails-offline-needed') || {}).textContent || ''"
+
+
+def painted_ground(page: Any) -> tuple[float, float, str]:
+    """How much ground the preview has coloured in, and how much it says it has.
+
+    Args:
+        page: The page, with the chooser open and a selection made.
+
+    Returns:
+        The area painted on the screen in km2, the area the panel says the level
+        it is drawing covers in km2, and the sentence it said it in.
+    """
+    painted = page.evaluate(PAINTED) or {"filled": 0.0}
+    where = page.evaluate(with_map("() => ({z: __MAP__.getZoom(), lat: __MAP__.getCenter().lat})"))
+    side = 40075016.686 * math.cos(math.radians(where["lat"])) / 2 ** where["z"] / 1000
+    said = page.evaluate(SAID_LAYER)
+    quoted = re.search(r"about ([\d,]+) km2", said)
+    return painted["filled"] * side * side, float(quoted.group(1).replace(",", "")) if quoted else 0.0, said
+
+
+def what_the_chooser_draws(page: Any) -> list[Reading]:
+    """The chooser's own drawing, driven, because none of it is in the source.
+
+    **Three things the panel claims that only a browser can settle.** A source
+    test can read the arithmetic and see that the preview paints sub-rectangles;
+    it cannot see that the result is the right piece of ground. It can see that a
+    handle is draggable; it cannot see that dragging one moves the selection. It
+    can see that a button is given ``disabled``; it cannot see it refuse a press.
+
+    The first is the one this exists for. Colouring the whole screen tile
+    whenever it holds any kept tile looks right at the zoom the area was drawn
+    at and turns a valley into a county three zooms out -- which is how it was
+    reported, from a phone, and it is invisible in the source either way.
+
+    Args:
+        page: The page, online, with the chooser open on a drawn area.
+
+    Returns:
+        What each of the three measured.
+    """
+    out: list[Reading] = []
+
+    # **Which line the band and the box are drawn round.** With neither a planned
+    # route nor a selected track the two scopes are not offered at all, and this
+    # page opens with neither -- so selecting a chain has to bring them back, and
+    # the panel has to say which of the two it took. `shape` is decoded out of
+    # the routing graph a microtask after the click and the panel reads it there;
+    # nothing in the source can show that it arrives.
+    without = page.evaluate(SCOPES_OFFERED)
+    out.append(Reading("with no line to follow, only the two scopes that need none", without, ["all", "draw"]))
+    if select(page, LONG_CHAIN):
+        page.evaluate("async () => await window.trailsOffline.choose('band', 15)")
+        page.wait_for_function(
+            "() => { const s = window.trailsOffline.state(); return s && s.counted && s.counted.scope === 'band'; }",
+            timeout=60_000,
+        )
+        said_line = page.evaluate(SAID_NEEDED)
+        out.append(Reading("selecting a track brings the other two back", page.evaluate(SCOPES_OFFERED), ["all", "band", "rect", "draw"]))
+        out.append(Reading("and the panel says which line it took", "the track you have selected" in said_line, True, note=said_line[:110]))
+        # **Toggled off again**, or every figure below is read with a chain
+        # highlighted and the offline page's, loaded fresh, is not.
+        page.evaluate(SELECT_CHAIN, LONG_CHAIN)
+    else:
+        out.append(Reading("selecting a track brings the other two back", "no such chain", LONG_CHAIN))
+    page.evaluate(KEEP_AREA, KEPT_AREA)
+    page.wait_for_function("() => { const s = window.trailsOffline.state(); return s && s.counted; }", timeout=60_000)
+
+    # Close in, where the selection is bigger than the window: the paint is the
+    # window, and the panel says the level covers more ground than is on screen.
+    page.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
+    page.wait_for_timeout(1500)
+    close, said_close, sentence = painted_ground(page)
+    out.append(Reading("the panel says which level it is colouring in", "level z" in sentence, True, note=sentence[:96]))
+    out.append(
+        Reading(
+            "and close in, the paint is inside what it says",
+            close <= said_close * 1.5,
+            True,
+            note=f"{close:.0f} km2 painted, {said_close:.0f} km2 said",
+        )
+    )
+
+    # **And right out, which is where the wrong drawing shows.** Below z11 the
+    # preview has no finer level to fall back to, so a screen tile covers 64 of
+    # the ones it holds; filling it whole would paint about 4,200 km2 for each
+    # tile the selection touches, against the 790 km2 the selection is.
+    page.evaluate(with_map("() => __MAP__.setZoom(8)"))
+    page.wait_for_timeout(2500)
+    far, said_far, sentence_far = painted_ground(page)
+    out.append(
+        Reading(
+            "and zoomed right out it still is",
+            far <= said_far * 1.5,
+            True,
+            note=f"{far:.0f} km2 painted, {said_far:.0f} km2 said",
+        )
+    )
+
+    # A corner, dragged with a finger, is a different piece of ground. Driven at
+    # z12, where all four are on the screen at once.
+    page.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 12)"))
+    page.wait_for_timeout(1200)
+    before = page.evaluate("() => window.trailsOffline.state().counted.tiles")
+    spot = page.evaluate(
+        """() => {
+            const handle = document.querySelector('.trails-offline-handle');
+            if (!handle) { return null; }
+            const box = handle.getBoundingClientRect();
+            return {x: box.left + box.width / 2, y: box.top + box.height / 2};
+        }"""
+    )
+    dragged = None
+    if spot:
+        page.mouse.move(spot["x"], spot["y"])
+        page.mouse.down()
+        # Out and down, so the area grows: a drag that happened to make it
+        # smaller would read the same as a drag that did nothing at all.
+        page.mouse.move(spot["x"] - 120, spot["y"] + 90, steps=12)
+        page.mouse.up()
+        page.wait_for_function("() => { const s = window.trailsOffline.state(); return s && s.counted; }", timeout=60_000)
+        dragged = page.evaluate("() => window.trailsOffline.state().counted.tiles")
+    out.append(Reading("a corner has a handle to drag", bool(spot), True))
+    out.append(
+        Reading(
+            "and dragging it is a different piece of ground",
+            bool(dragged and dragged > before),
+            True,
+            note=f"{before} tiles then {dragged}",
+        )
+    )
+
+    # And a zoom nobody may have cannot be pressed. The whole map stops at z16
+    # because that *is* the budget; everything above it would be an archive.
+    page.evaluate("async () => await window.trailsOffline.choose('all', 16)")
+    page.wait_for_function(
+        "() => { const s = window.trailsOffline.state(); return s && s.counted && s.counted.scope === 'all'; }",
+        timeout=120_000,
+    )
+    locks = page.evaluate(
+        """() => {
+            const out = {};
+            document.querySelectorAll('.trails-offline-zoom').forEach(b => {
+                out[b.getAttribute('data-zoom')] = {off: !!b.disabled, why: b.title};
+            });
+            return out;
+        }"""
+    )
+    shut = sorted(at for at, how in locks.items() if how["off"])
+    out.append(Reading("the zooms that would be an archive are shut", shut, ["17", "18"], note=str(locks.get("17", {}).get("why"))))
+    out.append(Reading("and every zoom that fits the budget is open", [at for at in ("14", "15", "16") if locks.get(at, {}).get("off")], []))
+    # Held rather than painted on: a button drawn `disabled` proves what the
+    # screen does, and this proves what is true underneath it.
+    clamped = page.evaluate("async () => (await window.trailsOffline.choose('all', 18)).zoom")
+    out.append(Reading("and asking for one anyway comes back with one that fits", clamped, 16))
+    # **Waited for, and read once.** Choosing throws the count away and the panel
+    # says *working out how much that is* until the tick that does it lands;
+    # asking twice reads one side of that and reports the other.
+    page.wait_for_function("() => { const s = window.trailsOffline.state(); return s && s.counted; }", timeout=120_000)
+    against = page.evaluate("() => (document.querySelector('.trails-offline-budget') || {}).textContent || ''")
+    out.append(Reading("the panel says what the selection costs against the budget", "of the budget" in against, True, note=against))
+    return out
+
+
 def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) -> list[Check]:
     """The map, served by its own worker, with the network switched off.
 
@@ -3173,7 +3389,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # it is driven here rather than later because the cache is empty at this
         # point anyway -- a `forget()` in the middle of this check would take
         # away the terrain the offline visit below has to draw.
-        first.evaluate("async () => await window.trailsOffline.choose('view', 14)")
+        first.evaluate(KEEP_AREA, KEPT_AREA)
         context.set_offline(True)
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
@@ -3189,16 +3405,28 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             )
         )
 
-        # A small, real download: a tight view at the coarsest zoom the chooser
-        # offers is a few dozen tiles from Kartverket, which is a check and not
-        # a bulk fetch. **Zoomed in first**, and the two asks below are z14 and
-        # z15 rather than z12 and z13: the chooser floors at z14, so two asks
+        # **What the chooser draws, before anything is downloaded.** It needs the
+        # network for the terrain under the preview and the switch still off, and
+        # both are true here and neither is once the download below has run.
+        first.evaluate("async () => await window.trailsOffline.open(true)")
+        first.evaluate(KEEP_AREA, KEPT_AREA)
+        first.wait_for_function("() => { const s = window.trailsOffline.state(); return s && s.counted; }", timeout=60_000)
+        terrain.extend(what_the_chooser_draws(first))
+
+        # A small, real download: the area set above, at the coarsest zoom the
+        # chooser offers, is a few hundred tiles from Kartverket -- a check and
+        # not a bulk fetch. **Zoomed in first**, and the two asks below are z14
+        # and z15 rather than z12 and z13: the chooser floors at z14, so two asks
         # under it would clamp to the same set, the second run would skip every
         # tile as already kept, and the regression it exists for -- a download
         # made *through* the worker with the switch on -- would never happen.
+        #
+        # Set again rather than assumed: the check above drags one of its corners
+        # on purpose, and what is kept here has to be the ground the offline
+        # visit at the bottom looks at.
         first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
         first.wait_for_timeout(1500)
-        first.evaluate("async () => await window.trailsOffline.choose('view', 14)")
+        first.evaluate(KEEP_AREA, KEPT_AREA)
         first_ask = first.evaluate("() => window.trailsOffline.needed()")
         RAIL_OFFLINE = "() => (document.querySelector('.trails-rail [data-tool=offline] svg') || {}).innerHTML"
         drawn_off = first.evaluate(RAIL_OFFLINE)
@@ -3220,7 +3448,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # with a blank -- unless it lets `cache: 'reload'` past. Without that
         # branch every one of these is 68 bytes of transparent PNG written into
         # the terrain cache as terrain, and the panel reports success.
-        first.evaluate("async () => await window.trailsOffline.choose('view', 15)")
+        first.evaluate("async () => await window.trailsOffline.choose('draw', 15)")
         second_ask = first.evaluate("() => window.trailsOffline.needed()")
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
@@ -3286,11 +3514,11 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         second.wait_for_function(with_map("() => {" + DRAWN + " return drawn.length > 11000; }"), timeout=120_000)
         offline = second.evaluate(WHOLE_MAP)
         # And with the network off, what was kept is what is drawn: the tiles
-        # come back from the cache and none of them is the worker's blank. **At
-        # the view it was kept for**, which is the part that has to be said: the
-        # terrain above was chosen for a z14 viewport, and looking at z12
-        # instead asks for ground nobody kept and is answered, correctly, with
-        # 22 blanks.
+        # come back from the cache and none of them is the worker's blank. **On
+        # the ground it was kept for**, which is the part that has to be said:
+        # the terrain above was drawn as a rectangle round 65.55 N 13.05 E, and
+        # looking somewhere else asks for ground nobody kept and is answered,
+        # correctly, with blanks.
         second.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
         second.wait_for_timeout(3000)
         drawn_terrain = second.evaluate(

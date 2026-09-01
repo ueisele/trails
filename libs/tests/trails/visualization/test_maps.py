@@ -354,6 +354,16 @@ class TestOfflinePanel:
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
         return source.split("class _OfflinePanel")[1].split("\nclass ")[0]
 
+    @staticmethod
+    def script():
+        """The template alone, without the docstring above it.
+
+        Every figure this panel quotes is worked out at load, and the way to hold
+        it to that is to be able to look at the code without the prose that
+        explains it: the prose is allowed to name 6.76 GB, and the script is not.
+        """
+        return TestOfflinePanel.panel().split("_template = Template(")[1]
+
     def test_the_page_says_whether_this_browser_can_keep_it_at_all(self):
         """The page has computed `window.trailsWorker.why` since the worker was
         added and showed it nowhere. On iOS a service worker exists in Safari and
@@ -386,16 +396,67 @@ class TestOfflinePanel:
         assert "if (want && !there.tiles)" in panel
         assert "chooser = true;" in panel
 
-    def test_a_corridor_along_the_line_and_never_a_box_around_it(self):
-        """Measured on a real 42.3 km loop, the bounding box costs 2.4x the
-        corridor at z16 and 7.2x at z18: a round trip's box is mostly the hole in
-        the middle, which nobody walks. Only the viewport is a rectangle, because
-        a viewport is one."""
+    def test_four_pieces_of_ground_and_only_one_follows_the_paths(self):
+        """**A band along everything drawn was the wrong shape for this park.**
+        In Lomsdal-Visten one walks off the path, and a band along the paths puts
+        a white tile under anybody who leaves one -- so the scope that keeps
+        everything is a filled box now. The band stays, because along a line it
+        is still the cheapest useful shape by a long way: measured on a real
+        42.3 km loop, 1,722 tiles at z16 against 131,033 for the box.
+
+        The viewport is gone with it. It was never a piece of terrain so much as
+        a piece of screen, and what it was reached for -- *this valley and the
+        ridge behind it* -- is what the drawn area says properly."""
         panel = self.panel()
-        scopes = re.findall(r"\{key: '(\w+)', label: '([^']+)', pad: (\d)", panel)
-        assert {key for key, _, _ in scopes} == {"route", "view", "all"}
-        pads = {key: int(pad) for key, _, pad in scopes}
-        assert pads == {"route": 2, "view": 0, "all": 1}
+        scopes = re.findall(r"\{key: '(\w+)', label: '([^']+)', pad: (\d), ceiling: (\w+),", panel)
+        assert [key for key, _, _, _ in scopes] == ["all", "band", "rect", "draw"]
+        assert {key: int(pad) for key, _, pad, _ in scopes} == {"all": 1, "band": 2, "rect": 1, "draw": 1}
+        # Only the one that keeps everything stops short of where the source does.
+        assert {key: ceiling for key, _, _, ceiling in scopes} == {
+            "all": "CAP_ZOOM",
+            "band": "TOP",
+            "rect": "TOP",
+            "draw": "TOP",
+        }
+        assert "level > here.ceiling" in panel
+
+    def test_the_whole_map_fills_a_box_rather_than_following_a_band(self):
+        """Which is the entire point of replacing *everything drawn*: the band
+        was 1,722 tiles at z16 and the box is 131,033, and the difference is the
+        ground between the paths -- which in this park is the ground somebody is
+        standing on."""
+        panel = self.panel()
+        filled = panel.split("function boxAt(box, z) {")[1].split("\n                }")[0]
+        assert "for (x = Math.floor(a.x); x <= Math.floor(b.x); x += 1)" in filled
+        assert "for (y = Math.floor(a.y); y <= Math.floor(b.y); y += 1)" in filled
+        # Not a walk along anything, which is what it would be if this had been
+        # left as a corridor round the box's own edge.
+        assert "walk(" not in filled
+        assert "if (which === 'all') { return boxAt(mapBox(), z); }" in panel
+        # And the box is read off the layers rather than written down, or it goes
+        # stale the first time the sources move.
+        box = panel.split("function mapBox() {")[1].split("\n                }")[0]
+        assert "drawnLines().forEach" in box
+        assert "n = Math.max(n, at[0]); s = Math.min(s, at[0]);" in box
+
+    def test_the_selection_is_measured_once_and_halved_down_to_z11(self):
+        """A tile at z-1 is the tile at z with both coordinates shifted right, so
+        one pass answers every level below it. **And the margin is laid on each
+        level while the unpadded set is what goes down**: padding first and
+        halving the padded set compounds the margin all the way to z11, where a
+        tile is eight kilometres across."""
+        panel = self.panel()
+        levels = panel.split("function levelsFor(coreAt, top, pad) {")[1].split("\n                }")[0]
+        assert "var out = {}, below = coreAt(top), z;" in levels
+        assert "out[top] = padded(below, pad);" in levels
+        assert "out[z] = padded(up, pad);" in levels
+        assert "below = up;" in levels
+        assert "below = padded" not in levels
+        # z11 whatever the reader picked, because a map that cannot be zoomed out
+        # of is not a map anybody navigates with. FLOOR is the coarsest zoom
+        # somebody may *choose*; it is not the floor of the pyramid.
+        assert "for (z = top - 1; z >= BOTTOM; z -= 1)" in levels
+        assert "var BOTTOM = 11;" in panel
 
     def test_a_straight_run_between_two_vertices_is_walked_and_not_skipped(self):
         """The drawn geometry is simplified at 8 m, so a straight across a
@@ -414,17 +475,151 @@ class TestOfflinePanel:
         assert "var TOP = 18;" in panel
         assert "var FLOOR = 14;" in panel
 
-    def test_everything_drawn_is_refused_above_the_zoom_that_is_a_download(self):
-        """2.1 GB at z16, 4.0 GB at z17 and about 9 GB at z18 -- the last a
-        quarter of a million requests to somebody else's service."""
+    def test_the_budget_is_measured_at_load_rather_than_written_down(self):
+        """It is what the whole map costs at the zoom that scope is capped at --
+        6.76 GB on this build -- and every other scope is held to it, so nothing
+        on this panel can quietly cost more than the choice that keeps
+        everything. Worked out at load, because a figure typed in here is a
+        figure that goes stale the first time the sources move."""
         panel = self.panel()
-        assert "{key: 'all', label: 'Everything drawn', pad: 1, ceiling: 16," in panel
-        assert "level > here.ceiling" in panel
+        assert "cap = cost('all', CAP_ZOOM).bytes;" in panel
+        assert "var CAP_ZOOM = 16;" in panel
+        # Every zoom whose result would go over it is refused, and says why.
+        assert "cap !== null && known && known.bytes > cap" in panel
+        assert "'Over the budget: '" in panel
+        # A comment may name the measurement -- that is what comments here are
+        # for. The code may not, because a figure written into the code is one
+        # that keeps being quoted after it has stopped being true.
+        code = "\n".join(line for line in self.script().split("\n") if not line.strip().startswith("//"))
+        assert "6.76" not in code
+
+    def test_the_buffer_key_holds_every_corner_and_not_their_number(self):
+        """**Measured against the shape on the screen, not reasoned about.**
+        Dragging a handle moves a point in the middle of the list and leaves both
+        the count and the last corner alone, so a key made of those two is the
+        same key for two different areas -- and the panel answered out of the
+        buffer with the area the shape used to have."""
+        panel = self.panel()
+        sig = panel.split("function sig(which, level) {")[1].split("\n                }")[0]
+        assert "at[0].toFixed(5) + ',' + at[1].toFixed(5)" in sig
+        assert ".join(';')" in sig
+        assert "drawn.length" not in sig
+        # And the buffer is what the zoom row reads, or every repaint prices five
+        # levels of a turned rectangle to draw a row of buttons.
+        assert "memo[at] = guess || weigh(levelsFor(coreOf(which), level, scopeOf(which).pad));" in panel
+
+    def test_a_ring_too_large_to_price_is_refused_before_it_is_built(self):
+        """An area drawn round the whole park, priced at z18, is 1.5 million
+        tiles at the top level alone -- a few hundred megabytes of arrays and
+        about a second, to work out a figure that was always going to be a
+        refusal. And the chooser prices every level it offers, so drawing that
+        area would spend it without anybody asking for z18.
+
+        **The estimate is the ring's own area and not its bounding box**, which
+        is the one place that distinction matters: the box round the route is
+        deliberately diagonal, and refusing z18 for a rectangle that fits the
+        budget would take away the reason it is turned at all."""
+        panel = self.panel()
+        assert "function ringTiles(ring, level)" in panel
+        area = panel.split("function ringTiles(ring, level) {")[1].split("\n                }")[0]
+        assert "sum += (b.x + a.x) * (b.y - a.y);" in area
+        assert "Math.abs(sum / 2)" in area
+        assert "bytes > budget() * 2" in panel
+        # And the same refusal is held where the selection is built, because
+        # switching scope keeps the zoom it was on.
+        assert "while (zoom > FLOOR && cost(scope, zoom).bytes > budget()) { zoom -= 1; }" in panel
+
+    def test_the_preview_paints_kept_tiles_inside_the_screen_tile(self):
+        """**Two other ways of drawing this are wrong and both were built.**
+        Testing only the screen tile's centre paints nothing at all zoomed out,
+        because the centre almost never lands in a kept tile; filling the whole
+        screen tile whenever it holds any kept one turns a valley into a county
+        -- reported from a phone, where an area a few kilometres across was
+        painted a hundred kilometres wide."""
+        panel = self.panel()
+        tile = panel.split("createTile: function (coords) {")[1].split("\n                });")[0]
+        assert "var step = Math.pow(2, z - coords.z);" in tile
+        # The screen the finer of the two: then and only then the whole tile.
+        assert "if (step <= 1) {" in tile
+        assert "ink.fillRect(0, 0, side, side);" in tile
+        # The screen the coarser: sub-rectangles of side/step, one per kept tile.
+        assert "var px = side / step" in tile
+        assert "ink.fillRect(i * px, j * px, px, px);" in tile
+        # And under a pixel it draws nothing rather than rounding a speck up.
+        assert "if (step > side) { return canvas; }" in tile
+        # A grid layer, so the preview costs what the screen costs whether the
+        # selection is 400 tiles or 131,000.
+        assert "L.GridLayer.extend({" in panel
+
+    def test_the_panel_says_which_level_is_the_one_coloured_in(self):
+        """Every level carries its own one-tile margin, so the same selection is
+        223 km2 at z15 and 1,712 km2 at z11. Without this line the shape looks as
+        though it grew when the reader zoomed out."""
+        panel = self.panel()
+        saying = panel.split("function sayLayer() {")[1].split("\n                }")[0]
+        assert "'Coloured in: level z'" in saying
+        assert "' tiles of '" in saying
+        assert "km2" in saying
+        assert "map.on('zoomend', function () { if (chooser) { sayLayer(); } });" in panel
+
+    def test_a_band_and_a_box_need_a_line_and_say_which_one_they_took(self):
+        """The planned route first, because a reader who has planned one is
+        keeping ground for that; the selected track otherwise. Neither, and the
+        two scopes are not offered at all -- the rule the route scope has always
+        followed, rather than a button that answers nothing."""
+        panel = self.panel()
+        source = panel.split("function source() {")[1].split("\n                }")[0]
+        assert "var planned = routeLine();" in source
+        assert "'the route you planned'" in source
+        assert "window.trailsProfile" in source
+        assert "'the track you have selected'" in source
+        assert "return from || (each.key !== 'band' && each.key !== 'rect');" in panel
+        # And it is said on the panel, because which of the two was taken changes
+        # what the selection is and nothing else on the screen would show it.
+        assert "' Drawn round ' + from.from + '.'" in panel
+
+    def test_the_box_round_the_route_is_turned_to_lie_close(self):
+        """A convex hull and rotating calipers: the minimum-area enclosing
+        rectangle always has one side flush with a hull edge, so trying each edge
+        is the whole algorithm. **Worked in metres about the line's own centre**,
+        because an angle in degrees of latitude and longitude is not an angle on
+        the ground -- at 65 degrees north a degree of longitude is 46 km and a
+        degree of latitude 111."""
+        panel = self.panel()
+        rect = panel.split("function rectRing(points, by) {")[1].split("\n                }")[0]
+        assert "convex(" in rect
+        assert "111320 * Math.cos(mid[0] * Math.PI / 180)" in rect
+        assert "Math.atan2(b[1] - a[1], b[0] - a[0])" in rect
+        assert "if (!best || area < best.area)" in rect
+        # The margin is a slider in metres, 0 to 5 km, because ground to leave
+        # the line by is the thing being asked for and it is not a zoom.
+        assert "said.margin.max = '5000';" in panel
+        assert "'Room round the line'" in panel
+
+    def test_a_corner_is_a_finger_wide_and_the_tap_stops_at_it(self):
+        """44 px of target around a 15 px dot: the dot is what a finger aims at
+        and the target is what it hits. And the tap stops there, or the map's own
+        click places a second corner directly on top of the one just touched."""
+        panel = self.panel()
+        assert "iconSize: [44, 44]" in panel
+        assert "L.DomEvent.stopPropagation(event);" in panel
+        # **Outline while dragging, tiles when it lands.** A point-in-polygon
+        # pass over the whole bounding box, dozens of times a second, on a phone.
+        dragging = panel.split("handle.on('drag', function () {")[1].split("});")[0]
+        assert "outline.setLatLngs(drawn)" in dragging
+        assert "again()" not in dragging
+        assert "again();" in panel.split("handle.on('dragend', function () {")[1].split("});")[0]
+        # Joined in the order they were tapped, and left tangled if they were
+        # tapped across each other: quietly taking the convex hull would keep
+        # ground nobody asked for and give no way of saying so.
+        assert "Corners are joined in the order they were tapped" in panel
+        assert "convex(drawn" not in panel
 
     def test_what_will_not_fit_is_refused_against_the_room_there_is(self):
-        """A ceiling per scope catches *everything drawn* at z17; it does not
-        catch a viewport zoomed out over the county, which asks for 22 GB --
-        measured -- and looks as reasonable as any other choice on the screen."""
+        """A ceiling per scope catches the whole map above z16; it does not catch
+        a phone with 3 GB free and a selection that fits the budget twice over.
+        This is measured on the device: a Firefox profile answered 3.3 GB, and a
+        phone will answer something else again."""
         panel = self.panel()
         assert "counted.bytes > free * 0.9" in panel
         assert "That is more than this device will hold" in panel
@@ -451,22 +646,52 @@ class TestOfflinePanel:
 
     def test_the_chooser_is_not_rebuilt_every_twenty_five_tiles(self):
         """Progress arrives every 25 tiles, and rebuilding the chooser that often
-        rebuilds ten buttons, re-reads the plan's whole route to decide whether
-        to offer *This route*, and takes the focus off whatever the reader was
-        on — including the Stop button they are reaching for."""
+        re-reads the plan's whole route to decide which scopes to offer and takes
+        the focus off whatever the reader was on -- including the Stop button
+        they are reaching for."""
         panel = self.panel()
-        assert "if (!working) { drawChooser(); }" in panel
+        drawing = panel.split("function draw() {")[1].split("\n                }")[0]
+        assert "if (!working) { drawChooser(); }" in drawing
+        assert drawing.count("drawChooser(") == 1
         # Built once when the run starts, so Stop is there to be pressed.
-        assert panel.count("drawChooser();") == 2
+        assert "drawChooser();\n                    draw();\n                    return state.done_;" in panel
+
+    def test_the_slider_and_the_corner_buttons_survive_being_counted(self):
+        """A margin slider is a control somebody drags, and a drag on an element
+        that is thrown away and made again on every recount ends the moment the
+        first figure arrives. So the chooser is built once and filled: only the
+        two rows of buttons are rewritten."""
+        panel = self.panel()
+        build = panel.split("function build() {")[1].split("\n                }")[0]
+        assert "said.margin = document.createElement('input');" in build
+        assert "said.margin.addEventListener('input'" in build
+        assert "said.go.addEventListener('click'" in build
+        chooser = panel.split("function drawChooser() {")[1].split("\n                }\n\n                function draw()")[0]
+        assert "said.chooser.innerHTML" not in chooser
+        assert "said.which.innerHTML = '';" in chooser
+        assert "said.fine.innerHTML = '';" in chooser
 
     def test_the_ceiling_belongs_to_the_scope_and_not_to_the_button(self):
         """Disabling a button is what the screen does; it is not what is true.
-        `choose('all', 18)` has to come back clamped, or the invariant is
-        painted on rather than held."""
+        `choose('all', 18)` has to come back clamped, and so does a level that
+        would go over the budget, or the invariant is painted on rather than
+        held."""
         panel = self.panel()
-        chosen = panel.split("choose: function (which, level)")[1].split("},")[0]
+        chosen = panel.split("choose: function (which, level)")[1].split("\n                    },")[0]
         assert "zoom > here.ceiling" in chosen
         assert "zoom > TOP" in chosen and "zoom < FLOOR" in chosen
+        assert "while (zoom > FLOOR && cost(scope, zoom).bytes > budget())" in chosen
+
+    def test_the_drawn_area_can_be_set_from_outside(self):
+        """There is no way to tap four corners from a script and have the map
+        believe it, and the check that this panel keeps what it says it will keep
+        has to ask for a piece of ground small enough to be a check rather than a
+        bulk fetch off somebody else's service."""
+        panel = self.panel()
+        assert "area: function (ring) {" in panel
+        given = panel.split("area: function (ring) {")[1].split("\n                    },")[0]
+        assert "drawn = (ring || []).map(" in given
+        assert "return again();" in given
 
     def test_the_reader_can_get_the_space_back(self):
         """A gigabyte somebody cannot get rid of from inside the thing that took
@@ -490,6 +715,14 @@ class TestOfflinePanel:
         # figures on it are what the device holds now, not what it held then.
         assert "if (key === 'offline' && window.trailsOffline) { window.trailsOffline.refresh(); }" in html
 
+    def test_the_preview_stays_out_of_the_box_it_is_measured_against(self):
+        """The outline is a layer on this map like any other, and `mapBox` reads
+        the box off the layers -- so without a mark on it, an area drawn outside
+        the paths would move the box that the whole map scope is."""
+        panel = self.panel()
+        assert "if (layer.options && layer.options.trailsOffline) { return; }" in panel
+        assert "trailsOffline: true" in panel
+
     def test_persistence_is_asked_for_from_the_press_and_not_at_load(self):
         """WebKit deletes storage a script created once an origin has gone seven
         days without a visit -- exactly the walk somebody keeps terrain for a
@@ -497,7 +730,7 @@ class TestOfflinePanel:
         origin nobody has touched asking to be kept for ever is what that rule
         exists to refuse."""
         panel = self.panel()
-        asked = panel.split("go.addEventListener('click'")[1].split("});")[0]
+        asked = panel.split("said.go.addEventListener('click', function () {")[1].split("\n                    });")[0]
         assert "navigator.storage.persist()" in asked
 
     def test_a_route_is_asked_of_the_plan_rather_than_read_off_the_map(self):
