@@ -868,6 +868,30 @@ the first of which is worth more than the other two together:
   rather than after each of them — and **build before driving**, or the run
   reports the page as it was before the change.
 
+**Four rules about driving a browser that were learned by a run going wrong, and
+lived only outside this repository until now.** They are here because they are
+not derivable from the code and each one costs a wasted run to rediscover.
+
+- **Playwright's Firefox is already on the machine that has one**, under
+  `~/.cache/ms-playwright` (307 MB, `firefox-1538`), so `uv run --with playwright`
+  resolves into an ephemeral overlay and downloads no browser. `uv.lock` and
+  `pyproject.toml` come out byte-identical — verified — which is why a browser
+  driver is never added as a dependency of this package. Chromium is *not*
+  cached. **A fresh machine downloads it on the first `make drive`.**
+- **Order the probes: click before wheel.** The wheel check zooms two levels in
+  over the top-left corner, which carries the park off the screen; every later
+  probe inside it then finds nothing and reads *exactly* like a broken map.
+- **`page.mouse.wheel(0, -300)` moves nothing.** One notch is `-120` and one
+  notch is one zoom level, so a documented 9 → 11 is two calls, not one big one.
+- **Do not use `getScreenCTM()` to map screen coordinates into an SVG path's own
+  space.** It does not see the CSS transform Leaflet pans the overlay pane with,
+  so `isPointInFill` answers *outside* everywhere. Ask Leaflet instead —
+  `map.containerPointToLatLng` with the layer's `getLatLngs()` — or derive the
+  affine from `getBBox()` against `getBoundingClientRect()`. (Since the map draws
+  into a canvas there are no paths to hit-test at all, which is the other half of
+  the same lesson: find drawn things through `map.eachLayer`, not through the
+  DOM.)
+
 **Waiting rather than sleeping, which this suite said about itself and stopped
 doing.** `select` has the rule in its own docstring — a fixed pause is a guess
 that is too long on a fast machine and too short on a slow one — and every check
