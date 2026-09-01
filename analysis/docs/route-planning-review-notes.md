@@ -861,7 +861,7 @@ the first of which is worth more than the other two together:
   the file costs one run; running it twice to see two parts of one report costs
   two. That was being done, repeatedly, and it doubled every wait a reader had.
 - **`ARGS="--only <word>"`** runs the checks whose name holds that word — ten
-  readings instead of 275 while one behaviour is being written. What is left out
+  readings instead of 278 while one behaviour is being written. What is left out
   is not reported at all rather than reported as skipped: a skip means *this
   could not be driven*, and *you did not ask for it* is a different sentence.
 - **Batch the changes.** Build once, drive once, at the end of a set of edits
@@ -1891,7 +1891,7 @@ survives a compaction, and everything below assumes it. Then `git log --oneline
 -30`, which says what was last done and why, because every commit message here
 carries the measurement that justified it. Then `command make map` and
 `command make drive`, which take about a minute and **400 seconds** and say
-whether the page still holds: **275 readings, and it should be green**. If it is
+whether the page still holds: **278 readings, and it should be green**. If it is
 not, the report's last line says whether an invariant broke or a recorded figure
 moved, and those are different problems — and its **first** check says whether
 the page ran at all, which is the one to read before any other.
@@ -1899,7 +1899,7 @@ the page ran at all, which is the one to read before any other.
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs, which was being done and doubled every wait.
 While one behaviour is being written, `ARGS="--only <word>"` is ten readings
-instead of 275. And **build before driving**: the run reads the page `make map`
+instead of 278. And **build before driving**: the run reads the page `make map`
 last built, so without that it reports the state before the change. All three are
 in *Verifying a build* below and beside the command in `CLAUDE.md`.
 
@@ -4256,6 +4256,20 @@ is worth less than no check, and this document has that entry twice already.
 view the terrain was kept for: 24 tiles drawn, none blank. Offline at a view
 nobody kept: **28 of 30 blank**, nothing thrown. Ground you did not keep is
 supposed to be blank rather than broken, and that had never been asserted.
+
+**And what survives a reload, which nothing held either.** Both parts do — the
+switch, because it is in `localStorage` and re-told to the worker on load, and
+the terrain, because its cache is not stamped with a version and is never
+trimmed. Measured across a reload with a network and a reload without one: the
+switch on, 40 kept, 24 tiles drawn at the kept view and none of them blank, and
+nothing thrown either time.
+
+**The reading that matters most there is the one taken with the network up.** On
+ground nobody kept, online, with the switch on: **0 tiles drawn and 24 blank.**
+That is the difference between *offline mode works* and *the network happened to
+be missing* — and it is the whole reason the switch is worth having indoors,
+because checking coverage before walking out is the only cheap way to find out
+what was not kept. Until now nothing in the suite could tell those two apart.
 
 ### A finding that was a grep, and the tag it could not see
 

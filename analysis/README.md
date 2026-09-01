@@ -145,6 +145,11 @@ at z18; everything drawn is 377 MB at z14 and 2.1 GB at z16, and is refused abov
 that. Anything larger than the device will hold is refused too, with the room it
 actually has. *Delete* gives the space back.
 
+Both the switch and what you kept survive a reload, with or without a signal.
+And with the switch on, ground you did not keep stays blank **even when there is
+a network** — which is the point of being able to turn it on at home: it shows
+you what you are missing while you can still do something about it.
+
 Everything else already worked with no signal: every line, every profile, the
 routing, the search and the files are inside the document.
 
@@ -163,7 +168,7 @@ route has settled the map goes to it.
 command make drive
 ```
 
-Drives the built map in a browser and reports **275 readings** — the counts the
+Drives the built map in a browser and reports **278 readings** — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,
@@ -175,7 +180,7 @@ the worker's own blank.
 
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs. While one behaviour is being written,
-`ARGS="--only <word>"` is ten readings instead of 275. And **build before
+`ARGS="--only <word>"` is ten readings instead of 278. And **build before
 driving**: the run reads the page `command make map` last built.
 
 **It does not overlap with `command make test`.** The tests assert on the page's

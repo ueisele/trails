@@ -3101,6 +3101,23 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 note=f"smallest of {weighed['sampled']}: {weighed['smallest']} B",
             )
         )
+        # **And the switch is what stops the fetch, not a missing network.** The
+        # whole point of being able to turn it on indoors is to see coverage
+        # before walking out; if the network were what was answering, this would
+        # be untested and nobody would know until a valley. Driven online, on
+        # ground nobody kept.
+        first.evaluate(with_map("() => __MAP__.setView([65.30, 12.40], 12)"))
+        first.wait_for_timeout(3000)
+        indoors = first.evaluate(
+            """() => {
+                let good = 0, blank = 0;
+                document.querySelectorAll('img.leaflet-tile').forEach(img => {
+                    if (img.naturalWidth > 1) { good += 1; } else { blank += 1; }
+                });
+                return {good: good, blank: blank};
+            }"""
+        )
+        terrain.append(Reading("with the switch on, unkept ground stays blank even online", indoors["good"], 0, note=f"{indoors['blank']} blank"))
         first.close()
 
         context.set_offline(True)
@@ -3135,6 +3152,13 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 return {good: good, blank: blank};
             }"""
         )
+        # Read before anything is drawn: the switch is held in localStorage and
+        # re-told to the worker on load, and the worker keeps its own copy in the
+        # terrain cache because it is stopped and started around single fetches.
+        reloaded = second.evaluate("async () => await window.trailsOffline.refresh()")
+        terrain.append(Reading("the switch survives a reload", reloaded["on"], True))
+        terrain.append(Reading("and so does the terrain", reloaded["kept"]["tiles"], second_ask["tiles"]))
+
         terrain.append(Reading("offline, the kept ground draws", drawn_terrain["good"] > 0, True, note=f"{drawn_terrain['good']} tiles"))
         terrain.append(Reading("and none of it is a broken image", drawn_terrain["blank"], 0))
 
