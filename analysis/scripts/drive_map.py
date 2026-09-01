@@ -216,6 +216,13 @@ FURNITURE = with_map(
     // burger already had, and Leaflet's is Leaflet's again.
     controls: [fromRight(rail), at(zoom)],
     scaleBars: document.querySelectorAll('.leaflet-control-scale-line').length,
+    // **The touch icon, fetched rather than read off the tag.** iOS takes this
+    // one and ignores the manifest's, and the page carried it as a `data:` URI
+    // for months -- a link that is present, well-formed, and one Safari will not
+    // fetch, so the home screen showed a screenshot. A link that resolves to
+    // nothing looks exactly the same in the markup.
+    touchIcon: (document.querySelector('link[rel="apple-touch-icon"]') || {}).getAttribute
+      ? document.querySelector('link[rel="apple-touch-icon"]').getAttribute('href') : null,
     // Asked of the browser and not of the stylesheet: `!important` against a
     // third party's rule is exactly the kind of override that can lose, and
     // losing it looks like a slightly blurred number rather than an error.
@@ -567,6 +574,7 @@ def furniture(page: Any) -> Check:
             # and imperial, one above the other, and with the zoom line under
             # them that corner reads as the same control drawn twice.
             Reading("bars in the scale control", seen["scaleBars"], 1),
+            Reading("the touch icon is a file, not a data: URI", seen["touchIcon"], "icon-180.png"),
             Reading("and the figures drawn once, not twice", seen["scaleShadow"], "none"),
             Reading("strokes in the offline tool's drawing", seen["offlineStrokes"] > 0, True, note=f"{seen['offlineStrokes']} paths"),
             # **The rail takes the right and Leaflet keeps the left.** It stood
@@ -579,6 +587,41 @@ def furniture(page: Any) -> Check:
             Reading("zoom buttons, px from the left", zoom, 10, within=1),
         ],
     )
+
+
+def the_icons_are_there(page: Any) -> Check:
+    """The four files the page and its manifest link to, fetched.
+
+    **Because a link is not a file.** The page links to `icon-180.png` and the
+    manifest to `icon-192.png` and `icon-512.png`; whether the build wrote them
+    and the deploy carried them is a different question from whether the markup
+    names them, and only one of the two shows up on a home screen.
+
+    Args:
+        page: The driven page
+
+    Returns:
+        What each icon answered, and what it turned out to be
+    """
+    got = page.evaluate(
+        """async () => {
+            const out = {};
+            for (const name of ['icon-32.png', 'icon-180.png', 'icon-192.png', 'icon-512.png']) {
+                try {
+                    const answer = await fetch(name);
+                    const bytes = new Uint8Array(await answer.arrayBuffer());
+                    // The PNG signature, so a 404 page served as an image cannot pass.
+                    const png = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+                    out[name] = {ok: answer.ok, png: png, bytes: bytes.length};
+                } catch (missing) { out[name] = {ok: false, png: false, bytes: 0}; }
+            }
+            return out;
+        }"""
+    )
+    readings = []
+    for name, answer in got.items():
+        readings.append(Reading(f"{name} is a PNG that answers", bool(answer["ok"] and answer["png"]), True, note=f"{answer['bytes']} B"))
+    return Check("the icons the page links to", readings)
 
 
 def map_wheel(page: Any) -> Check:
@@ -3604,7 +3647,7 @@ def drive(page: Any) -> list[Check]:
     Returns:
         Every check, in the order it ran
     """
-    checks = [check(page) for check in (furniture, map_wheel, chrome_layout, the_profile_tool) if wanted(check)]
+    checks = [check(page) for check in (furniture, the_icons_are_there, map_wheel, chrome_layout, the_profile_tool) if wanted(check)]
     if wanted(the_zoom_the_scale_says):
         checks.append(the_zoom_the_scale_says(page))
 

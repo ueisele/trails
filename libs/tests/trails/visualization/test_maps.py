@@ -857,20 +857,42 @@ class TestManifest:
         said = json.loads(maps.write_manifest(page, "Lomsdal-Visten").read_text(encoding="utf-8"))
         assert {icon["sizes"] for icon in said["icons"]} == {"192x192", "512x512"}
         for icon in said["icons"]:
-            assert icon["src"].startswith("data:image/png;base64,")
+            assert icon["src"] in ("./icon-192.png", "./icon-512.png")
+            # A full square with the cairn well inside it, so a launcher may crop
+            # it to a circle or a squircle without cutting a stone off.
+            assert icon["purpose"] == "any maskable"
 
-    def test_the_mark_is_a_real_png_at_whatever_size_is_asked_for(self):
-        """Drawn rather than committed, and its edges blended: a triangle
-        rasterised on whole pixels has a staircase down both slopes that is
-        plainly visible at 180 px."""
-        for side in (32, 180, 512):
-            drawn = maps._icon_png(side)
-            assert drawn.startswith(b"\x89PNG\r\n\x1a\n")
-            assert struct.unpack(">II", drawn[16:24]) == (side, side)
-        # Blended, which whole-pixel filling would not be: the slope carries
-        # values that are neither the ground nor the peak.
-        pixels = maps._icon_png(180)
-        assert len(pixels) > 500
+    def test_the_mark_ships_as_files_at_every_size_the_page_links_to(self):
+        """A page that links to `icon-180.png` and does not write one is a home
+        screen showing a screenshot. Every size in `ICON_SIZES` is a link
+        somewhere — the document, the manifest — so a missing one is a broken
+        reference and this raises rather than shipping it."""
+        for side in maps.ICON_SIZES:
+            source = maps.ICON_DIR / f"atlas-{side}.png"
+            assert source.is_file(), f"no source icon for {side}"
+            raw = source.read_bytes()
+            assert raw.startswith(b"\x89PNG\r\n\x1a\n")
+            assert struct.unpack(">II", raw[16:24]) == (side, side)
+
+    def test_the_icons_are_written_beside_the_page(self, tmp_path):
+        """Named for the page and not for the source: the document links to
+        `icon-180.png` whatever the file in the package is called."""
+        page = tmp_path / "lomsdal-visten.html"
+        page.write_text("<html></html>", encoding="utf-8")
+
+        written = maps.write_icons(page)
+
+        assert [each.name for each in written] == [f"icon-{side}.png" for side in maps.ICON_SIZES]
+        for each in written:
+            assert each.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+    def test_a_missing_size_is_refused_rather_than_shipped(self, tmp_path, monkeypatch):
+        """Silently writing three of four leaves the page pointing at an object
+        that is not there, and nothing says so until somebody adds it to a home
+        screen."""
+        monkeypatch.setattr(maps, "ICON_DIR", tmp_path / "empty")
+        with pytest.raises(FileNotFoundError, match="icon-32.png"):
+            maps.write_icons(tmp_path / "lomsdal-visten.html")
 
     def test_the_page_carries_its_name_its_mark_and_the_manifest(self):
         """Folium writes no title at all, so the tab and a home-screen icon were
@@ -878,7 +900,12 @@ class TestManifest:
         html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), title="Lomsdal-Visten").get_root().render()
         assert "<title>Lomsdal-Visten</title>" in html
         assert '<link rel="manifest" href="manifest.webmanifest">' in html
-        assert '<link rel="apple-touch-icon" href="data:image/png;base64,' in html
+        # **A file and not a `data:` URI.** Safari will not fetch one for a touch
+        # icon, so inline the link is well-formed and dead, and the home screen
+        # falls back to a screenshot of the map. Reported from a phone.
+        assert '<link rel="apple-touch-icon" href="icon-180.png">' in html
+        assert '<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">' in html
+        assert "data:image/png;base64," not in html.split("</head>")[0]
         assert '<meta name="apple-mobile-web-app-capable" content="yes">' in html
 
     def test_the_written_page_leaves_the_browser_its_own_zoom(self, tmp_path):

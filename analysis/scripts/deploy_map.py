@@ -155,9 +155,9 @@ def squeezed(source: Path) -> tuple[Path, int]:
     return squeezed_file, squeezed_file.stat().st_size
 
 
-#: The two small objects that ride beside the map, with what each is and how
-#: long an edge may hold it. Both are uncompressed: they are kilobytes, so
-#: compressing them saves nothing worth a decompression.
+#: The small objects that ride beside the map, with what each is and how long an
+#: edge may hold it. All uncompressed: they are kilobytes, so compressing them
+#: saves nothing worth a decompression — and a PNG is already compressed.
 BESIDE = {
     # The one object whose whole job is to be noticed when it changes -- an edge
     # holding yesterday's worker would hold yesterday's map with it, for as long
@@ -167,6 +167,17 @@ BESIDE = {
     # WebKit's seven-day sweep of storage a script created. It changes only when
     # the map is renamed, so an edge may hold it as long as it holds the page.
     "manifest.webmanifest": ("application/manifest+json", "max-age=300"),
+    # **The mark, as four files rather than as a data: URI inside the page.**
+    # iOS reads `apple-touch-icon` off the document and will not fetch a data:
+    # URI for it, so an inline mark is a link that resolves to nothing and the
+    # home screen shows a screenshot of the map instead. 180 is the one iOS
+    # takes; 32 is the tab; 192 and 512 are what the manifest offers a launcher.
+    # Held as briefly as the manifest: the name never changes, so a redesign
+    # would otherwise sit behind a long TTL with nothing to purge it.
+    "icon-32.png": ("image/png", "max-age=300"),
+    "icon-180.png": ("image/png", "max-age=300"),
+    "icon-192.png": ("image/png", "max-age=300"),
+    "icon-512.png": ("image/png", "max-age=300"),
 }
 
 
@@ -316,6 +327,8 @@ def main() -> None:
             upload_beside(companion, config)
         elif name == "sw.js":
             print("⚠️  No sw.js beside the map — readers get no offline copy. Was this built by `make map`?")
+        elif name.startswith("icon-"):
+            print(f"⚠️  No {name} beside the map — the page links to it, so a home screen gets a screenshot instead.")
         else:
             print(f"⚠️  No {name} beside the map — it cannot be installed, so iOS will sweep what it keeps.")
 

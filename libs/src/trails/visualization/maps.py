@@ -10,13 +10,10 @@ visually::
     save_map(fmap, pathlib.Path("map.html"))
 """
 
-import base64
 import hashlib
 import json
 import pathlib
 import re
-import struct
-import zlib
 from dataclasses import dataclass
 from enum import Enum
 from html import escape
@@ -499,63 +496,56 @@ _ICON_PEAKS = (((0.30, 0.40), 0.02, 0.58, _ICON_FAR), ((0.58, 0.24), 0.20, 0.98,
 _ICON_BASE = 0.80
 
 
-def _icon_png(side: int) -> bytes:
-    """Draw the map's mark, at whatever size is asked for.
+#: Where the mark lives. One of a pair, drawn beside the almanac icon that
+#: ``weather-cards`` publishes at ``almanac.cairn.zone``: the same stack of five
+#: unequal stones -- a cairn, which is what marks a route in these mountains --
+#: with a path below it here and an arc above it there. The stones are ellipses
+#: rather than rounded rectangles, because rounded rectangles stack into a set of
+#: teacups with a seam at every corner, and they are unequal and set off one
+#: another, because evenly centred a cairn reads as a wedding cake. The drawing
+#: script is in ``docs/draw.ts``.
+ICON_DIR = pathlib.Path(__file__).parent / "icons"
 
-    **Scanline, with the two edge pixels of each row blended.** A triangle
-    rasterised on whole pixels has a staircase down both slopes that is plainly
-    visible at 180 px, and a supersampled one costs a megapixel of Python per
-    icon. Covering the partial pixel at each end of the row is where nearly all
-    of the difference is, and it is O(rows) rather than O(pixels).
-
-    Args:
-        side: Width and height in pixels.
-
-    Returns:
-        The PNG's bytes.
-    """
-    rows = [bytearray(_ICON_GROUND * side) for _ in range(side)]
-    base = _ICON_BASE * side
-    for (apex_x, apex_y), left, right, colour in _ICON_PEAKS:
-        top, foot = apex_y * side, base
-        for y in range(max(0, int(top)), min(side, int(foot) + 1)):
-            down = (y + 0.5 - top) / (foot - top)
-            if not 0.0 <= down <= 1.0:
-                continue
-            span_l = (apex_x + (left - apex_x) * down) * side
-            span_r = (apex_x + (right - apex_x) * down) * side
-            row = rows[y]
-            for x in range(max(0, int(span_l)), min(side, int(span_r) + 1)):
-                # How much of this pixel the triangle covers, which is one at
-                # every pixel that is not on an edge.
-                covered = min(x + 1.0, span_r) - max(float(x), span_l)
-                if covered <= 0.0:
-                    continue
-                covered = min(covered, 1.0)
-                at = x * 3
-                for channel in range(3):
-                    was = row[at + channel]
-                    row[at + channel] = int(round(was + (colour[channel] - was) * covered))
-    raw = b"".join(b"\x00" + bytes(row) for row in rows)
-
-    def chunk(kind: bytes, body: bytes) -> bytes:
-        whole = kind + body
-        return struct.pack(">I", len(body)) + whole + struct.pack(">I", zlib.crc32(whole) & 0xFFFFFFFF)
-
-    head = struct.pack(">IIBBBBB", side, side, 8, 2, 0, 0, 0)
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", head) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
+#: The sizes written beside the page, and what each is for. 180 is the one iOS
+#: reads off ``apple-touch-icon``; 32 is the tab; 192 and 512 are what the
+#: manifest offers a launcher. They are shipped rather than drawn: this module
+#: used to rasterise a triangle into a ``data:`` URI, which is how a page ends up
+#: with a touch-icon link Safari will not fetch.
+ICON_SIZES = (32, 180, 192, 512)
 
 
-def icon_uri(side: int) -> str:
-    """The mark at one size, as a ``data:`` URI.
+def write_icons(beside: pathlib.Path) -> list[pathlib.Path]:
+    """Write the mark beside the built page, one file per size.
+
+    **Files, because a ``data:`` URI does not work for the one link that
+    matters.** iOS reads ``apple-touch-icon`` from the document rather than the
+    manifest's icons, and it will not fetch a ``data:`` URI for it -- so an
+    inline mark is a link that is present and does nothing, and the home screen
+    falls back to a screenshot of the page.
+
+    The names are the page's, not the source's: ``icon-180.png`` beside the map,
+    whatever the file in :data:`ICON_DIR` is called. The deploy uploads whatever
+    this wrote.
 
     Args:
-        side: Width and height in pixels.
+        beside: The built page. The icons are written into its directory.
 
     Returns:
-        A URI a manifest or a ``<link>`` can carry directly.
+        The files written, in the order of :data:`ICON_SIZES`.
+
+    Raises:
+        FileNotFoundError: If a size is missing from :data:`ICON_DIR`, which
+            means the page would ship a link to an object that is not there.
     """
-    return "data:image/png;base64," + base64.b64encode(_icon_png(side)).decode("ascii")
+    written = []
+    for side in ICON_SIZES:
+        source = ICON_DIR / f"atlas-{side}.png"
+        if not source.is_file():
+            raise FileNotFoundError(f"no icon at {source} — the page links to icon-{side}.png")
+        target = beside.with_name(f"icon-{side}.png")
+        target.write_bytes(source.read_bytes())
+        written.append(target)
+    return written
 
 
 def write_manifest(beside: pathlib.Path, name: str) -> pathlib.Path:
@@ -567,10 +557,15 @@ def write_manifest(beside: pathlib.Path, name: str) -> pathlib.Path:
     before -- and the exemptions are persisted storage and a home-screen install.
     Asking for the first is a line of JavaScript; offering the second needs this.
 
-    **Its icons are ``data:`` URIs**, so the deploy gains one small text object
-    and no binaries, and nothing about the account or the host is written into
-    it: ``start_url`` is relative, the way the worker already deals with the
-    object being ``X.html`` and served at ``/X``.
+    **Its icons are the files :func:`write_icons` wrote**, named relatively, the
+    way ``start_url`` is and for the same reason: nothing about the account or
+    the host may be written into this repository, and the object is ``X.html``
+    served at ``/X``. They used to be ``data:`` URIs, which cost the deploy no
+    binaries and cost the home screen its icon -- see :class:`_Head`.
+
+    ``purpose`` is ``any maskable``: the mark is a full square with the cairn
+    well inside it, so a launcher may crop it to a circle, a squircle or a
+    rounded square without cutting a stone off.
 
     Args:
         beside: The built page, whose name is the address the app opens at.
@@ -589,8 +584,8 @@ def write_manifest(beside: pathlib.Path, name: str) -> pathlib.Path:
         "background_color": "#1d282c",
         "theme_color": "#1d282c",
         "icons": [
-            {"src": icon_uri(192), "sizes": "192x192", "type": "image/png", "purpose": "any"},
-            {"src": icon_uri(512), "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
         ],
     }
     written = beside.with_name("manifest.webmanifest")
@@ -602,9 +597,16 @@ class _Head(Element):
     """The page's name, its mark, and where the manifest is.
 
     Folium writes no ``<title>`` at all, so the tab and a home-screen icon were
-    both labelled with the URL. The mark rides in the document as a ``data:``
-    URI because iOS reads ``apple-touch-icon`` from the page and not from the
-    manifest, and a second object to deploy for 700 bytes is not a trade.
+    both labelled with the URL.
+
+    **The mark is a file and not a ``data:`` URI, and that is the whole of a bug
+    this page carried.** iOS reads ``apple-touch-icon`` from the document and
+    ignores the manifest's icons -- which this file knew, and answered by putting
+    the mark inline, on the reasoning that a second object to deploy for 700
+    bytes was not a trade. It is: Safari will not fetch a ``data:`` URI for a
+    touch icon, so the link was present, well-formed, and dead. Added to a home
+    screen, atlas got a screenshot of the map. Reported from a phone, and the
+    same defect the sibling site had.
 
     **An `Element` and not a `MacroElement`, for the reason `_Inlined` records
     above it**: a macro's ``header`` block adds a child to the figure's header
@@ -636,8 +638,8 @@ class _Head(Element):
             '<meta name="mobile-web-app-capable" content="yes">\n'
             '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n'
             f'<meta name="apple-mobile-web-app-title" content="{named}">\n'
-            f'<link rel="apple-touch-icon" href="{icon_uri(180)}">\n'
-            f'<link rel="icon" type="image/png" href="{icon_uri(32)}">\n'
+            '<link rel="apple-touch-icon" href="icon-180.png">\n'
+            '<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">\n'
             '<link rel="manifest" href="manifest.webmanifest">'
         )
 

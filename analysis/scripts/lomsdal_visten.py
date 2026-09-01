@@ -1899,6 +1899,13 @@ def main() -> int:
     manifest = maps.write_manifest(map_path, PARK_NAME)
     print(f"  Manifest: {manifest} ({manifest.stat().st_size / 1e3:.1f} kB)")
 
+    # **The mark, as files.** The page links to `icon-180.png` rather than
+    # carrying the drawing inline, because iOS reads `apple-touch-icon` off the
+    # document and will not fetch a `data:` URI for it — inline, the link is
+    # well-formed and dead, and the home screen falls back to a screenshot.
+    icons = maps.write_icons(map_path)
+    print(f"  Icons: {', '.join(icon.name for icon in icons)}")
+
     # Built from the chains, not from the raw sources, so one geometry serves
     # the map, the exports and the router. At full source precision: the
     # simplified copy above is the drawn one and goes nowhere near this.
