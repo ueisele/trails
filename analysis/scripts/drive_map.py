@@ -214,6 +214,11 @@ FURNITURE = with_map(
     // because that is the corner each of them keeps: the rail is in the one the
     // burger already had, and Leaflet's is Leaflet's again.
     controls: [fromRight(rail), at(zoom)],
+    scaleBars: document.querySelectorAll('.leaflet-control-scale-line').length,
+    // A tool whose icon is missing is an error nowhere: `icon()` builds an
+    // `<svg>` around `undefined`, so the row goes out with a blank column and
+    // nothing anywhere says so. Counting the strokes is what notices.
+    offlineStrokes: document.querySelectorAll('.trails-rail [data-tool=offline] svg path').length,
     layerControls: document.querySelectorAll('.leaflet-control-layers').length}; }"""
 )
 
@@ -550,6 +555,11 @@ def furniture(page: Any) -> Check:
             # unwanted ones off again, and nothing else will.
             Reading("tile layers actually on the map", seen["tiles"], 1),
             Reading("separate layer controls", seen["layerControls"], 0),
+            # **One bar and not two.** A bare `L.control.scale()` draws metric
+            # and imperial, one above the other, and with the zoom line under
+            # them that corner reads as the same control drawn twice.
+            Reading("bars in the scale control", seen["scaleBars"], 1),
+            Reading("strokes in the offline tool's drawing", seen["offlineStrokes"] > 0, True, note=f"{seen['offlineStrokes']} paths"),
             # **The rail takes the right and Leaflet keeps the left.** It stood
             # at the left and the chrome pushed Leaflet's whole top-left corner
             # 56 px aside for it — which put the zoom at 66, exactly where the
@@ -3182,11 +3192,20 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         first.wait_for_timeout(1500)
         first.evaluate("async () => await window.trailsOffline.choose('view', 14)")
         first_ask = first.evaluate("() => window.trailsOffline.needed()")
+        RAIL_OFFLINE = "() => (document.querySelector('.trails-rail [data-tool=offline] svg') || {}).innerHTML"
+        drawn_off = first.evaluate(RAIL_OFFLINE)
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
         after = first.evaluate("() => window.trailsOffline.state()")
         terrain.append(Reading("what it said it would keep is what it kept", after["kept"]["tiles"], first_ask["tiles"]))
         terrain.append(Reading("and the switch is on once it is there", after["on"], True))
+        # **And the row says so without being opened.** The switch is thrown
+        # inside this panel, which on a phone is covering the menu at the time,
+        # so the drawing behind it has to have followed by the time the reader
+        # closes the panel. Two drawings sharing a tray: the arrow becomes a
+        # tick.
+        drawn_on = first.evaluate(RAIL_OFFLINE)
+        terrain.append(Reading("and the tool's drawing followed it", bool(drawn_off) and drawn_on != drawn_off, True, note="the arrow became a tick"))
 
         # **The one that would have been silent.** With the switch already on,
         # a second download goes out through a worker that answers unkept tiles

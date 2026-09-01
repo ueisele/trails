@@ -526,6 +526,19 @@ class TestScaleZoom:
         # the bar above it are measuring the same ground.
         assert "map.containerPointToLatLng([100, 0])" in html
 
+    def test_one_bar_and_not_two(self):
+        """folium's `control_scale=True` emits a bare `L.control.scale()`, and a
+        bare Leaflet scale draws a metric bar and an imperial one. Under the zoom
+        line, in that corner, the stack reads as the same control drawn twice —
+        reported from a phone in exactly those words."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "L.control.scale({metric: true, imperial: false, maxWidth: 100, position: 'bottomleft'})" in html
+        # And folium is not also adding its own, or there would be two controls
+        # rather than two bars, which is the same corner and a worse cause. The
+        # `.addTo` is what makes this the emitted call and not the comment above
+        # it explaining why the bare one is not wanted.
+        assert "L.control.scale().addTo" not in html
+
     def test_it_takes_the_box_and_not_the_measuring_bar(self):
         """A line with a rule under it in that corner is claiming to be a
         distance, and this one is not."""
@@ -3867,6 +3880,39 @@ class TestChrome:
         # by the caller rather than sniffed at: the day something guesses is the
         # day a place name with an ampersand in it becomes an element.
         assert "if (asHtml) { wrap.innerHTML = content; } else { wrap.textContent = content; }" in html
+
+    def test_the_offline_tool_has_a_drawing_and_it_says_which_state_it_is_in(self):
+        """It had none at all: `icon()` reads `ICONS[key]` and there was no
+        `offline` entry, so the row on a phone was a heading and a hint beside an
+        empty column. The two it has now share a tray — one thing in two
+        conditions, not two things — and the reader is told from the row whether
+        the ground is on the device."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert 'offline: \'<path d="M9 2.9v7.5"/>' in html
+        assert 'offlineKept: \'<path d="M5.6 6.9 8.1 9.4l4.6-5"/>' in html
+        assert "icon(tool.key === 'offline' && offlineOn() ? 'offlineKept' : tool.key)" in html
+        # Both places the tool is drawn ask the same question, or the rail and
+        # the menu would disagree about the same switch.
+        assert "iconFor(tool) + '</span>'" in html
+        assert "button.innerHTML = iconFor(tool);" in html
+
+    def test_the_switch_is_announced_so_the_row_behind_it_can_follow(self):
+        """The switch is thrown inside the offline panel, which on a narrow
+        screen is covering the menu at the time. Announced on every refresh and
+        not only on the toggle: the worker settles after load and a download
+        finishing changes the answer too, and neither is a click."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "new CustomEvent('trails:offline', {detail: snapshot})" in html
+        assert "document.addEventListener('trails:offline', function () {" in html
+        # And it lights on the rail while it is on, as plan mode and the
+        # position watch already do — the three tools that outlive their panel.
+        assert "(tool.key === 'offline' && offlineOn())" in html
 
     def test_the_last_one_opened_is_the_one_drawn(self):
         """On a narrow screen the dock, the menu and the detail are one

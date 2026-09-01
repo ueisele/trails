@@ -833,7 +833,13 @@ class _PinSize(MacroElement):
 
 
 class _ScaleZoom(MacroElement):
-    """A third line under the scale bar, saying which zoom this is.
+    """The scale bar itself, and a second line under it saying which zoom this is.
+
+    **It owns the bar because of one option.** folium's ``control_scale=True``
+    emits a bare ``L.control.scale()``, and a bare Leaflet scale draws two bars,
+    metric and imperial. Stacked in that corner with this line under them, the
+    three read as the same control drawn twice -- reported from a phone in
+    exactly those words -- and the mile is for nobody who walks in Norway.
 
     **Because the offline chooser asks for one.** A reader picking *z16* out of
     a list has no way to see what z16 looks like unless the map says what it is
@@ -858,6 +864,14 @@ class _ScaleZoom(MacroElement):
             (function () {
                 var map = {{ this._parent.get_name() }};
                 var line = null;
+
+                // **Ours rather than folium's, for one option.** folium's
+                // `control_scale=True` emits `L.control.scale()` with no
+                // arguments, and that draws a metric bar and an imperial one --
+                // which under the zoom line below reads as the control drawn
+                // twice. `maxWidth` is Leaflet's own default, written down
+                // because the pairing in this docstring is arithmetic over it.
+                L.control.scale({metric: true, imperial: false, maxWidth: 100, position: 'bottomleft'}).addTo(map);
 
                 function said() {
                     var box = map.getContainer().querySelector('.leaflet-control-scale');
@@ -1385,7 +1399,12 @@ def create_map(
     # anybody spends it: at four times the drawn detail the same measurement
     # reads 91 ms against 74. Canvas removes the DOM write; the projection and
     # the per-zoom simplification are unchanged and grow with the vertices.
-    fmap = folium.Map(location=list(center), zoom_start=zoom, tiles=None, control_scale=True, prefer_canvas=True)
+    # `control_scale=False`, and the bar is added by `_ScaleZoom` instead. folium
+    # emits a bare `L.control.scale()`, and Leaflet's bare scale draws **two**
+    # bars -- metric and imperial, one above the other. In that corner, under a
+    # third line saying the zoom, it reads as the same control drawn twice; and
+    # the mile is for nobody who walks in Norway. See `_ScaleZoom`.
+    fmap = folium.Map(location=list(center), zoom_start=zoom, tiles=None, control_scale=False, prefer_canvas=True)
     # **Three of folium's defaults, dropped after being measured rather than
     # after being reasoned about.** They cost 288 kB uncompressed and, between
     # them, a whole host: `netdna.bootstrapcdn.com` served one file and nothing
@@ -11739,6 +11758,21 @@ class _OfflinePanel(MacroElement):
                             counted: counted
                         };
                         draw();
+                        // **Said out loud, because the switch shows outside this
+                        // panel now.** The chrome draws the tool's row with one
+                        // of two icons depending on whether the ground is here,
+                        // and the panel is the only thing that knows. Announced
+                        // on every refresh rather than only on the toggle: the
+                        // worker settles after load and a download finishing
+                        // changes the answer too, neither of which is a click.
+                        var event;
+                        try {
+                            event = new CustomEvent('trails:offline', {detail: snapshot});
+                        } catch (old) {
+                            event = document.createEvent('CustomEvent');
+                            event.initCustomEvent('trails:offline', false, false, snapshot);
+                        }
+                        document.dispatchEvent(event);
                         return snapshot;
                     });
                 }
@@ -12421,7 +12455,16 @@ class _Chrome(MacroElement):
                 // the page is turned, which is right for a control that is
                 // about the turning and not about either side of it.
                 theme: '<circle cx="9" cy="9" r="6.4"/>' +
-                       '<path d="M9 2.6a6.4 6.4 0 0 1 0 12.8Z" fill="currentColor" stroke="none"/>'
+                       '<path d="M9 2.6a6.4 6.4 0 0 1 0 12.8Z" fill="currentColor" stroke="none"/>',
+                // **Two drawings sharing a tray**, because they are one thing in
+                // two conditions and not two things. The arrow is ground that
+                // could come down to the device; the tick is ground that is
+                // already here. A reader who has seen one recognises the other
+                // without being told what changed.
+                offline: '<path d="M9 2.9v7.5"/><path d="M6.1 7.6 9 10.5l2.9-2.9"/>' +
+                         '<path d="M3.5 12.2v1.5a1.4 1.4 0 0 0 1.4 1.4h8.2a1.4 1.4 0 0 0 1.4-1.4v-1.5"/>',
+                offlineKept: '<path d="M5.6 6.9 8.1 9.4l4.6-5"/>' +
+                             '<path d="M3.5 12.2v1.5a1.4 1.4 0 0 0 1.4 1.4h8.2a1.4 1.4 0 0 0 1.4-1.4v-1.5"/>'
             };
 
             function icon(name, size) {
@@ -12429,6 +12472,19 @@ class _Chrome(MacroElement):
                 return '<svg width="' + side + '" height="' + side + '" viewBox="0 0 18 18" fill="none" ' +
                     'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" ' +
                     'aria-hidden="true">' + ICONS[name] + '</svg>';
+            }
+
+            function offlineOn() {
+                var said = window.trailsOffline && window.trailsOffline.state();
+                return !!(said && said.on);
+            }
+
+            // **The only tool whose drawing depends on what it has done.** Every
+            // other icon names a thing to open; this one also answers a question
+            // the reader asks from the map -- is the ground on this device? --
+            // and answering it in the row costs nothing they have to open.
+            function iconFor(tool) {
+                return icon(tool.key === 'offline' && offlineOn() ? 'offlineKept' : tool.key);
             }
 
             // What this map can do, in the order a reader meets it. `selector`
@@ -12774,6 +12830,23 @@ class _Chrome(MacroElement):
             document.addEventListener('trails:theme', function () { paintTheme(); });
             paintTheme();
 
+            // **Redrawn where it stands rather than rebuilt.** The switch is
+            // thrown inside the offline panel, which on a narrow screen is
+            // covering the menu at the time -- so the row behind it has to be
+            // right when the reader closes the panel, and the rail beside it has
+            // to be right at once.
+            function paintOfflineIcon() {
+                var mark = iconFor(byKey.offline);
+                if (railButtons.offline) { railButtons.offline.innerHTML = mark; }
+                var row = menuParts.body.querySelector('[data-tool="offline"] span');
+                if (row) { row.innerHTML = mark; }
+            }
+
+            document.addEventListener('trails:offline', function () {
+                paintOfflineIcon();
+                paintRail();
+            });
+
             // **The one tool that used to be dead half the time.** It was
             // disabled while nothing was selected — greyed, with no reason
             // given, and on the rail with no text at all — so a reader meeting
@@ -12983,7 +13056,7 @@ class _Chrome(MacroElement):
                 button.title = tool.label;
                 button.setAttribute('aria-label', tool.label);
                 button.setAttribute('data-tool', tool.key);
-                button.innerHTML = icon(tool.key);
+                button.innerHTML = iconFor(tool);
                 button.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;' +
                     'height:44px;border:0;background:none;cursor:pointer;color:var(--trails-ink-3);' +
                     'border-bottom:' + (index < TOOLS.length - 1 ? '1px solid var(--trails-rule)' : '0');
@@ -13202,7 +13275,8 @@ class _Chrome(MacroElement):
                     // at the foot rather than in the dock.
                     var running = (tool.key === 'plan' && planOn()) ||
                         (tool.key === 'profile' && profileShowing()) ||
-                        (tool.key === 'here' && hereWatch !== null);
+                        (tool.key === 'here' && hereWatch !== null) ||
+                        (tool.key === 'offline' && offlineOn());
                     button.style.color = lit ? 'var(--trails-on-accent)' : (running ? 'var(--trails-accent)' : 'var(--trails-ink-3)');
                     button.setAttribute('aria-pressed', String(lit));
                 });
@@ -13221,7 +13295,7 @@ class _Chrome(MacroElement):
                         'padding:8px 4px;border:0;border-bottom:1px solid var(--trails-rule);background:none;' +
                         'cursor:pointer;text-align:left;color:var(--trails-ink);font:inherit';
                     row.innerHTML = '<span style="flex:none;width:26px;display:flex;justify-content:center;' +
-                        'color:var(--trails-ink-3)">' + icon(tool.key) + '</span>' +
+                        'color:var(--trails-ink-3)">' + iconFor(tool) + '</span>' +
                         '<span style="flex:1;min-width:0"><b style="display:block;font-size:14px">' +
                         esc(tool.label) + '</b><span style="display:block;font-size:11.5px;color:var(--trails-ink-5)">' +
                         esc(tool.hint) + '</span></span>' +
