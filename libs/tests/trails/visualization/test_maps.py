@@ -3957,6 +3957,93 @@ class TestTheme:
         assert "var ROUTE = '#111111'" in html or "'#111111'" in html
         assert "var SEA = '#4fa3c7';" in html
 
+    def test_the_reader_can_choose_the_set_and_the_choice_is_kept(self):
+        """The three CSS blocks were written for a switch that did not exist,
+        and the docstring said so. This is the switch: auto, light, dark, kept
+        on the device, reachable from the rail on a wide screen and from the
+        menu on a narrow one."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "window.trailsTheme = {" in html
+        assert "{key: 'theme', label: 'Theme'" in html
+        for choice in ("auto", "light", "dark"):
+            assert f"{{key: '{choice}'" in html
+        # **Auto removes the stamp rather than writing one.** The three blocks
+        # are built on that: `data-theme="auto"` would match neither the light
+        # block nor the dark one.
+        assert "if (choice === 'auto') { root.removeAttribute('data-theme'); }" in html
+        assert "else { root.setAttribute('data-theme', choice); }" in html
+        assert "window.localStorage.removeItem(KEY); }" in html
+
+    def test_the_stamp_is_on_the_root_before_the_first_paint(self):
+        """Applying a kept choice from the chrome's script would paint the page
+        once in the wrong set and correct it in front of the reader — a white
+        flash on a phone held at dusk, which is the moment the feature exists
+        for. So it goes in the head, above everything that draws."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert html.index("window.trailsTheme = {") < html.index("var TOOLS = [")
+        # And it survives a browser that refuses storage outright rather than
+        # taking the whole theme down with it: Safari in private browsing throws
+        # on the read, not only on the write.
+        assert "} catch (blocked) { return 'auto'; }" in html
+
+    def test_what_is_painted_with_attributes_is_told_to_redraw(self):
+        """Everything drawn through CSS follows the stamp on its own. The
+        elevation curve does not — it is the one thing here painted with SVG
+        attributes read at stroke time — and a switch that moved every other
+        surface and left the curve in the old set is the bug this prevents."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        gdf = gpd.GeoDataFrame(
+            {
+                "chain_id": ["ut-no-1-2-3"],
+                "ascent": [996.4],
+                "geometry": [LineString([(12.8, 65.4), (12.81, 65.41)])],
+            },
+            crs="EPSG:4326",
+        )
+        # The panel is drawn only where there is a figure to draw, so the field
+        # is what puts its script on the page at all.
+        layer = maps.add_trails(fmap, gdf, name="Chains", group_field="chain_id", figure_fields={"ascent": "ascent"})
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "document.dispatchEvent(event);" in html
+        assert "document.addEventListener('trails:theme', function () { render(); });" in html
+        # The machine still decides on auto, so its own change is announced too.
+        assert "media.addEventListener('change', function () { if (choice === 'auto') { tell(); } });" in html
+
+    def test_auto_says_which_way_it_currently_falls(self):
+        """*Auto* is the one answer a reader cannot check against the screen:
+        light and dark are visible, and following-the-machine looks exactly like
+        whichever one it landed on."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "Following this machine, which is asking for" in html
+        assert "(api.dark() ? 'dark' : 'light')" in html
+
+    def test_the_panel_keeps_no_copy_of_the_choice(self):
+        """The head owns the choice because the stamp has to be on the root
+        before the first paint. A panel holding its own copy would be a second
+        answer able to disagree with the first."""
+        panel = self.chrome()
+        assert "var chosen = api ? api.choice() : 'auto';" in panel
+        assert "if (window.trailsTheme) { window.trailsTheme.set(each.key); }" in panel
+        # A page built without the theme still opens; the panel says why it can
+        # turn nothing rather than throwing on the first click.
+        assert "This page was built without the theme" in panel
+
+    @staticmethod
+    def chrome():
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        return source.split("class _Chrome")[1].split("\nclass ")[0]
+
     def test_the_panels_say_their_own_ink(self):
         """Not one of them set a `color`: they inherited the document's black,
         which is right on a white panel and 1.4:1 on a dark one — measured in a

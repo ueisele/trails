@@ -1032,8 +1032,15 @@ class _Theme(MacroElement):
     explicit choice stamps ``data-theme`` on the root, and the default setting
     stamps nothing at all -- so ``prefers-color-scheme`` alone separates light
     from dark for most readers, while a stamped choice has to beat it in both
-    directions. There is no switch on the page today; the stamps are what one
-    would need, and cost nothing until then.
+    directions.
+
+    **And the switch that uses them lives here too**, as ``window.trailsTheme``
+    -- in the head, so the stamp is on the root before the first paint rather
+    than corrected in front of the reader. The chrome's *Theme* panel is a view
+    onto this and holds nothing of its own; anything else that needs to know
+    listens for the ``trails:theme`` event, which is how the elevation curve --
+    the one thing here painted with attributes rather than CSS -- redraws when
+    the reader turns the page over.
 
     **What does not turn: the data.** The four gradient bands, the route's own
     black and the colours the legend gives each source are statements about the
@@ -1184,6 +1191,91 @@ class _Theme(MacroElement):
         .trails-pin { display: block; line-height: 0; transform-origin: bottom center; transform: scale(var(--trails-pin, 1)); }
         .trails-pin svg { display: block; }
         </style>
+        <script>
+        // **In the head, and stamped before the first paint.** The choice is
+        // read and applied here rather than when the chrome is built, because
+        // anything later means the page is painted once in the wrong set and
+        // corrected in front of the reader -- a white flash on a phone held at
+        // dusk, which is the exact moment this feature exists for.
+        (function () {
+            var KEY = 'trails:theme';
+            var root = document.documentElement;
+            var media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+            function kept() {
+                // Storage can be denied outright -- Safari in private browsing
+                // throws on read, not only on write -- and a page that cannot
+                // remember a choice must still honour the machine's.
+                try {
+                    var got = window.localStorage.getItem(KEY);
+                    return got === 'light' || got === 'dark' ? got : 'auto';
+                } catch (blocked) { return 'auto'; }
+            }
+
+            var choice = kept();
+
+            // **Auto removes the stamp rather than writing one.** The three CSS
+            // blocks above are built on that: no stamp lets
+            // `prefers-color-scheme` decide, and a stamp has to beat it in both
+            // directions. Writing `data-theme="auto"` would match neither the
+            // light block nor the dark one and leave a reader in whichever set
+            // came first.
+            function stamp() {
+                if (choice === 'auto') { root.removeAttribute('data-theme'); }
+                else { root.setAttribute('data-theme', choice); }
+            }
+
+            function dark() {
+                return choice === 'auto' ? !!(media && media.matches) : choice === 'dark';
+            }
+
+            // Everything drawn through CSS follows the stamp on its own. What
+            // cannot is anything painted with attributes read at stroke time --
+            // the elevation curve is the one on this page -- so the change is
+            // announced and those redraw themselves.
+            function tell() {
+                var said = {choice: choice, dark: dark()};
+                var event;
+                try {
+                    event = new CustomEvent('trails:theme', {detail: said});
+                } catch (old) {
+                    event = document.createEvent('CustomEvent');
+                    event.initCustomEvent('trails:theme', false, false, said);
+                }
+                document.dispatchEvent(event);
+            }
+
+            stamp();
+
+            window.trailsTheme = {
+                choices: ['auto', 'light', 'dark'],
+                choice: function () { return choice; },
+                dark: dark,
+                set: function (want) {
+                    if (want !== 'auto' && want !== 'light' && want !== 'dark') { return; }
+                    if (want === choice) { return; }
+                    choice = want;
+                    stamp();
+                    try {
+                        // The default is *absence*, so auto clears the key
+                        // instead of writing the word. A reader who has never
+                        // chosen and a reader who has chosen auto want the same
+                        // thing, and one of them should not be carrying a
+                        // setting about it.
+                        if (want === 'auto') { window.localStorage.removeItem(KEY); }
+                        else { window.localStorage.setItem(KEY, want); }
+                    } catch (blocked) { /* the choice still holds for this visit */ }
+                    tell();
+                }
+            };
+
+            // On auto the machine is still the one deciding, so its change is
+            // this page's change too.
+            if (media && media.addEventListener) {
+                media.addEventListener('change', function () { if (choice === 'auto') { tell(); } });
+            }
+        })();
+        </script>
         {% endmacro %}
     """)
 
@@ -6246,6 +6338,13 @@ class _ProfilePanel(MacroElement):
                     scheme.addEventListener('change', function () { render(); });
                 }
             }
+            // **And so can the reader, which the query above cannot see.** A
+            // theme picked in the menu stamps the root and never touches
+            // `prefers-color-scheme`, so on this panel -- the only one that
+            // paints with attributes rather than CSS -- the switch would have
+            // moved every other surface and left the curve behind in the old
+            // set. Both ways in end at the same redraw.
+            document.addEventListener('trails:theme', function () { render(); });
 
             // A panel this wide is sized against the map, so a resized window
             // has to size it again before anything is drawn into it.
@@ -12317,7 +12416,12 @@ class _Chrome(MacroElement):
                 chevron: '<path d="M7 4.5 12 9l-5 4.5"/>',
                 close: '<path d="M4.8 4.8 13.2 13.2M13.2 4.8 4.8 13.2"/>',
                 here: '<circle cx="9" cy="9" r="3.1"/><circle cx="9" cy="9" r="6.4"/>' +
-                      '<path d="M9 1.4v2.2M9 14.4v2.2M1.4 9h2.2M14.4 9h2.2"/>'
+                      '<path d="M9 1.4v2.2M9 14.4v2.2M1.4 9h2.2M14.4 9h2.2"/>',
+                // A disc with one half filled: the same drawing whichever way
+                // the page is turned, which is right for a control that is
+                // about the turning and not about either side of it.
+                theme: '<circle cx="9" cy="9" r="6.4"/>' +
+                       '<path d="M9 2.6a6.4 6.4 0 0 1 0 12.8Z" fill="currentColor" stroke="none"/>'
             };
 
             function icon(name, size) {
@@ -12345,6 +12449,8 @@ class _Chrome(MacroElement):
                  hint: 'Your own position on this map, while you ask for it.'},
                 {key: 'offline', label: 'Offline', width: 330, selector: null,
                  hint: 'Keep the ground on this device, and walk with no signal.'},
+                {key: 'theme', label: 'Theme', width: 300, selector: null,
+                 hint: 'Light panels, dark panels, or whatever the machine says.'},
                 {key: 'info', label: 'Sources', width: 360, selector: null,
                  hint: 'Who made this data, and under what licence.'}
             ];
@@ -12585,6 +12691,88 @@ class _Chrome(MacroElement):
             // Built by its own element, which owns the tile arithmetic and the
             // worker's ear; the dock only finds it somewhere to be.
             byKey.offline.holder = window.trailsOffline ? window.trailsOffline.holder : null;
+
+            // **The panel holds no state, and that is the whole of its design.**
+            // `window.trailsTheme` in the head owns the choice, because the
+            // stamp has to be on the root before the first paint and this script
+            // runs long after it. This draws three buttons and reads back what
+            // it is told, so there is no second copy of the answer to disagree
+            // with the first.
+            var themeHolder = document.createElement('div');
+            themeHolder.className = 'trails-theme';
+            var themeSays = document.createElement('p');
+            themeSays.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-3)';
+            themeSays.textContent = 'The panels, the menu and this text. The map itself is a ' +
+                'photograph of the ground and stays as it is — a darkened slope would be a wrong ' +
+                'slope, not a dark one.';
+            var themeRow = document.createElement('div');
+            themeRow.className = 'trails-theme-choices';
+            themeRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px';
+            var themeState = document.createElement('p');
+            themeState.className = 'trails-theme-state';
+            themeState.style.cssText = 'margin:0;color:var(--trails-ink-5);font-size:11.5px';
+            var THEMES = [
+                {key: 'auto', label: 'Auto', hint: 'Follow the machine, and turn when it turns.'},
+                {key: 'light', label: 'Light', hint: 'Light panels, whatever the machine says.'},
+                {key: 'dark', label: 'Dark', hint: 'Dark panels, whatever the machine says.'}
+            ];
+            var themeButtons = {};
+            THEMES.forEach(function (each) {
+                var pick = document.createElement('button');
+                pick.type = 'button';
+                pick.className = 'trails-theme-choice';
+                pick.setAttribute('data-theme-choice', each.key);
+                pick.textContent = each.label;
+                pick.title = each.hint;
+                // 40 px, because this is a target for a thumb on a dark hillside
+                // and the rest of the coarse layout is already there.
+                pick.style.cssText = 'font:inherit;font-size:13px;font-weight:600;padding:9px 14px;' +
+                    'min-height:40px;border-radius:7px;cursor:pointer';
+                pick.addEventListener('click', function () {
+                    if (window.trailsTheme) { window.trailsTheme.set(each.key); }
+                    // Painted here as well as on the event, so a reader who has
+                    // storage denied and a reader who picks what is already
+                    // picked both see the press land.
+                    paintTheme();
+                });
+                themeButtons[each.key] = pick;
+                themeRow.appendChild(pick);
+            });
+            themeHolder.appendChild(themeSays);
+            themeHolder.appendChild(themeRow);
+            themeHolder.appendChild(themeState);
+            byKey.theme.holder = themeHolder;
+
+            function paintTheme() {
+                var api = window.trailsTheme;
+                var chosen = api ? api.choice() : 'auto';
+                THEMES.forEach(function (each) {
+                    var pick = themeButtons[each.key];
+                    var lit = each.key === chosen;
+                    pick.style.border = '1px solid ' + (lit ? 'var(--trails-strong)' : 'var(--trails-rule)');
+                    pick.style.background = lit ? 'var(--trails-strong)' : 'transparent';
+                    pick.style.color = lit ? 'var(--trails-on-strong)' : 'var(--trails-ink-2)';
+                    pick.setAttribute('aria-pressed', String(lit));
+                });
+                if (!api) {
+                    themeState.textContent = 'This page was built without the theme, so there is ' +
+                        'nothing here to turn.';
+                    return;
+                }
+                // **Auto says which way it currently falls.** *Auto* on its own
+                // is the one answer a reader cannot check against the screen:
+                // light and dark are visible, and following-the-machine looks
+                // exactly like whichever one it landed on.
+                themeState.textContent = chosen === 'auto'
+                    ? 'Following this machine, which is asking for ' + (api.dark() ? 'dark' : 'light') +
+                      ' just now.'
+                    : 'Chosen here, and kept on this device until you change it.';
+            }
+
+            // The machine can turn under an open panel, and on auto that moves
+            // the line above without anybody touching a button.
+            document.addEventListener('trails:theme', function () { paintTheme(); });
+            paintTheme();
 
             // **The one tool that used to be dead half the time.** It was
             // disabled while nothing was selected — greyed, with no reason

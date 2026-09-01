@@ -1063,6 +1063,110 @@ def narrow_sheets(page: Any) -> Check:
     )
 
 
+THEME_SWITCH = """() => {
+  const root = document.documentElement;
+  const chrome = document.querySelector('.trails-chrome');
+  const ink = () => getComputedStyle(chrome).color;
+  // **The labels and not a background rect.** The chart paints no rect -- its
+  // paper colour goes on the crosshair's disc, which is only there while a
+  // finger is on the curve. The axis labels carry `fill` as an attribute and
+  // are drawn on every render, which is exactly the property under test.
+  const paper = () => {
+    const texts = [...document.querySelectorAll('.trails-profile-panel svg text')];
+    return texts.length ? texts.map(t => t.getAttribute('fill')).join(',') : null;
+  };
+  const press = key => {
+    const button = document.querySelector('.trails-theme-choice[data-theme-choice="' + key + '"]');
+    if (!button) { return false; }
+    button.click();
+    return true;
+  };
+  const kept = () => { try { return window.localStorage.getItem('trails:theme'); } catch (blocked) { return 'denied'; } };
+
+  const out = {buttons: document.querySelectorAll('.trails-theme-choice').length};
+  out.pressed = ['auto', 'light', 'dark'].every(press);
+
+  press('light');
+  out.lightStamp = root.getAttribute('data-theme');
+  out.lightInk = ink();
+  out.lightPaper = paper();
+
+  press('dark');
+  out.darkStamp = root.getAttribute('data-theme');
+  out.darkInk = ink();
+  out.darkPaper = paper();
+  out.darkKept = kept();
+
+  press('auto');
+  out.autoStamp = root.getAttribute('data-theme');
+  out.autoKept = kept();
+  out.autoSays = (document.querySelector('.trails-theme-state') || {}).textContent || '';
+  return out;
+}"""
+"""What the switch does to the document, measured in the document.
+
+The source tests can prove the three buttons are written and that `set` stamps
+the root. Only a browser can say that the stamp actually repaints the furniture,
+because that is CSS resolving a custom property -- and only a browser can say
+whether the curve, which is painted with attributes instead, came with it.
+"""
+
+
+def the_theme_switch(page: Any) -> Check:
+    """Auto, light and dark, and whether the page turns with them.
+
+    **The curve is the reading that matters here.** Everything else on the page
+    is painted through CSS and follows the stamp on its own; the elevation panel
+    draws with SVG attributes read at stroke time, so it can be left behind in
+    the old set by a switch that visibly worked everywhere else. That is a defect
+    with no symptom in the source and an obvious one on the screen.
+
+    Args:
+        page: The driven page
+
+    Returns:
+        What each choice stamped, and what the page then drew
+    """
+    # **A chain is selected first, or the reading that matters is not taken.**
+    # The curve is only drawn while something is on it, and a check that quietly
+    # reports *not showing* for the one thing it was written for is a check that
+    # passes by not looking.
+    select(page, LONG_CHAIN)
+    page.wait_for_timeout(700)
+    page.evaluate(SHOW_TOOL, "theme")
+    page.wait_for_timeout(300)
+    seen = page.evaluate(THEME_SWITCH)
+    readings = [
+        Reading("choices offered", seen["buttons"], 3),
+        Reading("every one of them presses", seen["pressed"], True),
+        Reading("light stamps the root", seen["lightStamp"], "light"),
+        Reading("dark stamps the root", seen["darkStamp"], "dark"),
+        # **Auto is the absence of a stamp**, not the word. `data-theme="auto"`
+        # would match neither the light block nor the dark one and leave the
+        # reader in whichever came first.
+        Reading("auto stamps nothing", seen["autoStamp"], None),
+        Reading("and keeps nothing either", seen["autoKept"], None),
+        Reading("dark is kept on the device", seen["darkKept"], "dark"),
+        # The furniture actually turns: this is CSS resolving the custom
+        # property, which is the half a source test cannot reach.
+        Reading("the ink moves with it", seen["darkInk"] != seen["lightInk"], True, note=f"{seen['lightInk']} to {seen['darkInk']}"),
+        Reading("auto says which way it falls", "Following this machine" in seen["autoSays"], True),
+    ]
+    if seen["lightPaper"] is not None:
+        readings.append(
+            Reading(
+                "and the curve is redrawn with it", seen["darkPaper"] != seen["lightPaper"], True, note=f"{seen['lightPaper']} to {seen['darkPaper']}"
+            )
+        )
+    else:
+        readings.append(Reading("the curve is drawn at all", False, True, note=f"no labels found for {LONG_CHAIN}"))
+    # **Left as it was found.** On a narrow screen an open tool covers the map,
+    # and the checks after this one click into it. The choice is already back on
+    # auto with nothing kept; this puts the panel away too.
+    page.evaluate("() => window.trailsChrome.close()")
+    return Check("the theme switch", readings)
+
+
 def the_sources_behind_an_i(page: Any) -> Check:
     """Eleven lines of licence, and the room they take on a phone.
 
@@ -3258,6 +3362,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(narrow_sheets(page))
     if wanted(the_sources_behind_an_i):
         checks.append(the_sources_behind_an_i(page))
+    if wanted(the_theme_switch):
+        checks.append(the_theme_switch(page))
     select(page, LONG_CHAIN)
 
     # A chain already drawn finer than its own samples, which is 99 % of them:
