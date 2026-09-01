@@ -914,8 +914,20 @@ class _ServiceWorker(MacroElement):
                 var secure = location.protocol === 'https:' ||
                     location.hostname === 'localhost' || location.hostname === '127.0.0.1';
                 window.trailsWorker = {kept: false, newer: false, why: null};
-                if (!('serviceWorker' in navigator) || !secure) {
-                    window.trailsWorker.why = 'serviceWorker' in navigator ? 'not a secure origin' : 'no worker in this browser';
+                // **The origin is asked about before the browser, and that
+                // order is the whole of it.** WebKit does not expose
+                // `navigator.serviceWorker` at all off a secure origin, so a
+                // check that asks about the browser first answers *no worker in
+                // this browser* for Safari over http:// -- blaming the browser
+                // for what the address bar did, and sending the reader off to
+                // look for a browser that would have worked all along.
+                // Measured on iOS Safari against http://atlas.cairn.zone.
+                if (!secure) {
+                    window.trailsWorker.why = 'not a secure origin';
+                    return;
+                }
+                if (!('serviceWorker' in navigator)) {
+                    window.trailsWorker.why = 'no worker in this browser';
                     return;
                 }
                 navigator.serviceWorker.register('sw.js').then(function () {
@@ -11881,16 +11893,26 @@ class _OfflinePanel(MacroElement):
                             'and it is what you choose to keep.';
                     } else if (have.why) {
                         // **Two different refusals, and only one of them is
-                        // about the browser.** A page opened off the disk gets
-                        // no worker because the origin is not secure, and
-                        // telling that reader to use Safari sends them after
-                        // the wrong thing entirely.
+                        // about the browser.** An origin that is not secure
+                        // gets no worker whatever the browser is, and telling
+                        // that reader to use Safari sends them after the wrong
+                        // thing entirely.
+                        //
+                        // The insecure origin comes in two kinds and they want
+                        // different advice: a map opened off the disk has no
+                        // address to fix, and a map opened over http:// has
+                        // exactly one, so the sentence hands it over ready to
+                        // tap rather than describing it.
                         said.state.textContent = have.why.indexOf('secure') === -1
                             ? 'Not available in this browser — ' + have.why +
                               '. On iOS a worker exists in Safari and in this map added to the Home Screen, ' +
                               'and in no other browser.'
-                            : 'Not available here — ' + have.why +
-                              '. This is the map opened from a file rather than from a web address.';
+                            : location.protocol === 'file:'
+                                ? 'Not available here — ' + have.why +
+                                  '. This is the map opened from a file rather than from a web address.'
+                                : 'Not available here — ' + have.why +
+                                  '. The address is http, not https — open https://' +
+                                  location.host + location.pathname + ' and offline mode is there.';
                     } else {
                         // Neither kept nor refused: the registration has not
                         // settled. Saying *not available* here would be a wrong

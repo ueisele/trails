@@ -253,6 +253,16 @@ class TestServiceWorker:
         # And why it is not there, when it is not: a page that silently has no
         # offline copy looks exactly like one that has.
         assert "window.trailsWorker.why" in html
+        # **The origin is asked about first.** WebKit hides
+        # `navigator.serviceWorker` entirely off a secure origin, so a check
+        # that asks about the browser first calls Safari over http:// a browser
+        # without workers -- which is how a reader on the real site was sent
+        # looking for a browser they were already using.
+        origin, browser = (
+            html.index("window.trailsWorker.why = 'not a secure origin'"),
+            html.index("window.trailsWorker.why = 'no worker in this browser'"),
+        )
+        assert origin < browser
 
     def test_a_reader_is_told_when_a_newer_map_is_waiting(self):
         """Stale-first means a fix arrives one visit late. The line is a plain
@@ -358,6 +368,12 @@ class TestOfflinePanel:
         # and sending that reader after Safari sends them after the wrong thing.
         assert "opened from a file rather than from a web address" in panel
         assert "have.why.indexOf('secure') === -1" in panel
+        # An insecure origin comes in two kinds, and only one of them has an
+        # address the reader can fix. The http one gets that address handed
+        # over rather than described.
+        assert "location.protocol === 'file:'" in panel
+        assert "The address is http, not https" in panel
+        assert "location.host + location.pathname" in panel
         # Three states and not two: the registration settles after load, and
         # answering *not available* while it is pending is a wrong answer rather
         # than a slow one.
