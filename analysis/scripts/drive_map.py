@@ -153,6 +153,25 @@ DRAWN = """
   const chained = drawn.filter(l => (l.options.className || '').indexOf('trail-group-') === 0);
 """
 
+WHOLE_MAP = with_map(
+    """() => {"""
+    + DRAWN
+    + """ return {paths: drawn.length,
+              markers: document.querySelectorAll('.leaflet-marker-pane > *').length,
+              graph: !!(window.trailsGraph && window.trailsGraph.header)}; }"""
+)
+"""Everything the map holds, asked of the online page and of the offline one.
+
+**The same question to both, so the answer can be compared between them rather
+than against a number written down here.** What the offline check is for is that
+the map opens *whole* with the network off -- every line, every marker, the
+routing graph -- and *whole* means "what the same build drew a moment ago with
+the network on". A recorded count says that only until the sources move, and then
+it fails for the one reason that is not a fault: somebody cleared the cache and
+regenerated the map, which is a thing this project does on purpose.
+"""
+
+
 FURNITURE = with_map(
     """() => {"""
     + DRAWN
@@ -502,8 +521,12 @@ def furniture(page: Any) -> Check:
     return Check(
         "the page's furniture",
         [
-            Reading("paths in the overlay pane", seen["paths"], 11589, holds=False),
-            Reading("of them chains drawn as lines", seen["lines"], 11290, holds=False),
+            # Re-recorded 2026-09-01, from 11,589 and 11,290: the source cache
+            # was cleared and the map regenerated, so Turrutebasen was fetched
+            # again and came back with twelve more chains. This is the movement
+            # a `stands` reading is for -- looked at, understood, written down.
+            Reading("paths in the overlay pane", seen["paths"], 11601, holds=False),
+            Reading("of them chains drawn as lines", seen["lines"], 11302, holds=False),
             Reading("and chains drawn as circle markers", seen["circles"], 298, holds=False),
             # **The decomposition has to add up.** The count above moves when the
             # sources move; this does not, and it is what catches something drawn
@@ -3222,6 +3245,10 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             }"""
         )
         terrain.append(Reading("with the switch on, unkept ground stays blank even online", indoors["good"], 0, note=f"{indoors['blank']} blank"))
+        # **Asked while it is still open**, because this is what the offline page
+        # is held against. Panning and the switch above do not touch it: the
+        # count is over the map's layers, not over what is in view.
+        online = first.evaluate(WHOLE_MAP)
         first.close()
 
         context.set_offline(True)
@@ -3230,15 +3257,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         second.on("pageerror", lambda error: thrown.append(str(error)))
         second.goto(address, timeout=180_000)
         second.wait_for_function(with_map("() => {" + DRAWN + " return drawn.length > 11000; }"), timeout=120_000)
-        offline = second.evaluate(
-            with_map(
-                """() => {"""
-                + DRAWN
-                + """ return {paths: drawn.length,
-                              markers: document.querySelectorAll('.leaflet-marker-pane > *').length,
-                              graph: !!(window.trailsGraph && window.trailsGraph.header)}; }"""
-            )
-        )
+        offline = second.evaluate(WHOLE_MAP)
         # And with the network off, what was kept is what is drawn: the tiles
         # come back from the cache and none of them is the worker's blank. **At
         # the view it was kept for**, which is the part that has to be said: the
@@ -3312,8 +3331,8 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 Reading("nothing threw with the network off", len(thrown), 0, note="; ".join(thrown[:2])),
                 # The whole map, not a shell of one: every line, every marker, and
                 # the graph that routes over them.
-                Reading("offline: paths drawn", offline["paths"], 11589),
-                Reading("offline: markers", offline["markers"], 198),
+                Reading("offline: paths drawn", offline["paths"], online["paths"], note=f"{online['paths']} online"),
+                Reading("offline: markers", offline["markers"], online["markers"], note=f"{online['markers']} online"),
                 Reading("offline: the routing graph is there", offline["graph"], True),
             ],
         ),
