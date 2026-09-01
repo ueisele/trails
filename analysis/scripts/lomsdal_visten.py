@@ -1547,7 +1547,7 @@ def main() -> int:
     print("\nBuilding map...")
     approach_label = f"≤{args.approach_km:g} km"
     # Fit to the full approach zone, not just the park, so trailhead towns are visible.
-    fmap = maps.create_map(bounds=bounds_of(zone), base=maps.BaseMap.KARTVERKET_TOPO)
+    fmap = maps.create_map(bounds=bounds_of(zone), base=maps.BaseMap.KARTVERKET_TOPO, title=PARK_NAME)
 
     # Layers are added back-to-front so official routes draw on top of OSM,
     # and only non-empty ones appear in the control and legend. Everything is on
@@ -1891,6 +1891,13 @@ def main() -> int:
     # and a rebuild that changes nothing changes nothing.
     worker = maps.write_service_worker(map_path)
     print(f"  Worker: {worker} ({worker.stat().st_size / 1e3:.1f} kB)")
+
+    # **What makes an offline copy survive being left alone.** WebKit deletes
+    # storage a script created once an origin has gone seven days without a
+    # visit -- exactly the walk somebody keeps the terrain for a fortnight
+    # before -- and a home-screen install is one of the two exemptions.
+    manifest = maps.write_manifest(map_path, PARK_NAME)
+    print(f"  Manifest: {manifest} ({manifest.stat().st_size / 1e3:.1f} kB)")
 
     # Built from the chains, not from the raw sources, so one geometry serves
     # the map, the exports and the router. At full source precision: the

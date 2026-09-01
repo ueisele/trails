@@ -10,10 +10,13 @@ visually::
     save_map(fmap, pathlib.Path("map.html"))
 """
 
+import base64
 import hashlib
 import json
 import pathlib
 import re
+import struct
+import zlib
 from dataclasses import dataclass
 from enum import Enum
 from html import escape
@@ -220,13 +223,34 @@ SERVICE_WORKER = """// The map's service worker. Written by the build, stamped w
 // costs zero requests, and so does routing, because the Dijkstra is in the page.
 var VERSION = "__VERSION__";
 var PAGE = "trails-page-" + VERSION;
+
+// **Two tile caches, because they are two different promises.** `TILES` is what
+// the reader happened to look at, kept opportunistically and trimmed to the last
+// `TILE_CAP`. `TERRAIN` is what they *asked* to keep, and is never trimmed: a
+// deliberate nine-hundred-tile download into an LRU of five hundred would evict
+// itself on the way in, and the reader would be told it had worked.
 var TILES = "trails-tiles";
+var TERRAIN = "trails-terrain";
 
 // About 18 MB of terrain at the 37 kB a Kartverket tile measures. The browser's
 // own cache already keeps them five days -- `max-age=432000`, measured -- so
 // this is for the walk somebody plans a fortnight out, not for the next minute.
 var TILE_CAP = 500;
 var TILE_HOST = "cache.kartverket.no";
+
+// **Where the offline switch is kept, and why it is kept at all.** A service
+// worker is not a process that stays alive: the browser starts it for a fetch
+// and stops it again, and every variable it held goes with it. A flag that lived
+// only in this scope would be true on the first tile of a walk and false on the
+// second. So it is one entry in the terrain cache, read once and memoised, and
+// the memo is dropped when the page says the switch has moved.
+var STATE = "https://trails.invalid/offline";
+var switched = null;
+
+// A tile that is not kept, while the switch is on: a 1x1 transparent PNG,
+// answered 200 rather than refused, so Leaflet draws the page's own ground
+// instead of a broken image over it.
+var BLANK = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNgAAIAAAUAAen63NgAAAAASUVORK5CYII=";
 
 self.addEventListener("install", function () {
     // Nothing is precached from a list. The worker does not know what the map is
@@ -240,6 +264,10 @@ self.addEventListener("activate", function (event) {
     event.waitUntil(
         caches.keys().then(function (names) {
             return Promise.all(names.map(function (name) {
+                // Only the superseded copies of the page. The two tile caches
+                // are not stamped with a version and must survive every deploy:
+                // a reader who kept the park before a typo was fixed would
+                // otherwise download it again after it.
                 var stale = name.indexOf("trails-page-") === 0 && name !== PAGE;
                 return stale ? caches.delete(name) : null;
             }));
@@ -272,6 +300,41 @@ function tell(what) {
     });
 }
 
+// Whether the switch is on, from the cache the first time and from the memo
+// after that. It answers false for every failure, because a worker that cannot
+// read its own flag should go to the network rather than draw a blank park.
+function offlineNow() {
+    if (switched === null) {
+        switched = caches.open(TERRAIN).then(function (cache) {
+            return cache.match(STATE);
+        }).then(function (kept) {
+            return kept ? kept.text().then(function (said) { return said === "on"; }) : false;
+        }).catch(function () { return false; });
+    }
+    return switched;
+}
+
+function setOffline(on) {
+    switched = Promise.resolve(!!on);
+    return caches.open(TERRAIN).then(function (cache) {
+        return cache.put(STATE, new Response(on ? "on" : "off", {headers: {"content-type": "text/plain"}}));
+    });
+}
+
+self.addEventListener("message", function (event) {
+    var said = event.data || {};
+    if (said.trails !== "offline") { return; }
+    event.waitUntil(setOffline(said.on).then(function () {
+        if (event.source) { event.source.postMessage({trails: "offline", on: !!said.on}); }
+    }));
+});
+
+function blank() {
+    var raw = atob(BLANK), bytes = new Uint8Array(raw.length), i;
+    for (i = 0; i < raw.length; i += 1) { bytes[i] = raw.charCodeAt(i); }
+    return new Response(bytes, {status: 200, headers: {"content-type": "image/png"}});
+}
+
 // Whether two answers are the same map. The object carries `last-modified` and
 // no etag -- measured on the published page -- so that is what is compared, and
 // an answer carrying neither is treated as unchanged rather than as news.
@@ -283,35 +346,49 @@ function moved(kept, fresh) {
 
 // **Stale first, and the network behind it.** The reader gets the map they
 // already have, immediately and at no bytes; the new one lands in the cache for
-// the next visit and the page is told there is one.
+// the next visit and the page is told there is one. With the switch on there is
+// no network behind it at all: a reader who asked for offline did not ask for a
+// request that will hang until it times out.
 function pageFor(request) {
     return caches.open(PAGE).then(function (cache) {
         return cache.match(request).then(function (kept) {
-            var fresh = fetch(request).then(function (answer) {
-                if (answer && answer.ok) {
-                    cache.put(request, answer.clone());
-                    if (kept && moved(kept, answer)) { tell("newer"); }
-                }
-                return answer;
-            }).catch(function (failure) {
-                if (kept) { return kept; }
-                throw failure;
+            return offlineNow().then(function (off) {
+                if (off && kept) { return kept; }
+                var fresh = fetch(request).then(function (answer) {
+                    if (answer && answer.ok) {
+                        cache.put(request, answer.clone());
+                        if (kept && moved(kept, answer)) { tell("newer"); }
+                    }
+                    return answer;
+                }).catch(function (failure) {
+                    if (kept) { return kept; }
+                    throw failure;
+                });
+                return kept || fresh;
             });
-            return kept || fresh;
         });
     });
 }
 
 // **Cache first, because terrain does not change while somebody walks over it.**
+// What was asked for is looked at before what was merely seen, and with the
+// switch on the network is not reached for at all -- which is what makes the
+// switch worth having indoors: a reader can see exactly what they kept, instead
+// of finding out in a valley.
 function tileFor(request) {
-    return caches.open(TILES).then(function (cache) {
-        return cache.match(request).then(function (kept) {
-            if (kept) { return kept; }
-            return fetch(request).then(function (answer) {
-                if (answer && answer.ok) {
-                    cache.put(request, answer.clone()).then(function () { return trim(cache); });
-                }
-                return answer;
+    return Promise.all([caches.open(TERRAIN), caches.open(TILES), offlineNow()]).then(function (three) {
+        var terrain = three[0], tiles = three[1], off = three[2];
+        return terrain.match(request).then(function (asked) {
+            if (asked) { return asked; }
+            return tiles.match(request).then(function (seen) {
+                if (seen) { return seen; }
+                if (off) { return blank(); }
+                return fetch(request).then(function (answer) {
+                    if (answer && answer.ok) {
+                        tiles.put(request, answer.clone()).then(function () { return trim(tiles); });
+                    }
+                    return answer;
+                }).catch(function () { return blank(); });
             });
         });
     });
@@ -319,6 +396,7 @@ function tileFor(request) {
 
 // Oldest first, which is what `keys()` answers in. Not a true least-recently-used
 // -- reading a tile does not move it -- and saying so is cheaper than pretending.
+// The terrain cache is never handed to this.
 function trim(cache) {
     return cache.keys().then(function (keys) {
         if (keys.length <= TILE_CAP) { return null; }
@@ -337,6 +415,13 @@ self.addEventListener("fetch", function (event) {
         event.respondWith(pageFor(request));
         return;
     }
+    // **A deliberate download passes straight through**, and this branch is not
+    // an optimisation. The panel fetches what the reader asked to keep with
+    // `cache: "reload"`; without this, a download begun while the switch was on
+    // would be answered by the blank tile below and every one of those blanks
+    // would be written into the terrain cache as terrain. The reader would be
+    // told their park was kept, and it would be white.
+    if (request.cache === "reload") { return; }
     if (new URL(request.url).hostname === TILE_HOST) {
         event.respondWith(tileFor(request));
     }
@@ -398,6 +483,156 @@ def write_service_worker(beside: pathlib.Path) -> pathlib.Path:
     written = beside.with_name("sw.js")
     written.write_text(SERVICE_WORKER.replace("__VERSION__", stamp), encoding="utf-8")
     return written
+
+
+#: The mark, as three flat colours: the ground the panels use, a near peak and a
+#: far one. Drawn rather than committed, because a repository that carries a PNG
+#: carries it for ever and this one is eleven lines of arithmetic.
+_ICON_GROUND = (0x1D, 0x28, 0x2C)
+_ICON_FAR = (0x7D, 0x8F, 0x96)
+_ICON_NEAR = (0xF2, 0xF0, 0xEB)
+
+#: Two peaks, as fractions of the icon's side: (apex x, apex y, left x, right x).
+#: The baseline is shared, which is what makes them one range rather than two
+#: triangles that happen to be near each other.
+_ICON_PEAKS = (((0.30, 0.40), 0.02, 0.58, _ICON_FAR), ((0.58, 0.24), 0.20, 0.98, _ICON_NEAR))
+_ICON_BASE = 0.80
+
+
+def _icon_png(side: int) -> bytes:
+    """Draw the map's mark, at whatever size is asked for.
+
+    **Scanline, with the two edge pixels of each row blended.** A triangle
+    rasterised on whole pixels has a staircase down both slopes that is plainly
+    visible at 180 px, and a supersampled one costs a megapixel of Python per
+    icon. Covering the partial pixel at each end of the row is where nearly all
+    of the difference is, and it is O(rows) rather than O(pixels).
+
+    Args:
+        side: Width and height in pixels.
+
+    Returns:
+        The PNG's bytes.
+    """
+    rows = [bytearray(_ICON_GROUND * side) for _ in range(side)]
+    base = _ICON_BASE * side
+    for (apex_x, apex_y), left, right, colour in _ICON_PEAKS:
+        top, foot = apex_y * side, base
+        for y in range(max(0, int(top)), min(side, int(foot) + 1)):
+            down = (y + 0.5 - top) / (foot - top)
+            if not 0.0 <= down <= 1.0:
+                continue
+            span_l = (apex_x + (left - apex_x) * down) * side
+            span_r = (apex_x + (right - apex_x) * down) * side
+            row = rows[y]
+            for x in range(max(0, int(span_l)), min(side, int(span_r) + 1)):
+                # How much of this pixel the triangle covers, which is one at
+                # every pixel that is not on an edge.
+                covered = min(x + 1.0, span_r) - max(float(x), span_l)
+                if covered <= 0.0:
+                    continue
+                covered = min(covered, 1.0)
+                at = x * 3
+                for channel in range(3):
+                    was = row[at + channel]
+                    row[at + channel] = int(round(was + (colour[channel] - was) * covered))
+    raw = b"".join(b"\x00" + bytes(row) for row in rows)
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        whole = kind + body
+        return struct.pack(">I", len(body)) + whole + struct.pack(">I", zlib.crc32(whole) & 0xFFFFFFFF)
+
+    head = struct.pack(">IIBBBBB", side, side, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", head) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
+
+
+def icon_uri(side: int) -> str:
+    """The mark at one size, as a ``data:`` URI.
+
+    Args:
+        side: Width and height in pixels.
+
+    Returns:
+        A URI a manifest or a ``<link>`` can carry directly.
+    """
+    return "data:image/png;base64," + base64.b64encode(_icon_png(side)).decode("ascii")
+
+
+def write_manifest(beside: pathlib.Path, name: str) -> pathlib.Path:
+    """Write the manifest that makes the map installable.
+
+    **Which is not decoration: it is what makes an offline map survive.** WebKit
+    deletes storage a script created once an origin has gone seven days without
+    a visit -- exactly the walk somebody keeps the terrain for a fortnight
+    before -- and the exemptions are persisted storage and a home-screen install.
+    Asking for the first is a line of JavaScript; offering the second needs this.
+
+    **Its icons are ``data:`` URIs**, so the deploy gains one small text object
+    and no binaries, and nothing about the account or the host is written into
+    it: ``start_url`` is relative, the way the worker already deals with the
+    object being ``X.html`` and served at ``/X``.
+
+    Args:
+        beside: The built page, whose name is the address the app opens at.
+        name: What the installed map is called.
+
+    Returns:
+        Where the manifest was written.
+    """
+    manifest = {
+        "name": name,
+        "short_name": name,
+        "start_url": "./" + beside.stem,
+        "scope": "./",
+        "display": "standalone",
+        "orientation": "any",
+        "background_color": "#1d282c",
+        "theme_color": "#1d282c",
+        "icons": [
+            {"src": icon_uri(192), "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": icon_uri(512), "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        ],
+    }
+    written = beside.with_name("manifest.webmanifest")
+    written.write_text(json.dumps(manifest, separators=(",", ":")), encoding="utf-8")
+    return written
+
+
+class _Head(Element):
+    """The page's name, its mark, and where the manifest is.
+
+    Folium writes no ``<title>`` at all, so the tab and a home-screen icon were
+    both labelled with the URL. The mark rides in the document as a ``data:``
+    URI because iOS reads ``apple-touch-icon`` from the page and not from the
+    manifest, and a second object to deploy for 700 bytes is not a trade.
+
+    **An `Element` and not a `MacroElement`, for the reason `_Inlined` records
+    above it**: a macro's ``header`` block adds a child to the figure's header
+    while the figure is rendering that very header, and branca raises
+    ``OrderedDict mutated during iteration``. It cost this file a build twice.
+    """
+
+    _template = Template("""{{ this.body }}""")
+
+    def __init__(self, title: str) -> None:
+        """Hold the head.
+
+        Args:
+            title: What the page and an installed copy of it are called.
+        """
+        super().__init__()
+        named = escape(title, quote=True)
+        self.body = (
+            f"<title>{named}</title>\n"
+            '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
+            '<meta name="apple-mobile-web-app-capable" content="yes">\n'
+            '<meta name="mobile-web-app-capable" content="yes">\n'
+            '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n'
+            f'<meta name="apple-mobile-web-app-title" content="{named}">\n'
+            f'<link rel="apple-touch-icon" href="{icon_uri(180)}">\n'
+            f'<link rel="icon" type="image/png" href="{icon_uri(32)}">\n'
+            '<link rel="manifest" href="manifest.webmanifest">'
+        )
 
 
 def _squeezed(html: str) -> str:
@@ -548,6 +783,68 @@ class _PinSize(MacroElement):
         """Initialize the sizing."""
         super().__init__()
         self._name = "PinSize"
+
+
+class _ScaleZoom(MacroElement):
+    """A third line under the scale bar, saying which zoom this is.
+
+    **Because the offline chooser asks for one.** A reader picking *z16* out of
+    a list has no way to see what z16 looks like unless the map says what it is
+    showing, and a number you never meet again is a number you cannot choose
+    between. It also makes a screenshot readable back to a zoom, which every
+    report about this page has so far had to reconstruct from the bar.
+
+    The pairing is exact, and worth stating because it is arithmetic and not a
+    lookup: ``L.control.scale`` uses ``maxWidth: 100`` and rounds down to the
+    nearest 1, 2, 3 or 5 times a power of ten, and the ground resolution is
+    ``156543.03392 * cos(lat) / 2 ** z`` -- 64,917 / 2^z at this latitude. So the
+    bar reads 500 m at z13, 300 m at z14, 100 m at z15, 50 m at z16, 30 m at z17
+    and 20 m at z18, and none of those readings is shared with another zoom.
+
+    It is drawn in the scale control's own box rather than beside it, and takes
+    no measuring bar: a line with a rule under it in that corner claims to be a
+    distance, and this one is not.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+            (function () {
+                var map = {{ this._parent.get_name() }};
+                var line = null;
+
+                function said() {
+                    var box = map.getContainer().querySelector('.leaflet-control-scale');
+                    if (!box) { return; }
+                    if (!line || line.parentNode !== box) {
+                        line = document.createElement('div');
+                        line.className = 'trails-scale-zoom';
+                        box.appendChild(line);
+                    }
+                    // The resolution the map is actually drawing at, asked of
+                    // Leaflet rather than worked out from the zoom: a fractional
+                    // zoom or a different projection would make the arithmetic
+                    // here disagree with the ground the bar above it measured.
+                    var middle = map.getCenter();
+                    var across = map.distance(
+                        map.containerPointToLatLng([0, 0]),
+                        map.containerPointToLatLng([100, 0])) / 100;
+                    var zoom = map.getZoom();
+                    line.textContent = 'z' + (Math.round(zoom * 100) / 100) + ' \u00b7 ' +
+                        (across >= 10 ? Math.round(across) : Math.round(across * 100) / 100) + ' m/px';
+                    line.title = 'Zoom ' + zoom + ' at ' + middle.lat.toFixed(2) + '\u00b0 N';
+                }
+
+                map.on('zoomend moveend', said);
+                map.whenReady(said);
+                said();
+            })();
+        {% endmacro %}
+    """)
+
+    def __init__(self) -> None:
+        """Initialize the zoom line."""
+        super().__init__()
+        self._name = "ScaleZoom"
 
 
 class _ServiceWorker(MacroElement):
@@ -786,6 +1083,21 @@ class _Theme(MacroElement):
             color: var(--trails-ink-2) !important;
             border-color: var(--trails-ink-4) !important;
         }
+        /* **The same box, and deliberately not the same line.** Leaflet's scale
+           lines carry a rule along the bottom that *is* the measured distance;
+           this one says a zoom, so it gets the box and no bar. Anything else in
+           that corner with a rule under it is claiming to be a length. */
+        .trails-scale-zoom {
+            padding: 2px 5px 1px;
+            font-size: 11px;
+            line-height: 1.1;
+            border: 1px solid var(--trails-ink-4);
+            border-top: none;
+            background: var(--trails-panel);
+            color: var(--trails-ink-3);
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
         .leaflet-popup-content-wrapper, .leaflet-popup-tip {
             background: var(--trails-solid) !important;
             color: var(--trails-ink) !important;
@@ -878,6 +1190,7 @@ def create_map(
     zoom: int = 10,
     base: BaseMap = BaseMap.KARTVERKET_TOPO,
     extra_bases: tuple[BaseMap, ...] = (BaseMap.KARTVERKET_GRAYSCALE,),
+    title: str | None = None,
 ) -> folium.Map:
     """Create a Folium map focused on an area.
 
@@ -889,6 +1202,9 @@ def create_map(
         extra_bases: Additional base layers offered in the layer control. They
             are registered but not displayed until selected, otherwise Leaflet
             stacks them all and the last one wins.
+        title: What the page and an installed copy of it are called. Folium
+            writes no title at all, so without one the tab and a home-screen
+            icon are both labelled with the URL.
 
     Returns:
         Folium map with base layers attached; call :func:`add_legend` when done
@@ -966,6 +1282,8 @@ def create_map(
         header.add_child(_Inlined(vendored(url), css=False, name=name), name=name)
     for name, url in remote_css:
         header.add_child(_Inlined(vendored(url), css=True, name=name), name=name)
+    if title is not None:
+        header.add_child(_Head(title), name="head")
 
     for index, source in enumerate((base, *(extra for extra in extra_bases if extra is not base))):
         layer = _BASE_LAYERS[source]
@@ -989,6 +1307,7 @@ def create_map(
     # document — so the document has to have said them.
     _Theme().add_to(fmap)
     _PinSize().add_to(fmap)
+    _ScaleZoom().add_to(fmap)
     _ServiceWorker().add_to(fmap)
     # Before any layer, because every layer's own script calls it: folium
     # renders a map's children in the order they were added, and the layers are
@@ -10650,6 +10969,14 @@ class _PlanMode(MacroElement):
             window.trailsPlan = {
                 place: place,
                 undo: undo,
+                // The route's own line, which is what a corridor of terrain is
+                // kept along. `state()` answers everything else about a route
+                // and deliberately not this: it is read on every check and by
+                // the chrome, and two million coordinates is not a status.
+                geometry: function () {
+                    var shape = composeRoute();
+                    return {lon: shape.lon, lat: shape.lat};
+                },
                 // Reading a file, which is the whole of phase 8's way in. It
                 // takes the text rather than a File, so a browser check drives
                 // exactly what the picker drives one step further on — the
@@ -10950,6 +11277,622 @@ class LegendRow:
     label: str
     colour: str
     layer: Any = None
+
+
+class _OfflinePanel(MacroElement):
+    """The terrain a reader asked to keep, the switch that proves they have it,
+    and the way to get the space back.
+
+    **Everything but the ground already worked with the network off.** Selecting
+    a chain and reading its whole elevation profile costs zero requests, routing
+    costs zero, the search and the exports are in the document, and the worker
+    keeps the page itself. What was left was Kartverket's tiles, kept
+    opportunistically -- whatever the reader happened to pan over, capped at 500
+    and trimmed oldest-first. That is not a map somebody can walk with, and
+    nothing on the page ever said so.
+
+    **Four things, and the first is the one that matters most.**
+
+    - *Whether this browser can keep anything at all.* The page has computed
+      ``window.trailsWorker.why`` since the worker was added and showed it
+      nowhere. On iOS a service worker exists in Safari and in a home-screen web
+      app and in no third-party browser, so for some readers every other feature
+      here is already dead and the page was silent about it.
+    - *A switch.* On, the worker answers tiles from the cache and never touches
+      the network, which is what makes coverage checkable at home rather than
+      discoverable in a valley.
+    - *A chooser*, because a switch that silently gives a blank map is a switch
+      that lied. Turning it on with nothing kept opens it.
+    - *Delete*, because a gigabyte somebody cannot get rid of from inside the
+      thing that took it is a gigabyte taken without asking.
+
+    **A corridor along the route, never a box around it.** Measured on a real
+    42.3 km loop, the bounding box costs 2.4x the corridor at z16 and **7.2x at
+    z18** -- a round trip's box is mostly the hole in the middle, which nobody
+    walks. And because the margin is counted in tiles rather than metres, the
+    band is about 2 km wide at z14 and 250 m at z18: coarse ground far out and
+    fine ground under the feet, which is the right shape and not a compromise.
+
+    **The download does not go through the worker**, and the reason is a defect
+    it would otherwise have. Requests are made with ``cache: 'reload'``, which
+    the worker passes through untouched; without that a download started while
+    the switch was on would be answered by the worker's own blank tile and the
+    reader would be told their park was kept.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+            (function () {
+                var map = {{ this._parent.get_name() }};
+
+                // Where a deliberate download goes. The worker reads this one
+                // first and never trims it; `trails-tiles` beside it is what
+                // panning happened to leave behind and is capped at 500.
+                var TERRAIN = 'trails-terrain';
+                var TILES = 'trails-tiles';
+                var KEY = 'trails-offline';
+                // Kartverket's topo cache ends here: z19 and z20 answer 400.
+                var TOP = 18;
+                var FLOOR = 14;
+                // What a kept tile weighs, from twelve samples per zoom taken on
+                // the trail network rather than over the park: the sea tiles a
+                // bounding box is full of are a fraction of the size and would
+                // make every estimate here optimistic.
+                var WEIGHT = {11: 73914, 12: 73914, 13: 73914, 14: 70170,
+                              15: 45898, 16: 51295, 17: 28637, 18: 37037};
+
+                // **Three scopes, three genuinely different shapes.** The
+                // viewport is the only one that is a rectangle, because a
+                // viewport is one. `ceiling` is where a scope stops being a
+                // download and starts being an archive: everything drawn is
+                // 2.1 GB at z16, 4.0 GB at z17 and about 9 GB at z18.
+                var SCOPES = [
+                    {key: 'route', label: 'This route', pad: 2, ceiling: TOP,
+                     hint: 'A band along the route you planned, wider at the coarse zooms.'},
+                    {key: 'view', label: 'What I can see', pad: 0, ceiling: TOP,
+                     hint: 'The map as it stands on the screen right now.'},
+                    {key: 'all', label: 'Everything drawn', pad: 1, ceiling: 16,
+                     hint: 'A band along every path on this map, all 6,020 km of them.'}
+                ];
+
+                var scope = 'route', zoom = 16, chooser = false;
+                var counted = null, counting = false, working = null, snapshot = null;
+                var holder = null, said = {};
+
+                // ---- tiles ---------------------------------------------------
+
+                function fracTile(lat, lon, z) {
+                    var n = Math.pow(2, z);
+                    var s = Math.sin(lat * Math.PI / 180);
+                    return {x: (lon + 180) / 360 * n,
+                            y: (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n};
+                }
+
+                // **Walked, not sampled at the ends.** The drawn geometry is
+                // simplified at 8 m, so a straight run across a plateau can be
+                // hundreds of metres between two vertices -- and a tile at z18
+                // is 63 m. Taking only the endpoints would leave holes along
+                // every straight, which is exactly the ground somebody walks
+                // fastest and looks at least.
+                function walk(a, b, z, into) {
+                    var from = fracTile(a[0], a[1], z), to = fracTile(b[0], b[1], z);
+                    var dx = to.x - from.x, dy = to.y - from.y;
+                    var steps = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) * 2);
+                    var i;
+                    if (!isFinite(steps) || steps < 1) { steps = 1; }
+                    for (i = 0; i <= steps; i += 1) {
+                        into(Math.floor(from.x + dx * i / steps), Math.floor(from.y + dy * i / steps));
+                    }
+                }
+
+                function key(x, y) { return x + ',' + y; }
+
+                // The route as the plan panel composes it, which is the same
+                // geometry the exported file is written from.
+                function routeLine() {
+                    if (!window.trailsPlan || !window.trailsPlan.geometry) { return []; }
+                    var shape = window.trailsPlan.geometry(), out = [], i;
+                    for (i = 0; i < shape.lon.length; i += 1) {
+                        if (shape.lon[i] === null || shape.lat[i] === null) { continue; }
+                        out.push([shape.lat[i], shape.lon[i]]);
+                    }
+                    return out.length > 1 ? [out] : [];
+                }
+
+                // Every chain drawn on this map. `eachLayer` is flat -- a group
+                // hands each of its children to the map as well as holding it --
+                // so this must not recurse or every line is counted twice.
+                function ringsOf(value, into) {
+                    if (!value || !value.length) { return; }
+                    if (value[0].lat !== undefined) { into(value); return; }
+                    value.forEach(function (each) { ringsOf(each, into); });
+                }
+
+                function drawnLines() {
+                    var out = [];
+                    map.eachLayer(function (layer) {
+                        if (!layer.getLatLngs || layer.getRadius) { return; }
+                        // **Down to whatever depth the geometry had.** A
+                        // polyline answers a list of points, a polygon a list of
+                        // rings and a multipolygon a list of those; taking the
+                        // first level and hoping puts `undefined` into the
+                        // arithmetic and every tile it touches comes out NaN.
+                        ringsOf(layer.getLatLngs(), function (ring) {
+                            var line = [], i;
+                            for (i = 0; i < ring.length; i += 1) { line.push([ring[i].lat, ring[i].lng]); }
+                            if (line.length > 1) { out.push(line); }
+                        });
+                    });
+                    return out;
+                }
+
+                // **Computed once at the finest zoom and halved down.** A tile
+                // at z-1 is the tile at z with both coordinates shifted right,
+                // so one walk answers every level below it as well; walking the
+                // whole network five times over would be five times the work for
+                // a set that is already implied.
+                function coresFor(which, top) {
+                    var here = SCOPES.filter(function (each) { return each.key === which; })[0];
+                    var fine = {}, z;
+                    if (which === 'view') {
+                        var box = map.getBounds();
+                        var a = fracTile(box.getNorth(), box.getWest(), top);
+                        var b = fracTile(box.getSouth(), box.getEast(), top);
+                        var x, y;
+                        for (x = Math.floor(a.x); x <= Math.floor(b.x); x += 1) {
+                            for (y = Math.floor(a.y); y <= Math.floor(b.y); y += 1) { fine[key(x, y)] = [x, y]; }
+                        }
+                    } else {
+                        var lines = which === 'route' ? routeLine() : drawnLines();
+                        lines.forEach(function (line) {
+                            var i;
+                            for (i = 0; i + 1 < line.length; i += 1) {
+                                walk(line[i], line[i + 1], top, function (x, y) { fine[key(x, y)] = [x, y]; });
+                            }
+                        });
+                    }
+                    var levels = {}, below = fine;
+                    levels[top] = fine;
+                    for (z = top - 1; z >= 11; z -= 1) {
+                        var up = {};
+                        Object.keys(below).forEach(function (each) {
+                            var at = below[each], x = at[0] >> 1, y = at[1] >> 1;
+                            up[key(x, y)] = [x, y];
+                        });
+                        levels[z] = up;
+                        below = up;
+                    }
+                    return {levels: levels, pad: here.pad};
+                }
+
+                function padded(core, pad) {
+                    if (!pad) { return core; }
+                    var out = {};
+                    Object.keys(core).forEach(function (each) {
+                        var at = core[each], dx, dy;
+                        for (dx = -pad; dx <= pad; dx += 1) {
+                            for (dy = -pad; dy <= pad; dy += 1) {
+                                var x = at[0] + dx, y = at[1] + dy;
+                                if (x >= 0 && y >= 0) { out[key(x, y)] = [x, y]; }
+                            }
+                        }
+                    });
+                    return out;
+                }
+
+                // The base layer that is actually showing. Only one is fetched:
+                // topo and grayscale share a host, and keeping both would
+                // silently double every figure on this panel.
+                function base() {
+                    var found = null;
+                    map.eachLayer(function (layer) {
+                        if (!found && layer.getTileUrl && layer._url) { found = layer; }
+                    });
+                    return found;
+                }
+
+                // Built by hand rather than through `getTileUrl`, which takes
+                // its zoom from the map rather than from the tile it is given.
+                function urlFor(layer, x, y, z) {
+                    return layer._url.replace('{z}', z).replace('{y}', y).replace('{x}', x)
+                        .replace('{s}', (layer.options.subdomains || 'abc')[0])
+                        .replace('{r}', '');
+                }
+
+                function wanted() {
+                    var found = coresFor(scope, zoom), layer = base(), urls = [], bytes = 0, z;
+                    if (!layer) { return {urls: [], bytes: 0}; }
+                    for (z = 11; z <= zoom; z += 1) {
+                        var set = padded(found.levels[z], found.pad);
+                        Object.keys(set).forEach(function (each) {
+                            var at = set[each];
+                            urls.push(urlFor(layer, at[0], at[1], z));
+                        });
+                        bytes += Object.keys(set).length * (WEIGHT[z] || 45000);
+                    }
+                    return {urls: urls, bytes: bytes};
+                }
+
+                // ---- what is kept --------------------------------------------
+
+                function kept() {
+                    if (!window.caches) { return Promise.resolve({tiles: 0, bytes: 0}); }
+                    return caches.open(TERRAIN).then(function (cache) {
+                        return cache.keys();
+                    }).then(function (keys) {
+                        // The flag the worker keeps beside the tiles is not one.
+                        var tiles = keys.filter(function (each) {
+                            return each.url.indexOf('trails.invalid') === -1;
+                        }), bytes = 0;
+                        // Weighed by the zoom each one came from, out of the
+                        // same table the chooser quotes, so what the panel says
+                        // it will cost and what it says it holds are one figure
+                        // and not two that drift.
+                        tiles.forEach(function (each) {
+                            var parts = each.url.split('/');
+                            bytes += WEIGHT[Number(parts[parts.length - 3])] || 45000;
+                        });
+                        return {tiles: tiles.length, bytes: bytes};
+                    }).catch(function () { return {tiles: 0, bytes: 0}; });
+                }
+
+                function room() {
+                    if (!navigator.storage || !navigator.storage.estimate) {
+                        return Promise.resolve({usage: null, quota: null, persisted: null});
+                    }
+                    return navigator.storage.estimate().then(function (guess) {
+                        var persisted = navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(null);
+                        return persisted.then(function (held) {
+                            return {usage: guess.usage, quota: guess.quota, persisted: held};
+                        });
+                    }).catch(function () { return {usage: null, quota: null, persisted: null}; });
+                }
+
+                function on() {
+                    try { return window.localStorage.getItem(KEY) === 'on'; } catch (blocked) { return false; }
+                }
+
+                function remember(want) {
+                    try { window.localStorage.setItem(KEY, want ? 'on' : 'off'); } catch (blocked) { return; }
+                }
+
+                // **Told to the worker on every load, not only when it moves.**
+                // A worker is started and stopped around single fetches, so it
+                // reads the flag out of its own cache; this keeps the two from
+                // drifting when storage was cleared under the page.
+                function tellWorker(want) {
+                    if (!navigator.serviceWorker || !navigator.serviceWorker.controller) { return Promise.resolve(false); }
+                    navigator.serviceWorker.controller.postMessage({trails: 'offline', on: !!want});
+                    return Promise.resolve(true);
+                }
+
+                function refresh() {
+                    return Promise.all([kept(), room()]).then(function (both) {
+                        snapshot = {
+                            available: !!(window.trailsWorker && window.trailsWorker.kept),
+                            why: window.trailsWorker ? window.trailsWorker.why : 'the page has not asked yet',
+                            on: on(), kept: both[0], storage: both[1],
+                            busy: working !== null, chooser: chooser, scope: scope, zoom: zoom,
+                            counted: counted
+                        };
+                        draw();
+                        return snapshot;
+                    });
+                }
+
+                // ---- keeping it ----------------------------------------------
+
+                // **Six at a time, and never through the worker.** `cache:
+                // 'reload'` is what the worker passes through untouched: without
+                // it a download started while the switch was on would be
+                // answered by the worker's own blank tile, and the reader would
+                // be told their park was kept.
+                function keep() {
+                    if (working) { return working.done_; }
+                    if (!window.caches) { return Promise.resolve(); }
+                    var list = wanted().urls;
+                    var state = {total: list.length, done: 0, failed: 0, stop: false, done_: null};
+                    working = state;
+                    var at = 0;
+                    state.done_ = caches.open(TERRAIN).then(function (cache) {
+                        function one() {
+                            if (state.stop || at >= list.length) { return Promise.resolve(); }
+                            var url = list[at];
+                            at += 1;
+                            return cache.match(url).then(function (there) {
+                                if (there) { return null; }
+                                return fetch(url, {cache: 'reload', mode: 'cors'}).then(function (answer) {
+                                    if (answer && answer.ok) { return cache.put(url, answer); }
+                                    state.failed += 1;
+                                    return null;
+                                }).catch(function () { state.failed += 1; return null; });
+                            }).then(function () {
+                                state.done += 1;
+                                if (state.done % 25 === 0) { draw(); }
+                                return one();
+                            });
+                        }
+                        var runners = [], i;
+                        for (i = 0; i < 6; i += 1) { runners.push(one()); }
+                        return Promise.all(runners);
+                    }).then(function () {
+                        working = null;
+                        // A run that was stopped leaves the chooser where it
+                        // was: what the reader wants next is almost always to
+                        // pick a coarser zoom, not to find the panel again.
+                        if (!state.stop) {
+                            chooser = false;
+                            remember(true);
+                            tellWorker(true);
+                        }
+                        return refresh();
+                    });
+                    draw();
+                    return state.done_;
+                }
+
+                function forget() {
+                    if (!window.caches) { return Promise.resolve(); }
+                    return Promise.all([caches.delete(TERRAIN), caches.delete(TILES)]).then(function () {
+                        remember(false);
+                        return tellWorker(false);
+                    }).then(refresh);
+                }
+
+                // ---- the panel ------------------------------------------------
+
+                function megabytes(bytes) {
+                    if (bytes === null || bytes === undefined) { return '—'; }
+                    if (bytes >= 1e9) { return (bytes / 1e9).toFixed(2) + ' GB'; }
+                    return Math.round(bytes / 1e6) + ' MB';
+                }
+
+                function count(n) { return Number(n).toLocaleString('en-US'); }
+
+                function button(label, strong) {
+                    var made = document.createElement('button');
+                    made.type = 'button';
+                    made.textContent = label;
+                    made.style.cssText = 'font:inherit;font-size:13px;font-weight:600;padding:8px 14px;' +
+                        'border-radius:7px;cursor:pointer;border:1px solid ' +
+                        (strong ? 'var(--trails-strong);background:var(--trails-strong);color:var(--trails-on-strong)'
+                                : 'var(--trails-rule);background:transparent;color:var(--trails-ink-2)');
+                    return made;
+                }
+
+                function build() {
+                    holder = document.createElement('div');
+                    holder.className = 'trails-offline';
+                    said.state = document.createElement('p');
+                    said.state.className = 'trails-offline-state';
+                    said.state.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-3)';
+                    said.switchRow = document.createElement('div');
+                    said.switchRow.style.cssText = 'display:flex;align-items:center;gap:10px;margin:0 0 10px';
+                    said.toggle = button('Offline mode', true);
+                    said.toggle.className = 'trails-offline-toggle';
+                    said.toggle.addEventListener('click', function () { toggle(!on()); });
+                    said.switchRow.appendChild(said.toggle);
+                    said.figures = document.createElement('p');
+                    said.figures.className = 'trails-offline-figures';
+                    said.figures.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-3);font-size:12px';
+                    said.chooser = document.createElement('div');
+                    said.chooser.className = 'trails-offline-chooser';
+                    said.tools = document.createElement('div');
+                    said.tools.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+                    said.keep = button('Keep terrain…', false);
+                    said.keep.className = 'trails-offline-keep';
+                    said.keep.addEventListener('click', function () { chooser = !chooser; refresh(); });
+                    said.forget = button('Delete', false);
+                    said.forget.className = 'trails-offline-forget';
+                    said.forget.addEventListener('click', function () {
+                        if (!window.confirm('Delete the terrain kept on this device?')) { return; }
+                        forget();
+                    });
+                    said.tools.appendChild(said.keep);
+                    said.tools.appendChild(said.forget);
+                    holder.appendChild(said.state);
+                    holder.appendChild(said.switchRow);
+                    holder.appendChild(said.figures);
+                    holder.appendChild(said.chooser);
+                    holder.appendChild(said.tools);
+                    // **Left detached on purpose.** The dock is what puts a
+                    // panel on the screen, and a holder appended to the map
+                    // container would sit over the terrain until it got there.
+                    // This is the same seam `Where I am` and `Sources` use.
+                }
+
+                function drawChooser() {
+                    said.chooser.innerHTML = '';
+                    if (!chooser) { return; }
+                    said.chooser.style.cssText = 'margin:0 0 10px;padding:10px;border:1px solid var(--trails-rule);' +
+                        'border-radius:8px';
+                    var which = document.createElement('div');
+                    which.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px';
+                    SCOPES.forEach(function (each) {
+                        if (each.key === 'route' && !routeLine().length) { return; }
+                        var pick = button(each.label, each.key === scope);
+                        pick.className = 'trails-offline-scope';
+                        pick.setAttribute('data-scope', each.key);
+                        pick.style.fontSize = '12px';
+                        pick.style.padding = '6px 10px';
+                        pick.title = each.hint;
+                        pick.addEventListener('click', function () {
+                            scope = each.key;
+                            if (zoom > each.ceiling) { zoom = each.ceiling; }
+                            counted = null;
+                            refresh();
+                        });
+                        which.appendChild(pick);
+                    });
+                    said.chooser.appendChild(which);
+
+                    var here = SCOPES.filter(function (each) { return each.key === scope; })[0];
+                    var fine = document.createElement('div');
+                    fine.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px';
+                    var z;
+                    for (z = FLOOR; z <= TOP; z += 1) {
+                        (function (level) {
+                            var pick = button('z' + level, level === zoom);
+                            pick.className = 'trails-offline-zoom';
+                            pick.setAttribute('data-zoom', String(level));
+                            pick.style.fontSize = '12px';
+                            pick.style.padding = '6px 10px';
+                            if (level > here.ceiling) {
+                                pick.disabled = true;
+                                pick.style.opacity = '0.4';
+                                pick.style.cursor = 'default';
+                                pick.title = 'Too much ground at this zoom — that is an archive, not a download.';
+                            } else {
+                                pick.addEventListener('click', function () { zoom = level; counted = null; refresh(); });
+                            }
+                            fine.appendChild(pick);
+                        })(z);
+                    }
+                    said.chooser.appendChild(fine);
+
+                    var says = document.createElement('p');
+                    says.className = 'trails-offline-needed';
+                    says.style.cssText = 'margin:0 0 8px;color:var(--trails-ink-3);font-size:12px';
+                    if (counted === null) {
+                        says.textContent = 'Working out how much that is…';
+                        window.setTimeout(function () {
+                            if (counted !== null || !chooser) { return; }
+                            var found = wanted();
+                            counted = {tiles: found.urls.length, bytes: found.bytes, scope: scope, zoom: zoom};
+                            refresh();
+                        }, 0);
+                    } else {
+                        says.textContent = count(counted.tiles) + ' tiles · about ' + megabytes(counted.bytes) +
+                            ' · ' + here.hint;
+                    }
+                    said.chooser.appendChild(says);
+
+                    // **Refused against the room there actually is, not against
+                    // a number written here.** A ceiling per scope catches
+                    // *everything drawn* at z17; it does not catch a viewport
+                    // zoomed out over the county, which asks for 22 GB and looks
+                    // as reasonable as any other choice on the screen. This is
+                    // measured on the device: a Firefox profile answered 3.3 GB,
+                    // and a phone will answer something else again.
+                    var free = null, room = (snapshot || {}).storage;
+                    if (room && room.quota !== null && room.usage !== null) { free = room.quota - room.usage; }
+                    var tooMuch = counted !== null && free !== null && counted.bytes > free * 0.9;
+                    if (tooMuch) {
+                        var refused = document.createElement('p');
+                        refused.className = 'trails-offline-refused';
+                        refused.style.cssText = 'margin:0 0 8px;color:var(--trails-ink-2);font-size:12px';
+                        refused.textContent = 'That is more than this device will hold — ' +
+                            megabytes(free) + ' free. Pick a coarser zoom or a smaller piece of ground.';
+                        said.chooser.appendChild(refused);
+                    }
+
+                    var go = button(working ? 'Stop' : 'Keep it', !working);
+                    go.className = working ? 'trails-offline-stop' : 'trails-offline-go';
+                    go.disabled = !working && (counted === null || tooMuch);
+                    go.style.opacity = go.disabled ? '0.5' : '1';
+                    go.addEventListener('click', function () {
+                        if (working) { working.stop = true; return; }
+                        if (go.disabled) { return; }
+                        // Asked from the press and not at load, because that is
+                        // when a browser will grant it: an origin nobody has
+                        // touched asking to be kept for ever is what the rule
+                        // about user gestures exists to refuse.
+                        if (navigator.storage && navigator.storage.persist) { navigator.storage.persist(); }
+                        keep();
+                    });
+                    said.chooser.appendChild(go);
+                }
+
+                function draw() {
+                    if (!holder) { return; }
+                    var have = snapshot || {};
+                    if (have.available) {
+                        said.state.textContent = 'This map is kept on your device. Terrain is what is left, ' +
+                            'and it is what you choose to keep.';
+                    } else if (have.why) {
+                        said.state.textContent = 'Not available in this browser — ' + have.why +
+                            '. On iOS that means Safari, or this map added to the Home Screen.';
+                    } else {
+                        // Neither kept nor refused: the registration has not
+                        // settled. Saying *not available* here would be a wrong
+                        // answer rather than a slow one.
+                        said.state.textContent = 'Asking this browser whether it can keep the map…';
+                    }
+                    said.toggle.textContent = have.on ? 'Offline mode is on' : 'Offline mode is off';
+                    said.toggle.setAttribute('aria-pressed', have.on ? 'true' : 'false');
+                    said.toggle.disabled = !have.available;
+                    said.toggle.style.opacity = have.available ? '1' : '0.5';
+                    if (working) {
+                        said.figures.textContent = 'Keeping ' + count(working.done) + ' of ' +
+                            count(working.total) + (working.failed ? ' · ' + working.failed + ' refused' : '');
+                    } else {
+                        var lines = [count((have.kept || {}).tiles || 0) + ' tiles kept'];
+                        if (have.storage && have.storage.usage !== null) {
+                            lines.push(megabytes(have.storage.usage) + ' of ' + megabytes(have.storage.quota) + ' used');
+                        }
+                        if (have.storage && have.storage.persisted) { lines.push('storage is persistent'); }
+                        said.figures.textContent = lines.join(' · ');
+                    }
+                    said.forget.disabled = !((have.kept || {}).tiles);
+                    said.forget.style.opacity = (have.kept || {}).tiles ? '1' : '0.5';
+                    drawChooser();
+                }
+
+                // **On, with nothing kept, opens the chooser instead.** A switch
+                // that answers with a blank map is a switch that lied.
+                function toggle(want) {
+                    return kept().then(function (there) {
+                        if (want && !there.tiles) {
+                            chooser = true;
+                            return refresh();
+                        }
+                        remember(want);
+                        return tellWorker(want).then(refresh);
+                    });
+                }
+
+                build();
+                if (navigator.serviceWorker) {
+                    // **Registration finishes after the page does.** Reading
+                    // `window.trailsWorker.kept` once, at load, is reading it
+                    // before the promise it is set in has settled -- the panel
+                    // said *not available in this browser* on a browser that had
+                    // one, which is the one sentence here that must not be wrong.
+                    navigator.serviceWorker.ready.then(function () {
+                        return tellWorker(on());
+                    }).then(refresh, refresh);
+                }
+
+                window.trailsOffline = {
+                    holder: holder,
+                    refresh: refresh,
+                    state: function () { return snapshot; },
+                    scopes: SCOPES.map(function (each) { return each.key; }),
+                    open: function (want) { chooser = want === undefined ? true : !!want; return refresh(); },
+                    choose: function (which, level) {
+                        if (which) { scope = which; }
+                        if (level) { zoom = level; }
+                        counted = null;
+                        return refresh();
+                    },
+                    // What the chooser would fetch, computed rather than
+                    // estimated, so a check reads the figure the panel shows.
+                    needed: function () { var found = wanted(); return {tiles: found.urls.length, bytes: found.bytes}; },
+                    toggle: toggle,
+                    keep: keep,
+                    stop: function () { if (working) { working.stop = true; } },
+                    forget: forget
+                };
+
+                window.setTimeout(refresh, 0);
+            })();
+        {% endmacro %}
+    """)
+
+    def __init__(self) -> None:
+        """Initialize the panel."""
+        super().__init__()
+        self._name = "OfflinePanel"
 
 
 class _Legend(MacroElement):
@@ -11271,6 +12214,8 @@ class _Chrome(MacroElement):
                  hint: 'The climb of a trail you tap, or of a route you plan.'},
                 {key: 'here', label: 'Where I am', width: 300, selector: null,
                  hint: 'Your own position on this map, while you ask for it.'},
+                {key: 'offline', label: 'Offline', width: 330, selector: null,
+                 hint: 'Keep the ground on this device, and walk with no signal.'},
                 {key: 'info', label: 'Sources', width: 360, selector: null,
                  hint: 'Who made this data, and under what licence.'}
             ];
@@ -11506,6 +12451,11 @@ class _Chrome(MacroElement):
                 sourcesHolder.innerHTML = out || '<p style="color:var(--trails-ink-5)">No sources were handed to this page.</p>';
             })();
             byKey.info.holder = sourcesHolder;
+
+            // ---- what is kept on this device ----------------------------------
+            // Built by its own element, which owns the tile arithmetic and the
+            // worker's ear; the dock only finds it somewhere to be.
+            byKey.offline.holder = window.trailsOffline ? window.trailsOffline.holder : null;
 
             // **The one tool that used to be dead half the time.** It was
             // disabled while nothing was selected — greyed, with no reason
@@ -11984,6 +12934,7 @@ class _Chrome(MacroElement):
                 openTool = key;
                 raise('tool');
                 dockParts.title.textContent = tool.label;
+                if (key === 'offline' && window.trailsOffline) { window.trailsOffline.refresh(); }
                 TOOLS.forEach(function (each) {
                     if (each.holder) { each.holder.style.display = each.key === key ? '' : 'none'; }
                 });
@@ -12397,4 +13348,7 @@ def add_chrome(fmap: folium.Map, credits: dict[str, list[dict[str, str]]] | None
         credits: What to put in the *Sources* panel, keyed by source, as
             :func:`source_credits` composes it
     """
+    # Before the dock, because the dock reads `window.trailsOffline.holder`:
+    # folium renders a map's children in the order they were added.
+    _OfflinePanel().add_to(fmap)
     _Chrome(credits, getattr(fmap, MAP_BOUNDS_ATTR, None)).add_to(fmap)

@@ -2916,7 +2916,49 @@ CACHED_PAGE = """async () => {
     return false; }"""
 
 
-def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) -> Check:
+def the_zoom_the_scale_says(page: Any) -> Check:
+    """The map saying which zoom it is drawing at.
+
+    **Because the offline chooser asks the reader for one.** A reader picking
+    *z16* out of a list has no way to see what z16 looks like unless the map says
+    what it is showing, and a number nobody ever meets again is a number nobody
+    can choose between.
+
+    The pairing is arithmetic and not a lookup: ``L.control.scale`` uses
+    ``maxWidth: 100``, and at 65.5 N the ground resolution is 64,917 / 2^z. So
+    the bar reads 100 m at z15, 50 m at z16 and 30 m at z17, and no reading is
+    shared by two zooms -- which is what makes a screenshot readable back to a
+    zoom, something every report about this page has so far had to guess at.
+
+    Args:
+        page: A page already loaded and settled
+
+    Returns:
+        What the line said, at two zooms and against the bar beside it.
+
+    """
+    was = page.evaluate(with_map("() => ({at: __MAP__.getCenter(), z: __MAP__.getZoom()})"))
+    readings = []
+    for zoom, bar in ((15, "100 m"), (16, "50 m")):
+        page.evaluate(with_map(f"() => __MAP__.setView([65.55, 13.05], {zoom})"))
+        page.wait_for_timeout(400)
+        said = page.evaluate(
+            """() => ({
+                zoom: (document.querySelector('.trails-scale-zoom') || {}).textContent,
+                bar: (document.querySelector('.leaflet-control-scale-line') || {}).textContent
+            })"""
+        )
+        readings.append(Reading(f"at z{zoom} the line says so", (said["zoom"] or "").split(" ")[0], f"z{zoom}"))
+        readings.append(Reading(f"and the bar beside it reads {bar}", said["bar"], bar))
+    # A metres-per-pixel figure, because that is what this whole map argues in.
+    said = page.evaluate("() => (document.querySelector('.trails-scale-zoom') || {}).textContent")
+    readings.append(Reading("and it says the ground it is drawing at", "m/px" in (said or ""), True, note=said or ""))
+    page.evaluate(with_map(f"() => __MAP__.setView([{was['at']['lat']}, {was['at']['lng']}], {was['z']})"))
+    page.wait_for_timeout(300)
+    return Check("the scale bar says which zoom it is", readings)
+
+
+def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) -> list[Check]:
     """The map, served by its own worker, with the network switched off.
 
     **Today it does not open at all.** The document is served `max-age=300`, so
@@ -2935,7 +2977,8 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         page_path: The built page, whose directory is what gets served.
 
     Returns:
-        What the worker kept, and what opened without a network.
+        Two checks: what the worker kept and what opened without a network, and
+        then the terrain the reader asked it to keep.
     """
     with served(page_path.parent) as origin:
         address = f"{origin}/{page_path.name}"
@@ -2961,6 +3004,67 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # page: the worker keeps the map by asking for it a second time, and if
         # that second ask crossed the wire the first visit would cost twice.
         fetched = _Quiet.asked.get(f"/{page_path.name}", 0)
+
+        # ---- and the terrain a reader asked for, in the same session ---------
+        # **In this page and not in one of its own**, because a second 15.6 MB
+        # document is a minute of loading and about 590 MB of memory. The two
+        # things being driven here need the same worker and the same origin, so
+        # they are one visit that answers twice.
+        terrain: list[Reading] = []
+        first.wait_for_function("() => window.trailsOffline", timeout=60_000)
+        opened = first.evaluate("async () => await window.trailsOffline.refresh()")
+        terrain.append(Reading("the panel knows this browser can keep it", opened["available"], True, note=str(opened.get("why"))))
+
+        # **On, with nothing kept, opens the chooser instead**: a switch that
+        # answers with a blank map is a switch that lied.
+        asked = first.evaluate("async () => { var s = await window.trailsOffline.toggle(true); return {on: s.on, chooser: s.chooser}; }")
+        terrain.append(Reading("switching it on with nothing kept asks first", asked["chooser"], True))
+        terrain.append(Reading("and does not claim to be on", asked["on"], False))
+
+        # A small, real download: a tight view at a coarse zoom is a few dozen
+        # tiles from Kartverket, which is a check and not a bulk fetch.
+        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 12)"))
+        first.wait_for_timeout(1500)
+        first.evaluate("async () => await window.trailsOffline.choose('view', 12)")
+        first_ask = first.evaluate("() => window.trailsOffline.needed()")
+        first.evaluate("() => window.trailsOffline.keep()")
+        first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
+        after = first.evaluate("() => window.trailsOffline.state()")
+        terrain.append(Reading("what it said it would keep is what it kept", after["kept"]["tiles"], first_ask["tiles"]))
+        terrain.append(Reading("and the switch is on once it is there", after["on"], True))
+
+        # **The one that would have been silent.** With the switch already on,
+        # a second download goes out through a worker that answers unkept tiles
+        # with a blank -- unless it lets `cache: 'reload'` past. Without that
+        # branch every one of these is 68 bytes of transparent PNG written into
+        # the terrain cache as terrain, and the panel reports success.
+        first.evaluate("async () => await window.trailsOffline.choose('view', 13)")
+        second_ask = first.evaluate("() => window.trailsOffline.needed()")
+        first.evaluate("() => window.trailsOffline.keep()")
+        first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
+        weighed = first.evaluate(
+            """async () => {
+                const cache = await caches.open('trails-terrain');
+                const keys = (await cache.keys()).filter(k => k.url.indexOf('trails.invalid') === -1);
+                let smallest = Infinity, total = 0;
+                for (const key of keys.slice(0, 40)) {
+                    const body = await (await cache.match(key)).arrayBuffer();
+                    smallest = Math.min(smallest, body.byteLength);
+                    total += body.byteLength;
+                }
+                return {kept: keys.length, smallest: smallest, sampled: Math.min(40, keys.length)};
+            }"""
+        )
+        terrain.append(Reading("keeping more while it is on keeps all of it", weighed["kept"], second_ask["tiles"]))
+        # A blank tile is 68 bytes. Anything Kartverket drew is thousands.
+        terrain.append(
+            Reading(
+                "and every kept tile is terrain, not a blank",
+                weighed["smallest"] > 1000,
+                True,
+                note=f"smallest of {weighed['sampled']}: {weighed['smallest']} B",
+            )
+        )
         first.close()
 
         context.set_offline(True)
@@ -2978,30 +3082,54 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                               graph: !!(window.trailsGraph && window.trailsGraph.header)}; }"""
             )
         )
+        # And with the network off, what was kept is what is drawn: the tiles
+        # come back from the cache and none of them is the worker's blank.
+        second.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 12)"))
+        second.wait_for_timeout(3000)
+        drawn_terrain = second.evaluate(
+            """() => {
+                let good = 0, blank = 0;
+                document.querySelectorAll('img.leaflet-tile').forEach(img => {
+                    if (img.naturalWidth > 1) { good += 1; } else { blank += 1; }
+                });
+                return {good: good, blank: blank};
+            }"""
+        )
+        terrain.append(Reading("offline, the kept ground draws", drawn_terrain["good"] > 0, True, note=f"{drawn_terrain['good']} tiles"))
+        terrain.append(Reading("and none of it is a broken image", drawn_terrain["blank"], 0))
+        # And the reader can have the space back from inside the thing that took
+        # it, which is the last of the four this panel is for.
+        emptied = second.evaluate("async () => { var s = await window.trailsOffline.forget(); return {tiles: s.kept.tiles, on: s.on}; }")
+        terrain.append(Reading("and it can all be deleted again", emptied["tiles"], 0))
+        terrain.append(Reading("which switches offline mode back off", emptied["on"], False))
+
         context.set_offline(False)
         context.close()
 
-    return Check(
-        "the map opens with the network off",
-        [
-            Reading("a worker is registered", bool(registered and registered.get("kept")), True, note=str(registered)),
-            Reading("and the page is in its cache", kept, True),
-            # Kept on the **first** visit, and for one download: `cache.add`
-            # goes through the browser's own cache, which was handed the map
-            # seconds earlier. Two would be the whole point undone.
-            Reading("the first visit downloads the map once", fetched, 1),
-            # The browser's own cache already keeps a tile five days --
-            # `max-age=432000`, measured -- so this is for the walk somebody
-            # plans a fortnight out, not for the next minute.
-            Reading("terrain it was shown is kept too", tiles > 0, True, note=f"{tiles} tiles"),
-            Reading("nothing threw with the network off", len(thrown), 0, note="; ".join(thrown[:2])),
-            # The whole map, not a shell of one: every line, every marker, and
-            # the graph that routes over them.
-            Reading("offline: paths drawn", offline["paths"], 11589),
-            Reading("offline: markers", offline["markers"], 198),
-            Reading("offline: the routing graph is there", offline["graph"], True),
-        ],
-    )
+    return [
+        Check(
+            "the map opens with the network off",
+            [
+                Reading("a worker is registered", bool(registered and registered.get("kept")), True, note=str(registered)),
+                Reading("and the page is in its cache", kept, True),
+                # Kept on the **first** visit, and for one download: `cache.add`
+                # goes through the browser's own cache, which was handed the map
+                # seconds earlier. Two would be the whole point undone.
+                Reading("the first visit downloads the map once", fetched, 1),
+                # The browser's own cache already keeps a tile five days --
+                # `max-age=432000`, measured -- so this is for the walk somebody
+                # plans a fortnight out, not for the next minute.
+                Reading("terrain it was shown is kept too", tiles > 0, True, note=f"{tiles} tiles"),
+                Reading("nothing threw with the network off", len(thrown), 0, note="; ".join(thrown[:2])),
+                # The whole map, not a shell of one: every line, every marker, and
+                # the graph that routes over them.
+                Reading("offline: paths drawn", offline["paths"], 11589),
+                Reading("offline: markers", offline["markers"], 198),
+                Reading("offline: the routing graph is there", offline["graph"], True),
+            ],
+        ),
+        Check("the terrain a reader asked to keep", terrain),
+    ]
 
 
 def drive(page: Any) -> list[Check]:
@@ -3014,6 +3142,8 @@ def drive(page: Any) -> list[Check]:
         Every check, in the order it ran
     """
     checks = [check(page) for check in (furniture, map_wheel, chrome_layout, the_profile_tool) if wanted(check)]
+    if wanted(the_zoom_the_scale_says):
+        checks.append(the_zoom_the_scale_says(page))
 
     if not select(page, LONG_CHAIN):
         checks.append(Check("the profile panel", skipped=f"{LONG_CHAIN} is not in this page — see LONG_CHAIN"))
@@ -3225,7 +3355,7 @@ def main() -> int:
         # said about why. Two 42 MB documents at once is not a thing to ask for.
         if wanted(the_map_opens_with_the_network_off):
             page.close()
-            checks.append(the_map_opens_with_the_network_off(browser, page_path))
+            checks.extend(the_map_opens_with_the_network_off(browser, page_path))
         browser.close()
 
     code = report(checks)

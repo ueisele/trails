@@ -1,7 +1,10 @@
 """Tests for Folium map building."""
 
+import json
 import pathlib
 import re
+import struct
+import tempfile
 
 import folium
 import geopandas as gpd
@@ -258,6 +261,292 @@ class TestServiceWorker:
         html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
         assert "A newer map is ready" in html
         assert "trails-newer-close" in html
+
+
+class TestOfflineWorker:
+    """What the worker does with terrain somebody asked for, as against terrain
+    they happened to pan over."""
+
+    def test_what_was_asked_for_is_kept_apart_from_what_was_merely_seen(self):
+        """Two caches, because they are two different promises. `trails-tiles` is
+        opportunistic and trimmed to the last 500; `trails-terrain` is what the
+        reader chose and is never trimmed -- a deliberate nine-hundred-tile
+        download into an LRU of five hundred would evict itself on the way in,
+        and the panel would report that it had worked."""
+        assert 'var TERRAIN = "trails-terrain";' in maps.SERVICE_WORKER
+        assert 'var TILES = "trails-tiles";' in maps.SERVICE_WORKER
+        # Looked at in that order: what was asked for answers before what was
+        # seen, so a trimmed tile never shadows a kept one.
+        tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
+        assert tile.index("terrain.match") < tile.index("tiles.match")
+        # And the trim is handed the opportunistic cache and only that one.
+        assert "trim(tiles)" in tile
+        assert "trim(terrain)" not in maps.SERVICE_WORKER
+
+    def test_neither_tile_cache_is_swept_by_a_deploy(self):
+        """The page is stamped with its own digest and its old copies go; the
+        terrain is not stamped with anything and must survive every deploy. A
+        reader who kept the park before a typo was fixed would otherwise be asked
+        to download it again after it."""
+        sweep = maps.SERVICE_WORKER.split('addEventListener("activate"')[1].split("\nfunction ")[0]
+        assert 'name.indexOf("trails-page-") === 0' in sweep
+        assert "TERRAIN" not in sweep and "TILES" not in sweep
+
+    def test_the_switch_survives_the_worker_being_killed(self):
+        """A service worker is not a process that stays alive: the browser starts
+        it for a fetch and stops it again, and every variable it held goes with
+        it. A flag living only in that scope would be true on the first tile of a
+        walk and false on the second."""
+        assert 'var STATE = "https://trails.invalid/offline";' in maps.SERVICE_WORKER
+        assert "function offlineNow()" in maps.SERVICE_WORKER
+        assert "cache.match(STATE)" in maps.SERVICE_WORKER
+        assert "cache.put(STATE," in maps.SERVICE_WORKER
+        # Memoised, and the memo replaced rather than left when the page speaks.
+        assert "switched = Promise.resolve(!!on);" in maps.SERVICE_WORKER
+
+    def test_a_tile_that_is_not_kept_is_a_blank_and_not_a_failure(self):
+        """Offline, Leaflet drawing a broken image over the terrain says the page
+        is wrong; drawing nothing says the ground was not kept, which is true."""
+        assert "function blank()" in maps.SERVICE_WORKER
+        assert 'status: 200, headers: {"content-type": "image/png"}' in maps.SERVICE_WORKER
+        assert "if (off) { return blank(); }" in maps.SERVICE_WORKER
+
+    def test_a_deliberate_download_is_not_answered_by_the_worker(self):
+        """The panel fetches what the reader asked to keep with `cache:
+        'reload'`. Without this branch a download begun while the switch was on
+        would be answered by the worker's own blank tile, every blank would be
+        written into the terrain cache as terrain, and the reader would be told
+        their park was kept -- and it would be white.
+
+        It sits **after** the navigate branch on purpose: pressing reload makes a
+        navigation with the same flag, and offline that has to be answered from
+        the cache rather than sent to a network that is not there."""
+        fetching = maps.SERVICE_WORKER.split('addEventListener("fetch"')[1]
+        assert 'if (request.cache === "reload") { return; }' in fetching
+        assert fetching.index('request.mode === "navigate"') < fetching.index('request.cache === "reload"')
+
+    def test_the_document_does_not_reach_for_a_network_that_is_switched_off(self):
+        """A reader who asked for offline did not ask for a request that hangs
+        until it times out."""
+        paging = maps.SERVICE_WORKER.split("function pageFor(request)")[1].split("\nfunction ")[0]
+        assert "if (off && kept) { return kept; }" in paging
+
+
+class TestOfflinePanel:
+    """The tool that says what is kept, keeps more, and gets the space back."""
+
+    @staticmethod
+    def rendered():
+        return maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+
+    @staticmethod
+    def panel():
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        return source.split("class _OfflinePanel")[1].split("\nclass ")[0]
+
+    def test_the_page_says_whether_this_browser_can_keep_it_at_all(self):
+        """The page has computed `window.trailsWorker.why` since the worker was
+        added and showed it nowhere. On iOS a service worker exists in Safari and
+        in a home-screen web app and in no third-party browser, so for some
+        readers every other feature here was already dead and the page was
+        silent about it."""
+        panel = self.panel()
+        assert "Not available in this browser" in panel
+        assert "Safari, or this map added to the Home Screen" in panel
+        # Three states and not two: the registration settles after load, and
+        # answering *not available* while it is pending is a wrong answer rather
+        # than a slow one.
+        assert "Asking this browser whether it can keep the map" in panel
+        assert "navigator.serviceWorker.ready" in panel
+
+    def test_the_switch_with_nothing_kept_asks_instead_of_lying(self):
+        """A switch that silently gives a blank map is a switch that lied."""
+        panel = self.panel()
+        assert "if (want && !there.tiles)" in panel
+        assert "chooser = true;" in panel
+
+    def test_a_corridor_along_the_line_and_never_a_box_around_it(self):
+        """Measured on a real 42.3 km loop, the bounding box costs 2.4x the
+        corridor at z16 and 7.2x at z18: a round trip's box is mostly the hole in
+        the middle, which nobody walks. Only the viewport is a rectangle, because
+        a viewport is one."""
+        panel = self.panel()
+        scopes = re.findall(r"\{key: '(\w+)', label: '([^']+)', pad: (\d)", panel)
+        assert {key for key, _, _ in scopes} == {"route", "view", "all"}
+        pads = {key: int(pad) for key, _, pad in scopes}
+        assert pads == {"route": 2, "view": 0, "all": 1}
+
+    def test_a_straight_run_between_two_vertices_is_walked_and_not_skipped(self):
+        """The drawn geometry is simplified at 8 m, so a straight across a
+        plateau can be hundreds of metres between two vertices -- and a tile at
+        z18 is 63 m. Taking only the endpoints would leave holes along every
+        straight, which is the ground somebody walks fastest and looks at
+        least."""
+        panel = self.panel()
+        assert "function walk(a, b, z, into)" in panel
+        # Half a tile a step, so a tile can never be stepped over.
+        assert "Math.abs(dx), Math.abs(dy)) * 2" in panel
+
+    def test_the_zooms_offered_stop_where_the_source_does(self):
+        """Kartverket's topo cache ends at z18: z19 and z20 answer 400."""
+        panel = self.panel()
+        assert "var TOP = 18;" in panel
+        assert "var FLOOR = 14;" in panel
+
+    def test_everything_drawn_is_refused_above_the_zoom_that_is_a_download(self):
+        """2.1 GB at z16, 4.0 GB at z17 and about 9 GB at z18 -- the last a
+        quarter of a million requests to somebody else's service."""
+        panel = self.panel()
+        assert "{key: 'all', label: 'Everything drawn', pad: 1, ceiling: 16," in panel
+        assert "level > here.ceiling" in panel
+
+    def test_what_will_not_fit_is_refused_against_the_room_there_is(self):
+        """A ceiling per scope catches *everything drawn* at z17; it does not
+        catch a viewport zoomed out over the county, which asks for 22 GB --
+        measured -- and looks as reasonable as any other choice on the screen."""
+        panel = self.panel()
+        assert "counted.bytes > free * 0.9" in panel
+        assert "That is more than this device will hold" in panel
+
+    def test_only_the_base_layer_that_is_showing_is_kept(self):
+        """Topo and grayscale share a host, so keeping both would silently double
+        every figure on this panel."""
+        assert "function base()" in self.panel()
+
+    def test_the_reader_can_get_the_space_back(self):
+        """A gigabyte somebody cannot get rid of from inside the thing that took
+        it is a gigabyte taken without asking."""
+        panel = self.panel()
+        assert "function forget()" in panel
+        assert "caches.delete(TERRAIN), caches.delete(TILES)" in panel
+        assert "Delete the terrain kept on this device?" in panel
+
+    def test_it_is_a_tool_in_the_dock_like_every_other_one(self):
+        """And its holder is left detached: the dock is what puts a panel on the
+        screen, and one appended to the map container sits over the terrain until
+        it gets there."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "{key: 'offline', label: 'Offline'" in html
+        assert "byKey.offline.holder = window.trailsOffline" in html
+        assert "map.getContainer().appendChild(holder)" not in self.panel()
+        # And it is refreshed when it is looked at rather than only at load: the
+        # figures on it are what the device holds now, not what it held then.
+        assert "if (key === 'offline' && window.trailsOffline) { window.trailsOffline.refresh(); }" in html
+
+    def test_persistence_is_asked_for_from_the_press_and_not_at_load(self):
+        """WebKit deletes storage a script created once an origin has gone seven
+        days without a visit -- exactly the walk somebody keeps terrain for a
+        fortnight before. A browser grants persistence from a user gesture: an
+        origin nobody has touched asking to be kept for ever is what that rule
+        exists to refuse."""
+        panel = self.panel()
+        asked = panel.split("go.addEventListener('click'")[1].split("});")[0]
+        assert "navigator.storage.persist()" in asked
+
+    def test_a_route_is_asked_of_the_plan_rather_than_read_off_the_map(self):
+        """`state()` answers everything else about a route and deliberately not
+        this: it is read on every check and by the chrome, and two million
+        coordinates is not a status."""
+        assert "window.trailsPlan.geometry" in self.panel()
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
+        assert "geometry: function () {" in planning
+        assert "return {lon: shape.lon, lat: shape.lat};" in planning
+
+
+class TestScaleZoom:
+    """The map saying which zoom it is on."""
+
+    def test_the_scale_bar_says_the_zoom_and_the_ground_it_is_drawing_at(self):
+        """The chooser asks the reader for a zoom, so a reader picking z16 out of
+        a list has to be able to see what z16 looks like. It also makes a
+        screenshot readable back to a zoom, which every report about this page
+        has so far had to reconstruct from the bar."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "trails-scale-zoom" in html
+        assert "m/px" in html
+        # Asked of Leaflet rather than worked out from the zoom, so the line and
+        # the bar above it are measuring the same ground.
+        assert "map.containerPointToLatLng([100, 0])" in html
+
+    def test_it_takes_the_box_and_not_the_measuring_bar(self):
+        """A line with a rule under it in that corner is claiming to be a
+        distance, and this one is not."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        style = html.split(".trails-scale-zoom {")[1].split("}")[0]
+        assert "border-top: none" in style
+
+
+class TestManifest:
+    """What makes the map installable, which is what makes an offline copy
+    survive being left alone for a week."""
+
+    def test_it_opens_at_the_address_the_object_is_served_at(self):
+        """The object is `lomsdal-visten.html` in the bucket and is served at
+        `/lomsdal-visten`, the same distinction the worker already has to make.
+        And it is relative, because nothing identifying the host may be written
+        into this repository."""
+        page = pathlib.Path(tempfile.mkdtemp()) / "lomsdal-visten.html"
+        page.write_text("<html>a map</html>", encoding="utf-8")
+        written = maps.write_manifest(page, "Lomsdal-Visten")
+        assert written.name == "manifest.webmanifest"
+        said = json.loads(written.read_text(encoding="utf-8"))
+        assert said["start_url"] == "./lomsdal-visten"
+        assert said["scope"] == "./"
+        assert said["display"] == "standalone"
+        assert said["name"] == "Lomsdal-Visten"
+        assert "http" not in said["start_url"]
+
+    def test_its_icons_ride_in_it_rather_than_being_two_more_objects(self):
+        """A repository that carries a PNG carries it for ever, and a second
+        object to deploy for 700 bytes is not a trade."""
+        page = pathlib.Path(tempfile.mkdtemp()) / "lomsdal-visten.html"
+        page.write_text("<html>a map</html>", encoding="utf-8")
+        said = json.loads(maps.write_manifest(page, "Lomsdal-Visten").read_text(encoding="utf-8"))
+        assert {icon["sizes"] for icon in said["icons"]} == {"192x192", "512x512"}
+        for icon in said["icons"]:
+            assert icon["src"].startswith("data:image/png;base64,")
+
+    def test_the_mark_is_a_real_png_at_whatever_size_is_asked_for(self):
+        """Drawn rather than committed, and its edges blended: a triangle
+        rasterised on whole pixels has a staircase down both slopes that is
+        plainly visible at 180 px."""
+        for side in (32, 180, 512):
+            drawn = maps._icon_png(side)
+            assert drawn.startswith(b"\x89PNG\r\n\x1a\n")
+            assert struct.unpack(">II", drawn[16:24]) == (side, side)
+        # Blended, which whole-pixel filling would not be: the slope carries
+        # values that are neither the ground nor the peak.
+        pixels = maps._icon_png(180)
+        assert len(pixels) > 500
+
+    def test_the_page_carries_its_name_its_mark_and_the_manifest(self):
+        """Folium writes no title at all, so the tab and a home-screen icon were
+        both labelled with the URL."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), title="Lomsdal-Visten").get_root().render()
+        assert "<title>Lomsdal-Visten</title>" in html
+        assert '<link rel="manifest" href="manifest.webmanifest">' in html
+        assert '<link rel="apple-touch-icon" href="data:image/png;base64,' in html
+        assert '<meta name="apple-mobile-web-app-capable" content="yes">' in html
+
+    def test_a_map_on_a_phone_is_laid_out_at_the_phone_s_width(self):
+        """**Which this page has never said, and no check here could see.** A
+        mobile browser with no viewport meta lays a page out at 980 CSS pixels
+        and scales the result down; every phone reading in this project was
+        driven as a *narrow desktop window*, where that fallback does not exist.
+        So the whole page has been arriving on a real phone at roughly two-fifths
+        of the size it was designed at, and every figure recorded about a 390 px
+        layout was recorded somewhere that layout never happened."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), title="Lomsdal-Visten").get_root().render()
+        assert '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">' in html
+
+    def test_a_map_without_a_title_carries_none_of_it(self):
+        """`create_map` is used by a dozen tests and by anything else that wants
+        a map; a head is something a published page asks for."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "<title>" not in html
 
 
 class TestPins:
@@ -1846,7 +2135,7 @@ class TestPlanMode:
         network, and nothing threw, nothing logged, and the page looked right.
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
         read = set(re.findall(r"PLAN\.([A-Za-z_][A-Za-z0-9_]*)", planning)) - {"gpx"}
         assert read - set(maps.PLAN_SETTINGS) == set()
         assert set(maps.PLAN_SETTINGS) - read - {"gpx"} == set()
@@ -1925,7 +2214,7 @@ class TestPlanMode:
         ever reach. That asymmetry cost this page an hour once already.
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
         modes = set(re.findall(r"\{key: '([a-z]+)', label:", planning))
         assert modes
 
@@ -1965,7 +2254,7 @@ class TestPlanMode:
         reader reaches through an answer.
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
 
         assert planning.count("points = pointsForLoaded(graph);") == 1
         assert planning.count("loaded = read;") == 1
@@ -1997,7 +2286,7 @@ class TestPlanMode:
         would replace a recorded stretch with whatever path lies there.
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
         deciding = planning.split("function resolve(graph, from, to, mayAsk) {")[1]
 
         assert deciding.index("from.restore") < deciding.index("from.track === loaded.id")
@@ -2022,7 +2311,7 @@ class TestPlanMode:
         ``drifted`` then says out loud.
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
         laying = planning.split("function restoredWalked(")[1].split("\n            function agrees")[0]
 
         assert laying.count("agrees(") == 2
@@ -2038,7 +2327,7 @@ class TestPlanMode:
         gone. Restored, it comes home at the position it was set.
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
         placing = planning.split("if (restoring()) {")[1].split("if (loaded.mode === 'align')")[0]
 
         assert "<= 1.0" in placing
@@ -2134,7 +2423,7 @@ class TestPlanMode:
         7,419.9 m, which is the walk exactly.
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("class _Legend")[0]
+        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
 
         assert "composeRoute(stage.from, stage.to)" in planning
         assert planning.count("function composeRoute(fromLeg, toLeg)") == 1

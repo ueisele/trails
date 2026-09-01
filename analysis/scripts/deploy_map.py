@@ -155,27 +155,39 @@ def squeezed(source: Path) -> tuple[Path, int]:
     return squeezed_file, squeezed_file.stat().st_size
 
 
-def upload_worker(source: Path, config: dict[str, str]) -> None:
-    """Copy the service worker up, uncompressed and told not to be cached.
+#: The two small objects that ride beside the map, with what each is and how
+#: long an edge may hold it. Both are uncompressed: they are kilobytes, so
+#: compressing them saves nothing worth a decompression.
+BESIDE = {
+    # The one object whose whole job is to be noticed when it changes -- an edge
+    # holding yesterday's worker would hold yesterday's map with it, for as long
+    # as the header said to.
+    "sw.js": ("text/javascript; charset=utf-8", "no-cache"),
+    # What makes the map installable, and an installed map is what survives
+    # WebKit's seven-day sweep of storage a script created. It changes only when
+    # the map is renamed, so an edge may hold it as long as it holds the page.
+    "manifest.webmanifest": ("application/manifest+json", "max-age=300"),
+}
 
-    **Not brotli, and `no-cache`.** It is three kilobytes, so compressing it
-    saves nothing worth a decompression; and it is the one object whose whole
-    job is to be noticed when it changes -- an edge holding yesterday's worker
-    would hold yesterday's map with it, for as long as the header said to.
+
+def upload_beside(source: Path, config: dict[str, str]) -> None:
+    """Copy one of the map's small companions up, uncompressed.
 
     Args:
-        source: The worker, written beside the map by the build.
+        source: The file, written beside the map by the build. Its name decides
+            its content type and cache header, from :data:`BESIDE`.
         config: The settings from :func:`settings`.
 
     Raises:
         SystemExit: If the aws CLI is absent or the copy fails.
     """
+    content_type, cache_control = BESIDE[source.name]
     command = [
         "aws", "s3", "cp", str(source), f"s3://{config['TRAILS_MAP_BUCKET']}/{source.name}",
         "--endpoint-url", config["TRAILS_MAP_S3_ENDPOINT"],
         "--region", "auto",
-        "--content-type", "text/javascript; charset=utf-8",
-        "--cache-control", "no-cache",
+        "--content-type", content_type,
+        "--cache-control", cache_control,
         "--no-progress",
     ]  # fmt: skip
     try:
@@ -183,7 +195,7 @@ def upload_worker(source: Path, config: dict[str, str]) -> None:
     except FileNotFoundError:
         sys.exit("aws (the AWS CLI) is not installed — it is what talks to R2's S3 API.")
     except subprocess.CalledProcessError as error:
-        sys.exit(f"Uploading the service worker failed (exit {error.returncode}).")
+        sys.exit(f"Uploading {source.name} failed (exit {error.returncode}).")
 
 
 def upload(source: Path, key: str, config: dict[str, str]) -> None:
@@ -277,11 +289,13 @@ def main() -> None:
 
     # Every address the same object answers at, because each is its own cache entry: the clean one
     # the rewrite rule serves, the one a trailing slash produces, and the object's own name.
-    urls = [f"https://{host}/{args.map}", f"https://{host}/{args.map}/", f"https://{host}/{key}", f"https://{host}/sw.js"]
+    urls = [f"https://{host}/{args.map}", f"https://{host}/{args.map}/", f"https://{host}/{key}"]
+    urls += [f"https://{host}/{name}" for name in BESIDE]
 
     if args.dry_run:
         print(f"Would compress {source} ({size / 1e6:.1f} MB) at brotli 11")
-        print(f"      upload {source.with_name('sw.js').name} uncompressed, no-cache")
+        for name, (kind, held) in BESIDE.items():
+            print(f"      upload {name} uncompressed, {kind}, {held}")
         print(f"      upload it to s3://{config['TRAILS_MAP_BUCKET']}/{key} as {CONTENT_TYPE}, Content-Encoding: br")
         print("      purge " + ("nothing (--no-purge)" if args.no_purge else ", ".join(urls)))
         return
@@ -294,12 +308,16 @@ def main() -> None:
     # **The worker goes up after the map and never before it.** It is what makes
     # a reader's next visit serve the copy they already have, so a worker that
     # arrived first would hand out the old map while announcing the new one.
-    worker = source.with_name("sw.js")
-    if worker.exists():
-        print(f"⬆️  {worker.name} ({worker.stat().st_size / 1e3:.1f} kB) → s3://{config['TRAILS_MAP_BUCKET']}/{worker.name}, no-cache")
-        upload_worker(worker, config)
-    else:
-        print("⚠️  No sw.js beside the map — readers get no offline copy. Was this built by `make map`?")
+    for name, (_kind, held) in BESIDE.items():
+        companion = source.with_name(name)
+        if companion.exists():
+            weight = companion.stat().st_size / 1e3
+            print(f"⬆️  {name} ({weight:.1f} kB) → s3://{config['TRAILS_MAP_BUCKET']}/{name}, {held}")
+            upload_beside(companion, config)
+        elif name == "sw.js":
+            print("⚠️  No sw.js beside the map — readers get no offline copy. Was this built by `make map`?")
+        else:
+            print(f"⚠️  No {name} beside the map — it cannot be installed, so iOS will sweep what it keeps.")
 
     if args.no_purge:
         print("↩️  Edge cache left alone (--no-purge); it holds the old map for up to 5 minutes.")
