@@ -1,0 +1,21 @@
+# Toolchain for this project. After cloning: `mise install`.
+# mise auto-activates this when you cd in (if mise is hooked into your shell).
+
+[tools]
+# The deploy talks to R2 through the AWS CLI. `analysis/scripts/deploy_map.py` shells out to
+# `aws s3 cp` and says so plainly when it cannot — "aws (the AWS CLI) is not installed — it is what
+# talks to R2's S3 API." Until this file existed, nothing anywhere declared that requirement: it
+# worked on the laptop because the global mise config there happens to carry the tool, and it failed
+# on the remote-dev box, whose global list is deliberately small. `just deploy` in home/trails-map
+# got as far as the upload and stopped.
+#
+# **From aqua and not from pyproject.toml's dev group**, which is the part worth remembering. AWS
+# publishes only v1 to PyPI — 1.46.1 as this was written — while aqua carries v2, 2.36.36, which is
+# what the laptop has been using. Declaring `awscli` as a Python dependency would hand one machine a
+# different tool from the other, and that difference would surface as behaviour rather than as an
+# error anyone could read.
+"aqua:aws/aws-cli" = "latest"
+
+# uv and make are deliberately not here. Both are declared somewhere already — uv in the global mise
+# list of every machine that builds this repo, make as a system package on the box — and neither has
+# ever gone missing. The AWS CLI was the one this project needed and nothing claimed.
