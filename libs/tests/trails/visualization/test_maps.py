@@ -1086,6 +1086,16 @@ class TestTheFurnitureStaysInsideTheScreen:
         assert ".leaflet-bottom { padding-bottom: env(safe-area-inset-bottom); }" in html
         assert ".leaflet-top { padding-top: env(safe-area-inset-top); }" in html
 
+    def test_the_newer_map_line_clears_the_camera(self):
+        """The one thing this page draws outside the chrome, and so the one the
+        inset on that box does not reach. It landed under the camera and its
+        button could not be tapped — which is the worst place for it, because
+        that button is how the next version is taken: a reader who cannot press
+        it cannot reach the fix for it either."""
+        html = self.rendered()
+        assert "top:calc(10px + env(safe-area-inset-top));" in html
+        assert "'position:absolute;top:10px;left:50%" not in html
+
     def test_the_inset_is_applied_once(self):
         """The rail, the burger, the dock, the menu, the sheet and the plan bar
         are all children of the overlay, so a rule of their own would be the

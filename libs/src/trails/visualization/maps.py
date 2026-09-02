@@ -1360,7 +1360,20 @@ class _ServiceWorker(MacroElement):
                     if (document.querySelector('.trails-newer')) { return; }
                     var line = document.createElement('div');
                     line.className = 'trails-newer';
-                    line.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);' +
+                    // **The one thing this page draws outside the chrome**, and
+                    // therefore the one the inset on that box does not reach.
+                    // With `viewport-fit=cover` `top: 10px` is the physical top
+                    // edge, so this landed under the camera and the button could
+                    // not be tapped -- reported from the device, and it is the
+                    // worst place for it to happen: this is the button that takes
+                    // the next version, so a reader who cannot press it cannot
+                    // reach the fix for it either.
+                    //
+                    // `calc` rather than moving it into the chrome, because a map
+                    // built without `add_chrome` still has a worker and still
+                    // needs to say this.
+                    line.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);' +
+                        'top:calc(10px + env(safe-area-inset-top));' +
                         'z-index:1100;display:flex;gap:10px;align-items:center;padding:6px 10px;font-size:12px;' +
                         'border:1px solid var(--trails-rule);border-radius:8px;background:var(--trails-panel);' +
                         'color:var(--trails-ink-2);box-shadow:0 1px 6px rgba(0,0,0,0.2)';
