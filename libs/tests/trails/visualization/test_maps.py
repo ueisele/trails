@@ -936,10 +936,10 @@ class TestOfflinePanel:
         maps.add_chrome(fmap)
         html = fmap.get_root().render()
         assert "trails-offline-check" in html
-        assert "said.check.addEventListener('click', ask);" in html
+        assert "check.addEventListener('click', ask);" in html
         assert "window.trailsWorker.ask()" in html
         # Unavailable rather than failing when tapped.
-        assert "said.check.disabled = waiting || !askable;" in html
+        assert "row.check.disabled = waiting || !askable;" in html
         # **And a way out of *Checking…*.** The answer is a message from a
         # worker, and a worker can be stopped between the question and the
         # answer — which would leave the only button that asks disabled for the
@@ -978,6 +978,35 @@ class TestOfflinePanel:
         assert "if (!navigator.onLine) {" in keep
         assert "lastRun = {total: 0, kept: 0, failed: 0, offline: true};" in keep
         assert "'No connection \\u2014 nothing was tried, and nothing '" in html
+
+
+class TestSourcesFreshness:
+    """The map's age where a reader who never turns offline mode on can see it."""
+
+    def test_sources_carries_the_age_and_the_check(self):
+        """A map goes stale because an installed app resumes instead of
+        navigating, and that is true whatever the offline switch says. The one
+        cure lived behind a feature half the readers never turn on — and
+        `Sources` is already the panel about the page rather than the ground."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "sourcesHolder.insertBefore(window.trailsOffline.freshness(), sourcesHolder.firstChild);" in html
+        # **One set of facts, not two.** The row is handed out by the offline
+        # panel rather than rebuilt, so both say the same thing at the same
+        # moment and a check started in one is answered in the other.
+        assert "freshness: freshRow," in html
+        assert "freshRows.push({age: when, check: check});" in html
+        assert "freshRows.forEach(function (row) {" in html
+
+    def test_the_row_is_drawn_apart_from_the_panel(self):
+        """`draw` returns early when the offline panel has no holder — a row
+        handed to `Sources` has to stay true whether or not anybody has opened
+        the offline tool."""
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        panel = source.split("class _OfflinePanel")[1].split("\nclass ")[0]
+        fresh = panel.split("function drawFresh() {")[1].split("\n                }")[0]
+        assert "if (!holder)" not in fresh
 
 
 class TestScaleZoom:

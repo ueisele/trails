@@ -3525,6 +3525,31 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             )
         )
         armed = first.evaluate("() => window.__trailsIntervals || []")
+        # **And the way to act on it is reachable without the offline tool.** A
+        # map goes stale because an installed app resumes instead of navigating,
+        # which is true whatever the switch says -- so the check cannot live only
+        # behind a feature a reader may never turn on. `Sources` is the panel
+        # about the page, and it carries the same row.
+        first.evaluate("() => window.trailsChrome.open('info')")
+        first.wait_for_timeout(600)
+        newer.append(
+            Reading(
+                "the map's age is in Sources too, not only behind Offline",
+                first.evaluate(
+                    "() => { const node = document.querySelector('.trails-dock .trails-offline-age');"
+                    " return node ? node.textContent.indexOf('This map was built') === 0 : false; }"
+                ),
+                True,
+            )
+        )
+        newer.append(
+            Reading(
+                "and the button with it",
+                first.evaluate("() => !!document.querySelector('.trails-dock .trails-offline-check')"),
+                True,
+            )
+        )
+        first.evaluate("() => window.trailsChrome.close()")
         idle.append(
             Reading(
                 "and nothing is left ticking behind it",

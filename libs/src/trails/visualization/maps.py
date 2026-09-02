@@ -12600,6 +12600,7 @@ class _OfflinePanel(MacroElement):
                     // should not still say *built 2 h ago*. It costs a
                     // `Date.parse` and a redraw of one line: no timer to keep it
                     // true, and no request behind it.
+                    drawFresh();
                     draw();
                 });
 
@@ -12777,6 +12778,56 @@ class _OfflinePanel(MacroElement):
                 // answer, and no timer running at any other time.
                 var asking = null;
 
+                // **How old this map is, and the only thing that asks for a
+                // newer one.** Nothing on a timer and nothing on resume: being
+                // out of date is made visible instead, and acting on it is one
+                // tap. Both halves are needed -- a manual check nobody knows to
+                // press is the same as no check, and an age with no way to act
+                // on it is a complaint.
+                //
+                // **Handed out rather than built here, because it is not about
+                // this panel.** A map goes stale because a home-screen app
+                // resumes instead of navigating, and that is true of a reader
+                // who never turns offline mode on at all -- for whom this panel
+                // is a feature they do not use and would never open. The
+                // arithmetic and the worker's ear live here; `Sources` asks for
+                // a row of its own, and both stay in step because there is one
+                // set of facts behind them.
+                var freshRows = [];
+
+                function freshRow() {
+                    var wrap = document.createElement('div');
+                    wrap.className = 'trails-offline-fresh';
+                    wrap.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' +
+                        'margin:0 0 10px';
+                    var when = document.createElement('p');
+                    when.className = 'trails-offline-age';
+                    when.style.cssText = 'margin:0;color:var(--trails-ink-5);font-size:11px';
+                    var check = small(button('Check for a newer map', false));
+                    check.className = 'trails-offline-check';
+                    check.addEventListener('click', ask);
+                    wrap.appendChild(when);
+                    wrap.appendChild(check);
+                    freshRows.push({age: when, check: check});
+                    drawFresh();
+                    return wrap;
+                }
+
+                // Drawn apart from the panel, and deliberately not behind its
+                // `holder` guard: a row handed to `Sources` has to stay true
+                // whether or not anybody has opened the offline tool.
+                function drawFresh() {
+                    var old = age();
+                    var waiting = !!(window.trailsWorker && window.trailsWorker.checking);
+                    var askable = !!(window.trailsWorker && window.trailsWorker.ask) && navigator.onLine;
+                    freshRows.forEach(function (row) {
+                        row.age.textContent = [old, checkSaid].filter(Boolean).join(' ');
+                        row.check.disabled = waiting || !askable;
+                        row.check.style.opacity = row.check.disabled ? '0.5' : '1';
+                        row.check.textContent = waiting ? 'Checking…' : 'Check for a newer map';
+                    });
+                }
+
                 function ask() {
                     if (!window.trailsWorker || !window.trailsWorker.ask) { return; }
                     checkSaid = '';
@@ -12788,9 +12839,11 @@ class _OfflinePanel(MacroElement):
                             if (!window.trailsWorker.checking) { return; }
                             window.trailsWorker.checking = false;
                             checkSaid = 'No answer — try again.';
+                            drawFresh();
                             draw();
                         }, 20000);
                     }
+                    drawFresh();
                     draw();
                 }
 
@@ -12800,6 +12853,7 @@ class _OfflinePanel(MacroElement):
                     checkSaid = answer.failed
                         ? 'The map could not be reached.'
                         : (answer.newer ? '' : 'This is the newest one.');
+                    drawFresh();
                     draw();
                 });
 
@@ -12857,25 +12911,7 @@ class _OfflinePanel(MacroElement):
                     said.figures = document.createElement('p');
                     said.figures.className = 'trails-offline-figures';
                     said.figures.style.cssText = 'margin:0 0 6px;color:var(--trails-ink-3);font-size:12px';
-                    // **How old this map is, and the only thing that asks
-                    // for a newer one.** Nothing on a timer and nothing on
-                    // resume: being out of date is made visible instead, and
-                    // acting on it is one tap. Both halves are needed -- a
-                    // manual check nobody knows to press is the same as no
-                    // check, and an age with no way to act on it is a
-                    // complaint.
-                    said.fresh = document.createElement('div');
-                    said.fresh.className = 'trails-offline-fresh';
-                    said.fresh.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' +
-                        'margin:0 0 10px';
-                    said.age = document.createElement('p');
-                    said.age.className = 'trails-offline-age';
-                    said.age.style.cssText = 'margin:0;color:var(--trails-ink-5);font-size:11px';
-                    said.check = small(button('Check for a newer map', false));
-                    said.check.className = 'trails-offline-check';
-                    said.check.addEventListener('click', ask);
-                    said.fresh.appendChild(said.age);
-                    said.fresh.appendChild(said.check);
+                    said.fresh = freshRow();
                     said.sheet = document.createElement('p');
                     said.sheet.className = 'trails-offline-sheet';
                     said.sheet.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-5);font-size:11px';
@@ -13239,16 +13275,7 @@ class _OfflinePanel(MacroElement):
                         // answer rather than a slow one.
                         said.state.textContent = 'Asking this browser whether it can keep the map\\u2026';
                     }
-                    var old = age();
-                    said.age.textContent = [old, checkSaid].filter(Boolean).join(' ');
-                    // Nothing to press while it is asking, and nothing to press
-                    // with no connection: the button that cannot work says so by
-                    // being unavailable rather than by failing when tapped.
-                    var waiting = !!(window.trailsWorker && window.trailsWorker.checking);
-                    var askable = !!(window.trailsWorker && window.trailsWorker.ask) && navigator.onLine;
-                    said.check.disabled = waiting || !askable;
-                    said.check.style.opacity = said.check.disabled ? '0.5' : '1';
-                    said.check.textContent = waiting ? 'Checking…' : 'Check for a newer map';
+                    drawFresh();
                     said.toggle.textContent = have.on ? 'Offline mode is on' : 'Offline mode is off';
                     said.toggle.setAttribute('aria-pressed', have.on ? 'true' : 'false');
                     said.toggle.disabled = !have.available;
@@ -13346,6 +13373,9 @@ class _OfflinePanel(MacroElement):
 
                 window.trailsOffline = {
                     holder: holder,
+                    // A row of its own for any panel that wants one. `Sources`
+                    // takes one; see `freshRow`.
+                    freshness: freshRow,
                     refresh: refresh,
                     state: function () { return snapshot; },
                     scopes: SCOPES.map(function (each) { return each.key; }),
@@ -13981,6 +14011,20 @@ class _Chrome(MacroElement):
                 });
                 sourcesHolder.innerHTML = out || '<p style="color:var(--trails-ink-5)">No sources were handed to this page.</p>';
             })();
+            // **How old this copy is, above the credits.** `Sources` is the
+            // panel about the page rather than about the ground, and when this
+            // map was built is exactly that -- it already says who made the
+            // data and under what licence.
+            //
+            // It is also the only place a reader who never turns offline mode on
+            // can find it. A map goes stale because an installed app resumes
+            // instead of navigating, which is true whatever the switch says, and
+            // until this the one cure sat behind a feature that reader does not
+            // use. The row comes from the offline panel so there is one set of
+            // facts and not two.
+            if (window.trailsOffline && window.trailsOffline.freshness) {
+                sourcesHolder.insertBefore(window.trailsOffline.freshness(), sourcesHolder.firstChild);
+            }
             byKey.info.holder = sourcesHolder;
 
             // ---- what is kept on this device ----------------------------------
