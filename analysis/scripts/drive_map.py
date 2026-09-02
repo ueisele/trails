@@ -993,7 +993,12 @@ def chrome_layout(page: Any) -> Check:
         page.evaluate("() => window.trailsChrome.close()")
         page.wait_for_timeout(400)
         seen = page.evaluate(free)
-        narrow = width < seen["state"]["threshold"]
+        # **Both halves, asked of the page.** The rail needs a column as well
+        # as a width, and a phone held sideways — 844 by 390, the third viewport
+        # here — has the one and not the other. Read rather than repeated: a
+        # check carrying its own copy of the rule is a check that can agree with
+        # itself while disagreeing with the map.
+        narrow = width < seen["state"]["threshold"] or height < seen["state"]["column"]
         readings.append(Reading(f"{label}: map free with nothing asked for", seen["free"], 96, within=4, holds=False))
         readings.append(Reading(f"{label}: the rail stands", seen["rail"], not narrow))
         readings.append(Reading(f"{label}: the burger stands", seen["burger"], narrow))
@@ -1011,7 +1016,7 @@ def chrome_layout(page: Any) -> Check:
     readings.append(Reading("a rail button docks its panel", opened, "layers"))
     readings.append(Reading("and the legend is what is in it", boxes, 30, holds=False))
     readings.append(Reading("and the same button puts it away", page.evaluate("() => window.trailsChrome.state().tool"), None))
-    return Check("one layout, decided by the width of the map", readings)
+    return Check("one layout, decided by the room the map has", readings)
 
 
 def pinch_the_curve(page: Any) -> Check:

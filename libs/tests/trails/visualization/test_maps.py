@@ -1113,11 +1113,28 @@ class TestTheFurnitureStaysInsideTheScreen:
         own background showed there. Reported as a black band under the map,
         with the scale sitting on top of it."""
         html = self.rendered()
-        assert "html, body { height: 100dvh; }" in html
+        assert "html, body { width: 100dvw; height: 100dvh; }" in html
+        # Sideways the same thing happened on the left: a band of the browser's
+        # background where the map should have been.
         # folium's own rule stays as the fallback: a browser that does not know
         # the unit drops this declaration and keeps the behaviour that was right
         # before any of this.
         assert "height: 100%;" in html
+
+    def test_the_profile_leaves_room_for_the_rail_and_the_edge(self):
+        """It took the whole map minus 20 px, which was true while the map ended
+        where the screen's usable part did. It does not any more — reported from
+        a phone held sideways as the profile sticking out to the right, into the
+        inset and under the rail."""
+        # Read off the element rather than a rendered page: the profile panel
+        # is added by a chain, not by `add_chrome`.
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        panel = source.split("class _ProfilePanel")[1].split("\nclass ")[0]
+        assert "var railRoom = narrow ? 0 : 66;" in panel
+        assert "env(safe-area-inset-left)" in panel
+        assert "env(safe-area-inset-right)" in panel
+        # The old arithmetic is gone rather than wrapped.
+        assert "(map.getSize().x - (narrow ? 0 : 20)) + 'px'" not in panel
 
     def test_a_full_screen_panel_looks_like_one(self):
         """The chrome is held inside the safe area, so a full-screen sheet
@@ -1140,6 +1157,47 @@ class TestTheFurnitureStaysInsideTheScreen:
         same inset a second time."""
         html = self.rendered()
         assert "margin-top: env(safe-area-inset-top)" not in html
+
+
+class TestTheWideLayoutNeedsRoomInBothDirections:
+    """A phone held sideways is wide enough for the rail and far too short."""
+
+    @staticmethod
+    def rendered():
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        return fmap.get_root().render()
+
+    def test_a_short_screen_gets_the_burger(self):
+        """Reported from a phone in landscape: the rail ran off the bottom of
+        the screen, and the way back to the tool that had gone was a menu that
+        was not there. The burger opens a full-height sheet that scrolls, which
+        is the shape a short screen can use."""
+        html = self.rendered()
+        assert "var RAIL_ROOM = TOOLS.length * 46 + (TOOLS.length - 1) + 20;" in html
+        assert "return size.x < NARROW || size.y < RAIL_ROOM;" in html
+        # Every place that asked about width asks this instead, or the two
+        # would disagree about which layout is on.
+        assert "var narrow = isNarrow(size);" in html
+        assert "narrow: isNarrow(map.getSize())," in html
+        assert "var narrow = size.x < NARROW;" not in html
+
+    def test_the_profile_asks_the_chrome_rather_than_deciding_again(self):
+        """It worked the answer out again from the width, and the two have just
+        stopped agreeing — so the chrome would show the burger while the profile
+        still left room for a rail that was not there."""
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        panel = source.split("class _ProfilePanel")[1].split("\nclass ")[0]
+        assert "var said = window.trailsChrome && window.trailsChrome.state();" in panel
+        assert "var narrow = said ? said.narrow : map.getSize().x < NARROW;" in panel
+
+    def test_the_sheet_a_short_screen_gets_can_be_scrolled(self):
+        """Which is the whole reason the burger is the right answer here: the
+        menu is bounded to the room there is and its body carries the overflow,
+        so nine tools fit a screen that cannot show nine tools."""
+        html = self.rendered()
+        assert "box.style.height = Math.max(40, floor) + 'px';" in html
+        assert "overflow: auto" in html or "overflow:auto" in html
 
 
 class TestNothingInThePanelIsDeclaredTwice:

@@ -1647,7 +1647,7 @@ class _Theme(MacroElement):
            `dvh` is the viewport including the insets. A browser that does not
            know the unit drops this declaration and keeps folium's, which is the
            behaviour that was correct before any of this. */
-        html, body { height: 100dvh; }
+        html, body { width: 100dvw; height: 100dvh; }
         /* **The strip the phone keeps for itself.** With `viewport-fit=cover` the
            map is drawn to the physical edges, which is what the head asked for --
            and the home indicator then sits on whatever is in the bottom corners.
@@ -5348,12 +5348,32 @@ class _ProfilePanel(MacroElement):
                 // The 16 px that stay below it are not decoration: the
                 // attribution sits in the corner underneath, and a panel that
                 // covered it would be taking a credit off the page.
-                var narrow = map.getSize().x < NARROW;
+                // **Asked of the chrome, which owns the answer.** It used to
+                // work this out again from the width, and the two have just
+                // stopped agreeing: a phone held sideways is wide enough for the
+                // rail and too short for it, so the chrome shows the burger while
+                // this still believed there was a rail to leave room for.
+                var said = window.trailsChrome && window.trailsChrome.state();
+                var narrow = said ? said.narrow : map.getSize().x < NARROW;
                 box.style.margin = narrow ? '0 0 16px 0' : '';
                 box.style.borderRadius = narrow ? '0' : '';
                 box.style.borderLeftWidth = narrow ? '0' : '';
                 box.style.borderRightWidth = narrow ? '0' : '';
-                box.style.width = open ? (map.getSize().x - (narrow ? 0 : 20)) + 'px' : '';
+                // **The room it has, not the width of the map.** This took the
+                // whole map minus 20 px, which was true while the map ended
+                // where the screen's usable part did. It does not any more: the
+                // page reaches the physical edges, so on a phone held sideways
+                // the panel ran into the inset on the right *and* under the rail
+                // -- reported as the profile sticking out to the right.
+                //
+                // The rail is 46 px and stands 10 px off the edge; 66 leaves it
+                // its own width and a gap. On a narrow screen there is no rail,
+                // only the burger, and that sits above this.
+                var railRoom = narrow ? 0 : 66;
+                box.style.width = open
+                    ? 'calc(' + map.getSize().x + 'px - env(safe-area-inset-left) - ' +
+                      'env(safe-area-inset-right) - ' + (railRoom + (narrow ? 0 : 20)) + 'px)'
+                    : '';
             }
             header.addEventListener('click', function () { open = !open; fold(); render(); });
 
@@ -14559,6 +14579,22 @@ class _Chrome(MacroElement):
             var byKey = {};
             TOOLS.forEach(function (tool) { byKey[tool.key] = tool; });
 
+            // **The rail needs a column, and a phone held sideways has none.**
+            // Nine tools at 46 px with a rule between them, plus the 10 px it
+            // stands off each end. Reported from a phone in landscape: the last
+            // tool ran off the bottom of the screen, and the way back to it was
+            // a menu that was not there.
+            //
+            // So the wide layout is not about width alone. It is room in both
+            // directions, and a screen that has one but not the other gets the
+            // burger -- which opens a full-height sheet that scrolls, which is
+            // the shape that fits a short screen.
+            var RAIL_ROOM = TOOLS.length * 46 + (TOOLS.length - 1) + 20;
+
+            function isNarrow(size) {
+                return size.x < NARROW || size.y < RAIL_ROOM;
+            }
+
             // **The base map picker comes out first, and the order is the
             // point.** It is built inside the legend, so adopting the legend
             // while it is still in there would carry it along and the two tools
@@ -15725,7 +15761,7 @@ class _Chrome(MacroElement):
                 // instead of 784. Anything that re-places has to re-decide this.
                 paintProfile();
                 var size = map.getSize();
-                var narrow = size.x < NARROW;
+                var narrow = isNarrow(size);
                 var landscape = narrow && size.x > size.y;
                 chrome.classList.toggle('trails-chrome-narrow', narrow);
                 rail.style.display = narrow ? 'none' : '';
@@ -15944,7 +15980,7 @@ class _Chrome(MacroElement):
                 },
                 state: function () {
                     return {
-                        narrow: map.getSize().x < NARROW,
+                        narrow: isNarrow(map.getSize()),
                         tool: openTool,
                         menu: menuOpen,
                         detail: detailShown,
@@ -15954,7 +15990,11 @@ class _Chrome(MacroElement):
                         planPoints: planState ? planState.points : 0,
                         planBar: planbar.style.display !== 'none',
                         coarse: container.classList.contains('trails-coarse'),
-                        threshold: NARROW
+                        threshold: NARROW,
+                        // The other half of the rule. A check that worked the
+                        // layout out from the width alone would be encoding a
+                        // rule this page no longer follows.
+                        column: RAIL_ROOM
                     };
                 }
             };
