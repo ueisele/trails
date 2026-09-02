@@ -1023,8 +1023,8 @@ def _squeezed(html: str) -> str:
 _VIEWPORT = re.compile(r'<meta\s+name="viewport"[^>]*>')
 
 
-def _scalable(html: str) -> str:
-    """Give the browser its own zoom back.
+def _viewport(html: str) -> str:
+    """Give the browser its own zoom back, and tell it the screen has corners.
 
     **Folium hardcodes ``maximum-scale=1.0, user-scalable=no``** into every map
     it writes, and nothing in this project chose that: it takes the browser's
@@ -1041,6 +1041,20 @@ def _scalable(html: str) -> str:
     to; it does not make the panels zoomable, and saying otherwise would be a
     claim about ground nobody has walked.
 
+    **And ``viewport-fit=cover``, which is what makes the insets exist.** The head
+    asks for ``apple-mobile-web-app-status-bar-style: black-translucent``, so an
+    installed app is drawn edge to edge -- under the status bar and over the home
+    indicator. Without this the page is never told which part of that is covered:
+    measured on the device, ``standalone true`` with ``safe-area-inset-top`` and
+    ``-bottom`` both ``0px``, while the scale in the corner was being cut in half
+    by the indicator sitting on it. The page asked for the whole screen and had no
+    way to learn where the edges were.
+
+    With it, ``env(safe-area-inset-*)`` reports the real numbers and the
+    stylesheet keeps the controls out of them. It is one word here and a handful
+    of rules there, and neither can be checked on this machine: every browser in
+    this project runs on Linux, where the insets are zero whatever this says.
+
     Asserted rather than replaced quietly. If a folium release stops writing the
     tag, writes two, or drops ``user-scalable`` of its own accord, this says so
     at build time instead of leaving a stale rewrite in place for a year.
@@ -1054,7 +1068,11 @@ def _scalable(html: str) -> str:
     found = _VIEWPORT.findall(html)
     assert len(found) == 1, f"expected one viewport meta from folium, found {len(found)}"
     assert "user-scalable=no" in found[0], f"folium no longer writes user-scalable=no ({found[0]!r}) -- is this still needed?"
-    return _VIEWPORT.sub('<meta name="viewport" content="width=device-width, initial-scale=1" />', html, count=1)
+    return _VIEWPORT.sub(
+        '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />',
+        html,
+        count=1,
+    )
 
 
 def save_map(fmap: folium.Map, path: pathlib.Path) -> pathlib.Path:
@@ -1070,7 +1088,7 @@ def save_map(fmap: folium.Map, path: pathlib.Path) -> pathlib.Path:
     Returns:
         Where it was written.
     """
-    path.write_text(_scalable(_squeezed(fmap.get_root().render())), encoding="utf-8")
+    path.write_text(_viewport(_squeezed(fmap.get_root().render())), encoding="utf-8")
     return path
 
 
@@ -1600,6 +1618,27 @@ class _Theme(MacroElement):
             line-height: 14px !important;
         }
         .leaflet-control-attribution a { color: var(--trails-accent) !important; }
+        /* **The strip the phone keeps for itself.** With `viewport-fit=cover` the
+           map is drawn to the physical edges, which is what the head asked for --
+           and the home indicator then sits on whatever is in the bottom corners.
+           Reported from an installed app: the scale bar's second line was cut
+           off, and worse in life than in a screenshot, because a screenshot does
+           not draw the indicator.
+
+           On the four corner containers rather than on each control, so anything
+           Leaflet or this page puts in a corner is covered by having been put
+           there. Zero everywhere but a phone, so nothing else moves. */
+        .leaflet-top { padding-top: env(safe-area-inset-top); }
+        .leaflet-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .leaflet-left { padding-left: env(safe-area-inset-left); }
+        .leaflet-right { padding-right: env(safe-area-inset-right); }
+        /* The rail and its narrow-screen stand-in are anchored to the top right
+           by inline `top`/`right`; a margin moves an absolutely positioned box
+           without touching what set it. */
+        .trails-rail, .trails-burger {
+            margin-top: env(safe-area-inset-top);
+            margin-right: env(safe-area-inset-right);
+        }
         .leaflet-control-scale-line {
             background: var(--trails-panel) !important;
             color: var(--trails-ink-2) !important;

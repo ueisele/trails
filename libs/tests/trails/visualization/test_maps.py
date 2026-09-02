@@ -1118,10 +1118,13 @@ class TestATileIsAskedForMoreThanOnce:
         is not back the instant the reader is. Retrying into that spends every
         try on the one situation where none of them can work."""
         html = self.rendered()
-        assert "function awake() {" in html
+        # Named `whenInFront` and not `awake`: the panel already has an `awake`,
+        # which holds the wake lock. See the check that no name in this scope is
+        # declared twice — it was added because this one reached the browser.
+        assert "function whenInFront() {" in html
         assert "if (!document.hidden) { return Promise.resolve(); }" in html
         # The fetch waits for the app rather than for a clock.
-        assert "return awake().then(function () {" in html
+        assert "return whenInFront().then(function () {" in html
         # **A failure across a suspension costs no try.** The app went away
         # mid-request; that says nothing about the tile or the connection.
         assert "if (putAway !== away || document.hidden) {" in html
@@ -1611,9 +1614,9 @@ class TestManifest:
         no-op here would put `user-scalable=no` back on the published map and
         every check would stay green."""
         with pytest.raises(AssertionError, match="found 0"):
-            maps._scalable("<html><head></head></html>")
+            maps._viewport("<html><head></head></html>")
         with pytest.raises(AssertionError, match="no longer writes"):
-            maps._scalable('<meta name="viewport" content="width=device-width" />')
+            maps._viewport('<meta name="viewport" content="width=device-width" />')
 
     def test_the_page_says_a_phone_s_own_width_exactly_once(self):
         """**A tag written across two lines is a tag `grep` cannot see.** Folium's
