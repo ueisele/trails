@@ -1878,6 +1878,192 @@ _BASE_LAYERS: dict[BaseMap, dict[str, str]] = {
 }
 
 
+#: How far from a line's paint a finger may land and still count as having hit
+#: it, in CSS pixels.
+#:
+#: **Leaflet's own answer is half the stroke, and that is the whole defect.**
+#: The map draws into a canvas, so hit-testing is Leaflet's arithmetic rather
+#: than the browser's, and `Path._clickTolerance` is `weight / 2` plus the
+#: renderer's `tolerance` option — which is `0` by default. A 3 px line has to
+#: be hit **within 1.5 px of its centre**. Read in leaflet 1.9.4, not inferred:
+#: a fingertip is nowhere near that accurate, and being off by two pixels is
+#: indistinguishable from having tapped empty ground.
+#:
+#: The number itself is a judgement rather than a measurement. With the paint's
+#: own half-width on top it makes a corridor about 27 px wide where there were
+#: 3, which is close to what the eye reads as *on that line* — and it is only
+#: safe that wide because the nearest line wins rather than the topmost one.
+#: See :class:`_TouchReach`.
+FINGER_PX = 12
+
+#: How far a finger may roll between press and release and still be a tap,
+#: in CSS pixels, as ``|dx| + |dy|``.
+#:
+#: **The second half of the same defect, and the half that makes a tap fail
+#: rather than land somewhere else.** `Draggable.options.clickTolerance` is 3,
+#: and once `|dx| + |dy|` reaches it the map is dragging: `Canvas._onClick`
+#: then asks `_draggableMoved` and throws the hit away entirely. So a finger
+#: that rolls two pixels while pressing does not select the line it is resting
+#: on — it selects nothing at all, which is exactly "you have to tap several
+#: times". A mouse does not roll and keeps Leaflet's 3.
+#:
+#: Raising it costs a jump: when the drag finally starts it applies the whole
+#: offset at once, so the map moves ten pixels rather than three at the moment
+#: a pan begins. That is the trade, taken deliberately — a pan that starts a
+#: touch late is a pan; a tap that is eaten is a reader tapping again.
+TAP_SLOP_PX = 10
+
+
+class _TouchReach(MacroElement):
+    """What counts as a finger having hit a line, and as having held still.
+
+    **Added before any layer, because Leaflet bakes the reach into a bounding
+    box.** `Path._updateBounds` pads `_pxBounds` with whatever
+    `_clickTolerance()` said at projection time, and `_containsPoint` refuses
+    anything outside that box before it measures a single segment. Nothing here
+    relies on that padding — the hit test below carries its own — but the
+    ordering is what keeps the two answers the same, and `create_map` adds this
+    where `_PopupText` is added and for the same reason.
+
+    Three things, all of them one cause seen from different sides:
+
+    - **Leaflet's drag threshold**, raised for a finger. Nothing else changes:
+      a mouse keeps the 3 px it has always had, and a pointer that stops being
+      coarse gets it back.
+    - **A halo around every drawn line**, :data:`FINGER_PX` wide, measured from
+      the paint rather than from the centre so a 4 px line and a 2 px line both
+      reach the same distance beyond what a reader can see.
+    - **The nearest line wins, not the topmost.** Leaflet's `_onClick` keeps
+      the *last* layer in draw order that contains the point, which is right at
+      1.5 px and wrong at 13: where six sources run through one valley a tap
+      would land on whichever was drawn last regardless of which line it was
+      aimed at. Worse, `_ClickHighlight` calls `bringToFront` on the route it
+      selects, so the last selection would go on winning every nearby tap
+      afterwards. Ranking by distance makes the widening safe; exact ties still
+      go to the later layer, which is what keeps "UT.no last, therefore on top"
+      true where two sources draw the same line.
+
+    Only under a coarse pointer. Under a fine one Leaflet's own handler runs
+    untouched, so nothing about a mouse — including which line a hover names —
+    moves at all.
+    """
+
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function () {
+            var map = {{ this._parent.get_name() }};
+            var FINGER = {{ this.finger_px }};
+            var SLOP = {{ this.tap_slop_px }};
+            // Read before it is replaced, so the mouse gets Leaflet's own
+            // number back rather than a copy of it written down here.
+            var MOUSE_SLOP = L.Draggable.prototype.options.clickTolerance;
+
+            // The same test the chrome makes, made the same way: the class
+            // first, so a browser check can drive a finger it does not have,
+            // and the media query behind it so a page built without the chrome
+            // still knows one when it sees one.
+            function coarse() {
+                var box = map.getContainer();
+                return box.classList.contains('trails-coarse') ||
+                    !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+            }
+
+            // Merged onto the prototype rather than set on the instance:
+            // Leaflet's own options object is the instance's prototype, and
+            // `Draggable` reads `clickTolerance` afresh on every move, so this
+            // reaches the map's dragging handler although it was built first.
+            function apply() {
+                L.Draggable.mergeOptions({clickTolerance: coarse() ? SLOP : MOUSE_SLOP});
+            }
+            apply();
+
+            // How far the point is from what the layer *paints*, or null where
+            // it is nowhere near. The bounding box is Leaflet's, padded again
+            // here because the padding it was given was the old, thin one.
+            function away(layer, point) {
+                var box = layer._pxBounds;
+                if (!box) { return null; }
+                if (point.x < box.min.x - FINGER || point.x > box.max.x + FINGER ||
+                        point.y < box.min.y - FINGER || point.y > box.max.y + FINGER) {
+                    return null;
+                }
+                var paint = layer.options.stroke ? (layer.options.weight || 0) / 2 : 0;
+                if (layer._point && layer._radius !== undefined) {
+                    return Math.max(0, point.distanceTo(layer._point) - layer._radius - paint);
+                }
+                // A shape with an inside is not a distance question at all --
+                // in it or not in it -- so it stays Leaflet's own answer.
+                if (!layer._parts || (L.Polygon && layer instanceof L.Polygon)) {
+                    return layer._containsPoint && layer._containsPoint(point) ? 0 : null;
+                }
+                // `_parts` and not `_rings`: clipped to the screen and
+                // simplified for this zoom, which is both the cheaper list and
+                // the one the reader is actually looking at.
+                var near = Infinity;
+                for (var i = 0; i < layer._parts.length; i += 1) {
+                    var part = layer._parts[i];
+                    for (var j = 1; j < part.length; j += 1) {
+                        near = Math.min(near, L.LineUtil.pointToSegmentDistance(point, part[j - 1], part[j]));
+                    }
+                }
+                return near === Infinity ? null : Math.max(0, near - paint);
+            }
+
+            var leaflets = L.Canvas.prototype._onClick;
+            L.Canvas.include({
+                _onClick: function (event) {
+                    if (!coarse()) { return leaflets.call(this, event); }
+                    var point = this._map.mouseEventToLayerPoint(event);
+                    var hit = null;
+                    var best = Infinity;
+                    for (var order = this._drawFirst; order; order = order.next) {
+                        var layer = order.layer;
+                        // The search filter hides a line by clearing this, so a
+                        // line nobody can see cannot take a tap either.
+                        if (!layer.options.interactive) { continue; }
+                        var gap = away(layer, point);
+                        if (gap === null || gap > FINGER) { continue; }
+                        // Leaflet's rule, kept: a click that ended a drag is the
+                        // end of the drag, not a click on whatever lay under it.
+                        if ((event.type === 'click' || event.type === 'preclick') &&
+                                this._map._draggableMoved(layer)) { continue; }
+                        // `<=` and not `<`, so an exact tie goes to the layer
+                        // drawn last -- Leaflet's own tie-break, and the one the
+                        // layer order was chosen for.
+                        if (gap <= best) { best = gap; hit = layer; }
+                    }
+                    this._fireEvent(hit ? [hit] : false, event);
+                }
+            });
+
+            // Exposed the way the graph and the highlight are: so a browser
+            // check reads the reach and drives a tap at a measured distance
+            // rather than guessing at one, and so plan mode -- which takes
+            // every click before Leaflet sees it -- can tell a tap from the end
+            // of a pan by the same number and the same arithmetic.
+            window.trailsReach = {
+                finger: FINGER,
+                slop: function () { return coarse() ? SLOP : MOUSE_SLOP; },
+                away: away,
+                recount: apply
+            };
+        })();
+        {% endmacro %}
+    """)
+
+    def __init__(self, finger_px: float, tap_slop_px: float) -> None:
+        """Widen what a finger has to hit.
+
+        Args:
+            finger_px: Halo around a line's paint that still counts as a hit
+            tap_slop_px: How far a finger may roll and still be a tap
+        """
+        super().__init__()
+        self._name = "TouchReach"
+        self.finger_px = finger_px
+        self.tap_slop_px = tap_slop_px
+
+
 def create_map(
     bounds: Bounds | None = None,
     center: tuple[float, float] | None = None,
@@ -2008,6 +2194,10 @@ def create_map(
     _PinSize().add_to(fmap)
     _ScaleZoom().add_to(fmap)
     _ServiceWorker().add_to(fmap)
+    # Before any layer for a second reason, said where `_TouchReach` is written:
+    # Leaflet pads a path's bounding box with the reach that was in force when
+    # the path was projected.
+    _TouchReach(FINGER_PX, TAP_SLOP_PX).add_to(fmap)
     # Before any layer, because every layer's own script calls it: folium
     # renders a map's children in the order they were added, and the layers are
     # added by the caller after this returns.
@@ -11667,7 +11857,16 @@ class _PlanMode(MacroElement):
                 // A pan ends in a click too. Leaflet drops that one for its own
                 // listeners; this one is not Leaflet's, so how far the pointer
                 // travelled is what tells the two apart.
-                if (pressed && Math.max(Math.abs(event.clientX - pressed.x), Math.abs(event.clientY - pressed.y)) > 3) { return; }
+                //
+                // **`window.trailsReach`'s number and its arithmetic, not three
+                // pixels and a different sum.** Leaflet starts dragging when
+                // `|dx| + |dy|` reaches its threshold, and a finger is allowed
+                // more of that than a mouse; keeping a separate 3 here would
+                // mean a five-pixel roll moved nothing and was thrown away as a
+                // pan all the same -- a tap that does nothing at all, which is
+                // the defect `_TouchReach` exists to end.
+                var slop = window.trailsReach ? window.trailsReach.slop() : 3;
+                if (pressed && Math.abs(event.clientX - pressed.x) + Math.abs(event.clientY - pressed.y) >= slop) { return; }
                 event.stopPropagation();
                 // **Three things one click can mean, and they are told apart
                 // here because nothing else ever sees the click.** The handler
@@ -14754,6 +14953,12 @@ class _Chrome(MacroElement):
                 var on = forcedCoarse === null ? !!(pointer && pointer.matches) : forcedCoarse;
                 if (container.classList.contains('trails-coarse') === on) { return; }
                 container.classList.toggle('trails-coarse', on);
+                // What a finger may hit, and how still it has to hold, is read
+                // off this class too -- and Leaflet's drag threshold is merged
+                // rather than read, so it is the one thing that has to be told.
+                if (window.trailsReach && window.trailsReach.recount) {
+                    window.trailsReach.recount();
+                }
                 // The profile's hint tells a reader which gestures to use, and
                 // these are not the same gestures. A line telling somebody to
                 // shift-drag is a line telling them to do something they cannot.

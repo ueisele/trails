@@ -4197,6 +4197,209 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
     ]
 
 
+#: How far off a line the finger check taps, in CSS pixels. Inside the reach the
+#: page grants a finger, and far outside the 1.5 px Leaflet grants a 3 px line.
+TAP_OFF_PX = 10
+
+#: A tap nowhere near a line, so the reading says the reach has an edge and not
+#: merely that something was selected.
+TAP_FAR_PX = 40
+
+#: A roll small enough to be a finger resting, and one big enough to be a pan.
+#: Leaflet compares ``|dx| + |dy|``, so these are 6 and 16 against a threshold
+#: of 10 -- one either side of it, and neither near it.
+TAP_ROLL = (3, 3)
+PAN_ROLL = (8, 8)
+
+FIND_TAP = with_map(
+    """(px) => {
+  const map = __MAP__;
+  const drawn = [];
+  map.eachLayer(l => { if (l.setStyle && !l.eachLayer) drawn.push(l); });
+  // The check's own distance, so what it measures is geometry and not the
+  // page's opinion of geometry.
+  const gap = (layer, p) => {
+    if (layer._point && layer._radius !== undefined) {
+      return Math.max(0, p.distanceTo(layer._point) - layer._radius);
+    }
+    let near = Infinity;
+    for (const part of (layer._parts || [])) {
+      for (let j = 1; j < part.length; j += 1) {
+        near = Math.min(near, L.LineUtil.pointToSegmentDistance(p, part[j - 1], part[j]));
+      }
+    }
+    return near;
+  };
+  const nearest = (p, except) => {
+    let near = Infinity;
+    for (const l of drawn) { if (l !== except) { near = Math.min(near, gap(l, p)); } }
+    return near;
+  };
+  const chained = drawn.filter(l => (l.options.className || '').indexOf('trail-group-') === 0);
+  const look = () => {
+    const box = map.getContainer().getBoundingClientRect();
+    // Clear of the furniture at every edge, which owns its own clicks.
+    const inside = at => at.x > 150 && at.y > 150 &&
+                         at.x < box.width - 150 && at.y < box.height - 150;
+    for (const layer of chained) {
+      for (const part of (layer._parts || [])) {
+        for (let j = 1; j < part.length; j += 1) {
+          const a = part[j - 1], b = part[j];
+          const span = a.distanceTo(b);
+          // Long enough that the foot of a perpendicular lands inside it, so
+          // the offset really is the distance to the line.
+          if (span < 60) { continue; }
+          const mid = L.point((a.x + b.x) / 2, (a.y + b.y) / 2);
+          const nx = -(b.y - a.y) / span, ny = (b.x - a.x) / span;
+          for (const side of [1, -1]) {
+            const off = L.point(mid.x + nx * side * px.off, mid.y + ny * side * px.off);
+            const far = L.point(mid.x + nx * side * px.far, mid.y + ny * side * px.far);
+            // Alone out here, or the tap would be asking which of two lines is
+            // nearer instead of whether a finger can reach one at all -- and
+            // the far tap would land on a neighbour and select that.
+            if (Math.abs(gap(layer, off) - px.off) > 1) { continue; }
+            if (nearest(off, layer) < px.off + 10) { continue; }
+            if (nearest(far, null) < 20) { continue; }
+            const here = map.layerPointToContainerPoint(off);
+            const beyond = map.layerPointToContainerPoint(far);
+            const on = map.layerPointToContainerPoint(mid);
+            if (!inside(here) || !inside(beyond) || !inside(on)) { continue; }
+            const page = at => ({x: box.left + at.x, y: box.top + at.y});
+            return {cls: layer.options.className, weight: layer.options.weight,
+                    on: page(on), off: page(here), far: page(beyond),
+                    alone: Math.round(nearest(off, layer)),
+                    view: {lat: map.getCenter().lat, lon: map.getCenter().lng,
+                           zoom: map.getZoom()}};
+          }
+        }
+      }
+    }
+    return null;
+  };
+  // **Zoomed in first, and that is not cheating.** `_parts` is simplified for
+  // the zoom it is drawn at, so at the whole park's zoom six sources through
+  // one valley are a few pixels apart and no line is alone anywhere. What the
+  // reader taps at is a walking zoom; the reach being measured is in pixels
+  // and is the same at either.
+  const chain = chained.find(l => l.options.className === px.chain) || chained[0];
+  if (!chain) { return null; }
+  const line = chain.getLatLngs();
+  for (const zoom of [15, 14, 13]) {
+    for (const step of [0.2, 0.4, 0.6, 0.8]) {
+      map.setView(line[Math.floor(step * (line.length - 1))], zoom, {animate: false});
+      const found = look();
+      if (found) { return found; }
+    }
+  }
+  return null; }"""
+)
+"""A stretch of one line with nothing else near it, and three points off it."""
+
+SETTLE_TAP = with_map(
+    """(view) => { const map = __MAP__;
+  map.setView([view.lat, view.lon], view.zoom, {animate: false});
+  if (window.trailsHighlight) { window.trailsHighlight.clear(); }
+  map.closePopup();
+  if (window.trailsChrome) { window.trailsChrome.close(); } }"""
+)
+"""Put the map back where the points were measured, and let go of everything."""
+
+
+def tap(page: Any, spot: dict[str, Any], at: str, roll: tuple[int, int] = (0, 0)) -> Any:
+    """Press, roll and release, and say what the map selected.
+
+    **It presses back along the roll and releases on the point**, so every
+    gesture here ends in the same place and only the travel differs. Releasing
+    where the roll ended would move the target as well as the distance, and a
+    reading that moves two things measures neither.
+
+    Args:
+        page: The driven page
+        spot: What :data:`FIND_TAP` found
+        at: Which of its points to release on
+        roll: How far the pointer travels on the way, in CSS pixels
+
+    Returns:
+        The chain the map ended up holding, or None
+    """
+    page.evaluate(SETTLE_TAP, spot["view"])
+    where = spot[at]
+    page.mouse.move(where["x"] - roll[0], where["y"] - roll[1])
+    page.mouse.down()
+    if roll != (0, 0):
+        page.mouse.move(where["x"], where["y"])
+    page.mouse.up()
+    page.wait_for_timeout(300)
+    return page.evaluate("() => window.trailsHighlight && window.trailsHighlight.selected()")
+
+
+def a_finger_can_hit_a_line(page: Any) -> Check:
+    """Reported from a phone: a trail can only be selected by tapping around.
+
+    **Both halves of it are in leaflet 1.9.4 and were read there.** The map
+    draws into a canvas, so a hit is Leaflet's own arithmetic and not the
+    browser's: ``Path._clickTolerance`` is ``weight / 2`` plus the renderer's
+    ``tolerance`` option, which is ``0``, so a 3 px line has to be hit within
+    1.5 px of its centre. And ``Draggable.options.clickTolerance`` is 3, so a
+    finger that rolls two pixels while pressing has dragged the map --
+    whereupon ``Canvas._onClick`` asks ``_draggableMoved`` and throws the hit
+    away, and the tap does nothing at all rather than something else.
+
+    **Driven with the class rather than with a finger.** Whether Firefox calls a
+    synthetic touch context coarse is a different question and not this page's,
+    and ``trails-coarse`` is the same knob every other target check uses.
+
+    Args:
+        page: The driven page, with nothing selected and plan mode off
+
+    Returns:
+        What a tap reaches, what it does not, and how far a finger may roll
+    """
+    entry = page.evaluate(
+        with_map("() => { const map = __MAP__; const at = map.getCenter(); return {lat: at.lat, lon: at.lng, zoom: map.getZoom()}; }")
+    )
+    spot = page.evaluate(FIND_TAP, {"off": TAP_OFF_PX, "far": TAP_FAR_PX, "chain": LONG_CHAIN})
+    if not spot:
+        page.evaluate(SETTLE_TAP, entry)
+        return Check("a finger can hit a line", skipped="no stretch of line stands far enough from the rest")
+
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    near = tap(page, spot, "off")
+    far = tap(page, spot, "far")
+    rolled = tap(page, spot, "on", TAP_ROLL)
+    panned = tap(page, spot, "on", PAN_ROLL)
+    # Read while the pointer is still coarse: `slop()` answers for the pointer
+    # it is asked about, and asking it afterwards would report the mouse's.
+    reach = page.evaluate("() => window.trailsReach.finger")
+    slop = page.evaluate("() => window.trailsReach.slop()")
+    page.evaluate("() => window.trailsChrome.coarse(null)")
+    mouse_near = tap(page, spot, "off")
+    mouse_rolled = tap(page, spot, "on", TAP_ROLL)
+    mouse_slop = page.evaluate("() => window.trailsReach.slop()")
+    page.evaluate(SETTLE_TAP, entry)
+    aside = f"{spot['weight']} px line, {spot['alone']} px from anything else"
+    return Check(
+        "a finger can hit a line",
+        [
+            # The reading the report was about.
+            Reading(f"coarse: a tap {TAP_OFF_PX} px off the line selects it", near, spot["cls"], note=aside),
+            # And the same tap before the widening, which is what the phone was
+            # doing: nothing.
+            Reading("mouse: the same tap selects nothing", mouse_near, None),
+            # A reach with an edge. Widening it is only safe if it stops.
+            Reading(f"coarse: a tap {TAP_FAR_PX} px off selects nothing", far, None),
+            Reading("the reach a finger is given", reach, 12),
+            # The second half: the release is on the line in both of these, so
+            # the only thing that differs is how far the pointer travelled.
+            Reading("coarse: a small roll is still a tap", rolled, spot["cls"], note=str(TAP_ROLL)),
+            Reading("mouse: the same roll is dropped as a drag", mouse_rolled, None, note="Leaflet's 3 px"),
+            Reading("coarse: a real pan is not a tap", panned, None, note=str(PAN_ROLL)),
+            Reading("how far a finger may roll", slop, 10),
+            Reading("and how far a mouse may, which is Leaflet's own", mouse_slop, 3),
+        ],
+    )
+
+
 def drive(page: Any) -> list[Check]:
     """Run every check in one browser session.
 
@@ -4213,6 +4416,10 @@ def drive(page: Any) -> list[Check]:
     ]
     if wanted(the_zoom_the_scale_says):
         checks.append(the_zoom_the_scale_says(page))
+    # Before anything is selected and before plan mode, which takes every click
+    # on the container and would answer this one itself.
+    if wanted(a_finger_can_hit_a_line):
+        checks.append(a_finger_can_hit_a_line(page))
 
     if not select(page, LONG_CHAIN):
         checks.append(Check("the profile panel", skipped=f"{LONG_CHAIN} is not in this page — see LONG_CHAIN"))

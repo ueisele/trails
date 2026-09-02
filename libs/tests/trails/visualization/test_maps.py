@@ -2192,6 +2192,89 @@ class TestCanvas:
         assert "if (layer._shadow) { layer._shadow.style.display = value; }" in html
 
 
+class TestAFingerCanHitALine:
+    """Reported from a phone: a trail can only be selected by tapping around.
+
+    The cause is in leaflet 1.9.4 and was read there rather than guessed at.
+    The map draws into a canvas, so a hit is Leaflet's own arithmetic:
+    ``Path._clickTolerance`` is ``weight / 2`` plus the renderer's ``tolerance``
+    option, which is ``0``. A 3 px line has to be hit within 1.5 px of its
+    centre. And ``Draggable.options.clickTolerance`` is 3, so a finger that
+    rolls two pixels while pressing has dragged the map -- after which
+    ``Canvas._onClick`` asks ``_draggableMoved`` and throws the hit away
+    altogether.
+    """
+
+    @staticmethod
+    def rendered():
+        return maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+
+    def test_the_halo_is_measured_from_the_paint(self):
+        """A 4 px line and a 2 px line reach the same distance beyond what a
+        reader can see, which is the distance a reader is aiming at."""
+        html = self.rendered()
+        assert f"var FINGER = {maps.FINGER_PX};" in html
+        assert "var paint = layer.options.stroke ? (layer.options.weight || 0) / 2 : 0;" in html
+        assert "return near === Infinity ? null : Math.max(0, near - paint);" in html
+
+    def test_the_nearest_line_wins_and_not_the_topmost(self):
+        """Leaflet keeps the last layer in draw order that contains the point,
+        which is right at 1.5 px and wrong at 13: six sources run through one
+        valley here, and `_ClickHighlight` calls `bringToFront` on the one it
+        selects -- so the last selection would go on winning every nearby tap."""
+        html = self.rendered()
+        assert "if (gap <= best) { best = gap; hit = layer; }" in html
+        assert "this._fireEvent(hit ? [hit] : false, event);" in html
+
+    def test_a_mouse_keeps_leaflet_s_own_handler(self):
+        """Nothing about a fine pointer moves -- including which line a hover
+        names, which is decided by a handler this does not touch."""
+        html = self.rendered()
+        assert "var leaflets = L.Canvas.prototype._onClick;" in html
+        assert "if (!coarse()) { return leaflets.call(this, event); }" in html
+        assert "var MOUSE_SLOP = L.Draggable.prototype.options.clickTolerance;" in html
+
+    def test_a_finger_may_roll_and_still_be_a_tap(self):
+        html = self.rendered()
+        assert f"var SLOP = {maps.TAP_SLOP_PX};" in html
+        assert "L.Draggable.mergeOptions({clickTolerance: coarse() ? SLOP : MOUSE_SLOP});" in html
+
+    def test_a_line_nobody_can_see_cannot_take_the_tap(self):
+        """The search filter hides a canvas line by clearing `interactive`,
+        because there is no element to hide. The widened reach has to respect
+        that or a hidden line would answer a tap from thirteen pixels away."""
+        assert "if (!layer.options.interactive) { continue; }" in self.rendered()
+
+    def test_it_is_set_up_before_any_line_is_drawn(self, trails):
+        """`Path._updateBounds` pads `_pxBounds` with the reach that was in
+        force when the path was projected, and `_containsPoint` refuses anything
+        outside that box before measuring a segment. The hit test here carries
+        its own padding, so nothing is broken by a late setup -- but the two
+        answers stay the same only while this runs first."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="Paths", color="#1b5e20")
+
+        html = fmap.get_root().render()
+        assert html.index("window.trailsReach = {") < html.index(f"var {group.get_name()} = L.featureGroup")
+
+    def test_the_chrome_tells_it_when_the_pointer_changes(self):
+        """The reach reads the class on every tap, but Leaflet's drag threshold
+        is merged rather than read, so that one has to be told."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "window.trailsReach.recount();" in html
+
+    def test_plan_mode_tells_a_tap_from_a_pan_by_the_same_number(self):
+        """It takes every click before Leaflet sees one, so it decides this for
+        itself -- and a 3 px test of its own would drop a five-pixel roll that
+        moved nothing, which is a tap that does nothing at all."""
+        planning = pathlib.Path(maps.__file__).read_text(encoding="utf-8").split("class _PlanMode")[1].split("\nclass ")[0]
+        assert "var slop = window.trailsReach ? window.trailsReach.slop() : 3;" in planning
+        assert "Math.abs(event.clientX - pressed.x) + Math.abs(event.clientY - pressed.y) >= slop" in planning
+
+
 class TestClickHighlight:
     """Tests for add_click_highlight."""
 
