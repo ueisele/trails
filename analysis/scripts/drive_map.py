@@ -3399,6 +3399,18 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
     with served(page_path.parent) as origin:
         address = f"{origin}/{page_path.name}"
         context = browser.new_context(viewport={"width": 1400, "height": 900})
+        # **Counted before any page script runs**, which is the only place a
+        # wrapper can see every timer the page arms. A tick behind a locked
+        # screen is the cheapest way to spend a battery on nothing, and the one
+        # a page can acquire without anybody noticing.
+        context.add_init_script(
+            """window.__trailsIntervals = [];
+            const armed = window.setInterval;
+            window.setInterval = function (fn, ms) {
+                window.__trailsIntervals.push(ms || 0);
+                return armed.apply(this, arguments);
+            };"""
+        )
         first = context.new_page()
         first.goto(address, timeout=180_000)
         # **Waiting rather than sleeping**, which this suite says about itself
@@ -3431,6 +3443,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         newer: list[Reading] = []
         before_tiles = first.evaluate("async () => (await (await caches.open('trails-terrain')).keys()).length")
         page_path.touch()
+        got_before = _Quiet.asked.get(f"/{page_path.name}", 0)
         first.evaluate("() => { navigator.serviceWorker.controller.postMessage({trails: 'check'}); }")
         found = True
         try:
@@ -3464,6 +3477,63 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 before_tiles,
             )
         )
+        # **And it costs the page nothing either.** Finding a newer map used to
+        # fetch it: 5.2 MB spent behind the reader, over whatever connection
+        # happened to be attached, for a reload they might never press. The body
+        # is now the button's job, so looking is the HEAD above and nothing more.
+        newer.append(
+            Reading(
+                "and looking does not fetch the map",
+                _Quiet.asked.get(f"/{page_path.name}", 0),
+                got_before,
+                note="the body is what the Reload button spends",
+            )
+        )
+
+        # ---- and in the foreground it asks for nothing ----------------------
+        # **Stated absolutely rather than as a budget**, which is what makes it
+        # checkable: once the page has loaded, sitting in front of it and coming
+        # back to it cost no requests at all. Coming back used to cost a HEAD
+        # every ten minutes and, whenever the answer was yes, the map behind it.
+        # Driven by faking the visibility change the page listens for -- the same
+        # event a home-screen app gets when it is reopened.
+        idle: list[Reading] = []
+        first.wait_for_timeout(3000)
+        seen: list[str] = []
+        first.on("request", lambda request: seen.append(request.url))
+        first.evaluate(
+            """async () => {
+                const swap = (state) => {
+                    Object.defineProperty(document, 'visibilityState', {value: state, configurable: true});
+                    document.dispatchEvent(new Event('visibilitychange'));
+                };
+                for (let i = 0; i < 2; i += 1) {
+                    swap('hidden');
+                    await new Promise(r => setTimeout(r, 400));
+                    swap('visible');
+                    await new Promise(r => setTimeout(r, 400));
+                }
+            }"""
+        )
+        first.wait_for_timeout(3000)
+        idle.append(
+            Reading(
+                "coming back to the app costs no request at all",
+                len(seen),
+                0,
+                note="; ".join(url.rsplit("/", 1)[-1] for url in seen[:4]) or "two rounds of hidden and visible",
+            )
+        )
+        armed = first.evaluate("() => window.__trailsIntervals || []")
+        idle.append(
+            Reading(
+                "and nothing is left ticking behind it",
+                len(armed),
+                0,
+                note=f"delays: {armed}" if armed else "no interval armed by the page",
+            )
+        )
+        first.evaluate("() => { Object.defineProperty(document, 'visibilityState', {value: 'visible', configurable: true}); }")
 
         # ---- and the terrain a reader asked for, in the same session ---------
         # **In this page and not in one of its own**, because a second 15.6 MB
@@ -3488,21 +3558,45 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # it is driven here rather than later because the cache is empty at this
         # point anyway -- a `forget()` in the middle of this check would take
         # away the terrain the offline visit below has to draw.
+        #
+        # **Twice, because there are two ways to have no connection** and the
+        # page answers them differently. Honestly offline it does not begin at
+        # all: a hundred thousand fetches into a dead radio is the most
+        # expensive thing this page could do, in the situation where the battery
+        # is the whole question.
+        SAID = "() => (document.querySelector('.trails-offline-figures') || {}).textContent || ''"
         first.evaluate(KEEP_AREA, KEPT_AREA)
         context.set_offline(True)
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
-        context.set_offline(False)
         starved = first.evaluate("() => window.trailsOffline.state()")
-        terrain.append(Reading("a run where everything is refused keeps nothing", starved["kept"]["tiles"], 0))
+        terrain.append(Reading("with no connection the run is not begun", "No connection" in first.evaluate(SAID), True))
+        terrain.append(Reading("and it keeps nothing", starved["kept"]["tiles"], 0))
         terrain.append(Reading("and switches nothing on", starved["on"], False))
+
+        # **And now the case the flag gets wrong.** `navigator.onLine` reports
+        # true for any live interface, so on a mountain with one bar and no route
+        # it says online and the guard above waves the run through -- which is
+        # what the twelve-in-a-row rule behind it is for. Driven by forcing the
+        # flag true while the context is offline, which is that valley exactly.
+        first.evaluate("() => { Object.defineProperty(navigator, 'onLine', {value: true, configurable: true}); }")
+        first.evaluate("() => window.trailsOffline.keep()")
+        first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
+        context.set_offline(False)
+        first.evaluate("() => { delete navigator.onLine; }")
+        stalled = first.evaluate("() => window.trailsOffline.state()")
+        # The sentence exists on no other path: it is written only where the run
+        # gave up on the connection rather than reaching the end of the list.
         terrain.append(
             Reading(
-                "and says so rather than leaving it to be found",
-                "Nothing arrived" in first.evaluate("() => (document.querySelector('.trails-offline-figures') || {}).textContent || ''"),
+                "a run whose connection dies gives up rather than grinding on",
+                "The connection gave out" in first.evaluate(SAID),
                 True,
+                note="twelve refusals in a row, not a hundred thousand attempts",
             )
         )
+        terrain.append(Reading("and it too keeps nothing", stalled["kept"]["tiles"], 0))
+        terrain.append(Reading("and switches nothing on either", stalled["on"], False))
 
         # **What the chooser draws, before anything is downloaded.** It needs the
         # network for the terrain under the preview and the switch still off, and
@@ -3730,6 +3824,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             ],
         ),
         Check("a newer map, found without navigating", newer),
+        Check("what the page costs while nobody touches it", idle),
         Check("the terrain a reader asked to keep", terrain),
     ]
 

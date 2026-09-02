@@ -348,13 +348,33 @@ class TestOfflineWorker:
         reader with the switch on never reaches the network at all: exactly the
         one carrying a stale map for a fortnight."""
         assert 'if (said.trails === "check")' in maps.SERVICE_WORKER
-        assert "function lookForNewer()" in maps.SERVICE_WORKER
-        # **A HEAD first.** The page is 5.2 MB over the wire, and spending that
-        # to be told nothing had changed is what a reader walking would pay for.
-        assert 'fetch(request.url, {method: "HEAD", cache: "reload"})' in maps.SERVICE_WORKER
-        # The body only once it has moved — and then kept, so the reload the
-        # reader is offered is instant rather than another 5.2 MB.
-        assert 'return cache.put(request, answer.clone()).then(function () { return tell("newer"); });' in maps.SERVICE_WORKER
+        assert "function askForNewer()" in maps.SERVICE_WORKER
+        looking = maps.SERVICE_WORKER.split("function askForNewer()")[1].split("\nfunction ")[0]
+        # **A HEAD, and only a HEAD.** The page is 5.2 MB over the wire, and
+        # spending that to be told nothing had changed is what a reader walking
+        # would pay for — so looking costs a few hundred bytes and nothing else.
+        assert 'fetch(both.request.url, {method: "HEAD", cache: "reload"})' in looking
+        assert '{cache: "reload"}' not in looking
+        # And what it answers with is the size, because that is what the reader
+        # is about to be asked to spend.
+        assert 'bytes: Number(head.headers.get("content-length")) || null' in looking
+
+    def test_the_body_is_fetched_only_when_the_reader_asks_for_it(self):
+        """The look used to fetch the body behind the reader whenever the answer
+        was yes: 5.2 MB spent by a rule nobody invoked, over whatever connection
+        happened to be attached. That is the thing the offline switch exists to
+        prevent, and it was doing it in the switch's own page."""
+        assert 'if (said.trails === "take")' in maps.SERVICE_WORKER
+        taking = maps.SERVICE_WORKER.split("function takeNewer()")[1].split("\nfunction ")[0]
+        assert 'fetch(both.request.url, {cache: "reload"})' in taking
+        assert "return cache.put(both.request, answer.clone());" in taking
+        # **The HEAD runs again rather than being trusted from a minute ago.**
+        # With the switch off `pageFor` may have taken the new page in between,
+        # and the reload would then spend 5.2 MB arriving where it already was.
+        assert 'if (!moved(both.kept, head)) { return tell("taken"); }' in taking
+        # A tap that could not be honoured says so instead of reloading into the
+        # same map it was already showing.
+        assert 'return tell("stuck");' in taking
 
     def test_the_newer_line_carries_a_way_to_act_on_it(self):
         """It said *reload to see it* to a reader who, installed to a home
@@ -362,24 +382,29 @@ class TestOfflineWorker:
         cannot be carried out."""
         html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
         assert "trails-newer-reload" in html
-        assert "again.addEventListener('click', function () { location.reload(); });" in html
-        assert "A newer map is ready." in html
+        assert "postMessage({trails: 'take'})" in html
+        assert "A newer map is ready" in html
+        # The size the button is about to spend, quoted before it is pressed.
+        assert "(window.trailsWorker.bytes / 1e6).toFixed(1) + ' MB.'" in html
 
-    def test_the_page_asks_on_the_way_back_and_does_not_act(self):
-        """A map that reloaded itself under somebody's fingers would be worse
-        than a stale one: this page is twenty seconds of loading and may have a
-        route half planned on it. So the return asks, and the reader decides."""
+    def test_nothing_asks_on_the_way_back_in(self):
+        """A HEAD on every resume wakes the radio each time the app is glanced
+        at, and the body behind it was 5.2 MB nobody asked for. Energy outranks
+        freshness for a reader days from a charger: the age is made visible and
+        the asking is a button."""
         html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
-        assert "postMessage({trails: 'check'})" in html
-        # Offline it would ask for nothing; already told, it need not ask again;
-        # and ten minutes apart, so returning to the app repeatedly is not a HEAD
-        # every time.
-        assert "if (!navigator.onLine) { return; }" in html
-        assert "if (window.trailsWorker.newer) { return; }" in html
-        assert "if (Date.now() - asked < 600000) { return; }" in html
-        # And it never reloads by itself.
-        asks = html.split("var asked = 0;")[1].split("});")[0]
-        assert "location.reload" not in asks
+        # The two halves of what was removed, by name.
+        assert "var asked = 0;" not in html
+        assert "if (Date.now() - asked < 600000) { return; }" not in html
+        # What is left is asked for by hand, and refuses to ask with nothing to
+        # ask over.
+        assert "window.trailsWorker.ask = function () {" in html
+        asking = html.split("window.trailsWorker.ask = function () {")[1].split("};")[0]
+        assert "if (!navigator.onLine) { return false; }" in asking
+        assert "postMessage({trails: 'check'})" in asking
+        # And the only listener left on a resume is the wake lock and a redraw.
+        for block in html.split("document.addEventListener('visibilitychange'")[1:]:
+            assert "postMessage" not in block.split("});")[0]
 
 
 class TestOfflinePanel:
@@ -828,7 +853,8 @@ class TestOfflinePanel:
         assert "navigator.wakeLock.request('screen')" in html
         # Taken again on the way back: the browser drops the lock whenever the
         # page is hidden and does not hand it back.
-        assert "if (document.visibilityState === 'visible' && working) { keepAwake(); }" in html
+        awake = html.split("document.addEventListener('visibilitychange', function () {")
+        assert any("if (working) { keepAwake(); }" in block for block in awake[1:])
         # And let go when the run ends, or the screen stays on for as long as the
         # tab lives.
         assert "letSleep();" in html
@@ -883,6 +909,75 @@ class TestOfflinePanel:
         # yet. Driven, the panel was caught opening at 0 for that window.
         assert "'Checking what is already kept" in html
         assert "done: working && working.counted ? working.done : null," in html
+
+    def test_the_panel_says_how_old_the_map_is(self):
+        """Nothing asks for a newer map on its own any more, so being out of
+        date has to be visible rather than silent — otherwise an app opened on
+        the fourth day of a walk shows the first day's map and says nothing."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "trails-offline-age" in html
+        # **Read, not stamped.** A build time written into the HTML changes the
+        # page's bytes on every rebuild, which changes the worker's digest,
+        # which drops the cached page — recording the age would itself become a
+        # reason to download the map again.
+        assert "Date.parse(document.lastModified)" in html
+        assert "'This map was built ' + Math.round(hours) + ' h ago.'" in html
+        # And no timer keeps it true: a tick behind a locked screen is a wake-up
+        # to redraw a string nobody is reading.
+        panel = self.script()
+        assert "setInterval" not in panel
+
+    def test_the_only_thing_that_asks_for_a_newer_map_is_a_button(self):
+        """A manual check nobody knows to press is the same as no check, and an
+        age with no way to act on it is a complaint."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "trails-offline-check" in html
+        assert "said.check.addEventListener('click', ask);" in html
+        assert "window.trailsWorker.ask()" in html
+        # Unavailable rather than failing when tapped.
+        assert "said.check.disabled = waiting || !askable;" in html
+        # **And a way out of *Checking…*.** The answer is a message from a
+        # worker, and a worker can be stopped between the question and the
+        # answer — which would leave the only button that asks disabled for the
+        # rest of the session, on the page somebody is carrying up a valley.
+        assert "checkSaid = 'No answer — try again.';" in html
+        # And the answer is said even when it is *nothing to do*, which is most
+        # of the time and is not a reason to leave the button looking unread.
+        assert "'This is the newest one.'" in html
+        assert "'The map could not be reached.'" in html
+
+    def test_a_download_gives_up_on_the_connection_not_on_the_tile(self):
+        """One tile that will not come is a tile; twelve in a row is the signal.
+        Grinding through the rest is a hundred thousand more attempts to wake a
+        radio that has nothing to answer — in the one situation where the
+        battery is the whole question."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "if (missed >= 12) { state.stop = true; state.stalled = true; }" in html
+        # Reset on every success, so bad tiles arriving in ones and twos never
+        # trip it — twelve rather than three because six requests run at once.
+        assert "if (answer && answer.ok) { missed = 0; return cache.put(url, answer); }" in html
+        # A run the connection stopped still switches on for what arrived; only
+        # a run the reader stopped leaves the chooser where it was.
+        assert "if (state.stop && !state.stalled) { return refresh(); }" in html
+        assert "'The connection gave out \\u2014 '" in html
+
+    def test_a_download_is_not_begun_without_a_connection(self):
+        """`navigator.onLine` lies in one direction only: when it says false
+        there is genuinely nothing, and beginning is then a hundred thousand
+        fetches into a radio with nobody to talk to."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        keep = html.split("function keep() {")[1].split("function forget()")[0]
+        assert "if (!navigator.onLine) {" in keep
+        assert "lastRun = {total: 0, kept: 0, failed: 0, offline: true};" in keep
+        assert "'No connection \\u2014 nothing was tried, and nothing '" in html
 
 
 class TestScaleZoom:

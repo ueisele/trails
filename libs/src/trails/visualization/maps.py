@@ -291,9 +291,15 @@ function keepWhatIsOpen() {
     });
 }
 
-function tell(what) {
+function tell(what, more) {
     return self.clients.matchAll().then(function (open) {
-        open.forEach(function (client) { client.postMessage({trails: what}); });
+        open.forEach(function (client) {
+            var said = {trails: what}, key;
+            for (key in more || {}) {
+                if (Object.prototype.hasOwnProperty.call(more, key)) { said[key] = more[key]; }
+            }
+            client.postMessage(said);
+        });
     });
 }
 
@@ -321,7 +327,11 @@ function setOffline(on) {
 self.addEventListener("message", function (event) {
     var said = event.data || {};
     if (said.trails === "check") {
-        event.waitUntil(lookForNewer());
+        event.waitUntil(askForNewer());
+        return;
+    }
+    if (said.trails === "take") {
+        event.waitUntil(takeNewer());
         return;
     }
     if (said.trails !== "offline") { return; }
@@ -330,38 +340,69 @@ self.addEventListener("message", function (event) {
     }));
 });
 
-// **Asked for, because otherwise it is never asked.** The only thing that
-// notices a new map today is `pageFor`, and it runs on a navigation -- so a
-// reader learns there is one by reloading, which is the very thing they were
-// going to be told to do. Installed to a home screen there is no reload control
-// at all. And with the switch on `pageFor` does not go to the network, so the
-// reader most likely to be carrying a stale map is the one who can never hear
-// about a new one.
-//
-// **A HEAD first, and the body only if it moved.** The page is 5.2 MB over the
-// wire. Fetching it to find out whether it changed would spend that on somebody
-// walking, every time they came back to the app, to be told nothing had
-// happened. A HEAD is a few hundred bytes.
-function lookForNewer() {
+// The page as it is held, by the address it was kept under. Both halves are
+// wanted by both callers below, and asking twice is two passes over the cache.
+function heldPage() {
     return caches.open(PAGE).then(function (cache) {
         return cache.keys().then(function (keys) {
             if (!keys.length) { return null; }
             var request = keys[0];
-            return cache.match(request).then(function (kept) {
-                if (!kept) { return null; }
-                return fetch(request.url, {method: "HEAD", cache: "reload"}).then(function (head) {
-                    if (!head || !head.ok || !moved(kept, head)) { return null; }
-                    // It has moved, so the body is wanted anyway: it is what the
-                    // next visit will open, and fetching it now is what makes
-                    // the reload instant rather than another 5.2 MB.
-                    return fetch(request.url, {cache: "reload"}).then(function (answer) {
-                        if (!answer || !answer.ok) { return null; }
-                        return cache.put(request, answer.clone()).then(function () { return tell("newer"); });
-                    });
-                });
+            return cache.match(request).then(function (held) {
+                return held ? {request: request, kept: held} : null;
             });
         });
-    }).catch(function () { return null; });
+    });
+}
+
+// **Asked for, and only when asked.** The only other thing that notices a new
+// map is `pageFor`, and it runs on a navigation -- so a reader learns there is
+// one by reloading, which is the very thing they were going to be told to do.
+// Installed to a home screen there is no reload control at all. And with the
+// switch on `pageFor` does not go to the network, so the reader most likely to
+// be carrying a stale map is the one who can never hear about a new one.
+//
+// **Nothing here runs on its own any more.** This was wired to
+// `visibilitychange`, and a rule nobody invoked that spends bytes on a phone in
+// a tent is the thing the offline switch exists to prevent. What replaced it is
+// a panel that says how old the map is and a button that asks -- so the page in
+// the foreground touches the network never, which is a property that can be
+// measured rather than a budget one hopes to have stayed inside.
+//
+// **A HEAD, and nothing else.** The page is 5.2 MB over the wire, and the body
+// is now the reader's decision: what comes back from this is a size to quote
+// them before they spend it.
+function askForNewer() {
+    return heldPage().then(function (both) {
+        if (!both) { return null; }
+        return fetch(both.request.url, {method: "HEAD", cache: "reload"}).then(function (head) {
+            if (!head || !head.ok) { return tell("checked", {failed: true, newer: false, bytes: null}); }
+            return tell("checked", {
+                failed: false,
+                newer: moved(both.kept, head),
+                bytes: Number(head.headers.get("content-length")) || null
+            });
+        });
+    }).catch(function () { return tell("checked", {failed: true, newer: false, bytes: null}); });
+}
+
+// **The body, because the reader asked for it.** The HEAD runs again rather
+// than being trusted from a minute ago: with the switch off `pageFor` may have
+// taken the new page in between, and the reload would then have spent 5.2 MB
+// arriving at what was already in the cache.
+function takeNewer() {
+    return heldPage().then(function (both) {
+        if (!both) { return tell("taken"); }
+        return fetch(both.request.url, {method: "HEAD", cache: "reload"}).then(function (head) {
+            if (!head || !head.ok) { return tell("stuck"); }
+            if (!moved(both.kept, head)) { return tell("taken"); }
+            return fetch(both.request.url, {cache: "reload"}).then(function (answer) {
+                if (!answer || !answer.ok) { return tell("stuck"); }
+                return caches.open(PAGE).then(function (cache) {
+                    return cache.put(both.request, answer.clone());
+                }).then(function () { return tell("taken"); });
+            });
+        });
+    }).catch(function () { return tell("stuck"); });
 }
 
 function blank() {
@@ -967,7 +1008,7 @@ class _ServiceWorker(MacroElement):
                 var map = {{ this._parent.get_name() }};
                 var secure = location.protocol === 'https:' ||
                     location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-                window.trailsWorker = {kept: false, newer: false, why: null};
+                window.trailsWorker = {kept: false, newer: false, why: null, bytes: null, ask: null};
                 // **The origin is asked about before the browser, and that
                 // order is the whole of it.** WebKit does not expose
                 // `navigator.serviceWorker` at all off a secure origin, so a
@@ -990,10 +1031,63 @@ class _ServiceWorker(MacroElement):
                     window.trailsWorker.why = String(failure);
                 });
                 navigator.serviceWorker.addEventListener('message', function (event) {
-                    if (!event.data || event.data.trails !== 'newer') { return; }
+                    var word = (event.data || {}).trails;
+                    // The reader pressed Reload and the new page is in the cache
+                    // behind them, so this is the reload they asked for.
+                    if (word === 'taken') { location.reload(); return; }
+                    if (word === 'stuck') { stuck(); return; }
+                    if (word === 'checked') {
+                        window.trailsWorker.checking = false;
+                        if (event.data.newer) {
+                            window.trailsWorker.newer = true;
+                            window.trailsWorker.bytes = event.data.bytes || null;
+                            say();
+                        }
+                        tellPage(event.data);
+                        return;
+                    }
+                    // `pageFor` still says this on a navigation, and there the
+                    // body has already been taken -- so there is no size to
+                    // quote and nothing left to fetch.
+                    if (word !== 'newer') { return; }
                     window.trailsWorker.newer = true;
                     say();
                 });
+
+                // **The panel is where the answer is read**, because that is
+                // where the question was asked from and where the map's age is
+                // written. The banner only appears when there is something.
+                function tellPage(detail) {
+                    var event;
+                    try {
+                        event = new CustomEvent('trails:checked', {detail: detail});
+                    } catch (old) {
+                        event = document.createEvent('CustomEvent');
+                        event.initCustomEvent('trails:checked', false, false, detail);
+                    }
+                    document.dispatchEvent(event);
+                }
+
+                // **Asked for by hand, and by nothing else.** There is no timer
+                // behind this and nothing on resume: a HEAD is cheap but a radio
+                // woken on every glance at the app is not, and the reader
+                // carrying this map is the one furthest from a charger.
+                window.trailsWorker.ask = function () {
+                    if (!navigator.onLine) { return false; }
+                    if (!navigator.serviceWorker.controller) { return false; }
+                    window.trailsWorker.checking = true;
+                    navigator.serviceWorker.controller.postMessage({trails: 'check'});
+                    return true;
+                };
+
+                function stuck() {
+                    var line = document.querySelector('.trails-newer');
+                    if (!line) { return; }
+                    var again = line.querySelector('.trails-newer-reload');
+                    if (again) { again.disabled = false; again.textContent = 'Try again'; }
+                    var told = line.querySelector('.trails-newer-said');
+                    if (told) { told.textContent = 'It could not be fetched — no connection.'; }
+                }
 
                 function say() {
                     if (document.querySelector('.trails-newer')) { return; }
@@ -1004,7 +1098,21 @@ class _ServiceWorker(MacroElement):
                         'border:1px solid var(--trails-rule);border-radius:8px;background:var(--trails-panel);' +
                         'color:var(--trails-ink-2);box-shadow:0 1px 6px rgba(0,0,0,0.2)';
                     var said = document.createElement('span');
-                    said.textContent = 'A newer map is ready.';
+                    said.className = 'trails-newer-said';
+                    // **The size, when the HEAD came back with one.** It is what
+                    // the button is about to spend, and a reader on a phone in a
+                    // valley is entitled to see it before pressing.
+                    //
+                    // Usually it did not: Cloudflare drops `content-length` on a
+                    // compressed answer, measured against the published page, so
+                    // in production this is the short line. Kept because it is
+                    // three lines that degrade into the sentence below, and
+                    // because guessing a figure would be worse than omitting
+                    // one.
+                    said.textContent = window.trailsWorker.bytes
+                        ? 'A newer map is ready · ' +
+                          (window.trailsWorker.bytes / 1e6).toFixed(1) + ' MB.'
+                        : 'A newer map is ready.';
                     // **A button, because there may be no other way to reload.**
                     // Installed to a home screen there is no address bar and no
                     // reload control, so *reload to see it* was an instruction
@@ -1018,7 +1126,17 @@ class _ServiceWorker(MacroElement):
                     again.style.cssText = 'font:inherit;font-size:12px;font-weight:600;padding:4px 10px;' +
                         'border-radius:6px;border:1px solid var(--trails-strong);background:var(--trails-strong);' +
                         'color:var(--trails-on-strong);cursor:pointer';
-                    again.addEventListener('click', function () { location.reload(); });
+                    // **The body is fetched here and nowhere else.** Looking
+                    // costs a HEAD; this is the tap that pays for the map, and
+                    // the worker reloads the page once it is in the cache. The
+                    // tiles are not touched by it: the terrain cache carries no
+                    // version and the worker sweeps only `trails-page-`.
+                    again.addEventListener('click', function () {
+                        if (!navigator.serviceWorker.controller) { location.reload(); return; }
+                        again.disabled = true;
+                        again.textContent = 'Fetching…';
+                        navigator.serviceWorker.controller.postMessage({trails: 'take'});
+                    });
                     var shut = document.createElement('button');
                     shut.type = 'button';
                     shut.className = 'trails-newer-close';
@@ -1033,31 +1151,21 @@ class _ServiceWorker(MacroElement):
                     map.getContainer().appendChild(line);
                 }
 
-                // **Asked on the way back in, because nothing else asks.** The
-                // check for a newer map runs inside `pageFor`, which runs on a
-                // navigation — so the only way to hear about a new map was to do
-                // the thing you were about to be told to do. A home-screen app
-                // resumed on the fourth day of a walk never navigates at all.
+                // **Nothing asks on the way back in, and that is deliberate.**
+                // This did: a HEAD on `visibilitychange`, ten minutes apart, and
+                // the body fetched behind it whenever the answer was yes. Two
+                // things were wrong with it on a walk. The body is 5.2 MB spent
+                // by a rule nobody invoked, over whatever connection happens to
+                // be attached -- the exact thing the offline switch exists to
+                // prevent. And the HEAD itself wakes the radio every time the
+                // app is glanced at, which is the expensive act on a phone that
+                // is days from a charger.
                 //
-                // It asks and does not act: the worker answers with a HEAD and
-                // the page shows the line above, with its button. A map that
-                // reloaded itself under somebody's fingers would be worse than a
-                // stale one — this page is twenty seconds of loading and may
-                // have a route half planned on it.
-                var asked = 0;
-                document.addEventListener('visibilitychange', function () {
-                    if (document.visibilityState !== 'visible') { return; }
-                    if (!navigator.onLine) { return; }
-                    if (window.trailsWorker.newer) { return; }
-                    // Ten minutes, so returning to the app repeatedly is not a
-                    // HEAD every time — and an hour of that is not a habit worth
-                    // acquiring on a phone with one bar.
-                    if (Date.now() - asked < 600000) { return; }
-                    asked = Date.now();
-                    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-                        navigator.serviceWorker.controller.postMessage({trails: 'check'});
-                    }
-                });
+                // What replaced it is in the offline panel: it says how old this
+                // map is, and it has a button that asks. Being out of date is
+                // visible rather than silent, acting on it is one tap, and the
+                // page in the foreground makes no requests at all -- which is a
+                // claim the driven suite can measure.
             })();
         {% endmacro %}
     """)
@@ -12485,12 +12593,32 @@ class _OfflinePanel(MacroElement):
                 // without this, one glance at a message leaves the rest of the
                 // download to a screen that will lock again.
                 document.addEventListener('visibilitychange', function () {
-                    if (document.visibilityState === 'visible' && working) { keepAwake(); }
+                    if (document.visibilityState !== 'visible') { return; }
+                    if (working) { keepAwake(); }
+                    // **And the age is recomputed, which is all that happens on
+                    // a resume.** An app reopened on the fourth day of a walk
+                    // should not still say *built 2 h ago*. It costs a
+                    // `Date.parse` and a redraw of one line: no timer to keep it
+                    // true, and no request behind it.
+                    draw();
                 });
 
                 function keep() {
                     if (working) { return working.done_; }
                     if (!window.caches) { return Promise.resolve(); }
+                    // **Not begun at all without a connection.**
+                    // `navigator.onLine` lies in one direction only -- it says
+                    // online for any live interface, so it is wrong in a valley
+                    // with one bar and no route -- but when it says false there
+                    // is genuinely nothing, and beginning is then a hundred
+                    // thousand fetches into a radio with nobody to talk to, in
+                    // the one situation where the battery is the whole question.
+                    // The stall guard below is what catches the case this gets
+                    // wrong.
+                    if (!navigator.onLine) {
+                        lastRun = {total: 0, kept: 0, failed: 0, offline: true};
+                        return refresh();
+                    }
                     var list = wanted().urls;
                     lastRun = null;
                     // `counted` is false until `keys()` has answered. Until then
@@ -12524,16 +12652,38 @@ class _OfflinePanel(MacroElement):
                             draw();
                             return missing;
                         }).then(function (missing) {
+                            // How many have refused in a row. Shared by all
+                            // six runners on purpose: it is the connection being
+                            // measured, not any one of them.
+                            var missed = 0;
                             function one() {
                                 if (state.stop || at >= missing.length) { return Promise.resolve(); }
                                 var url = missing[at];
                                 at += 1;
                                 return fetch(url, {cache: 'reload', mode: 'cors'}).then(function (answer) {
-                                    if (answer && answer.ok) { return cache.put(url, answer); }
+                                    if (answer && answer.ok) { missed = 0; return cache.put(url, answer); }
                                     state.failed += 1;
+                                    missed += 1;
                                     return null;
-                                }).catch(function () { state.failed += 1; return null; }).then(function () {
+                                }).catch(function () {
+                                    state.failed += 1;
+                                    missed += 1;
+                                    return null;
+                                }).then(function () {
                                     state.done += 1;
+                                    // **Give up on the connection, not on the
+                                    // tile.** One tile that will not come is a
+                                    // tile, and the other hundred thousand are
+                                    // still worth having; twelve in a row is not
+                                    // a tile, it is the signal -- and grinding
+                                    // on is a hundred thousand more attempts to
+                                    // wake a radio that has nothing to answer.
+                                    // Twelve rather than three because six run
+                                    // at once, so a healthy run's last rounds can
+                                    // carry a scatter of refusals. `missed`
+                                    // resets on every success, so bad tiles
+                                    // arriving in ones and twos never trip it.
+                                    if (missed >= 12) { state.stop = true; state.stalled = true; }
                                     if (state.done % 25 === 0) { draw(); }
                                     return one();
                                 });
@@ -12548,7 +12698,11 @@ class _OfflinePanel(MacroElement):
                         // A run that was stopped leaves the chooser where it
                         // was: what the reader wants next is almost always to
                         // pick a coarser zoom, not to find the panel again.
-                        if (state.stop) { return refresh(); }
+                        // A run the reader stopped leaves the chooser where
+                        // it was; a run the connection stopped goes on to the
+                        // branch below, because ninety per cent of the ground is
+                        // worth switching on for.
+                        if (state.stop && !state.stalled) { return refresh(); }
                         // **And a run that kept nothing switches nothing on.**
                         // Every fetch failing is almost always the network, and
                         // turning the switch on then hands over exactly the
@@ -12557,7 +12711,10 @@ class _OfflinePanel(MacroElement):
                         // cache rather than of the counter, because what matters
                         // is what is there and not what the loop believes.
                         return kept().then(function (there) {
-                            lastRun = {total: state.total, kept: there.tiles, failed: state.failed};
+                            lastRun = {
+                                total: state.total, kept: there.tiles,
+                                failed: state.failed, stalled: !!state.stalled
+                            };
                             if (!there.tiles) { return refresh(); }
                             chooser = false;
                             remember(true);
@@ -12582,6 +12739,69 @@ class _OfflinePanel(MacroElement):
                 }
 
                 // ---- the panel --------------------------------------------------
+
+                // **The map's age, from the document's own header.** Read
+                // rather than stamped into the page: a build time written into
+                // the HTML changes the page's bytes on every rebuild, which
+                // changes the worker's digest, which drops the cached page --
+                // so recording the age would itself become a reason to download
+                // the map again. `document.lastModified` is the `Last-Modified`
+                // the copy in front of the reader arrived with, cache or
+                // network, and the published object carries one -- measured, and
+                // it is the same header the worker compares.
+                //
+                // **No timer behind it.** A displayed age wants one to stay
+                // true, and a tick behind a locked screen is a wake-up to redraw
+                // a string nobody is reading. It is recomputed when the panel
+                // draws and when the app comes back, both of which are free.
+                function age() {
+                    var when = Date.parse(document.lastModified);
+                    if (!when) { return null; }
+                    var hours = (Date.now() - when) / 3600000;
+                    if (hours < 0) { return null; }
+                    if (hours < 1) { return 'This map was built less than an hour ago.'; }
+                    if (hours < 48) { return 'This map was built ' + Math.round(hours) + ' h ago.'; }
+                    return 'This map was built ' + Math.round(hours / 24) + ' d ago.';
+                }
+
+                // What the last check answered, so the row can say something
+                // when the answer is *nothing to do* -- which is most of the
+                // time, and is not a reason to leave the button looking unread.
+                var checkSaid = '';
+
+                // **And a way out of *Checking…*.** The answer comes back as a
+                // message from a worker, and a worker can be stopped between the
+                // question and the answer -- which would leave the one button
+                // that asks disabled for the rest of the session, on the page
+                // somebody is carrying up a valley. One shot, cleared by the
+                // answer, and no timer running at any other time.
+                var asking = null;
+
+                function ask() {
+                    if (!window.trailsWorker || !window.trailsWorker.ask) { return; }
+                    checkSaid = '';
+                    if (!window.trailsWorker.ask()) {
+                        checkSaid = 'No connection — nothing was asked.';
+                    } else {
+                        if (asking) { window.clearTimeout(asking); }
+                        asking = window.setTimeout(function () {
+                            if (!window.trailsWorker.checking) { return; }
+                            window.trailsWorker.checking = false;
+                            checkSaid = 'No answer — try again.';
+                            draw();
+                        }, 20000);
+                    }
+                    draw();
+                }
+
+                document.addEventListener('trails:checked', function (event) {
+                    var answer = event.detail || {};
+                    if (asking) { window.clearTimeout(asking); asking = null; }
+                    checkSaid = answer.failed
+                        ? 'The map could not be reached.'
+                        : (answer.newer ? '' : 'This is the newest one.');
+                    draw();
+                });
 
                 function megabytes(bytes) {
                     if (bytes === null || bytes === undefined) { return '\\u2014'; }
@@ -12637,6 +12857,25 @@ class _OfflinePanel(MacroElement):
                     said.figures = document.createElement('p');
                     said.figures.className = 'trails-offline-figures';
                     said.figures.style.cssText = 'margin:0 0 6px;color:var(--trails-ink-3);font-size:12px';
+                    // **How old this map is, and the only thing that asks
+                    // for a newer one.** Nothing on a timer and nothing on
+                    // resume: being out of date is made visible instead, and
+                    // acting on it is one tap. Both halves are needed -- a
+                    // manual check nobody knows to press is the same as no
+                    // check, and an age with no way to act on it is a
+                    // complaint.
+                    said.fresh = document.createElement('div');
+                    said.fresh.className = 'trails-offline-fresh';
+                    said.fresh.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;' +
+                        'margin:0 0 10px';
+                    said.age = document.createElement('p');
+                    said.age.className = 'trails-offline-age';
+                    said.age.style.cssText = 'margin:0;color:var(--trails-ink-5);font-size:11px';
+                    said.check = small(button('Check for a newer map', false));
+                    said.check.className = 'trails-offline-check';
+                    said.check.addEventListener('click', ask);
+                    said.fresh.appendChild(said.age);
+                    said.fresh.appendChild(said.check);
                     said.sheet = document.createElement('p');
                     said.sheet.className = 'trails-offline-sheet';
                     said.sheet.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-5);font-size:11px';
@@ -12773,6 +13012,7 @@ class _OfflinePanel(MacroElement):
                     holder.appendChild(said.switchRow);
                     holder.appendChild(said.figures);
                     holder.appendChild(said.sheet);
+                    holder.appendChild(said.fresh);
                     holder.appendChild(said.chooser);
                     holder.appendChild(said.tools);
                     // **Left detached on purpose.** The dock is what puts a
@@ -12999,6 +13239,16 @@ class _OfflinePanel(MacroElement):
                         // answer rather than a slow one.
                         said.state.textContent = 'Asking this browser whether it can keep the map\\u2026';
                     }
+                    var old = age();
+                    said.age.textContent = [old, checkSaid].filter(Boolean).join(' ');
+                    // Nothing to press while it is asking, and nothing to press
+                    // with no connection: the button that cannot work says so by
+                    // being unavailable rather than by failing when tapped.
+                    var waiting = !!(window.trailsWorker && window.trailsWorker.checking);
+                    var askable = !!(window.trailsWorker && window.trailsWorker.ask) && navigator.onLine;
+                    said.check.disabled = waiting || !askable;
+                    said.check.style.opacity = said.check.disabled ? '0.5' : '1';
+                    said.check.textContent = waiting ? 'Checking…' : 'Check for a newer map';
                     said.toggle.textContent = have.on ? 'Offline mode is on' : 'Offline mode is off';
                     said.toggle.setAttribute('aria-pressed', have.on ? 'true' : 'false');
                     said.toggle.disabled = !have.available;
@@ -13008,6 +13258,17 @@ class _OfflinePanel(MacroElement):
                             ? 'Keeping ' + count(working.done) + ' of ' + count(working.total) +
                               (working.failed ? ' \\u00b7 ' + working.failed + ' refused' : '')
                             : 'Checking what is already kept\\u2026';
+                    } else if (lastRun && lastRun.offline) {
+                        said.figures.textContent = 'No connection \\u2014 nothing was tried, and nothing ' +
+                            'was spent looking. Try again where there is signal.';
+                    } else if (lastRun && lastRun.stalled) {
+                        // **Told, rather than read off a count that stopped
+                        // moving.** A run that gave up on the connection looks
+                        // exactly like a run somebody stopped, and the
+                        // difference is whether pressing Keep again is worth
+                        // anything.
+                        said.figures.textContent = 'The connection gave out \\u2014 ' + count(lastRun.kept) +
+                            ' tiles are kept and nothing further was tried. Keep again picks up where it stopped.';
                     } else if (lastRun && !lastRun.kept && lastRun.total) {
                         // **Said, rather than left to be discovered.** A run
                         // where nothing arrived looks exactly like a run that
