@@ -341,6 +341,46 @@ class TestOfflineWorker:
         paging = maps.SERVICE_WORKER.split("function pageFor(request)")[1].split("\nfunction ")[0]
         assert "if (off && kept) { return kept; }" in paging
 
+    def test_a_newer_map_can_be_asked_for_without_navigating(self):
+        """The check lived inside `pageFor`, which runs on a navigation — so the
+        only way to hear about a new map was to do the thing you were about to be
+        told to do. Installed to a home screen there is no reload control, and a
+        reader with the switch on never reaches the network at all: exactly the
+        one carrying a stale map for a fortnight."""
+        assert 'if (said.trails === "check")' in maps.SERVICE_WORKER
+        assert "function lookForNewer()" in maps.SERVICE_WORKER
+        # **A HEAD first.** The page is 5.2 MB over the wire, and spending that
+        # to be told nothing had changed is what a reader walking would pay for.
+        assert 'fetch(request.url, {method: "HEAD", cache: "reload"})' in maps.SERVICE_WORKER
+        # The body only once it has moved — and then kept, so the reload the
+        # reader is offered is instant rather than another 5.2 MB.
+        assert 'return cache.put(request, answer.clone()).then(function () { return tell("newer"); });' in maps.SERVICE_WORKER
+
+    def test_the_newer_line_carries_a_way_to_act_on_it(self):
+        """It said *reload to see it* to a reader who, installed to a home
+        screen, has no address bar and no reload control — an instruction that
+        cannot be carried out."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "trails-newer-reload" in html
+        assert "again.addEventListener('click', function () { location.reload(); });" in html
+        assert "A newer map is ready." in html
+
+    def test_the_page_asks_on_the_way_back_and_does_not_act(self):
+        """A map that reloaded itself under somebody's fingers would be worse
+        than a stale one: this page is twenty seconds of loading and may have a
+        route half planned on it. So the return asks, and the reader decides."""
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "postMessage({trails: 'check'})" in html
+        # Offline it would ask for nothing; already told, it need not ask again;
+        # and ten minutes apart, so returning to the app repeatedly is not a HEAD
+        # every time.
+        assert "if (!navigator.onLine) { return; }" in html
+        assert "if (window.trailsWorker.newer) { return; }" in html
+        assert "if (Date.now() - asked < 600000) { return; }" in html
+        # And it never reloads by itself.
+        asks = html.split("var asked = 0;")[1].split("});")[0]
+        assert "location.reload" not in asks
+
 
 class TestOfflinePanel:
     """The tool that says what is kept, keeps more, and gets the space back."""

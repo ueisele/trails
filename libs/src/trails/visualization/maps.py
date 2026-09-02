@@ -320,11 +320,49 @@ function setOffline(on) {
 
 self.addEventListener("message", function (event) {
     var said = event.data || {};
+    if (said.trails === "check") {
+        event.waitUntil(lookForNewer());
+        return;
+    }
     if (said.trails !== "offline") { return; }
     event.waitUntil(setOffline(said.on).then(function () {
         if (event.source) { event.source.postMessage({trails: "offline", on: !!said.on}); }
     }));
 });
+
+// **Asked for, because otherwise it is never asked.** The only thing that
+// notices a new map today is `pageFor`, and it runs on a navigation -- so a
+// reader learns there is one by reloading, which is the very thing they were
+// going to be told to do. Installed to a home screen there is no reload control
+// at all. And with the switch on `pageFor` does not go to the network, so the
+// reader most likely to be carrying a stale map is the one who can never hear
+// about a new one.
+//
+// **A HEAD first, and the body only if it moved.** The page is 5.2 MB over the
+// wire. Fetching it to find out whether it changed would spend that on somebody
+// walking, every time they came back to the app, to be told nothing had
+// happened. A HEAD is a few hundred bytes.
+function lookForNewer() {
+    return caches.open(PAGE).then(function (cache) {
+        return cache.keys().then(function (keys) {
+            if (!keys.length) { return null; }
+            var request = keys[0];
+            return cache.match(request).then(function (kept) {
+                if (!kept) { return null; }
+                return fetch(request.url, {method: "HEAD", cache: "reload"}).then(function (head) {
+                    if (!head || !head.ok || !moved(kept, head)) { return null; }
+                    // It has moved, so the body is wanted anyway: it is what the
+                    // next visit will open, and fetching it now is what makes
+                    // the reload instant rather than another 5.2 MB.
+                    return fetch(request.url, {cache: "reload"}).then(function (answer) {
+                        if (!answer || !answer.ok) { return null; }
+                        return cache.put(request, answer.clone()).then(function () { return tell("newer"); });
+                    });
+                });
+            });
+        });
+    }).catch(function () { return null; });
+}
 
 function blank() {
     var raw = atob(BLANK), bytes = new Uint8Array(raw.length), i;
@@ -966,7 +1004,21 @@ class _ServiceWorker(MacroElement):
                         'border:1px solid var(--trails-rule);border-radius:8px;background:var(--trails-panel);' +
                         'color:var(--trails-ink-2);box-shadow:0 1px 6px rgba(0,0,0,0.2)';
                     var said = document.createElement('span');
-                    said.textContent = 'A newer map is ready \u2014 reload to see it.';
+                    said.textContent = 'A newer map is ready.';
+                    // **A button, because there may be no other way to reload.**
+                    // Installed to a home screen there is no address bar and no
+                    // reload control, so *reload to see it* was an instruction
+                    // the reader could not carry out. The tiles are not touched
+                    // by it: the terrain cache carries no version and the worker
+                    // sweeps only `trails-page-` on activate.
+                    var again = document.createElement('button');
+                    again.type = 'button';
+                    again.className = 'trails-newer-reload';
+                    again.textContent = 'Reload';
+                    again.style.cssText = 'font:inherit;font-size:12px;font-weight:600;padding:4px 10px;' +
+                        'border-radius:6px;border:1px solid var(--trails-strong);background:var(--trails-strong);' +
+                        'color:var(--trails-on-strong);cursor:pointer';
+                    again.addEventListener('click', function () { location.reload(); });
                     var shut = document.createElement('button');
                     shut.type = 'button';
                     shut.className = 'trails-newer-close';
@@ -976,9 +1028,36 @@ class _ServiceWorker(MacroElement):
                         'background:none;color:var(--trails-ink-3);cursor:pointer';
                     shut.addEventListener('click', function () { line.remove(); });
                     line.appendChild(said);
+                    line.appendChild(again);
                     line.appendChild(shut);
                     map.getContainer().appendChild(line);
                 }
+
+                // **Asked on the way back in, because nothing else asks.** The
+                // check for a newer map runs inside `pageFor`, which runs on a
+                // navigation — so the only way to hear about a new map was to do
+                // the thing you were about to be told to do. A home-screen app
+                // resumed on the fourth day of a walk never navigates at all.
+                //
+                // It asks and does not act: the worker answers with a HEAD and
+                // the page shows the line above, with its button. A map that
+                // reloaded itself under somebody's fingers would be worse than a
+                // stale one — this page is twenty seconds of loading and may
+                // have a route half planned on it.
+                var asked = 0;
+                document.addEventListener('visibilitychange', function () {
+                    if (document.visibilityState !== 'visible') { return; }
+                    if (!navigator.onLine) { return; }
+                    if (window.trailsWorker.newer) { return; }
+                    // Ten minutes, so returning to the app repeatedly is not a
+                    // HEAD every time — and an hour of that is not a habit worth
+                    // acquiring on a phone with one bar.
+                    if (Date.now() - asked < 600000) { return; }
+                    asked = Date.now();
+                    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+                        navigator.serviceWorker.controller.postMessage({trails: 'check'});
+                    }
+                });
             })();
         {% endmacro %}
     """)

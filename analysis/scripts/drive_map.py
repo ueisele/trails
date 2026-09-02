@@ -3043,8 +3043,13 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
     *free* is a thing to measure rather than to reason about.
     """
 
-    #: How often each path was asked for, across every instance.
+    #: How often each path was asked for with a GET, across every instance.
     asked: dict[str, int] = {}
+
+    #: And with a HEAD, counted apart. `send_head` runs for both, so counting
+    #: them together would put the worker's cheap "has it moved?" into the figure
+    #: that says how many times the 5.2 MB map was actually downloaded.
+    heads: dict[str, int] = {}
 
     def log_message(self, format: str, *args: Any) -> None:
         """Say nothing.
@@ -3060,7 +3065,8 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
         Returns:
             Whatever the handler this one is built on answers.
         """
-        _Quiet.asked[self.path] = _Quiet.asked.get(self.path, 0) + 1
+        counted = _Quiet.heads if self.command == "HEAD" else _Quiet.asked
+        counted[self.path] = counted.get(self.path, 0) + 1
         return super().send_head()
 
 
@@ -3415,6 +3421,50 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # that second ask crossed the wire the first visit would cost twice.
         fetched = _Quiet.asked.get(f"/{page_path.name}", 0)
 
+        # ---- a newer map, found without navigating --------------------------
+        # **The one the reader could not reach.** The check for a new map lives
+        # in `pageFor`, which runs on a navigation, so the only way to hear about
+        # one was to reload -- the very thing the message then asks for -- and a
+        # home-screen app has no reload control. Driven by moving the file's
+        # mtime, which is what `Last-Modified` is served from and what the worker
+        # compares.
+        newer: list[Reading] = []
+        before_tiles = first.evaluate("async () => (await (await caches.open('trails-terrain')).keys()).length")
+        page_path.touch()
+        first.evaluate("() => { navigator.serviceWorker.controller.postMessage({trails: 'check'}); }")
+        found = True
+        try:
+            first.wait_for_selector(".trails-newer", timeout=30_000)
+        except Exception:
+            found = False
+        newer.append(Reading("a newer map is found without a navigation", found, True))
+        newer.append(
+            Reading(
+                "and the line carries a button to act on it",
+                first.evaluate("() => !!document.querySelector('.trails-newer-reload')"),
+                True,
+                note="installed to a home screen there is no other way to reload",
+            )
+        )
+        # **And the HEAD is what it cost.** Asking with a GET would spend 5.2 MB
+        # to be told nothing had happened, every time somebody came back to the
+        # app. The body is fetched only because it did move.
+        newer.append(
+            Reading(
+                "the check asked with HEAD before the body",
+                _Quiet.heads.get(f"/{page_path.name}", 0),
+                1,
+                note=f"{_Quiet.asked.get(f'/{page_path.name}', 0)} GETs in the whole visit",
+            )
+        )
+        newer.append(
+            Reading(
+                "and finding one costs the terrain nothing",
+                first.evaluate("async () => (await (await caches.open('trails-terrain')).keys()).length"),
+                before_tiles,
+            )
+        )
+
         # ---- and the terrain a reader asked for, in the same session ---------
         # **In this page and not in one of its own**, because a second 15.6 MB
         # document is a minute of loading and about 590 MB of memory. The two
@@ -3679,6 +3729,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 Reading("offline: the routing graph is there", offline["graph"], True),
             ],
         ),
+        Check("a newer map, found without navigating", newer),
         Check("the terrain a reader asked to keep", terrain),
     ]
 
