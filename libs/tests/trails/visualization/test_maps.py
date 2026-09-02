@@ -1178,31 +1178,61 @@ class TestTheWideLayoutNeedsRoomInBothDirections:
         assert "return size.x < NARROW || size.y < RAIL_ROOM;" in html
         # Every place that asked about width asks this instead, or the two
         # would disagree about which layout is on.
-        assert "var narrow = isNarrow(size);" in html
-        assert "narrow: isNarrow(map.getSize())," in html
+        assert "var narrow = narrowNow();" in html
+        assert "narrow: narrowNow()," in html
         assert "var narrow = size.x < NARROW;" not in html
+        # And it asks the box the rail actually stands in. The chrome is held
+        # inside the safe area, so sideways the rail has the screen's height
+        # less the home indicator, and it is that which has to fit nine tools.
+        assert "return {x: chrome.clientWidth || size.x, y: chrome.clientHeight || size.y};" in html
 
-    def test_the_rail_is_measured_and_not_added_up(self):
+    def test_the_rail_is_measured_after_it_has_been_filled(self):
         """Arithmetic over a stylesheet is a guess, and this one was a few pixels
-        from being wrong: reported from a phone in landscape where the rail still
-        stood, on a screen a hair taller than the sum. It is read while the rail
-        is standing, which is the only moment it can be — once `place` has run it
-        may be `display: none`, and a hidden box measures zero."""
+        from being wrong. The first attempt to measure instead of guess did not
+        measure anything: it read the height straight after `appendChild`, where
+        the rail is an empty bordered div two pixels tall, so the `Math.max` kept
+        the arithmetic and the number never moved. It belongs below the loop that
+        fills it — and no later, because once `place` has run the rail may be
+        `display: none` and a hidden box measures zero."""
         html = self.rendered()
         assert "RAIL_ROOM = Math.max(RAIL_ROOM, Math.ceil(rail.offsetHeight) + 20);" in html
-        # Read straight after it is appended, before anything hides it.
         after = html.split("chrome.appendChild(rail);")[1].split("RAIL_ROOM = Math.max")[0]
-        assert "display" not in after
+        # The nine buttons are in it by then...
+        assert "rail.appendChild(button);" in after
+        # ...and nothing has hidden it yet: `place` is the only thing that ever
+        # sets the rail's display, and it has not run.
+        assert "rail.style.display" not in after
+        assert "place();" not in after
 
-    def test_a_rotation_is_not_one_resize(self):
-        """iOS reports an intermediate size first and the final one after the
-        animation, so a layout decided on the first reading is decided on a
-        screen that never existed. Reported as the wide menu surviving a turn
-        back to upright, where it has no room at all."""
+    def test_the_screen_is_measured_and_never_remembered(self):
+        """`map.getSize()` is a cache, not a measurement: Leaflet re-reads the
+        container only when `invalidateSize()` has set `_sizeChanged`, and that
+        runs from one `window` `resize` inside one `requestAnimationFrame`. A
+        rotation on iOS is animated, so the frame that lands during it records a
+        box that never existed and nothing arrives to correct it — reported as
+        the wide menu on an upright screen, the profile hanging off the right
+        edge and the map stopping short of the bottom. Three symptoms, one
+        number. A second `place()` on a 350 ms timer could not help: re-asking a
+        cache returns the cache."""
         html = self.rendered()
-        assert "map.on('resize', placeAgain);" in html
-        assert "window.addEventListener('orientationchange', placeAgain);" in html
-        assert "settling = window.setTimeout(function () { settling = null; place(); }, 350);" in html
+        assert "return {x: container.clientWidth || 0, y: container.clientHeight || 0};" in html
+        # The timer that guessed how long a rotation takes is gone.
+        assert "placeAgain" not in html
+        assert "350);" not in html
+
+    def test_the_box_is_watched_rather_than_the_events_guessed(self):
+        """An observer fires for every real change of the box and stops when the
+        box does, which is the last frame of the rotation and the only reading
+        worth having. It also tells Leaflet: nothing but `invalidateSize()`
+        re-measures what the map draws itself against."""
+        html = self.rendered()
+        assert "new ResizeObserver(settled).observe(container);" in html
+        assert "map.invalidateSize({debounceMoveend: true});" in html
+        # Coalesced to a frame, the way Leaflet's own resize handler is.
+        assert "pending = window.requestAnimationFrame(function () {" in html
+        # And a fallback for a browser without the observer, on the event
+        # Leaflet itself listens to.
+        assert "window.addEventListener('orientationchange', settled);" in html
 
     def test_the_profile_asks_the_chrome_rather_than_deciding_again(self):
         """It worked the answer out again from the width, and the two have just
@@ -1211,7 +1241,24 @@ class TestTheWideLayoutNeedsRoomInBothDirections:
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
         panel = source.split("class _ProfilePanel")[1].split("\nclass ")[0]
         assert "var said = window.trailsChrome && window.trailsChrome.state();" in panel
-        assert "var narrow = said ? said.narrow : map.getSize().x < NARROW;" in panel
+        assert "var narrow = said ? said.narrow : mapRoom().x < NARROW;" in panel
+
+    def test_nothing_decides_a_layout_from_leaflet_s_cached_size(self):
+        """The class of the bug rather than the three instances of it. Leaflet's
+        `getSize` returns `this._size.clone()` unless `_sizeChanged` is set, and
+        only `invalidateSize()` sets it — so any layout worked out from it can be
+        working from a screen that stopped existing at the last rotation. Every
+        one of them was: the chrome's own decision, the profile's fallback, its
+        width, its height and its ceiling. They now read the container, which
+        cannot be out of date because it is not stored.
+
+        Mechanical, and it reads the source rather than the rendering: a new
+        `map.getSize()` anywhere in this file fails here, and the only thing that
+        keeps it passing is not writing one.
+        """
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        live = [(number, line) for number, line in enumerate(source.splitlines(), 1) if "map.getSize()" in line and not line.strip().startswith("//")]
+        assert live == [], live
 
     def test_the_sheet_a_short_screen_gets_can_be_scrolled(self):
         """Which is the whole reason the burger is the right answer here: the
@@ -2802,7 +2849,7 @@ class TestProfilePanel:
         html = fmap.get_root().render()
 
         assert "var least = 60;" in html
-        assert "map.getSize().y - (box.offsetHeight - laidOut) - 80" in html
+        assert "mapRoom().y - (box.offsetHeight - laidOut) - 80" in html
         assert "laidOut = chartHeight;" in html
 
     def test_the_profile_height_does_not_move_while_the_panel_is_folded(self, group):
@@ -5093,7 +5140,7 @@ class TestChrome:
         assert "profileAsked = (want === undefined || want === null) ? !profileOn() : !!want;" in html
         assert "return profileAsked === null ? profileDefault() : profileAsked;" in html
         # While planning on a narrow screen the map is what is being tapped.
-        assert "return !(map.getSize().x < NARROW && planOn());" in html
+        assert "return !(mapRoom().x < NARROW && planOn());" in html
         assert "profile: function (want) {" in html
 
     def test_the_rail_takes_the_corner_the_burger_already_has(self):

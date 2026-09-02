@@ -949,6 +949,91 @@ def sharing_the_room(page: Any) -> Check:
     return Check("two controls sharing one map", readings)
 
 
+def a_turn_no_resize_event_describes(page: Any) -> Check:
+    """The layout follows the box, not the last event that mentioned it.
+
+    Reported from an iPhone after turning it back and forth a few times: the
+    wide menu standing on an upright screen, the profile panel cut to a
+    landscape width and hanging off the right edge, and the map stopping short
+    of the bottom with everything above it holding a margin from an edge that
+    was not there. Three symptoms, one cause -- ``map.getSize()`` is a cache.
+    Leaflet re-reads the container only when ``invalidateSize()`` has set
+    ``_sizeChanged``, and that runs from a single ``window`` ``resize`` inside a
+    single ``requestAnimationFrame``. A rotation on iOS is animated, so the
+    frame that lands during it records a box that never existed, and no second
+    event arrives to correct it.
+
+    A driven browser cannot animate an iPhone's rotation, but it does not have
+    to: what makes that rotation break things is that the container ends at a
+    size **no resize event described**. That is reproducible exactly -- squeeze
+    the page with CSS and no ``resize`` fires at all. The old code failed this
+    outright; a viewport change would not have caught it, because Playwright
+    fires a real event and one event is all Leaflet ever needed.
+
+    Args:
+        page: The driven page, with nothing selected
+
+    Returns:
+        What Leaflet believes and what the chrome does about it
+    """
+    # folium declares the map as a plain `var`, so the instance is a global and
+    # its own idea of its size can be asked for directly. This is the number the
+    # map draws itself against; everything visible follows from it.
+    believed = """() => {
+      const key = Object.keys(window).find(
+        k => k.indexOf('map_') === 0 && window[k] && window[k].getSize);
+      const map = window[key];
+      const box = document.querySelector('.leaflet-container');
+      const seen = map.getSize();
+      const shown = sel => { const n = document.querySelector(sel);
+        return !!(n && n.offsetParent !== null); };
+      return {believedX: seen.x, believedY: seen.y,
+              realX: box.clientWidth, realY: box.clientHeight,
+              rail: shown('.trails-rail'), burger: shown('.trails-burger'),
+              narrow: window.trailsChrome.state().narrow}; }"""
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(900)
+    page.evaluate("() => window.trailsChrome.close()")
+    page.wait_for_timeout(400)
+    wide = page.evaluate(believed)
+
+    # A phone's box on a desktop's viewport. No `resize` event exists for this.
+    page.evaluate("""() => { const html = document.documentElement;
+      html.style.width = '390px'; html.style.height = '844px';
+      document.body.style.width = '390px'; document.body.style.height = '844px'; }""")
+    page.wait_for_timeout(800)
+    squeezed = page.evaluate(believed)
+
+    page.evaluate("""() => { const html = document.documentElement;
+      html.style.width = ''; html.style.height = '';
+      document.body.style.width = ''; document.body.style.height = ''; }""")
+    page.wait_for_timeout(800)
+    back = page.evaluate(believed)
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(600)
+
+    return Check(
+        "a turn no resize event describes",
+        [
+            Reading("wide: the rail stands", wide["rail"], True),
+            Reading("wide: Leaflet knows the width", wide["believedX"], wide["realX"]),
+            # The whole check, in one line: the box is 390 and nothing said so.
+            Reading("squeezed: the box really is a phone's", squeezed["realX"], 390),
+            Reading("squeezed: Leaflet knows the width", squeezed["believedX"], 390),
+            Reading("squeezed: Leaflet knows the height", squeezed["believedY"], 844),
+            Reading("squeezed: the chrome calls it narrow", squeezed["narrow"], True),
+            Reading("squeezed: the rail is gone", squeezed["rail"], False),
+            Reading("squeezed: the burger stands", squeezed["burger"], True),
+            # And back, because the report was about turning back.
+            Reading("back: Leaflet knows the width again", back["believedX"], back["realX"]),
+            Reading("back: the rail stands again", back["rail"], True),
+            Reading("back: the burger is gone", back["burger"], False),
+        ],
+    )
+
+
 def chrome_layout(page: Any) -> Check:
     """One layout decided by one number, and what it puts where.
 
@@ -4121,7 +4206,11 @@ def drive(page: Any) -> list[Check]:
     Returns:
         Every check, in the order it ran
     """
-    checks = [check(page) for check in (furniture, the_icons_are_there, map_wheel, chrome_layout, the_profile_tool) if wanted(check)]
+    checks = [
+        check(page)
+        for check in (furniture, the_icons_are_there, map_wheel, chrome_layout, a_turn_no_resize_event_describes, the_profile_tool)
+        if wanted(check)
+    ]
     if wanted(the_zoom_the_scale_says):
         checks.append(the_zoom_the_scale_says(page))
 

@@ -3793,6 +3793,19 @@ class _ProfilePanel(MacroElement):
             var SHORT = {{ this.short_px }};
             var open = {{ 'false' if this.collapsed else 'true' }};
 
+            // **The size of the map, read rather than remembered.** Everything
+            // here used to ask `map.getSize()`, which is a cache and not a
+            // measurement: Leaflet re-reads the container only when
+            // `invalidateSize()` has set `_sizeChanged`, and that runs from one
+            // `window` `resize`, inside one `requestAnimationFrame`. See the
+            // chrome's own note -- it is the same stale number, and it is why
+            // this panel was drawn to a landscape width on an upright phone and
+            // hung off the right edge.
+            function mapRoom() {
+                var box = map.getContainer();
+                return {x: box.clientWidth || 0, y: box.clientHeight || 0};
+            }
+
             var SVG = 'http://www.w3.org/2000/svg';
             // Room for the axes: the left margin holds a four-digit height, the
             // bottom one a distance.
@@ -5206,7 +5219,7 @@ class _ProfilePanel(MacroElement):
                 // three of them at once, and the panel opens at 900 px on a
                 // 900 px map.
                 var least = 60;
-                var most = Math.max(least, map.getSize().y - (box.offsetHeight - laidOut) - 80);
+                var most = Math.max(least, mapRoom().y - (box.offsetHeight - laidOut) - 80);
                 var wanted = Math.round(Math.min(most, Math.max(least, pixels)));
                 if (wanted === chartHeight) { return; }
                 chartHeight = wanted;
@@ -5231,7 +5244,7 @@ class _ProfilePanel(MacroElement):
             // 844 px screen and 61 % of a 640 px one, decided by a build-time
             // number that never saw the screen.
             function defaultChartHeight() {
-                var size = map.getSize();
+                var size = mapRoom();
                 var wanted = startingChartHeight;
                 // **Two caps, because one number cannot tell these screens
                 // apart.** A phone held upright is 390 x 844 and a desktop is
@@ -5354,7 +5367,7 @@ class _ProfilePanel(MacroElement):
                 // rail and too short for it, so the chrome shows the burger while
                 // this still believed there was a rail to leave room for.
                 var said = window.trailsChrome && window.trailsChrome.state();
-                var narrow = said ? said.narrow : map.getSize().x < NARROW;
+                var narrow = said ? said.narrow : mapRoom().x < NARROW;
                 box.style.margin = narrow ? '0 0 16px 0' : '';
                 box.style.borderRadius = narrow ? '0' : '';
                 box.style.borderLeftWidth = narrow ? '0' : '';
@@ -5371,7 +5384,7 @@ class _ProfilePanel(MacroElement):
                 // only the burger, and that sits above this.
                 var railRoom = narrow ? 0 : 66;
                 box.style.width = open
-                    ? 'calc(' + map.getSize().x + 'px - env(safe-area-inset-left) - ' +
+                    ? 'calc(' + mapRoom().x + 'px - env(safe-area-inset-left) - ' +
                       'env(safe-area-inset-right) - ' + (railRoom + (narrow ? 0 : 20)) + 'px)'
                     : '';
             }
@@ -5729,7 +5742,7 @@ class _ProfilePanel(MacroElement):
                 freeKey.style.display = 'none';
                 if (!open) { return; }
 
-                var width = Math.max(240, body.clientWidth || (map.getSize().x - 40));
+                var width = Math.max(240, body.clientWidth || (mapRoom().x - 40));
                 // The height is set here and nowhere else. It is no longer a
                 // constant — a reader drags it — and a viewBox that disagreed
                 // with the element it is drawn in scales the whole chart by the
@@ -14497,6 +14510,33 @@ class _Chrome(MacroElement):
             var CREDITS = {{ this.credits_json }};
             var container = map.getContainer();
 
+            // **The screen is measured, never remembered.** Every decision below
+            // reads this instead of `map.getSize()`, which is a cache rather
+            // than a measurement: Leaflet re-reads the container's
+            // `clientWidth`/`clientHeight` only when `invalidateSize()` has set
+            // `_sizeChanged`, and that runs from one `window` `resize` handler,
+            // inside one `requestAnimationFrame` (Leaflet 1.9.4, `Map.getSize`
+            // and `Map._onResize`).
+            //
+            // A rotation on iOS is animated, so the frame that lands during it
+            // reports a box that is neither the screen being left nor the one
+            // being arrived at -- and no second resize event ever comes to
+            // correct it. Leaflet then holds that number for good.
+            //
+            // Reported after turning the phone back and forth a few times: the
+            // wide menu standing on an upright screen, the profile panel cut to
+            // a landscape width and hanging off the right edge, and the map
+            // stopping short of the bottom with everything holding a margin
+            // from an edge that was not there. One stale number, three symptoms
+            // -- and the 350 ms second `place()` that was meant to catch the
+            // settled screen could not, because re-asking a cache returns the
+            // cache. Auto-detecting the container's size is Leaflet issue #941,
+            // open since 2012 and still the caller's job; the observer below is
+            // this page doing it.
+            function mapRoom() {
+                return {x: container.clientWidth || 0, y: container.clientHeight || 0};
+            }
+
             function esc(text) {
                 return String(text === null || text === undefined ? '' : text)
                     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -15351,12 +15391,6 @@ class _Chrome(MacroElement):
                 'box-shadow:0 1px 3px rgba(0,0,0,0.18)';
             L.DomEvent.disableClickPropagation(rail);
             chrome.appendChild(rail);
-            // **Asked of the rail while it is standing.** It is appended visible
-            // and nothing has hidden it yet, so this is the only moment its own
-            // height can be read -- once `place` has run it may be `display:
-            // none`, and a hidden box measures zero. The sum above stays as the
-            // answer for a browser that will not say.
-            RAIL_ROOM = Math.max(RAIL_ROOM, Math.ceil(rail.offsetHeight) + 20);
 
             var railButtons = {};
             TOOLS.forEach(function (tool, index) {
@@ -15373,6 +15407,18 @@ class _Chrome(MacroElement):
                 rail.appendChild(button);
                 railButtons[tool.key] = button;
             });
+
+            // **Asked of the rail while it is standing, and after it has
+            // something in it.** Two conditions, and the first version of this
+            // met only one: it read the height straight after `appendChild`,
+            // where the rail is an empty bordered div two pixels tall, so the
+            // `Math.max` kept the arithmetic and the measurement it was named
+            // for never happened. It has to be here, below the loop that fills
+            // it -- and it cannot be later than here, because once `place` has
+            // run the rail may be `display: none` and a hidden box measures
+            // zero. The sum above stays as the answer for a browser that will
+            // not say.
+            RAIL_ROOM = Math.max(RAIL_ROOM, Math.ceil(rail.offsetHeight) + 20);
 
             // ---- the burger, on a narrow one ---------------------------------
             // Top right, not top left: the zoom buttons keep their corner, so
@@ -15526,7 +15572,7 @@ class _Chrome(MacroElement):
             // is one tap away on the Profile tool and not gone — the bargain the
             // legend struck, in a second place.
             function profileDefault() {
-                return !(map.getSize().x < NARROW && planOn());
+                return !(mapRoom().x < NARROW && planOn());
             }
 
             function profileOn() {
@@ -15761,6 +15807,19 @@ class _Chrome(MacroElement):
             var popupPane = map.getPane('popupPane');
             if (popupPane) { popupPane.style.zIndex = 1050; }
 
+            // **The room the tools actually have.** The chrome is held inside
+            // the safe area, so a phone held sideways offers the rail the
+            // screen's height less the home indicator, and it is that -- not
+            // the screen -- that has to be tall enough for nine tools. Read off
+            // the box itself for the same reason as `mapRoom`: it is the only
+            // number that cannot be out of date.
+            function railRoom() {
+                var size = mapRoom();
+                return {x: chrome.clientWidth || size.x, y: chrome.clientHeight || size.y};
+            }
+
+            function narrowNow() { return isNarrow(railRoom()); }
+
             // ---- where everything stands -------------------------------------
             function place() {
                 // **First, because whether the profile panel is drawn at all
@@ -15770,8 +15829,8 @@ class _Chrome(MacroElement):
                 // a panel that should not have been there — 346 px of map
                 // instead of 784. Anything that re-places has to re-decide this.
                 paintProfile();
-                var size = map.getSize();
-                var narrow = isNarrow(size);
+                var size = mapRoom();
+                var narrow = narrowNow();
                 var landscape = narrow && size.x > size.y;
                 chrome.classList.toggle('trails-chrome-narrow', narrow);
                 rail.style.display = narrow ? 'none' : '';
@@ -15784,7 +15843,7 @@ class _Chrome(MacroElement):
                 // anybody: nothing here touches a corner it did not make.
 
                 // **What a soft keyboard covers.** It shrinks the *visual*
-                // viewport and leaves the layout one alone, so `map.getSize()`
+                // viewport and leaves the layout one alone, so the container
                 // reports a height that is partly under the keyboard and a
                 // full-screen sheet reaches under it with the field the reader
                 // is typing into. Both places this page asks for typing — the
@@ -15897,24 +15956,53 @@ class _Chrome(MacroElement):
                 }
             }
 
-            // **And again once it has settled.** A rotation is not one resize:
-            // iOS reports an intermediate size first and the final one after the
-            // animation, so a layout decided on the first reading is decided on a
-            // screen that never existed. Reported as the wide menu surviving a
-            // turn back to upright, where it has no room at all.
-            var settling = null;
-            function placeAgain() {
-                place();
-                if (settling) { window.clearTimeout(settling); }
-                settling = window.setTimeout(function () { settling = null; place(); }, 350);
+            // **Watched, not waited for.** A rotation is not one resize and it
+            // is not two either: the box changes on every frame of the
+            // animation and the only reading worth having is the last one. An
+            // observer is given exactly that -- it fires for each real change
+            // and stops when the box does -- where a timer has to guess how long
+            // the animation lasts, and a 350 ms guess was both too short for a
+            // slow turn and useless anyway, because what it re-read was
+            // Leaflet's cache.
+            //
+            // It also tells Leaflet, which is the other half. `map.getSize()`
+            // is what the map draws itself against, and nothing re-measures it
+            // but `invalidateSize()`; left to the single `window` `resize`, a
+            // map measured mid-rotation stays that size -- which is the band of
+            // unfilled screen at the foot, with everything above it holding a
+            // margin from an edge that is not there. Coalesced to one frame the
+            // way Leaflet's own handler is, and `debounceMoveend` for the same
+            // reason: an animated turn would otherwise fire a `moveend` a frame.
+            var pending = null;
+            function settled() {
+                if (pending) { return; }
+                pending = window.requestAnimationFrame(function () {
+                    pending = null;
+                    map.invalidateSize({debounceMoveend: true});
+                    place();
+                });
             }
 
-            map.on('resize', placeAgain);
-            window.addEventListener('orientationchange', placeAgain);
+            if (window.ResizeObserver) {
+                // Nothing in `place` changes this box -- the chrome and the veil
+                // are absolutely positioned inside it -- so this cannot feed
+                // itself.
+                new ResizeObserver(settled).observe(container);
+            } else {
+                // No observer: the window's own event, which is what Leaflet
+                // listens to, so the layout follows the map's re-measurement
+                // rather than racing it.
+                window.addEventListener('resize', settled);
+                window.addEventListener('orientationchange', settled);
+            }
+            // Leaflet re-measures for its own reasons as well -- an
+            // `invalidateSize` from anywhere else -- and the layout follows
+            // every one of them.
+            map.on('resize', place);
             // The keyboard opening is not a map resize: the layout viewport does
-            // not move, so Leaflet never hears about it.
+            // not move, so neither Leaflet nor the observer hears about it.
             if (window.visualViewport) {
-                window.visualViewport.addEventListener('resize', placeAgain);
+                window.visualViewport.addEventListener('resize', place);
                 window.visualViewport.addEventListener('scroll', place);
             }
 
@@ -15934,7 +16022,7 @@ class _Chrome(MacroElement):
             // Read by a browser check rather than screenshotted, the way the
             // graph, the panel and the plan are already read.
             window.trailsChrome = {
-                narrow: function () { return map.getSize().x < NARROW; },
+                narrow: function () { return narrowNow(); },
                 // Ask for the coarse layout, or hand it back to the pointer.
                 // A check drives this rather than pretending to have a finger:
                 // what it is measuring is the geometry, and whether Firefox
@@ -16003,7 +16091,7 @@ class _Chrome(MacroElement):
                 },
                 state: function () {
                     return {
-                        narrow: isNarrow(map.getSize()),
+                        narrow: narrowNow(),
                         tool: openTool,
                         menu: menuOpen,
                         detail: detailShown,
