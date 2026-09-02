@@ -14355,8 +14355,32 @@ class _Chrome(MacroElement):
                 var since = function (a, b) {
                     return (a && b && a > b) ? Math.round(a - b) : null;
                 };
+                // **The subresources, because that is where the answer was.**
+                // Read off a phone: fetched 326 ms, map built 282 ms, graph
+                // 168 ms -- and `Opened in 22.3 s`. Nothing the page does
+                // accounts for twenty-one of those seconds, and `loadEventEnd`
+                // does not fire until every image has settled. With the switch
+                // on each tile is a `cache.match` against a store holding tens
+                // of thousands of entries and several gigabytes, which is
+                // exactly why it only happens with tiles kept.
+                var tiles = [], others = [], worst = 0, spent = 0;
+                (performance.getEntriesByType('resource') || []).forEach(function (each) {
+                    if (each.name.indexOf('kartverket') === -1) { others.push(each); return; }
+                    tiles.push(each);
+                    spent += each.duration || 0;
+                    if ((each.duration || 0) > worst) { worst = each.duration; }
+                });
                 return {
                     total: Math.round(nav.loadEventEnd || nav.domComplete || 0),
+                    tiles: tiles.length,
+                    tilesWorst: Math.round(worst),
+                    tilesSpent: Math.round(spent),
+                    others: others.length,
+                    // Kept raw beside the differences above, because a figure
+                    // this page cannot subtract is still one somebody can read.
+                    interactive: Math.round(nav.domInteractive || 0),
+                    contentLoaded: Math.round(nav.domContentLoadedEventEnd || 0),
+                    loadStart: Math.round(nav.loadEventStart || 0),
                     // How long the worker held the request before answering: the
                     // cost of reading the document out of the Cache API.
                     worker: nav.workerStart ? since(nav.responseStart, nav.workerStart) : null,
@@ -14385,17 +14409,48 @@ class _Chrome(MacroElement):
             costLine.className = 'trails-open-cost';
             costLine.style.cssText = 'margin:0 0 8px;color:var(--trails-ink-5);font-size:11px;line-height:1.5';
 
+            var tileLine = document.createElement('p');
+            tileLine.className = 'trails-open-tiles';
+            tileLine.style.cssText = 'margin:0 0 8px;color:var(--trails-ink-5);font-size:11px;line-height:1.5';
+
             function sayOpenCost() {
                 var cost = openCost();
                 if (!cost) { return; }
                 var parts = ['Opened in ' + seconds(cost.total)];
                 if (cost.bytes) { parts.push(Math.round(cost.bytes / 1e5) / 10 + ' MB document'); }
-                if (cost.worker !== null) { parts.push('worker ' + seconds(cost.worker)); }
-                else if (cost.fetch !== null) { parts.push('fetched ' + seconds(cost.fetch)); }
-                if (cost.parse !== null) { parts.push('parsed ' + seconds(cost.parse)); }
-                if (cost.build !== null) { parts.push('map built ' + seconds(cost.build)); }
-                if (cost.graph) { parts.push('graph ' + seconds(cost.graph)); }
+                // Both, and dashes where the browser will not say. `worker` is
+                // the one this line was built for and the one Safari leaves
+                // empty -- said out loud, so its absence is a reading rather
+                // than a gap nobody notices.
+                parts.push('worker ' + seconds(cost.worker));
+                parts.push('fetched ' + seconds(cost.fetch));
+                // **A dash rather than nothing, when a browser will not say.**
+                // Safari fills neither `workerStart` nor `decodedBodySize` for a
+                // document a worker answered, and this quietly left both out --
+                // so a line read off a phone was missing the two figures it was
+                // built to carry, and looked complete. `parsed` went the same
+                // way, which was the one that mattered.
+                parts.push('parsed ' + seconds(cost.parse));
+                parts.push('map built ' + seconds(cost.build));
+                parts.push('graph ' + seconds(cost.graph));
                 costLine.textContent = parts.join(' \u00b7 ') + '.';
+                // **The tiles on their own line**, because the answer was there
+                // and not in anything above it: `loadEventEnd` waits for every
+                // image, and with the switch on every image is a lookup in a
+                // cache holding gigabytes.
+                var said = cost.tiles
+                    ? cost.tiles + ' tiles, ' + seconds(cost.tilesSpent) + ' in all, worst ' +
+                      seconds(cost.tilesWorst) + ' \u00b7 ' + cost.others + ' other requests'
+                    : 'No tiles were asked for';
+                // **The browser's own milestones, raw.** Every figure on the
+                // line above is a difference, and a difference disappears when
+                // either end is missing -- which is how a line read off a phone
+                // came back without the two numbers it was built to carry. These
+                // are what the browser said, subtracted from nothing.
+                said += ' \u00b7 DOM ' + seconds(cost.interactive) +
+                    ', content ' + seconds(cost.contentLoaded) +
+                    ', load ' + seconds(cost.loadStart) + '.';
+                tileLine.textContent = said;
             }
 
             window.trailsOpened = window.trailsOpened || {};
@@ -14415,6 +14470,7 @@ class _Chrome(MacroElement):
             if (window.trailsOffline && window.trailsOffline.freshness) {
                 sourcesHolder.insertBefore(window.trailsOffline.freshness(), sourcesHolder.firstChild);
             }
+            sourcesHolder.insertBefore(tileLine, sourcesHolder.firstChild);
             sourcesHolder.insertBefore(costLine, sourcesHolder.firstChild);
             byKey.info.holder = sourcesHolder;
 
