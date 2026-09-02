@@ -3102,13 +3102,44 @@ def served(directory: pathlib.Path) -> Any:
 #: Whether the page this is running in is in the worker's own cache, asked of
 #: the cache rather than of the worker: what matters is that the bytes are there
 #: under the address the reader used, not that a registration succeeded.
-CACHED_PAGE = """async () => {
-    for (const name of await caches.keys()) {
-        if (!name.startsWith('trails-page-')) { continue; }
-        const cache = await caches.open(name);
-        if (await cache.match(location.href)) { return true; }
-    }
-    return false; }"""
+#: Whether the worker has kept this page. A row in the database now, not an
+#: entry in a cache: the first `caches.open()` of any cache costs 23 s on a phone
+#: with the ground kept, and answering a navigation may not pay it.
+CACHED_PAGE = """async () => await new Promise(done => {
+    const ask = indexedDB.open('trails', 1);
+    ask.onsuccess = () => {
+        const get = ask.result.transaction('pages', 'readonly').objectStore('pages').get(location.href);
+        get.onsuccess = () => done(!!get.result);
+        get.onerror = () => done(false);
+    };
+    ask.onerror = () => done(false);
+})"""
+
+
+def wait_until(page: Any, expr: str, timeout_ms: int = 60_000) -> bool:
+    """Poll an expression until it answers truthy.
+
+    **`wait_for_function` must never be handed an async function.** It takes the
+    promise the call returns as the answer, which is an object and therefore
+    truthy, and passes on the first poll whatever that promise would have
+    resolved to. Measured: the check asking whether the map had been kept for
+    offline use returned at once with the page not kept at all, and had been
+    green on that basis. `evaluate` awaits properly, so this loops on that.
+
+    Args:
+        page: The driven page
+        expr: A JavaScript expression, which may be async
+        timeout_ms: How long to keep asking
+
+    Returns:
+        Whether it answered truthy before the time ran out.
+    """
+    until = time.time() + timeout_ms / 1000
+    while time.time() < until:
+        if page.evaluate(expr):
+            return True
+        page.wait_for_timeout(250)
+    return False
 
 
 def the_zoom_the_scale_says(page: Any) -> Check:
@@ -3453,11 +3484,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # the run from 180 to 315; the page says when it is ready.
         first.wait_for_function("() => window.trailsWorker", timeout=120_000)
         registered = first.evaluate("() => window.trailsWorker")
-        kept = True
-        try:
-            first.wait_for_function(CACHED_PAGE, timeout=60_000)
-        except Exception:
-            kept = False
+        kept = wait_until(first, CACHED_PAGE, 60_000)
         # Move, so that some terrain is asked for while the worker is in the way
         # of it. The tiles the first paint fetched went out before it took over.
         first.evaluate("() => window[Object.keys(window).find(k => k.startsWith('map_'))].setZoom(10)")

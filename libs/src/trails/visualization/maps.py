@@ -219,7 +219,84 @@ SERVICE_WORKER = """// The map's service worker. Written by the build, stamped w
 // in it: measured, selecting a chain and reading its whole elevation profile
 // costs zero requests, and so does routing, because the Dijkstra is in the page.
 var VERSION = "__VERSION__";
-var PAGE = "trails-page-" + VERSION;
+
+// **The document and the switch live in a database, not in a cache.** Measured
+// on an installed app: the first `caches.open()` of *any* cache costs 23.2 s once
+// the terrain cache holds tens of thousands of tiles, and 11 ms with the store
+// empty -- same device, same page, one variable. The first touch pays for the
+// whole origin, and answering a navigation needs exactly two things, the page and
+// the flag, both of which used to be in there.
+//
+// So they are here instead: one file rather than a hundred thousand. The tiles
+// stay in the cache for now, which means the first tile still pays -- but it
+// pays after the map is on the screen rather than in front of a black one.
+//
+// The digest still names the worker, which is what makes a deploy install one --
+// it is no longer a cache name, and `sweepOldCaches` takes the caches that were.
+var DB = "trails";
+var PAGES = "pages";
+var FLAGS = "flags";
+var opened = null;
+
+function base() {
+    if (opened) { return opened; }
+    opened = new Promise(function (done, fail) {
+        var ask = indexedDB.open(DB, 1);
+        ask.onupgradeneeded = function () {
+            var made = ask.result;
+            if (!made.objectStoreNames.contains(PAGES)) { made.createObjectStore(PAGES); }
+            if (!made.objectStoreNames.contains(FLAGS)) { made.createObjectStore(FLAGS); }
+        };
+        ask.onsuccess = function () { done(ask.result); };
+        ask.onerror = function () { fail(ask.error); };
+    });
+    return opened;
+}
+
+function read(store, key) {
+    return base().then(function (open) {
+        return new Promise(function (done, fail) {
+            var ask = open.transaction(store, "readonly").objectStore(store).get(key);
+            ask.onsuccess = function () { done(ask.result === undefined ? null : ask.result); };
+            ask.onerror = function () { fail(ask.error); };
+        });
+    }).catch(function () { return null; });
+}
+
+function write(store, key, value) {
+    return base().then(function (open) {
+        return new Promise(function (done, fail) {
+            var deal = open.transaction(store, "readwrite");
+            deal.objectStore(store).put(value, key);
+            deal.oncomplete = function () { done(true); };
+            deal.onerror = function () { fail(deal.error); };
+        });
+    }).catch(function () { return false; });
+}
+
+// **The headers travel with the body.** A cache kept the whole `Response`; a row
+// keeps a blob, so what the response said about itself has to be written down
+// beside it. `last-modified` is not decoration here: it is the entire basis on
+// which a newer map is recognised.
+function rowFor(answer) {
+    return answer.clone().blob().then(function (body) {
+        var headers = [];
+        answer.headers.forEach(function (value, name) { headers.push([name, value]); });
+        return {version: VERSION, body: body, headers: headers, at: Date.now()};
+    });
+}
+
+function responseFrom(row) {
+    return new Response(row.body, {headers: row.headers});
+}
+
+function headerOf(row, name) {
+    var found = null;
+    (row.headers || []).forEach(function (pair) {
+        if (pair[0].toLowerCase() === name) { found = pair[1]; }
+    });
+    return found;
+}
 
 // **Two tile caches, because they are two different promises.** `TILES` is what
 // the reader happened to look at, kept opportunistically and trimmed to the last
@@ -253,9 +330,8 @@ var TILE_HOST = "cache.kartverket.no";
 //
 // So nothing on the way to answering a navigation may open `TERRAIN` any more.
 // The panel's own record of what is kept lives here for the same reason.
-var FLAGS = "trails-state";
-var STATE = "https://trails.invalid/offline";
-var TIMING = "https://trails.invalid/timing";
+var STATE = "offline";
+var TIMING = "timing";
 var switched = null;
 
 // A tile that is not kept, while the switch is on: a 1x1 transparent PNG,
@@ -283,27 +359,25 @@ self.addEventListener("install", function () {
 // activation takes both -- and it is much the cheaper mistake.
 self.addEventListener("activate", function (event) {
     event.waitUntil(
-        self.clients.claim().then(keepWhatIsOpen).then(sweep)
+        self.clients.claim().then(keepWhatIsOpen).then(sweepOldCaches)
     );
 });
 
-// Only the superseded copies of the page, and not before this worker's own cache
-// holds something. The two tile caches are not stamped with a version and must
-// survive every deploy: a reader who kept the park before a typo was fixed would
-// otherwise download it again after it.
-function sweep() {
-    return caches.open(PAGE).then(function (cache) {
-        return cache.keys();
-    }).then(function (keys) {
-        if (!keys.length) { return null; }
-        return caches.keys().then(function (names) {
-            return Promise.all(names.map(function (name) {
-                var stale = name.indexOf("trails-page-") === 0 && name !== PAGE;
-                return stale ? caches.delete(name) : null;
-            }));
-        });
+// **What earlier versions left behind.** Every deploy used to mint a cache named
+// after the page's digest and hold 15.7 MB in it; a reader who has been through
+// a few is carrying several. Swept here, on activation, which is after the
+// navigation has been answered -- so the one thing this must not do is happen in
+// front of somebody: `caches.keys()` is the call that costs 23 seconds on a
+// phone with the ground kept.
+function sweepOldCaches() {
+    return caches.keys().then(function (names) {
+        return Promise.all(names.map(function (name) {
+            var old = name.indexOf("trails-page-") === 0 || name === "trails-state";
+            return old ? caches.delete(name) : null;
+        }));
     }).catch(function () { return null; });
 }
+
 
 // **Keep the page that is open, by the address it was opened at.**
 //
@@ -314,42 +388,19 @@ function sweep() {
 // answers. If it does not, one extra fetch buys a map that opens without a
 // network, which is the whole point.
 function keepWhatIsOpen() {
-    return Promise.all([caches.open(PAGE), self.clients.matchAll({type: "window"})]).then(function (both) {
-        var cache = both[0];
-        return Promise.all(both[1].map(function (client) {
-            return cache.match(client.url).then(function (kept) {
-                if (kept) { return null; }
-                return cache.add(client.url).catch(function () { return carryOver(cache, client.url); });
+    return self.clients.matchAll({type: "window"}).then(function (open) {
+        return Promise.all(open.map(function (client) {
+            return read(PAGES, client.url).then(function (row) {
+                if (row) { return null; }
+                return fetch(client.url).then(function (answer) {
+                    if (!answer || !answer.ok) { return null; }
+                    return rowFor(answer).then(function (made) {
+                        return write(PAGES, client.url, made);
+                    });
+                }).catch(function () { return null; });
             });
         }));
-    });
-}
-
-// **The copy from the superseded cache, when the network will not hand one
-// over.** A new worker starts with an empty cache of its own and `pageFor` looks
-// in that one only, so the fetch above failing used to mean a reader with a map
-// on the device and a worker that could not see it.
-//
-// Nothing is fetched here: these are bytes already on the phone, moved. It may
-// be one build behind -- the reader who was offline through the last deploy has
-// the old document and nothing better exists -- and a build behind is what
-// `pageFor` corrects on the next visit with a signal. Blank is not.
-function carryOver(cache, url) {
-    return caches.keys().then(function (names) {
-        return names.filter(function (name) {
-            return name.indexOf("trails-page-") === 0 && name !== PAGE;
-        }).reduce(function (chain, name) {
-            return chain.then(function (done) {
-                if (done) { return true; }
-                return caches.open(name).then(function (was) {
-                    return was.match(url, {ignoreSearch: true});
-                }).then(function (kept) {
-                    if (!kept) { return false; }
-                    return cache.put(url, kept.clone()).then(function () { return true; });
-                });
-            });
-        }, Promise.resolve(false));
-    }).catch(function () { return false; });
+    }).catch(function () { return null; });
 }
 
 function tell(what, more) {
@@ -369,10 +420,8 @@ function tell(what, more) {
 // read its own flag should go to the network rather than draw a blank park.
 function offlineNow() {
     if (switched === null) {
-        switched = caches.open(FLAGS).then(function (cache) {
-            return cache.match(STATE);
-        }).then(function (kept) {
-            return kept ? kept.text().then(function (said) { return said === "on"; }) : false;
+        switched = read(FLAGS, STATE).then(function (kept) {
+            return kept === "on";
         }).catch(function () { return false; });
     }
     return switched;
@@ -380,9 +429,7 @@ function offlineNow() {
 
 function setOffline(on) {
     switched = Promise.resolve(!!on);
-    return caches.open(FLAGS).then(function (cache) {
-        return cache.put(STATE, new Response(on ? "on" : "off", {headers: {"content-type": "text/plain"}}));
-    });
+    return write(FLAGS, STATE, on ? "on" : "off");
 }
 
 self.addEventListener("message", function (event) {
@@ -401,18 +448,16 @@ self.addEventListener("message", function (event) {
     }));
 });
 
-// The page as it is held, by the address it was kept under. Both halves are
-// wanted by both callers below, and asking twice is two passes over the cache.
+// The page as it is held, and the address it was kept under. A row keyed by
+// that address, so this is one read where it used to be a listing and a match.
 function heldPage() {
-    return caches.open(PAGE).then(function (cache) {
-        return cache.keys().then(function (keys) {
-            if (!keys.length) { return null; }
-            var request = keys[0];
-            return cache.match(request).then(function (held) {
-                return held ? {request: request, kept: held} : null;
-            });
+    return self.clients.matchAll({type: "window"}).then(function (open) {
+        var url = open.length ? open[0].url : null;
+        if (!url) { return null; }
+        return read(PAGES, url).then(function (row) {
+            return row ? {url: url, row: row} : null;
         });
-    });
+    }).catch(function () { return null; });
 }
 
 // **Asked for, and only when asked.** The only other thing that notices a new
@@ -435,11 +480,11 @@ function heldPage() {
 function askForNewer() {
     return heldPage().then(function (both) {
         if (!both) { return null; }
-        return fetch(both.request.url, {method: "HEAD", cache: "reload"}).then(function (head) {
+        return fetch(both.url, {method: "HEAD", cache: "reload"}).then(function (head) {
             if (!head || !head.ok) { return tell("checked", {failed: true, newer: false, bytes: null}); }
             return tell("checked", {
                 failed: false,
-                newer: moved(both.kept, head),
+                newer: movedFrom(both.row, head),
                 bytes: Number(head.headers.get("content-length")) || null
             });
         });
@@ -453,13 +498,13 @@ function askForNewer() {
 function takeNewer() {
     return heldPage().then(function (both) {
         if (!both) { return tell("taken"); }
-        return fetch(both.request.url, {method: "HEAD", cache: "reload"}).then(function (head) {
+        return fetch(both.url, {method: "HEAD", cache: "reload"}).then(function (head) {
             if (!head || !head.ok) { return tell("stuck"); }
-            if (!moved(both.kept, head)) { return tell("taken"); }
-            return fetch(both.request.url, {cache: "reload"}).then(function (answer) {
+            if (!movedFrom(both.row, head)) { return tell("taken"); }
+            return fetch(both.url, {cache: "reload"}).then(function (answer) {
                 if (!answer || !answer.ok) { return tell("stuck"); }
-                return caches.open(PAGE).then(function (cache) {
-                    return cache.put(both.request, answer.clone());
+                return rowFor(answer).then(function (made) {
+                    return write(PAGES, both.url, made);
                 }).then(function () { return tell("taken"); });
             });
         });
@@ -479,10 +524,15 @@ function blank() {
 // Whether two answers are the same map. The object carries `last-modified` and
 // no etag -- measured on the published page -- so that is what is compared, and
 // an answer carrying neither is treated as unchanged rather than as news.
-function moved(kept, fresh) {
-    var was = kept.headers.get("last-modified") || kept.headers.get("etag");
-    var now = fresh.headers.get("last-modified") || fresh.headers.get("etag");
+function moved(was, now) {
     return !!(was && now && was !== now);
+}
+
+function movedFrom(row, fresh) {
+    return moved(
+        headerOf(row, "last-modified") || headerOf(row, "etag"),
+        fresh.headers.get("last-modified") || fresh.headers.get("etag")
+    );
 }
 
 // **Stale first, and the network behind it.** The reader gets the map they
@@ -496,31 +546,32 @@ function moved(kept, fresh) {
 // three say which part, and they are written to the small cache rather than
 // posted, because a navigation is answered before any page is listening.
 function pageFor(request) {
-    var began = Date.now(), opened = 0, matched = 0;
-    return caches.open(PAGE).then(function (cache) {
-        opened = Date.now() - began;
-        return cache.match(request).then(function (kept) {
-            matched = Date.now() - began - opened;
-            return offlineNow().then(function (off) {
-                var flag = Date.now() - began - opened - matched;
-                caches.open(FLAGS).then(function (small) {
-                    return small.put(TIMING, new Response(JSON.stringify({
-                        open: opened, match: matched, flag: flag, total: Date.now() - began
-                    }), {headers: {"content-type": "application/json"}}));
-                }).catch(function () { return null; });
-                if (off && kept) { return kept; }
-                var fresh = fetch(request).then(function (answer) {
-                    if (answer && answer.ok) {
-                        cache.put(request, answer.clone());
-                        if (kept && moved(kept, answer)) { tell("newer"); }
-                    }
-                    return answer;
-                }).catch(function (failure) {
-                    if (kept) { return kept; }
-                    throw failure;
-                });
-                return kept || fresh;
+    var began = Date.now(), open = 0, matched = 0;
+    return base().then(function () {
+        open = Date.now() - began;
+        return read(PAGES, request.url);
+    }).then(function (row) {
+        matched = Date.now() - began - open;
+        return offlineNow().then(function (off) {
+            var flag = Date.now() - began - open - matched;
+            write(FLAGS, TIMING, {open: open, match: matched, flag: flag, total: Date.now() - began});
+            var kept = row ? responseFrom(row) : null;
+            if (off && kept) { return kept; }
+            var fresh = fetch(request).then(function (answer) {
+                if (answer && answer.ok) {
+                    // **Written before anything is thrown away**, which here is
+                    // free: a row keyed by address is replaced in place, so there
+                    // is no window in which the reader has neither copy. That was
+                    // a whole dance when this was a cache named after a digest.
+                    rowFor(answer).then(function (made) { return write(PAGES, request.url, made); });
+                    if (row && movedFrom(row, answer)) { tell("newer"); }
+                }
+                return answer;
+            }).catch(function (failure) {
+                if (kept) { return kept; }
+                throw failure;
             });
+            return kept || fresh;
         });
     });
 }
@@ -12583,17 +12634,58 @@ class _OfflinePanel(MacroElement):
 
                 // ---- what is kept ----------------------------------------------
 
-                // **Where the figure lives, and why not beside the tiles.**
+                // **Where the figure lives, and why not in a cache at all.**
                 // It was in the terrain cache, which reads well: storage cleared
-                // under the page would take both. It also meant that opening this
-                // panel opened a Cache Storage holding tens of thousands of
-                // entries and several gigabytes -- measured at twenty seconds on
-                // an installed app, in front of the reader. It sits in the small
-                // cache beside the offline switch instead, and `forget` clears
-                // that one too, which is the property the old place was for.
-                var FLAGS = 'trails-state';
-                var HELD = 'https://trails.invalid/held';
-                var TIMING = 'https://trails.invalid/timing';
+                // under the page would take both. Then it was in a small cache of
+                // its own, which read better and helped not at all -- measured on
+                // an installed app, the first `caches.open()` of *any* cache costs
+                // 23.2 s once the terrain holds tens of thousands of tiles, and
+                // 11 ms with the store empty. The first touch pays for the whole
+                // origin.
+                //
+                // So it is a row in the same database the worker keeps the
+                // document and the switch in. `forget` clears it, which is the
+                // property the first place was chosen for.
+                var HELD = 'held';
+                var TIMING = 'timing';
+
+                function db() {
+                    if (!window.indexedDB) { return Promise.reject(new Error('no database')); }
+                    if (!db.open) {
+                        db.open = new Promise(function (done, fail) {
+                            var ask = window.indexedDB.open('trails', 1);
+                            ask.onupgradeneeded = function () {
+                                var made = ask.result;
+                                if (!made.objectStoreNames.contains('pages')) { made.createObjectStore('pages'); }
+                                if (!made.objectStoreNames.contains('flags')) { made.createObjectStore('flags'); }
+                            };
+                            ask.onsuccess = function () { done(ask.result); };
+                            ask.onerror = function () { fail(ask.error); };
+                        });
+                    }
+                    return db.open;
+                }
+
+                function dbRead(store, key) {
+                    return db().then(function (open) {
+                        return new Promise(function (done, fail) {
+                            var ask = open.transaction(store, 'readonly').objectStore(store).get(key);
+                            ask.onsuccess = function () { done(ask.result === undefined ? null : ask.result); };
+                            ask.onerror = function () { fail(ask.error); };
+                        });
+                    }).catch(function () { return null; });
+                }
+
+                function dbWrite(store, key, value) {
+                    return db().then(function (open) {
+                        return new Promise(function (done, fail) {
+                            var deal = open.transaction(store, 'readwrite');
+                            deal.objectStore(store).put(value, key);
+                            deal.oncomplete = function () { done(true); };
+                            deal.onerror = function () { fail(deal.error); };
+                        });
+                    }).catch(function () { return false; });
+                }
 
                 // **Written down, not counted out.** This was `cache.keys()` over
                 // the whole terrain cache -- one `Request` object per tile -- on
@@ -12612,11 +12704,7 @@ class _OfflinePanel(MacroElement):
                 function kept() {
                     var none = {tiles: 0, bytes: 0, top: 0, known: false};
                     if (!window.caches) { return Promise.resolve(none); }
-                    return caches.open(FLAGS).then(function (cache) {
-                        return cache.match(HELD);
-                    }).then(function (said) {
-                        return said ? said.json() : null;
-                    }).then(function (held) {
+                    return dbRead('flags', HELD).then(function (held) {
                         if (!held) { return none; }
                         return {tiles: held.tiles || 0, bytes: held.bytes || 0,
                                 top: held.top || 0, known: true};
@@ -12630,18 +12718,11 @@ class _OfflinePanel(MacroElement):
                 // either is run again, which is the safe way to be wrong -- it
                 // never claims ground that is not there.
                 function note(tiles, bytes, top) {
-                    return caches.open(FLAGS).then(function (small) {
-                        return small.match(HELD).then(function (said) {
-                            return said ? said.json() : null;
-                        }).catch(function () { return null; }).then(function (was) {
-                            var held = {
-                                tiles: Math.max((was && was.tiles) || 0, tiles),
-                                bytes: Math.max((was && was.bytes) || 0, bytes),
-                                top: Math.max((was && was.top) || 0, top)
-                            };
-                            return small.put(HELD, new Response(JSON.stringify(held), {
-                                headers: {'content-type': 'application/json'}
-                            }));
+                    return dbRead('flags', HELD).then(function (was) {
+                        return dbWrite('flags', HELD, {
+                            tiles: Math.max((was && was.tiles) || 0, tiles),
+                            bytes: Math.max((was && was.bytes) || 0, bytes),
+                            top: Math.max((was && was.top) || 0, top)
                         });
                     }).catch(function () { return null; });
                 }
@@ -13046,7 +13127,7 @@ class _OfflinePanel(MacroElement):
                 function forget() {
                     if (!window.caches) { return Promise.resolve(); }
                     return Promise.all([
-                        caches.delete(TERRAIN), caches.delete(TILES), caches.delete(FLAGS)
+                        caches.delete(TERRAIN), caches.delete(TILES), dbWrite('flags', HELD, null)
                     ]).then(function () {
                         remember(false);
                         return tellWorker(false);
@@ -13725,6 +13806,9 @@ class _OfflinePanel(MacroElement):
 
                 window.trailsOffline = {
                     holder: holder,
+                    // The chrome reads the worker's own timings out of the same
+                    // database; one opener, so the page has one connection.
+                    dbRead: dbRead,
                     // A row of its own for any panel that wants one. `Sources`
                     // takes one; see `freshRow`.
                     freshness: freshRow,
@@ -14496,14 +14580,10 @@ class _Chrome(MacroElement):
                 // does; these three say which part of it. Written to a cache
                 // rather than posted, because a navigation is answered before
                 // any page is listening -- so it is read here, after the fact.
-                if (!window.caches) { return; }
-                caches.open('trails-state').then(function (small) {
-                    return small.match('https://trails.invalid/timing');
-                }).then(function (found) {
-                    return found ? found.json() : null;
-                }).then(function (spent) {
+                if (!window.trailsOffline || !window.trailsOffline.dbRead) { return; }
+                window.trailsOffline.dbRead('flags', 'timing').then(function (spent) {
                     if (!spent) { return; }
-                    tileLine.textContent = said + ' Worker: cache open ' + seconds(spent.open) +
+                    tileLine.textContent = said + ' Worker: store open ' + seconds(spent.open) +
                         ', page found ' + seconds(spent.match) + ', switch read ' + seconds(spent.flag) + '.';
                 }).catch(function () { return; });
             }

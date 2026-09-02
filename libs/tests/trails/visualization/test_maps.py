@@ -229,7 +229,7 @@ class TestServiceWorker:
         work from the third."""
         assert "function keepWhatIsOpen()" in maps.SERVICE_WORKER
         assert 'self.clients.matchAll({type: "window"})' in maps.SERVICE_WORKER
-        assert "cache.add(client.url)" in maps.SERVICE_WORKER
+        assert "return write(PAGES, client.url, made);" in maps.SERVICE_WORKER
 
     def test_the_document_is_stale_first_and_the_tiles_are_cache_first(self):
         """A reader gets the map they already have, at no bytes, and the new one
@@ -294,48 +294,40 @@ class TestOfflineWorker:
         assert "trim(terrain)" not in maps.SERVICE_WORKER
 
     def test_neither_tile_cache_is_swept_by_a_deploy(self):
-        """The page is stamped with its own digest and its old copies go; the
-        terrain is not stamped with anything and must survive every deploy. A
-        reader who kept the park before a typo was fixed would otherwise be asked
-        to download it again after it."""
-        sweep = maps.SERVICE_WORKER.split("function sweep()")[1].split("\nfunction ")[0]
+        """The terrain is not stamped with anything and must survive every
+        deploy. A reader who kept the park before a typo was fixed would
+        otherwise be asked to download it again after it."""
+        sweep = maps.SERVICE_WORKER.split("function sweepOldCaches()")[1].split("\nfunction ")[0]
         assert 'name.indexOf("trails-page-") === 0' in sweep
         assert "TERRAIN" not in sweep and "TILES" not in sweep
 
-    def test_the_new_cache_is_filled_before_the_old_one_is_swept(self):
-        """It ran the other way round: delete every superseded page cache, then
-        fetch the open page into this worker's own. Both halves may fail, and on
-        a dying signal it is the second — so it deleted the copy the reader was
-        standing on and put nothing back."""
+    def test_the_old_page_caches_are_swept_after_the_navigation(self):
+        """Every deploy used to mint a cache named after the page's digest and
+        hold 15.7 MB in it, so a reader who has been through a few is carrying
+        several. The one thing the sweep must not do is happen in front of
+        somebody: `caches.keys()` is the call measured at 23 s on a phone with
+        the ground kept."""
         activate = maps.SERVICE_WORKER.split('addEventListener("activate"')[1].split("\nfunction ")[0]
-        assert "self.clients.claim().then(keepWhatIsOpen).then(sweep)" in activate
-        # And the sweep refuses to run against a cache with nothing in it, so a
-        # half-done update leaves two page caches rather than none.
-        sweep = maps.SERVICE_WORKER.split("function sweep()")[1].split("\nfunction ")[0]
-        assert "if (!keys.length) { return null; }" in sweep
-        assert sweep.index("if (!keys.length)") < sweep.index("caches.delete(name)")
+        assert "self.clients.claim().then(keepWhatIsOpen).then(sweepOldCaches)" in activate
 
-    def test_a_worker_that_cannot_fetch_the_page_carries_the_old_copy_over(self):
-        """A new worker starts with an empty cache of its own and `pageFor` looks
-        in that one only. So the fetch failing meant a reader with a map on the
-        device and a worker that could not see it — blank, with the bytes right
-        there."""
-        assert "cache.add(client.url).catch(function () { return carryOver(cache, client.url); });" in maps.SERVICE_WORKER
-        carry = maps.SERVICE_WORKER.split("function carryOver(cache, url)")[1].split("\nfunction ")[0]
-        # Nothing is fetched: these are bytes already on the phone, moved.
-        assert "fetch(" not in carry
-        assert 'name.indexOf("trails-page-") === 0 && name !== PAGE' in carry
-        assert "cache.put(url, kept.clone())" in carry
+    def test_a_row_is_replaced_in_place_so_nothing_has_to_be_carried_over(self):
+        """Fetch before you evict was a whole dance when the page lived in a
+        cache named after a digest: the new one had to be filled before the old
+        was dropped, and a worker whose fetch failed had to move the old copy
+        across by hand. A row keyed by the address is replaced where it lies."""
+        assert "carryOver" not in maps.SERVICE_WORKER
+        paging = maps.SERVICE_WORKER.split("function pageFor(request)")[1].split("\nfunction ")[0]
+        assert "rowFor(answer).then(function (made) { return write(PAGES, request.url, made); });" in paging
 
     def test_the_switch_survives_the_worker_being_killed(self):
         """A service worker is not a process that stays alive: the browser starts
         it for a fetch and stops it again, and every variable it held goes with
         it. A flag living only in that scope would be true on the first tile of a
         walk and false on the second."""
-        assert 'var STATE = "https://trails.invalid/offline";' in maps.SERVICE_WORKER
+        assert 'var STATE = "offline";' in maps.SERVICE_WORKER
         assert "function offlineNow()" in maps.SERVICE_WORKER
-        assert "cache.match(STATE)" in maps.SERVICE_WORKER
-        assert "cache.put(STATE," in maps.SERVICE_WORKER
+        assert "read(FLAGS, STATE)" in maps.SERVICE_WORKER
+        assert 'write(FLAGS, STATE, on ? "on" : "off")' in maps.SERVICE_WORKER
         # Memoised, and the memo replaced rather than left when the page speaks.
         assert "switched = Promise.resolve(!!on);" in maps.SERVICE_WORKER
 
@@ -378,7 +370,7 @@ class TestOfflineWorker:
         # **A HEAD, and only a HEAD.** The page is 5.2 MB over the wire, and
         # spending that to be told nothing had changed is what a reader walking
         # would pay for — so looking costs a few hundred bytes and nothing else.
-        assert 'fetch(both.request.url, {method: "HEAD", cache: "reload"})' in looking
+        assert 'fetch(both.url, {method: "HEAD", cache: "reload"})' in looking
         assert '{cache: "reload"}' not in looking
         # And what it answers with is the size, because that is what the reader
         # is about to be asked to spend.
@@ -391,12 +383,12 @@ class TestOfflineWorker:
         prevent, and it was doing it in the switch's own page."""
         assert 'if (said.trails === "take")' in maps.SERVICE_WORKER
         taking = maps.SERVICE_WORKER.split("function takeNewer()")[1].split("\nfunction ")[0]
-        assert 'fetch(both.request.url, {cache: "reload"})' in taking
-        assert "return cache.put(both.request, answer.clone());" in taking
+        assert 'fetch(both.url, {cache: "reload"})' in taking
+        assert "return write(PAGES, both.url, made);" in taking
         # **The HEAD runs again rather than being trusted from a minute ago.**
         # With the switch off `pageFor` may have taken the new page in between,
         # and the reload would then spend 5.2 MB arriving where it already was.
-        assert 'if (!moved(both.kept, head)) { return tell("taken"); }' in taking
+        assert 'if (!movedFrom(both.row, head)) { return tell("taken"); }' in taking
         # A tap that could not be honoured says so instead of reloading into the
         # same map it was already showing.
         assert 'return tell("stuck");' in taking
@@ -1102,19 +1094,18 @@ class TestNothingGrowsWithTheDownload:
         Firefox: 1,000 entries 25 ms, 10,000 202 ms, 40,000 920 ms. At 131,033
         that is about three seconds and as many `Request` objects, each time."""
         html = self.rendered()
-        assert "var HELD = 'https://trails.invalid/held';" in html
-        counting = html.split("var HELD = 'https://trails.invalid/held';")[1].split("function note(")[0]
-        assert "cache.match(HELD)" in counting
+        assert "var HELD = 'held';" in html
+        counting = html.split("var HELD = 'held';")[1].split("function note(")[0]
+        assert "dbRead('flags', HELD)" in counting
         assert "cache.keys()" not in "\n".join(line for line in counting.split("\n") if not line.strip().startswith("//"))
         # **And not beside the tiles.** It was, which reads well — storage
         # cleared under the page would take both — and it meant that opening this
         # panel opened a Cache Storage holding tens of thousands of entries and
         # several gigabytes. Measured on an installed app at twenty seconds.
-        assert "caches.open(FLAGS).then(function (cache) {" in counting
-        assert "var FLAGS = 'trails-state';" in html
-        # `forget` clears the small cache too, which is the property the old
-        # place was chosen for.
-        assert "caches.delete(TERRAIN), caches.delete(TILES), caches.delete(FLAGS)" in html
+        assert "window.indexedDB.open('trails', 1)" in html
+        # `forget` clears the row too, which is the property the first place was
+        # chosen for.
+        assert "caches.delete(TERRAIN), caches.delete(TILES), dbWrite('flags', HELD, null)" in html
         # Written as the run goes, so a run the phone interrupts still leaves a
         # figure behind — which is exactly the run that used to leave the panel
         # saying nothing was kept.
