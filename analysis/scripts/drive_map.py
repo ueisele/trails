@@ -3231,6 +3231,42 @@ def painted_ground(page: Any) -> tuple[float, float, str]:
     return painted["filled"] * side * side, float(quoted.group(1).replace(",", "")) if quoted else 0.0, said
 
 
+#: Wait for the chooser's count and read it in the same breath.
+#:
+#: **Two calls is a race, and it became a reachable one.** The panel nulls the
+#: figure whenever the selection moves and works it out again off the paint, so
+#: `wait_for_function` and then `evaluate` can land either side of that. It was
+#: survivable while a refresh took a couple of hundred milliseconds enumerating
+#: the terrain cache; a refresh is now four, and the harness lost every time.
+COUNTED = """(was) => {
+    const said = window.trailsOffline.state();
+    if (!said || !said.counted) { return null; }
+    if (was !== null && said.counted.at === was) { return null; }
+    return {tiles: said.counted.tiles, at: said.counted.at};
+}"""
+
+
+def counted_now(page: Any, after: str | None = None, timeout: int = 60_000) -> dict:
+    """The figure the chooser has settled on, and which selection it belongs to.
+
+    **`after` is what makes this a measurement rather than a coincidence.** The
+    figure carries `at`, the selection's own signature, so waiting for one that
+    is *not* the signature already in hand is the difference between reading the
+    count after a drag and reading the one that was on the screen before it.
+    Without that, a check reads whatever is there and passes when nothing moved.
+
+    Args:
+        page: The driven page, with the chooser open
+        after: A signature to wait past, or None for whatever is there
+        timeout: How long to wait for a figure
+
+    Returns:
+        ``{"tiles": int, "at": str}`` for the settled selection.
+    """
+    settled = page.wait_for_function(COUNTED, arg=after, timeout=timeout).json_value()
+    return {"tiles": int(settled["tiles"]), "at": str(settled["at"])}
+
+
 def what_the_chooser_draws(page: Any) -> list[Reading]:
     """The chooser's own drawing, driven, because none of it is in the source.
 
@@ -3313,7 +3349,7 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
     # z12, where all four are on the screen at once.
     page.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 12)"))
     page.wait_for_timeout(1200)
-    before = page.evaluate("() => window.trailsOffline.state().counted.tiles")
+    before = counted_now(page)
     spot = page.evaluate(
         """() => {
             const handle = document.querySelector('.trails-offline-handle');
@@ -3330,15 +3366,14 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
         # smaller would read the same as a drag that did nothing at all.
         page.mouse.move(spot["x"] - 120, spot["y"] + 90, steps=12)
         page.mouse.up()
-        page.wait_for_function("() => { const s = window.trailsOffline.state(); return s && s.counted; }", timeout=60_000)
-        dragged = page.evaluate("() => window.trailsOffline.state().counted.tiles")
+        dragged = counted_now(page, after=before["at"])["tiles"]
     out.append(Reading("a corner has a handle to drag", bool(spot), True))
     out.append(
         Reading(
             "and dragging it is a different piece of ground",
-            bool(dragged and dragged > before),
+            bool(dragged and dragged > before["tiles"]),
             True,
-            note=f"{before} tiles then {dragged}",
+            note=f"{before['tiles']} tiles then {dragged}",
         )
     )
 
@@ -3730,24 +3765,21 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # line of a holder that is detached until the dock shows it, and a run of
         # a few hundred tiles is over in under a second — two ways for a check to
         # read nothing and call it a pass.
-        opened = first.evaluate(
-            """async () => {
-                for (let i = 0; i < 200; i += 1) {
-                    const said = window.trailsOffline.state();
-                    if (said.busy && said.done !== null) { return said.done; }
-                    if (!said.busy && i > 3) { return -1; }
-                    await new Promise(r => setTimeout(r, 5));
-                }
-                return -1;
-            }"""
-        )
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
+        # **What a resumed run downloads, which is the claim that matters.** It
+        # used to be asked as *does the counter open at the resumed figure*, and
+        # the pre-scan that made that true was `cache.keys()` over the whole
+        # terrain cache — one `Request` object per tile, 131,033 of them for the
+        # whole map at z16, at the moment the page can least afford it. The
+        # counter now climbs from zero through what it already holds; what has
+        # to stay true is that it fetches none of it.
+        resumed = first.evaluate("() => window.trailsOffline.state().run")
         terrain.append(
             Reading(
-                "a resumed run opens at what is already kept",
-                opened,
+                "a resumed run fetches nothing it already holds",
+                resumed["held"],
                 first_ask["tiles"],
-                note="it used to open at 0 and race up through the tiles it was skipping",
+                note=f"{resumed['added']} fetched, {resumed['held']} found already there",
             )
         )
         weighed = first.evaluate(

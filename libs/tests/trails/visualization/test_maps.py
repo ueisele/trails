@@ -483,7 +483,7 @@ class TestOfflinePanel:
     def test_the_switch_with_nothing_kept_asks_instead_of_lying(self):
         """A switch that silently gives a blank map is a switch that lied."""
         panel = self.panel()
-        assert "if (want && !there.tiles)" in panel
+        assert "if (want && !any)" in panel
         assert "chooser = true;" in panel
 
     def test_four_pieces_of_ground_and_only_one_follows_the_paths(self):
@@ -723,13 +723,14 @@ class TestOfflinePanel:
         """**Measured, not reasoned about**: with the network down, a download of
         40 tiles kept 0 and turned offline mode on anyway — which hands over
         exactly the blank map this chooser exists to prevent, while saying it is
-        what the reader asked for. It is asked of the cache rather than of the
-        loop's own counter, because what matters is what is there."""
+        what the reader asked for. Counted as tiles found plus tiles fetched,
+        which is what this selection has on the device — the two figures the loop
+        could only get by asking the cache for every tile in turn."""
         panel = self.panel()
         settle = panel.split("}).then(function () {\n                        working = null;")[1]
-        assert "return kept().then(function (there) {" in settle
-        assert "if (!there.tiles) { return refresh(); }" in settle
-        assert settle.index("if (!there.tiles)") < settle.index("remember(true)")
+        assert "kept: state.held + state.added," in settle
+        assert "if (!lastRun.kept) { return refresh(); }" in settle
+        assert settle.index("if (!lastRun.kept)") < settle.index("remember(true)")
         # And it is said, because a run where nothing arrived looks exactly like
         # a run that was never started.
         assert "Nothing arrived" in panel
@@ -907,33 +908,38 @@ class TestOfflinePanel:
         html = fmap.get_root().render()
         assert "the run stops when the phone locks or you switch app" in html
         assert "Stopping costs nothing: the count picks up where it got to." in html
-        # And the claim it makes is one the loop keeps: what is already there is
-        # counted before anything is fetched, and only the rest is asked for.
-        assert "var missing = list.filter(function (url) { return !have[url]; });" in html
-        assert "state.done = list.length - missing.length;" in html
+        # And the claim it makes is one the loop keeps: every tile is asked of
+        # the cache before it is asked of the network, so a stopped run costs
+        # nothing to pick up.
+        assert "return cache.match(next.url).then(function (there) {" in html
+        assert "if (there) { missed = 0; state.held += 1; return null; }" in html
 
-    def test_a_resumed_run_counts_from_what_is_already_there(self):
-        """It opened at `Keeping 0 of 130,000` and raced up through tiles it was
-        skipping, which reads as starting again — the one thing it does not do.
-        One `keys()` instead of a `match` per tile, and the count starts where
-        the last run stopped."""
+    def test_a_run_never_holds_more_than_one_tile(self):
+        """The pre-scan that let a resumed run open at the figure it had reached
+        was `cache.keys()` over the terrain cache: one `Request` object per tile,
+        131,033 of them for the whole map at z16, at the one moment the page can
+        least afford it. Measured in Firefox at 920 ms for 40,000 entries and
+        linear — about three seconds and a hundred thousand objects, on a phone
+        already holding a 15.7 MB document."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "return cache.keys().then(function (keys) {" in html
-        assert "state.done = list.length - missing.length;" in html
-        # Drawn before the first fetch answers, or the resumed figure appears 25
-        # tiles later and the opening frame still says zero.
-        keep = html.split("state.done = list.length - missing.length;")[1].split("return missing;")[0]
-        assert "draw();" in keep
-        # The loop walks what is missing, so a skipped tile is never counted twice.
-        assert "if (state.stop || at >= missing.length) { return Promise.resolve(); }" in html
-        # **And no figure before it is one.** `done` is 0 until `keys()` answers,
-        # which is not the same as nothing being kept — the run has not looked
-        # yet. Driven, the panel was caught opening at 0 for that window.
-        assert "'Checking what is already kept" in html
-        assert "done: working && working.counted ? working.done : null," in html
+        # Nothing in the run enumerates, and nothing in it is a list of tiles.
+        run = html.split("function keep() {")[1].split("function forget()")[0]
+        # Read as code and not as prose: the comment above the loop names the
+        # call it replaced.
+        code = "\n".join(line for line in run.split("\n") if not line.strip().startswith("//"))
+        assert "cache.keys()" not in code
+        assert "wanted()" not in code
+        # One tile in hand at a time, out of a walk over the chosen levels.
+        assert "var walk = walker();" in html
+        assert "var next = walk.next();" in run
+        assert "if (!next) { return Promise.resolve(); }" in run
+        # And the counter counts both halves, so it is a figure from the first
+        # tile rather than after a pass that has to finish first.
+        assert "counted: true" in run
+        assert "state.done += 1;" in run
 
     def test_the_panel_says_how_old_the_map_is(self):
         """Nothing asks for a newer map on its own any more, so being out of
@@ -986,7 +992,7 @@ class TestOfflinePanel:
         assert "if (missed >= 12) { state.stop = true; state.stalled = true; }" in html
         # Reset on every success, so bad tiles arriving in ones and twos never
         # trip it — twelve rather than three because six requests run at once.
-        assert "if (answer && answer.ok) { missed = 0; return cache.put(url, answer); }" in html
+        assert "missed = 0;" in html and "return cache.put(next.url, answer);" in html
         # A run the connection stopped still switches on for what arrived; only
         # a run the reader stopped leaves the chooser where it was.
         assert "if (state.stop && !state.stalled) { return refresh(); }" in html
@@ -1003,6 +1009,81 @@ class TestOfflinePanel:
         assert "if (!navigator.onLine) {" in keep
         assert "lastRun = {total: 0, kept: 0, failed: 0, offline: true};" in keep
         assert "'No connection \\u2014 nothing was tried, and nothing '" in html
+
+
+class TestNothingGrowsWithTheDownload:
+    """What an installed app can hold while it keeps a hundred thousand tiles."""
+
+    @staticmethod
+    def rendered():
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        return fmap.get_root().render()
+
+    def test_a_tile_is_one_number_in_a_set(self):
+        """It was a string key `"x,y"` into an object whose value was an `[x, y]`
+        array — three allocations a tile, and the whole map at z16 is 131,033
+        tiles. `Set.size` also replaces `Object.keys(set).length`, which built a
+        131,033-element array to ask how many there were, on every repaint of
+        the zoom row."""
+        html = self.rendered()
+        assert "var SPAN = 262144;" in html
+        assert "function key(x, y) { return x * SPAN + y; }" in html
+        assert "function keyX(v) { return Math.floor(v / SPAN); }" in html
+        # Every producer of a level makes a Set, and every consumer asks it.
+        assert "var out = new Set(), x, y;" in html
+        assert "out.add(key(x, y));" in html
+        assert "var n = levels[z].size;" in html
+        assert "var n = set.size;" in html
+        assert "if (set.has(key(x0 + i, y0 + j)))" in html
+        # And nothing builds a keys array out of a level any more. Read as code
+        # and not as prose: the comment above `key` names what it replaced.
+        code = "\n".join(line for line in html.split("\n") if not line.strip().startswith("//"))
+        assert "Object.keys(set)" not in code
+        assert "Object.keys(core)" not in code
+
+    def test_the_addresses_are_walked_and_never_listed(self):
+        """This built the address of all 131,033 tiles into an array — some 14 MB
+        of strings — and the only other caller used it to ask how long the array
+        was."""
+        html = self.rendered()
+        assert "function walker() {" in html
+        assert "it = set.values();" in html
+        assert "var step = it.next();" in html
+        # The count comes from the weights, which already had it.
+        assert "return {tiles: base() ? picked.tiles : 0, bytes: picked.bytes};" in html
+        assert "urls.push(" not in html
+
+    def test_what_is_kept_is_written_down_not_counted_out(self):
+        """`cache.keys()` over the terrain cache ran on every `refresh` — on
+        load, on the switch, and every time the panel was opened. Measured in
+        Firefox: 1,000 entries 25 ms, 10,000 202 ms, 40,000 920 ms. At 131,033
+        that is about three seconds and as many `Request` objects, each time."""
+        html = self.rendered()
+        assert "var HELD = 'https://trails.invalid/held';" in html
+        counting = html.split("var HELD = 'https://trails.invalid/held';")[1].split("function note(")[0]
+        assert "cache.match(HELD)" in counting
+        assert "cache.keys()" not in "\n".join(line for line in counting.split("\n") if not line.strip().startswith("//"))
+        # The record lives beside the tiles, so storage cleared under the page
+        # takes both.
+        assert "caches.open(TERRAIN).then(function (cache) {" in counting
+        # Written as the run goes, so a run the phone interrupts still leaves a
+        # figure behind — which is exactly the run that used to leave the panel
+        # saying nothing was kept.
+        assert "note(cache, state.held + state.added, state.bytes, state.top);" in html
+
+    def test_no_record_is_not_the_same_as_nothing_kept(self):
+        """A cache from before this map kept a figure has ground and no number,
+        and answering *0 tiles kept* is the one wrong answer that costs bytes —
+        it invites a reader with everything to download it again."""
+        html = self.rendered()
+        assert "var none = {tiles: 0, bytes: 0, top: 0, known: false};" in html
+        assert "kept tiles not counted" in html
+        # And the switch's guard asks for a tile rather than for a count, because
+        # what it wants to know is whether there is anything at all.
+        assert "function anyKept() {" in html
+        assert "if (there.known) { return there.tiles > 0; }" in html
+        assert "var first = walker().next();" in html
 
 
 class TestTheSheetCarriesAToken:
@@ -1128,8 +1209,8 @@ class TestNativeZoomFollowsWhatIsKept:
         """Asking the cache a second time for one number is a second walk over a
         hundred thousand keys, in the panel that already pays for one."""
         html = self.rendered()
-        assert "if (z > top) { top = z; }" in html
-        assert "return {tiles: tiles.length, bytes: bytes, top: top};" in html
+        assert "if (next.z > state.top) { state.top = next.z; }" in html
+        assert "top: Math.max((was && was.top) || 0, top)" in html
         assert "fitNativeZoom(both[0].top);" in html
 
     def test_a_sheet_switched_under_the_reader_gets_the_same_ceiling(self):

@@ -11894,12 +11894,26 @@ class _OfflinePanel(MacroElement):
                     }
                 }
 
-                function key(x, y) { return x + ',' + y; }
+                // **One number a tile, in a `Set`.** This was a string key
+                // `"x,y"` into an object whose value was an `[x, y]` array: three
+                // allocations a tile, about 150 bytes, and the whole map at z16
+                // is 131,033 tiles. `Set.size` also replaces
+                // `Object.keys(set).length`, which built a 131,033-element array
+                // to ask how many there were -- on every repaint of the zoom row.
+                //
+                // `SPAN` is 2^18, the finest level Kartverket answers, so one
+                // constant packs every level and the arithmetic is exact: the
+                // largest value here is 2^36, far inside what a double holds
+                // whole.
+                var SPAN = 262144;
+                function key(x, y) { return x * SPAN + y; }
+                function keyX(v) { return Math.floor(v / SPAN); }
+                function keyY(v) { return v - Math.floor(v / SPAN) * SPAN; }
 
                 function bandAt(line, z) {
-                    var out = {}, i;
+                    var out = new Set(), i;
                     for (i = 0; i + 1 < line.length; i += 1) {
-                        walk(line[i], line[i + 1], z, function (x, y) { out[key(x, y)] = [x, y]; });
+                        walk(line[i], line[i + 1], z, function (x, y) { out.add(key(x, y)); });
                     }
                     return out;
                 }
@@ -11910,9 +11924,9 @@ class _OfflinePanel(MacroElement):
                 // this scope.
                 function boxAt(box, z) {
                     var a = fracTile(box.n, box.w, z), b = fracTile(box.s, box.e, z);
-                    var out = {}, x, y;
+                    var out = new Set(), x, y;
                     for (x = Math.floor(a.x); x <= Math.floor(b.x); x += 1) {
-                        for (y = Math.floor(a.y); y <= Math.floor(b.y); y += 1) { out[key(x, y)] = [x, y]; }
+                        for (y = Math.floor(a.y); y <= Math.floor(b.y); y += 1) { out.add(key(x, y)); }
                     }
                     return out;
                 }
@@ -11931,7 +11945,7 @@ class _OfflinePanel(MacroElement):
                 // the sliver that misses at the edge, and an exact clip would be
                 // a lot of code for tiles that are kept either way.
                 function ringAt(ring, z) {
-                    var n = -90, s = 90, e = -180, w = 180, out = {}, i, x, y;
+                    var n = -90, s = 90, e = -180, w = 180, out = new Set(), i, x, y;
                     for (i = 0; i < ring.length; i += 1) {
                         n = Math.max(n, ring[i][0]); s = Math.min(s, ring[i][0]);
                         e = Math.max(e, ring[i][1]); w = Math.min(w, ring[i][1]);
@@ -11942,7 +11956,7 @@ class _OfflinePanel(MacroElement):
                             var probes = [[x + 0.5, y + 0.5], [x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]], p;
                             for (p = 0; p < probes.length; p += 1) {
                                 if (inside(latAt(probes[p][1], z), lonAt(probes[p][0], z), ring)) {
-                                    out[key(x, y)] = [x, y];
+                                    out.add(key(x, y));
                                     break;
                                 }
                             }
@@ -12130,22 +12144,22 @@ class _OfflinePanel(MacroElement):
                         if (which === 'all') { return boxAt(mapBox(), z); }
                         if (which === 'band') {
                             var from = source();
-                            return from ? bandAt(from.line, z) : {};
+                            return from ? bandAt(from.line, z) : new Set();
                         }
                         var ring = ringFor(which);
-                        return ring ? ringAt(ring, z) : {};
+                        return ring ? ringAt(ring, z) : new Set();
                     };
                 }
 
                 function padded(core, pad) {
                     if (!pad) { return core; }
-                    var out = {};
-                    Object.keys(core).forEach(function (each) {
-                        var at = core[each], dx, dy;
+                    var out = new Set();
+                    core.forEach(function (v) {
+                        var cx = keyX(v), cy = keyY(v), dx, dy;
                         for (dx = -pad; dx <= pad; dx += 1) {
                             for (dy = -pad; dy <= pad; dy += 1) {
-                                var x = at[0] + dx, y = at[1] + dy;
-                                if (x >= 0 && y >= 0) { out[key(x, y)] = [x, y]; }
+                                var x = cx + dx, y = cy + dy;
+                                if (x >= 0 && y >= 0) { out.add(key(x, y)); }
                             }
                         }
                     });
@@ -12167,10 +12181,9 @@ class _OfflinePanel(MacroElement):
                     var out = {}, below = coreAt(top), z;
                     out[top] = padded(below, pad);
                     for (z = top - 1; z >= BOTTOM; z -= 1) {
-                        var up = {};
-                        Object.keys(below).forEach(function (each) {
-                            var at = below[each], x = at[0] >> 1, y = at[1] >> 1;
-                            up[key(x, y)] = [x, y];
+                        var up = new Set();
+                        below.forEach(function (v) {
+                            up.add(key(keyX(v) >> 1, keyY(v) >> 1));
                         });
                         out[z] = padded(up, pad);
                         below = up;
@@ -12181,7 +12194,7 @@ class _OfflinePanel(MacroElement):
                 function weigh(levels) {
                     var tiles = 0, bytes = 0;
                     Object.keys(levels).forEach(function (z) {
-                        var n = Object.keys(levels[z]).length;
+                        var n = levels[z].size;
                         tiles += n;
                         bytes += n * (WEIGHT[z] || 45000);
                     });
@@ -12323,18 +12336,36 @@ class _OfflinePanel(MacroElement):
                         .replace('{r}', '');
                 }
 
-                function wanted() {
-                    var picked = recount(), layer = base(), urls = [], z;
-                    if (!layer) { return {urls: [], bytes: picked.bytes}; }
-                    for (z = BOTTOM; z <= picked.top; z += 1) {
-                        var set = picked.levels[z];
-                        if (!set) { continue; }
-                        Object.keys(set).forEach(function (each) {
-                            var at = set[each];
-                            urls.push(urlFor(layer, at[0], at[1], z));
-                        });
-                    }
-                    return {urls: urls, bytes: picked.bytes};
+                // **A walk, not a list.** This built the address of all
+                // 131,033 tiles into an array -- some 14 MB of strings -- and the
+                // only other caller used it to ask how long the array was. The
+                // download wants them one at a time and nothing wants them all at
+                // once, so now nothing holds more than one.
+                function walker() {
+                    var picked = recount(), layer = base();
+                    var z = BOTTOM, it = null;
+                    return {
+                        total: layer ? picked.tiles : 0,
+                        bytes: picked.bytes,
+                        next: function () {
+                            if (!layer) { return null; }
+                            while (z <= picked.top) {
+                                if (!it) {
+                                    var set = picked.levels[z];
+                                    if (!set) { z += 1; continue; }
+                                    it = set.values();
+                                }
+                                var step = it.next();
+                                if (step.done) { it = null; z += 1; continue; }
+                                // The level travels with the address because the
+                                // run weighs what it keeps, and parsing it back
+                                // out of the URL would be the third time this
+                                // page had written that particular guess down.
+                                return {url: urlFor(layer, keyX(step.value), keyY(step.value), z), z: z};
+                            }
+                            return null;
+                        }
+                    };
                 }
 
                 // ---- what it would keep, drawn on the map ----------------------
@@ -12397,7 +12428,7 @@ class _OfflinePanel(MacroElement):
                             // The screen is the finer of the two: this tile is
                             // inside a kept one or it is not.
                             var at = fracTile(latAt(coords.y + 0.5, coords.z), lonAt(coords.x + 0.5, coords.z), z);
-                            if (set[key(Math.floor(at.x), Math.floor(at.y))]) { ink.fillRect(0, 0, side, side); }
+                            if (set.has(key(Math.floor(at.x), Math.floor(at.y)))) { ink.fillRect(0, 0, side, side); }
                             return canvas;
                         }
                         // Coarser screen: this tile covers step by step kept
@@ -12409,7 +12440,7 @@ class _OfflinePanel(MacroElement):
                         var px = side / step, x0 = coords.x * step, y0 = coords.y * step, i, j;
                         for (i = 0; i < step; i += 1) {
                             for (j = 0; j < step; j += 1) {
-                                if (set[key(x0 + i, y0 + j)]) { ink.fillRect(i * px, j * px, px, px); }
+                                if (set.has(key(x0 + i, y0 + j))) { ink.fillRect(i * px, j * px, px, px); }
                             }
                         }
                         return canvas;
@@ -12515,33 +12546,57 @@ class _OfflinePanel(MacroElement):
 
                 // ---- what is kept ----------------------------------------------
 
+                // Where the figure lives, beside the tiles it describes, so
+                // storage cleared under the page takes both.
+                var HELD = 'https://trails.invalid/held';
+
+                // **Written down, not counted out.** This was `cache.keys()` over
+                // the whole terrain cache -- one `Request` object per tile -- on
+                // every `refresh`: on load, on the switch, and every time the
+                // panel is opened. Measured in Firefox: 1,000 entries 25 ms,
+                // 10,000 202 ms, 40,000 920 ms. The whole map at z16 is 131,033
+                // tiles, so about three seconds and 131,033 objects, each time,
+                // on a phone already holding a 15.7 MB document. That is what
+                // made an installed app hang and take the rest of the phone with
+                // it, and it is why this asks for one entry instead.
+                //
+                // **`known` is false rather than zero when there is no record.**
+                // The old code turned every failure into *nothing kept*, which is
+                // the one wrong answer that costs bytes: it invites a reader with
+                // a full cache to download it again.
                 function kept() {
-                    if (!window.caches) { return Promise.resolve({tiles: 0, bytes: 0, top: 0}); }
+                    var none = {tiles: 0, bytes: 0, top: 0, known: false};
+                    if (!window.caches) { return Promise.resolve(none); }
                     return caches.open(TERRAIN).then(function (cache) {
-                        return cache.keys();
-                    }).then(function (keys) {
-                        // The flag the worker keeps beside the tiles is not one.
-                        var tiles = keys.filter(function (each) {
-                            return each.url.indexOf('trails.invalid') === -1;
-                        }), bytes = 0, top = 0;
-                        // Weighed by the zoom each one came from, out of the
-                        // same table the chooser quotes, so what the panel says
-                        // it will cost and what it says it holds are one figure
-                        // and not two that drift.
-                        //
-                        // **And the finest level held, from the same pass.** It
-                        // is the ceiling the map is allowed to ask Kartverket
-                        // for while the switch is on -- see `fitNativeZoom` --
-                        // and asking the cache a second time for one number
-                        // would be a second walk over a hundred thousand keys.
-                        tiles.forEach(function (each) {
-                            var parts = each.url.split('/');
-                            var z = Number(parts[parts.length - 3]);
-                            bytes += WEIGHT[z] || 45000;
-                            if (z > top) { top = z; }
-                        });
-                        return {tiles: tiles.length, bytes: bytes, top: top};
-                    }).catch(function () { return {tiles: 0, bytes: 0, top: 0}; });
+                        return cache.match(HELD);
+                    }).then(function (said) {
+                        return said ? said.json() : null;
+                    }).then(function (held) {
+                        if (!held) { return none; }
+                        return {tiles: held.tiles || 0, bytes: held.bytes || 0,
+                                top: held.top || 0, known: true};
+                    }).catch(function () { return none; });
+                }
+
+                // **Maintained by the run, which is the only thing that puts a
+                // tile here.** Every tile it fetched, plus every tile of its own
+                // selection it found already there. Exact for one selection;
+                // a reader who kept two that do not overlap is undercounted until
+                // either is run again, which is the safe way to be wrong -- it
+                // never claims ground that is not there.
+                function note(cache, tiles, bytes, top) {
+                    return cache.match(HELD).then(function (said) {
+                        return said ? said.json() : null;
+                    }).catch(function () { return null; }).then(function (was) {
+                        var held = {
+                            tiles: Math.max((was && was.tiles) || 0, tiles),
+                            bytes: Math.max((was && was.bytes) || 0, bytes),
+                            top: Math.max((was && was.top) || 0, top)
+                        };
+                        return cache.put(HELD, new Response(JSON.stringify(held), {
+                            headers: {'content-type': 'application/json'}
+                        }));
+                    }).catch(function () { return null; });
                 }
 
                 function room() {
@@ -12725,6 +12780,12 @@ class _OfflinePanel(MacroElement):
                             // nothing can check.
                             done: working && working.counted ? working.done : null,
                             total: working ? working.total : null,
+                            // **What the last run found against what it
+                            // fetched.** The claim a resumed run has to keep is
+                            // that it downloads nothing it already holds, and
+                            // that is two numbers rather than a figure on a
+                            // panel which is detached until the dock shows it.
+                            run: lastRun,
                             chooser: chooser, scope: scope, zoom: zoom,
                             corners: drawn.length, counted: counted
                         };
@@ -12818,49 +12879,40 @@ class _OfflinePanel(MacroElement):
                         lastRun = {total: 0, kept: 0, failed: 0, offline: true};
                         return refresh();
                     }
-                    var list = wanted().urls;
+                    var walk = walker();
                     lastRun = null;
-                    // `counted` is false until `keys()` has answered. Until then
-                    // `done` is 0 and it is not a fact -- the run has not looked
-                    // yet -- so the panel says what it is doing instead of
-                    // quoting a figure it is about to correct.
-                    var state = {total: list.length, done: 0, counted: false, failed: 0, stop: false, done_: null};
+                    // **Every tile is either checked or fetched, and the counter
+                    // counts both.** It used to pre-scan with `cache.keys()` so
+                    // that a resumed run could open at the figure it had reached
+                    // -- one `Request` object per tile, 131,033 of them, at the
+                    // one moment the page is least able to afford it. What is
+                    // asked instead is one `match` per tile, inside the loop that
+                    // was already checking, so nothing here grows with the size
+                    // of the download. The cost is that a resumed run climbs fast
+                    // through what it already has rather than starting at the
+                    // number: it is the same figure arriving a few seconds later,
+                    // and it is not a re-download.
+                    var state = {total: walk.total, done: 0, counted: true, failed: 0,
+                                 held: 0, added: 0, bytes: 0, top: 0,
+                                 stop: false, done_: null};
                     working = state;
-                    var at = 0;
                     state.done_ = caches.open(TERRAIN).then(function (cache) {
-                        // **What is already here is counted before anything is
-                        // fetched, and the count starts there.** The loop has
-                        // always skipped a tile it already had -- that is what
-                        // makes a stopped run free to resume -- but it counted
-                        // the skips one at a time from zero, so a run picked up
-                        // after a lock or a tunnel opened at `Keeping 0 of
-                        // 130,000` and raced. What that reads as is *starting
-                        // again*, which is the one thing it does not do.
-                        //
-                        // Asked with `keys()` rather than a `match` per tile: it
-                        // is one pass instead of 130,000, and the panel already
-                        // pays for it on every refresh to say how much is kept.
-                        return cache.keys().then(function (keys) {
-                            var have = {}, i;
-                            for (i = 0; i < keys.length; i += 1) { have[keys[i].url] = 1; }
-                            var missing = list.filter(function (url) { return !have[url]; });
-                            state.done = list.length - missing.length;
-                            state.counted = true;
-                            // So the resumed figure is on the screen before the
-                            // first fetch answers, rather than 25 tiles later.
-                            draw();
-                            return missing;
-                        }).then(function (missing) {
-                            // How many have refused in a row. Shared by all
-                            // six runners on purpose: it is the connection being
-                            // measured, not any one of them.
-                            var missed = 0;
-                            function one() {
-                                if (state.stop || at >= missing.length) { return Promise.resolve(); }
-                                var url = missing[at];
-                                at += 1;
-                                return fetch(url, {cache: 'reload', mode: 'cors'}).then(function (answer) {
-                                    if (answer && answer.ok) { missed = 0; return cache.put(url, answer); }
+                        // How many have refused in a row. Shared by all six
+                        // runners on purpose: it is the connection being
+                        // measured, not any one of them.
+                        var missed = 0;
+                        function one() {
+                            if (state.stop) { return Promise.resolve(); }
+                            var next = walk.next();
+                            if (!next) { return Promise.resolve(); }
+                            return cache.match(next.url).then(function (there) {
+                                if (there) { missed = 0; state.held += 1; return null; }
+                                return fetch(next.url, {cache: 'reload', mode: 'cors'}).then(function (answer) {
+                                    if (answer && answer.ok) {
+                                        missed = 0;
+                                        state.added += 1;
+                                        return cache.put(next.url, answer);
+                                    }
                                     state.failed += 1;
                                     missed += 1;
                                     return null;
@@ -12868,28 +12920,38 @@ class _OfflinePanel(MacroElement):
                                     state.failed += 1;
                                     missed += 1;
                                     return null;
-                                }).then(function () {
-                                    state.done += 1;
-                                    // **Give up on the connection, not on the
-                                    // tile.** One tile that will not come is a
-                                    // tile, and the other hundred thousand are
-                                    // still worth having; twelve in a row is not
-                                    // a tile, it is the signal -- and grinding
-                                    // on is a hundred thousand more attempts to
-                                    // wake a radio that has nothing to answer.
-                                    // Twelve rather than three because six run
-                                    // at once, so a healthy run's last rounds can
-                                    // carry a scatter of refusals. `missed`
-                                    // resets on every success, so bad tiles
-                                    // arriving in ones and twos never trip it.
-                                    if (missed >= 12) { state.stop = true; state.stalled = true; }
-                                    if (state.done % 25 === 0) { draw(); }
-                                    return one();
                                 });
-                            }
-                            var runners = [], i;
-                            for (i = 0; i < 6; i += 1) { runners.push(one()); }
-                            return Promise.all(runners);
+                            }).then(function () {
+                                state.done += 1;
+                                if (next.z > state.top) { state.top = next.z; }
+                                state.bytes += WEIGHT[next.z] || 45000;
+                                // **Give up on the connection, not on the tile.**
+                                // One tile that will not come is a tile, and the
+                                // other hundred thousand are still worth having;
+                                // twelve in a row is not a tile, it is the signal
+                                // -- and grinding on is a hundred thousand more
+                                // attempts to wake a radio that has nothing to
+                                // answer. Twelve rather than three because six run
+                                // at once, so a healthy run's last rounds can
+                                // carry a scatter of refusals. `missed` resets on
+                                // every success, so bad tiles arriving in ones
+                                // and twos never trip it.
+                                if (missed >= 12) { state.stop = true; state.stalled = true; }
+                                if (state.done % 25 === 0) { draw(); }
+                                // **Written down as it goes**, so a run the phone
+                                // interrupts still leaves a figure behind -- which
+                                // is exactly the run that used to leave the panel
+                                // saying nothing was kept.
+                                if (state.done % 2000 === 0) {
+                                    note(cache, state.held + state.added, state.bytes, state.top);
+                                }
+                                return one();
+                            });
+                        }
+                        var runners = [], i;
+                        for (i = 0; i < 6; i += 1) { runners.push(one()); }
+                        return Promise.all(runners).then(function () {
+                            return note(cache, state.held + state.added, state.bytes, state.top);
                         });
                     }).then(function () {
                         working = null;
@@ -12904,24 +12966,26 @@ class _OfflinePanel(MacroElement):
                         if (state.stop && !state.stalled) { return refresh(); }
                         // **And a run that kept nothing switches nothing on.**
                         // Every fetch failing is almost always the network, and
-                        // turning the switch on then hands over exactly the
-                        // blank map this chooser exists to prevent -- while
-                        // saying it is what the reader asked for. Asked of the
-                        // cache rather than of the counter, because what matters
-                        // is what is there and not what the loop believes.
-                        return kept().then(function (there) {
-                            lastRun = {
-                                total: state.total, kept: there.tiles,
-                                failed: state.failed, stalled: !!state.stalled
-                            };
-                            if (!there.tiles) { return refresh(); }
-                            chooser = false;
-                            remember(true);
-                            return tellWorker(true).then(function () {
-                                // Ground that was blank a moment ago is kept now.
-                                restamp();
-                                return refresh();
-                            });
+                        // turning the switch on then hands over exactly the blank
+                        // map this chooser exists to prevent -- while saying it is
+                        // what the reader asked for.
+                        //
+                        // Counted as tiles found plus tiles fetched, which is what
+                        // this selection now has on the device: the two the loop
+                        // could only get by asking the cache, one tile at a time,
+                        // for every one of them.
+                        lastRun = {
+                            total: state.total, kept: state.held + state.added,
+                            held: state.held, added: state.added,
+                            failed: state.failed, stalled: !!state.stalled
+                        };
+                        if (!lastRun.kept) { return refresh(); }
+                        chooser = false;
+                        remember(true);
+                        return tellWorker(true).then(function () {
+                            // Ground that was blank a moment ago is kept now.
+                            restamp();
+                            return refresh();
                         });
                     });
                     keepAwake();
@@ -13273,7 +13337,7 @@ class _OfflinePanel(MacroElement):
                     var seen = mapBox();
                     var side = 156543.03392 * Math.cos((seen.n + seen.s) / 2 * Math.PI / 180) /
                         Math.pow(2, z) * 256 / 1000;
-                    var n = Object.keys(set).length;
+                    var n = set.size;
                     said.layer.textContent = 'Coloured in: level z' + z + ' \\u2014 ' + count(n) +
                         ' tiles of ' + side.toFixed(2) + ' km, about ' + count(Math.round(n * side * side)) + ' km2. ' +
                         (z < chosen.top ? 'Zooming in shows the finer levels, which lie closer.'
@@ -13388,7 +13452,13 @@ class _OfflinePanel(MacroElement):
                         window.setTimeout(function () {
                             if (counted !== null || !chooser) { return; }
                             var picking = recount();
-                            counted = {tiles: picking.tiles, bytes: picking.bytes, scope: scope, zoom: zoom};
+                            // `at` is the selection's own signature -- scope,
+                            // zoom and every corner -- so it says *which* count
+                            // this is and not merely that there is one. What
+                            // reads it is a check that has to tell a figure from
+                            // before a drag from the figure after it.
+                            counted = {tiles: picking.tiles, bytes: picking.bytes,
+                                       scope: scope, zoom: zoom, at: picking.at};
                             budget();
                             var level;
                             for (level = FLOOR; level <= here.ceiling; level += 1) { cost(scope, level); }
@@ -13505,7 +13575,16 @@ class _OfflinePanel(MacroElement):
                         said.figures.textContent = 'Nothing arrived \\u2014 all ' + count(lastRun.total) +
                             ' were refused, so offline mode is still off. Check the connection and try again.';
                     } else {
-                        var lines = [count((have.kept || {}).tiles || 0) + ' tiles kept'];
+                        // **Not counted rather than none, when there is no
+                        // record.** A cache from before this map kept a figure
+                        // has ground and no number, and answering *0 tiles kept*
+                        // is the one wrong answer that costs bytes -- it invites
+                        // a reader with everything to download it again. The
+                        // space used is exact either way; it comes from the
+                        // browser and not from a count.
+                        var lines = [have.kept && have.kept.known
+                            ? count(have.kept.tiles) + ' tiles kept'
+                            : 'kept tiles not counted \\u2014 the next download says how many'];
                         if (lastRun && lastRun.failed) { lines.push(count(lastRun.failed) + ' refused'); }
                         if (have.storage && have.storage.usage !== null) {
                             lines.push(megabytes(have.storage.usage) + ' of ' + megabytes(have.storage.quota) + ' used');
@@ -13513,8 +13592,12 @@ class _OfflinePanel(MacroElement):
                         if (have.storage && have.storage.persisted) { lines.push('storage is persistent'); }
                         said.figures.textContent = lines.join(' \\u00b7 ');
                     }
-                    said.forget.disabled = !((have.kept || {}).tiles);
-                    said.forget.style.opacity = (have.kept || {}).tiles ? '1' : '0.5';
+                    // Offered whenever there may be something to delete, which
+                    // includes not knowing: a reader who cannot count what they
+                    // hold is the one most likely to want it gone.
+                    var maybe = have.kept && (have.kept.tiles || !have.kept.known);
+                    said.forget.disabled = !maybe;
+                    said.forget.style.opacity = maybe ? '1' : '0.5';
                     // **Said, because otherwise it is found the hard way.** Only
                     // the sheet that is showing is kept -- topo and grayscale
                     // share a host and keeping both would double every figure
@@ -13528,7 +13611,7 @@ class _OfflinePanel(MacroElement):
                     said.sheet.textContent = working
                         ? 'Keep this page in front \u2014 the run stops when the phone locks or you switch app. ' +
                           'Stopping costs nothing: the count picks up where it got to.'
-                        : ((have.kept || {}).tiles
+                        : (maybe
                             ? 'Kept for the ' + baseName() + ' sheet. Switching sheets with no signal shows nothing.'
                             : '');
                     // **Not while a run is going.** Progress arrives every 25
@@ -13549,9 +13632,25 @@ class _OfflinePanel(MacroElement):
 
                 // **On, with nothing kept, opens the chooser instead.** A switch
                 // that answers with a blank map is a switch that lied.
-                function toggle(want) {
+                // **A tile, not a count, when there is no record.** The guard
+                // exists to stop the switch handing over a blank map, and a reader
+                // whose cache predates the record has ground but no figure. One
+                // `match` answers whether this selection has anything at all,
+                // which is what the guard is actually asking.
+                function anyKept() {
                     return kept().then(function (there) {
-                        if (want && !there.tiles) {
+                        if (there.known) { return there.tiles > 0; }
+                        var first = walker().next();
+                        if (!first) { return false; }
+                        return caches.open(TERRAIN).then(function (cache) {
+                            return cache.match(first.url);
+                        }).then(function (one) { return !!one; }).catch(function () { return false; });
+                    });
+                }
+
+                function toggle(want) {
+                    return anyKept().then(function (any) {
+                        if (want && !any) {
                             chooser = true;
                             return refresh();
                         }
@@ -13613,7 +13712,13 @@ class _OfflinePanel(MacroElement):
                     },
                     // What the chooser would fetch, computed rather than
                     // estimated, so a check reads the figure the panel shows.
-                    needed: function () { var found = wanted(); return {tiles: found.urls.length, bytes: found.bytes}; },
+                    // Counted, not listed: `weigh` already has the figure and
+                    // building 131,033 strings to call `.length` on them was the
+                    // most expensive way to ask.
+                    needed: function () {
+                        var picked = recount();
+                        return {tiles: base() ? picked.tiles : 0, bytes: picked.bytes};
+                    },
                     toggle: toggle,
                     keep: keep,
                     stop: function () { if (working) { working.stop = true; } },
