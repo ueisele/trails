@@ -239,9 +239,23 @@ var TILE_HOST = "cache.kartverket.no";
 // worker is not a process that stays alive: the browser starts it for a fetch
 // and stops it again, and every variable it held goes with it. A flag that lived
 // only in this scope would be true on the first tile of a walk and false on the
-// second. So it is one entry in the terrain cache, read once and memoised, and
-// the memo is dropped when the page says the switch has moved.
+// second. So it is one entry in a cache, read once and memoised, and the memo is
+// dropped when the page says the switch has moved.
+//
+// **In a cache of its own, holding two small entries and nothing else.** It used
+// to live beside the tiles, which reads well and cost twenty seconds. Measured on
+// an installed app with the ground kept: the worker held the navigation for
+// **20.8 s** before the response began, and every tile after it was quick -- 22
+// of them, 2.1 s in all, worst 162 ms. Reading the flag is the first thing
+// `pageFor` does, so it paid the cold open of a Cache Storage holding tens of
+// thousands of entries and several gigabytes, once, in front of the reader; by
+// the time tiles were asked for it was warm.
+//
+// So nothing on the way to answering a navigation may open `TERRAIN` any more.
+// The panel's own record of what is kept lives here for the same reason.
+var FLAGS = "trails-state";
 var STATE = "https://trails.invalid/offline";
+var TIMING = "https://trails.invalid/timing";
 var switched = null;
 
 // A tile that is not kept, while the switch is on: a 1x1 transparent PNG,
@@ -355,7 +369,7 @@ function tell(what, more) {
 // read its own flag should go to the network rather than draw a blank park.
 function offlineNow() {
     if (switched === null) {
-        switched = caches.open(TERRAIN).then(function (cache) {
+        switched = caches.open(FLAGS).then(function (cache) {
             return cache.match(STATE);
         }).then(function (kept) {
             return kept ? kept.text().then(function (said) { return said === "on"; }) : false;
@@ -366,7 +380,7 @@ function offlineNow() {
 
 function setOffline(on) {
     switched = Promise.resolve(!!on);
-    return caches.open(TERRAIN).then(function (cache) {
+    return caches.open(FLAGS).then(function (cache) {
         return cache.put(STATE, new Response(on ? "on" : "off", {headers: {"content-type": "text/plain"}}));
     });
 }
@@ -476,10 +490,24 @@ function moved(kept, fresh) {
 // the next visit and the page is told there is one. With the switch on there is
 // no network behind it at all: a reader who asked for offline did not ask for a
 // request that will hang until it times out.
+// **Timed from the inside, because the outside could not see it.** The page's
+// own account said `worker 20.8 s` and could say no more: `workerStart` to
+// `responseStart` is one number covering everything this function does. These
+// three say which part, and they are written to the small cache rather than
+// posted, because a navigation is answered before any page is listening.
 function pageFor(request) {
+    var began = Date.now(), opened = 0, matched = 0;
     return caches.open(PAGE).then(function (cache) {
+        opened = Date.now() - began;
         return cache.match(request).then(function (kept) {
+            matched = Date.now() - began - opened;
             return offlineNow().then(function (off) {
+                var flag = Date.now() - began - opened - matched;
+                caches.open(FLAGS).then(function (small) {
+                    return small.put(TIMING, new Response(JSON.stringify({
+                        open: opened, match: matched, flag: flag, total: Date.now() - began
+                    }), {headers: {"content-type": "application/json"}}));
+                }).catch(function () { return null; });
                 if (off && kept) { return kept; }
                 var fresh = fetch(request).then(function (answer) {
                     if (answer && answer.ok) {
@@ -12555,9 +12583,17 @@ class _OfflinePanel(MacroElement):
 
                 // ---- what is kept ----------------------------------------------
 
-                // Where the figure lives, beside the tiles it describes, so
-                // storage cleared under the page takes both.
+                // **Where the figure lives, and why not beside the tiles.**
+                // It was in the terrain cache, which reads well: storage cleared
+                // under the page would take both. It also meant that opening this
+                // panel opened a Cache Storage holding tens of thousands of
+                // entries and several gigabytes -- measured at twenty seconds on
+                // an installed app, in front of the reader. It sits in the small
+                // cache beside the offline switch instead, and `forget` clears
+                // that one too, which is the property the old place was for.
+                var FLAGS = 'trails-state';
                 var HELD = 'https://trails.invalid/held';
+                var TIMING = 'https://trails.invalid/timing';
 
                 // **Written down, not counted out.** This was `cache.keys()` over
                 // the whole terrain cache -- one `Request` object per tile -- on
@@ -12576,7 +12612,7 @@ class _OfflinePanel(MacroElement):
                 function kept() {
                     var none = {tiles: 0, bytes: 0, top: 0, known: false};
                     if (!window.caches) { return Promise.resolve(none); }
-                    return caches.open(TERRAIN).then(function (cache) {
+                    return caches.open(FLAGS).then(function (cache) {
                         return cache.match(HELD);
                     }).then(function (said) {
                         return said ? said.json() : null;
@@ -12593,18 +12629,20 @@ class _OfflinePanel(MacroElement):
                 // a reader who kept two that do not overlap is undercounted until
                 // either is run again, which is the safe way to be wrong -- it
                 // never claims ground that is not there.
-                function note(cache, tiles, bytes, top) {
-                    return cache.match(HELD).then(function (said) {
-                        return said ? said.json() : null;
-                    }).catch(function () { return null; }).then(function (was) {
-                        var held = {
-                            tiles: Math.max((was && was.tiles) || 0, tiles),
-                            bytes: Math.max((was && was.bytes) || 0, bytes),
-                            top: Math.max((was && was.top) || 0, top)
-                        };
-                        return cache.put(HELD, new Response(JSON.stringify(held), {
-                            headers: {'content-type': 'application/json'}
-                        }));
+                function note(tiles, bytes, top) {
+                    return caches.open(FLAGS).then(function (small) {
+                        return small.match(HELD).then(function (said) {
+                            return said ? said.json() : null;
+                        }).catch(function () { return null; }).then(function (was) {
+                            var held = {
+                                tiles: Math.max((was && was.tiles) || 0, tiles),
+                                bytes: Math.max((was && was.bytes) || 0, bytes),
+                                top: Math.max((was && was.top) || 0, top)
+                            };
+                            return small.put(HELD, new Response(JSON.stringify(held), {
+                                headers: {'content-type': 'application/json'}
+                            }));
+                        });
                     }).catch(function () { return null; });
                 }
 
@@ -12952,7 +12990,7 @@ class _OfflinePanel(MacroElement):
                                 // is exactly the run that used to leave the panel
                                 // saying nothing was kept.
                                 if (state.done % 2000 === 0) {
-                                    note(cache, state.held + state.added, state.bytes, state.top);
+                                    note(state.held + state.added, state.bytes, state.top);
                                 }
                                 return one();
                             });
@@ -12960,7 +12998,7 @@ class _OfflinePanel(MacroElement):
                         var runners = [], i;
                         for (i = 0; i < 6; i += 1) { runners.push(one()); }
                         return Promise.all(runners).then(function () {
-                            return note(cache, state.held + state.added, state.bytes, state.top);
+                            return note(state.held + state.added, state.bytes, state.top);
                         });
                     }).then(function () {
                         working = null;
@@ -13007,7 +13045,9 @@ class _OfflinePanel(MacroElement):
 
                 function forget() {
                     if (!window.caches) { return Promise.resolve(); }
-                    return Promise.all([caches.delete(TERRAIN), caches.delete(TILES)]).then(function () {
+                    return Promise.all([
+                        caches.delete(TERRAIN), caches.delete(TILES), caches.delete(FLAGS)
+                    ]).then(function () {
                         remember(false);
                         return tellWorker(false);
                     }).then(refresh);
@@ -14451,6 +14491,21 @@ class _Chrome(MacroElement):
                     ', content ' + seconds(cost.contentLoaded) +
                     ', load ' + seconds(cost.loadStart) + '.';
                 tileLine.textContent = said;
+                // **What the worker spent, from inside the worker.** `worker` on
+                // the line above is one number covering everything `pageFor`
+                // does; these three say which part of it. Written to a cache
+                // rather than posted, because a navigation is answered before
+                // any page is listening -- so it is read here, after the fact.
+                if (!window.caches) { return; }
+                caches.open('trails-state').then(function (small) {
+                    return small.match('https://trails.invalid/timing');
+                }).then(function (found) {
+                    return found ? found.json() : null;
+                }).then(function (spent) {
+                    if (!spent) { return; }
+                    tileLine.textContent = said + ' Worker: cache open ' + seconds(spent.open) +
+                        ', page found ' + seconds(spent.match) + ', switch read ' + seconds(spent.flag) + '.';
+                }).catch(function () { return; });
             }
 
             window.trailsOpened = window.trailsOpened || {};

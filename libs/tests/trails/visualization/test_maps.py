@@ -1106,13 +1106,19 @@ class TestNothingGrowsWithTheDownload:
         counting = html.split("var HELD = 'https://trails.invalid/held';")[1].split("function note(")[0]
         assert "cache.match(HELD)" in counting
         assert "cache.keys()" not in "\n".join(line for line in counting.split("\n") if not line.strip().startswith("//"))
-        # The record lives beside the tiles, so storage cleared under the page
-        # takes both.
-        assert "caches.open(TERRAIN).then(function (cache) {" in counting
+        # **And not beside the tiles.** It was, which reads well — storage
+        # cleared under the page would take both — and it meant that opening this
+        # panel opened a Cache Storage holding tens of thousands of entries and
+        # several gigabytes. Measured on an installed app at twenty seconds.
+        assert "caches.open(FLAGS).then(function (cache) {" in counting
+        assert "var FLAGS = 'trails-state';" in html
+        # `forget` clears the small cache too, which is the property the old
+        # place was chosen for.
+        assert "caches.delete(TERRAIN), caches.delete(TILES), caches.delete(FLAGS)" in html
         # Written as the run goes, so a run the phone interrupts still leaves a
         # figure behind — which is exactly the run that used to leave the panel
         # saying nothing was kept.
-        assert "note(cache, state.held + state.added, state.bytes, state.top);" in html
+        assert "note(state.held + state.added, state.bytes, state.top);" in html
 
     def test_no_record_is_not_the_same_as_nothing_kept(self):
         """A cache from before this map kept a figure has ground and no number,
