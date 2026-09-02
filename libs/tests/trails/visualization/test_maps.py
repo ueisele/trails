@@ -298,9 +298,34 @@ class TestOfflineWorker:
         terrain is not stamped with anything and must survive every deploy. A
         reader who kept the park before a typo was fixed would otherwise be asked
         to download it again after it."""
-        sweep = maps.SERVICE_WORKER.split('addEventListener("activate"')[1].split("\nfunction ")[0]
+        sweep = maps.SERVICE_WORKER.split("function sweep()")[1].split("\nfunction ")[0]
         assert 'name.indexOf("trails-page-") === 0' in sweep
         assert "TERRAIN" not in sweep and "TILES" not in sweep
+
+    def test_the_new_cache_is_filled_before_the_old_one_is_swept(self):
+        """It ran the other way round: delete every superseded page cache, then
+        fetch the open page into this worker's own. Both halves may fail, and on
+        a dying signal it is the second — so it deleted the copy the reader was
+        standing on and put nothing back."""
+        activate = maps.SERVICE_WORKER.split('addEventListener("activate"')[1].split("\nfunction ")[0]
+        assert "self.clients.claim().then(keepWhatIsOpen).then(sweep)" in activate
+        # And the sweep refuses to run against a cache with nothing in it, so a
+        # half-done update leaves two page caches rather than none.
+        sweep = maps.SERVICE_WORKER.split("function sweep()")[1].split("\nfunction ")[0]
+        assert "if (!keys.length) { return null; }" in sweep
+        assert sweep.index("if (!keys.length)") < sweep.index("caches.delete(name)")
+
+    def test_a_worker_that_cannot_fetch_the_page_carries_the_old_copy_over(self):
+        """A new worker starts with an empty cache of its own and `pageFor` looks
+        in that one only. So the fetch failing meant a reader with a map on the
+        device and a worker that could not see it — blank, with the bytes right
+        there."""
+        assert "cache.add(client.url).catch(function () { return carryOver(cache, client.url); });" in maps.SERVICE_WORKER
+        carry = maps.SERVICE_WORKER.split("function carryOver(cache, url)")[1].split("\nfunction ")[0]
+        # Nothing is fetched: these are bytes already on the phone, moved.
+        assert "fetch(" not in carry
+        assert 'name.indexOf("trails-page-") === 0 && name !== PAGE' in carry
+        assert "cache.put(url, kept.clone())" in carry
 
     def test_the_switch_survives_the_worker_being_killed(self):
         """A service worker is not a process that stays alive: the browser starts

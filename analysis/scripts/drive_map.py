@@ -3490,6 +3490,47 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             )
         )
 
+        # **And a body that breaks mid-stream leaves the old map alone.** This
+        # is the property the Reload button rests on: `fetch` resolves when the
+        # headers arrive, so `answer.ok` is true while five megabytes are still
+        # coming, and the signal going is therefore a failure *inside*
+        # `cache.put`. Driven against a stream that errors after a few bytes,
+        # which is what the Cache API sees either way.
+        #
+        # Firefox on Linux, like everything else here: it measures the API's
+        # rule, not WebKit's implementation of it.
+        atomic = first.evaluate(
+            """async () => {
+                const name = 'trails-atomic-probe';
+                const cache = await caches.open(name);
+                const url = new URL('probe', location.href).href;
+                await cache.put(url, new Response('the map you already had'));
+                let threw = false;
+                try {
+                    const broken = new ReadableStream({
+                        start(control) {
+                            control.enqueue(new TextEncoder().encode('half of a newer map'));
+                            control.error(new Error('the signal went'));
+                        }
+                    });
+                    await cache.put(url, new Response(broken));
+                } catch (stopped) { threw = true; }
+                const held = await cache.match(url);
+                const still = held ? await held.text() : null;
+                await caches.delete(name);
+                return {threw: threw, still: still};
+            }"""
+        )
+        newer.append(Reading("a body that breaks mid-stream is not written at all", atomic["threw"], True))
+        newer.append(
+            Reading(
+                "and what stays is the map that was already there",
+                atomic["still"],
+                "the map you already had",
+                note="no half-written entry, so Reload cannot leave a broken copy",
+            )
+        )
+
         # ---- and in the foreground it asks for nothing ----------------------
         # **Stated absolutely rather than as a budget**, which is what makes it
         # checkable: once the page has loaded, sitting in front of it and coming

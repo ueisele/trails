@@ -257,20 +257,39 @@ self.addEventListener("install", function () {
     self.skipWaiting();
 });
 
+// **Filled first, and swept only once it can stand alone.** This ran the other
+// way round: delete every superseded page cache, then fetch the open page into
+// this worker's own. Both halves of that are allowed to fail, and on a dying
+// signal the failing half is the second -- so it deleted the copy the reader was
+// standing on and put nothing back, leaving a worker holding nothing over a map
+// that had been there a minute earlier.
+//
+// A half-done update now leaves two page caches instead of none. That is
+// bounded -- each is one superseded copy of one document, and the next good
+// activation takes both -- and it is much the cheaper mistake.
 self.addEventListener("activate", function (event) {
     event.waitUntil(
-        caches.keys().then(function (names) {
+        self.clients.claim().then(keepWhatIsOpen).then(sweep)
+    );
+});
+
+// Only the superseded copies of the page, and not before this worker's own cache
+// holds something. The two tile caches are not stamped with a version and must
+// survive every deploy: a reader who kept the park before a typo was fixed would
+// otherwise download it again after it.
+function sweep() {
+    return caches.open(PAGE).then(function (cache) {
+        return cache.keys();
+    }).then(function (keys) {
+        if (!keys.length) { return null; }
+        return caches.keys().then(function (names) {
             return Promise.all(names.map(function (name) {
-                // Only the superseded copies of the page. The two tile caches
-                // are not stamped with a version and must survive every deploy:
-                // a reader who kept the park before a typo was fixed would
-                // otherwise download it again after it.
                 var stale = name.indexOf("trails-page-") === 0 && name !== PAGE;
                 return stale ? caches.delete(name) : null;
             }));
-        }).then(function () { return self.clients.claim(); }).then(keepWhatIsOpen)
-    );
-});
+        });
+    }).catch(function () { return null; });
+}
 
 // **Keep the page that is open, by the address it was opened at.**
 //
@@ -285,10 +304,38 @@ function keepWhatIsOpen() {
         var cache = both[0];
         return Promise.all(both[1].map(function (client) {
             return cache.match(client.url).then(function (kept) {
-                return kept ? null : cache.add(client.url).catch(function () { return null; });
+                if (kept) { return null; }
+                return cache.add(client.url).catch(function () { return carryOver(cache, client.url); });
             });
         }));
     });
+}
+
+// **The copy from the superseded cache, when the network will not hand one
+// over.** A new worker starts with an empty cache of its own and `pageFor` looks
+// in that one only, so the fetch above failing used to mean a reader with a map
+// on the device and a worker that could not see it.
+//
+// Nothing is fetched here: these are bytes already on the phone, moved. It may
+// be one build behind -- the reader who was offline through the last deploy has
+// the old document and nothing better exists -- and a build behind is what
+// `pageFor` corrects on the next visit with a signal. Blank is not.
+function carryOver(cache, url) {
+    return caches.keys().then(function (names) {
+        return names.filter(function (name) {
+            return name.indexOf("trails-page-") === 0 && name !== PAGE;
+        }).reduce(function (chain, name) {
+            return chain.then(function (done) {
+                if (done) { return true; }
+                return caches.open(name).then(function (was) {
+                    return was.match(url, {ignoreSearch: true});
+                }).then(function (kept) {
+                    if (!kept) { return false; }
+                    return cache.put(url, kept.clone()).then(function () { return true; });
+                });
+            });
+        }, Promise.resolve(false));
+    }).catch(function () { return false; });
 }
 
 function tell(what, more) {
