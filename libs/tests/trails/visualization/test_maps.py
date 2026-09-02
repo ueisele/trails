@@ -1095,6 +1095,44 @@ class TestTheFurnitureStaysInsideTheScreen:
         html = self.rendered()
         assert "top:calc(10px + env(safe-area-inset-top));" in html
         assert "'position:absolute;top:10px;left:50%" not in html
+        # **And hung inside the box whose inset is visibly working.** The `calc`
+        # went out once and was reported still under the camera; the overlay that
+        # holds the menu and the panels was demonstrably right in the same
+        # screenshot. The `calc` stays for a map built without `add_chrome`,
+        # where there is no such box.
+        assert "var into = map.getContainer().querySelector('.trails-chrome');" in html
+        assert "(into || map.getContainer()).appendChild(line);" in html
+        # Inside a box that is `pointer-events: none`, a button has to ask for
+        # them back or it cannot be pressed — which is this line's whole point.
+        assert "line.style.pointerEvents = 'auto';" in html
+
+    def test_the_page_is_as_tall_as_the_screen(self):
+        """folium writes `html, body { height: 100% }`, and with
+        `viewport-fit=cover` on iOS that resolves to the viewport inside the
+        insets — so the map stopped above the home indicator and the browser's
+        own background showed there. Reported as a black band under the map,
+        with the scale sitting on top of it."""
+        html = self.rendered()
+        assert "html, body { height: 100dvh; }" in html
+        # folium's own rule stays as the fallback: a browser that does not know
+        # the unit drops this declaration and keeps the behaviour that was right
+        # before any of this.
+        assert "height: 100%;" in html
+
+    def test_a_full_screen_panel_looks_like_one(self):
+        """The chrome is held inside the safe area, so a full-screen sheet
+        leaves a band of map above it and another below — which reads as a
+        mistake rather than as a map. The strips take the panels' own colour
+        while a panel is covering, and only then."""
+        html = self.rendered()
+        assert "veil.className = 'trails-veil';" in html
+        assert "background:var(--trails-solid)" in html
+        assert "veil.style.display = covering ? 'block' : 'none';" in html
+        # Behind the chrome and outside its inset, or it would be the band it is
+        # there to fill.
+        veil = html.split("veil.style.cssText = ")[1].split(";\n")[0]
+        assert "left:0;top:0;right:0;bottom:0" in veil
+        assert "z-index:1099" in veil
 
     def test_the_inset_is_applied_once(self):
         """The rail, the burger, the dock, the menu, the sheet and the plan bar

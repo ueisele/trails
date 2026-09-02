@@ -1428,7 +1428,17 @@ class _ServiceWorker(MacroElement):
                     line.appendChild(said);
                     line.appendChild(again);
                     line.appendChild(shut);
-                    map.getContainer().appendChild(line);
+                    // **Into the chrome where there is one.** The `calc` above
+                    // is the same arithmetic the overlay does, and it went out
+                    // once and was reported still under the camera -- so rather
+                    // than argue about why, this hangs the line inside the box
+                    // whose inset is *visibly* working: the one the menu and the
+                    // panels sit in. The `calc` stays for a map built without
+                    // `add_chrome`, where there is no such box and a worker still
+                    // has to be able to say this.
+                    var into = map.getContainer().querySelector('.trails-chrome');
+                    if (into) { line.style.top = '10px'; line.style.pointerEvents = 'auto'; }
+                    (into || map.getContainer()).appendChild(line);
                 }
 
                 // **Nothing asks on the way back in, and that is deliberate.**
@@ -1627,6 +1637,17 @@ class _Theme(MacroElement):
             line-height: 14px !important;
         }
         .leaflet-control-attribution a { color: var(--trails-accent) !important; }
+        /* **The page is as tall as the screen, not as tall as the safe part of
+           it.** folium writes `html, body { height: 100% }`, and with
+           `viewport-fit=cover` on iOS that resolves to the viewport *inside* the
+           insets -- so the map stopped above the home indicator and what showed
+           there was the browser's own background. Reported as a black band under
+           the map, with the scale sitting on top of it.
+
+           `dvh` is the viewport including the insets. A browser that does not
+           know the unit drops this declaration and keeps folium's, which is the
+           behaviour that was correct before any of this. */
+        html, body { height: 100dvh; }
         /* **The strip the phone keeps for itself.** With `viewport-fit=cover` the
            map is drawn to the physical edges, which is what the head asked for --
            and the home indicator then sits on whatever is in the bottom corners.
@@ -14680,6 +14701,18 @@ class _Chrome(MacroElement):
                 'left:env(safe-area-inset-left);top:env(safe-area-inset-top);' +
                 'right:env(safe-area-inset-right);bottom:env(safe-area-inset-bottom);' +
                 'pointer-events:none;font-family:sans-serif;font-size:12px;line-height:1.4;color:var(--trails-ink)';
+            // **The strips, when a panel has taken the screen.** The chrome is
+            // held inside the safe area so nothing a finger wants lands under the
+            // clock or the home indicator -- which on a full-screen sheet leaves
+            // a band of map above it and another below, and a menu with the map
+            // showing through at both ends reads as a mistake rather than as a
+            // map. This sits behind the chrome and outside its inset, in the
+            // panels' own colour, and only while a panel is covering the map.
+            var veil = document.createElement('div');
+            veil.className = 'trails-veil';
+            veil.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;z-index:1099;' +
+                'display:none;pointer-events:none;background:var(--trails-solid)';
+            container.appendChild(veil);
             container.appendChild(chrome);
 
             function frame(cls) {
@@ -15752,6 +15785,7 @@ class _Chrome(MacroElement):
                 var covering = narrow && (openTool !== null || menuOpen ||
                     (!landscape && detailShown));
                 burger.style.display = (narrow && !covering) ? 'flex' : 'none';
+                veil.style.display = covering ? 'block' : 'none';
 
                 if (narrow) {
                     [dock, menu, sheet].forEach(function (box) {
