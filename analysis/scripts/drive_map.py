@@ -3781,6 +3781,46 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 note=f"smallest of {weighed['sampled']}: {weighed['smallest']} B",
             )
         )
+        # **What lies past the finest level anybody kept.** The download above
+        # went to z15, so z16 is ground the reader owns nothing of -- and the
+        # question is what the map does when they keep zooming. Leaflet does not
+        # scale a coarse tile up to cover a fine one: `maxNativeZoom` is 18 on
+        # both sheets, so it asks for the real z16, the worker has none, and with
+        # the switch on it answers a blank rather than the network. Measured on
+        # the very ground that is kept, one level apart, so the only thing that
+        # differs between the two readings is the zoom.
+        COUNT = """() => {
+            let good = 0, blank = 0;
+            document.querySelectorAll('img.leaflet-tile').forEach(img => {
+                if (img.naturalWidth > 1) { good += 1; } else { blank += 1; }
+            });
+            return {good: good, blank: blank};
+        }"""
+        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 15)"))
+        first.wait_for_timeout(3000)
+        at_top = first.evaluate(COUNT)
+        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 16)"))
+        first.wait_for_timeout(3000)
+        past_top = first.evaluate(COUNT)
+        terrain.append(
+            Reading(
+                "at the finest level kept, the ground draws",
+                at_top["good"] > 0,
+                True,
+                note=f"{at_top['good']} drawn, {at_top['blank']} blank at z15",
+            )
+        )
+        terrain.append(
+            Reading(
+                "and one level past it there is nothing to scale up from",
+                past_top["good"],
+                0,
+                note=f"{past_top['blank']} blank at z16 — Leaflet asks for the real tile, not a magnified z15",
+            )
+        )
+        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
+        first.wait_for_timeout(1500)
+
         # **And the switch is what stops the fetch, not a missing network.** The
         # whole point of being able to turn it on indoors is to see coverage
         # before walking out; if the network were what was answering, this would
