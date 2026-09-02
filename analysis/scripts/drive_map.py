@@ -3810,12 +3810,29 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 note=f"{at_top['good']} drawn, {at_top['blank']} blank at z15",
             )
         )
+        # **And one level past it, that same ground magnified.** Left alone,
+        # Leaflet asks Kartverket for the real z16, the worker has none and
+        # answers a blank -- a valid 200, so Leaflet counts it loaded and prunes
+        # the z15 the reader does own. Measured at 0 drawn against 35 blank
+        # before `fitNativeZoom` held the ceiling to what is on the device.
         terrain.append(
             Reading(
-                "and one level past it there is nothing to scale up from",
-                past_top["good"],
-                0,
-                note=f"{past_top['blank']} blank at z16 — Leaflet asks for the real tile, not a magnified z15",
+                "and one level past it the kept ground is magnified, not dropped",
+                past_top["good"] > 0,
+                True,
+                note=f"{past_top['good']} drawn, {past_top['blank']} blank at z16 — z15 doubled",
+            )
+        )
+        terrain.append(
+            Reading(
+                "and the ceiling is the finest level held, not the sheet's own",
+                first.evaluate(
+                    with_map(
+                        "() => { let seen = null; __MAP__.eachLayer(l => { if (l.getTileUrl) { seen = l.options.maxNativeZoom; } }); return seen; }"
+                    )
+                ),
+                15,
+                note="both sheets are built with 18",
             )
         )
         first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))

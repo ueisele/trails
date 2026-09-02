@@ -1005,6 +1005,54 @@ class TestOfflinePanel:
         assert "'No connection \\u2014 nothing was tried, and nothing '" in html
 
 
+class TestNativeZoomFollowsWhatIsKept:
+    """Zooming past the ground on the device shows that ground magnified."""
+
+    @staticmethod
+    def rendered():
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        return fmap.get_root().render()
+
+    def test_the_ceiling_follows_the_finest_level_held(self):
+        """Both sheets carry `maxNativeZoom: 18`, so Leaflet asks for the real
+        tile at every zoom. One level past what is kept the worker answers a
+        blank — a valid 200 — so Leaflet counts it loaded and prunes the coarse
+        ground the reader does own. Driven: 24 tiles at z15, 0 at z16."""
+        html = self.rendered()
+        assert "function fitNativeZoom(top) {" in html
+        assert "layer.options.maxNativeZoom = want;" in html
+        assert "layer.redraw();" in html
+        # **Only while the switch is on.** With it off the reader wants the real
+        # z17 from Kartverket and can have it.
+        assert "var want = (on() && top) ? top : layer.options.trailsNative;" in html
+        # The sheet's own ceiling is remembered once, so turning offline mode off
+        # gives back what the layer was built with rather than a guess.
+        assert "layer.options.trailsNative = layer.options.maxNativeZoom;" in html
+
+    def test_the_finest_level_comes_from_the_pass_that_was_already_being_made(self):
+        """Asking the cache a second time for one number is a second walk over a
+        hundred thousand keys, in the panel that already pays for one."""
+        html = self.rendered()
+        assert "if (z > top) { top = z; }" in html
+        assert "return {tiles: tiles.length, bytes: bytes, top: top};" in html
+        assert "fitNativeZoom(both[0].top);" in html
+
+    def test_a_sheet_switched_under_the_reader_gets_the_same_ceiling(self):
+        """A base layer arrives with its own 18, and the offline switch does not
+        move when it does."""
+        html = self.rendered()
+        assert "map.on('baselayerchange', function () {" in html
+        assert "fitNativeZoom(snapshot && snapshot.kept ? snapshot.kept.top : 0);" in html
+
+    def test_the_chooser_preview_is_not_taken_for_a_sheet(self):
+        """The preview is a grid layer that paints its tiles and fetches none;
+        a ceiling on it would mean nothing and redrawing it would repaint the
+        selection for no reason."""
+        html = self.rendered()
+        assert "if (!layer.getTileUrl || !layer.options) { return; }" in html
+
+
 class TestSourcesFreshness:
     """The map's age where a reader who never turns offline mode on can see it."""
 

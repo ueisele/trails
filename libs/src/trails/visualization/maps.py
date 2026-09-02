@@ -12493,24 +12493,32 @@ class _OfflinePanel(MacroElement):
                 // ---- what is kept ----------------------------------------------
 
                 function kept() {
-                    if (!window.caches) { return Promise.resolve({tiles: 0, bytes: 0}); }
+                    if (!window.caches) { return Promise.resolve({tiles: 0, bytes: 0, top: 0}); }
                     return caches.open(TERRAIN).then(function (cache) {
                         return cache.keys();
                     }).then(function (keys) {
                         // The flag the worker keeps beside the tiles is not one.
                         var tiles = keys.filter(function (each) {
                             return each.url.indexOf('trails.invalid') === -1;
-                        }), bytes = 0;
+                        }), bytes = 0, top = 0;
                         // Weighed by the zoom each one came from, out of the
                         // same table the chooser quotes, so what the panel says
                         // it will cost and what it says it holds are one figure
                         // and not two that drift.
+                        //
+                        // **And the finest level held, from the same pass.** It
+                        // is the ceiling the map is allowed to ask Kartverket
+                        // for while the switch is on -- see `fitNativeZoom` --
+                        // and asking the cache a second time for one number
+                        // would be a second walk over a hundred thousand keys.
                         tiles.forEach(function (each) {
                             var parts = each.url.split('/');
-                            bytes += WEIGHT[Number(parts[parts.length - 3])] || 45000;
+                            var z = Number(parts[parts.length - 3]);
+                            bytes += WEIGHT[z] || 45000;
+                            if (z > top) { top = z; }
                         });
-                        return {tiles: tiles.length, bytes: bytes};
-                    }).catch(function () { return {tiles: 0, bytes: 0}; });
+                        return {tiles: tiles.length, bytes: bytes, top: top};
+                    }).catch(function () { return {tiles: 0, bytes: 0, top: 0}; });
                 }
 
                 function room() {
@@ -12553,6 +12561,52 @@ class _OfflinePanel(MacroElement):
                     });
                 }
 
+                // **Magnified rather than blank, past the finest level kept.**
+                // Leaflet asks for the real tile at every zoom -- both sheets
+                // carry `maxNativeZoom: 18` -- so one level past what is on the
+                // device the worker answers a blank, and a blank is a valid 200,
+                // so Leaflet counts it as loaded and prunes the coarse ground the
+                // reader *does* own along with it. Measured on the same ground
+                // one level apart: 24 tiles drawn at z15 and 0 at z16.
+                //
+                // Which is the worst way for it to fail. The data is on the
+                // phone, the screen is empty, and nothing on it says that
+                // zooming out would bring the map back -- in a valley, with no
+                // second opinion available.
+                //
+                // Held to the finest level actually kept, and never below what
+                // the sheet was built with. With one uniform level -- the whole
+                // map at z16, which is what the budget is drawn around -- z17
+                // becomes that level doubled: blurry, and navigable. With mixed
+                // levels, a box at z16 under a band at z18, the ceiling is 18
+                // and nothing changes at all. So it is never worse than leaving
+                // it alone, which is what makes it worth doing without a switch
+                // of its own.
+                //
+                // **Only while offline mode is on.** With it off the reader
+                // wants the real z17 from Kartverket and can have it.
+                function fitNativeZoom(top) {
+                    map.eachLayer(function (layer) {
+                        // A tile layer with a URL, so the chooser's own preview
+                        // grid -- which paints its tiles and fetches none -- is
+                        // not counted as one.
+                        if (!layer.getTileUrl || !layer.options) { return; }
+                        if (layer.options.trailsNative === undefined) {
+                            layer.options.trailsNative = layer.options.maxNativeZoom;
+                        }
+                        var want = (on() && top) ? top : layer.options.trailsNative;
+                        if (layer.options.maxNativeZoom === want) { return; }
+                        layer.options.maxNativeZoom = want;
+                        layer.redraw();
+                    });
+                }
+
+                // A sheet switched under the reader arrives with its own ceiling
+                // of 18, and the switch does not move when it does.
+                map.on('baselayerchange', function () {
+                    fitNativeZoom(snapshot && snapshot.kept ? snapshot.kept.top : 0);
+                });
+
                 function refresh() {
                     // Held here rather than only on the buttons: a route can be
                     // cleared while the panel is open, and the scope it was
@@ -12578,6 +12632,7 @@ class _OfflinePanel(MacroElement):
                             chooser: chooser, scope: scope, zoom: zoom,
                             corners: drawn.length, counted: counted
                         };
+                        fitNativeZoom(both[0].top);
                         draw();
                         // **Said out loud, because the switch shows outside this
                         // panel now.** The chrome draws the tool's row with one
