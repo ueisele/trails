@@ -113,6 +113,14 @@ from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
 
 PARK_NAME = "Lomsdal-Visten"
 
+#: What the map is called as a thing rather than as a place: the page's title,
+#: the label under a home-screen icon, and both names in the manifest.
+#:
+#: **Separate from `PARK_NAME` on purpose.** That one is the park, and it is
+#: written into legends, exported files and the titles of the other pages this
+#: script builds, where "Atlas" would be wrong. This one names the application.
+APP_NAME = f"{PARK_NAME} Atlas"
+
 #: Substrings identifying DNT (Den Norske Turistforening) as maintainer.
 DNT_PATTERN = "DNT|Turistforening"
 
@@ -1547,7 +1555,7 @@ def main() -> int:
     print("\nBuilding map...")
     approach_label = f"≤{args.approach_km:g} km"
     # Fit to the full approach zone, not just the park, so trailhead towns are visible.
-    fmap = maps.create_map(bounds=bounds_of(zone), base=maps.BaseMap.KARTVERKET_TOPO, title=PARK_NAME)
+    fmap = maps.create_map(bounds=bounds_of(zone), base=maps.BaseMap.KARTVERKET_TOPO, title=APP_NAME)
 
     # Layers are added back-to-front so official routes draw on top of OSM,
     # and only non-empty ones appear in the control and legend. Everything is on
@@ -1896,7 +1904,7 @@ def main() -> int:
     # storage a script created once an origin has gone seven days without a
     # visit -- exactly the walk somebody keeps the terrain for a fortnight
     # before -- and a home-screen install is one of the two exemptions.
-    manifest = maps.write_manifest(map_path, PARK_NAME)
+    manifest = maps.write_manifest(map_path, APP_NAME)
     print(f"  Manifest: {manifest} ({manifest.stat().st_size / 1e3:.1f} kB)")
 
     # **The mark, as files.** The page links to `icon-180.png` rather than
