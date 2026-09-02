@@ -1005,6 +1005,100 @@ class TestOfflinePanel:
         assert "'No connection \\u2014 nothing was tried, and nothing '" in html
 
 
+class TestTheSheetCarriesAToken:
+    """Making the browser ask again for a tile it thinks it already has."""
+
+    @staticmethod
+    def rendered():
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        return fmap.get_root().render()
+
+    def test_the_token_moves_where_the_answer_moves(self):
+        """A browser holds an image by its address, so a tile the reader saw as
+        blank stays blank on that address for the life of the document —
+        Leaflet rebuilding the `<img>` does not help, because the memory cache
+        answers and no request reaches the worker at all. Measured: with the
+        switch newly off, `fetch` of a blanked tile returned 89,757 bytes while
+        an `<img>` on the same address still loaded 1 × 1."""
+        html = self.rendered()
+        assert "function restamp() {" in html
+        assert "layer.setUrl(plainUrl(layer) + '?trails=' + stamp);" in html
+        # Thrown, and downloaded — the two moments the worker's answer changes.
+        assert html.count("restamp();") == 2
+        # And both sit behind the worker being told, which is the moment its
+        # answer actually changes — not in `refresh`, which runs on every settle
+        # and would make every visible tile be asked for again each time.
+        for call in html.split("restamp();")[:-1]:
+            assert "tellWorker(" in call[-300:], "a token moved without the worker being told"
+
+    def test_the_worker_looks_up_without_the_token(self):
+        """Everything on that side is keyed on the tile itself, so a token that
+        moves costs one lookup and no bytes. Driven with the network off: kept
+        ground still draws under its new address."""
+        assert 'var plain = request.url.split("?")[0];' in maps.SERVICE_WORKER
+        tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
+        assert "terrain.match(plain)" in tile
+        assert "tiles.match(plain)" in tile
+        # Stored without it too, or a second token would orphan what the first
+        # one wrote.
+        assert "tiles.put(plain, answer.clone())" in tile
+        # **Stripped rather than matched with `ignoreSearch`**, which would turn
+        # every one of a hundred thousand keys into a comparison.
+        assert "ignoreSearch" not in tile
+
+    def test_the_download_builds_addresses_without_the_token(self):
+        """What goes into a cache is keyed on the plain address, so moving the
+        token never orphans a tile."""
+        html = self.rendered()
+        assert "layer.options.trailsUrl = layer._url.split('?')[0];" in html
+        assert "return plainUrl(layer).replace('{z}', z)" in html
+
+    def test_a_sheet_switched_in_gets_the_token_without_moving_it(self):
+        """A base layer arrives with no token at all, and switching sheets is
+        not a reason to make every reader ask for their tiles again."""
+        html = self.rendered()
+        change = html.split("map.on('baselayerchange', function () {")[1].split("});")[0]
+        assert "eachSheet(stampOn);" in change
+        assert "restamp" not in change
+
+
+class TestTheSwitchWaitsForTheWorker:
+    """Throwing the switch and redrawing the map are not the same instant."""
+
+    @staticmethod
+    def rendered():
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        return fmap.get_root().render()
+
+    def test_the_flag_is_waited_for_and_not_merely_posted(self):
+        """Writing the flag is asynchronous — it goes into the worker's own
+        cache — while the refresh that follows every call redraws the sheets at
+        once. Posted and not waited for, those tiles were answered by a worker
+        still holding the old flag: switching offline mode off left the ground
+        blank until something made Leaflet ask again. Driven, and it did."""
+        html = self.rendered()
+        assert "navigator.serviceWorker.addEventListener('message', heard);" in html
+        assert "if (!event.data || event.data.trails !== 'offline') { return; }" in html
+        # The worker has always sent this reply; nothing listened to it.
+        assert 'event.source.postMessage({trails: "offline", on: !!said.on})' in maps.SERVICE_WORKER
+
+    def test_a_worker_that_never_answers_does_not_hold_the_panel(self):
+        """A panel that never finishes refreshing is worse than one that
+        refreshes a moment early — and the flag is written either way."""
+        html = self.rendered()
+        assert "window.setTimeout(function () { done(false); }, 2000);" in html
+        assert "navigator.serviceWorker.removeEventListener('message', heard);" in html
+
+    def test_the_download_hands_the_switch_over_before_it_redraws(self):
+        """The one caller that dropped the promise on the floor, and the one
+        where the redraw matters most: the switch has just gone on, and every
+        tile on the screen is about to be asked for again."""
+        html = self.rendered()
+        assert "return tellWorker(true).then(function () {" in html
+
+
 class TestNativeZoomFollowsWhatIsKept:
     """Zooming past the ground on the device shows that ground magnified."""
 

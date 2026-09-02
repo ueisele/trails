@@ -455,6 +455,10 @@ function takeNewer() {
 function blank() {
     var raw = atob(BLANK), bytes = new Uint8Array(raw.length), i;
     for (i = 0; i < raw.length; i += 1) { bytes[i] = raw.charCodeAt(i); }
+    // **A 200 and not a refusal**, so Leaflet draws the page's own ground rather
+    // than a broken image over it. `cache-control: no-store` was tried here and
+    // does not keep the browser's image cache from holding it -- measured -- so
+    // what makes a blank tile askable again is the token on the sheet's URL.
     return new Response(bytes, {status: 200, headers: {"content-type": "image/png"}});
 }
 
@@ -498,17 +502,26 @@ function pageFor(request) {
 // switch on the network is not reached for at all -- which is what makes the
 // switch worth having indoors: a reader can see exactly what they kept, instead
 // of finding out in a valley.
+// **Looked up without the query, and stored without it.** The page appends a
+// token to the sheet's URL whenever the answer here would change -- see
+// `restamp` -- because a browser holds an image by its address and will not ask
+// again for one it has. Everything on this side is keyed on the tile itself, so
+// a token that moves costs one lookup and no bytes: what was kept is still kept.
+//
+// Stripped rather than matched with `ignoreSearch`, which would turn every one of
+// a hundred thousand keys into a comparison instead of a lookup.
 function tileFor(request) {
+    var plain = request.url.split("?")[0];
     return Promise.all([caches.open(TERRAIN), caches.open(TILES), offlineNow()]).then(function (three) {
         var terrain = three[0], tiles = three[1], off = three[2];
-        return terrain.match(request).then(function (asked) {
+        return terrain.match(plain).then(function (asked) {
             if (asked) { return asked; }
-            return tiles.match(request).then(function (seen) {
+            return tiles.match(plain).then(function (seen) {
                 if (seen) { return seen; }
                 if (off) { return blank(); }
                 return fetch(request).then(function (answer) {
                     if (answer && answer.ok) {
-                        tiles.put(request, answer.clone()).then(function () { return trim(tiles); });
+                        tiles.put(plain, answer.clone()).then(function () { return trim(tiles); });
                     }
                     return answer;
                 }).catch(function () { return blank(); });
@@ -12292,10 +12305,20 @@ class _OfflinePanel(MacroElement):
                     return found;
                 }
 
+                // The sheet's address without the token `restamp` may have put
+                // on it. Everything that goes into a cache is keyed on this, so
+                // moving the token never orphans a tile.
+                function plainUrl(layer) {
+                    if (layer.options.trailsUrl === undefined) {
+                        layer.options.trailsUrl = layer._url.split('?')[0];
+                    }
+                    return layer.options.trailsUrl;
+                }
+
                 // Built by hand rather than through `getTileUrl`, which takes
                 // its zoom from the map rather than from the tile it is given.
                 function urlFor(layer, x, y, z) {
-                    return layer._url.replace('{z}', z).replace('{y}', y).replace('{x}', x)
+                    return plainUrl(layer).replace('{z}', z).replace('{y}', y).replace('{x}', x)
                         .replace('{s}', (layer.options.subdomains || 'abc')[0])
                         .replace('{r}', '');
                 }
@@ -12545,10 +12568,41 @@ class _OfflinePanel(MacroElement):
                 // A worker is started and stopped around single fetches, so it
                 // reads the flag out of its own cache; this keeps the two from
                 // drifting when storage was cleared under the page.
+                //
+                // **And waited for, not merely posted.** Writing the flag is
+                // asynchronous -- it goes into the worker's own cache -- while
+                // the refresh that follows every call here redraws the sheets at
+                // once. Posted and not waited for, those tiles were answered by a
+                // worker still holding the old flag, and switching offline mode
+                // off left the ground blank until something else made Leaflet ask
+                // again: on a phone, noticing and panning. Measured, and the
+                // reading is in the driven suite.
+                //
+                // The worker has always answered `{trails: 'offline'}` when the
+                // flag is written. Nothing listened to it.
+                //
+                // **Two seconds, and then on regardless.** A panel that never
+                // finishes refreshing is worse than one that refreshes a moment
+                // early, and the flag is written either way -- what is lost is
+                // only the redraw landing on the right side of it.
                 function tellWorker(want) {
                     if (!navigator.serviceWorker || !navigator.serviceWorker.controller) { return Promise.resolve(false); }
-                    navigator.serviceWorker.controller.postMessage({trails: 'offline', on: !!want});
-                    return Promise.resolve(true);
+                    return new Promise(function (settled) {
+                        var over = false;
+                        function done(answered) {
+                            if (over) { return; }
+                            over = true;
+                            navigator.serviceWorker.removeEventListener('message', heard);
+                            settled(answered);
+                        }
+                        function heard(event) {
+                            if (!event.data || event.data.trails !== 'offline') { return; }
+                            done(true);
+                        }
+                        navigator.serviceWorker.addEventListener('message', heard);
+                        window.setTimeout(function () { done(false); }, 2000);
+                        navigator.serviceWorker.controller.postMessage({trails: 'offline', on: !!want});
+                    });
                 }
 
                 // Which scopes have something to be drawn round. A band and a box
@@ -12601,10 +12655,52 @@ class _OfflinePanel(MacroElement):
                     });
                 }
 
+                // **A token on the sheet's URL, moved whenever what the worker
+                // would answer has changed.** A browser holds an image by its
+                // address, so a tile the reader saw as blank stays blank on that
+                // address for the life of the document -- Leaflet rebuilding the
+                // `<img>` does not help, because the memory cache answers and no
+                // request reaches the worker at all.
+                //
+                // Measured, after two cheaper ideas failed. With the switch newly
+                // off, `fetch` of a blanked tile returned 89,757 bytes of
+                // Kartverket while an `<img>` on the same address still loaded
+                // 1 x 1; the same tile with a query appended loaded at 256.
+                // `cache-control: no-store` on the blank changed nothing.
+                //
+                // It costs no bytes where it matters. The token is moved after a
+                // download and when the switch is thrown -- never on an ordinary
+                // refresh -- and the worker strips it before looking, so a tile
+                // that is kept is answered from the cache under its new address
+                // exactly as it was under the old one.
+                var stamp = 0;
+
+                function stampOn(layer) {
+                    if (!stamp) { return; }
+                    layer.setUrl(plainUrl(layer) + '?trails=' + stamp);
+                }
+
+                function eachSheet(what) {
+                    map.eachLayer(function (layer) {
+                        // A tile layer with an address of its own, so the
+                        // chooser's preview grid -- which paints its tiles and
+                        // fetches none -- is not one.
+                        if (!layer.getTileUrl || !layer.setUrl || !layer._url) { return; }
+                        what(layer);
+                    });
+                }
+
+                function restamp() {
+                    stamp += 1;
+                    eachSheet(stampOn);
+                }
+
                 // A sheet switched under the reader arrives with its own ceiling
-                // of 18, and the switch does not move when it does.
+                // of 18 and with no token, and neither the switch nor the count
+                // moves when it does.
                 map.on('baselayerchange', function () {
                     fitNativeZoom(snapshot && snapshot.kept ? snapshot.kept.top : 0);
+                    eachSheet(stampOn);
                 });
 
                 function refresh() {
@@ -12821,8 +12917,11 @@ class _OfflinePanel(MacroElement):
                             if (!there.tiles) { return refresh(); }
                             chooser = false;
                             remember(true);
-                            tellWorker(true);
-                            return refresh();
+                            return tellWorker(true).then(function () {
+                                // Ground that was blank a moment ago is kept now.
+                                restamp();
+                                return refresh();
+                            });
                         });
                     });
                     keepAwake();
@@ -13457,7 +13556,10 @@ class _OfflinePanel(MacroElement):
                             return refresh();
                         }
                         remember(want);
-                        return tellWorker(want).then(refresh);
+                        return tellWorker(want).then(function () {
+                            restamp();
+                            return refresh();
+                        });
                     });
                 }
 

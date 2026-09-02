@@ -3796,6 +3796,12 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             });
             return {good: good, blank: blank};
         }"""
+        # **Driven with the network off**, which makes these three readings say
+        # more than the zoom. The token on the sheet's URL moved when the switch
+        # went on, so anything that draws here is a kept tile answered under its
+        # new address off the device -- the invariant the token has to satisfy or
+        # it would be a re-download dressed as a fix.
+        context.set_offline(True)
         first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 15)"))
         first.wait_for_timeout(3000)
         at_top = first.evaluate(COUNT)
@@ -3804,10 +3810,10 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         past_top = first.evaluate(COUNT)
         terrain.append(
             Reading(
-                "at the finest level kept, the ground draws",
+                "at the finest level kept, the ground draws with the network off",
                 at_top["good"] > 0,
                 True,
-                note=f"{at_top['good']} drawn, {at_top['blank']} blank at z15",
+                note=f"{at_top['good']} drawn, {at_top['blank']} blank at z15 — under the moved token",
             )
         )
         # **And one level past it, that same ground magnified.** Left alone,
@@ -3835,6 +3841,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 note="both sheets are built with 18",
             )
         )
+        context.set_offline(False)
         first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
         first.wait_for_timeout(1500)
 
@@ -3855,6 +3862,55 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             }"""
         )
         terrain.append(Reading("with the switch on, unkept ground stays blank even online", indoors["good"], 0, note=f"{indoors['blank']} blank"))
+        # **And turning the switch off keeps every tile.** Nothing about the
+        # switch is a deletion -- it is a flag in `localStorage` and a message to
+        # the worker -- and the only thing in this page that empties a tile cache
+        # is the Delete button, behind a confirmation. Worth a reading because it
+        # is the kind of thing a later tidy-up breaks silently: somebody frees
+        # the space on the way out, and a reader who switched off in a hotel to
+        # see live terrain walks out with nothing.
+        held = first.evaluate("() => window.trailsOffline.state().kept.tiles")
+        parked = first.evaluate("async () => { await window.trailsOffline.toggle(false); return window.trailsOffline.state(); }")
+        terrain.append(Reading("switching it off keeps every tile", parked["kept"]["tiles"], held))
+        terrain.append(Reading("and it really is off", parked["on"], False))
+        # And the ceiling goes back to what the sheet was built with, so a reader
+        # who switched off for live terrain gets the real fine levels again.
+        terrain.append(
+            Reading(
+                "and the zoom ceiling is the sheet's own again",
+                first.evaluate(
+                    with_map(
+                        "() => { let seen = null; __MAP__.eachLayer(l => { if (l.getTileUrl) { seen = l.options.maxNativeZoom; } }); return seen; }"
+                    )
+                ),
+                18,
+                note="held to 15 while it was on",
+            )
+        )
+        # The mirror of the reading above: with the switch off, the ground nobody
+        # kept comes from the network again, on the same view that was blank a
+        # moment ago.
+        first.wait_for_timeout(4000)
+        live = first.evaluate(
+            """() => {
+                let good = 0, blank = 0;
+                document.querySelectorAll('img.leaflet-tile').forEach(img => {
+                    if (img.naturalWidth > 1) { good += 1; } else { blank += 1; }
+                });
+                return {good: good, blank: blank};
+            }"""
+        )
+        terrain.append(
+            Reading(
+                "and unkept ground draws again from the network",
+                live["good"] > 0,
+                True,
+                note=f"{live['good']} drawn where {indoors['blank']} were blank with the switch on",
+            )
+        )
+        first.evaluate("async () => { await window.trailsOffline.toggle(true); }")
+        first.wait_for_timeout(1000)
+
         # **Asked while it is still open**, because this is what the offline page
         # is held against. Panning and the switch above do not touch it: the
         # count is over the map's layers, not over what is in view.
