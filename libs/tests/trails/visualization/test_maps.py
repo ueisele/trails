@@ -1182,6 +1182,28 @@ class TestTheWideLayoutNeedsRoomInBothDirections:
         assert "narrow: isNarrow(map.getSize())," in html
         assert "var narrow = size.x < NARROW;" not in html
 
+    def test_the_rail_is_measured_and_not_added_up(self):
+        """Arithmetic over a stylesheet is a guess, and this one was a few pixels
+        from being wrong: reported from a phone in landscape where the rail still
+        stood, on a screen a hair taller than the sum. It is read while the rail
+        is standing, which is the only moment it can be — once `place` has run it
+        may be `display: none`, and a hidden box measures zero."""
+        html = self.rendered()
+        assert "RAIL_ROOM = Math.max(RAIL_ROOM, Math.ceil(rail.offsetHeight) + 20);" in html
+        # Read straight after it is appended, before anything hides it.
+        after = html.split("chrome.appendChild(rail);")[1].split("RAIL_ROOM = Math.max")[0]
+        assert "display" not in after
+
+    def test_a_rotation_is_not_one_resize(self):
+        """iOS reports an intermediate size first and the final one after the
+        animation, so a layout decided on the first reading is decided on a
+        screen that never existed. Reported as the wide menu surviving a turn
+        back to upright, where it has no room at all."""
+        html = self.rendered()
+        assert "map.on('resize', placeAgain);" in html
+        assert "window.addEventListener('orientationchange', placeAgain);" in html
+        assert "settling = window.setTimeout(function () { settling = null; place(); }, 350);" in html
+
     def test_the_profile_asks_the_chrome_rather_than_deciding_again(self):
         """It worked the answer out again from the width, and the two have just
         stopped agreeing — so the chrome would show the burger while the profile

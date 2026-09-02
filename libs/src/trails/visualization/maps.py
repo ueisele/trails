@@ -14589,6 +14589,10 @@ class _Chrome(MacroElement):
             // directions, and a screen that has one but not the other gets the
             // burger -- which opens a full-height sheet that scrolls, which is
             // the shape that fits a short screen.
+            // Added up here and measured below, because arithmetic over a
+            // stylesheet is a guess and this one was three pixels from being
+            // wrong: reported from a phone in landscape where the rail still
+            // stood, on a screen a hair taller than this sum.
             var RAIL_ROOM = TOOLS.length * 46 + (TOOLS.length - 1) + 20;
 
             function isNarrow(size) {
@@ -15347,6 +15351,12 @@ class _Chrome(MacroElement):
                 'box-shadow:0 1px 3px rgba(0,0,0,0.18)';
             L.DomEvent.disableClickPropagation(rail);
             chrome.appendChild(rail);
+            // **Asked of the rail while it is standing.** It is appended visible
+            // and nothing has hidden it yet, so this is the only moment its own
+            // height can be read -- once `place` has run it may be `display:
+            // none`, and a hidden box measures zero. The sum above stays as the
+            // answer for a browser that will not say.
+            RAIL_ROOM = Math.max(RAIL_ROOM, Math.ceil(rail.offsetHeight) + 20);
 
             var railButtons = {};
             TOOLS.forEach(function (tool, index) {
@@ -15887,11 +15897,24 @@ class _Chrome(MacroElement):
                 }
             }
 
-            map.on('resize', place);
+            // **And again once it has settled.** A rotation is not one resize:
+            // iOS reports an intermediate size first and the final one after the
+            // animation, so a layout decided on the first reading is decided on a
+            // screen that never existed. Reported as the wide menu surviving a
+            // turn back to upright, where it has no room at all.
+            var settling = null;
+            function placeAgain() {
+                place();
+                if (settling) { window.clearTimeout(settling); }
+                settling = window.setTimeout(function () { settling = null; place(); }, 350);
+            }
+
+            map.on('resize', placeAgain);
+            window.addEventListener('orientationchange', placeAgain);
             // The keyboard opening is not a map resize: the layout viewport does
             // not move, so Leaflet never hears about it.
             if (window.visualViewport) {
-                window.visualViewport.addEventListener('resize', place);
+                window.visualViewport.addEventListener('resize', placeAgain);
                 window.visualViewport.addEventListener('scroll', place);
             }
 
