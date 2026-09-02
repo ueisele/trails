@@ -3105,8 +3105,21 @@ def served(directory: pathlib.Path) -> Any:
 #: Whether the worker has kept this page. A row in the database now, not an
 #: entry in a cache: the first `caches.open()` of any cache costs 23 s on a phone
 #: with the ground kept, and answering a navigation may not pay it.
+#: How many rows a store in the map's database holds. The tiles are no longer
+#: entries in a cache: the first `caches.open()` of any cache costs 23 s on a
+#: phone with the ground kept.
+ROWS = """async (store) => await new Promise(done => {
+    const ask = indexedDB.open('trails', 2);
+    ask.onsuccess = () => {
+        const count = ask.result.transaction(store, 'readonly').objectStore(store).count();
+        count.onsuccess = () => done(count.result);
+        count.onerror = () => done(-1);
+    };
+    ask.onerror = () => done(-1);
+})"""
+
 CACHED_PAGE = """async () => await new Promise(done => {
-    const ask = indexedDB.open('trails', 1);
+    const ask = indexedDB.open('trails', 2);
     ask.onsuccess = () => {
         const get = ask.result.transaction('pages', 'readonly').objectStore('pages').get(location.href);
         get.onsuccess = () => done(!!get.result);
@@ -3489,7 +3502,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # of it. The tiles the first paint fetched went out before it took over.
         first.evaluate("() => window[Object.keys(window).find(k => k.startsWith('map_'))].setZoom(10)")
         first.wait_for_timeout(4000)
-        tiles = first.evaluate("async () => (await (await caches.open('trails-tiles')).keys()).length")
+        tiles = first.evaluate(ROWS, "browse")
         # **What the first visit paid**, read off the server rather than the
         # page: the worker keeps the map by asking for it a second time, and if
         # that second ask crossed the wire the first visit would cost twice.
@@ -3503,7 +3516,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # mtime, which is what `Last-Modified` is served from and what the worker
         # compares.
         newer: list[Reading] = []
-        before_tiles = first.evaluate("async () => (await (await caches.open('trails-terrain')).keys()).length")
+        before_tiles = first.evaluate(ROWS, "tiles")
         page_path.touch()
         got_before = _Quiet.asked.get(f"/{page_path.name}", 0)
         first.evaluate("() => { navigator.serviceWorker.controller.postMessage({trails: 'check'}); }")
@@ -3535,7 +3548,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         newer.append(
             Reading(
                 "and finding one costs the terrain nothing",
-                first.evaluate("async () => (await (await caches.open('trails-terrain')).keys()).length"),
+                first.evaluate(ROWS, "tiles"),
                 before_tiles,
             )
         )
@@ -3833,17 +3846,21 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             )
         )
         weighed = first.evaluate(
-            """async () => {
-                const cache = await caches.open('trails-terrain');
-                const keys = (await cache.keys()).filter(k => k.url.indexOf('trails.invalid') === -1);
-                let smallest = Infinity, total = 0;
-                for (const key of keys.slice(0, 40)) {
-                    const body = await (await cache.match(key)).arrayBuffer();
-                    smallest = Math.min(smallest, body.byteLength);
-                    total += body.byteLength;
-                }
-                return {kept: keys.length, smallest: smallest, sampled: Math.min(40, keys.length)};
-            }"""
+            """async () => await new Promise(done => {
+                const ask = indexedDB.open('trails', 2);
+                ask.onsuccess = () => {
+                    const store = ask.result.transaction('tiles', 'readonly').objectStore('tiles');
+                    const all = store.getAll(undefined, 40);
+                    const count = store.count();
+                    let smallest = Infinity, seen = 0;
+                    all.onsuccess = () => {
+                        for (const body of all.result) { smallest = Math.min(smallest, body.size); seen += 1; }
+                        count.onsuccess = () => done({kept: count.result, smallest: smallest, sampled: seen});
+                    };
+                    all.onerror = () => done({kept: -1, smallest: -1, sampled: 0});
+                };
+                ask.onerror = () => done({kept: -1, smallest: -1, sampled: 0});
+            })"""
         )
         terrain.append(
             Reading(

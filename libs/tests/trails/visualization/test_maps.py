@@ -240,7 +240,7 @@ class TestServiceWorker:
         assert "if (kept) { return kept; }" in maps.SERVICE_WORKER
         # Bounded, because a cache with no ceiling is a quota with no floor.
         assert "var TILE_CAP = 500;" in maps.SERVICE_WORKER
-        assert "function trim(cache)" in maps.SERVICE_WORKER
+        assert "function trim()" in maps.SERVICE_WORKER
 
     def test_it_is_registered_only_where_a_worker_can_exist(self):
         """A worker needs a secure origin, so a page opened off the disk gets
@@ -278,20 +278,20 @@ class TestOfflineWorker:
     they happened to pan over."""
 
     def test_what_was_asked_for_is_kept_apart_from_what_was_merely_seen(self):
-        """Two caches, because they are two different promises. `trails-tiles` is
-        opportunistic and trimmed to the last 500; `trails-terrain` is what the
-        reader chose and is never trimmed -- a deliberate nine-hundred-tile
-        download into an LRU of five hundred would evict itself on the way in,
-        and the panel would report that it had worked."""
-        assert 'var TERRAIN = "trails-terrain";' in maps.SERVICE_WORKER
-        assert 'var TILES = "trails-tiles";' in maps.SERVICE_WORKER
+        """Two stores, because they are two different promises. `browse` is
+        opportunistic and trimmed to the last 500; `tiles` is what the reader
+        chose and is never trimmed -- a deliberate nine-hundred-tile download
+        into an LRU of five hundred would evict itself on the way in, and the
+        panel would report that it had worked."""
+        assert 'var KEPT = "tiles";' in maps.SERVICE_WORKER
+        assert 'var SEEN = "browse";' in maps.SERVICE_WORKER
         # Looked at in that order: what was asked for answers before what was
         # seen, so a trimmed tile never shadows a kept one.
         tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
-        assert tile.index("terrain.match") < tile.index("tiles.match")
-        # And the trim is handed the opportunistic cache and only that one.
-        assert "trim(tiles)" in tile
-        assert "trim(terrain)" not in maps.SERVICE_WORKER
+        assert tile.index("read(KEPT, plain)") < tile.index("read(SEEN, plain)")
+        # And the trim runs over the opportunistic store and only that one.
+        trimming = maps.SERVICE_WORKER.split("function trim()")[1].split("\nfunction ")[0]
+        assert "SEEN" in trimming and "KEPT" not in trimming
 
     def test_neither_tile_cache_is_swept_by_a_deploy(self):
         """The terrain is not stamped with anything and must survive every
@@ -719,7 +719,9 @@ class TestOfflinePanel:
         which is what this selection has on the device — the two figures the loop
         could only get by asking the cache for every tile in turn."""
         panel = self.panel()
-        settle = panel.split("}).then(function () {\n                        working = null;")[1]
+        settle = panel.split("function keep() {")[1].split(
+            "}).then(function () {\n                        working = null;"
+        )[1]
         assert "kept: state.held + state.added," in settle
         assert "if (!lastRun.kept) { return refresh(); }" in settle
         assert settle.index("if (!lastRun.kept)") < settle.index("remember(true)")
@@ -903,7 +905,7 @@ class TestOfflinePanel:
         # And the claim it makes is one the loop keeps: every tile is asked of
         # the cache before it is asked of the network, so a stopped run costs
         # nothing to pick up.
-        assert "return cache.match(next.url).then(function (there) {" in html
+        assert "return dbRead(KEPT, next.url).then(function (there) {" in html
         assert "if (there) { missed = 0; state.held += 1; return null; }" in html
 
     def test_a_run_never_holds_more_than_one_tile(self):
@@ -984,7 +986,7 @@ class TestOfflinePanel:
         assert "if (missed >= 12) { state.stop = true; state.stalled = true; }" in html
         # Reset on every success, so bad tiles arriving in ones and twos never
         # trip it — twelve rather than three because six requests run at once.
-        assert "missed = 0;" in html and "return cache.put(next.url, answer);" in html
+        assert "missed = 0;" in html and "return dbWrite(KEPT, next.url, body);" in html
         # A run the connection stopped still switches on for what arrived; only
         # a run the reader stopped leaves the chooser where it was.
         assert "if (state.stop && !state.stalled) { return refresh(); }" in html
@@ -1045,6 +1047,50 @@ class TestThePageAccountsForItsOwnOpening:
         assert "costLine.textContent = parts.join" in html
 
 
+class TestTheTwoScriptsAgreeAboutTheDatabase:
+    """The one disagreement that stops the map opening at all."""
+
+    @staticmethod
+    def rendered():
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        return fmap.get_root().render()
+
+    def test_the_worker_and_the_page_open_the_same_version(self):
+        """A connection held at an older version blocks the other side's
+        upgrade, and with no `onblocked` the wait never ends. Measured on this
+        suite: the page held version 1 while the worker asked for 2, a
+        navigation never answered, and the driven run sat at zero per cent CPU
+        for twenty minutes. On a phone the app simply would not have opened."""
+        html = self.rendered()
+        worker = re.search(r"var DB_AT = (\d+);", maps.SERVICE_WORKER)
+        page = re.search(r"window\.indexedDB\.open\('trails', (\d+)\)", html)
+        assert worker and page, "both sides must name a version"
+        assert worker.group(1) == page.group(1)
+
+    def test_neither_side_hangs_and_neither_side_blocks(self):
+        """Two halves. Saying so beats waiting — blocked means somebody holds an
+        older connection. And stepping aside when the other wants to upgrade is
+        what makes the deadlock impossible rather than merely reported."""
+        html = self.rendered()
+        assert "ask.onblocked" in maps.SERVICE_WORKER
+        assert "ask.onblocked" in html
+        assert "open.onversionchange = function () { open.close(); opened = null; };" in maps.SERVICE_WORKER
+        assert "open.onversionchange = function () { open.close(); db.open = null; };" in html
+
+    def test_both_sides_make_every_store(self):
+        """Whichever opens first runs the upgrade, so both have to know about
+        all four — a store missing on one side is a transaction that throws on
+        the other."""
+        html = self.rendered()
+        for store in ("pages", "flags"):
+            assert f"createObjectStore('{store}')" in html
+            assert f'contains({store.upper()})' in maps.SERVICE_WORKER or f'"{store}"' in maps.SERVICE_WORKER
+        assert "createObjectStore(KEPT)" in html and "createObjectStore(KEPT)" in maps.SERVICE_WORKER
+        assert "createObjectStore(SEEN).createIndex" in html
+        assert "createObjectStore(SEEN).createIndex" in maps.SERVICE_WORKER
+
+
 class TestNothingGrowsWithTheDownload:
     """What an installed app can hold while it keeps a hundred thousand tiles."""
 
@@ -1086,7 +1132,11 @@ class TestNothingGrowsWithTheDownload:
         assert "var step = it.next();" in html
         # The count comes from the weights, which already had it.
         assert "return {tiles: base() ? picked.tiles : 0, bytes: picked.bytes};" in html
-        assert "urls.push(" not in html
+        # The one place a list of addresses is still built is the move off
+        # the old store, which has to be handed a listing and turns it into
+        # strings in the same breath — see `moveGround`.
+        run = html.split("function walker() {")[1].split("\n                function ")[0]
+        assert "urls.push(" not in run
 
     def test_what_is_kept_is_written_down_not_counted_out(self):
         """`cache.keys()` over the terrain cache ran on every `refresh` — on
@@ -1102,10 +1152,10 @@ class TestNothingGrowsWithTheDownload:
         # cleared under the page would take both — and it meant that opening this
         # panel opened a Cache Storage holding tens of thousands of entries and
         # several gigabytes. Measured on an installed app at twenty seconds.
-        assert "window.indexedDB.open('trails', 1)" in html
+        assert "window.indexedDB.open('trails', 2)" in html
         # `forget` clears the row too, which is the property the first place was
         # chosen for.
-        assert "caches.delete(TERRAIN), caches.delete(TILES), dbWrite('flags', HELD, null)" in html
+        assert "dbClear(KEPT), dbClear(SEEN), dbWrite('flags', HELD, null)" in html
         # Written as the run goes, so a run the phone interrupts still leaves a
         # figure behind — which is exactly the run that used to leave the panel
         # saying nothing was kept.
@@ -1158,11 +1208,11 @@ class TestTheSheetCarriesAToken:
         ground still draws under its new address."""
         assert 'var plain = request.url.split("?")[0];' in maps.SERVICE_WORKER
         tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
-        assert "terrain.match(plain)" in tile
-        assert "tiles.match(plain)" in tile
+        assert "read(KEPT, plain)" in tile
+        assert "read(SEEN, plain)" in tile
         # Stored without it too, or a second token would orphan what the first
         # one wrote.
-        assert "tiles.put(plain, answer.clone())" in tile
+        assert "write(SEEN, plain, {body: body, at: Date.now()})" in tile
         # **Stripped rather than matched with `ignoreSearch`**, which would turn
         # every one of a hundred thousand keys into a comparison.
         assert "ignoreSearch" not in tile

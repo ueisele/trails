@@ -234,20 +234,52 @@ var VERSION = "__VERSION__";
 // The digest still names the worker, which is what makes a deploy install one --
 // it is no longer a cache name, and `sweepOldCaches` takes the caches that were.
 var DB = "trails";
+// **One number, and the page carries the same one written out.** They are two
+// scripts and cannot share a constant; what they must not do is disagree. A
+// connection held at an older version blocks an upgrade, and with no `onblocked`
+// the other side waits for ever -- measured on this suite, the page opened the
+// database at 1 while the worker asked for 2 and a navigation never answered at
+// all. The app would not have opened. There is a test that the two literals
+// match, because nothing else would notice.
+var DB_AT = 2;
 var PAGES = "pages";
 var FLAGS = "flags";
+// **The ground, and what was merely looked at.** Two stores because they are two
+// different promises: `KEPT` is what the reader asked for and is never trimmed,
+// `SEEN` is what panning left behind and is held to `TILE_CAP`. A deliberate
+// nine-hundred-tile download into an LRU of five hundred would evict itself on
+// the way in and report success.
+var KEPT = "tiles";
+var SEEN = "browse";
+var MOVED = "migrated";
 var opened = null;
 
 function base() {
     if (opened) { return opened; }
     opened = new Promise(function (done, fail) {
-        var ask = indexedDB.open(DB, 1);
+        var ask = indexedDB.open(DB, DB_AT);
+        // Said rather than waited on: blocked means somebody else is holding an
+        // older connection, and hanging is the one answer that helps nobody.
+        ask.onblocked = function () { fail(new Error("the database is blocked")); };
         ask.onupgradeneeded = function () {
             var made = ask.result;
             if (!made.objectStoreNames.contains(PAGES)) { made.createObjectStore(PAGES); }
             if (!made.objectStoreNames.contains(FLAGS)) { made.createObjectStore(FLAGS); }
+            if (!made.objectStoreNames.contains(KEPT)) { made.createObjectStore(KEPT); }
+            if (!made.objectStoreNames.contains(SEEN)) {
+                // The index is what makes the trim cheap: oldest first, without
+                // reading a row to find out how old it is.
+                made.createObjectStore(SEEN).createIndex("at", "at");
+            }
         };
-        ask.onsuccess = function () { done(ask.result); };
+        ask.onsuccess = function () {
+            var open = ask.result;
+            // **Let go when the other side wants to upgrade.** This is what keeps
+            // the deadlock above from being possible at all rather than merely
+            // reported: a connection that steps aside cannot block anything.
+            open.onversionchange = function () { open.close(); opened = null; };
+            done(open);
+        };
         ask.onerror = function () { fail(ask.error); };
     });
     return opened;
@@ -589,36 +621,82 @@ function pageFor(request) {
 //
 // Stripped rather than matched with `ignoreSearch`, which would turn every one of
 // a hundred thousand keys into a comparison instead of a lookup.
+// **Whether the old cache is still there, asked once and remembered.** Touching
+// Cache Storage at all is what costs 23 seconds on a phone with the ground kept,
+// so this is read from a row and not from `caches.has` -- and once the migration
+// has run, nothing here goes near a cache again.
+var legacy = null;
+
+function stillInCaches() {
+    if (legacy === null) {
+        legacy = read(FLAGS, MOVED).then(function (done) { return !done; })
+            .catch(function () { return true; });
+    }
+    return legacy;
+}
+
+function fromLegacy(plain) {
+    return stillInCaches().then(function (old) {
+        if (!old) { return null; }
+        return caches.open(TERRAIN).then(function (cache) {
+            return cache.match(plain);
+        }).catch(function () { return null; });
+    });
+}
+
 function tileFor(request) {
     var plain = request.url.split("?")[0];
-    return Promise.all([caches.open(TERRAIN), caches.open(TILES), offlineNow()]).then(function (three) {
-        var terrain = three[0], tiles = three[1], off = three[2];
-        return terrain.match(plain).then(function (asked) {
-            if (asked) { return asked; }
-            return tiles.match(plain).then(function (seen) {
-                if (seen) { return seen; }
+    return Promise.all([read(KEPT, plain), offlineNow()]).then(function (two) {
+        if (two[0]) { return new Response(two[0]); }
+        var off = two[1];
+        return read(SEEN, plain).then(function (seen) {
+            if (seen && seen.body) { return new Response(seen.body); }
+            // Until the reader has moved their ground across, it is still where
+            // they left it. After that this costs one memoised boolean.
+            return fromLegacy(plain).then(function (older) {
+                if (older) { return older; }
                 if (off) { return blank(); }
                 return fetch(request).then(function (answer) {
                     if (answer && answer.ok) {
-                        tiles.put(plain, answer.clone()).then(function () { return trim(tiles); });
+                        answer.clone().blob().then(function (body) {
+                            return write(SEEN, plain, {body: body, at: Date.now()});
+                        }).then(trim);
                     }
                     return answer;
                 }).catch(function () { return blank(); });
             });
         });
-    });
+    }).catch(function () { return blank(); });
 }
 
-// Oldest first, which is what `keys()` answers in. Not a true least-recently-used
-// -- reading a tile does not move it -- and saying so is cheaper than pretending.
-// The terrain cache is never handed to this.
-function trim(cache) {
-    return cache.keys().then(function (keys) {
-        if (keys.length <= TILE_CAP) { return null; }
-        return Promise.all(keys.slice(0, keys.length - TILE_CAP).map(function (key) {
-            return cache.delete(key);
-        }));
-    });
+// Oldest first, by when it was written. Not a true least-recently-used -- reading
+// a tile does not move it -- and saying so is cheaper than pretending. Only the
+// browse store is ever trimmed; what the reader asked for is never touched.
+//
+// **Counted, then the oldest walked off, and neither reads a tile.** `count()`
+// is one number out of the index and the cursor hands back keys, so trimming a
+// five-hundred-tile store never touches a blob.
+function trim() {
+    return base().then(function (open) {
+        return new Promise(function (done) {
+            var store = open.transaction(SEEN, "readwrite").objectStore(SEEN);
+            var counting = store.count();
+            counting.onsuccess = function () {
+                var over = counting.result - TILE_CAP;
+                if (over <= 0) { done(null); return; }
+                var walk = store.index("at").openKeyCursor();
+                walk.onsuccess = function () {
+                    var at = walk.result;
+                    if (!at || over <= 0) { done(null); return; }
+                    store.delete(at.primaryKey);
+                    over -= 1;
+                    at.continue();
+                };
+                walk.onerror = function () { done(null); };
+            };
+            counting.onerror = function () { done(null); };
+        });
+    }).catch(function () { return null; });
 }
 
 self.addEventListener("fetch", function (event) {
@@ -12648,18 +12726,38 @@ class _OfflinePanel(MacroElement):
                 // property the first place was chosen for.
                 var HELD = 'held';
                 var TIMING = 'timing';
+                var MOVED = 'migrated';
+                // The two tile stores, named as the worker names them.
+                var KEPT = 'tiles';
+                var SEEN = 'browse';
 
                 function db() {
                     if (!window.indexedDB) { return Promise.reject(new Error('no database')); }
                     if (!db.open) {
                         db.open = new Promise(function (done, fail) {
-                            var ask = window.indexedDB.open('trails', 1);
+                            // **The same number the worker opens with**, written
+                            // out because the two are separate scripts. They may
+                            // not disagree: a connection held at an older version
+                            // blocks the other's upgrade, and without `onblocked`
+                            // the wait never ends. Measured here -- the page held
+                            // 1 while the worker asked for 2, and the map stopped
+                            // opening altogether.
+                            var ask = window.indexedDB.open('trails', 2);
+                            ask.onblocked = function () { fail(new Error('blocked')); };
                             ask.onupgradeneeded = function () {
                                 var made = ask.result;
                                 if (!made.objectStoreNames.contains('pages')) { made.createObjectStore('pages'); }
                                 if (!made.objectStoreNames.contains('flags')) { made.createObjectStore('flags'); }
+                                if (!made.objectStoreNames.contains(KEPT)) { made.createObjectStore(KEPT); }
+                                if (!made.objectStoreNames.contains(SEEN)) {
+                                    made.createObjectStore(SEEN).createIndex('at', 'at');
+                                }
                             };
-                            ask.onsuccess = function () { done(ask.result); };
+                            ask.onsuccess = function () {
+                                var open = ask.result;
+                                open.onversionchange = function () { open.close(); db.open = null; };
+                                done(open);
+                            };
                             ask.onerror = function () { fail(ask.error); };
                         });
                     }
@@ -12674,6 +12772,17 @@ class _OfflinePanel(MacroElement):
                             ask.onerror = function () { fail(ask.error); };
                         });
                     }).catch(function () { return null; });
+                }
+
+                function dbClear(store) {
+                    return db().then(function (open) {
+                        return new Promise(function (done) {
+                            var deal = open.transaction(store, 'readwrite');
+                            deal.objectStore(store).clear();
+                            deal.oncomplete = function () { done(true); };
+                            deal.onerror = function () { done(false); };
+                        });
+                    }).catch(function () { return false; });
                 }
 
                 function dbWrite(store, key, value) {
@@ -12919,6 +13028,12 @@ class _OfflinePanel(MacroElement):
                         };
                         fitNativeZoom(both[0].top);
                         draw();
+                        // Asked after the panel has drawn, because asking is the
+                        // expensive act. It answers once and then costs nothing.
+                        lookForOlder().then(function (there) {
+                            if (snapshot) { snapshot.older = there; }
+                            draw();
+                        });
                         // **Said out loud, because the switch shows outside this
                         // panel now.** The chrome draws the tool's row with one
                         // of two icons depending on whether the ground is here,
@@ -12991,6 +13106,115 @@ class _OfflinePanel(MacroElement):
                     draw();
                 });
 
+                // **Asked once, and never in front of the reader.** `caches.has`
+                // touches Cache Storage, which is the twenty-three seconds this
+                // whole change is about. So it is asked after the panel has
+                // drawn, and once the answer is no it is written down and never
+                // asked again.
+                var older = null;
+
+                function lookForOlder() {
+                    if (older !== null) { return Promise.resolve(older); }
+                    return dbRead('flags', MOVED).then(function (done) {
+                        if (done || !window.caches || !caches.has) { older = false; return false; }
+                        return caches.has(TERRAIN).then(function (there) {
+                            older = !!there;
+                            if (!there) { dbWrite('flags', MOVED, true); }
+                            return older;
+                        });
+                    }).catch(function () { older = false; return false; });
+                }
+
+                // **Moved, not fetched again.** The ground is already on the
+                // device; what is wrong with it is only where it lies. A reader
+                // on a slow line should not pay for a hundred thousand tiles a
+                // second time because the map changed its mind about storage.
+                //
+                // **Enumerated once, and turned into addresses at once.** One
+                // `cache.keys()` hands back a `Request` per tile -- the
+                // allocation that crashed a phone earlier -- so the array is
+                // mapped to strings and the requests are let go in the same
+                // breath. What is left is about 15 MB for a hundred thousand,
+                // held for the length of one run.
+                //
+                // **Copied and then deleted, one tile at a time**, so the two
+                // copies never both exist: a store already holding gigabytes has
+                // no room to hold them twice. That also makes the run resumable
+                // for free -- what moved is gone from the old cache, so a second
+                // run has less to do and needs no bookkeeping to know it.
+                function moveGround() {
+                    if (working) { return working.done_; }
+                    if (!window.caches) { return Promise.resolve(); }
+                    lastRun = null;
+                    var state = {total: 0, done: 0, counted: true, failed: 0, held: 0,
+                                 added: 0, bytes: 0, top: 0, moving: true,
+                                 stop: false, done_: null};
+                    working = state;
+                    state.done_ = caches.open(TERRAIN).then(function (cache) {
+                        return cache.keys().then(function (keys) {
+                            var urls = [], i;
+                            for (i = 0; i < keys.length; i += 1) {
+                                if (keys[i].url.indexOf('trails.invalid') === -1) { urls.push(keys[i].url); }
+                            }
+                            return urls;
+                        }).then(function (urls) {
+                            state.total = urls.length;
+                            draw();
+                            var at = 0;
+                            function one() {
+                                if (state.stop || at >= urls.length) { return Promise.resolve(); }
+                                var url = urls[at];
+                                at += 1;
+                                return cache.match(url).then(function (found) {
+                                    if (!found) { return null; }
+                                    return found.blob().then(function (body) {
+                                        return dbWrite(KEPT, url, body);
+                                    }).then(function (written) {
+                                        if (!written) { state.failed += 1; return null; }
+                                        state.added += 1;
+                                        var parts = url.split('/');
+                                        var z = Number(parts[parts.length - 3]);
+                                        state.bytes += WEIGHT[z] || 45000;
+                                        if (z > state.top) { state.top = z; }
+                                        return cache.delete(url);
+                                    });
+                                }).catch(function () { state.failed += 1; return null; }).then(function () {
+                                    state.done += 1;
+                                    if (state.done % 25 === 0) { draw(); }
+                                    if (state.done % 2000 === 0) { note(state.added, state.bytes, state.top); }
+                                    return one();
+                                });
+                            }
+                            var runners = [], i;
+                            // Four rather than six: this is the disk answering
+                            // itself, with no network in it to wait on.
+                            for (i = 0; i < 4; i += 1) { runners.push(one()); }
+                            return Promise.all(runners);
+                        });
+                    }).then(function () {
+                        return note(state.added, state.bytes, state.top);
+                    }).then(function () {
+                        // **Only once nothing was left behind.** A stopped or
+                        // half-failed move leaves the old cache exactly as it
+                        // was minus what arrived, and running again finishes it.
+                        if (state.stop || state.failed) { return null; }
+                        older = false;
+                        return Promise.all([
+                            caches.delete(TERRAIN), caches.delete(TILES), dbWrite('flags', MOVED, true)
+                        ]);
+                    }).then(function () {
+                        working = null;
+                        letSleep();
+                        lastRun = {total: state.total, kept: state.added, held: 0,
+                                   added: state.added, failed: state.failed,
+                                   stalled: false, moved: true};
+                        return refresh();
+                    });
+                    keepAwake();
+                    draw();
+                    return state.done_;
+                }
+
                 function keep() {
                     if (working) { return working.done_; }
                     if (!window.caches) { return Promise.resolve(); }
@@ -13024,7 +13248,7 @@ class _OfflinePanel(MacroElement):
                                  held: 0, added: 0, bytes: 0, top: 0,
                                  stop: false, done_: null};
                     working = state;
-                    state.done_ = caches.open(TERRAIN).then(function (cache) {
+                    state.done_ = Promise.resolve().then(function () {
                         // How many have refused in a row. Shared by all six
                         // runners on purpose: it is the connection being
                         // measured, not any one of them.
@@ -13033,13 +13257,15 @@ class _OfflinePanel(MacroElement):
                             if (state.stop) { return Promise.resolve(); }
                             var next = walk.next();
                             if (!next) { return Promise.resolve(); }
-                            return cache.match(next.url).then(function (there) {
+                            return dbRead(KEPT, next.url).then(function (there) {
                                 if (there) { missed = 0; state.held += 1; return null; }
                                 return fetch(next.url, {cache: 'reload', mode: 'cors'}).then(function (answer) {
                                     if (answer && answer.ok) {
                                         missed = 0;
                                         state.added += 1;
-                                        return cache.put(next.url, answer);
+                                        return answer.blob().then(function (body) {
+                                            return dbWrite(KEPT, next.url, body);
+                                        });
                                     }
                                     state.failed += 1;
                                     missed += 1;
@@ -13127,7 +13353,11 @@ class _OfflinePanel(MacroElement):
                 function forget() {
                     if (!window.caches) { return Promise.resolve(); }
                     return Promise.all([
-                        caches.delete(TERRAIN), caches.delete(TILES), dbWrite('flags', HELD, null)
+                        dbClear(KEPT), dbClear(SEEN), dbWrite('flags', HELD, null),
+                        // What earlier versions wrote, in case the ground was
+                        // never moved across. Deleting a cache that is not there
+                        // is not an error.
+                        caches.delete(TERRAIN), caches.delete(TILES)
                     ]).then(function () {
                         remember(false);
                         return tellWorker(false);
@@ -13437,6 +13667,15 @@ class _OfflinePanel(MacroElement):
                         if (!window.confirm('Delete the terrain kept on this device?')) { return; }
                         forget();
                     });
+                    // **Offered rather than done quietly.** Moving a hundred
+                    // thousand tiles is minutes of work with the screen awake;
+                    // that is the reader's call, and until they make it the map
+                    // still opens and still draws what they kept.
+                    said.move = button('Move the ground\u2026', true);
+                    said.move.className = 'trails-offline-move';
+                    said.move.style.display = 'none';
+                    said.move.addEventListener('click', function () { moveGround(); });
+                    said.tools.appendChild(said.move);
                     said.tools.appendChild(said.keep);
                     said.tools.appendChild(said.forget);
                     holder.appendChild(said.state);
@@ -13629,6 +13868,15 @@ class _OfflinePanel(MacroElement):
                     sayLayer();
                 }
 
+                // What a move says while it runs. Its total is not known until
+                // the old cache has been listed, which is one pass and the only
+                // one this makes.
+                function state_moving(run) {
+                    if (!run.total) { return 'Looking at what is already on this device\u2026'; }
+                    return 'Moving ' + count(run.done) + ' of ' + count(run.total) +
+                        ' to the new store' + (run.failed ? ' \u00b7 ' + count(run.failed) + ' refused' : '');
+                }
+
                 function draw() {
                     if (!holder) { return; }
                     // **The three fields a run moves are refreshed here, because
@@ -13681,11 +13929,24 @@ class _OfflinePanel(MacroElement):
                     said.toggle.setAttribute('aria-pressed', have.on ? 'true' : 'false');
                     said.toggle.disabled = !have.available;
                     said.toggle.style.opacity = have.available ? '1' : '0.5';
-                    if (working) {
+                    said.move.style.display = have.older && !working ? '' : 'none';
+                    if (working && working.moving) {
+                        said.figures.textContent = state_moving(working);
+                    } else if (working) {
                         said.figures.textContent = working.counted
                             ? 'Keeping ' + count(working.done) + ' of ' + count(working.total) +
                               (working.failed ? ' \\u00b7 ' + working.failed + ' refused' : '')
                             : 'Checking what is already kept\\u2026';
+                    } else if (have.older) {
+                        // **Said before it is asked for.** The ground is on the
+                        // device and the map can read it; what it cannot do is
+                        // open quickly while it is where it lies.
+                        said.figures.textContent = 'The ground you kept is in the old store. Moving it is ' +
+                            'why this map takes twenty seconds to open \u2014 nothing is downloaded again.';
+                    } else if (lastRun && lastRun.moved) {
+                        said.figures.textContent = 'Moved ' + count(lastRun.added) + ' tiles to the new store' +
+                            (lastRun.failed ? ' \u00b7 ' + count(lastRun.failed) + ' refused, so the old one is still there'
+                                            : ' \u00b7 the old one is gone') + '.';
                     } else if (lastRun && lastRun.offline) {
                         said.figures.textContent = 'No connection \\u2014 nothing was tried, and nothing ' +
                             'was spent looking. Try again where there is signal.';
@@ -13772,9 +14033,8 @@ class _OfflinePanel(MacroElement):
                         if (there.known) { return there.tiles > 0; }
                         var first = walker().next();
                         if (!first) { return false; }
-                        return caches.open(TERRAIN).then(function (cache) {
-                            return cache.match(first.url);
-                        }).then(function (one) { return !!one; }).catch(function () { return false; });
+                        return dbRead(KEPT, first.url).then(function (one) { return !!one; })
+                            .catch(function () { return false; });
                     });
                 }
 
@@ -13813,6 +14073,7 @@ class _OfflinePanel(MacroElement):
                     // takes one; see `freshRow`.
                     freshness: freshRow,
                     refresh: refresh,
+                    move: moveGround,
                     state: function () { return snapshot; },
                     scopes: SCOPES.map(function (each) { return each.key; }),
                     open: function (want) { chooser = want === undefined ? true : !!want; return refresh(); },
