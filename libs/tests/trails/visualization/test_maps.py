@@ -1011,6 +1011,48 @@ class TestOfflinePanel:
         assert "'No connection \\u2014 nothing was tried, and nothing '" in html
 
 
+class TestThePageAccountsForItsOwnOpening:
+    """The one gap no check here can cross: how long this costs on the device."""
+
+    @staticmethod
+    def rendered():
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        return fmap.get_root().render()
+
+    def test_the_page_marks_its_own_opening(self):
+        """An installed app on a phone reported ten to twenty seconds to open
+        where every check in this project measures 1.8 s — and every one of them
+        is Firefox on Linux, so the gap is exactly the part that cannot be
+        measured from here."""
+        html = self.rendered()
+        # The head macro runs before the body exists; the chrome is added last,
+        # so what lies between the two marks is the map being built.
+        assert "window.trailsOpened = {head: performance.now()};" in html
+        assert "if (window.trailsOpened) { window.trailsOpened.chrome = performance.now(); }" in html
+        assert "function openCost() {" in html
+        assert "build: since(marks.chrome, marks.head)," in html
+
+    def test_it_asks_what_the_worker_cost(self):
+        """With offline mode on the document comes out of the Cache API, where
+        it is held at its decoded 15.7 MB rather than the 5.2 MB brotli the
+        network sends — beside a store holding gigabytes of tiles. That is the
+        suspicion this line exists to confirm or kill."""
+        html = self.rendered()
+        assert "worker: nav.workerStart ? since(nav.responseStart, nav.workerStart) : null," in html
+
+    def test_the_figures_are_read_on_the_way_in(self):
+        """The chrome is built before `load` has fired, so every figure that ends
+        at `loadEventEnd` was zero: the line said *opened in 0 ms* about a page
+        that had taken 1.7 seconds."""
+        html = self.rendered()
+        assert "if (key === 'info') { sayOpenCost(); }" in html
+        assert "sourcesHolder.insertBefore(costLine, sourcesHolder.firstChild);" in html
+        # Built empty and filled later, rather than composed once and left.
+        assert "function sayOpenCost() {" in html
+        assert "costLine.textContent = parts.join" in html
+
+
 class TestNothingGrowsWithTheDownload:
     """What an installed app can hold while it keeps a hundred thousand tiles."""
 

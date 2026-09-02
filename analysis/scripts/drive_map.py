@@ -3625,6 +3625,29 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 True,
             )
         )
+        # **What the page says opening it cost.** No check here can measure the
+        # device this map is carried on -- an installed app reported ten to
+        # twenty seconds where this run measures under two -- so the page keeps
+        # its own account and `Sources` reads it out. Driven for the shape of the
+        # sentence, not the figures: those belong to whatever opened it.
+        said_cost = first.evaluate("() => (document.querySelector('.trails-dock .trails-open-cost') || {}).textContent || ''")
+        cost = first.evaluate("() => window.trailsOpened.cost()")
+        newer.append(
+            Reading(
+                "the page says what opening it cost",
+                said_cost.startswith("Opened in ") and "document" in said_cost,
+                True,
+                note=said_cost[:120],
+            )
+        )
+        newer.append(
+            Reading(
+                "and the map's own build is a figure in it",
+                cost["build"] is not None and cost["build"] > 0,
+                True,
+                note=f"{cost['build']} ms building, {cost['parse']} ms parsing, {cost['bytes'] / 1e6:.1f} MB",
+            )
+        )
         first.evaluate("() => window.trailsChrome.close()")
         idle.append(
             Reading(

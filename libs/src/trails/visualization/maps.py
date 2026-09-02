@@ -1523,6 +1523,15 @@ class _Theme(MacroElement):
 
             stamp();
 
+            // **The first of three marks, and the earliest one this page can
+            // take.** An installed app on a phone reported ten to twenty seconds
+            // to open where every check in this project measures 1.8 s -- and
+            // every one of those checks is Firefox on Linux. Rather than guess
+            // across that gap, the page keeps its own account of what opening it
+            // cost and the Sources panel reads it out. This macro is in the head,
+            // so it runs before the body exists.
+            window.trailsOpened = {head: performance.now()};
+
             window.trailsTheme = {
                 choices: ['auto', 'light', 'dark'],
                 choice: function () { return choice; },
@@ -14002,6 +14011,11 @@ class _Chrome(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
         (function () {
+            // **The second mark**, taken before this panel builds anything. The
+            // chrome is added last, so everything between it and the mark in the
+            // head is the map itself: 11,302 polylines, 1,411 circle markers and
+            // 867 labels, measured on this build. See `openCost`.
+            if (window.trailsOpened) { window.trailsOpened.chrome = performance.now(); }
             var map = {{ this._parent.get_name() }};
             var NARROW = {{ this.narrow_px }};
             // What this map draws. `null` where nobody said, and then nothing
@@ -14320,6 +14334,73 @@ class _Chrome(MacroElement):
                 });
                 sourcesHolder.innerHTML = out || '<p style="color:var(--trails-ink-5)">No sources were handed to this page.</p>';
             })();
+            // **What this page cost to open, in the panel about the page.**
+            // An installed app on a phone reported ten to twenty seconds where
+            // every check in this project measures 1.8 s -- and every one of
+            // those checks is Firefox on Linux, so the gap is exactly the part
+            // that cannot be measured from here. The page therefore keeps its
+            // own account and the reader can read it out on the device.
+            //
+            // **`worker` is the number this was built for.** With offline mode on
+            // the document comes out of the Cache API, where it is held at its
+            // decoded 15.7 MB rather than the 5.2 MB brotli the network sends --
+            // beside a store holding gigabytes of tiles. If that is where the
+            // seconds are, this line says so; if it is the parse, it says that
+            // instead. Either way it stops being a guess.
+            function openCost() {
+                var nav = (performance.getEntriesByType('navigation') || [])[0];
+                if (!nav) { return null; }
+                var marks = window.trailsOpened || {};
+                var graph = window.trailsGraph || {};
+                var since = function (a, b) {
+                    return (a && b && a > b) ? Math.round(a - b) : null;
+                };
+                return {
+                    total: Math.round(nav.loadEventEnd || nav.domComplete || 0),
+                    // How long the worker held the request before answering: the
+                    // cost of reading the document out of the Cache API.
+                    worker: nav.workerStart ? since(nav.responseStart, nav.workerStart) : null,
+                    fetch: since(nav.responseEnd, nav.requestStart),
+                    // The head mark to the chrome mark is the map being built.
+                    build: since(marks.chrome, marks.head),
+                    parse: since(nav.domInteractive, nav.responseEnd),
+                    after: since(nav.domComplete, nav.domInteractive),
+                    graph: Math.round((graph.inflateMs || 0) + (graph.decodeMs || 0)) || null,
+                    bytes: nav.decodedBodySize || 0,
+                    wire: nav.transferSize || 0
+                };
+            }
+
+            function seconds(ms) {
+                if (ms === null || ms === undefined) { return '\u2014'; }
+                return ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms';
+            }
+
+            // **Filled when the panel is opened, not when it is built.** The
+            // chrome is built before `load` has fired, so every figure that ends
+            // at `loadEventEnd` was zero -- the line said *opened in 0 ms* about
+            // a page that had taken 1.7 seconds. Written on the way in instead,
+            // where the reader is about to look at it.
+            var costLine = document.createElement('p');
+            costLine.className = 'trails-open-cost';
+            costLine.style.cssText = 'margin:0 0 8px;color:var(--trails-ink-5);font-size:11px;line-height:1.5';
+
+            function sayOpenCost() {
+                var cost = openCost();
+                if (!cost) { return; }
+                var parts = ['Opened in ' + seconds(cost.total)];
+                if (cost.bytes) { parts.push(Math.round(cost.bytes / 1e5) / 10 + ' MB document'); }
+                if (cost.worker !== null) { parts.push('worker ' + seconds(cost.worker)); }
+                else if (cost.fetch !== null) { parts.push('fetched ' + seconds(cost.fetch)); }
+                if (cost.parse !== null) { parts.push('parsed ' + seconds(cost.parse)); }
+                if (cost.build !== null) { parts.push('map built ' + seconds(cost.build)); }
+                if (cost.graph) { parts.push('graph ' + seconds(cost.graph)); }
+                costLine.textContent = parts.join(' \u00b7 ') + '.';
+            }
+
+            window.trailsOpened = window.trailsOpened || {};
+            window.trailsOpened.cost = openCost;
+
             // **How old this copy is, above the credits.** `Sources` is the
             // panel about the page rather than about the ground, and when this
             // map was built is exactly that -- it already says who made the
@@ -14334,6 +14415,7 @@ class _Chrome(MacroElement):
             if (window.trailsOffline && window.trailsOffline.freshness) {
                 sourcesHolder.insertBefore(window.trailsOffline.freshness(), sourcesHolder.firstChild);
             }
+            sourcesHolder.insertBefore(costLine, sourcesHolder.firstChild);
             byKey.info.holder = sourcesHolder;
 
             // ---- what is kept on this device ----------------------------------
@@ -14901,6 +14983,9 @@ class _Chrome(MacroElement):
             function pick(key) {
                 var tool = byKey[key];
                 if (!tool) { return; }
+                // The graph settles after the map is drawn, so this is read on
+                // the way in rather than written once and left to go stale.
+                if (key === 'info') { sayOpenCost(); }
                 // With something selected this shows and hides the panel and
                 // opens no dock: the panel *is* what the tool is for. With
                 // nothing selected it falls through and the dock explains it.
