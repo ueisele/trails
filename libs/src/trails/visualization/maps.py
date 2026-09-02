@@ -1218,20 +1218,16 @@ class _ScaleZoom(MacroElement):
                         line = document.createElement('div');
                         line.className = 'trails-scale-zoom';
                         box.appendChild(line);
-                        // **Beside the bar rather than under it.** Two lines at
-                        // the very bottom of an installed app is two lines in the
-                        // one place iOS keeps for itself: the home indicator sits
-                        // over whatever is there, and the zoom was the half that
-                        // went. One line is half the height and half the exposure
-                        // -- and it reads better, which was luck rather than
-                        // design.
+                        // **Under the bar, which is where it was and where it
+                        // belongs.** It went beside it for a while, to keep two
+                        // lines out of the strip the home indicator sits on --
+                        // and that was solving the wrong problem: the corner is
+                        // now held inside the safe area, so there is nothing to
+                        // squeeze out of. Asked for back the way it was.
                         //
                         // Not written into Leaflet's own scale line: that element
                         // has its text replaced on every move, and anything put
                         // inside it goes with it.
-                        box.style.display = 'flex';
-                        box.style.alignItems = 'baseline';
-                        box.style.gap = '6px';
                     }
                     // The resolution the map is actually drawing at, asked of
                     // Leaflet rather than worked out from the zoom: a fractional
@@ -1632,13 +1628,9 @@ class _Theme(MacroElement):
         .leaflet-bottom { padding-bottom: env(safe-area-inset-bottom); }
         .leaflet-left { padding-left: env(safe-area-inset-left); }
         .leaflet-right { padding-right: env(safe-area-inset-right); }
-        /* The rail and its narrow-screen stand-in are anchored to the top right
-           by inline `top`/`right`; a margin moves an absolutely positioned box
-           without touching what set it. */
-        .trails-rail, .trails-burger {
-            margin-top: env(safe-area-inset-top);
-            margin-right: env(safe-area-inset-right);
-        }
+        /* The rail, the burger and every panel are children of `.trails-chrome`,
+           which is itself held inside the safe area -- so none of them needs a
+           rule here, and one would be the inset applied twice. */
         .leaflet-control-scale-line {
             background: var(--trails-panel) !important;
             color: var(--trails-ink-2) !important;
@@ -14660,7 +14652,20 @@ class _Chrome(MacroElement):
 
             var chrome = document.createElement('div');
             chrome.className = 'trails-chrome';
-            chrome.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;z-index:1100;' +
+            // **Inset here, once, rather than in nine places.** The rail, the
+            // burger, the dock, the menu, the sheet and the plan bar are all
+            // children of this box, so holding it inside the safe area holds all
+            // of them -- and the map underneath still reaches the physical edges,
+            // which is what `viewport-fit=cover` is for.
+            //
+            // Reported from the device: with the insets live but this box still
+            // at 0, a panel's heading and its close button were drawn under the
+            // clock, and the button could not be tapped at all. Anything a finger
+            // is meant to reach belongs below the point where the screen is its
+            // full width.
+            chrome.style.cssText = 'position:absolute;z-index:1100;' +
+                'left:env(safe-area-inset-left);top:env(safe-area-inset-top);' +
+                'right:env(safe-area-inset-right);bottom:env(safe-area-inset-bottom);' +
                 'pointer-events:none;font-family:sans-serif;font-size:12px;line-height:1.4;color:var(--trails-ink)';
             container.appendChild(chrome);
 

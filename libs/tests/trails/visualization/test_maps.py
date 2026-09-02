@@ -1063,6 +1063,37 @@ class TestThePageAccountsForItsOwnOpening:
         assert "costLine.textContent = parts.join" in html
 
 
+class TestTheFurnitureStaysInsideTheScreen:
+    """What a finger can reach, on a phone that keeps two strips for itself."""
+
+    @staticmethod
+    def rendered():
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        return fmap.get_root().render()
+
+    def test_the_map_reaches_the_edges_and_the_furniture_does_not(self):
+        """Reported from the device: with `viewport-fit=cover` live but the
+        overlay still at zero, a panel's heading and its close button were drawn
+        under the clock and the button could not be tapped at all. The map is
+        meant to fill the screen; anything a finger is for belongs below the
+        point where the screen is its full width."""
+        html = self.rendered()
+        assert "left:env(safe-area-inset-left);top:env(safe-area-inset-top);" in html
+        assert "right:env(safe-area-inset-right);bottom:env(safe-area-inset-bottom);" in html
+        # Leaflet's own corners are not inside that box, so they are held by
+        # their four containers instead.
+        assert ".leaflet-bottom { padding-bottom: env(safe-area-inset-bottom); }" in html
+        assert ".leaflet-top { padding-top: env(safe-area-inset-top); }" in html
+
+    def test_the_inset_is_applied_once(self):
+        """The rail, the burger, the dock, the menu, the sheet and the plan bar
+        are all children of the overlay, so a rule of their own would be the
+        same inset a second time."""
+        html = self.rendered()
+        assert "margin-top: env(safe-area-inset-top)" not in html
+
+
 class TestNothingInThePanelIsDeclaredTwice:
     """The one mistake this file makes twice in an afternoon."""
 
