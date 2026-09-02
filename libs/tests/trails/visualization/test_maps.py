@@ -336,7 +336,7 @@ class TestOfflineWorker:
         is wrong; drawing nothing says the ground was not kept, which is true."""
         assert "function blank()" in maps.SERVICE_WORKER
         assert 'status: 200, headers: {"content-type": "image/png"}' in maps.SERVICE_WORKER
-        assert "if (off) { return blank(); }" in maps.SERVICE_WORKER
+        assert 'if (off) { tally("blank"); return blank(); }' in maps.SERVICE_WORKER
 
     def test_a_deliberate_download_is_not_answered_by_the_worker(self):
         """The panel fetches what the reader asked to keep with `cache:
@@ -719,9 +719,7 @@ class TestOfflinePanel:
         which is what this selection has on the device — the two figures the loop
         could only get by asking the cache for every tile in turn."""
         panel = self.panel()
-        settle = panel.split("function keep() {")[1].split(
-            "}).then(function () {\n                        working = null;"
-        )[1]
+        settle = panel.split("function keep() {")[1].split("}).then(function () {\n                        working = null;")[1]
         assert "kept: state.held + state.added," in settle
         assert "if (!lastRun.kept) { return refresh(); }" in settle
         assert settle.index("if (!lastRun.kept)") < settle.index("remember(true)")
@@ -1085,7 +1083,7 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         html = self.rendered()
         for store in ("pages", "flags"):
             assert f"createObjectStore('{store}')" in html
-            assert f'contains({store.upper()})' in maps.SERVICE_WORKER or f'"{store}"' in maps.SERVICE_WORKER
+            assert f"contains({store.upper()})" in maps.SERVICE_WORKER or f'"{store}"' in maps.SERVICE_WORKER
         assert "createObjectStore(KEPT)" in html and "createObjectStore(KEPT)" in maps.SERVICE_WORKER
         assert "createObjectStore(SEEN).createIndex" in html
         assert "createObjectStore(SEEN).createIndex" in maps.SERVICE_WORKER
@@ -1127,7 +1125,7 @@ class TestNothingGrowsWithTheDownload:
         of strings — and the only other caller used it to ask how long the array
         was."""
         html = self.rendered()
-        assert "function walker() {" in html
+        assert "function walker(picked) {" in html
         assert "it = set.values();" in html
         assert "var step = it.next();" in html
         # The count comes from the weights, which already had it.
@@ -1135,8 +1133,14 @@ class TestNothingGrowsWithTheDownload:
         # The one place a list of addresses is still built is the move off
         # the old store, which has to be handed a listing and turns it into
         # strings in the same breath — see `moveGround`.
-        run = html.split("function walker() {")[1].split("\n                function ")[0]
+        run = html.split("function walker(picked) {")[1].split("\n                function ")[0]
         assert "urls.push(" not in run
+        # **And the move off the old store lists nothing either.** Its first
+        # version asked `cache.keys()` what was there; on the phone this was
+        # written for, that call did not return and took the app with it.
+        moving = html.split("function moveGround() {")[1].split("\n                function ")[0]
+        assert "cache.keys()" not in "\n".join(line for line in moving.split("\n") if not line.strip().startswith("//"))
+        assert "var walk = walker(everything());" in moving
 
     def test_what_is_kept_is_written_down_not_counted_out(self):
         """`cache.keys()` over the terrain cache ran on every `refresh` — on

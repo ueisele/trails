@@ -364,6 +364,7 @@ var TILE_HOST = "cache.kartverket.no";
 // The panel's own record of what is kept lives here for the same reason.
 var STATE = "offline";
 var TIMING = "timing";
+var TILES_SAID = "tiles-said";
 var switched = null;
 
 // A tile that is not kept, while the switch is on: a 1x1 transparent PNG,
@@ -635,38 +636,78 @@ function stillInCaches() {
     return legacy;
 }
 
+// Held open, because opening is the expensive act and this is asked once per
+// tile.
+//
+// **A minute, not a few seconds.** The first version capped this at eight, which
+// would have been the bug it was meant to prevent: opening this cache is
+// *measured* at 23 seconds on the phone in question, so a short cap turns a slow
+// tile into a blank one and the reader loses ground they have. The cap is here
+// only so that a store which never answers cannot hold a tile open for ever.
+var terrainCache = null;
+
 function fromLegacy(plain) {
     return stillInCaches().then(function (old) {
         if (!old) { return null; }
-        return caches.open(TERRAIN).then(function (cache) {
+        if (!terrainCache) { terrainCache = caches.open(TERRAIN); }
+        return within(60000, terrainCache.then(function (cache) {
             return cache.match(plain);
-        }).catch(function () { return null; });
-    });
+        }), null);
+    }).catch(function () { return null; });
+}
+
+// **What the tiles did, because a blank says nothing about why.** Every path
+// out of `tileFor` ends in an image, and three of the four are indistinguishable
+// on the screen: a tile from the database, one from the old cache and one from
+// the network all just appear, and a blank just does not. Shipped without this,
+// the ground stopped appearing at all and there was no way to ask where it had
+// gone. Written to the same small row the navigation timings use, at most once a
+// second, so a hundred thousand tiles do not become a hundred thousand writes.
+var told = {db: 0, seen: 0, legacy: 0, net: 0, blank: 0, why: null, at: 0};
+
+function tally(which, why) {
+    told[which] += 1;
+    if (why && !told.why) { told.why = String(why).slice(0, 120); }
+    if (Date.now() - told.at < 1000) { return; }
+    told.at = Date.now();
+    write(FLAGS, TILES_SAID, told);
+}
+
+// **Never hangs, whatever the database does.** A read that does not answer used
+// to leave `respondWith` unresolved, and an unresolved tile is one Leaflet waits
+// on for ever -- which is the difference between a slow map and a blank one.
+function within(ms, work, fallback) {
+    return Promise.race([
+        work,
+        new Promise(function (done) { setTimeout(function () { done(fallback); }, ms); })
+    ]);
 }
 
 function tileFor(request) {
     var plain = request.url.split("?")[0];
-    return Promise.all([read(KEPT, plain), offlineNow()]).then(function (two) {
-        if (two[0]) { return new Response(two[0]); }
-        var off = two[1];
-        return read(SEEN, plain).then(function (seen) {
-            if (seen && seen.body) { return new Response(seen.body); }
-            // Until the reader has moved their ground across, it is still where
-            // they left it. After that this costs one memoised boolean.
-            return fromLegacy(plain).then(function (older) {
-                if (older) { return older; }
-                if (off) { return blank(); }
-                return fetch(request).then(function (answer) {
-                    if (answer && answer.ok) {
-                        answer.clone().blob().then(function (body) {
-                            return write(SEEN, plain, {body: body, at: Date.now()});
-                        }).then(trim);
-                    }
-                    return answer;
-                }).catch(function () { return blank(); });
+    return within(4000, Promise.all([read(KEPT, plain), offlineNow()]), [null, false])
+        .then(function (two) {
+            if (two[0]) { tally("db"); return new Response(two[0]); }
+            var off = two[1];
+            return within(4000, read(SEEN, plain), null).then(function (seen) {
+                if (seen && seen.body) { tally("seen"); return new Response(seen.body); }
+                // Until the reader has moved their ground across, it is still
+                // where they left it.
+                return fromLegacy(plain).then(function (older) {
+                    if (older) { tally("legacy"); return older; }
+                    if (off) { tally("blank"); return blank(); }
+                    return fetch(request).then(function (answer) {
+                        if (answer && answer.ok) {
+                            tally("net");
+                            answer.clone().blob().then(function (body) {
+                                return write(SEEN, plain, {body: body, at: Date.now()});
+                            }).then(trim).catch(function () { return null; });
+                        }
+                        return answer;
+                    }).catch(function (gone) { tally("blank", gone); return blank(); });
+                });
             });
-        });
-    }).catch(function () { return blank(); });
+        }).catch(function (gone) { tally("blank", gone); return blank(); });
 }
 
 // Oldest first, by when it was written. Not a true least-recently-used -- reading
@@ -12507,8 +12548,21 @@ class _OfflinePanel(MacroElement):
                 // only other caller used it to ask how long the array was. The
                 // download wants them one at a time and nothing wants them all at
                 // once, so now nothing holds more than one.
-                function walker() {
-                    var picked = recount(), layer = base();
+                // **The whole box, without asking the chooser.** The move off
+                // the old store needs the addresses of everything a reader could
+                // have kept there, and the reader's current selection is not
+                // that. Built the same way `recount` builds one, and not put in
+                // its memo, so opening the panel afterwards still shows what they
+                // had chosen.
+                function everything() {
+                    var levels = levelsFor(coreOf('all'), CAP_ZOOM, scopeOf('all').pad);
+                    var sum = weigh(levels);
+                    return {levels: levels, top: CAP_ZOOM, tiles: sum.tiles, bytes: sum.bytes};
+                }
+
+                function walker(picked) {
+                    picked = picked || recount();
+                    var layer = base();
                     var z = BOTTOM, it = null;
                     return {
                         total: layer ? picked.tiles : 0,
@@ -13146,57 +13200,60 @@ class _OfflinePanel(MacroElement):
                     if (working) { return working.done_; }
                     if (!window.caches) { return Promise.resolve(); }
                     lastRun = null;
-                    var state = {total: 0, done: 0, counted: true, failed: 0, held: 0,
+                    // **Walked, not listed.** The first version asked the old
+                    // cache what it held. `cache.keys()` hands back a `Request`
+                    // per tile and there are a hundred thousand of them, and on
+                    // the phone this was written for it did not return -- the
+                    // panel sat at *looking at what is already on this device*
+                    // and the app went down with it. So nothing here asks that
+                    // question: it walks the addresses the whole box would have,
+                    // which is a bounded walk over a `Set`, and asks the cache
+                    // about one at a time.
+                    //
+                    // What that covers is everything inside the map's own box up
+                    // to z16, which is what `The whole map` keeps. Ground kept
+                    // finer than that along a route is not walked, and goes with
+                    // the old store when it is deleted -- said on the button, and
+                    // cheap to keep again afterwards.
+                    var walk = walker(everything());
+                    var state = {total: walk.total, done: 0, counted: true, failed: 0, held: 0,
                                  added: 0, bytes: 0, top: 0, moving: true,
                                  stop: false, done_: null};
                     working = state;
                     state.done_ = caches.open(TERRAIN).then(function (cache) {
-                        return cache.keys().then(function (keys) {
-                            var urls = [], i;
-                            for (i = 0; i < keys.length; i += 1) {
-                                if (keys[i].url.indexOf('trails.invalid') === -1) { urls.push(keys[i].url); }
-                            }
-                            return urls;
-                        }).then(function (urls) {
-                            state.total = urls.length;
-                            draw();
-                            var at = 0;
-                            function one() {
-                                if (state.stop || at >= urls.length) { return Promise.resolve(); }
-                                var url = urls[at];
-                                at += 1;
-                                return cache.match(url).then(function (found) {
-                                    if (!found) { return null; }
-                                    return found.blob().then(function (body) {
-                                        return dbWrite(KEPT, url, body);
-                                    }).then(function (written) {
-                                        if (!written) { state.failed += 1; return null; }
-                                        state.added += 1;
-                                        var parts = url.split('/');
-                                        var z = Number(parts[parts.length - 3]);
-                                        state.bytes += WEIGHT[z] || 45000;
-                                        if (z > state.top) { state.top = z; }
-                                        return cache.delete(url);
-                                    });
-                                }).catch(function () { state.failed += 1; return null; }).then(function () {
-                                    state.done += 1;
-                                    if (state.done % 25 === 0) { draw(); }
-                                    if (state.done % 2000 === 0) { note(state.added, state.bytes, state.top); }
-                                    return one();
+                        function one() {
+                            if (state.stop) { return Promise.resolve(); }
+                            var next = walk.next();
+                            if (!next) { return Promise.resolve(); }
+                            return cache.match(next.url).then(function (found) {
+                                if (!found) { return null; }
+                                return found.blob().then(function (body) {
+                                    return dbWrite(KEPT, next.url, body);
+                                }).then(function (written) {
+                                    if (!written) { state.failed += 1; return null; }
+                                    state.added += 1;
+                                    state.bytes += WEIGHT[next.z] || 45000;
+                                    if (next.z > state.top) { state.top = next.z; }
+                                    return cache.delete(next.url);
                                 });
-                            }
-                            var runners = [], i;
-                            // Four rather than six: this is the disk answering
-                            // itself, with no network in it to wait on.
-                            for (i = 0; i < 4; i += 1) { runners.push(one()); }
-                            return Promise.all(runners);
-                        });
+                            }).catch(function () { state.failed += 1; return null; }).then(function () {
+                                state.done += 1;
+                                if (state.done % 50 === 0) { draw(); }
+                                if (state.done % 4000 === 0) { note(state.added, state.bytes, state.top); }
+                                return one();
+                            });
+                        }
+                        var runners = [], i;
+                        // Four rather than six: this is the disk answering
+                        // itself, with no network in it to wait on.
+                        for (i = 0; i < 4; i += 1) { runners.push(one()); }
+                        return Promise.all(runners);
                     }).then(function () {
                         return note(state.added, state.bytes, state.top);
                     }).then(function () {
-                        // **Only once nothing was left behind.** A stopped or
-                        // half-failed move leaves the old cache exactly as it
-                        // was minus what arrived, and running again finishes it.
+                        // **Only once the walk finished.** A stopped or
+                        // half-failed move leaves the old store exactly as it was
+                        // minus what arrived, and running again finishes it.
                         if (state.stop || state.failed) { return null; }
                         older = false;
                         return Promise.all([
@@ -13207,13 +13264,14 @@ class _OfflinePanel(MacroElement):
                         letSleep();
                         lastRun = {total: state.total, kept: state.added, held: 0,
                                    added: state.added, failed: state.failed,
-                                   stalled: false, moved: true};
+                                   stalled: false, moved: true, stopped: state.stop};
                         return refresh();
                     });
                     keepAwake();
                     draw();
                     return state.done_;
                 }
+
 
                 function keep() {
                     if (working) { return working.done_; }
@@ -13671,7 +13729,7 @@ class _OfflinePanel(MacroElement):
                     // thousand tiles is minutes of work with the screen awake;
                     // that is the reader's call, and until they make it the map
                     // still opens and still draws what they kept.
-                    said.move = button('Move the ground\u2026', true);
+                    said.move = button('Move the ground to the new store', true);
                     said.move.className = 'trails-offline-move';
                     said.move.style.display = 'none';
                     said.move.addEventListener('click', function () { moveGround(); });
@@ -13872,9 +13930,9 @@ class _OfflinePanel(MacroElement):
                 // the old cache has been listed, which is one pass and the only
                 // one this makes.
                 function state_moving(run) {
-                    if (!run.total) { return 'Looking at what is already on this device\u2026'; }
-                    return 'Moving ' + count(run.done) + ' of ' + count(run.total) +
-                        ' to the new store' + (run.failed ? ' \u00b7 ' + count(run.failed) + ' refused' : '');
+                    return 'Looking at ' + count(run.done) + ' of ' + count(run.total) +
+                        ' \u00b7 ' + count(run.added) + ' moved so far' +
+                        (run.failed ? ' \u00b7 ' + count(run.failed) + ' refused' : '');
                 }
 
                 function draw() {
@@ -13941,8 +13999,9 @@ class _OfflinePanel(MacroElement):
                         // **Said before it is asked for.** The ground is on the
                         // device and the map can read it; what it cannot do is
                         // open quickly while it is where it lies.
-                        said.figures.textContent = 'The ground you kept is in the old store. Moving it is ' +
-                            'why this map takes twenty seconds to open \u2014 nothing is downloaded again.';
+                        said.figures.textContent = 'The ground you kept is in the old store, which is why this ' +
+                            'map takes twenty seconds to open. Moving it downloads nothing. It covers the whole ' +
+                            'box up to z' + CAP_ZOOM + '; ground kept finer than that along a route is not moved.';
                     } else if (lastRun && lastRun.moved) {
                         said.figures.textContent = 'Moved ' + count(lastRun.added) + ' tiles to the new store' +
                             (lastRun.failed ? ' \u00b7 ' + count(lastRun.failed) + ' refused, so the old one is still there'
@@ -14843,9 +14902,22 @@ class _Chrome(MacroElement):
                 // any page is listening -- so it is read here, after the fact.
                 if (!window.trailsOffline || !window.trailsOffline.dbRead) { return; }
                 window.trailsOffline.dbRead('flags', 'timing').then(function (spent) {
-                    if (!spent) { return; }
-                    tileLine.textContent = said + ' Worker: store open ' + seconds(spent.open) +
-                        ', page found ' + seconds(spent.match) + ', switch read ' + seconds(spent.flag) + '.';
+                    if (spent) {
+                        tileLine.textContent = said + ' Worker: store open ' + seconds(spent.open) +
+                            ', page found ' + seconds(spent.match) + ', switch read ' + seconds(spent.flag) + '.';
+                    }
+                    // **Where the tiles came from, which the screen cannot say.**
+                    // A tile out of the database, one out of the old cache and
+                    // one off the network all simply appear; a blank simply does
+                    // not, and shipped without this the ground stopped appearing
+                    // with no way to ask where it had gone.
+                    return window.trailsOffline.dbRead('flags', 'tiles-said');
+                }).then(function (told) {
+                    if (!told) { return; }
+                    tileLine.textContent += ' Tiles: ' + told.db + ' from the store, ' +
+                        told.seen + ' seen before, ' + told.legacy + ' from the old cache, ' +
+                        told.net + ' fetched, ' + told.blank + ' blank' +
+                        (told.why ? ' \u00b7 ' + told.why : '') + '.';
                 }).catch(function () { return; });
             }
 
