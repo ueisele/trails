@@ -293,13 +293,24 @@ class TestOfflineWorker:
         trimming = maps.SERVICE_WORKER.split("function trim()")[1].split("\nfunction ")[0]
         assert "SEEN" in trimming and "KEPT" not in trimming
 
-    def test_neither_tile_cache_is_swept_by_a_deploy(self):
-        """The terrain is not stamped with anything and must survive every
-        deploy. A reader who kept the park before a typo was fixed would
-        otherwise be asked to download it again after it."""
+    def test_every_cache_an_earlier_version_wrote_is_swept(self):
+        """Nothing reads a cache any longer, so whatever is left in one is
+        unreachable — gigabytes on a phone no code can answer from, which is
+        worse than deleting them. It runs on activation, after the navigation
+        has been answered: `caches.keys()` is the call measured at 23 seconds
+        on a phone with the ground kept, and it must not happen in front of
+        anybody."""
+        assert "var CAST_OFF = /^trails-(page-|state$|terrain$|tiles$)/;" in maps.SERVICE_WORKER
         sweep = maps.SERVICE_WORKER.split("function sweepOldCaches()")[1].split("\nfunction ")[0]
-        assert 'name.indexOf("trails-page-") === 0' in sweep
-        assert "TERRAIN" not in sweep and "TILES" not in sweep
+        assert "CAST_OFF.test(name) ? caches.delete(name) : null" in sweep
+
+    def test_nothing_on_the_way_to_a_tile_touches_a_cache(self):
+        """A cache read anywhere in this path brings back the cost the whole
+        change was about: the first `caches.open()` of any cache is 23.2 s on a
+        phone with the ground kept, whichever cache it happens to be."""
+        tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
+        assert "caches." not in tile
+        assert "fromLegacy" not in maps.SERVICE_WORKER
 
     def test_the_old_page_caches_are_swept_after_the_navigation(self):
         """Every deploy used to mint a cache named after the page's digest and
@@ -898,8 +909,8 @@ class TestOfflinePanel:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "the run stops when the phone locks or you switch app" in html
-        assert "Stopping costs nothing: the count picks up where it got to." in html
+        assert "the run pauses when the phone locks or you switch " in html
+        assert "picks up when you come back. Stopping costs nothing either." in html
         # And the claim it makes is one the loop keeps: every tile is asked of
         # the cache before it is asked of the network, so a stopped run costs
         # nothing to pick up.
@@ -950,7 +961,14 @@ class TestOfflinePanel:
         # And no timer keeps it true: a tick behind a locked screen is a wake-up
         # to redraw a string nobody is reading.
         panel = self.script()
-        assert "setInterval" not in panel
+        assert "setInterval" not in panel.split("function age()")[1].split("function ask()")[0]
+        # **One interval exists in this panel, and it is not this.** A paused
+        # download polls for the app coming back, because `visibilitychange` in a
+        # standalone iOS app is unverified here and waiting on it alone would
+        # park the run for ever. It is armed only while a run is waiting, where
+        # nothing else is running at all.
+        assert panel.count("setInterval") == 1
+        assert "var poll = window.setInterval(go, 1000);" in panel
 
     def test_the_only_thing_that_asks_for_a_newer_map_is_a_button(self):
         """A manual check nobody knows to press is the same as no check, and an
@@ -1045,6 +1063,98 @@ class TestThePageAccountsForItsOwnOpening:
         assert "costLine.textContent = parts.join" in html
 
 
+class TestNothingInThePanelIsDeclaredTwice:
+    """The one mistake this file makes twice in an afternoon."""
+
+    def test_no_name_is_declared_twice_in_the_offline_panel(self):
+        """`paint` was added beside the `paint` that draws the selection preview,
+        and `awake` beside the `awake` that holds the wake lock. The first was
+        caught by reading; the second reached the browser and the driven run
+        stopped with *awake is not a function*. It is one script, one scope, and
+        several thousand lines — so the check is mechanical rather than careful."""
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        panel = source.split("class _OfflinePanel")[1].split("\nclass ")[0]
+        # **Only the panel's own scope**, which is exactly one indentation. A
+        # name inside a function may repeat as often as it likes; these are the
+        # ones that share a namespace several thousand lines wide.
+        top = "                "
+        names: dict[str, int] = {}
+        for line in panel.split("\n"):
+            if not line.startswith(top) or line[len(top) : len(top) + 1] == " ":
+                continue
+            found = re.match(r"(?:function (\w+)\s*\(|var (\w+)\s*=)", line[len(top) :])
+            if not found:
+                continue
+            name = found.group(1) or found.group(2)
+            names[name] = names.get(name, 0) + 1
+        twice = sorted(name for name, seen in names.items() if seen > 1)
+        assert not twice, f"declared more than once in one scope: {twice}"
+
+
+class TestATileIsAskedForMoreThanOnce:
+    """A scatter of refusals is a hole in the map where the reader was standing."""
+
+    @staticmethod
+    def rendered():
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        return fmap.get_root().render()
+
+    def test_three_tries_a_tile(self):
+        """Reported from a real download: refusals arriving now and then, each
+        one a tile the run simply gave up on."""
+        html = self.rendered()
+        assert "var TRIES = 3;" in html
+        assert "return fetchTile(next.url, 1, 0).then(function (answer) {" in html
+        # The wait grows with the attempt, because what this exists for is a
+        # server briefly out of patience and coming straight back is what made
+        # it so.
+        assert "return later(400 * attempt).then(function () {" in html
+
+    def test_nothing_is_asked_for_while_the_app_is_away(self):
+        """Reported from a real download: the refusals came when the app had
+        been briefly inactive. They are not the server saying no — iOS freezes a
+        web app that is not in front, in-flight requests are cut, and the radio
+        is not back the instant the reader is. Retrying into that spends every
+        try on the one situation where none of them can work."""
+        html = self.rendered()
+        assert "function awake() {" in html
+        assert "if (!document.hidden) { return Promise.resolve(); }" in html
+        # The fetch waits for the app rather than for a clock.
+        assert "return awake().then(function () {" in html
+        # **A failure across a suspension costs no try.** The app went away
+        # mid-request; that says nothing about the tile or the connection.
+        assert "if (putAway !== away || document.hidden) {" in html
+        # And it cannot wait for ever: a run left in the background stops.
+        assert "var WAITS = 8;" in html
+        assert "if (waited >= WAITS) { return null; }" in html
+        # **The event, and a poll behind it.** Whether `visibilitychange` fires
+        # for a standalone home-screen app on iOS has never been measured here —
+        # it is one of the open questions this project carries — and waiting on
+        # it alone would park the run for ever after the first interruption.
+        assert "var poll = window.setInterval(go, 1000);" in html
+        assert "window.clearInterval(poll);" in html
+
+    def test_only_where_a_second_ask_can_change_the_answer(self):
+        """Asking again about any refusal would be two more radio wakes for the
+        same answer, which is the bill this map spent the afternoon reducing. A
+        400 is Kartverket saying the tile is not there — z19 and z20 answer 400,
+        measured — and no amount of asking makes one."""
+        html = self.rendered()
+        assert "var worth = !answer || answer.status === 429 || answer.status >= 500;" in html
+        assert "if (!worth || attempt >= TRIES) { return null; }" in html
+
+    def test_the_stall_guard_still_counts_tiles(self):
+        """Twelve in a row is the connection, not the tiles — and with retries a
+        tile is only counted once it has refused three times over, so the guard
+        did not quietly become thirty-six attempts before it fires."""
+        html = self.rendered()
+        keep = html.split("function keep() {")[1].split("function forget()")[0]
+        assert "if (missed >= 12) { state.stop = true; state.stalled = true; }" in keep
+        # `missed` moves once per tile, in the branch that has already given up.
+        assert keep.count("missed += 1;") == 2
+
+
 class TestTheTwoScriptsAgreeAboutTheDatabase:
     """The one disagreement that stops the map opening at all."""
 
@@ -1130,17 +1240,13 @@ class TestNothingGrowsWithTheDownload:
         assert "var step = it.next();" in html
         # The count comes from the weights, which already had it.
         assert "return {tiles: base() ? picked.tiles : 0, bytes: picked.bytes};" in html
-        # The one place a list of addresses is still built is the move off
-        # the old store, which has to be handed a listing and turns it into
-        # strings in the same breath — see `moveGround`.
         run = html.split("function walker(picked) {")[1].split("\n                function ")[0]
         assert "urls.push(" not in run
-        # **And the move off the old store lists nothing either.** Its first
-        # version asked `cache.keys()` what was there; on the phone this was
-        # written for, that call did not return and took the app with it.
-        moving = html.split("function moveGround() {")[1].split("\n                function ")[0]
-        assert "cache.keys()" not in "\n".join(line for line in moving.split("\n") if not line.strip().startswith("//"))
-        assert "var walk = walker(everything());" in moving
+        # **And the move off the old store is gone with the store.** It ran
+        # once, on the one device that had ground in a cache — 59,091 tiles,
+        # measured — and what it was for cannot happen again: nothing writes
+        # a cache any more.
+        assert "moveGround" not in html
 
     def test_what_is_kept_is_written_down_not_counted_out(self):
         """`cache.keys()` over the terrain cache ran on every `refresh` — on

@@ -251,7 +251,6 @@ var FLAGS = "flags";
 // the way in and report success.
 var KEPT = "tiles";
 var SEEN = "browse";
-var MOVED = "migrated";
 var opened = null;
 
 function base() {
@@ -396,17 +395,20 @@ self.addEventListener("activate", function (event) {
     );
 });
 
-// **What earlier versions left behind.** Every deploy used to mint a cache named
-// after the page's digest and hold 15.7 MB in it; a reader who has been through
-// a few is carrying several. Swept here, on activation, which is after the
-// navigation has been answered -- so the one thing this must not do is happen in
-// front of somebody: `caches.keys()` is the call that costs 23 seconds on a
-// phone with the ground kept.
+// **Everything earlier versions wrote to a cache, which is now all of it.** A
+// deploy used to mint a cache named after the page's digest and hold 15.7 MB in
+// it, and the ground was kept in two more. Nothing here reads a cache any longer,
+// so what is left is unreachable -- gigabytes on a phone that no code can answer
+// from, which is worse than deleting them.
+//
+// **Swept on activation, which is after the navigation has been answered.** The
+// one thing this must not do is happen in front of somebody: `caches.keys()` is
+// the call measured at 23 seconds on a phone with the ground kept.
+var CAST_OFF = /^trails-(page-|state$|terrain$|tiles$)/;
 function sweepOldCaches() {
     return caches.keys().then(function (names) {
         return Promise.all(names.map(function (name) {
-            var old = name.indexOf("trails-page-") === 0 || name === "trails-state";
-            return old ? caches.delete(name) : null;
+            return CAST_OFF.test(name) ? caches.delete(name) : null;
         }));
     }).catch(function () { return null; });
 }
@@ -628,34 +630,6 @@ function pageFor(request) {
 // has run, nothing here goes near a cache again.
 var legacy = null;
 
-function stillInCaches() {
-    if (legacy === null) {
-        legacy = read(FLAGS, MOVED).then(function (done) { return !done; })
-            .catch(function () { return true; });
-    }
-    return legacy;
-}
-
-// Held open, because opening is the expensive act and this is asked once per
-// tile.
-//
-// **A minute, not a few seconds.** The first version capped this at eight, which
-// would have been the bug it was meant to prevent: opening this cache is
-// *measured* at 23 seconds on the phone in question, so a short cap turns a slow
-// tile into a blank one and the reader loses ground they have. The cap is here
-// only so that a store which never answers cannot hold a tile open for ever.
-var terrainCache = null;
-
-function fromLegacy(plain) {
-    return stillInCaches().then(function (old) {
-        if (!old) { return null; }
-        if (!terrainCache) { terrainCache = caches.open(TERRAIN); }
-        return within(60000, terrainCache.then(function (cache) {
-            return cache.match(plain);
-        }), null);
-    }).catch(function () { return null; });
-}
-
 // **What the tiles did, because a blank says nothing about why.** Every path
 // out of `tileFor` ends in an image, and three of the four are indistinguishable
 // on the screen: a tile from the database, one from the old cache and one from
@@ -665,9 +639,21 @@ function fromLegacy(plain) {
 // second, so a hundred thousand tiles do not become a hundred thousand writes.
 var told = {db: 0, seen: 0, legacy: 0, net: 0, blank: 0, why: null, at: 0};
 
+var telling = null;
+
 function tally(which, why) {
     told[which] += 1;
     if (why && !told.why) { told.why = String(why).slice(0, 120); }
+    // **And a trailing write, or the last second is never reported.** Throttled
+    // alone, the row held whatever was true a second before the tiles stopped
+    // arriving: a view of fifteen tiles was read back as one. The timer is only
+    // ever armed while tiles are being answered.
+    if (telling) { clearTimeout(telling); }
+    telling = setTimeout(function () {
+        telling = null;
+        told.at = Date.now();
+        write(FLAGS, TILES_SAID, told);
+    }, 400);
     if (Date.now() - told.at < 1000) { return; }
     told.at = Date.now();
     write(FLAGS, TILES_SAID, told);
@@ -691,21 +677,16 @@ function tileFor(request) {
             var off = two[1];
             return within(4000, read(SEEN, plain), null).then(function (seen) {
                 if (seen && seen.body) { tally("seen"); return new Response(seen.body); }
-                // Until the reader has moved their ground across, it is still
-                // where they left it.
-                return fromLegacy(plain).then(function (older) {
-                    if (older) { tally("legacy"); return older; }
-                    if (off) { tally("blank"); return blank(); }
-                    return fetch(request).then(function (answer) {
-                        if (answer && answer.ok) {
-                            tally("net");
-                            answer.clone().blob().then(function (body) {
-                                return write(SEEN, plain, {body: body, at: Date.now()});
-                            }).then(trim).catch(function () { return null; });
-                        }
-                        return answer;
-                    }).catch(function (gone) { tally("blank", gone); return blank(); });
-                });
+                if (off) { tally("blank"); return blank(); }
+                return fetch(request).then(function (answer) {
+                    if (answer && answer.ok) {
+                        tally("net");
+                        answer.clone().blob().then(function (body) {
+                            return write(SEEN, plain, {body: body, at: Date.now()});
+                        }).then(trim).catch(function () { return null; });
+                    }
+                    return answer;
+                }).catch(function (gone) { tally("blank", gone); return blank(); });
             });
         }).catch(function (gone) { tally("blank", gone); return blank(); });
 }
@@ -1219,6 +1200,20 @@ class _ScaleZoom(MacroElement):
                         line = document.createElement('div');
                         line.className = 'trails-scale-zoom';
                         box.appendChild(line);
+                        // **Beside the bar rather than under it.** Two lines at
+                        // the very bottom of an installed app is two lines in the
+                        // one place iOS keeps for itself: the home indicator sits
+                        // over whatever is there, and the zoom was the half that
+                        // went. One line is half the height and half the exposure
+                        // -- and it reads better, which was luck rather than
+                        // design.
+                        //
+                        // Not written into Leaflet's own scale line: that element
+                        // has its text replaced on every move, and anything put
+                        // inside it goes with it.
+                        box.style.display = 'flex';
+                        box.style.alignItems = 'baseline';
+                        box.style.gap = '6px';
                     }
                     // The resolution the map is actually drawing at, asked of
                     // Leaflet rather than worked out from the zoom: a fractional
@@ -12543,23 +12538,6 @@ class _OfflinePanel(MacroElement):
                         .replace('{r}', '');
                 }
 
-                // **A walk, not a list.** This built the address of all
-                // 131,033 tiles into an array -- some 14 MB of strings -- and the
-                // only other caller used it to ask how long the array was. The
-                // download wants them one at a time and nothing wants them all at
-                // once, so now nothing holds more than one.
-                // **The whole box, without asking the chooser.** The move off
-                // the old store needs the addresses of everything a reader could
-                // have kept there, and the reader's current selection is not
-                // that. Built the same way `recount` builds one, and not put in
-                // its memo, so opening the panel afterwards still shows what they
-                // had chosen.
-                function everything() {
-                    var levels = levelsFor(coreOf('all'), CAP_ZOOM, scopeOf('all').pad);
-                    var sum = weigh(levels);
-                    return {levels: levels, top: CAP_ZOOM, tiles: sum.tiles, bytes: sum.bytes};
-                }
-
                 function walker(picked) {
                     picked = picked || recount();
                     var layer = base();
@@ -12780,7 +12758,6 @@ class _OfflinePanel(MacroElement):
                 // property the first place was chosen for.
                 var HELD = 'held';
                 var TIMING = 'timing';
-                var MOVED = 'migrated';
                 // The two tile stores, named as the worker names them.
                 var KEPT = 'tiles';
                 var SEEN = 'browse';
@@ -13082,12 +13059,6 @@ class _OfflinePanel(MacroElement):
                         };
                         fitNativeZoom(both[0].top);
                         draw();
-                        // Asked after the panel has drawn, because asking is the
-                        // expensive act. It answers once and then costs nothing.
-                        lookForOlder().then(function (there) {
-                            if (snapshot) { snapshot.older = there; }
-                            draw();
-                        });
                         // **Said out loud, because the switch shows outside this
                         // panel now.** The chrome draws the tool's row with one
                         // of two icons depending on whether the ground is here,
@@ -13165,113 +13136,100 @@ class _OfflinePanel(MacroElement):
                 // whole change is about. So it is asked after the panel has
                 // drawn, and once the answer is no it is written down and never
                 // asked again.
-                var older = null;
 
-                function lookForOlder() {
-                    if (older !== null) { return Promise.resolve(older); }
-                    return dbRead('flags', MOVED).then(function (done) {
-                        if (done || !window.caches || !caches.has) { older = false; return false; }
-                        return caches.has(TERRAIN).then(function (there) {
-                            older = !!there;
-                            if (!there) { dbWrite('flags', MOVED, true); }
-                            return older;
-                        });
-                    }).catch(function () { older = false; return false; });
+                // **Three tries a tile, and only where a second one can change
+                // the answer.** A scatter of refusals is a hole in the map at the
+                // zoom the reader was standing at, and the run had no way to ask
+                // again -- but asking again about *any* refusal would be two more
+                // radio wakes for the same answer, which is the bill this map
+                // spent the afternoon reducing.
+                //
+                // So: a network error is worth waiting out, and so are 429 and
+                // the 5xx family, which are the server saying *not now*. A 400 or
+                // a 404 is Kartverket saying the tile is not there -- z19 and z20
+                // answer 400, measured -- and no amount of asking makes one.
+                //
+                // The wait grows with the attempt, because the case this exists
+                // for is a server briefly out of patience, and coming straight
+                // back is what made it so.
+                var TRIES = 3;
+                // A hard stop on waiting for the app to come back, so a run left
+                // in the background cannot spin for ever on one tile.
+                var WAITS = 8;
+
+                function later(ms) {
+                    return new Promise(function (done) { window.setTimeout(done, ms); });
                 }
 
-                // **Moved, not fetched again.** The ground is already on the
-                // device; what is wrong with it is only where it lies. A reader
-                // on a slow line should not pay for a hundred thousand tiles a
-                // second time because the map changed its mind about storage.
-                //
-                // **Enumerated once, and turned into addresses at once.** One
-                // `cache.keys()` hands back a `Request` per tile -- the
-                // allocation that crashed a phone earlier -- so the array is
-                // mapped to strings and the requests are let go in the same
-                // breath. What is left is about 15 MB for a hundred thousand,
-                // held for the length of one run.
-                //
-                // **Copied and then deleted, one tile at a time**, so the two
-                // copies never both exist: a store already holding gigabytes has
-                // no room to hold them twice. That also makes the run resumable
-                // for free -- what moved is gone from the old cache, so a second
-                // run has less to do and needs no bookkeeping to know it.
-                function moveGround() {
-                    if (working) { return working.done_; }
-                    if (!window.caches) { return Promise.resolve(); }
-                    lastRun = null;
-                    // **Walked, not listed.** The first version asked the old
-                    // cache what it held. `cache.keys()` hands back a `Request`
-                    // per tile and there are a hundred thousand of them, and on
-                    // the phone this was written for it did not return -- the
-                    // panel sat at *looking at what is already on this device*
-                    // and the app went down with it. So nothing here asks that
-                    // question: it walks the addresses the whole box would have,
-                    // which is a bounded walk over a `Set`, and asks the cache
-                    // about one at a time.
-                    //
-                    // What that covers is everything inside the map's own box up
-                    // to z16, which is what `The whole map` keeps. Ground kept
-                    // finer than that along a route is not walked, and goes with
-                    // the old store when it is deleted -- said on the button, and
-                    // cheap to keep again afterwards.
-                    var walk = walker(everything());
-                    var state = {total: walk.total, done: 0, counted: true, failed: 0, held: 0,
-                                 added: 0, bytes: 0, top: 0, moving: true,
-                                 stop: false, done_: null};
-                    working = state;
-                    state.done_ = caches.open(TERRAIN).then(function (cache) {
-                        function one() {
-                            if (state.stop) { return Promise.resolve(); }
-                            var next = walk.next();
-                            if (!next) { return Promise.resolve(); }
-                            return cache.match(next.url).then(function (found) {
-                                if (!found) { return null; }
-                                return found.blob().then(function (body) {
-                                    return dbWrite(KEPT, next.url, body);
-                                }).then(function (written) {
-                                    if (!written) { state.failed += 1; return null; }
-                                    state.added += 1;
-                                    state.bytes += WEIGHT[next.z] || 45000;
-                                    if (next.z > state.top) { state.top = next.z; }
-                                    return cache.delete(next.url);
-                                });
-                            }).catch(function () { state.failed += 1; return null; }).then(function () {
-                                state.done += 1;
-                                if (state.done % 50 === 0) { draw(); }
-                                if (state.done % 4000 === 0) { note(state.added, state.bytes, state.top); }
-                                return one();
+                // **How often this app has been put away.** Reported from a real
+                // download: the refusals came *when the app had been briefly
+                // inactive*. They are not Kartverket saying no -- iOS freezes a
+                // web app that is not in front, in-flight requests are cut, and
+                // the radio is not back the instant the reader is. Retrying into
+                // that spends all three tries on the one situation where none of
+                // them can work.
+                var putAway = 0;
+                document.addEventListener('visibilitychange', function () {
+                    if (document.hidden) { putAway += 1; }
+                });
+
+                // Nothing is asked for while the app is away. A tile fetched into
+                // a frozen radio is a refusal invented by this page.
+                function whenInFront() {
+                    if (!document.hidden) { return Promise.resolve(); }
+                    return new Promise(function (done) {
+                        var over = false;
+                        function go() {
+                            if (over || document.hidden) { return; }
+                            over = true;
+                            document.removeEventListener('visibilitychange', go);
+                            window.clearInterval(poll);
+                            // A moment after the app is in front again, because
+                            // being visible and having a network are not the same
+                            // instant.
+                            later(250).then(done);
+                        }
+                        // **The event, and a poll behind it.** Whether
+                        // `visibilitychange` fires for a standalone home-screen
+                        // app on iOS is written down here as an open question and
+                        // has never been measured -- and if it does not, waiting
+                        // on it alone would park the run for ever after the first
+                        // interruption. The poll costs a tick a second and only
+                        // while the app is away, where nothing else is running
+                        // anyway; a run that resumes a second late is not a
+                        // failure, and one that never resumes is.
+                        var poll = window.setInterval(go, 1000);
+                        document.addEventListener('visibilitychange', go);
+                    });
+                }
+
+                function fetchTile(url, attempt, waited) {
+                    var away = putAway;
+                    function again(answer) {
+                        // **A failure across a suspension costs no try.** The app
+                        // went away mid-request; that says nothing about the tile
+                        // or the connection, and counting it would turn one
+                        // glance at a message into a hole in the map.
+                        if (putAway !== away || document.hidden) {
+                            if (waited >= WAITS) { return null; }
+                            return whenInFront().then(function () {
+                                return fetchTile(url, attempt, waited + 1);
                             });
                         }
-                        var runners = [], i;
-                        // Four rather than six: this is the disk answering
-                        // itself, with no network in it to wait on.
-                        for (i = 0; i < 4; i += 1) { runners.push(one()); }
-                        return Promise.all(runners);
-                    }).then(function () {
-                        return note(state.added, state.bytes, state.top);
-                    }).then(function () {
-                        // **Only once the walk finished.** A stopped or
-                        // half-failed move leaves the old store exactly as it was
-                        // minus what arrived, and running again finishes it.
-                        if (state.stop || state.failed) { return null; }
-                        older = false;
-                        return Promise.all([
-                            caches.delete(TERRAIN), caches.delete(TILES), dbWrite('flags', MOVED, true)
-                        ]);
-                    }).then(function () {
-                        working = null;
-                        letSleep();
-                        lastRun = {total: state.total, kept: state.added, held: 0,
-                                   added: state.added, failed: state.failed,
-                                   stalled: false, moved: true, stopped: state.stop};
-                        return refresh();
-                    });
-                    keepAwake();
-                    draw();
-                    return state.done_;
+                        var worth = !answer || answer.status === 429 || answer.status >= 500;
+                        if (!worth || attempt >= TRIES) { return null; }
+                        return later(400 * attempt).then(function () {
+                            return fetchTile(url, attempt + 1, waited);
+                        });
+                    }
+                    return whenInFront().then(function () {
+                        away = putAway;
+                        return fetch(url, {cache: 'reload', mode: 'cors'});
+                    }).then(function (answer) {
+                        if (answer && answer.ok) { return answer; }
+                        return again(answer);
+                    }).catch(function () { return again(null); });
                 }
-
 
                 function keep() {
                     if (working) { return working.done_; }
@@ -13317,14 +13275,17 @@ class _OfflinePanel(MacroElement):
                             if (!next) { return Promise.resolve(); }
                             return dbRead(KEPT, next.url).then(function (there) {
                                 if (there) { missed = 0; state.held += 1; return null; }
-                                return fetch(next.url, {cache: 'reload', mode: 'cors'}).then(function (answer) {
-                                    if (answer && answer.ok) {
+                                return fetchTile(next.url, 1, 0).then(function (answer) {
+                                    if (answer) {
                                         missed = 0;
                                         state.added += 1;
                                         return answer.blob().then(function (body) {
                                             return dbWrite(KEPT, next.url, body);
                                         });
                                     }
+                                    // Refused now means refused three times, so
+                                    // the stall guard below still counts tiles
+                                    // and not attempts.
                                     state.failed += 1;
                                     missed += 1;
                                     return null;
@@ -13548,15 +13509,25 @@ class _OfflinePanel(MacroElement):
 
                 function count(n) { return Number(n).toLocaleString('en-US'); }
 
-                function button(label, strong) {
-                    var made = document.createElement('button');
-                    made.type = 'button';
-                    made.textContent = label;
+                // **The fill, as something that can be repainted.** It used to
+                // be written once when the button was made, which is right for
+                // every button here except the one that is also an indicator: the
+                // offline switch was filled whether it was on or off, so the only
+                // thing saying which was the word inside it. A switch that looks
+                // the same in both positions is not a switch.
+                function fillFor(made, strong) {
                     made.style.cssText = 'font:inherit;font-size:13px;font-weight:600;padding:8px 14px;' +
                         'border-radius:7px;cursor:pointer;border:1px solid ' +
                         (strong ? 'var(--trails-strong);background:var(--trails-strong);color:var(--trails-on-strong)'
                                 : 'var(--trails-rule);background:transparent;color:var(--trails-ink-2)');
                     return made;
+                }
+
+                function button(label, strong) {
+                    var made = document.createElement('button');
+                    made.type = 'button';
+                    made.textContent = label;
+                    return fillFor(made, strong);
                 }
 
                 function small(made) {
@@ -13725,15 +13696,6 @@ class _OfflinePanel(MacroElement):
                         if (!window.confirm('Delete the terrain kept on this device?')) { return; }
                         forget();
                     });
-                    // **Offered rather than done quietly.** Moving a hundred
-                    // thousand tiles is minutes of work with the screen awake;
-                    // that is the reader's call, and until they make it the map
-                    // still opens and still draws what they kept.
-                    said.move = button('Move the ground to the new store', true);
-                    said.move.className = 'trails-offline-move';
-                    said.move.style.display = 'none';
-                    said.move.addEventListener('click', function () { moveGround(); });
-                    said.tools.appendChild(said.move);
                     said.tools.appendChild(said.keep);
                     said.tools.appendChild(said.forget);
                     holder.appendChild(said.state);
@@ -13926,15 +13888,6 @@ class _OfflinePanel(MacroElement):
                     sayLayer();
                 }
 
-                // What a move says while it runs. Its total is not known until
-                // the old cache has been listed, which is one pass and the only
-                // one this makes.
-                function state_moving(run) {
-                    return 'Looking at ' + count(run.done) + ' of ' + count(run.total) +
-                        ' \u00b7 ' + count(run.added) + ' moved so far' +
-                        (run.failed ? ' \u00b7 ' + count(run.failed) + ' refused' : '');
-                }
-
                 function draw() {
                     if (!holder) { return; }
                     // **The three fields a run moves are refreshed here, because
@@ -13985,27 +13938,17 @@ class _OfflinePanel(MacroElement):
                     drawFresh();
                     said.toggle.textContent = have.on ? 'Offline mode is on' : 'Offline mode is off';
                     said.toggle.setAttribute('aria-pressed', have.on ? 'true' : 'false');
+                    // Filled when it is on, outlined when it is off -- the same
+                    // two shapes every other button here uses for *this is the
+                    // one* and *this is available*.
+                    fillFor(said.toggle, !!have.on);
                     said.toggle.disabled = !have.available;
                     said.toggle.style.opacity = have.available ? '1' : '0.5';
-                    said.move.style.display = have.older && !working ? '' : 'none';
-                    if (working && working.moving) {
-                        said.figures.textContent = state_moving(working);
-                    } else if (working) {
+                    if (working) {
                         said.figures.textContent = working.counted
                             ? 'Keeping ' + count(working.done) + ' of ' + count(working.total) +
                               (working.failed ? ' \\u00b7 ' + working.failed + ' refused' : '')
                             : 'Checking what is already kept\\u2026';
-                    } else if (have.older) {
-                        // **Said before it is asked for.** The ground is on the
-                        // device and the map can read it; what it cannot do is
-                        // open quickly while it is where it lies.
-                        said.figures.textContent = 'The ground you kept is in the old store, which is why this ' +
-                            'map takes twenty seconds to open. Moving it downloads nothing. It covers the whole ' +
-                            'box up to z' + CAP_ZOOM + '; ground kept finer than that along a route is not moved.';
-                    } else if (lastRun && lastRun.moved) {
-                        said.figures.textContent = 'Moved ' + count(lastRun.added) + ' tiles to the new store' +
-                            (lastRun.failed ? ' \u00b7 ' + count(lastRun.failed) + ' refused, so the old one is still there'
-                                            : ' \u00b7 the old one is gone') + '.';
                     } else if (lastRun && lastRun.offline) {
                         said.figures.textContent = 'No connection \\u2014 nothing was tried, and nothing ' +
                             'was spent looking. Try again where there is signal.';
@@ -14023,7 +13966,8 @@ class _OfflinePanel(MacroElement):
                         // was never started, and the switch being still off is
                         // the only other evidence there is.
                         said.figures.textContent = 'Nothing arrived \\u2014 all ' + count(lastRun.total) +
-                            ' were refused, so offline mode is still off. Check the connection and try again.';
+                            ' were refused three times over, so offline mode is still off. ' +
+                            'Check the connection and try again.';
                     } else {
                         // **Not counted rather than none, when there is no
                         // record.** A cache from before this map kept a figure
@@ -14059,8 +14003,8 @@ class _OfflinePanel(MacroElement):
                     // the cache being checked before every tile -- neither is
                     // visible, and guessing either one wrong costs an evening.
                     said.sheet.textContent = working
-                        ? 'Keep this page in front \u2014 the run stops when the phone locks or you switch app. ' +
-                          'Stopping costs nothing: the count picks up where it got to.'
+                        ? 'Keep this page in front \u2014 the run pauses when the phone locks or you switch ' +
+                          'app, and picks up when you come back. Stopping costs nothing either.'
                         : (maybe
                             ? 'Kept for the ' + baseName() + ' sheet. Switching sheets with no signal shows nothing.'
                             : '');
@@ -14132,7 +14076,6 @@ class _OfflinePanel(MacroElement):
                     // takes one; see `freshRow`.
                     freshness: freshRow,
                     refresh: refresh,
-                    move: moveGround,
                     state: function () { return snapshot; },
                     scopes: SCOPES.map(function (each) { return each.key; }),
                     open: function (want) { chooser = want === undefined ? true : !!want; return refresh(); },
@@ -14839,8 +14782,34 @@ class _Chrome(MacroElement):
                 };
             }
 
+            // **What iOS keeps for itself, asked of the browser.** The head
+            // says `apple-mobile-web-app-status-bar-style: black-translucent`,
+            // which draws the app edge to edge -- and the viewport meta says
+            // nothing about `viewport-fit`, without which `env(safe-area-inset-*)`
+            // reads zero. So the page asks for the whole screen and is never told
+            // which part of it is covered, and everything at the bottom edge sits
+            // under the home indicator.
+            //
+            // Which of the two ways out is right depends on numbers no check here
+            // can produce: on Linux the insets are always zero and `standalone`
+            // is always undefined. So the page reports what its own device says.
+            function inset(side) {
+                var probe = document.createElement('div');
+                probe.style.cssText = 'position:absolute;visibility:hidden;' +
+                    'padding-' + side + ':env(safe-area-inset-' + side + ')';
+                document.body.appendChild(probe);
+                var got = getComputedStyle(probe)['padding' + side.charAt(0).toUpperCase() + side.slice(1)];
+                probe.remove();
+                return got || '0px';
+            }
+
             function seconds(ms) {
-                if (ms === null || ms === undefined) { return '\u2014'; }
+                // **Nought means not yet, and a nought reads as an answer.** The
+                // reader opened `Sources` before `load` had fired and the line
+                // said *opened in 0 ms* about a page that was still finishing --
+                // the second time that figure has lied by rounding an absence to
+                // a number.
+                if (!ms) { return '\u2014'; }
                 return ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms) + ' ms';
             }
 
@@ -14918,6 +14887,11 @@ class _Chrome(MacroElement):
                         told.seen + ' seen before, ' + told.legacy + ' from the old cache, ' +
                         told.net + ' fetched, ' + told.blank + ' blank' +
                         (told.why ? ' \u00b7 ' + told.why : '') + '.';
+                }).then(function () {
+                    tileLine.textContent += ' Screen: safe area top ' + inset('top') +
+                        ', bottom ' + inset('bottom') +
+                        ' \u00b7 standalone ' + (navigator.standalone === undefined
+                            ? '\u2014' : String(navigator.standalone)) + '.';
                 }).catch(function () { return; });
             }
 
