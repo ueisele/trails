@@ -1438,7 +1438,10 @@ def the_sources_are_a_page(page: Any) -> Check:
             # never drawn straight across anything.
             Reading("the four bands are drawn", held["bands"], 4),
             # The whole point: the map is still there while this is read.
-            Reading("px of map left above it", read["top"], 388, within=60, holds=False),
+            # The page is the drawing's own height, so the panel costs the map
+            # the same whichever page is showing -- and it is the reader's, so
+            # what it costs is theirs to set.
+            Reading("px of map left above it", read["top"], 565, within=30, holds=False),
             Reading("and the page never takes more than half", read["high"] < 844 * 0.55, True, note=f"{read['high']} px"),
             Reading("a second press folds the pages", folded["pages"]["open"], False),
             Reading("and the row stays", folded["top"] is not None and folded["high"] < 90, True, note=f"{folded['high']} px"),
@@ -1895,6 +1898,14 @@ def the_point_list_takes_the_room(page: Any) -> Check:
                 over: page.scrollHeight - page.clientHeight,
                 rows: [...rows.children].length}; }"""
     wide = page.evaluate(listed)
+    # And dragging the panel taller gives the room to the page, which is what
+    # makes the cap the reader's rather than a constant: the grip above the
+    # pages is the one control for the height of all of them.
+    page.evaluate(STRETCH_PROFILE, 150)
+    page.wait_for_timeout(800)
+    stretched = page.evaluate(listed)
+    page.evaluate(STRETCH_PROFILE, -150)
+    page.wait_for_timeout(600)
 
     # And on a phone with a finger, where the cap bites: the rows are 44 px
     # under a coarse pointer, so ten of them are taller than the page may be and
@@ -1931,9 +1942,19 @@ def the_point_list_takes_the_room(page: Any) -> Check:
         "the point list takes the room",
         [
             Reading("ten points make ten rows", wide["rows"], 10),
-            # The cap that matters is the room the panel may take off the map,
-            # not a constant somebody once picked.
-            Reading("on a desktop they fit without scrolling", wide["over"], 0, note=f"{wide['page']} px page"),
+            # **The page is as tall as the drawing and scrolls when there is
+            # more.** Pages of their own heights meant a panel that jumped as it
+            # was turned; one height means the row at the foot never moves and
+            # the reader sets it once, for all of them.
+            Reading("the page is the height of the drawing", wide["page"], 205, within=6),
+            Reading("and ten rows scroll inside it", wide["over"] > 0, True, note=f"{wide['over']} px below the fold"),
+            Reading(
+                "dragging the panel taller gives the room to the page",
+                stretched["page"] - wide["page"],
+                150,
+                within=12,
+                note=f"{wide['page']} px to {stretched['page']}",
+            ),
             Reading(
                 "on a phone with a finger the page scrolls instead",
                 narrow["over"] > 0,
@@ -2674,6 +2695,10 @@ def reading_with_a_finger(page: Any) -> Check:
         What a touch put on the panel and on the map
 
     """
+    # **Held, and lifted separately.** A reading belongs to the finger making
+    # it: lifting takes the rule, the mark and the words away, so a helper that
+    # ended in `touchend` would read what is left after the gesture rather than
+    # what the gesture said.
     touch = """(where) => { const chart = document.querySelector('.trails-profile-chart');
       const box = chart.getBoundingClientRect();
       const at = {clientX: box.left + box.width * where, clientY: box.top + box.height / 2};
@@ -2681,7 +2706,11 @@ def reading_with_a_finger(page: Any) -> Check:
         event.touches = kind === 'touchend' ? [] : [at];
         event.changedTouches = [at];
         chart.dispatchEvent(event); };
-      fire('touchstart'); fire('touchmove'); fire('touchend'); }"""
+      fire('touchstart'); fire('touchmove'); }"""
+    lift = """() => { const chart = document.querySelector('.trails-profile-chart');
+      const event = new Event('touchend', {bubbles: true, cancelable: true});
+      event.touches = []; event.changedTouches = [];
+      chart.dispatchEvent(event); }"""
     seen = """() => { const chart = document.querySelector('.trails-profile-chart');
       const shown = [...chart.querySelectorAll('text')].filter(n => n.style.display !== 'none')
         .map(n => n.textContent);
@@ -2714,9 +2743,14 @@ def reading_with_a_finger(page: Any) -> Check:
     page.evaluate(touch, 0.45)
     page.wait_for_timeout(700)
     near = page.evaluate(seen)
+    page.evaluate(lift)
+    page.wait_for_timeout(400)
+    lifted = page.evaluate(seen)
     page.evaluate(touch, 0.75)
     page.wait_for_timeout(700)
     far = page.evaluate(seen)
+    page.evaluate(lift)
+    page.wait_for_timeout(400)
     page.evaluate("() => window.trailsChrome.coarse(null)")
     page.wait_for_timeout(500)
     on_a_mouse = page.evaluate(seen)
@@ -2726,6 +2760,12 @@ def reading_with_a_finger(page: Any) -> Check:
         [
             Reading("nothing is read until something is touched", before["reading"], None),
             Reading("a touch reads a place", bool(near["reading"]), True, note=near["reading"]),
+            # **And the reading goes with the finger.** Reported: it stood in the
+            # row over a page about something else long after the finger had
+            # gone, because only a mouse leaving the chart ever took it away.
+            Reading("lifting the finger takes the words back", lifted["reading"], None),
+            Reading("and the rule with them", lifted["rules"], 0),
+            Reading("and the mark off the map", lifted["mark"], 0),
             Reading("with the blue rule on it", near["rules"], 1),
             # The mark on the map is the other half of the answer: a reader
             # following a climb wants to see where it is.

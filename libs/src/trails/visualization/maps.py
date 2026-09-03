@@ -2549,6 +2549,7 @@ def _popup_shape(
     link_fields: dict[str, str] | None = None,
     source: str | None = None,
     link_heading: str | None = None,
+    published_fields: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     """Work out the part of a popup that is the same for a whole layer.
 
@@ -2579,18 +2580,27 @@ def _popup_shape(
         link_heading: Line set above the links, saying whose pages they are.
             Without one, a link offering a GPX reads as this map's export of the
             line rather than as the recording somebody else published.
+        published_fields: Mapping of column name to label for rows that belong
+            **under** that heading rather than above it: what somebody else
+            states about this line, as against what this map worked out. A
+            route's own site saying *23,4 km, 2 d, +1088 m* is a claim of theirs
+            and sat in the middle of ours, where it read as a figure this map
+            had measured and disagreed with itself by a kilometre.
 
     Returns:
         The layer's popup shape, or None if no feature of it could show anything
     """
     columns = [column for column in fields if column in gdf.columns]
+    stated = [column for column in (published_fields or {}) if column in gdf.columns]
     links = [column for column in (link_fields or {}) if column in gdf.columns]
-    if not columns and not links and not source:
+    if not columns and not stated and not links and not source:
         return None
     shape: dict[str, Any] = {
         "labels": [str(fields[column]) for column in columns],
+        "published": [str((published_fields or {})[column]) for column in stated],
         "links": [str((link_fields or {})[column]) for column in links],
         "columns": columns,
+        "publishedColumns": stated,
         "linkColumns": links,
     }
     if link_heading:
@@ -2612,12 +2622,12 @@ def _popup_values(row: pd.Series, shape: dict[str, Any]) -> list[str | None] | N
         shape: What :func:`_popup_shape` worked out for the layer
 
     Returns:
-        One entry per label and then one per link, ``None`` where the row says
-        nothing -- or None altogether if the row fills no slot and the layer has
-        no source line to fall back on
+        One entry per label, then one per published label, then one per link,
+        ``None`` where the row says nothing -- or None altogether if the row
+        fills no slot and the layer has no source line to fall back on
     """
     values: list[str | None] = []
-    for column in shape["columns"]:
+    for column in shape["columns"] + shape.get("publishedColumns", []):
         value = row[column]
         values.append(None if pd.isna(value) or value == "" else str(value))
     for column in shape["linkColumns"]:
@@ -2641,6 +2651,7 @@ def add_trails(
     weight: float = 3.0,
     opacity: float = 0.85,
     popup_fields: dict[str, str] | None = None,
+    published_fields: dict[str, str] | None = None,
     link_fields: dict[str, str] | None = None,
     link_heading: str | None = None,
     tooltip_field: str | None = None,
@@ -2661,6 +2672,9 @@ def add_trails(
         weight: Line width in pixels
         opacity: Line opacity between 0 and 1
         popup_fields: Mapping of column name to popup label
+        published_fields: Mapping of column name to popup label for what
+            somebody else states about the line, shown under the link heading
+            rather than among the figures this map worked out
         link_fields: Mapping of a column holding a URL to its link text, for
             trails that have a description page elsewhere
         link_heading: Line set above those links, saying whose pages they are
@@ -2691,7 +2705,11 @@ def add_trails(
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
     search_names: dict[str, str] = {}
     figures: dict[str, dict[str, object]] = {}
-    shape = _popup_shape(gdf, popup_fields or {}, link_fields, source, link_heading) if (popup_fields or link_fields or source) else None
+    shape = (
+        _popup_shape(gdf, popup_fields or {}, link_fields, source, link_heading, published_fields)
+        if (popup_fields or published_fields or link_fields or source)
+        else None
+    )
 
     for _, row in gdf.iterrows():
         geometry = row.geometry
@@ -2779,17 +2797,33 @@ class _PopupText(MacroElement):
                     rows.push("<tr><td style='padding:2px 8px 2px 0;color:var(--trails-ink-3)'>" + esc(shape.labels[i])
                         + "</td><td style='padding:2px 0'><b>" + esc(values[at]) + "</b></td></tr>");
                 }
-                // Above the first link that survives, not above the block: a
-                // route with no description on the park's site would otherwise
-                // get a heading over nothing at all.
+                // Above the first thing under it that survives, not above the
+                // block: a route with no description on the park's site would
+                // otherwise get a heading over nothing at all.
                 var written = 0;
-                for (i = 0; i < shape.links.length; i++, at++) {
-                    if (values[at] === null || values[at] === undefined) { continue; }
+                function heading() {
                     if (shape.heading && !written) {
                         rows.push("<tr><td colspan='2' style='padding:7px 0 1px;color:var(--trails-ink-4)'>"
                             + esc(shape.heading) + "</td></tr>");
                     }
                     written += 1;
+                }
+                // **What somebody else states about this line, under their own
+                // heading.** These read exactly like the rows above them and are
+                // not the same kind of thing at all: a route's own site saying
+                // *23,4 km, 2 d, +1088 m* stood in the middle of figures this map
+                // had measured, where it looked like one of them disagreeing
+                // with the rest by a kilometre.
+                var stated = shape.published || [];
+                for (i = 0; i < stated.length; i++, at++) {
+                    if (values[at] === null || values[at] === undefined) { continue; }
+                    heading();
+                    rows.push("<tr><td style='padding:2px 8px 2px 0;color:var(--trails-ink-3)'>" + esc(stated[i])
+                        + "</td><td style='padding:2px 0'><b>" + esc(values[at]) + "</b></td></tr>");
+                }
+                for (i = 0; i < shape.links.length; i++, at++) {
+                    if (values[at] === null || values[at] === undefined) { continue; }
+                    heading();
                     // noopener keeps the opened page from reaching back into this one.
                     rows.push("<tr><td colspan='2' style='padding:3px 0'><a href=\\"" + esc(values[at])
                         + "\\" target=\\"_blank\\" rel=\\"noopener noreferrer\\">" + esc(shape.links[i]) + "</a></td></tr>");
@@ -2848,7 +2882,7 @@ class _LazyPopups(MacroElement):
         """
         super().__init__()
         self._name = "LazyPopups"
-        self.shape_json = json.dumps({key: value for key, value in shape.items() if key not in ("columns", "linkColumns")})
+        self.shape_json = json.dumps({key: value for key, value in shape.items() if key not in ("columns", "linkColumns", "publishedColumns")})
 
 
 class _ClickHighlight(MacroElement):
@@ -5297,7 +5331,7 @@ class _ProfilePanel(MacroElement):
                 licensed.style.display = '';
                 noted.style.display = noted.textContent ? 'block' : 'none';
             }
-            function detailFigures() {
+            function detailFigures(withFigures) {
                 var box = document.createElement('div');
                 box.style.cssText = 'font-size:13px;line-height:1.65;color:var(--trails-ink-2)';
                 // The same lines the heading shows the first three of, in the
@@ -5306,7 +5340,8 @@ class _ProfilePanel(MacroElement):
                 // that used to sit beside the button and is about the file
                 // rather than about the walk, which is why it reads better at
                 // the end of this list than in a heading nobody asked.
-                var figures = saidLines.concat(carries.textContent ? [carries.textContent] : []);
+                var figures = withFigures
+                    ? saidLines.concat(carries.textContent ? [carries.textContent] : []) : [];
                 figures.forEach(function (line, at) {
                     var row = document.createElement('div');
                     row.style.cssText = 'padding:3px 0' +
@@ -5479,14 +5514,61 @@ class _ProfilePanel(MacroElement):
             var detailBox = document.createElement('div');
             detailBox.className = 'trails-profile-detail';
             detailBox.style.cssText = 'padding:0 0 6px';
+            // Two rows into a table somebody else built, in that table's own
+            // hand: the popup writes `<td>` for a label and `<td><b>` for a
+            // value, and a row added here that looked like anything else would
+            // read as a second list rather than as the end of the first.
+            function addRow(table, label, value) {
+                if (!table || !value) { return; }
+                // **Before the first row that spans the table**, which is the
+                // heading over what somebody else published: these two are this
+                // map's own figures and belong with the rest of them. Written as
+                // a search for that row rather than as a count of the ones above
+                // it, because a line with no links has neither.
+                var rows = table.rows, at = null;
+                for (var i = 0; i < rows.length && at === null; i += 1) {
+                    if (rows[i].cells.length < 2 || rows[i].cells[0].colSpan > 1) { at = rows[i]; }
+                }
+                var row = document.createElement('tr');
+                var said = document.createElement('td');
+                said.style.cssText = 'padding:2px 8px 2px 0;color:var(--trails-ink-3)';
+                said.textContent = label;
+                var shown = document.createElement('td');
+                shown.style.cssText = 'padding:2px 0';
+                var bold = document.createElement('b');
+                bold.textContent = value;
+                shown.appendChild(bold);
+                row.appendChild(said);
+                row.appendChild(shown);
+                if (at) { at.parentNode.insertBefore(row, at); } else { table.appendChild(row); }
+            }
+
             function fillDetail() {
                 detailBox.innerHTML = '';
+                var table = null;
                 if (detailHtml) {
                     var held = document.createElement('div');
                     held.innerHTML = detailHtml;
                     detailBox.appendChild(held);
+                    table = held.querySelector('table');
                 }
-                var figures = detailFigures();
+                // **The figures are said once.** The popup's own table already
+                // carries the length, the climb, the steepest and the high
+                // point; the list underneath said all four again and added two.
+                // Those two go into the table instead, and the list is only
+                // drawn where there is no table -- a planned route, which has no
+                // popup at all.
+                if (table) {
+                    var lowest = '';
+                    saidLines.forEach(function (line) {
+                        if (line.indexOf('low ') === 0) { lowest = line.slice(4); }
+                    });
+                    addRow(table, 'Low point', lowest);
+                    var counted = carries.textContent || '';
+                    addRow(table, 'Points read',
+                           counted.indexOf(' points') > 0 ? counted.replace(' points', '') : '');
+                }
+                var figures = detailFigures(!table);
                 if (detailHtml && figures.firstChild) {
                     figures.style.marginTop = '10px';
                     figures.style.paddingTop = '8px';
@@ -5545,18 +5627,15 @@ class _ProfilePanel(MacroElement):
                 return made;
             }
 
-            function pageRoom(page) {
-                if (page.kind === 'profile') { return chartHeight; }
-                // **Measured, not assumed.** What the panel costs the map is the
-                // page *plus* the row, the grip and the dots above it, and that
-                // overhead is a different number in every browser -- the same
-                // reason `stretchTo` measures it rather than subtracting a
-                // constant.
-                var over = (box && pagesBox.offsetHeight)
-                    ? Math.max(0, box.offsetHeight - pagesBox.offsetHeight) : 60;
-                var most = Math.max(90, Math.round(mapRoom().y * 0.46) - over);
-                var needs = page.node.scrollHeight || 0;
-                return Math.max(90, Math.min(most, needs + 6));
+            // **Every page is as tall as the drawing, and the drawing is as
+            // tall as the reader dragged it.** Pages of their own heights meant
+            // a panel that jumped as it was turned and a row at the foot that
+            // moved with it -- and a grip that governed one page of three. One
+            // height means one control for it, and a page with more to say than
+            // fits scrolls, which is what a page is for.
+            function sizePages() {
+                if (!pages.length) { return; }
+                pagesBox.style.height = chartHeight + 'px';
             }
 
             // **Every page is in the track from the start and the ones that do
@@ -5593,7 +5672,7 @@ class _ProfilePanel(MacroElement):
                 pages.forEach(function (page) { page.node.style.width = (100 / pages.length) + '%'; });
                 track.style.transition = moved === false ? 'none' : 'transform .18s ease';
                 track.style.transform = 'translateX(-' + (pageAt * (100 / pages.length)) + '%)';
-                pagesBox.style.height = pageRoom(pages[pageAt]) + 'px';
+                sizePages();
 
                 pips.innerHTML = '';
                 pill.innerHTML = '';
@@ -5635,6 +5714,9 @@ class _ProfilePanel(MacroElement):
             }
 
             function goPage(at) {
+                // Turning the page is leaving the curve, and a reading of a
+                // place on it is about the curve.
+                forget();
                 pageAt = Math.max(0, Math.min(pages.length - 1, at));
                 if (!pagesOpen) { showPages(true); return; }
                 paintPages();
@@ -5716,10 +5798,15 @@ class _ProfilePanel(MacroElement):
             // and pressing it again on the page it opened folds it away.
             said.addEventListener('click', function () {
                 if (!pages.length) { return; }
+                // **Open it, or put it away.** It used to walk to the page it
+                // names first and fold only from there, so a reader who wanted
+                // the map back got the table they had not asked for and then had
+                // to press again. What is open goes; what is shut comes up on
+                // the page this line has been pointing at all along.
+                if (pagesOpen) { showPages(false); return; }
                 var wanted = planning() ? 'list' : 'details';
                 var at = 0;
                 pages.forEach(function (page, i) { if (page.key === wanted) { at = i; } });
-                if (pagesOpen && pageAt === at) { showPages(false); return; }
                 goPage(at);
             });
 
@@ -5780,7 +5867,14 @@ class _ProfilePanel(MacroElement):
                 // thousand samples is four hundred separate strokes.
                 if (!awaiting) {
                     awaiting = true;
-                    window.requestAnimationFrame(function () { awaiting = false; render(); });
+                    window.requestAnimationFrame(function () {
+                        awaiting = false;
+                        // The box first, because a drag that started on the list
+                        // is asking for a taller list and would otherwise wait
+                        // for the reader to turn back to the curve.
+                        sizePages();
+                        render();
+                    });
                 }
             }
 
@@ -6288,6 +6382,13 @@ class _ProfilePanel(MacroElement):
             }
 
             function render() {
+                // **The box follows the drawing's height.** The chart's height
+                // is the reader's own -- the grip above it is what sets it --
+                // and the box it sits in has to follow, or a drag moves a
+                // drawing inside a window that stays where it was. Driven: the
+                // grip did nothing at all, because the only thing that resized
+                // the window was a repaint of the page set.
+                sizePages();
                 // Before anything is drawn, because the reader may have turned
                 // their whole machine dark since the last stroke.
                 refreshInk();
@@ -6994,7 +7095,16 @@ class _ProfilePanel(MacroElement):
 
             function fingersUp(event) {
                 if (event.touches.length < 2) { pinching = null; }
-                if (event.touches.length === 0) { dragging = null; chart.style.cursor = 'crosshair'; }
+                if (event.touches.length === 0) {
+                    dragging = null;
+                    chart.style.cursor = 'crosshair';
+                    // **The reading goes with the finger that made it.** A mouse
+                    // leaving the chart has always taken the rule, the dot and
+                    // the reading with it; a finger lifted left all three
+                    // standing, so the row went on saying *612 m at 8.42 km*
+                    // over a page about something else entirely.
+                    forget();
+                }
             }
             chart.addEventListener('touchend', fingersUp);
             chart.addEventListener('touchcancel', fingersUp);

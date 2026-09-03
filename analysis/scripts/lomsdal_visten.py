@@ -296,10 +296,17 @@ UT_POPUP_FIELDS = {
     "climb": "Ascent / descent",
     "steepness": "Steepest",
     "high_point": "High point",
-    "ut_summary": "UT.no states",
     "marking_all": "Marking, all sources",
     "unrecorded": "Unrecorded ground",
 }
+
+#: What UT.no states about the route, which is **their** claim and not this
+#: map's measurement: it stood among the figures above and read as one of them,
+#: disagreeing with the length by a kilometre and with the climb by 200 m. It
+#: belongs under the same heading as their pages -- *published elsewhere, not by
+#: this map* -- which is where the two can be compared without either pretending
+#: to be the other.
+UT_PUBLISHED_FIELDS = {"ut_summary": "UT.no states"}
 
 #: Set above the UT.no links. Two of the four point at the park's own site
 #: rather than at UT.no, so the heading names what they have in common instead
@@ -540,6 +547,9 @@ class TrailLayer(NamedTuple):
         popup_fields: Mapping of column name to popup label
         link_fields: Mapping of a column holding a URL to its link text
         link_heading: Line set above those links, saying whose pages they are
+        published_fields: Mapping of column name to label for what somebody else
+            states about the line, shown under that heading rather than among
+            the figures this map worked out
         tooltip_field: Column shown on hover
         search_field: Column the search box matches against. Not the chain id:
             what a reader types is a name, and a road's identity is a register
@@ -557,6 +567,7 @@ class TrailLayer(NamedTuple):
     search_field: str | None = None
     dash: str | None = None
     link_heading: str | None = None
+    published_fields: dict[str, str] | None = None
 
 
 def source_of(label: str) -> str | None:
@@ -1598,8 +1609,22 @@ def main() -> int:
         # with a written description, so they should win wherever they share a
         # path with a Turrutebasen or FKB line. They also carry links, which no
         # other layer does.
-        TrailLayer(ut_core, "Routes [UT.no]", "#d81b60", 4.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name", None, UT_LINK_HEADING),
-        TrailLayer(ut_access, "Access routes [UT.no]", "#f48fb1", 3.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name", None, UT_LINK_HEADING),
+        TrailLayer(
+            ut_core, "Routes [UT.no]", "#d81b60", 4.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name", None, UT_LINK_HEADING, UT_PUBLISHED_FIELDS
+        ),
+        TrailLayer(
+            ut_access,
+            "Access routes [UT.no]",
+            "#f48fb1",
+            3.0,
+            UT_POPUP_FIELDS,
+            UT_LINK_FIELDS,
+            "name",
+            "name",
+            None,
+            UT_LINK_HEADING,
+            UT_PUBLISHED_FIELDS,
+        ),
     ]
 
     # **The legend is the layer control now**, so a row carries the layer it
@@ -1618,6 +1643,7 @@ def main() -> int:
             color=layer.color,
             weight=layer.weight,
             popup_fields=layer.popup_fields,
+            published_fields=layer.published_fields,
             link_fields=layer.link_fields,
             link_heading=layer.link_heading,
             tooltip_field=layer.tooltip_field,

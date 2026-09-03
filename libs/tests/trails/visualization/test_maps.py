@@ -1930,6 +1930,34 @@ class TestPopupShape:
         assert shape["heading"] == "Published elsewhere"
         assert shape["links"] == ["Route page"]
 
+    def test_what_somebody_else_states_travels_in_its_own_group(self, trails):
+        """A route's own site saying *23,4 km, 2 d, +1088 m* is their claim, not
+        this map's measurement — and it stood among the figures above, where it
+        read as one of them disagreeing with the length by a kilometre. It goes
+        under the same heading as their pages."""
+        gdf = trails.copy()
+        gdf["ut_summary"] = "23,4 km, 2 d, +1088 m"
+        shape = maps._popup_shape(
+            gdf,
+            {"trail_name": "Route"},
+            source="UT.no",
+            link_heading="Published elsewhere, not by this map",
+            published_fields={"ut_summary": "UT.no states"},
+        )
+
+        assert shape["labels"] == ["Route"]
+        assert shape["published"] == ["UT.no states"]
+        # And the values follow the same three groups in the same order, or a
+        # positional list is read against the wrong labels.
+        assert maps._popup_values(gdf.iloc[0], shape) == ["Sjøbergmarsjen", "23,4 km, 2 d, +1088 m"]
+
+    def test_a_stated_figure_alone_is_enough_for_a_shape(self, trails):
+        """A layer whose only popup content is somebody else's claim still has
+        one to show."""
+        gdf = trails.copy()
+        gdf["ut_summary"] = "23,4 km"
+        assert maps._popup_shape(gdf, {"absent": "Absent"}, published_fields={"ut_summary": "UT.no states"}) is not None
+
     def test_a_source_alone_is_enough_for_a_shape(self, trails):
         """A feature the source says nothing else about should still name it."""
         assert maps._popup_shape(trails, {"absent": "Absent"}, source="N50") is not None
@@ -2093,6 +2121,26 @@ class TestPopupText:
 
         html = fmap.get_root().render()
         assert html.index("window.trailsPopup = (function () {") < html.index("window.trailsPopup(shape,")
+
+
+class TestWhatSomebodyElseStates:
+    """Their figures under their heading, and ours above it."""
+
+    def test_the_heading_stands_before_the_first_thing_under_it(self, trails):
+        """Above the first row that survives and not above the block: a route
+        with nothing published about it would otherwise get a heading over
+        nothing at all. That rule used to be the links'; the stated figures come
+        first now, so it is written once and both of them call it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_trails(fmap, trails, name="Routes [UT.no]", popup_fields={"trail_name": "Route"}, source="UT.no")
+
+        html = fmap.get_root().render()
+        assert "function heading() {" in html
+        assert "var stated = shape.published || [];" in html
+        # The stated rows are written in the same hand as the figures above them
+        # — the reader is told which is which by the heading, not by the styling.
+        assert "for (i = 0; i < stated.length; i++, at++) {" in html
+        assert html.index("var stated = shape.published") < html.index("for (i = 0; i < shape.links.length")
 
 
 class TestLabelledPoints:
@@ -2757,7 +2805,7 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "function detailFigures() {" in html
+        assert "function detailFigures(withFigures) {" in html
         assert "window.trailsChrome.detail(named, box, 'profile');" not in html
         # Read off the element that shows it rather than composed again: one
         # sentence, in two places, from one derivation.
@@ -2791,6 +2839,32 @@ class TestProfilePanel:
         # The two lines are one sentence about one thing, so they are written in
         # one call and can never be about two.
         assert "name.textContent = planning()" in html
+
+    def test_a_press_on_what_it_says_opens_it_or_puts_it_away(self, group):
+        """It used to walk to the page it names first and fold only from there,
+        so a reader who wanted the map back got the table they had not asked for
+        and had to press again. What is open goes; what is shut comes up on the
+        page this line has been pointing at all along — *tap for the points*
+        while a route is being planned, the details otherwise."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "if (pagesOpen) { showPages(false); return; }" in html
+        assert "var wanted = planning() ? 'list' : 'details';" in html
+
+    def test_a_reading_belongs_to_the_finger_that_made_it(self, group):
+        """A mouse leaving the chart has always taken the rule, the dot and the
+        reading with it; a finger lifted left all three standing, so the row went
+        on saying *612 m at 8.42 km* over a page about something else. Turning
+        the page is leaving the curve for the same reason."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        lifted = html.split("function fingersUp(event) {")[1].split("}")[0:6]
+        assert any("forget();" in part for part in lifted)
+        assert "// Turning the page is leaving the curve, and a reading of a" in html
 
     def test_swiping_is_taken_everywhere_but_across_the_drawing(self, group):
         """One finger on the curve reads it — distance, height, gradient — and
@@ -2896,19 +2970,29 @@ class TestProfilePanel:
         # probe comparing a computed rgb() against the token's hex never matches.
         assert "summary.classList.toggle('trails-profile-reading', !!readingNow);" in html
 
-    def test_the_sheet_takes_the_count_the_ground_then_the_sources_then_the_key(self, group):
+    def test_the_page_takes_the_ground_then_the_sources_then_the_key(self, group):
         """The order is an argument. What a walk covers is about this route; who
         may be asked about it is about the file; and the colour key is the only
-        thing in the sheet that says nothing about this route at all — it
+        thing on the page that says nothing about this route at all — it
         explains a drawing rule that holds for every walk there will ever be. So
         it goes last, and it is built from the same two functions the panel's own
         key uses, because a second wording of *gentle under 15 %* is the
-        two-panel mistake in miniature."""
+        two-panel mistake in miniature.
+
+        **And the figures above them are drawn only where nothing else says
+        them.** A line's own popup carries the length, the climb, the steepest
+        and the high point; the list repeated all four and added two, so the two
+        go into that table and the list is left to a planned route, which has no
+        popup at all."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "var figures = saidLines.concat(carries.textContent ? [carries.textContent] : []);" in html
+        assert "var figures = withFigures" in html
+        assert "var figures = detailFigures(!table);" in html
+        # The two the table is missing, in the table's own hand.
+        assert "addRow(table, 'Low point', lowest);" in html
+        assert "addRow(table, 'Points read'," in html
         assert "[[noted.textContent, 'The ground this covers']," in html
         assert "[licensed.textContent, 'Sources and licences']].forEach(function (part) {" in html
         assert "coloured.textContent = 'How the curve is coloured';" in html
@@ -2958,7 +3042,11 @@ class TestProfilePanel:
 
         assert "cursor:ns-resize" in html
         assert "function stretchTo(pixels)" in html
-        assert "window.requestAnimationFrame(function () { awaiting = false; render(); });" in html
+        assert "awaiting = false;" in html
+        # **The box before the drawing**, because a drag that started on the
+        # list is asking for a taller list and would otherwise wait for the
+        # reader to turn back to the curve.
+        assert "                        sizePages();\n                        render();" in html
 
     def test_the_profile_height_is_bounded_at_both_ends(self, group):
         """Room for a curve at all, and never so tall that the panel is the map.
