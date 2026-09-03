@@ -409,24 +409,14 @@ BOXES = """() => {
     return {top: r.top, bottom: r.bottom, height: r.height}; };
   const a = seen(plan), b = seen(profile);
   const clipped = getComputedStyle(plan).overflow;
+  // **The list is not in this dock any more.** It is lent to the profile
+  // panel, where a reader planning a route is looking, so whether its last row
+  // can be reached is a question about that panel's pages and is asked there.
   const list = document.querySelector('.trails-plan-points');
-  let reachable = false;
-  if (list && list.lastElementChild) {
-    // Scrolled to the end, the last row has to be inside the box. That is the
-    // question — not whether there is anything to scroll, which with three rows
-    // in a 220 px cap there rightly is not.
-    list.scrollTop = list.scrollHeight;
-    const last = list.lastElementChild.getBoundingClientRect();
-    const held = list.getBoundingClientRect();
-    reachable = last.bottom <= held.bottom + 1 && last.top >= held.top - 1;
-    list.scrollTop = 0;
-  }
   return {overlap: Math.max(0, a.bottom - b.top),
           'dock clips': clipped === 'hidden',
           'profile height': Math.round(b.height),
-          'list cap': list ? parseFloat(list.style.maxHeight) : null,
-          'rows': list ? list.children.length : 0,
-          'last row reachable': reachable}; }"""
+          'rows': list ? list.children.length : 0}; }"""
 
 STRETCH_PROFILE = """(px) => {
   const panel = document.querySelector('.trails-profile-panel'), grip = panel.firstChild;
@@ -471,6 +461,15 @@ def select(page: Any, chain: str) -> bool:
         page.wait_for_function("() => window.trailsProfile && window.trailsProfile.shape", timeout=15_000)
     except Exception:
         return False
+    # **And with its pages open**, which is what *selected* used to mean on its
+    # own. The panel is two things now -- a row at the foot that stands for the
+    # selection, and pages above it the reader folds -- and a reader who folded
+    # them keeps them folded through the next selection. Every check below asks
+    # for a drawn curve, so the helper that gets them one asks for it: driven
+    # without this, a drag on the chart found a chart of zero width and the
+    # panel had never rendered a crosshair to read.
+    page.evaluate("() => window.trailsProfilePanel.page(true)")
+    page.wait_for_timeout(300)
     return True
 
 
@@ -827,36 +826,37 @@ def popup_click(page: Any) -> Check:
     )
     page.wait_for_timeout(1200)
     where = page.evaluate(
-        """() => { const panel = document.querySelector('.trails-detail');
-        if (!panel || panel.style.display === 'none') { return null; }
-        const close = panel.querySelector('.trails-chrome-close');
-        const body = panel.querySelector('.trails-chrome-body');
-        const shut = close.getBoundingClientRect(), text = body.getBoundingClientRect();
-        return {close: {x: shut.left + shut.width / 2, y: shut.top + shut.height / 2},
+        """() => { if (!window.trailsProfilePanel.page('details')) { return null; }
+        const held = document.querySelector('.trails-profile-detail');
+        if (!held || held.getClientRects().length === 0) { return null; }
+        const marks = [...document.querySelectorAll('.trails-profile-mark')];
+        const lit = marks[window.trailsProfilePanel.pages().at];
+        const text = held.getBoundingClientRect(), mark = lit.getBoundingClientRect();
+        return {mark: {x: mark.left + mark.width / 2, y: mark.top + mark.height / 2},
                 text: {x: text.left + text.width / 2, y: text.top + 24},
-                rows: panel.querySelectorAll('tr').length}; }"""
+                rows: held.querySelectorAll('tr').length}; }"""
     )
     if not where:
-        return Check("a click in a chain's detail", skipped="the detail panel did not open")
+        return Check("a click in a chain's detail", skipped="the detail page did not open")
 
     before = page.evaluate("() => window.trailsPlan.state().points.length")
     page.mouse.click(where["text"]["x"], where["text"]["y"])
     page.wait_for_timeout(1000)
     after_text = page.evaluate("() => window.trailsPlan.state().points.length")
-    page.mouse.click(where["close"]["x"], where["close"]["y"])
+    page.mouse.click(where["mark"]["x"], where["mark"]["y"])
     page.wait_for_timeout(1000)
 
     return Check(
         "a click in a chain's detail is not a click on the ground",
         [
             # The popup carried 13 rows when it floated and carries them still:
-            # the chrome moves the node folium built, it does not rebuild it.
+            # the panel moves the node folium built, it does not rebuild it.
             Reading("rows the detail holds", where["rows"] > 0, True, note=f"{where['rows']} rows"),
             Reading("waypoints placed by reading it", after_text - before, 0),
-            Reading("waypoints placed by the close button", page.evaluate("() => window.trailsPlan.state().points.length") - before, 0),
+            Reading("waypoints placed by the mark that folds it", page.evaluate("() => window.trailsPlan.state().points.length") - before, 0),
             Reading(
-                "and it closed",
-                page.evaluate("() => window.trailsChrome.state().detail"),
+                "and a second press on the lit mark folded it away",
+                page.evaluate("() => window.trailsProfilePanel.pages().open"),
                 False,
             ),
         ],
@@ -928,10 +928,9 @@ def sharing_the_room(page: Any) -> Check:
                 f"{label}: px of the tool dock under the profile",
                 round(seen["overlap"]),
                 0,
-                note=f"profile {seen['profile height']} px, list cap {seen['list cap']}",
+                note=f"profile {seen['profile height']} px, {seen['rows']} rows in the list",
             )
         )
-        readings.append(Reading(f"{label}: the last row can still be reached", seen["last row reachable"], True, note=f"{seen['rows']} rows"))
         # What makes measuring the dock rather than its content the right
         # question: without the clip, content taller than the cap would show
         # through and the overlap above would be a fiction.
@@ -1181,15 +1180,19 @@ def narrow_sheets(page: Any) -> Check:
     legend and the layer control had already produced once on this map, and the
     reason what is open is kept as three facts rather than as three styles.
 
+    **The detail is opened through the chrome's own entry now.** A popup used to
+    open it and does not: a popup is a page of the profile panel, which stands at
+    the foot and is not one of the three. What still comes here is anything a
+    caller hands over -- the plan panel's *i* is the one that does -- so the
+    check drives that entry rather than a popup that would no longer arrive.
+
     Args:
-        page: The driven page, with a chain selected
+        page: The driven page
 
     Returns:
         What is drawn as a tool is opened over an open detail and closed again
     """
     page.set_viewport_size({"width": 390, "height": 844})
-    page.wait_for_timeout(900)
-    page.evaluate(SELECT_CHAIN, LONG_CHAIN)
     page.wait_for_timeout(900)
 
     shown = """() => {
@@ -1199,16 +1202,7 @@ def narrow_sheets(page: Any) -> Check:
               detail: drawn('.trails-detail'), state: window.trailsChrome.state()}; }"""
 
     page.evaluate("() => window.trailsChrome.close()")
-    page.evaluate(
-        """(cls) => { const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
-        let found = null;
-        const walk = l => { if (found) return;
-          if (l.options && l.options.className === cls) { found = l; return; }
-          if (l.eachLayer) l.eachLayer(walk); };
-        map.eachLayer(walk);
-        if (found) { found.fire('click'); } }""",
-        LONG_CHAIN,
-    )
+    page.evaluate("() => window.trailsChrome.detail('A reading', 'What a caller handed over', 'driven')")
     page.wait_for_timeout(900)
     reading = page.evaluate(shown)
 
@@ -1227,7 +1221,7 @@ def narrow_sheets(page: Any) -> Check:
     return Check(
         "one sheet at a time on a narrow screen",
         [
-            Reading("a tap draws the detail", reading["detail"], True),
+            Reading("a reading handed over is drawn", reading["detail"], True),
             Reading("and only that", reading["dock"] or reading["menu"], False),
             Reading("a tool covers it", over["dock"] and not over["detail"], True),
             # Covered, not closed: the chrome still says a detail is open, and
@@ -1342,143 +1336,112 @@ def the_theme_switch(page: Any) -> Check:
     return Check("the theme switch", readings)
 
 
-def the_sources_behind_an_i(page: Any) -> Check:
+def the_sources_are_a_page(page: Any) -> Check:
     """Eleven lines of licence, and the room they take on a phone.
 
-    Reported with a screenshot: on a phone held upright the sources fill more of
-    the profile panel than the curve does. They were already folded behind an
-    *i* -- but the rule was written from a measurement taken with the phone held
-    sideways, so it asked about the height alone and a portrait screen is not
-    short. It is the same lack of room measured on the other axis.
+    Reported with a screenshot: on a phone held upright the sources filled more
+    of the profile panel than the curve did. They went behind an *i*, and the *i*
+    opened a sheet over the whole screen -- which answered *what was this drawn
+    from* by taking away the drawing, the map and the line that had been tapped
+    to get there, with no way back to the line's own table.
 
-    What the *i* opens is the sheet a popup docks into and not eleven lines
-    unfolded into the drawing: a page whose popups all dock into one panel has
-    somewhere to put this.
+    They are a page of the panel now, one swipe from the curve, and the row at
+    the foot says which of the two is showing. What this measures is that the
+    figures are still one gesture away, that the page holds the same four
+    things, and that the map is still there while they are read.
 
     Args:
         page: The driven page, with a chain selected
 
     Returns:
-        What the row shows narrow, what the *i* opens, and what it shows wide
+        What the row shows, what the second page holds, and what is left of the map
     """
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(900)
     page.evaluate("() => window.trailsChrome.close()")
     if not select(page, LONG_CHAIN):
         page.set_viewport_size({"width": 1400, "height": 900})
-        return Check("the sources behind an i", skipped=f"{LONG_CHAIN} is not in this page")
-    page.wait_for_timeout(700)
+        return Check("the sources are a page", skipped=f"{LONG_CHAIN} is not in this page")
+    page.wait_for_timeout(900)
 
     # `getClientRects()` and not `offsetParent`: the second is the probe this
     # suite has already been lied to by once.
     row = """() => {
       const box = sel => { const node = document.querySelector(sel);
         return node ? {drawn: node.getClientRects().length > 0, text: node.textContent} : null; };
-      const head = document.querySelector('.trails-profile-head');
-      return {more: box('.trails-profile-more'), licences: box('.trails-profile-licences'),
-              ground: box('.trails-profile-ground'),
-              hide: box('.trails-profile-hide'),
-              summary: (document.querySelector('.trails-profile-figures') || {}).textContent || null}; }"""
-    narrow = page.evaluate(row)
+      const panel = document.querySelector('.trails-profile-panel');
+      const seen = panel ? panel.getBoundingClientRect() : null;
+      return {marks: document.querySelectorAll('.trails-profile-mark').length,
+              licences: box('.trails-profile-licences'),
+              name: (document.querySelector('.trails-profile-name') || {}).textContent || null,
+              summary: (document.querySelector('.trails-profile-figures') || {}).textContent || null,
+              pages: window.trailsProfilePanel.pages(),
+              top: seen ? Math.round(seen.top) : null,
+              high: seen ? Math.round(seen.height) : null}; }"""
+    curve = page.evaluate(row)
 
-    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
+    # One press on the second mark, which is the gesture the *i* was.
+    page.evaluate(
+        """() => { const marks = [...document.querySelectorAll('.trails-profile-mark')];
+        if (marks[1]) { marks[1].click(); } }"""
+    )
     page.wait_for_timeout(700)
-    sheet = page.evaluate(
-        """() => { const node = document.querySelector('.trails-detail');
+    read = page.evaluate(row)
+    held = page.evaluate(
+        """() => { const node = document.querySelector('.trails-profile-detail');
         const said = node ? node.textContent : '';
-        // **The sheet is built at the moment it is asked for**, so its blocks
+        // **The page is built at the moment it is asked for**, so its blocks
         // exist only in a browser: a typo in the one that draws the colours
         // would be invisible to every source test and to a green build alike.
         const key = node ? node.querySelector('.trails-profile-key') : null;
         return {drawn: !!node && node.getClientRects().length > 0,
                 text: said,
-                ground: said.indexOf('The ground this covers'),
+                rows: node ? node.querySelectorAll('tr').length : 0,
                 sources: said.indexOf('Sources and licences'),
                 colours: said.indexOf('How the curve is coloured'),
-                bands: key ? key.children.length : 0,
-                state: window.trailsChrome.state().detail}; }"""
+                bands: key ? key.children.length : 0}; }"""
     )
 
-    # **What it covers, it gives back.** Reported: pressing the *i* took the plan
-    # panel away and closing the sheet gave back nothing — the chrome cleared the
-    # open tool outright, which is right when a tap on the ground answers the map
-    # and wrong for a panel's own button. And a second press closes it, which is
-    # what a button that opened something is expected to do.
-    page.evaluate("() => window.trailsChrome.close()")
-    page.evaluate(SHOW_TOOL, "plan")
-    page.wait_for_timeout(700)
-    drawn = """() => { const seen = sel => { const node = document.querySelector(sel);
-        return !!node && node.getClientRects().length > 0; };
-      return {dock: seen('.trails-dock'), sheet: seen('.trails-detail'),
-              tool: window.trailsChrome.state().tool,
-              detail: window.trailsChrome.state().detail}; }"""
-    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
-    page.wait_for_timeout(700)
-    over = page.evaluate(drawn)
-    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
-    page.wait_for_timeout(700)
-    back = page.evaluate(drawn)
+    # And a second press on the lit mark folds it, which is the way back to a
+    # whole map that does not also give up the selection.
+    page.evaluate(
+        """() => { const marks = [...document.querySelectorAll('.trails-profile-mark')];
+        const at = window.trailsProfilePanel.pages().at;
+        if (marks[at]) { marks[at].click(); } }"""
+    )
+    page.wait_for_timeout(600)
+    folded = page.evaluate(row)
 
+    page.evaluate("() => window.trailsProfilePanel.page('profile')")
     page.evaluate("() => window.trailsChrome.close()")
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(900)
-    wide = page.evaluate(row)
 
-    licences = (narrow["licences"] or {}).get("text") or ""
     return Check(
-        "the sources behind an i",
+        "the sources are a page",
         [
-            Reading("the i is offered on a narrow screen", narrow["more"]["drawn"], True),
-            Reading("and the licences are not in the panel", narrow["licences"]["drawn"], False),
-            Reading("nor what ground the file covers", narrow["ground"]["drawn"], False),
-            # The room this gives back is the whole point, and it is the
-            # sentence itself that is long. This is a chain's own list, which is
-            # the short case: the panel that was reported was a planned route
-            # drawing on seven sources, and that names them in some 300
-            # characters over eleven lines of a 390 px screen.
-            Reading("what was taking the room", len(licences), 65, within=40, holds=False, note="characters, and a chain's list is the short one"),
-            Reading("the i opens the sheet", sheet["drawn"], True),
-            Reading("and the chrome says so", sheet["state"], True),
-            Reading("headed as what it is", "Sources and licences" in sheet["text"], True),
-            # **The order is the argument.** What a walk covers is about this
-            # route, who may be asked about it is about the file, and the colour
-            # key is the only thing in the sheet that says nothing about this
-            # route at all -- it explains a drawing rule that holds for every
-            # walk there will ever be, so it goes last.
-            Reading("the ground comes before the sources", sheet["ground"] < sheet["sources"], True),
-            Reading("and the colours after both", sheet["colours"] > sheet["sources"], True),
-            # **Four, and the fifth is right to be missing.** The dashed line
-            # is drawn only where something in the panel is dashed, and a chain
-            # is never drawn straight across anything -- the rule the panel's own
-            # key has kept since phase 4, now kept in the sheet as well. Asking
-            # for five here was the check being wrong about the page.
-            Reading("with a line for each band", sheet["bands"], 4),
-            # And what the file would hold, which used to sit beside the button.
-            Reading("and the count the button used to carry", "points" in sheet["text"], True),
-            # The same sentence and not a second derivation of it: it is read off
-            # the element that shows it.
-            Reading("holding the licences themselves", licences in sheet["text"], True),
-            # And the figures the heading dropped, in the same order it kept the
-            # first three of.
-            Reading("and every figure with them", "high " in sheet["text"] and "low " in sheet["text"], True),
-            # The other switch in the heading, which is proposal one's.
-            Reading("the × is offered beside it", narrow["hide"]["drawn"], True),
-            # It covers the plan panel and does not dismiss it.
-            Reading("the plan panel is still open under it", over["tool"], "plan"),
-            Reading("covered, not closed", over["sheet"] and not over["dock"], True),
-            # A second press closes the sheet, and the panel comes back.
-            Reading("a second press closes it", back["detail"], False),
-            Reading("and the plan panel is back", back["dock"], True),
-            # **And a wide screen is no different now.** The rule used to be
-            # about room — first height, then width — and the room was never
-            # what made a 300-character list of licences the wrong thing to put
-            # above a drawing. The heading carries three figures everywhere and
-            # the *i* carries the rest everywhere.
-            Reading("a wide screen is the same", wide["licences"]["drawn"], False),
-            Reading("and the i is offered there too", wide["more"]["drawn"], True),
-            # The three the heading keeps, on both: how far, how much climb, how
-            # steep at worst.
-            Reading("the heading is three figures", (wide["summary"] or "").count(" \u00b7 "), 2, note=wide["summary"] or ""),
+            Reading("the panel offers two pages", curve["pages"]["keys"], ["profile", "details"]),
+            Reading("and a mark for each", curve["marks"], 2),
+            # The row carries the name over the figures, which is what plan
+            # mode's bar has been measuring with all along.
+            Reading("the row names what is selected", bool(curve["name"]), True, note=curve["name"]),
+            Reading("and the figures under it", "km" in (curve["summary"] or ""), True, note=curve["summary"]),
+            Reading("one press opens the second page", read["pages"]["at"], 1),
+            Reading("it holds the line's own table", held["rows"] > 0, True, note=f"{held['rows']} rows"),
+            Reading("and the sources under it", held["sources"] >= 0, True),
+            # **The colour key last, because it is the only thing here that says
+            # nothing about this route**: it explains a drawing rule that holds
+            # for every walk there will ever be.
+            Reading("and the colours after them", held["colours"] > held["sources"], True),
+            # **Four, and the fifth is right to be missing.** The dashed line is
+            # drawn only where something in the panel is dashed, and a chain is
+            # never drawn straight across anything.
+            Reading("the four bands are drawn", held["bands"], 4),
+            # The whole point: the map is still there while this is read.
+            Reading("px of map left above it", read["top"], 388, within=60, holds=False),
+            Reading("and the page never takes more than half", read["high"] < 844 * 0.55, True, note=f"{read['high']} px"),
+            Reading("a second press folds the pages", folded["pages"]["open"], False),
+            Reading("and the row stays", folded["top"] is not None and folded["high"] < 90, True, note=f"{folded['high']} px"),
         ],
     )
 
@@ -1490,39 +1453,39 @@ def room_on_a_short_screen(page: Any) -> Check:
     download button, the point count, the licences and the colour key came out
     **66 px** against a **78 px** drawing -- the licence list wraps to three
     lines on a screen that narrow and to one on a desktop, so the small screen
-    paid double for the same sentence. It folds behind an *i* there, and the *i*
-    does not exist where the row already fits.
+    paid double for the same sentence.
+
+    It was folded behind an *i*, then hidden outright while a sheet held it.
+    There is no sheet: the row is back, at the **foot of the page the curve is
+    on**, below the drawing and therefore costing it nothing -- the page is as
+    tall as the curve and what is under it is a scroll away.
 
     Args:
         page: The driven page, with a chain selected
 
     Returns:
-        What the row and the drawing measure, folded and unfolded, at both sizes
+        What the page and the drawing measure, and where the row went
     """
     parts = """() => {
       const panel = document.querySelector('.trails-profile-panel');
-      const body = panel.children[2];
+      const pages = document.querySelector('.trails-profile-pagesbox');
+      const chart = document.querySelector('.trails-profile-chart');
+      const meta = document.querySelector('.trails-profile-meta');
+      // The page is the scroller and the box around it is the window: asking the
+      // window how far it scrolls is asking the wrong box, which reads zero.
+      const first = document.querySelector('.trails-profile-page');
       const high = node => node ? Math.round(node.getBoundingClientRect().height) : null;
-      const more = document.querySelector('.trails-profile-more');
-      return {panel: high(panel), meta: high(body.children[0]), chart: high(body.children[1]),
-              more: !!(more && more.offsetParent !== null)}; }"""
+      return {panel: high(panel), pages: high(pages), chart: high(chart), meta: high(meta),
+              // What the page holds beyond what it shows: the row is under the
+              // drawing rather than beside it, so this is how it is reached.
+              scrolls: first ? first.scrollHeight - first.clientHeight : null,
+              // And where it stands, which is the whole claim: under the curve.
+              under: (chart && meta)
+                ? meta.getBoundingClientRect().top >= chart.getBoundingClientRect().bottom - 1 : null}; }"""
 
     page.set_viewport_size({"width": 844, "height": 390})
     page.wait_for_timeout(1200)
-    folded = page.evaluate(parts)
-    # **And the i no longer unfolds them into the drawing.** It did, and that
-    # was the answer while the profile panel was the only place this page had to
-    # put a sentence; there is a sheet now, and eleven lines unfolded into a
-    # 390 px drawing gives straight back the room this check exists to protect.
-    page.evaluate("() => document.querySelector('.trails-profile-more').click()")
-    page.wait_for_timeout(600)
-    opened = page.evaluate(parts)
-    opened_sheet = page.evaluate(
-        """() => { const node = document.querySelector('.trails-detail');
-        return !!node && node.getClientRects().length > 0 && /CC BY|ODbL|CC0/.test(node.textContent); }"""
-    )
-    page.evaluate("() => window.trailsChrome.close()")
-    page.wait_for_timeout(400)
+    sideways = page.evaluate(parts)
 
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(1200)
@@ -1531,32 +1494,22 @@ def room_on_a_short_screen(page: Any) -> Check:
     return Check(
         "a short screen gets its drawing back",
         [
-            Reading("sideways: the licences are folded", folded["more"], True),
-            # **Not a shorter row: no row.** It folded to 33 px behind an *i*;
-            # with a sheet to put it in there is nothing left in the panel at all,
-            # and the pixels go to the map rather than to a drawing that cannot
-            # use them -- 111 metres to the pixel on a route this long, where the
-            # width binds and extra height draws nothing at all.
-            Reading("sideways: px the row takes", folded["meta"], 0),
-            # And the freed pixels go to the drawing rather than to the map:
-            # the share is on the chart while the furniture is what it costs, so
-            # shrinking the furniture without moving the share gives the map the
-            # room and the curve none of it.
-            Reading("and the drawing gets them", folded["chart"], 109, within=6, note="78 px before"),
-            Reading("and the panel is what is left", folded["panel"], 152, within=6, holds=False, note="of 390, against 195 before"),
-            # Nothing is withheld: the sentence a reader has to see before
-            # pressing Download is one tap away and says so.
-            Reading("the i opens them in the sheet", opened_sheet, True),
-            # And the row it was folded out of stays folded: the sentence a
-            # reader has to see before pressing Download is one tap away, and
-            # the drawing keeps its pixels while they read it.
-            Reading("and the panel keeps its room", opened["meta"], folded["meta"], note=f"{opened['meta']} px"),
-            # **The i is offered on a desktop too now.** The heading carries
-            # three figures on every screen and everything else is behind it:
-            # what was a width rule is not one any more.
-            Reading("desktop: the i is there too", desk["more"], True),
-            Reading("desktop: px the row takes", desk["meta"], 0),
-            Reading("desktop: px the drawing takes", desk["chart"], 205, within=2),
+            # The page is the drawing's height and the row is below it, so the
+            # sentence costs the curve nothing on any screen.
+            Reading("sideways: the page is the drawing", sideways["pages"], sideways["chart"], within=2),
+            Reading("sideways: and the row stands under it", sideways["under"], True),
+            Reading("sideways: reachable by scrolling the page", sideways["scrolls"] > 0, True, note=f"{sideways['scrolls']} px below the fold"),
+            Reading("sideways: px the drawing takes", sideways["chart"], 109, within=10, holds=False),
+            Reading(
+                "sideways: px the panel is",
+                sideways["panel"],
+                186,
+                within=14,
+                holds=False,
+                note="of 390: the drawing, and the row that says what it is",
+            ),
+            Reading("desktop: the row is under the drawing too", desk["under"], True),
+            Reading("desktop: px the drawing takes", desk["chart"], 205, within=4),
         ],
     )
 
@@ -1582,21 +1535,14 @@ def a_finger_can_use_it(page: Any) -> Check:
     # check before this one taps a trail. Measuring here without opening it
     # again measures a box with no size, which is the detached-DOM trap one
     # level up.
-    page.evaluate(SHOW_TOOL, "plan")
-    page.wait_for_timeout(600)
-    # And it asks whether the list is open rather than pressing the handle: the
-    # handle is a toggle, the check before this one has already opened it, and a
-    # second press shuts it. Driving a toggle blind is how a check ends up
+    # **The list is a page of the profile panel now**, lent by the plan control
+    # rather than copied: the rows a reader reorders and the rows this measures
+    # are one list. Asking for the page by name and not pressing a handle -- a
+    # handle is a toggle, and driving a toggle blind is how a check ends up
     # measuring the opposite of what it asked for.
-    page.evaluate(
-        """() => { const list = document.querySelector('.trails-plan-points');
-        if (list && list.style.display !== 'none') { return; }
-        const box = document.querySelector('.trails-plan-control');
-        const handle = [...box.querySelectorAll('div')]
-          .find(d => /point/.test(d.textContent) && d.style.cursor === 'pointer');
-        if (handle) { handle.click(); } }"""
-    )
-    page.wait_for_timeout(600)
+    page.evaluate("() => window.trailsChrome.close()")
+    page.evaluate("() => window.trailsProfilePanel.page('list')")
+    page.wait_for_timeout(700)
 
     sizes = """() => {
       const size = node => { if (!node || node.offsetParent === null) return null;
@@ -1738,52 +1684,66 @@ def a_way_back_to_the_whole(page: Any) -> Check:
     )
 
 
-def the_plan_bar(page: Any) -> Check:
+def the_row_at_the_foot(page: Any) -> Check:
     """Planning on a phone, with the ground it is planned on left showing.
 
-    Measured before this was built, with real taps at 390 x 844: the profile
-    panel opened on the **first** point at 355 px and grew to 389 on the second,
-    so the map a reader was tapping shrank to **439 px** -- and with the plan
-    panel shut the only thing on the screen was the burger, so nothing said plan
-    mode was on and every tap placed a point. Reaching the point list was four
-    taps and undo was three.
+    Measured before any of this was built, with real taps at 390 x 844: the
+    profile panel opened on the **first** point at 355 px and grew to 389 on the
+    second, so the map a reader was tapping shrank to **439 px** -- and with the
+    plan panel shut the only thing on the screen was the burger, so nothing said
+    plan mode was on and every tap placed a point. Reaching the point list was
+    four taps and undo was three.
+
+    A bar of plan mode's own fixed that and cost a second row: it stood above the
+    profile panel's heading, its figures over the panel's figures, its profile
+    switch over the panel's own. **There is one row now** -- the panel's -- and
+    what plan mode has to say is pushed into it. This measures that everything
+    the bar reached is still one gesture away, and that the map is still there.
 
     Args:
         page: The driven page, in plan mode with points down
 
     Returns:
-        What the bar says and reaches, and what it left of the map
-
+        What the row says and reaches, and what it left of the map
     """
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(900)
     page.evaluate("() => window.trailsChrome.close()")
     page.wait_for_timeout(600)
+    # **Stopping and starting again, because the default is what is being
+    # measured.** Whether the pages open by themselves is the chrome's default
+    # and a reader's answer outlives the state that set it -- the checks before
+    # this one ask for a page by name, which *is* such an answer. Starting or
+    # stopping plan mode is a new question and takes the default back, which is
+    # the rule this reading is about; the route is left drawn either way.
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(500)
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(800)
 
     seen = """() => {
       const box = sel => { const n = document.querySelector(sel);
-        if (!n || n.offsetParent === null) { return null; }
+        if (!n || n.getClientRects().length === 0) { return null; }
         const r = n.getBoundingClientRect();
         return {w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top)}; };
-      const bar = document.querySelector('.trails-planbar');
-      return {bar: box('.trails-planbar'),
-              says: bar ? bar.querySelector('b').textContent : null,
-              profile: box('.trails-profile-panel'),
+      const list = document.querySelector('.trails-plan-points');
+      return {row: box('.trails-profile-head'),
+              says: (document.querySelector('.trails-profile-name') || {}).textContent || null,
+              hint: (document.querySelector('.trails-profile-figures') || {}).textContent || null,
+              panel: box('.trails-profile-panel'),
+              pages: window.trailsProfilePanel.pages(),
               dock: box('.trails-dock'),
-              rows: (() => { const l = document.querySelector('.trails-plan-points');
-                return l && l.style.display !== 'none' ? l.children.length : 0; })(),
+              rows: list && list.getClientRects().length ? list.children.length : 0,
               state: window.trailsChrome.state()}; }"""
 
     planning = page.evaluate(seen)
-    before = page.evaluate("() => window.trailsPlan.state().points.length")
 
-    # One tap on the figures, and the list is open. Four taps before this.
-    page.evaluate("() => { document.querySelector('.trails-planbar-figures').click(); }")
+    # One press on the figures, and the list is open. Four taps before the bar
+    # existed, and the same one gesture the bar's own figures were.
+    page.evaluate("() => document.querySelector('.trails-profile-said').click()")
     page.wait_for_timeout(900)
     reached = page.evaluate(seen)
 
-    page.evaluate("() => window.trailsChrome.close()")
-    page.wait_for_timeout(500)
     # **A point placed here on purpose.** Undo takes back the last *change*, and
     # the check before this one ends with a reorder — pressing undo then would
     # restore an order and leave the count where it was, which is right and
@@ -1798,35 +1758,36 @@ def the_plan_bar(page: Any) -> Check:
     )
     settled(page)
     before = page.evaluate("() => window.trailsPlan.state().points.length")
+    # **Undo stands over the list**, which is where the changes are. It was in
+    # the bar, beside two controls that are not edits at all.
     pressable = page.evaluate(
-        """() => { const b = document.querySelector('.trails-planbar-undo');
-        return {there: !!(b && b.offsetParent !== null), off: b ? b.disabled : null,
+        """() => { const b = document.querySelector('.trails-profile-undo');
+        return {there: !!(b && b.getClientRects().length > 0), off: b ? b.disabled : null,
                 steps: window.trailsPlan.state().undoable}; }"""
     )
     pressable["before the place"] = steps_before
-    # **By name and not by position.** These were `button[0]` and `button[1]`,
-    # and the day the bar grew a third button every one of these readings moved
-    # by one: undo pressed the profile switch, Done pressed undo, and four
-    # readings failed saying nothing about what had changed.
-    page.evaluate("() => { document.querySelector('.trails-planbar-undo').click(); }")
+    page.evaluate("() => document.querySelector('.trails-profile-undo').click()")
     settled(page)
     undone = page.evaluate("() => window.trailsPlan.state().points.length")
 
-    # The profile is one tap away rather than gone.
-    page.evaluate(SHOW_TOOL, "profile")
-    page.wait_for_timeout(900)
+    # The curve is one press away, on the mark that names it.
+    page.evaluate(
+        """() => { const marks = [...document.querySelectorAll('.trails-profile-mark')];
+        if (marks[0]) { marks[0].click(); } }"""
+    )
+    page.wait_for_timeout(800)
     asked = page.evaluate(seen)
 
-    # The switch on the bar, pressed twice: away and back.
-    bar_switch = {"there": page.evaluate("() => !!document.querySelector('.trails-planbar-profile')")}
-    page.evaluate("() => { document.querySelector('.trails-planbar-profile').click(); }")
+    # And a second press on the lit mark folds the pages and leaves the row.
+    page.evaluate(
+        """() => { const marks = [...document.querySelectorAll('.trails-profile-mark')];
+        if (marks[0]) { marks[0].click(); } }"""
+    )
     page.wait_for_timeout(700)
-    bar_switch["after"] = page.evaluate(seen)["profile"]
-    page.evaluate("() => { document.querySelector('.trails-planbar-profile').click(); }")
-    page.wait_for_timeout(700)
-    bar_switch["again"] = page.evaluate(seen)["profile"]
+    folded = page.evaluate(seen)
 
-    page.evaluate("() => { document.querySelector('.trails-planbar-done').click(); }")
+    # The way out of planning is the mark at the end of the row, which says so.
+    page.evaluate("() => document.querySelector('.trails-profile-hide').click()")
     page.wait_for_timeout(900)
     done = page.evaluate(seen)
 
@@ -1836,44 +1797,42 @@ def the_plan_bar(page: Any) -> Check:
     return Check(
         "planning with the map still showing",
         [
-            Reading("the bar stands while planning", bool(planning["bar"]), True),
-            Reading("px it takes", planning["bar"]["h"] if planning["bar"] else 0, 44),
-            # The whole point: the profile does not open by itself on a phone
-            # while the reader is tapping the ground it would cover.
-            Reading("and the profile does not open by itself", planning["profile"], None),
+            Reading("the row stands while planning", bool(planning["row"]), True),
+            Reading("px it takes", planning["row"]["h"] if planning["row"] else 0, 40, within=6),
+            # The whole point: the pages do not open by themselves on a phone
+            # while the reader is tapping the ground they would cover.
+            Reading("and the pages do not open by themselves", planning["pages"]["open"], False),
             Reading(
                 "px of map left to tap on",
-                planning["bar"]["top"] if planning["bar"] else 0,
+                planning["panel"]["top"] if planning["panel"] else 0,
                 784,
-                within=2,
-                note="439 before",
+                within=14,
+                note="439 before the bar existed",
             ),
             Reading("it says how far the walk has got", "point" in (planning["says"] or ""), True, note=planning["says"]),
             # NaN is neither null nor undefined, and a route of crossings alone
             # has no climb: driven on open water the bar once read "+NaN m".
             Reading("and never says NaN", "NaN" in (planning["says"] or ""), False),
-            Reading("one tap reaches the list", reached["rows"] > 0, True, note=f"{reached['rows']} rows"),
+            Reading("and points at the page under it", planning["hint"], "tap for the points"),
+            Reading("one press reaches the list", reached["rows"] > 0, True, note=f"{reached['rows']} rows"),
+            Reading("which is a page of the panel", reached["pages"]["keys"][reached["pages"]["at"]], "list"),
             # **One place, one entry.** It read two until the history's own
-            # function was renamed apart from the height cache's: a freehand
-            # leg's heights arriving called what it thought was the cache and
-            # was the history.
+            # function was renamed apart from the height cache's.
             Reading("one place is one change", pressable["steps"] - pressable["before the place"], 1),
-            Reading("one tap undoes it", undone, before - 1),
+            Reading("undo stands over the list", pressable["there"], True),
+            Reading("one press undoes it", undone, before - 1),
             Reading("and leaves what was there", page.evaluate(laid), was),
-            Reading("and the profile is one tap away", bool(asked["profile"]), True),
-            # From the bar itself, which is the tap: the rail is behind the
-            # burger while planning, so the way to the curve was three taps
-            # through a menu that is not about planning.
-            Reading("the bar carries the switch", bar_switch["there"], True),
-            Reading("and one tap on it puts the curve away", bar_switch["after"], None),
-            Reading("and another brings it back", bar_switch["again"] is not None, True),
-            Reading(
-                "with the bar still above it",
-                bool(asked["bar"] and asked["profile"] and asked["bar"]["top"] < asked["profile"]["top"]),
-                True,
-            ),
-            Reading("done puts plan mode away", done["state"]["planning"], False),
-            Reading("and the bar with it", done["bar"], None),
+            Reading("the curve is one press away", asked["pages"]["keys"][asked["pages"]["at"]], "profile"),
+            Reading("and the row is still under it", bool(asked["row"] and asked["panel"] and asked["row"]["top"] > asked["panel"]["top"]), True),
+            Reading("a second press folds the pages", folded["pages"]["open"], False),
+            Reading("and the row stays", bool(folded["row"]), True),
+            Reading("the mark at the end finishes planning", done["state"]["planning"], False),
+            # **And the route it made stays.** Finishing is not discarding: the
+            # panel is still drawing the walk that was planned, so the row stands
+            # and says what it is now saying about a route rather than about a
+            # plan. What goes is plan mode.
+            Reading("and the row keeps the route it made", bool(done["row"]), True, note=done["says"]),
+            Reading("saying nothing about points any more", "point" in (done["says"] or ""), False),
         ],
     )
 
@@ -1888,8 +1847,12 @@ def the_point_list_takes_the_room(page: Any) -> Check:
     what handed the wheel to the map, because the panel gave the turn up as soon
     as it had nothing left to scroll.
 
-    **A wheel that started over a panel does not end in a zoom.** Each scroller
-    inside takes what it can use; the outermost panel swallows the rest.
+    **The list is a page of the profile panel now**, so the room it is given is
+    the page's and the cap is the one that keeps the panel off the map: never
+    more than 46 % of it, measured with the row at the foot counted in. What is
+    checked here is that the rows fit where there is room, that the page and not
+    the map takes a wheel over them where there is not, and that ten points are
+    still ten rows.
 
     Args:
         page: The driven page, at any state
@@ -1920,48 +1883,71 @@ def the_point_list_takes_the_room(page: Any) -> Check:
         page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
         settled(page)
     settled(page)
-    page.evaluate("() => window.trailsPlan.showList(true)")
-    page.evaluate(SHOW_TOOL, "plan")
-    page.wait_for_timeout(1000)
+    page.evaluate("() => window.trailsProfilePanel.page('list')")
+    page.wait_for_timeout(900)
 
-    listed = page.evaluate(
-        """() => { const rows = document.querySelector('.trails-plan-points');
-        const seen = getComputedStyle(rows);
+    listed = """() => { const rows = document.querySelector('.trails-plan-points');
+        const page = rows.closest('.trails-profile-page');
+        const room = document.querySelector('.trails-profile-panel').getBoundingClientRect();
         return {h: Math.round(rows.getBoundingClientRect().height),
-                cap: Math.round(parseFloat(seen.maxHeight)),
-                over: rows.scrollHeight - rows.clientHeight,
+                page: Math.round(page.getBoundingClientRect().height),
+                panel: Math.round(room.height),
+                over: page.scrollHeight - page.clientHeight,
                 rows: [...rows.children].length}; }"""
-    )
+    wide = page.evaluate(listed)
 
-    # A wheel over the rows, at the far end of whatever they can scroll, which is
-    # where the panel used to give the turn to the map.
+    # And on a phone with a finger, where the cap bites: the rows are 44 px
+    # under a coarse pointer, so ten of them are taller than the page may be and
+    # the page scrolls rather than the panel growing over the map being planned
+    # on. With a mouse the same ten fit, which is the point of the cap being a
+    # share of the map rather than a constant.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.wait_for_timeout(1000)
+    page.evaluate("() => window.trailsProfilePanel.page('list')")
+    page.wait_for_timeout(700)
+    narrow = page.evaluate(listed)
+
+    # A wheel over the rows there, where the page has somewhere left to scroll,
+    # which is where the panel used to give the turn to the map.
     zoom = "() => window[Object.keys(window).find(k => k.startsWith('map_'))].getZoom()"
     before = page.evaluate(zoom)
-    page.evaluate("() => { const rows = document.querySelector('.trails-plan-points'); rows.scrollTop = rows.scrollHeight; }")
     where = page.evaluate(
         """() => { const box = document.querySelector('.trails-plan-points').getBoundingClientRect();
         return {x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2)}; }"""
     )
     page.mouse.move(where["x"], where["y"])
-    page.mouse.wheel(0, 320)
-    page.wait_for_timeout(700)
-    page.mouse.wheel(0, -320)
+    page.mouse.wheel(0, 200)
     page.wait_for_timeout(700)
     after = page.evaluate(zoom)
 
+    page.evaluate("() => window.trailsChrome.coarse(null)")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(800)
     page.evaluate("() => window.trailsChrome.close()")
     page.wait_for_timeout(400)
 
     return Check(
         "the point list takes the room",
         [
-            Reading("ten points make ten rows", listed["rows"], 10),
-            # The cap that matters is the room measured above the profile panel,
+            Reading("ten points make ten rows", wide["rows"], 10),
+            # The cap that matters is the room the panel may take off the map,
             # not a constant somebody once picked.
-            Reading("the list is given more than 220 px", listed["cap"] > 220, True, note=f"{listed['cap']} px"),
-            Reading("and does not have to scroll", listed["over"], 0, note=f"{listed['h']} px tall"),
-            # The reported one: a wheel that started over a panel does not end in
-            # a zoom, whether or not there was anything left to scroll.
+            Reading("on a desktop they fit without scrolling", wide["over"], 0, note=f"{wide['page']} px page"),
+            Reading(
+                "on a phone with a finger the page scrolls instead",
+                narrow["over"] > 0,
+                True,
+                note=f"{narrow['over']} px below the fold, rows at 44",
+            ),
+            Reading(
+                "and the panel keeps off more than half the map",
+                narrow["panel"] < 844 * 0.5,
+                True,
+                note=f"{narrow['panel']} px of 844",
+            ),
+            # The reported one: a wheel that started over rows with somewhere to
+            # scroll does not end in a zoom.
             Reading("a wheel over the rows leaves the map alone", after, before),
         ],
     )
@@ -4447,8 +4433,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(room_on_a_short_screen(page))
     if wanted(narrow_sheets):
         checks.append(narrow_sheets(page))
-    if wanted(the_sources_behind_an_i):
-        checks.append(the_sources_behind_an_i(page))
+    if wanted(the_sources_are_a_page):
+        checks.append(the_sources_are_a_page(page))
     if wanted(the_theme_switch):
         checks.append(the_theme_switch(page))
     select(page, LONG_CHAIN)
@@ -4502,8 +4488,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(stations_and_list(page, places))
     if wanted(a_finger_can_use_it):
         checks.append(a_finger_can_use_it(page))
-    if wanted(the_plan_bar):
-        checks.append(the_plan_bar(page))
+    if wanted(the_row_at_the_foot):
+        checks.append(the_row_at_the_foot(page))
     if wanted(the_point_list_takes_the_room):
         checks.append(the_point_list_takes_the_room(page))
     if wanted(undo_undoes_the_last_change):

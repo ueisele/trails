@@ -2732,35 +2732,37 @@ class TestProfilePanel:
         """The same map, as a fixture."""
         return self.drawn()
 
-    def test_the_figures_and_the_sources_are_one_tap_away_on_every_screen(self, group):
-        """First the licences folded on a short screen, then on a narrow one as
-        well — a width rule for something that was never about width. The
-        heading carries the three figures a walk is decided on and everything
-        else is behind the *i*, on a phone and on a desktop alike."""
+    def test_what_the_curve_was_drawn_from_stands_under_it(self, group):
+        """The colour key, the point count, the licences and the ground note
+        were hidden outright on any page with a chrome, because a full-screen
+        sheet held them. There is no sheet: they are back, at the foot of the
+        page the curve is on, where scrolling reaches them and the drawing is
+        not asked to give up a line for them."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "var folded = sheeted() || !licencesOpen;" in html
-        assert "size.y < SHORT" not in html.split("function showLicences")[1][:400]
+        assert "meta.style.display = '';" in html
+        # The drawing first and what it was drawn from under it. A licence line
+        # over a curve is a licence line in the way.
+        assert html.index("body.appendChild(chart);") < html.index("body.appendChild(meta);")
 
-    def test_the_i_opens_the_sheet_rather_than_the_drawing(self, group):
-        """A page whose popups all dock into one panel has somewhere to put a
-        sentence this long, and unfolding eleven lines into a 390 px drawing
-        gives straight back the room the fold was for. Where there is no chrome
-        the fold is still the answer, because there is nowhere else."""
+    def test_the_i_is_a_page_and_not_a_sheet(self, group):
+        """It used to open the chrome's full-screen sheet, which answered *what
+        was this drawn from* by covering the drawing, the map and the line that
+        had been tapped to get there. The same content is the second page of the
+        same panel, one swipe from the curve, and the row underneath says which
+        of the two is showing."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "window.trailsChrome.detail(named, box, 'profile');" in html
-        # And a second press closes it, which is what a button that opened
-        # something is expected to do.
-        assert "standing.detailKey === 'profile'" in html
+        assert "function detailFigures() {" in html
+        assert "window.trailsChrome.detail(named, box, 'profile');" not in html
         # Read off the element that shows it rather than composed again: one
         # sentence, in two places, from one derivation.
         assert "said.textContent = part[0];" in html
-        assert "licencesOpen = !licencesOpen;" in html
+        assert "kind: 'details'" in html
 
     def test_the_heading_shows_three_of_the_list_the_sheet_shows_all_of(self, group):
         """Six lines of figures over a drawing that got four. The heading takes
@@ -2774,21 +2776,53 @@ class TestProfilePanel:
         assert "saidText = lines.slice(0, 3).join(" in html
         assert "figures.forEach(function (line, at) {" in html
 
-    def test_the_heading_is_one_line_of_marks_and_carries_no_title(self, group):
-        """Measured on a phone: 46 px of heading on two lines, over a drawing
-        that got 186. The panel's own name is the one thing it can give up for
-        nothing — the sheet's bar carries `Elevation profile · <what>` already,
-        and on a wide screen the rail beside the panel names the same tool the
-        same way. What is left of it is the caret, because the fold is a gesture
-        a reader has and it costs one character."""
+    def test_the_row_says_what_it_is_over_how_far_it_goes(self, group):
+        """Two lines of 44 px, which is what plan mode's bar has been measuring
+        with all along: the name in bold and the figures under it, each on one
+        line and each ending in an ellipsis rather than wrapping. The figures
+        that do not fit are on the page the name opens."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "name.className = 'trails-profile-fold';" in html
-        assert "name.textContent = open ? '\\u25be' : '\\u25b8';" in html
-        # One line, ending in an ellipsis rather than wrapping to a second.
+        assert "name.className = 'trails-profile-name';" in html
+        assert "summary.className = 'trails-profile-figures';" in html
         assert "white-space:nowrap;overflow:hidden;text-overflow:ellipsis'" in html
+        # The two lines are one sentence about one thing, so they are written in
+        # one call and can never be about two.
+        assert "name.textContent = planning()" in html
+
+    def test_swiping_is_taken_everywhere_but_across_the_drawing(self, group):
+        """One finger on the curve reads it — distance, height, gradient — and
+        that gesture is both older and worth more than this one: it is the only
+        way to ask a phone what is under a place. So the swipe is taken on the
+        row at the foot and on the pages that are not the curve, and the marks
+        are what move a reader off the profile."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "swipeFrom(header);" in html
+        assert "swipeFrom(detailBox);" in html
+        assert "swipeFrom(pointsPage);" in html
+        assert "swipeFrom(chart)" not in html
+
+    def test_the_archive_is_offered_only_where_there_are_stages(self, group):
+        """A tour cut into stages can be had as one file or as an archive of
+        them; a tour that is one stage would be offered the same file twice under
+        two names. The plan panel's own save has always said so, and it is said
+        once here rather than twice."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "if (cut > 1) {" in html
+        assert "saveEntry('Whole tour (GPX)'," in html
+        assert "saveEntry('All stages (zip)'," in html
+        # Plan mode's own writer, asked for by name: a second writer would
+        # eventually disagree with the first about a route it was handed the
+        # same way.
+        assert "window.trailsPlan.saveStages()" in html
 
     def test_the_file_is_a_mark_beside_the_other_two(self, group):
         """The plan control gave up its words a fortnight ago and this was the
@@ -2801,26 +2835,32 @@ class TestProfilePanel:
         html = fmap.get_root().render()
         assert "download.className = 'trails-profile-gpx';" in html
         assert "download.textContent = 'Download GPX';" not in html
-        assert "tools.appendChild(download);" in html
-        # **A mark in the heading has to stop the heading's own click.** Every
-        # other control up there says so; this one was written while it stood in
-        # the body, and without it a reader asking for the file loses the drawing
-        # with it. Driven before it was added, and it folded.
+        # The button and its menu travel together, so the menu can be placed
+        # against the button rather than against the row.
+        assert "saveWrap.appendChild(download);" in html
+        assert "tools.appendChild(saveWrap);" in html
         assert "download.addEventListener('click', function (event) {" in html
         # And the chart is named, because the mark put a second `<svg>` in the
         # panel ahead of it: `panel svg` had quietly begun meaning a 17 px icon.
         assert "chart.setAttribute('class', 'trails-profile-chart');" in html
 
-    def test_with_a_sheet_the_panel_is_a_heading_and_a_curve(self, group):
-        """The colour key, the point count, the licences and the ground note all
-        stand in the sheet the *i* opens. Without a chrome there is nowhere else,
-        so the row stays exactly as it was — the same rule the licences have
-        followed since they were folded."""
+    def test_a_second_press_on_the_lit_mark_folds_the_pages_away(self, group):
+        """Which is what a mark that opened something is expected to do — and
+        the only way to a whole map that does not also give up the selection.
+        The row stays; it is 44 px and it is what says something is chosen."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "meta.style.display = sheeted() ? 'none' : '';" in html
+        assert "if (lit) { showPages(false); return; }" in html
+        # **And the answer is kept where every other switch for it is kept.** A
+        # fold that set only this closed itself again the moment anything
+        # repainted: while planning on a narrow screen the chrome's default is
+        # *shut*, so it asked for shut back half a frame after a reader had asked
+        # for open. Driven, the list page opened and was gone before it could be
+        # read.
+        assert "window.trailsChrome.profile(want);" in html
+        assert "if (pagesOpen === want) { return; }" in html
 
     def test_neither_hint_is_drawn_and_nothing_stands_in_for_them(self, group):
         """Reported from a phone: the hint anchored at `box.left` and the reading
@@ -2875,16 +2915,21 @@ class TestProfilePanel:
         assert "function bandLabel(at) {" in html
         assert "row.appendChild(bandSwatch(band.width, band.colour, false));" in html
 
-    def test_the_panel_can_be_put_away_only_where_something_brings_it_back(self, group):
-        """A control that strands a reader is worse than no control: a page built
-        without the chrome has no way back to the panel once it is gone."""
+    def test_the_way_out_takes_the_selection_with_it(self, group):
+        """It used to put the panel away and leave the line selected underneath,
+        so a reader who wanted the map back pressed this and then had to find the
+        line again to undo its highlight. Folding is what the lit mark does; this
+        is *done with this thing* — and while a route is being planned, the thing
+        being finished is the planning."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
         assert "hide.className = 'trails-profile-hide';" in html
-        assert "window.trailsChrome.profile(false);" in html
-        assert "hide.style.display = (window.trailsChrome && window.trailsChrome.profile) ? '' : 'none';" in html
+        assert "if (planNow && window.trailsPlan) { window.trailsPlan.toggle(false); return; }" in html
+        assert "if (window.trailsHighlight) { window.trailsHighlight.clear(); }" in html
+        # Only where there is something to be done with.
+        assert "hide.style.display = (open || planning()) ? 'flex' : 'none';" in html
 
     def test_the_gradient_bands_and_their_rule_reach_the_page(self, group):
         """The bands are a measurement, not a taste: 15 % sits above the worst
@@ -3925,9 +3970,9 @@ class TestPlanMode:
     def test_the_points_are_listed_in_order_behind_their_own_count(self):
         """A route is a sequence and a map cannot show a sequence: reading eleven
         numbered pins off a map to find that 7 comes before 8 is searching, not
-        reading. The count was already naming what the list holds, so it is the
-        handle -- a second heading saying the same number would be the two-panel
-        mistake the legend was cured of.
+        reading. The list is lent to the profile panel, which is where a reader
+        planning a route is looking; where nothing borrows it — a page built
+        without a panel — it stays behind the count that names it.
         """
         fmap, _ = self.drawn()
         maps.add_plan_mode(fmap, self.planned())
@@ -3936,7 +3981,11 @@ class TestPlanMode:
 
         assert "function drawList(stations) {" in html
         assert "listOpen = !listOpen;" in html
-        assert "listBox.style.display = (listable && listOpen) ? '' : 'none';" in html
+        assert "listBox.style.display = (lentOut || (listable && listOpen)) ? '' : 'none';" in html
+        # Moved rather than copied: a second rendering of a sequence is how two
+        # of them come to disagree about the order.
+        assert "if (!lentOut && panel() && panel().list) { lentOut = !!panel().list(listBox); }" in html
+        assert "if (!lentOut) { box.appendChild(listBox); }" in html
         # Drawn from the walk the panel is fed, so how far along a point comes is
         # the walk's answer and not a sum of the legs'.
         assert "drawList(shape.stations || []);" in html
@@ -4773,9 +4822,9 @@ class TestComposedProfile:
         html = self.drawn().get_root().render()
         assert "var writable = !!(selected && (!selected.composed || selected.plan));" in html
         assert "offer.style.display = writable ? 'block' : 'none';" in html
-        # The mark stands in the heading now, so the condition has to be said to
-        # it as well: a mark that does nothing is worse than no mark.
-        assert "download.style.display = writable ? '' : 'none';" in html
+        # The mark stands in the row at the foot now, laid out as a box a thumb
+        # can hit, so the condition has to be said to it as well.
+        assert "download.style.display = writable ? 'flex' : 'none';" in html
 
     def test_a_route_with_a_hole_in_it_is_refused_and_said(self):
         """The file states that it breaks its track only at crossings. A leg
@@ -5144,11 +5193,13 @@ class TestChrome:
     """Tests for the rail, the burger, and the one sheet under both."""
 
     def test_one_sheet_holds_whatever_is_read_in_it(self):
-        """A popup docks here and so does anything else the page has that is to
-        be read rather than glanced at. Two full-screen surfaces on a phone
-        would be two things that have to agree about which is on top, which is
-        the defect this chrome exists to end — so it is written once and called
-        from both."""
+        """What is still read in it — the plan panel's own *i*, which is about a
+        file that was loaded rather than about the route — and anything else the
+        page has that is to be read rather than glanced at. Two full-screen
+        surfaces on a phone would be two things that have to agree about which is
+        on top, which is the defect this chrome exists to end, so it is written
+        once. A popup no longer comes here at all: it is a page of the panel, and
+        this is the fallback for a page built without one."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(fmap)
 
@@ -5160,6 +5211,36 @@ class TestChrome:
         # by the caller rather than sniffed at: the day something guesses is the
         # day a place name with an ampersand in it becomes an element.
         assert "if (asHtml) { wrap.innerHTML = content; } else { wrap.textContent = content; }" in html
+
+    def test_a_popup_becomes_a_page_of_the_panel(self):
+        """It used to become a sheet over the whole screen, which answered *what
+        did I just tap* by covering the thing that had been tapped, the curve it
+        drew and the map it was on. It goes to the panel now — beside the profile
+        where the tapped thing has one, alone where it has not, which is what a
+        place gets — and only a page with no panel falls back to the sheet."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "window.trailsProfilePanel.detail(titleFor(popup), content);" in html
+        # Asked first, and the sheet only where there is nothing to ask.
+        assert html.index("window.trailsProfilePanel.detail(titleFor(popup)") < html.index("readInSheet(titleFor(popup), content, true, 'popup')")
+
+    def test_the_row_at_the_foot_stands_for_a_selection_or_a_plan(self):
+        """Plan mode had a bar of its own and it stood above the profile panel's
+        heading — its figures over the panel's figures, its profile switch over
+        the panel's own — so two rows said two versions of *what you are looking
+        at*. There is one row, it belongs to the panel, and what plan mode has to
+        say is pushed into it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "trails-planbar" not in html
+        assert "var standing = !!(selection || planOn());" in html
+        assert "window.trailsProfilePanel.planning(summary);" in html
+        # Two answers, not one: the row stands, and the pages are the switch.
+        assert "if (pager.pages().open !== want) { pager.page(want ? true : false); }" in html
 
     def test_the_offline_tool_has_a_drawing_and_it_says_which_state_it_is_in(self):
         """It had none at all: `icon()` reads `ICONS[key]` and there was no

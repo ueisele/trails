@@ -5043,21 +5043,32 @@ class _ProfilePanel(MacroElement):
             // from 6.96 to 4.72 metres a pixel, which is where its readings
             // already are. Where the width binds — a long gentle route — it
             // changes nothing, and only zooming would.
+            // **One row at the foot, whatever is going on.** A selected line
+            // and a route being planned used to have a bar each -- this panel's
+            // heading and plan mode's own -- standing one above the other while
+            // both were true and saying two versions of *what you are looking
+            // at*. This is that row, written once: what it is on the left, the
+            // pages as one mark each in the middle, the file and the way out on
+            // the right.
+            //
+            // **Under the pages and not over them.** It is the part that is
+            // always there, and a control that is always there should not move
+            // when something opens above it: the thumb that reaches the foot of
+            // a phone finds it in the same place whether a page is open or not.
             var header = document.createElement('div');
             header.className = 'trails-profile-head';
-            header.style.cssText = 'font-weight:600;cursor:pointer;user-select:none;' +
-                'display:flex;gap:8px;align-items:baseline';
-            // **The panel's own name is gone from the panel.** The sheet the
-            // *i* opens carries `Elevation profile . <what>` in its own bar, and
-            // on a wide screen the rail beside the panel names the same tool the
-            // same way -- so the heading was spending its one line on a word
-            // that already stands twice elsewhere. What is left of it is the
-            // caret: the fold is a gesture a reader has, and taking a working
-            // gesture away to save ten pixels is the trade this document keeps
-            // arguing against.
-            var name = document.createElement('span');
-            name.className = 'trails-profile-fold';
-            name.style.cssText = 'flex:none;color:var(--trails-ink-4);font-weight:400';
+            header.style.cssText = 'display:flex;gap:8px;align-items:center;user-select:none';
+
+            // The name over the figures, which is the order plan mode's bar
+            // already used for the same two kinds of sentence: what this is,
+            // and how far it goes.
+            var said = document.createElement('div');
+            said.className = 'trails-profile-said';
+            said.style.cssText = 'flex:1 1 auto;min-width:0;cursor:pointer';
+            var name = document.createElement('b');
+            name.className = 'trails-profile-name';
+            name.style.cssText = 'display:block;font-size:14px;line-height:1.15;white-space:nowrap;' +
+                'overflow:hidden;text-overflow:ellipsis';
             // **A way back that can be found.** Double-clicking the curve has
             // put the whole chain back since the zoom was built, and nothing
             // says so — an undiscoverable gesture is a gesture most readers do
@@ -5072,9 +5083,10 @@ class _ProfilePanel(MacroElement):
                 'border:1px solid var(--trails-rule);border-radius:10px;background:var(--trails-solid);' +
                 'color:var(--trails-ink-2);cursor:pointer;display:none';
             var body = document.createElement('div');
-            // Right of the title, not under it. It reads as what the title is
-            // about rather than as a second thing to look at, and when nothing
-            // is selected the whole panel is one line.
+            // Under the name, not beside it. A line of 10.5 px carries about
+            // forty characters beside three marks and a name, which is what the
+            // plan bar has been measuring with all along; the figures that do
+            // not fit are on the page the name opens.
             var summary = document.createElement('span');
             // **One line, and it ends in an ellipsis rather than wrapping.**
             // The three figures are 47 characters and a 390 px heading holds
@@ -5083,8 +5095,20 @@ class _ProfilePanel(MacroElement):
             // being cured of. What is cut off is one tap away, whole, and the
             // list it is cut from is the same list the sheet renders entire.
             summary.className = 'trails-profile-figures';
-            summary.style.cssText = 'flex:1 1 auto;min-width:0;font-weight:400;color:var(--trails-ink-2);' +
-                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+            summary.style.cssText = 'display:block;font-size:10.5px;line-height:1.15;font-weight:400;' +
+                'color:var(--trails-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+            said.appendChild(name);
+            said.appendChild(summary);
+
+            // **One mark per page, and the lit one is where you are.** It is the
+            // same fact the dots over the page show and the same fact a swipe
+            // changes: three renderings of one number, which is the only way a
+            // reader who swiped and a reader who pressed end up in the same
+            // place.
+            var pill = document.createElement('div');
+            pill.className = 'trails-profile-pages';
+            pill.style.cssText = 'flex:none;display:none;border:1px solid var(--trails-rule);' +
+                'border-radius:9px;overflow:hidden;background:var(--trails-solid)';
             // **Two switches at the end of the heading, and they are not the
             // same switch.** The heading itself folds: the drawing goes and the
             // line of figures stays, which is what a reader wants who is coming
@@ -5094,27 +5118,34 @@ class _ProfilePanel(MacroElement):
             // 35 px bar of nothing over the map.
             var tools = document.createElement('span');
             tools.style.cssText = 'flex:none;display:flex;gap:2px;align-items:center';
+            // **The way out, and it is the selection that goes.** It used to put
+            // the panel away and leave the line selected underneath, which meant
+            // a reader who wanted the map back had to press this and then find
+            // the line again to undo the highlight. Folding the pages is what
+            // the lit mark does; this is *done with this thing*. While a route
+            // is being planned it is plan mode that is done with, and the mark
+            // says so.
             var hide = document.createElement('button');
             hide.type = 'button';
             hide.className = 'trails-profile-hide';
             hide.innerHTML = '\\u00d7';
-            hide.title = 'Put the profile away';
-            hide.setAttribute('aria-label', 'Put the profile away');
-            hide.style.cssText = 'font:inherit;font-size:16px;line-height:1;padding:0 5px;border:0;' +
-                'background:none;color:var(--trails-ink-3);cursor:pointer;display:none';
+            hide.title = 'Put this away';
+            hide.setAttribute('aria-label', 'Put this away');
+            hide.style.cssText = 'font:inherit;font-size:16px;line-height:1;border:1px solid var(--trails-rule);' +
+                'border-radius:8px;background:var(--trails-solid);color:var(--trails-ink-3);cursor:pointer;' +
+                'width:40px;height:40px;display:none;align-items:center;justify-content:center';
             hide.addEventListener('click', function (event) {
-                // The heading folds on a click and this is inside it.
                 event.stopPropagation();
-                // **Only where something can bring it back.** A page built
-                // without the chrome has no way to the panel once it is gone,
-                // and a control that strands a reader is worse than no control.
-                if (window.trailsChrome && window.trailsChrome.profile) {
-                    window.trailsChrome.profile(false);
-                }
+                // Planning is the thing being finished where one is running;
+                // otherwise it is the selection, and clearing that is what the
+                // click-highlight and this panel already agree means *nothing is
+                // chosen* -- so it goes through the one entry both of them have.
+                if (planNow && window.trailsPlan) { window.trailsPlan.toggle(false); return; }
+                if (window.trailsHighlight) { window.trailsHighlight.clear(); }
+                present(null);
             });
-            header.appendChild(name);
-            header.appendChild(summary);
-            header.appendChild(whole);
+            header.appendChild(said);
+            header.appendChild(pill);
             header.appendChild(tools);
             var chart = document.createElementNS(SVG, 'svg');
             // **Named, because it is no longer the only `<svg>` in the panel.**
@@ -5198,8 +5229,13 @@ class _ProfilePanel(MacroElement):
                 '<path d="M3.4 11.6v2.6a1 1 0 0 0 1 1h9.2a1 1 0 0 0 1-1v-2.6"/></svg>';
             download.title = 'Download this as a GPX file';
             download.setAttribute('aria-label', 'Download this as a GPX file');
-            download.style.cssText = 'font:inherit;line-height:0;padding:2px 4px;border:0;background:none;' +
-                'color:var(--trails-accent);cursor:pointer;display:none';
+            // A box the size of the mark beside it: the row at the foot is what
+            // a thumb meets, and 40 px is what the coarse-pointer rules on this
+            // page already give every other control in it.
+            download.style.cssText = 'font:inherit;line-height:0;border:1px solid var(--trails-rule);' +
+                'border-radius:8px;background:var(--trails-solid);color:var(--trails-accent);' +
+                'cursor:pointer;width:40px;height:40px;display:none;align-items:center;' +
+                'justify-content:center';
             var carries = document.createElement('span');
             carries.style.cssText = 'color:var(--trails-ink-2);margin-right:8px';
             var licensed = document.createElement('span');
@@ -5214,52 +5250,54 @@ class _ProfilePanel(MacroElement):
             var noted = document.createElement('span');
             noted.className = 'trails-profile-ground';
             noted.style.cssText = 'color:var(--trails-ink-4);font-size:11px;display:block;margin-top:2px';
-            // **Everything about this line except the three figures.** The
-            // heading carried all of it — measured on a phone held upright, six
-            // lines of figures and eleven of licences over a drawing that got
-            // four — and the sentence a reader decides a walk on is three of
-            // those numbers: how far, how much climb, how steep at worst. The
-            // rest is not less true, it is less often wanted, and this is one
-            // tap from where it was.
-            //
-            // It opens **the sheet the chrome already has**, the one every popup
-            // docks into. Where there is no chrome it unfolds into the panel
-            // instead, because there the alternative is nowhere.
-            var more = document.createElement('button');
-            more.type = 'button';
-            more.className = 'trails-profile-more';
-            more.textContent = '\\u24d8';
-            more.title = 'Every figure, and the sources this draws on';
-            more.setAttribute('aria-label', 'Every figure, and the sources this draws on');
-            more.style.cssText = 'font:inherit;font-size:14px;line-height:1;padding:0 4px;border:0;' +
-                'background:none;color:var(--trails-accent);cursor:pointer;display:none';
-            tools.appendChild(download);
-            tools.appendChild(more);
+            // The button and its menu travel together, so the menu can be
+            // placed against the button rather than against the row.
+            var saveWrap = document.createElement('span');
+            saveWrap.style.cssText = 'position:relative;display:flex';
+            var saveMenu = document.createElement('div');
+            saveMenu.className = 'trails-profile-savemenu';
+            saveMenu.style.cssText = 'display:none;position:absolute;right:0;bottom:100%;z-index:6;' +
+                'min-width:180px;margin-bottom:6px;background:var(--trails-solid);' +
+                'border:1px solid var(--trails-edge);border-radius:7px;padding:3px;' +
+                'box-shadow:0 2px 10px rgba(0,0,0,0.22)';
+            function saveEntry(label, explains, act) {
+                var made = document.createElement('button');
+                made.type = 'button';
+                made.textContent = label;
+                made.title = explains;
+                made.style.cssText = 'display:block;width:100%;text-align:left;font:inherit;font-size:12px;' +
+                    'padding:9px 10px;border:0;background:none;color:var(--trails-ink-2);cursor:pointer;' +
+                    'white-space:nowrap';
+                made.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    saveMenu.style.display = 'none';
+                    act();
+                });
+                return made;
+            }
+            saveWrap.appendChild(download);
+            saveWrap.appendChild(saveMenu);
+            tools.appendChild(saveWrap);
             tools.appendChild(hide);
-            var licencesOpen = false;
-            // With a chrome, the licences and the ground note are never in the
-            // panel: the sheet holds them, on every screen. Without one they
-            // fold, and the fold is what the *i* works.
-            function sheeted() {
-                return !!(window.trailsChrome && window.trailsChrome.detail);
-            }
+            // **The *i* is a page now, not a button beside the curve.** It used
+            // to open the chrome's full-screen sheet, which is the defect this
+            // panel is being cured of: a reader who asked what the curve was
+            // drawn from lost the curve, the map and the line they had tapped
+            // to get there. Everything it showed is on the second page, which
+            // stands where the first one stands.
+            //
+            // What is left here is the row at the foot of the profile page --
+            // the colour key, the count, the licences, the ground -- which is
+            // below the drawing rather than above it and therefore costs the
+            // curve nothing. It was hidden entirely while a sheet existed to
+            // hold it; there is no sheet, so it is back where it can be scrolled
+            // to.
             function showLicences() {
-                // **With a chrome, the panel is a heading and a curve.** The
-                // colour key, the point count, the licences and the ground note
-                // all stand in the sheet the *i* opens -- a place a reader goes
-                // rather than one they look past, and the whole of what this
-                // row cost was that it was never looked at and always there.
-                // Without a chrome there is nowhere else, so the row stays
-                // exactly as it was.
-                meta.style.display = sheeted() ? 'none' : '';
-                var folded = sheeted() || !licencesOpen;
-                licensed.style.display = folded ? 'none' : '';
-                noted.style.display = folded ? 'none' : 'block';
-                var worth = saidLines.length || licensed.textContent || noted.textContent;
-                more.style.display = worth ? '' : 'none';
-                hide.style.display = (window.trailsChrome && window.trailsChrome.profile) ? '' : 'none';
+                meta.style.display = '';
+                licensed.style.display = '';
+                noted.style.display = noted.textContent ? 'block' : 'none';
             }
-            function openDetail() {
+            function detailFigures() {
                 var box = document.createElement('div');
                 box.style.cssText = 'font-size:13px;line-height:1.65;color:var(--trails-ink-2)';
                 // The same lines the heading shows the first three of, in the
@@ -5323,27 +5361,8 @@ class _ProfilePanel(MacroElement):
                 coloured.textContent = 'How the curve is coloured';
                 box.appendChild(coloured);
                 box.appendChild(colours);
-                var named = selected && selected.label ? title + ' \\u00b7 ' + selected.label : title;
-                window.trailsChrome.detail(named, box, 'profile');
+                return box;
             }
-            more.addEventListener('click', function (event) {
-                event.stopPropagation();
-                if (sheeted()) {
-                    // **A second press closes it**, which is what a button that
-                    // opened something is expected to do. Only where the sheet is
-                    // still showing *this*: where a popup has taken it over since,
-                    // the press is a request for these figures again.
-                    var standing = window.trailsChrome.state();
-                    if (standing.detail && standing.detailKey === 'profile') {
-                        window.trailsChrome.closeDetail();
-                        return;
-                    }
-                    openDetail();
-                    return;
-                }
-                licencesOpen = !licencesOpen;
-                showLicences();
-            });
 
             offer.appendChild(carries);
             offer.appendChild(licensed);
@@ -5353,13 +5372,356 @@ class _ProfilePanel(MacroElement):
             // three stacked above it. `key` keeps its own margins, so it is
             // pushed rather than padded apart.
             var meta = document.createElement('div');
+            // Named, because a check that addressed it by its place in the box
+            // was measuring whichever child happened to be second -- and the box
+            // has just gained two.
+            meta.className = 'trails-profile-meta';
             meta.style.cssText = 'display:flex;gap:16px;align-items:baseline;justify-content:space-between;flex-wrap:wrap';
             key.style.marginLeft = 'auto';
             meta.appendChild(offer);
             meta.appendChild(key);
 
-            body.appendChild(meta);
+            // The drawing first and what it was drawn from under it. `meta`
+            // stood above the chart while it was hidden on every chromed page
+            // and its position was nobody's business; it is visible again, and
+            // a licence line over a curve is a licence line in the way.
             body.appendChild(chart);
+            body.appendChild(meta);
+            // The way back to the whole chain sits over the drawing's own
+            // corner rather than in the row at the foot: that row is 40 px of
+            // marks on a phone and has nothing to spare, and this belongs to
+            // the picture it undoes.
+            body.style.position = 'relative';
+            whole.style.position = 'absolute';
+            whole.style.top = '2px';
+            whole.style.right = '2px';
+            whole.style.zIndex = '2';
+            body.appendChild(whole);
+
+            // ---- the pages ---------------------------------------------------
+            // **Everything about the thing in hand, side by side, in the panel
+            // it is already looking at.** A tapped line used to answer in a
+            // sheet over the whole screen -- the line gone, the curve gone, the
+            // map gone -- and the *i* under the curve answered in the same sheet
+            // about something else, with no way back to the first. Both are
+            // pages here: the same box, the same width, one swipe apart, and the
+            // row at the foot says which one is showing.
+            //
+            // **What a page is worth is what it costs the map**, so a page is as
+            // tall as it needs and never taller than 46 % of the map. The
+            // profile is the exception and keeps the height the reader dragged
+            // it to: on a steep chain that height is resolution, which is the
+            // one thing on this panel a reader may want more of.
+            var pagesBox = document.createElement('div');
+            pagesBox.className = 'trails-profile-pagesbox';
+            pagesBox.style.cssText = 'overflow:hidden;position:relative';
+            var track = document.createElement('div');
+            track.className = 'trails-profile-track';
+            track.style.cssText = 'display:flex;height:100%;align-items:stretch';
+            pagesBox.appendChild(track);
+            // Three renderings of one number -- the dots, the lit mark in the
+            // row below, and the page itself -- because a reader who swiped and
+            // a reader who pressed a mark have to end up believing the same
+            // thing about where they are.
+            // **The page takes a wheel it can use and passes on the rest.**
+            // The same bargain the legend and the point list strike: a list that
+            // will not scroll is as useless as a map that will not zoom, and
+            // only one of them can have any one turn. The curve is not in it --
+            // it has a bargain of its own about zooming into the readings.
+            pagesBox.addEventListener('wheel', function (event) {
+                var page = pages[pageAt];
+                if (!page || page.kind === 'profile') { return; }
+                var room = page.node.scrollHeight - page.node.clientHeight;
+                if (room <= 0) { return; }
+                if (event.deltaY < 0 ? page.node.scrollTop > 0 : page.node.scrollTop < room - 1) {
+                    event.stopPropagation();
+                }
+            }, {passive: true});
+
+            var pips = document.createElement('div');
+            pips.className = 'trails-profile-pips';
+            pips.style.cssText = 'display:none;justify-content:center;gap:5px;padding:3px 0 5px';
+
+            var pages = [], pageAt = 0;
+            //: What the pages are about, so that the same thing arriving twice
+            //: is not treated as a second thing. See `present`.
+            var showingWhat = null;
+            //: The popup of whatever is selected, handed over by the chrome:
+            //: markup, because that is what a popup is made of.
+            var detailHtml = null;
+            //: What plan mode is doing, pushed in by the chrome. Null while none
+            //: is running -- and a running plan with no points is still a plan,
+            //: which is why this is not counted in points.
+            var planNow = null;
+            //: Whether the pages are showing at all. The row at the foot stands
+            //: whether they are or not; this is the one the reader folds.
+            var pagesOpen = true;
+
+            function markNode(kind) {
+                if (kind === 'details') { return document.createTextNode('\\u24d8'); }
+                if (kind === 'list') { return document.createTextNode('\\u2630'); }
+                var svg = document.createElementNS(SVG, 'svg');
+                svg.setAttribute('viewBox', '0 0 16 16');
+                svg.setAttribute('width', '17');
+                svg.setAttribute('height', '17');
+                var line = document.createElementNS(SVG, 'polyline');
+                line.setAttribute('points', '1,13 5,7 8,10 12,3 15,8');
+                line.setAttribute('fill', 'none');
+                line.setAttribute('stroke', 'currentColor');
+                line.setAttribute('stroke-width', '1.7');
+                line.setAttribute('stroke-linejoin', 'round');
+                svg.appendChild(line);
+                return svg;
+            }
+
+            // The details, built when the page is made rather than when the
+            // popup arrives: the figures change under it as the selection does.
+            var detailBox = document.createElement('div');
+            detailBox.className = 'trails-profile-detail';
+            detailBox.style.cssText = 'padding:0 0 6px';
+            function fillDetail() {
+                detailBox.innerHTML = '';
+                if (detailHtml) {
+                    var held = document.createElement('div');
+                    held.innerHTML = detailHtml;
+                    detailBox.appendChild(held);
+                }
+                var figures = detailFigures();
+                if (detailHtml && figures.firstChild) {
+                    figures.style.marginTop = '10px';
+                    figures.style.paddingTop = '8px';
+                    figures.style.borderTop = '1px solid var(--trails-rule)';
+                }
+                detailBox.appendChild(figures);
+            }
+
+            // Plan mode's own list, which is the same node the plan control
+            // built: adopted rather than drawn again, so the rows a reader
+            // reorders and the rows this page shows cannot come apart. What is
+            // added here is the one edit that belongs beside a list of changes
+            // -- taking the last one back. Starting over does not: it is not an
+            // edit, it undoes the lot, and a control that can do that should
+            // take some finding. It stays in the plan panel behind the menu.
+            var pointsPage = document.createElement('div');
+            pointsPage.className = 'trails-profile-list';
+            pointsPage.style.cssText = 'padding:0 0 6px';
+            var undoRow = document.createElement('div');
+            undoRow.style.cssText = 'display:flex;justify-content:flex-end;padding:0 0 4px';
+            var undoOne = document.createElement('button');
+            undoOne.type = 'button';
+            undoOne.className = 'trails-profile-undo';
+            undoOne.innerHTML = '\\u21b6 undo';
+            undoOne.title = 'Undo the last change';
+            undoOne.setAttribute('aria-label', 'Undo the last change');
+            undoOne.style.cssText = 'font:inherit;font-size:11px;padding:6px 10px;cursor:pointer;' +
+                'border:1px solid var(--trails-rule);border-radius:10px;background:var(--trails-solid);' +
+                'color:var(--trails-ink-2)';
+            undoOne.addEventListener('click', function (event) {
+                event.stopPropagation();
+                if (window.trailsPlan) { window.trailsPlan.undo(); }
+            });
+            undoRow.appendChild(undoOne);
+            pointsPage.appendChild(undoRow);
+
+            function wantedPages() {
+                var made = [];
+                if (selected && (selected.shape || selected.missing)) {
+                    made.push({key: 'profile', kind: 'profile', node: body,
+                               label: 'Elevation profile'});
+                }
+                if (planNow && planNow.on) {
+                    made.push({key: 'list', kind: 'list', node: pointsPage,
+                               label: 'Points and stages'});
+                }
+                // A popup handed over is a page whether or not a route is being
+                // planned. It cannot normally happen while one is -- plan mode
+                // owns every click on the map, so nothing opens a popup -- but a
+                // page that holds a popup it will not show would be holding it
+                // where nobody can read it.
+                if (detailHtml || (!(planNow && planNow.on) && saidLines.length)) {
+                    made.push({key: 'details', kind: 'details', node: detailBox,
+                               label: 'Details'});
+                }
+                return made;
+            }
+
+            function pageRoom(page) {
+                if (page.kind === 'profile') { return chartHeight; }
+                // **Measured, not assumed.** What the panel costs the map is the
+                // page *plus* the row, the grip and the dots above it, and that
+                // overhead is a different number in every browser -- the same
+                // reason `stretchTo` measures it rather than subtracting a
+                // constant.
+                var over = (box && pagesBox.offsetHeight)
+                    ? Math.max(0, box.offsetHeight - pagesBox.offsetHeight) : 60;
+                var most = Math.max(90, Math.round(mapRoom().y * 0.46) - over);
+                var needs = page.node.scrollHeight || 0;
+                return Math.max(90, Math.min(most, needs + 6));
+            }
+
+            // **Every page is in the track from the start and the ones that do
+            // not apply are hidden.** They were appended and removed as the set
+            // changed, which detaches a node -- and the curve is one of them.
+            // Driven, a drag on the chart between two selections found no chart
+            // at all: it was in a variable and not in the document, which is the
+            // detached-DOM trap this suite has met one level up.
+            [body, detailBox, pointsPage].forEach(function (node) {
+                node.classList.add('trails-profile-page');
+                node.style.flex = 'none';
+                node.style.overflowY = 'auto';
+                node.style.display = 'none';
+                track.appendChild(node);
+            });
+
+            function paintPages(moved) {
+                pages = wantedPages();
+                if (pageAt >= pages.length) { pageAt = 0; }
+                var wanted = pages.map(function (page) { return page.node; });
+                [body, detailBox, pointsPage].forEach(function (node) {
+                    node.style.display = wanted.indexOf(node) >= 0 ? '' : 'none';
+                });
+                if (!pages.length) {
+                    pagesBox.style.display = 'none';
+                    pips.style.display = 'none';
+                    pill.style.display = 'none';
+                    return;
+                }
+                if (pages[pageAt] && pages[pageAt].kind === 'details') { fillDetail(); }
+                pagesBox.style.display = pagesOpen ? '' : 'none';
+                pips.style.display = (pagesOpen && pages.length > 1) ? 'flex' : 'none';
+                track.style.width = (pages.length * 100) + '%';
+                pages.forEach(function (page) { page.node.style.width = (100 / pages.length) + '%'; });
+                track.style.transition = moved === false ? 'none' : 'transform .18s ease';
+                track.style.transform = 'translateX(-' + (pageAt * (100 / pages.length)) + '%)';
+                pagesBox.style.height = pageRoom(pages[pageAt]) + 'px';
+
+                pips.innerHTML = '';
+                pill.innerHTML = '';
+                pill.style.display = (pages.length > 1) ? 'flex' : 'none';
+                if (planNow) {
+                    undoOne.disabled = !planNow.undoable;
+                    undoOne.style.opacity = planNow.undoable ? '' : '0.35';
+                }
+                pages.forEach(function (page, at) {
+                    var pip = document.createElement('i');
+                    pip.style.cssText = 'width:5px;height:5px;border-radius:50%;background:' +
+                        (at === pageAt && pagesOpen ? 'var(--trails-ink-4)' : 'var(--trails-grip)');
+                    pips.appendChild(pip);
+
+                    var mark = document.createElement('button');
+                    mark.type = 'button';
+                    mark.className = 'trails-profile-mark' +
+                        (at === pageAt && pagesOpen ? ' trails-profile-mark-on' : '');
+                    var lit = at === pageAt && pagesOpen;
+                    mark.style.cssText = 'width:38px;height:40px;border:0;font:inherit;font-size:15px;' +
+                        'display:flex;align-items:center;justify-content:center;cursor:pointer;' +
+                        'border-left:' + (at ? '1px solid var(--trails-rule)' : '0') + ';' +
+                        'background:' + (lit ? 'var(--trails-accent)' : 'transparent') + ';' +
+                        'color:' + (lit ? 'var(--trails-on-accent)' : 'var(--trails-ink-3)');
+                    mark.title = page.label;
+                    mark.setAttribute('aria-label', page.label);
+                    mark.appendChild(markNode(page.kind));
+                    mark.addEventListener('click', function (event) {
+                        event.stopPropagation();
+                        // A second press on the lit mark folds the pages away
+                        // and leaves the row -- which is what a mark that opened
+                        // something is expected to do, and the only way back to
+                        // a whole map without giving up the selection.
+                        if (lit) { showPages(false); return; }
+                        goPage(at);
+                    });
+                    pill.appendChild(mark);
+                });
+            }
+
+            function goPage(at) {
+                pageAt = Math.max(0, Math.min(pages.length - 1, at));
+                if (!pagesOpen) { showPages(true); return; }
+                paintPages();
+                if (pages[pageAt] && pages[pageAt].kind === 'profile') { render(); }
+            }
+
+            // **Whether the pages are open is the reader's answer, and the
+            // reader's answer is the chrome's to keep.** Every other switch for
+            // it -- the rail's mark, the plan control -- sets it there, and one
+            // that set only this closed itself again the moment anything
+            // repainted: while planning on a narrow screen the chrome's default
+            // is *shut*, so it asked for shut back, half a frame after a reader
+            // had asked for open. Driven: the list page opened and was gone
+            // before it could be read.
+            function showPages(want) {
+                want = !!want;
+                if (window.trailsChrome && window.trailsChrome.profile &&
+                        window.trailsChrome.profile() !== want) {
+                    // The chrome answers by asking this back, which is where the
+                    // work below gets done. One handshake, not two.
+                    window.trailsChrome.profile(want);
+                    return;
+                }
+                if (pagesOpen === want) { return; }
+                pagesOpen = want;
+                paintPages();
+                if (pagesOpen) { render(); }
+                if (window.trailsChrome && window.trailsChrome.placed) { window.trailsChrome.placed(); }
+            }
+
+            // **Swiping, everywhere in the panel except across the drawing.**
+            // One finger on the curve reads it -- distance, height, gradient --
+            // and that gesture is both older and worth more than this one: it is
+            // the only way to ask a phone what is under a place. So the swipe is
+            // taken on the row at the foot and on any page that is not the
+            // curve, and the marks are what move a reader off the profile.
+            var swiping = null;
+            function swipeFrom(node) {
+                node.addEventListener('touchstart', function (event) {
+                    if (pages.length < 2 || event.touches.length !== 1) { swiping = null; return; }
+                    swiping = {x: event.touches[0].clientX, y: event.touches[0].clientY, took: false};
+                }, {passive: true});
+                node.addEventListener('touchmove', function (event) {
+                    if (!swiping || event.touches.length !== 1) { return; }
+                    var dx = event.touches[0].clientX - swiping.x;
+                    var dy = event.touches[0].clientY - swiping.y;
+                    if (!swiping.took && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+                        swiping.took = true;
+                    }
+                    if (!swiping.took) { return; }
+                    event.preventDefault();
+                    track.style.transition = 'none';
+                    track.style.transform = 'translateX(calc(-' + (pageAt * (100 / pages.length)) +
+                        '% + ' + (dx / pages.length) + 'px))';
+                }, {passive: false});
+                node.addEventListener('touchend', function (event) {
+                    if (!swiping) { return; }
+                    var took = swiping.took;
+                    var from = swiping.x;
+                    swiping = null;
+                    if (!took) { return; }
+                    var wide = pagesBox.clientWidth || 1;
+                    var dx = (event.changedTouches && event.changedTouches.length)
+                        ? event.changedTouches[0].clientX - from : 0;
+                    if (dx < -wide * 0.18 && pageAt < pages.length - 1) { goPage(pageAt + 1); return; }
+                    if (dx > wide * 0.18 && pageAt > 0) { goPage(pageAt - 1); return; }
+                    paintPages();
+                });
+                node.addEventListener('touchcancel', function () { swiping = null; paintPages(); });
+            }
+            swipeFrom(header);
+            swipeFrom(detailBox);
+            swipeFrom(pointsPage);
+
+            // **A press on what it says opens what it says more about**, which
+            // is the page the second line has been pointing at all along: the
+            // points of a route being planned, the details of a line. Plan
+            // mode's bar said *tap for the list* and meant it; this is that tap,
+            // and pressing it again on the page it opened folds it away.
+            said.addEventListener('click', function () {
+                if (!pages.length) { return; }
+                var wanted = planning() ? 'list' : 'details';
+                var at = 0;
+                pages.forEach(function (page, i) { if (page.key === wanted) { at = i; } });
+                if (pagesOpen && pageAt === at) { showPages(false); return; }
+                goPage(at);
+            });
 
             // ---- the height, which a reader owns ----------------------------
             // **Dragging this taller is not decoration.** The chart's scale is
@@ -5511,8 +5873,9 @@ class _ProfilePanel(MacroElement):
                     // and would otherwise be covered by a panel this wide.
                     'margin-bottom:22px';
                 box.appendChild(grip);
+                box.appendChild(pips);
+                box.appendChild(pagesBox);
                 box.appendChild(header);
-                box.appendChild(body);
                 // Clicking and dragging inside the panel must not reach the map;
                 // scrolling must, or the map freezes under an open panel.
                 L.DomEvent.disableClickPropagation(box);
@@ -5541,9 +5904,18 @@ class _ProfilePanel(MacroElement):
                 // up again on reopening would jump the height by however far the
                 // pointer travelled in between.
                 if (!open && stretching) { stretching = null; grabbed.style.background = 'var(--trails-grip)'; }
-                name.textContent = open ? '\\u25be' : '\\u25b8';
-                body.style.display = open ? '' : 'none';
-                header.style.marginBottom = open ? '4px' : '0';
+                // **The row stands whenever there is something to stand for**,
+                // and the pages are the part that folds. Something is a selected
+                // line, a route being planned -- with no points down yet as much
+                // as with four -- or a place whose popup has been handed over.
+                paintPages();
+                grip.style.display = (open && pagesOpen) ? 'flex' : 'none';
+                header.style.marginTop = (open && pagesOpen) ? '4px' : '0';
+                // **Folded, the row is the whole panel and pays a row's price.**
+                // Plan mode's bar was 44 px; this was 63 with the panel's own
+                // padding around it, and those 19 px are map a reader planning
+                // is tapping on.
+                box.style.padding = (open && pagesOpen) ? '6px 10px' : '2px 10px';
                 // **Edge to edge where the screen is narrow**, and inset where
                 // it is not. Leaflet gives every control a 10 px margin, which
                 // on a 390 px screen is 5 % of the width spent on a gutter
@@ -5573,12 +5945,11 @@ class _ProfilePanel(MacroElement):
                 // its own width and a gap. On a narrow screen there is no rail,
                 // only the burger, and that sits above this.
                 var railRoom = narrow ? 0 : 66;
-                box.style.width = open
+                box.style.width = (open || planning())
                     ? 'calc(' + mapRoom().x + 'px - env(safe-area-inset-left) - ' +
                       'env(safe-area-inset-right) - ' + (railRoom + (narrow ? 0 : 20)) + 'px)'
                     : '';
             }
-            header.addEventListener('click', function () { open = !open; fold(); render(); });
 
             // ---- the arrow, in a container of its own -----------------------
             // Not a layer and not a path on the map: the count of those is what
@@ -6693,8 +7064,30 @@ class _ProfilePanel(MacroElement):
             // there is no second place for a reading to be drawn.
             var saidText = '';
             var readingNow = '';
+            // **What the row says while a route is being made.** Plan mode's own
+            // bar said this and stood above this panel's heading saying
+            // something else about the same route; there is one row now, so the
+            // wording moved here whole rather than being written a second time.
+            function planSays() {
+                var count = planNow ? planNow.points : 0;
+                if (!count) { return 'Tap the map to place the first point'; }
+                // **`isFinite` and not a null check.** A route whose legs are
+                // all crossings has no walked distance and no climb, and the
+                // ascent comes back NaN rather than null.
+                var told = count + (count === 1 ? ' point' : ' points');
+                if (count > 1 && isFinite(planNow.metres)) {
+                    told += ' \\u00b7 ' + (planNow.metres / 1000).toFixed(2) + ' km';
+                }
+                if (isFinite(planNow.ascent)) { told += ' \\u00b7 +' + Math.round(planNow.ascent) + ' m'; }
+                return told;
+            }
+            function planHint() {
+                if (!planNow || !planNow.points) { return 'Plan mode is on'; }
+                return planNow.working ? 'working\\u2026' : 'tap for the points';
+            }
+            function planning() { return !!(planNow && planNow.on); }
             function paintSummary() {
-                summary.textContent = readingNow || saidText;
+                summary.textContent = readingNow || (planning() ? planHint() : saidText);
                 summary.style.color = readingNow ? 'var(--trails-accent)' : 'var(--trails-ink-2)';
                 // **Which of the two it is saying, as a fact and not as a
                 // colour.** A probe comparing a computed `rgb()` against the
@@ -6702,6 +7095,18 @@ class _ProfilePanel(MacroElement):
                 // back off a colour is a state recorded twice, once for the eye
                 // and once for nobody.
                 summary.classList.toggle('trails-profile-reading', !!readingNow);
+                // The name above it, from the same call: the two lines are one
+                // sentence about one thing and must never be about two.
+                name.textContent = planning()
+                    ? planSays()
+                    : ((selected && selected.label) || '');
+                hide.innerHTML = planning() ? '\\u2713' : '\\u00d7';
+                hide.title = planning() ? 'Finish planning' : 'Put this away';
+                hide.setAttribute('aria-label', hide.title);
+                // Only where there is something to be done with: a page that
+                // has nothing selected and nothing being planned says so in the
+                // line above, and a way out of nothing is not a control.
+                hide.style.display = (open || planning()) ? 'flex' : 'none';
             }
 
             function sayLines(lines) {
@@ -6710,6 +7115,7 @@ class _ProfilePanel(MacroElement):
                 readingNow = '';
                 paintSummary();
                 showLicences();
+                paintPages();
             }
 
             function say(message) {
@@ -6718,6 +7124,7 @@ class _ProfilePanel(MacroElement):
                 readingNow = '';
                 paintSummary();
                 showLicences();
+                paintPages();
             }
 
             // What a composed series says about itself. The distance is the
@@ -6766,6 +7173,12 @@ class _ProfilePanel(MacroElement):
                 });
             }
 
+            // **And the pages are drawn from the description**, because what
+            // there is to read changes when it arrives rather than when it is
+            // asked for: a chain's series is composed a megabyte of arithmetic
+            // after the click, and a page set worked out at the click has no
+            // profile in it. Every path through here ends at `sayLines` or
+            // `say`, and both of those repaint.
             function describe() {
                 if (!selected) { say(suspended ? 'Plan mode: click the map to place a point.' : 'Click a line to see its profile.'); return; }
                 var figure = selected.figure, shape = selected.shape;
@@ -6811,7 +7224,7 @@ class _ProfilePanel(MacroElement):
                 // it needs the condition said to it as well: a panel showing a
                 // series nobody described cannot write a file, and a mark that
                 // does nothing is worse than no mark.
-                download.style.display = writable ? '' : 'none';
+                download.style.display = writable ? 'flex' : 'none';
                 noted.textContent = '';
                 if (!selected || (selected.composed && !selected.plan)) { return; }
                 if (!selected.shape) {
@@ -6853,11 +7266,7 @@ class _ProfilePanel(MacroElement):
             }
 
             if (EXPORT) {
-                download.addEventListener('click', function (event) {
-                    // The heading folds on a click and this now sits inside it,
-                    // beside two marks that have always said so. Without this a
-                    // reader who asks for the file loses the drawing as well.
-                    event.stopPropagation();
+                function saveNow() {
                     if (!selected || !selected.runs) { return; }
                     if (selected.composed) {
                         if (!selected.plan || selected.plan.why) { return; }
@@ -6875,7 +7284,34 @@ class _ProfilePanel(MacroElement):
                         return;
                     }
                     saveFile(fileNameOf(selected.figure.id), gpxOf(selected.figure, selected.shape, selected.runs));
+                }
+                download.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    // **One mark, and the choice behind it -- but only where
+                    // there is a choice.** A tour cut into stages can be had as
+                    // one file or as an archive of them; a tour that is one
+                    // stage would be offered the same file twice under two
+                    // names, which is what the plan panel's own save has always
+                    // said and is said once here rather than twice.
+                    var cut = planning() && window.trailsPlan && window.trailsPlan.stages
+                        ? window.trailsPlan.stages() : 0;
+                    if (cut > 1) {
+                        saveMenu.style.display = saveMenu.style.display === 'block' ? 'none' : 'block';
+                        return;
+                    }
+                    saveMenu.style.display = 'none';
+                    saveNow();
                 });
+                // The two files a planned tour can be, in the row it is being
+                // planned from. Both are plan mode's own writers: a second
+                // writer would eventually disagree with the first about a route
+                // it was handed the same way.
+                saveMenu.appendChild(saveEntry('Whole tour (GPX)',
+                    'The whole route as one GPX file, its stage marks and all',
+                    function () { saveNow(); }));
+                saveMenu.appendChild(saveEntry('All stages (zip)',
+                    'Every stage on its own, and the whole tour with its stages, in one archive',
+                    function () { if (window.trailsPlan && window.trailsPlan.saveStages) { window.trailsPlan.saveStages(); } }));
             }
 
             // Everything that happens whatever is selected. Two things reach
@@ -6902,6 +7338,19 @@ class _ProfilePanel(MacroElement):
                 // it cannot know that from the DOM, because a folded panel and
                 // an empty one look the same from outside.
                 if (window.trailsChrome && window.trailsChrome.selected) { window.trailsChrome.selected(selected); }
+                // **A new thing to look at opens on the first of its pages** --
+                // a reader who taps a second line while reading the first one's
+                // table means *this line now*, not *the same page about
+                // something else*.
+                //
+                // **A new thing, and not the same one handed over again.** A
+                // planned route arrives here on every refresh, and plan mode
+                // refreshes when the panel opens: resetting on each of those put
+                // a reader who pressed *the points* on the curve instead, half a
+                // frame later. Driven, that was one press reaching the list and
+                // the list not being what came up.
+                var showing = selected ? (selected.className || selected.label || 'composed') : null;
+                if (showing !== showingWhat) { pageAt = 0; showingWhat = showing; }
                 fold();
                 describe();
                 offered();
@@ -6914,6 +7363,71 @@ class _ProfilePanel(MacroElement):
             // itself and the figures already read off it; the bands, the
             // crosshair and the reduction all apply unchanged.
             window.trailsProfilePanel = {
+                // **A popup, taken in as a page rather than shown over the
+                // map.** Every popup on this page used to dock into the chrome's
+                // full-screen sheet, which put the answer to *what did I just
+                // tap* over the thing that had been tapped. The chrome hands the
+                // markup here instead, and it becomes the second page of the
+                // panel -- beside the curve where there is one, and alone where
+                // there is not, which is what a place gets.
+                detail: function (label, html) {
+                    detailHtml = html || null;
+                    // **While plan mode owns the map, a popup is a page and not
+                    // a selection.** The panel is suspended then -- a click
+                    // places a waypoint and must not also choose a line -- so
+                    // what arrives is read where it stands and changes nothing
+                    // about what the row says.
+                    if (label && !suspended && (!selected || !selected.label)) {
+                        // A place has no series and no figures: the selection is
+                        // the popup, and this is the whole of it.
+                        selected = selected || {detail: true, label: label, figure: null,
+                                                shape: null, told: [], mid: null};
+                        selected.label = selected.label || label;
+                        open = true;
+                        window.trailsProfile = selected;
+                        if (window.trailsChrome && window.trailsChrome.selected) {
+                            window.trailsChrome.selected(selected);
+                        }
+                    }
+                    pageAt = 0;
+                    fold();
+                    paintSummary();
+                },
+                // What plan mode is doing, pushed by the chrome on every refresh
+                // -- the same summary its bar used to draw itself from. A plan
+                // with no points down is still a plan, and the row says so.
+                planning: function (summary) {
+                    planNow = summary && summary.on ? summary : null;
+                    fold();
+                    paintSummary();
+                },
+                // Which pages there are, which one is showing, and whether they
+                // are showing at all: read by a check rather than measured off
+                // the screen, the way the series and the view already are.
+                pages: function () {
+                    return {keys: pages.map(function (page) { return page.key; }),
+                            at: pageAt, open: pagesOpen && pages.length > 0};
+                },
+                // Plan mode's list of points, lent rather than copied. It is
+                // given back when planning stops, which is what keeps the plan
+                // panel whole on a page that never opens this one.
+                list: function (node) {
+                    if (!node) { return false; }
+                    node.style.display = '';
+                    node.style.maxHeight = 'none';
+                    node.style.marginTop = '0';
+                    pointsPage.appendChild(node);
+                    return true;
+                },
+                page: function (key) {
+                    if (key === undefined) { return pages[pageAt] ? pages[pageAt].key : null; }
+                    if (key === false) { showPages(false); return null; }
+                    if (key === true) { showPages(true); return pages[pageAt] ? pages[pageAt].key : null; }
+                    for (var at = 0; at < pages.length; at += 1) {
+                        if (pages[at].key === key) { goPage(at); return key; }
+                    }
+                    return null;
+                },
                 series: function (spec) {
                     present(spec === null ? null : {
                         composed: true, label: spec.label, figure: spec.figure, shape: spec.shape,
@@ -10647,6 +11161,17 @@ class _PlanMode(MacroElement):
             // computed now, so nothing can find it by the cap it used to carry.
             listBox.className = 'trails-plan-points';
             listBox.style.cssText = 'margin-top:4px;max-height:220px;overflow-y:auto;display:none';
+            // **Lent to the profile panel, which is where a reader planning a
+            // route is looking.** Seeing the sequence used to mean opening a
+            // full-screen tool over the map being planned on -- the same defect
+            // as a popup taking the screen, one panel further along. The node is
+            // moved rather than copied: the rows a reader drags and the rows
+            // this shows are one list, and a second rendering of a sequence is
+            // how two of them come to disagree about the order.
+            //
+            // Whoever holds it owns its height. Lent, the page bounds it; kept,
+            // the cap below does.
+            var lentOut = false;
             // The wheel is the map's except where this has somewhere left to
             // scroll, the same bargain the legend strikes: a list that will not
             // scroll is as useless as a map that will not zoom, and only one of
@@ -10702,6 +11227,7 @@ class _PlanMode(MacroElement):
                 // the end of a list that had no reason to end. The cap that
                 // matters is the one measured — how much room stands above the
                 // profile panel — and that is `room`.
+                if (lentOut) { return; }
                 listBox.style.maxHeight = Math.max(40, room - fixed) + 'px';
                 box.style.maxHeight = Math.max(40, room) + 'px';
             }
@@ -11344,7 +11870,10 @@ class _PlanMode(MacroElement):
                 box.appendChild(offerBox);
                 box.appendChild(loadStatus);
                 box.appendChild(status);
-                box.appendChild(listBox);
+                // Only where nothing has borrowed it. The panel takes it on the
+                // first refresh; before that it belongs here, and on a page
+                // built without a profile panel it stays here for good.
+                if (!lentOut) { box.appendChild(listBox); }
                 box.style.overflowY = 'auto';
                 // The wheel is the map's except where this has somewhere left to
                 // scroll, the same bargain the legend and the list strike. The
@@ -11435,8 +11964,9 @@ class _PlanMode(MacroElement):
                 // nothing: it called `trailsChrome.profile()` with no argument,
                 // which is the *reading* of that state and not the setting of
                 // it. Rather than fix a third switch, it is gone — the rail
-                // carries it on a wide screen and the plan bar on a narrow one,
-                // which is where a reader planning a route already is.
+                // carries it on a wide screen and the row at the foot of the
+                // panel on every screen, which is where a reader planning a
+                // route already is.
                 // **Nor is there a row of edits any more.** *Move earlier*,
                 // *move later* and *Remove* stood in a box of their own that
                 // appeared when a point was picked and was empty the rest of the
@@ -11449,7 +11979,7 @@ class _PlanMode(MacroElement):
                 var listable = on && points.length > 0;
                 status.style.cursor = listable ? 'pointer' : '';
                 status.title = listable ? 'Show or hide the points, one to a row' : '';
-                listBox.style.display = (listable && listOpen) ? '' : 'none';
+                listBox.style.display = (lentOut || (listable && listOpen)) ? '' : 'none';
                 // The name stands with the route, above the tools, and only
                 // where there is a route: a box asking what to call nothing is a
                 // row of the control spent on nothing.
@@ -11708,6 +12238,10 @@ class _PlanMode(MacroElement):
                 var figure = shape && points.length > 1 ? figuresOf(shape) : null;
                 lastFigures = shape ? {metres: shape.total, ascent: figure ? figure.ascent : NaN} : null;
                 paintFigures();
+                // Handed over once, on the first refresh there is a panel for:
+                // by then everything that draws into it exists, and asking again
+                // afterwards would move a node a reader may be scrolling.
+                if (!lentOut && panel() && panel().list) { lentOut = !!panel().list(listBox); }
                 if (!window.trailsChrome || !window.trailsChrome.planning) { return; }
                 window.trailsChrome.planning({
                     on: on,
@@ -11907,6 +12441,14 @@ class _PlanMode(MacroElement):
             window.trailsPlan = {
                 place: place,
                 undo: undo,
+                // **What the row at the foot offers, and how it knows whether to
+                // offer a choice.** The panel's own button writes the whole tour
+                // -- one writer, asked from three places, as `saveWhole` says --
+                // and an archive of stages is this one's to write; how many
+                // stages there are is what decides whether asking is worth a
+                // menu at all.
+                saveStages: function () { return saveStages(); },
+                stages: function () { return stagesOf().length; },
                 // The route's own line, which is what a corridor of terrain is
                 // kept along. `state()` answers everything else about a route
                 // and deliberately not this: it is read on every check and by
@@ -11999,8 +12541,9 @@ class _PlanMode(MacroElement):
                 restore: restoreKept,
                 forget: forgetKept,
                 // The count is the list's handle inside this control, and the
-                // plan bar is its handle from outside one. Both ask for the
-                // same thing rather than each carrying their own idea of it.
+                // panel's own row is its handle from outside one -- the list is
+                // lent to that panel and read there. Both ask for the same thing
+                // rather than each carrying their own idea of it.
                 showList: function (want) {
                     listOpen = want === undefined ? !listOpen : !!want;
                     refresh();
@@ -14931,7 +15474,13 @@ class _Chrome(MacroElement):
                 '  { min-height: 40px; }',
                 '.trails-coarse .trails-legend input, .trails-coarse .trails-basemap input',
                 '  { width: 20px; height: 20px; }',
-                '.trails-coarse .trails-profile-more { min-width: 40px; min-height: 40px; }',
+                // The row at the foot is what a thumb meets, and everything in
+                // it is a box rather than a glyph: the marks are laid out at
+                // 38 x 40 already, and this is the floor under the two that are
+                // written as buttons beside them.
+                '.trails-coarse .trails-profile-head button',
+                '  { min-width: 40px; min-height: 40px; }',
+                '.trails-coarse .trails-profile-undo { min-height: 40px; }',
                 // **16px is not a taste.** iOS Safari zooms the whole page when
                 // a field smaller than that takes focus, which on a map is the
                 // reader losing their place to type a name.
@@ -14972,7 +15521,7 @@ class _Chrome(MacroElement):
             var chrome = document.createElement('div');
             chrome.className = 'trails-chrome';
             // **Inset here, once, rather than in nine places.** The rail, the
-            // burger, the dock, the menu, the sheet and the plan bar are all
+            // burger, the dock, the menu and the sheet are all
             // children of this box, so holding it inside the safe area holds all
             // of them -- and the map underneath still reaches the physical edges,
             // which is what `viewport-fit=cover` is for.
@@ -15642,20 +16191,20 @@ class _Chrome(MacroElement):
             burger.addEventListener('click', function () { openMenu(); });
             chrome.appendChild(burger);
 
-            // ---- the plan bar, which is the whole of planning on a phone ------
-            // **44 px, and it is the pointer's own row height** — the same
-            // number the point list already takes under a coarse pointer, not a
-            // new constant. It carries what a reader planning needs to see and
-            // reach without giving up the ground they are tapping: how far they
-            // have got, the way back one step, and the way out.
-            //
-            // Measured before it: with the plan panel shut, the only thing on a
-            // 390 px screen was the burger — nothing said plan mode was on, and
-            // every tap placed a point. Reaching the point list was four taps.
+            // ---- what is being looked at, and who says so --------------------
+            // **Planning on a phone had a bar of its own and does not need
+            // one.** Measured before that bar: with the plan panel shut, the
+            // only thing on a 390 px screen was the burger — nothing said plan
+            // mode was on, and every tap placed a point; reaching the point list
+            // was four taps. The bar answered that and cost a second row, above
+            // the profile panel's own heading and saying a second version of the
+            // same sentence. What plan mode has to say is pushed into that one
+            // row now, and the state it is drawn from is here.
             // **One state, and everything that switches the profile sets this
-            // one.** Three places offer the switch — the rail, the plan bar and
-            // the plan control — and a second flag beside this is two switches
-            // that can disagree, which is the failure this chrome exists to end.
+            // one.** Three places offer the switch — the rail, the lit mark in
+            // the panel's own row, and the plan control — and a second flag
+            // beside this is two switches that can disagree, which is the
+            // failure this chrome exists to end.
             //
             // Three values and not two. `null` means *nobody has said*, and the
             // default then depends on where the reader is: while planning on a
@@ -15665,103 +16214,12 @@ class _Chrome(MacroElement):
             // direction, and they outlast the state that set the default.
             var planState = null, profileAsked = null, selection = null;
 
-            var planbar = document.createElement('div');
-            planbar.className = 'trails-planbar';
-            planbar.style.cssText = 'position:absolute;left:0;right:0;height:44px;display:none;' +
-                'pointer-events:auto;background:var(--trails-solid);border-top:1px solid var(--trails-edge);box-sizing:border-box;' +
-                'align-items:center;gap:8px;padding:0 8px 0 12px';
-            L.DomEvent.disableClickPropagation(planbar);
-
-            var planFigures = document.createElement('div');
-            planFigures.className = 'trails-planbar-figures';
-            planFigures.style.cssText = 'flex:1;min-width:0;cursor:pointer';
-            var planSays = document.createElement('b');
-            planSays.style.cssText = 'display:block;font-size:14px;line-height:1.15;' +
-                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-            var planHint = document.createElement('span');
-            planHint.style.cssText = 'display:block;font-size:10.5px;color:var(--trails-ink-5);line-height:1.1';
-            planFigures.appendChild(planSays);
-            planFigures.appendChild(planHint);
-
-            function planAction(label, explains) {
-                var made = document.createElement('button');
-                made.type = 'button';
-                made.title = explains;
-                made.setAttribute('aria-label', explains);
-                made.style.cssText = 'flex:none;width:40px;height:40px;border:1px solid var(--trails-rule);' +
-                    'border-radius:8px;background:var(--trails-solid);cursor:pointer;color:var(--trails-ink-3);' +
-                    'display:flex;align-items:center;justify-content:center';
-                made.innerHTML = label;
-                return made;
-            }
-            // **The profile, from where the route is being made.** On a narrow
-            // screen the rail is behind the burger, so reaching the curve while
-            // planning was three taps through a menu that is not about planning.
-            var planProfile = planAction(icon('profile', 17), 'Show or hide the elevation profile');
-            planProfile.className = 'trails-planbar-profile';
-            var planUndo = planAction(icon('undo', 17), 'Undo the last change');
-            planUndo.className = 'trails-planbar-undo';
-            var planDone = document.createElement('button');
-            planDone.type = 'button';
-            planDone.className = 'trails-planbar-done';
-            planDone.textContent = 'Done';
-            planDone.style.cssText = 'flex:none;height:40px;padding:0 14px;border:1px solid var(--trails-strong);' +
-                'border-radius:8px;background:var(--trails-strong);color:var(--trails-on-strong);cursor:pointer;font:inherit;' +
-                'font-size:13px;font-weight:600';
-
-            planbar.appendChild(planFigures);
-            planbar.appendChild(planProfile);
-            planbar.appendChild(planUndo);
-            planbar.appendChild(planDone);
-            chrome.appendChild(planbar);
-
-            planFigures.addEventListener('click', function () {
-                if (window.trailsPlan) { window.trailsPlan.showList(true); }
-                pick('plan');
-            });
-            planProfile.addEventListener('click', function () { askProfile(); });
-            planUndo.addEventListener('click', function () {
-                if (window.trailsPlan) { window.trailsPlan.undo(); }
-            });
-            planDone.addEventListener('click', function () {
-                if (window.trailsPlan) { window.trailsPlan.toggle(false); }
-            });
-
-            function paintPlanBar() {
-                var count = planState ? planState.points : 0;
-                if (!count) {
-                    planSays.textContent = 'Tap the map to place the first point';
-                    planHint.textContent = 'Plan mode is on';
-                } else {
-                    // **`isFinite` and not a null check.** A route whose legs
-                    // are all crossings has no walked distance and no climb, and
-                    // the ascent comes back NaN rather than null — driven with
-                    // three points on open water, the bar read `+NaN m`. NaN is
-                    // neither null nor undefined, so a guard that tests for
-                    // those lets it straight through onto the screen.
-                    var said = count + (count === 1 ? ' point' : ' points');
-                    if (count > 1 && isFinite(planState.metres)) {
-                        said += ' \u00b7 ' + (planState.metres / 1000).toFixed(2) + ' km';
-                    }
-                    if (isFinite(planState.ascent)) {
-                        said += ' \u00b7 +' + Math.round(planState.ascent) + ' m';
-                    }
-                    planSays.textContent = said;
-                    planHint.textContent = planState.working ? 'working\u2026' : 'tap for the list';
-                }
-                // What there is to step back through, not how many points are
-                // down: after an insertion those are different numbers, which is
-                // the whole reason this button was rebuilt.
-                var steps = planState ? planState.undoable : 0;
-                planUndo.disabled = !steps;
-                planUndo.style.opacity = steps ? '' : '0.35';
-                // Lit from the one state, like the rail's own icon, so the two
-                // cannot say different things about the same panel.
-                var showing = profileOn();
-                planProfile.style.color = showing ? 'var(--trails-accent)' : 'var(--trails-ink-3)';
-                planProfile.style.borderColor = showing ? 'var(--trails-accent)' : 'var(--trails-rule)';
-                planProfile.setAttribute('aria-pressed', String(showing));
-            }
+            // **Plan mode's bar is the panel's own row now.** It stood above
+            // the profile panel while a route was being made -- its figures over
+            // the panel's figures, its profile switch over the panel's own -- and
+            // the two rows said two versions of *what you are looking at*. There
+            // is one row, it belongs to the panel, and what plan mode has to say
+            // is pushed into it below.
 
             // ---- the profile panel, which is shown by having something to show
             var profileBox = null;
@@ -15805,18 +16263,34 @@ class _Chrome(MacroElement):
                 place();
             }
 
+            // **Two answers, not one.** The panel is a row that stands whenever
+            // there is something to stand for -- a selected line, a place whose
+            // popup was handed over, a route being planned -- and a set of pages
+            // above it that the reader opens and folds. This used to be one
+            // answer, which is why putting the profile away also took the row
+            // with it and left a reader who had tapped a line with nothing at
+            // all on the screen about it.
             function paintProfile() {
                 var panel = profilePanel();
-                if (panel) { panel.style.display = (selection && profileOn()) ? '' : 'none'; }
+                var standing = !!(selection || planOn());
+                if (panel) { panel.style.display = standing ? '' : 'none'; }
+                var pager = window.trailsProfilePanel;
+                if (pager && pager.pages && pager.page) {
+                    var want = standing && profileOn();
+                    // Asked only where the answer would change it: the panel
+                    // tells this back through `placed`, and a call that always
+                    // spoke would be a loop between the two.
+                    if (pager.pages().open !== want) { pager.page(want ? true : false); }
+                }
                 paintRail();
-                paintPlanBar();
             }
 
-            // Whether the profile panel is standing, which is what the rail's
-            // own icon says now that it is never greyed.
+            // Whether the pages are showing, which is what the rail's own icon
+            // says now that it is never greyed. The row underneath them is not
+            // the answer: it stands whether they do or not.
             function profileShowing() {
-                var panel = profilePanel();
-                return !!(panel && panel.style.display !== 'none');
+                var pager = window.trailsProfilePanel;
+                return !!(pager && pager.pages && pager.pages().open);
             }
 
             // Read off what plan mode last pushed rather than asked for. Asking
@@ -15871,15 +16345,14 @@ class _Chrome(MacroElement):
                 // The graph settles after the map is drawn, so this is read on
                 // the way in rather than written once and left to go stale.
                 if (key === 'info') { sayOpenCost(); }
-                // With something selected this shows and hides the panel and
+                // With something selected this shows and hides the pages and
                 // opens no dock: the panel *is* what the tool is for. With
                 // nothing selected it falls through and the dock explains it.
                 if (key === 'profile' && selection) {
-                    // **It shows and hides the panel, on every screen.** It used
-                    // to click the panel's own fold handle on a wide one, which
-                    // left a 35 px bar of nothing over the map and made the tool
-                    // mean two different things at two widths. Folding is still
-                    // the heading's job; this is the way the panel goes away.
+                    // **The pages, not the panel.** The row at the foot says
+                    // what is selected and stands whether the pages are open or
+                    // not; this is the same switch the lit mark in that row is,
+                    // reached from the rail instead.
                     askProfile();
                     closeMenu();
                     return;
@@ -16003,6 +16476,18 @@ class _Chrome(MacroElement):
                 adopting = true;
                 map.closePopup(popup);
                 adopting = false;
+                // **Into the panel, not over the map.** A popup used to become a
+                // full-screen sheet, which answered *what did I just tap* by
+                // covering the thing that had been tapped, the curve it drew and
+                // the map it was on. It is a page of the panel now: beside the
+                // profile where the tapped thing has one, alone where it has
+                // not, which is what a place gets.
+                if (window.trailsProfilePanel && window.trailsProfilePanel.detail) {
+                    window.trailsProfilePanel.detail(titleFor(popup), content);
+                    paintProfile();
+                    place();
+                    return;
+                }
                 readInSheet(titleFor(popup), content, true, 'popup');
             });
 
@@ -16030,9 +16515,10 @@ class _Chrome(MacroElement):
                 // **First, because whether the profile panel is drawn at all
                 // depends on the width.** Driven from a desktop viewport down to
                 // 390 px, the panel kept the display it had been given when the
-                // screen was wide, and the plan bar then measured itself against
-                // a panel that should not have been there — 346 px of map
-                // instead of 784. Anything that re-places has to re-decide this.
+                // screen was wide, and everything measured against its top was
+                // then measured against a panel that should not have been there
+                // — 346 px of map instead of 784. Anything that re-places has to
+                // re-decide this.
                 paintProfile();
                 var size = mapRoom();
                 var narrow = narrowNow();
@@ -16076,21 +16562,6 @@ class _Chrome(MacroElement):
                 menu.style.display = (menuOpen && narrow && top === 'menu') ? 'flex' : 'none';
                 dock.style.display = (openTool && (!narrow || top === 'tool')) ? 'flex' : 'none';
                 sheet.style.display = (detailShown && (!narrow || top === 'detail')) ? 'flex' : 'none';
-
-                // The bar stands on the profile panel where one is showing and
-                // at the foot where none is, keeping the 16 px the panel leaves
-                // the attribution. Everything above is then capped against its
-                // top rather than against the panel's.
-                var planShown = narrow && planOn();
-                planbar.style.display = planShown ? 'flex' : 'none';
-                if (planShown) {
-                    // On the profile panel where one is showing, above the
-                    // keyboard where one is up, and at the foot otherwise —
-                    // keeping the 16 px the panel leaves the attribution.
-                    var barBottom = Math.max(covered, size.y - floor, standing ? 0 : 16);
-                    planbar.style.bottom = barBottom + 'px';
-                    floor = Math.max(0, size.y - barBottom - 44);
-                }
 
                 var covering = narrow && (openTool !== null || menuOpen ||
                     (!landscape && detailShown));
@@ -16240,8 +16711,8 @@ class _Chrome(MacroElement):
                 },
                 open: function (key) { pick(key); },
                 // The one switch, for everything that offers one: the panel's
-                // own ×, the plan bar and the plan control. Called with nothing
-                // it flips; called with a boolean it says which way.
+                // own lit mark, the rail and the plan control. Called with
+                // nothing it flips; called with a boolean it says which way.
                 profile: function (want) {
                     if (want === undefined) { return profileOn(); }
                     askProfile(want);
@@ -16257,6 +16728,10 @@ class _Chrome(MacroElement):
                 // everything, and everything is not what a second press on one
                 // panel's own button means.
                 closeDetail: function () { closeSheet(); },
+                // The panel telling the chrome it has changed shape, so whatever
+                // is measured against its top -- a tool, the menu -- is measured
+                // against where it actually is.
+                placed: function () { place(); },
                 menu: function () { openMenu(); },
                 close: function () { closeDock(); closeMenu(); closeSheet(); },
                 tools: TOOLS.map(function (tool) { return tool.key; }),
@@ -16289,7 +16764,9 @@ class _Chrome(MacroElement):
                     // is being tapped, and 784 px of it against 462 is what that
                     // rule is worth.
                     if (planOn() !== was) { profileAsked = null; }
-                    paintPlanBar();
+                    if (window.trailsProfilePanel && window.trailsProfilePanel.planning) {
+                        window.trailsProfilePanel.planning(summary);
+                    }
                     paintProfile();
                     paintRail();
                     place();
@@ -16301,10 +16778,12 @@ class _Chrome(MacroElement):
                         menu: menuOpen,
                         detail: detailShown,
                         detailKey: detailKey,
-                        profile: !!(profilePanel() && profilePanel().style.display !== 'none'),
+                        profile: profileShowing(),
                         planning: planOn(),
                         planPoints: planState ? planState.points : 0,
-                        planBar: planbar.style.display !== 'none',
+                        // The row at the foot, which is the panel's own now:
+                        // standing while anything is selected or planned.
+                        banner: !!(profilePanel() && profilePanel().style.display !== 'none'),
                         coarse: container.classList.contains('trails-coarse'),
                         threshold: NARROW,
                         // The other half of the rule. A check that worked the
@@ -16317,7 +16796,6 @@ class _Chrome(MacroElement):
 
             selection = window.trailsProfile || null;
             paintProfile();
-            paintPlanBar();
             place();
         })();
         {% endmacro %}
