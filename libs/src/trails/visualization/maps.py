@@ -15485,7 +15485,6 @@ class _Chrome(MacroElement):
             // What this map draws. `null` where nobody said, and then nothing
             // here can refuse anything.
             var DRAWN = {{ this.extent_json }};
-            var EXTENT = DRAWN ? L.latLngBounds(DRAWN[0], DRAWN[1]) : null;
             var CREDITS = {{ this.credits_json }};
             var container = map.getContainer();
 
@@ -15590,13 +15589,19 @@ class _Chrome(MacroElement):
                  hint: 'Set points, route between them, cut it into stages.'},
                 {key: 'profile', label: 'Elevation profile', width: 320, selector: null,
                  hint: 'The climb of a trail you tap, or of a route you plan.'},
-                {key: 'here', label: 'Where I am', width: 300, selector: null,
+                // **A switch, and one the menu does not list.** It and the
+                // picker are the two marks at the foot on a narrow screen --
+                // which is the screen the menu is on -- so a row for them there
+                // would be a second way to the same switch, one tap slower.
+                // The rail keeps both, because on a wide screen there are no
+                // marks and the rail is where every tool is.
+                {key: 'here', label: 'Where I am', width: 300, selector: null, quick: true,
                  hint: 'Your own position on this map, while you ask for it.'},
                 // **A switch and not a panel**, like the profile: there is
                 // nothing to read in it, only a state the map is in. On a narrow
                 // screen it is one of the two buttons at the foot, where the
                 // rail is not.
-                {key: 'pick', label: 'Copy a position', width: 300, selector: null,
+                {key: 'pick', label: 'Copy a position', width: 300, selector: null, quick: true,
                  hint: 'Tap the map and its coordinates go to the clipboard.'},
                 {key: 'offline', label: 'Offline', width: 330, selector: null,
                  hint: 'Keep the ground on this device, and walk with no signal.'},
@@ -16232,34 +16237,19 @@ class _Chrome(MacroElement):
             var HERE_BLUE = '#1565c0';
             var hereWatch = null, hereDot = null, hereRing = null, hereFixes = 0;
 
-            var hereHolder = document.createElement('div');
-            hereHolder.className = 'trails-here';
-            var hereSays = document.createElement('p');
-            hereSays.className = 'trails-here-said';
-            hereSays.style.cssText = 'margin:0 0 10px;color:var(--trails-ink-3)';
-            hereSays.textContent = 'Your position, from this device, while you ask for it. ' +
-                'Nothing is sent anywhere: the browser tells this page and the page draws a dot.';
-            var hereButton = document.createElement('button');
-            hereButton.type = 'button';
-            hereButton.className = 'trails-here-toggle';
-            hereButton.style.cssText = 'font:inherit;font-size:13px;font-weight:600;padding:8px 14px;' +
-                'border-radius:7px;border:1px solid var(--trails-strong);background:var(--trails-strong);' +
-                'color:var(--trails-on-strong);cursor:pointer';
-            var hereState = document.createElement('p');
-            hereState.className = 'trails-here-state';
-            hereState.style.cssText = 'margin:10px 0 0;color:var(--trails-ink-4);font-size:12px';
-            hereHolder.appendChild(hereSays);
-            hereHolder.appendChild(hereButton);
-            hereHolder.appendChild(hereState);
-            byKey.here.holder = hereHolder;
-
+            // **No panel, and nothing to press twice.** It used to open a tool
+            // whose whole content was a paragraph and a button called *Show my
+            // position* -- a page asking a reader whether they meant what they
+            // had just asked for. The mark at the foot is the switch; what there
+            // is to say arrives in the same line the picker says things in, and
+            // the mark's own lamp says whether it is watching.
+            //
+            // The browser's own permission dialogue is not this page's and does
+            // not go away: it is asked once by the device, not by the map.
             function paintHere(said) {
-                hereButton.textContent = hereWatch === null ? 'Show my position' : 'Stop';
-                if (said !== undefined) { hereState.textContent = said; }
-                // The rail is built further down this script and this runs while
-                // the panel is being made: `railButtons` is hoisted and empty,
-                // and painting it then threw before anything else could load.
+                if (said) { saySomething(said, true); }
                 if (railButtons) { paintRail(); }
+                if (typeof paintQuick === 'function') { paintQuick(); }
             }
 
             function dropHere() {
@@ -16277,47 +16267,45 @@ class _Chrome(MacroElement):
                 paintHere(said === undefined ? '' : said);
             }
 
-            // How far a fix is from what is on the screen, in metres, or 0 where
-            // it is on the screen. The map is moved to a reader who is near
-            // enough that moving shows them something they were already looking
-            // at, and told the distance where they are not — a map that jumped
-            // to a grey square 400 km away would be answering with a blank.
-            function awayFromView(where) {
-                var seen = map.getBounds();
-                if (seen.pad(2).contains(where)) { return 0; }
-                return map.distance(seen.getCenter(), where);
-            }
-
-            // How far a fix falls outside the ground this map draws, in metres,
-            // or 0 where it falls on it. **Not the same question as "away from
-            // the view"**: a reader can pan anywhere, and a map that refused
-            // because they had scrolled off would be refusing its own reader.
-            // What cannot be answered is a position on ground never drawn.
-            function outsideMap(where) {
-                if (!EXTENT || EXTENT.contains(where)) { return 0; }
-                return map.distance(EXTENT.getCenter(), where);
-            }
-
-            function faraway(metres) {
-                return metres >= 10000
-                    ? Math.round(metres / 1000).toLocaleString('en-GB') + ' km'
-                    : (metres / 1000).toFixed(1) + ' km';
+            // **Where a fix puts the map.** Asked for once, on the first fix:
+            // a map that re-centres on every one cannot be read while walking,
+            // because the reader pans to look ahead and the next fix takes it
+            // back.
+            //
+            // **And a route on the panel stays in the picture.** A reader who
+            // has planned one is asking *where am I on this* and not *where am
+            // I*: inside its bounds the scale is theirs and only the middle
+            // moves; outside them the map opens far enough to hold both, which
+            // is the answer to the question they actually asked.
+            //
+            // Whatever the panel is showing counts as that route -- a planned
+            // one and a tapped line alike. There is only ever one, and it is the
+            // one they are looking at.
+            function goThere(where) {
+                var shape = window.trailsProfile && window.trailsProfile.shape;
+                var box = null;
+                if (shape && shape.lat && shape.lat.length) {
+                    box = L.latLngBounds([shape.lat[0], shape.lon[0]], [shape.lat[0], shape.lon[0]]);
+                    for (var i = 1; i < shape.lat.length; i += 1) {
+                        box.extend([shape.lat[i], shape.lon[i]]);
+                    }
+                }
+                if (box && box.isValid()) {
+                    if (box.contains(where)) { map.panTo(where); return; }
+                    map.fitBounds(box.extend(where), {padding: [40, 40]});
+                    return;
+                }
+                map.setView(where, Math.max(map.getZoom(), 13));
             }
 
             function drawHere(position) {
                 var where = L.latLng(position.coords.latitude, position.coords.longitude);
                 var spread = Math.max(1, position.coords.accuracy || 0);
-                // **Outside the drawn ground there is nothing to draw on.** A dot
-                // on a blank square is not an answer, so this says where the
-                // reader is instead of pretending to show them, and stops:
-                // there is no point watching a position this map cannot draw.
-                var beyond = outsideMap(where);
-                if (beyond) {
-                    stopHere('Your position is outside the ground this map draws \u2014 about ' +
-                        faraway(beyond) + ' from it, so there is nothing here to show you. ' +
-                        'Ask again inside the map.');
-                    return;
-                }
+                // **Wherever it is.** This used to refuse a fix outside the
+                // ground the map draws and stop watching -- on the grounds that
+                // a dot on a blank square is not an answer. It is one: it says
+                // *not here*, which a reader who has just got off a bus in the
+                // wrong valley would rather be told than argued with.
                 if (!hereDot) {
                     hereRing = L.circle(where, {radius: spread, color: HERE_BLUE, weight: 1,
                                                 opacity: 0.7, fillColor: HERE_BLUE, fillOpacity: 0.12,
@@ -16331,18 +16319,13 @@ class _Chrome(MacroElement):
                     hereDot.setLatLng(where);
                 }
                 hereFixes += 1;
-                var away = awayFromView(where);
-                // **Moved once and never again.** A map that re-centres on every
-                // fix is a map that cannot be read while walking: the reader
-                // pans to look ahead and the next fix takes it back.
-                if (hereFixes === 1 && !away) {
-                    map.setView(where, Math.max(map.getZoom(), 13));
+                if (hereFixes === 1) {
+                    goThere(where);
+                    // Said once, with the fix that moved the map: an accuracy
+                    // repeated every few seconds is a line a reader stops
+                    // reading, and the circle on the map says it anyway.
+                    saySomething('Accurate to about ' + Math.round(spread) + ' m', false);
                 }
-                paintHere(away
-                    ? 'You are about ' + (away / 1000).toFixed(0) + ' km from what is on the screen, ' +
-                      'so the map has stayed where it is. Accurate to about ' + Math.round(spread) + ' m.'
-                    : 'Accurate to about ' + Math.round(spread) + ' m. The circle is that accuracy, ' +
-                      'drawn at this map\u2019s scale.');
             }
 
             function failedHere(problem) {
@@ -16354,18 +16337,23 @@ class _Chrome(MacroElement):
                 stopHere(why);
             }
 
-            hereButton.addEventListener('click', function () {
-                if (hereWatch !== null) { stopHere(''); return; }
+            // **Pressed once and it watches; pressed again and it stops.** No
+            // panel, no second button, and nothing asked: a reader who pressed
+            // *where am I* has said what they want.
+            function askHere(want) {
+                var wanted = want === undefined ? hereWatch === null : !!want;
+                if (!wanted) { stopHere(''); return false; }
+                if (hereWatch !== null) { return true; }
                 if (!navigator.geolocation) {
                     paintHere('This browser has no way to tell the page where it is.');
-                    return;
+                    return false;
                 }
-                paintHere('Asking the device\u2026');
                 hereWatch = navigator.geolocation.watchPosition(drawHere, failedHere, {
                     enableHighAccuracy: true, maximumAge: 10000, timeout: 20000
                 });
-                paintHere();
-            });
+                paintHere('');
+                return true;
+            }
 
             // A tab that is put away is not a tab that needs to be watched.
             window.addEventListener('pagehide', function () { stopHere(''); });
@@ -16493,6 +16481,31 @@ class _Chrome(MacroElement):
                 pickSaid = null;
             }
 
+            // **One line, and two things say things in it.** The picker says what
+            // it copied; the position switch says how accurate a fix is and why
+            // one did not arrive. A second line for the second of them would be
+            // two surfaces on a phone that have to agree about which is on top,
+            // which is the defect this chrome exists to end.
+            function showSaid(sticky) {
+                pickToast.style.display = 'flex';
+                // A notice takes no pointer -- it stands over the map, and the
+                // map is what is being tapped. Something to read and dismiss
+                // keeps one.
+                pickToast.style.pointerEvents = sticky ? 'auto' : 'none';
+                if (pickTimer) { window.clearTimeout(pickTimer); }
+                pickTimer = sticky ? null : window.setTimeout(hideCopied, 2600);
+                place();
+            }
+
+            function saySomething(text, sticky) {
+                if (!text) { hideCopied(); return; }
+                pickToast.innerHTML = '';
+                var said = document.createElement('b');
+                said.textContent = text;
+                pickToast.appendChild(said);
+                showSaid(sticky);
+            }
+
             function sayCopied(text, went, high) {
                 pickSaid = text;
                 pickToast.innerHTML = '';
@@ -16517,22 +16530,14 @@ class _Chrome(MacroElement):
                 after.textContent = went ? 'copied' : '\u2014 copy it by hand';
                 pickToast.appendChild(said);
                 pickToast.appendChild(after);
-                pickToast.style.display = 'flex';
-                // **What it says must not eat the next tap.** It stands over the
-                // map, and the map is what is being tapped: driven, a second
+                // **What it says must not eat the next tap.** Driven, a second
                 // position picked while the first was still on the screen landed
-                // on this and did nothing at all -- the handler steps around
-                // everything in the chrome, and this is in the chrome.
-                //
-                // A success is a notice and takes no pointer; a refusal is a
-                // thing to read, select and dismiss, and keeps one. That case is
-                // rare and is asking for the reader's hands anyway.
-                pickToast.style.pointerEvents = went ? 'none' : 'auto';
-                if (pickTimer) { window.clearTimeout(pickTimer); }
-                // A refusal stays until it is dismissed; a success goes on its
-                // own, because it has already done what it says.
-                pickTimer = went ? window.setTimeout(hideCopied, 2600) : null;
-                place();
+                // on this line and did nothing at all -- the handler steps around
+                // everything in the chrome, and this is in the chrome. A refusal
+                // stays until it is dismissed and keeps its pointer, because it
+                // is a thing to read and select; a success goes on its own,
+                // because it has already done what it says.
+                showSaid(!went);
             }
 
             // **How high the tapped place is, where this map knows.** It has no
@@ -16698,11 +16703,14 @@ class _Chrome(MacroElement):
                 return made;
             }
             var quickPick = quickMark('pick', 'Copy a position', function () { askPicking(); });
-            var quickHere = quickMark('here', 'Where I am', function () { pick('here'); });
+            var quickHere = quickMark('here', 'Where I am', function () { askHere(); });
             L.DomEvent.disableClickPropagation(quick);
             chrome.appendChild(quick);
 
             function paintQuick() {
+                // Called from the position switch as well, which is written
+                // above these two and runs once before they exist.
+                if (!quickPick || !quickHere) { return; }
                 [[quickPick, picking], [quickHere, hereWatch !== null]].forEach(function (each) {
                     var lit = each[1];
                     each[0].style.background = lit ? 'var(--trails-accent)' : 'var(--trails-panel)';
@@ -16842,6 +16850,9 @@ class _Chrome(MacroElement):
                 menuParts.title.textContent = 'Menu';
                 menuParts.body.innerHTML = '';
                 TOOLS.forEach(function (tool) {
+                    // The two marks stand on this very screen; a row here would
+                    // be the same switch, one tap further away.
+                    if (tool.quick) { return; }
                     var row = document.createElement('button');
                     row.type = 'button';
                     row.setAttribute('data-tool', tool.key);
@@ -16876,6 +16887,13 @@ class _Chrome(MacroElement):
                 // whose whole content is the sentence in the menu beside it.
                 if (key === 'pick') {
                     askPicking();
+                    closeMenu();
+                    return;
+                }
+                // The same, and for the same reason: what it opened was a
+                // paragraph and a button asking whether the reader meant it.
+                if (key === 'here') {
+                    askHere();
                     closeMenu();
                     return;
                 }
@@ -17282,6 +17300,8 @@ class _Chrome(MacroElement):
                 // else.** Asked by plan mode before it takes a click of its own,
                 // set by the rail, by the mark at the foot and from here.
                 picking: function (want) { return askPicking(want); },
+                // The other switch at the foot, driven the same way.
+                here: function (want) { return askHere(want); },
                 // What the last tap copied, so a check can read it rather than
                 // ask the clipboard -- which a headless browser will not hand
                 // over without a permission nobody can grant it.
@@ -17339,6 +17359,7 @@ class _Chrome(MacroElement):
                         profile: profileShowing(),
                         planning: planOn(),
                         picking: picking,
+                        here: hereWatch !== null,
                         planPoints: planState ? planState.points : 0,
                         // The row at the foot, which is the panel's own now:
                         // standing while anything is selected or planned.

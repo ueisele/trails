@@ -45,6 +45,7 @@ import re
 import sys
 import threading
 import time
+import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -496,7 +497,16 @@ def wanted(check: Any) -> bool:
     return not ONLY or ONLY in check.__name__
 
 
-def settled(page: Any, within_ms: int = 25_000) -> None:
+#: Every wait for plan mode that ran out of patience, and where it was waiting.
+#: **A leg that never settles must be reported, not thrown.** Measured on this
+#: build and on the one before it: a waypoint placed a few hundred metres off the
+#: network can leave plan mode saying *working…* indefinitely, and a suite that
+#: raises there loses every reading after it -- including the ones that would say
+#: what else is wrong.
+STALLED: list[str] = []
+
+
+def settled(page: Any, within_ms: int = 25_000) -> bool:
     """Wait until plan mode has finished working, rather than until a clock says so.
 
     **The rule this suite states about itself and stopped keeping.** ``select``
@@ -510,8 +520,24 @@ def settled(page: Any, within_ms: int = 25_000) -> None:
         page: The driven page
         within_ms: How long to allow before giving up, which is a real failure
             and not a slow machine: nothing here takes twenty-five seconds.
+
+    Returns:
+        Whether it settled. A run carries on either way and says at the end how
+        often it did not: what is being driven above is the panel, the list and
+        the files, and losing all of that to one leg the router cannot finish
+        answers none of it.
     """
-    page.wait_for_function("() => !window.trailsPlan || !window.trailsPlan.busy()", timeout=within_ms)
+    try:
+        page.wait_for_function("() => !window.trailsPlan || !window.trailsPlan.busy()", timeout=within_ms)
+        return True
+    except Exception:
+        where = "unknown"
+        stack = traceback.extract_stack()
+        if len(stack) > 1:
+            called = stack[-2]
+            where = f"{called.name}, line {called.lineno}"
+        STALLED.append(where)
+        return False
 
 
 SHOW_TOOL = """(key) => { if (window.trailsChrome.state().tool !== key) { window.trailsChrome.open(key); } }"""
@@ -1841,10 +1867,16 @@ def the_row_at_the_foot(page: Any) -> Check:
     laid = "() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e5))"
     was = page.evaluate(laid)
     steps_before = page.evaluate("() => window.trailsPlan.state().undoable")
+    # **Placed next to the last point and not four hundred metres off it.** What
+    # this check is about is undo, and a leg that leaves the network can take the
+    # router a very long time: measured, a point 0.004 degrees off the last one
+    # left plan mode saying *working...* for over twenty-five seconds, on this
+    # build and on the one before it alike. That is worth knowing and is not this
+    # check's question, so it asks its question somewhere the router answers.
     page.evaluate(
         """() => { const points = window.trailsPlan.state().points;
         const last = points[points.length - 1];
-        window.trailsPlan.place(last.lat + 0.004, last.lon + 0.004); }"""
+        window.trailsPlan.place(last.lat + 0.0004, last.lon + 0.0004); }"""
     )
     settled(page)
     before = page.evaluate("() => window.trailsPlan.state().points.length")
@@ -2208,9 +2240,22 @@ def copying_a_position(page: Any) -> Check:
     page.wait_for_timeout(700)
 
     # 2. disarmed: the tap is plan mode's again.
+    #
+    # **Tapped on the route and not at an arbitrary pixel.** What this leg asks
+    # is who gets the tap, not what the router can do with it -- and a waypoint
+    # placed far from the network can leave plan mode saying *working...* for
+    # longer than this suite is willing to wait, on this build and on the one
+    # before it alike.
     page.evaluate("() => window.trailsChrome.picking(false)")
     page.wait_for_timeout(400)
-    tap(160, 320)
+    if on_track:
+        page.evaluate(with_map("(w) => __MAP__.setView([w.lat, w.lon], 15, {animate: false})"), on_track)
+        page.wait_for_timeout(700)
+        near = page.evaluate(middle)
+        page.mouse.click(near["x"], near["y"])
+        page.wait_for_timeout(700)
+    else:
+        tap(160, 320)
     settled(page)
     laid = page.evaluate("() => window.trailsPlan.state().points.length") - before
     page.evaluate("() => window.trailsPlan.undo()")
@@ -3241,12 +3286,18 @@ def reading_with_a_finger(page: Any) -> Check:
 
 
 def where_the_reader_is(page: Any) -> Check:
-    """A dot for the reader's own position, and the accuracy drawn with it.
+    """A dot for the reader's own position, the accuracy drawn with it, and what
+    the map does about it.
 
     **The accuracy is the point.** A fix is a claim with a radius on it -- 8 m
     under an open sky, 300 m in a valley -- and a page that draws it as a dot has
     thrown away the half that matters on a mountain. On a map whose whole
     argument is metres per pixel, the circle is the only honest way to show one.
+
+    **And the view is the other point.** A reader who has a route on the panel is
+    asking *where am I on this* and not *where am I*: inside its bounds the scale
+    is theirs and only the middle moves; outside them the map opens far enough to
+    hold both. With nothing on the panel the fix decides the view on its own.
 
     Playwright answers the browser's question for the reader it does not have, so
     both halves are driveable: that nothing is watched until it is asked for, and
@@ -3260,15 +3311,13 @@ def where_the_reader_is(page: Any) -> Check:
     """
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(500)
-    page.evaluate("() => window.trailsChrome.close()")
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
     # **It lays its own view down**, like the file check lays its own route. The
-    # checks before this leave the map wherever they were looking, and both
-    # questions here — did it move to the fix, and is the circle the reported
-    # accuracy at this scale — are answered against a scale.
+    # checks before this leave the map wherever they were looking, and every
+    # question here is answered against a scale.
     page.evaluate(f"() => {MAP_OBJECT}.setView([65.60, 13.20], 11)")
     page.wait_for_timeout(700)
-    page.evaluate(SHOW_TOOL, "here")
-    page.wait_for_timeout(600)
 
     seen = """() => {
       const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
@@ -3281,9 +3330,8 @@ def where_the_reader_is(page: Any) -> Check:
         if (cls === 'trails-here-dot') { dot = l; }
         if (cls === 'trails-here-ring') { ring = l; } });
       // **A circle has no `r` to read either way**: the question is how wide it
-      // comes out on the screen, which is the question anyway — the circle has
-      // to be the reported accuracy at this map's scale. Its own bounds,
-      // projected, answer that under either renderer.
+      // comes out on the screen, which is the question anyway -- the circle has
+      // to be the reported accuracy at this map's scale.
       let across = 0;
       if (ring) { const box = ring.getBounds();
         across = Math.round(map.latLngToContainerPoint(box.getSouthEast()).x
@@ -3292,61 +3340,119 @@ def where_the_reader_is(page: Any) -> Check:
                                   map.containerPointToLatLng([100, 0])) / 100;
       return {dot: !!dot, ring: !!ring, across: across,
               wanted: Math.round(2 * 24 / metres),
-              said: (document.querySelector('.trails-here-state') || {}).textContent || '',
-              button: (document.querySelector('.trails-here-toggle') || {}).textContent || '',
+              said: (document.querySelector('.trails-pick-said') || {}).textContent || '',
+              watching: window.trailsChrome.state().here,
               centre: map.getCenter(), zoom: map.getZoom()}; }"""
 
+    def watched() -> None:
+        """Wait until a fix has been drawn, rather than for a fixed pause."""
+        page.wait_for_function(
+            with_map(
+                """() => { let there = false;
+                __MAP__.eachLayer(l => { if (l.options && l.options.className === 'trails-here-dot') { there = true; } });
+                return there; }"""
+            ),
+            timeout=20_000,
+        )
+        page.wait_for_timeout(500)
+
     before = page.evaluate(seen)
-    page.evaluate("() => document.querySelector('.trails-here-toggle').click()")
-    page.wait_for_function(
-        with_map(
-            """() => { let seen = false;
-            __MAP__.eachLayer(l => { if (l.options && l.options.className === 'trails-here-dot') { seen = true; } });
-            return seen; }"""
-        ),
-        timeout=20_000,
-    )
-    page.wait_for_timeout(600)
+    # **The mark itself, which is the whole of the change.** It used to open a
+    # tool whose content was a paragraph and a button called *Show my position*:
+    # a page asking a reader whether they meant what they had just asked for.
+    page.evaluate("() => window.trailsChrome.here(true)")
+    watched()
     after = page.evaluate(seen)
-    # **Read with the dock shut.** An open tool's button is lit white on the
-    # accent; what is being asked here is the other thing the rail says — that
-    # something is *running* behind a closed panel.
-    page.evaluate("() => window.trailsChrome.close()")
-    page.wait_for_timeout(500)
+
+    # **Read with nothing open.** What is being asked is the other thing the rail
+    # says -- that something is *running* behind a closed panel.
     lit = page.evaluate(
         """() => { const b = document.querySelector('.trails-rail button[data-tool=here]');
         return b ? getComputedStyle(b).color : ''; }"""
     )
-    page.evaluate(SHOW_TOOL, "here")
+    listed = page.evaluate(
+        """() => { window.trailsChrome.menu();
+        const rows = [...document.querySelectorAll('.trails-menu [data-tool]')].map(n => n.getAttribute('data-tool'));
+        window.trailsChrome.close();
+        return rows; }"""
+    )
+    page.evaluate("() => window.trailsChrome.here(false)")
     page.wait_for_timeout(500)
-
-    page.evaluate("() => document.querySelector('.trails-here-toggle').click()")
-    page.wait_for_timeout(600)
     stopped = page.evaluate(seen)
 
-    # **And a reader standing somewhere this map has never drawn.** Oslo is 500
-    # km from the park: a dot there would be a dot on a blank square, which is
-    # not an answer. It says where they are and stops watching, because there is
-    # no point following a position it cannot draw.
-    page.context.set_geolocation({"latitude": 59.913, "longitude": 10.752, "accuracy": 20})
-    page.evaluate(SHOW_TOOL, "here")
-    page.wait_for_timeout(400)
-    page.evaluate("() => document.querySelector('.trails-here-toggle').click()")
-    page.wait_for_timeout(2500)
-    elsewhere = page.evaluate(seen)
-    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    # **A route on the panel stays in the picture.** Inside its bounds the scale
+    # is the reader's and only the middle moves.
+    #
+    # **It lays its own route down**, the way it lays its own view down: driven
+    # on its own this check has nothing selected, and a leg that quietly compares
+    # nothing with nothing is a leg that would go on passing after the rule it
+    # is about had gone.
+    # **And plan mode goes off to pick it**, for the reason the file check names:
+    # while it is on the panel stops answering clicks, so selecting a chain
+    # selects nothing -- driven, this leg compared nothing with nothing and said
+    # so, which is how it was found.
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(500)
+    laid = select(page, LONG_CHAIN)
+    page.wait_for_timeout(600)
+    on_track = page.evaluate(
+        """() => { const s = window.trailsProfile && window.trailsProfile.shape;
+        if (!s || !s.lon.length) { return null; }
+        const at = Math.floor(s.lon.length / 2);
+        return {lat: s.lat[at], lon: s.lon[at]}; }"""
+    )
+    inside = away = None
+    if on_track:
+        page.context.set_geolocation({"latitude": on_track["lat"], "longitude": on_track["lon"], "accuracy": 18})
+        page.evaluate(
+            with_map("(w) => __MAP__.setView([w.lat + 0.01, w.lon + 0.01], 13, {animate: false})"),
+            on_track,
+        )
+        page.wait_for_timeout(600)
+        held = page.evaluate(f"() => {MAP_OBJECT}.getZoom()")
+        page.evaluate("() => window.trailsChrome.here(true)")
+        watched()
+        inside = page.evaluate(seen)
+        inside["held"] = held
+        page.evaluate("() => window.trailsChrome.here(false)")
+        page.wait_for_timeout(400)
 
+        # And outside them the map opens far enough to hold both.
+        page.context.set_geolocation({"latitude": 66.10, "longitude": 12.40, "accuracy": 30})
+        page.evaluate("() => window.trailsChrome.here(true)")
+        watched()
+        away = page.evaluate(
+            with_map(
+                """() => { const box = __MAP__.getBounds();
+                const s = window.trailsProfile.shape;
+                let whole = true;
+                for (let i = 0; i < s.lat.length; i += 50) {
+                  if (!box.contains([s.lat[i], s.lon[i]])) { whole = false; break; } }
+                return {route: whole, fix: box.contains([66.10, 12.40]),
+                        zoom: __MAP__.getZoom()}; }"""
+            )
+        )
+        page.evaluate("() => window.trailsChrome.here(false)")
+        page.wait_for_timeout(400)
+
+    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
     page.evaluate("() => window.trailsChrome.close()")
     page.wait_for_timeout(400)
 
     moved = round(((after["centre"]["lat"] - 65.55) ** 2 + (after["centre"]["lng"] - 13.05) ** 2) ** 0.5, 4)
+    panned = (
+        round(((inside["centre"]["lat"] - on_track["lat"]) ** 2 + (inside["centre"]["lng"] - on_track["lon"]) ** 2) ** 0.5, 4) if inside else None
+    )
     return Check(
         "where the reader is",
         [
-            # Nothing is watched because the tool was opened: a map that starts
+            # Nothing is watched because a page was opened: a map that starts
             # following a reader on its own has decided something for them.
             Reading("nothing is drawn until it is asked for", before["dot"], False),
-            Reading("and the button offers it", before["button"], "Show my position"),
+            # Said out loud, because two of the readings below are about a route
+            # and would otherwise compare nothing with nothing for ever.
+            Reading("a route was laid down to ask against", laid, True),
+            Reading("one press watches", after["watching"], True),
             Reading("a fix draws a dot", after["dot"], True),
             # The half that matters: the radius the browser reported, at the
             # map's own scale.
@@ -3358,18 +3464,22 @@ def where_the_reader_is(page: Any) -> Check:
                 within=3,
                 note=f"{after['across']} px across, {after['wanted']} wanted for 24 m",
             ),
-            Reading("and said in words too", "24 m" in after["said"], True, note=after["said"][:70]),
-            # Moved once, to a fix that is near what is on the screen.
+            Reading("and said in words once", "24 m" in after["said"], True, note=after["said"][:60]),
             Reading("the map went to it", moved < 0.05, True, note=str(moved)),
             Reading("the rail says it is watching", lit, "rgb(13, 71, 161)"),
-            # And pressing again stops: the watch, the dot and the circle.
+            # **And the menu does not offer it.** It is a mark at the foot on the
+            # screen the menu is on; a row there would be the same switch, one
+            # tap slower.
+            Reading("the menu lists neither switch", [key for key in listed if key in ("here", "pick")], []),
+            # Pressing again stops: the watch, the dot and the circle.
             Reading("pressing again stops the watch", stopped["dot"] or stopped["ring"], False),
-            Reading("and offers it again", stopped["button"], "Show my position"),
-            # Outside the drawn ground: said, not drawn, and not followed.
-            Reading("a position off the map draws nothing", elsewhere["dot"] or elsewhere["ring"], False),
-            Reading("and says so", "outside the ground this map draws" in elsewhere["said"], True, note=elsewhere["said"][:80]),
-            Reading("with how far off it is", "km from it" in elsewhere["said"], True),
-            Reading("and stops watching", elsewhere["button"], "Show my position"),
+            Reading("and says so", stopped["watching"], False),
+            # A route on the panel: the reader's scale, and only the middle moves.
+            Reading("with a route on the panel, the zoom is kept", inside["zoom"] if inside else None, inside["held"] if inside else None),
+            Reading("and the map goes to the fix", (panned or 1) < 0.02, True, note=str(panned)),
+            # Outside its bounds, both have to fit.
+            Reading("a fix off the route opens the map", away["route"] if away else None, True),
+            Reading("far enough to hold the fix too", away["fix"] if away else None, True, note=f"zoom {away['zoom']}" if away else ""),
         ],
     )
 
@@ -5117,6 +5227,23 @@ def main() -> int:
         # and a handler that dies half way leaves a page that looks like one
         # where the gesture simply did nothing. Measured the hard way: a picker
         # that copied the first position and silently nothing afterwards.
+        # **And every leg the router was asked for came back.** A waypoint a few
+        # hundred metres off the network can leave plan mode saying *working…*
+        # for longer than anything here waits; that is a fault of its own, and a
+        # run that raised there lost every reading after it.
+        checks.append(
+            Check(
+                "every leg settled while it was driven",
+                [
+                    Reading(
+                        "waits that ran out of patience",
+                        len(STALLED),
+                        0,
+                        note="; ".join(STALLED[:3]),
+                    )
+                ],
+            )
+        )
         checks.append(
             Check(
                 "nothing threw while it was driven",

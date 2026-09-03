@@ -5460,7 +5460,7 @@ class TestChrome:
         html = fmap.get_root().render()
         assert "return where.lat.toFixed(5) + ', ' + where.lng.toFixed(5);" in html
         assert "after.textContent = went ? 'copied' : '\u2014 copy it by hand';" in html
-        assert "pickTimer = went ? window.setTimeout(hideCopied, 2600) : null;" in html
+        assert "pickTimer = sticky ? null : window.setTimeout(hideCopied, 2600);" in html
         # **Nothing is said before the fact.** A reader who armed a picker knows
         # what a tap does, and a line telling them so is a line over the ground
         # they are aiming at: arming draws no message at all.
@@ -5507,7 +5507,12 @@ class TestChrome:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "pickToast.style.pointerEvents = went ? 'none' : 'auto';" in html
+        assert "pickToast.style.pointerEvents = sticky ? 'auto' : 'none';" in html
+        # One line, and two things say things in it: what the picker copied, and
+        # how accurate a fix is. A second line for the second would be two
+        # surfaces on a phone that have to agree about which is on top.
+        assert "function saySomething(text, sticky) {" in html
+        assert "showSaid(!went);" in html
 
     def test_the_two_marks_stand_where_the_rail_is_not(self):
         """The rail is the desktop's answer and these are the phone's — the same
@@ -5752,16 +5757,23 @@ class TestWhereTheReaderIs:
     """Tests for the reader's own position on the map."""
 
     def test_nothing_is_watched_until_it_is_asked_for(self):
-        """A map that starts following a reader because it was opened is a map
-        that has decided something for them. It watches when the button is
-        pressed and stops when it is pressed again, when the page is hidden, or
-        when the browser refuses."""
+        """A map that starts following a reader on its own has decided something
+        for them. It watches when the mark is pressed and stops when it is
+        pressed again, when the page is hidden, or when the browser refuses.
+
+        **And nothing is asked twice.** What the mark opened used to be a panel
+        whose whole content was a paragraph and a button called *Show my
+        position* — a page asking a reader whether they meant what they had just
+        asked for. The browser's own permission dialogue is not this page's and
+        stays."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
         assert "navigator.geolocation.watchPosition(drawHere, failedHere," in html
-        assert "hereButton.addEventListener('click'" in html
+        assert "function askHere(want) {" in html
+        assert "var quickHere = quickMark('here', 'Where I am', function () { askHere(); });" in html
+        assert "hereButton" not in html
         assert "window.addEventListener('pagehide', function () { stopHere(''); });" in html
 
     def test_the_accuracy_is_drawn_and_not_only_the_dot(self):
@@ -5777,40 +5789,60 @@ class TestWhereTheReaderIs:
 
     def test_the_map_is_moved_once_and_never_again(self):
         """A map that re-centres on every fix cannot be read while walking: the
-        reader pans to look ahead and the next fix takes it back. And it does not
-        move at all to a fix far from what is on the screen — a jump to a grey
-        square 400 km away would be answering with a blank."""
+        reader pans to look ahead and the next fix takes it back. It moves on the
+        first one, wherever that is — it used to stay put for a fix far from the
+        view, which answered *where am I* by not showing them."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "if (hereFixes === 1 && !away) {" in html
-        assert "function awayFromView(where)" in html
+        assert "if (hereFixes === 1) {" in html
+        assert "goThere(where);" in html
+        assert "awayFromView" not in html
 
-    def test_a_position_off_the_drawn_ground_is_said_and_not_drawn(self):
-        """A dot on a blank square is not an answer. This is not the same
-        question as *away from the view*: a reader can pan anywhere, and a map
-        that refused because they had scrolled off would be refusing its own
-        reader. What cannot be answered is ground never drawn."""
+    def test_a_route_on_the_panel_stays_in_the_picture(self):
+        """A reader who has planned one is asking *where am I on this* and not
+        *where am I*: inside its bounds the scale is theirs and only the middle
+        moves; outside them the map opens far enough to hold both. Whatever the
+        panel is showing counts as that route — a planned one and a tapped line
+        alike, because there is only ever one and it is the one being looked
+        at."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "function outsideMap(where)" in html
-        assert "Your position is outside the ground this map draws" in html
-        # And the extent comes from what create_map fitted the view to, carried
-        # on the map object rather than repeated by every caller.
-        assert "var EXTENT = DRAWN ? L.latLngBounds(DRAWN[0], DRAWN[1]) : null;" in html
-        assert "[[65.3, 12.4], [65.7, 13.4]]" in html
+        assert "function goThere(where) {" in html
+        assert "var shape = window.trailsProfile && window.trailsProfile.shape;" in html
+        assert "if (box.contains(where)) { map.panTo(where); return; }" in html
+        assert "map.fitBounds(box.extend(where), {padding: [40, 40]});" in html
+        # And with nothing on the panel, the fix decides the view on its own.
+        assert "map.setView(where, Math.max(map.getZoom(), 13));" in html
 
-    def test_a_map_that_was_given_no_bounds_refuses_nothing(self):
-        """`null` where nobody said, and then nothing here can refuse anything —
-        a page built around a centre draws whatever the reader pans to."""
-        fmap = maps.create_map(center=(65.5, 13.0))
+    def test_a_position_anywhere_is_drawn(self):
+        """It used to refuse a fix outside the ground this map draws and stop
+        watching, on the grounds that a dot on a blank square is not an answer.
+        It is one: it says *not here*, which a reader who has got off a bus in
+        the wrong valley would rather be told than argued with."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "var DRAWN = null;" in html
+        assert "outsideMap" not in html
+        assert "Your position is outside the ground this map draws" not in html
+        assert "EXTENT" not in html
+
+    def test_the_two_switches_are_not_in_the_menu(self):
+        """They are the two marks at the foot on a narrow screen — which is the
+        screen the menu is on — so a row for them there would be a second way to
+        the same switch, one tap slower. The rail keeps both, because on a wide
+        screen there are no marks and the rail is where every tool is."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "if (tool.quick) { return; }" in html
+        assert "{key: 'here', label: 'Where I am', width: 300, selector: null, quick: true," in html
+        assert "{key: 'pick', label: 'Copy a position', width: 300, selector: null, quick: true," in html
 
     def test_a_refusal_says_which_refusal_it_was(self):
         """Told not to share, no fix in time, and a device that cannot work it
