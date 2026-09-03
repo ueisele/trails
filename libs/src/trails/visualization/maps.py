@@ -5350,6 +5350,11 @@ class _ProfilePanel(MacroElement):
                     row.textContent = line;
                     box.appendChild(row);
                 });
+                // **Nothing below this belongs to a thing with no curve.** A
+                // quay was told which sources the *route* drew on and how a
+                // gradient is coloured -- both read off rows the panel had
+                // filled in for whatever was selected before it.
+                if (!(selected && selected.shape)) { return box; }
                 // **The ground before the sources.** What a walk covers is about
                 // this route; who may be asked about it is about the file. The
                 // nearer question first.
@@ -5558,13 +5563,14 @@ class _ProfilePanel(MacroElement):
                 // Those two go into the table instead, and the list is only
                 // drawn where there is no table -- a planned route, which has no
                 // popup at all.
-                if (table) {
+                if (table && selected && selected.shape) {
                     // **The low point is not one of these any more.** It came in
                     // here because the popup had only the high one; the two ends
                     // of a climb are one fact and are written as one row where
                     // the rest of the figures are written. What is left is the
                     // count, which is about the file rather than about the walk
-                    // and exists nowhere but here.
+                    // and exists nowhere but here -- so a place, which has no
+                    // file, gets neither.
                     var counted = carries.textContent || '';
                     addRow(table, 'Points read',
                            counted.indexOf(' points') > 0 ? counted.replace(' points', '') : '');
@@ -5636,7 +5642,19 @@ class _ProfilePanel(MacroElement):
             // fits scrolls, which is what a page is for.
             function sizePages() {
                 if (!pages.length) { return; }
-                pagesBox.style.height = chartHeight + 'px';
+                // **A selection with a curve is as tall as the curve; one
+                // without is as tall as it is.** Both halves matter: pages of
+                // their own heights meant a panel that jumped as it was turned,
+                // and a quay with three rows in it drawn as tall as a chart is
+                // 110 px of empty panel over the map.
+                var curved = false;
+                pages.forEach(function (page) { if (page.kind === 'profile') { curved = true; } });
+                if (curved) { pagesBox.style.height = chartHeight + 'px'; return; }
+                // Measured with the box let go, because a page stretched to fill
+                // it reports the height it was given and never a smaller one.
+                pagesBox.style.height = 'auto';
+                var needs = pages[pageAt].node.scrollHeight || 0;
+                pagesBox.style.height = Math.max(60, Math.min(chartHeight, needs + 6)) + 'px';
             }
 
             // **Every page is in the track from the start and the ones that do
@@ -7292,6 +7310,11 @@ class _ProfilePanel(MacroElement):
             // `say`, and both of those repaint.
             function describe() {
                 if (!selected) { say(suspended ? 'Plan mode: click the map to place a point.' : 'Click a line to see its profile.'); return; }
+                // **A place has nothing under its name.** It said *click a line
+                // to see its profile* -- the sentence for an empty panel, under
+                // the name of the thing the reader had just chosen, telling them
+                // to do what they had done.
+                if (selected.detail) { say(''); return; }
                 var figure = selected.figure, shape = selected.shape;
                 if (!shape) { say(selected.saying || 'Decoding the network\\u2026'); return; }
                 if (selected.composed) { sayLines(planned(figure, shape, selected.told)); return; }
@@ -7329,7 +7352,7 @@ class _ProfilePanel(MacroElement):
                 // what it composed cannot be written out: the file has to say
                 // what its legs are and where its waypoints went, and a button
                 // this panel could not honour is worse than no button at all.
-                var writable = !!(selected && (!selected.composed || selected.plan));
+                var writable = !!(selected && !selected.detail && (!selected.composed || selected.plan));
                 offer.style.display = writable ? 'block' : 'none';
                 // The mark now stands in the heading rather than in that row, so
                 // it needs the condition said to it as well: a panel showing a
@@ -7337,6 +7360,10 @@ class _ProfilePanel(MacroElement):
                 // does nothing is worse than no mark.
                 download.style.display = writable ? 'flex' : 'none';
                 noted.textContent = '';
+                // A place has no walk to write out and no sources of its own --
+                // its popup names them itself -- so the row underneath the
+                // drawing is about a drawing that is not there.
+                if (selected && selected.detail) { carries.textContent = ''; licensed.textContent = ''; return; }
                 if (!selected || (selected.composed && !selected.plan)) { return; }
                 if (!selected.shape) {
                     download.disabled = true;
@@ -7481,16 +7508,26 @@ class _ProfilePanel(MacroElement):
                 // markup here instead, and it becomes the second page of the
                 // panel -- beside the curve where there is one, and alone where
                 // there is not, which is what a place gets.
-                detail: function (label, html) {
+                detail: function (label, html, isPoint) {
                     detailHtml = html || null;
                     // **While plan mode owns the map, a popup is a page and not
                     // a selection.** The panel is suspended then -- a click
                     // places a waypoint and must not also choose a line -- so
                     // what arrives is read where it stands and changes nothing
                     // about what the row says.
+                    if (isPoint && !suspended) {
+                        // **A place takes the panel over whole.** Tapping one
+                        // while a line was chosen left the line's curve standing
+                        // with the place's table beside it: two things in one
+                        // panel, and the row naming the second while the first
+                        // was drawn. The line is let go of on the map as well,
+                        // or it stays lifted out of a tangle nobody is reading.
+                        if (window.trailsHighlight) { window.trailsHighlight.clear(); }
+                        present({detail: true, label: label, figure: null,
+                                 shape: null, told: [], mid: null});
+                        return;
+                    }
                     if (label && !suspended && (!selected || !selected.label)) {
-                        // A place has no series and no figures: the selection is
-                        // the popup, and this is the whole of it.
                         selected = selected || {detail: true, label: label, figure: null,
                                                 shape: null, told: [], mid: null};
                         selected.label = selected.label || label;
@@ -16594,7 +16631,13 @@ class _Chrome(MacroElement):
                 // profile where the tapped thing has one, alone where it has
                 // not, which is what a place gets.
                 if (window.trailsProfilePanel && window.trailsProfilePanel.detail) {
-                    window.trailsProfilePanel.detail(titleFor(popup), content);
+                    // **Whether it came off a place or off a line**, which the
+                    // panel cannot see and has to know: a place replaces
+                    // whatever was chosen, and a line's popup is that line's own
+                    // second page. A marker has one position; a line has many.
+                    var source = popup._source;
+                    var isPoint = !!(source && source.getLatLng && !source.getLatLngs);
+                    window.trailsProfilePanel.detail(titleFor(popup), content, isPoint);
                     paintProfile();
                     place();
                     return;

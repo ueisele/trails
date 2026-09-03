@@ -1281,6 +1281,90 @@ whether the curve, which is painted with attributes instead, came with it.
 """
 
 
+def a_place_takes_the_panel(page: Any) -> Check:
+    """A place is a selection of its own, and not a page beside a line's curve.
+
+    Reported: tapping a place while a line was chosen left the line's curve
+    standing with the place's table beside it -- two things in one panel, the row
+    naming the second while the first was drawn. And the page under the place
+    carried the *route's* sources and the gradient key, both read off rows the
+    panel had filled in for whatever was selected before it; under the name stood
+    *Click a line to see its profile*, the sentence for an empty panel, telling a
+    reader to do what they had just done.
+
+    Args:
+        page: The driven page
+
+    Returns:
+        What is left of the line when a place is tapped
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(700)
+    page.evaluate("() => window.trailsChrome.close()")
+    if not select(page, LONG_CHAIN):
+        page.set_viewport_size({"width": 1400, "height": 900})
+        return Check("a place takes the panel", skipped=f"{LONG_CHAIN} is not in this page")
+    page.wait_for_timeout(800)
+
+    seen = """() => { const panel = document.querySelector('.trails-profile-panel');
+      const held = document.querySelector('.trails-profile-detail');
+      const mark = document.querySelector('.trails-profile-gpx');
+      return {pages: window.trailsProfilePanel.pages(),
+              name: (document.querySelector('.trails-profile-name') || {}).textContent || '',
+              under: (document.querySelector('.trails-profile-figures') || {}).textContent || '',
+              high: Math.round(panel.getBoundingClientRect().height),
+              file: mark ? getComputedStyle(mark).display : null,
+              held: held ? held.innerText : '',
+              highlighted: window.trailsHighlight ? window.trailsHighlight.selected() : null}; }"""
+    line = page.evaluate(seen)
+
+    # A place, opened the way a tap opens one: through its own popup.
+    tapped = page.evaluate(
+        with_map("""() => { const map = __MAP__;
+        let best = null;
+        const walk = l => { if (best) return;
+          if (l.getPopup && l.getPopup() && l.getLatLng && !l.getLatLngs && l.getTooltip && l.getTooltip()) { best = l; return; }
+          if (l.eachLayer) l.eachLayer(walk); };
+        map.eachLayer(walk);
+        if (!best) { return null; }
+        best.openPopup();
+        return true; }""")
+    )
+    if not tapped:
+        page.set_viewport_size({"width": 1400, "height": 900})
+        return Check("a place takes the panel", skipped="this page draws no place with a popup")
+    page.wait_for_timeout(1000)
+    place = page.evaluate(seen)
+
+    select(page, LONG_CHAIN)
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(700)
+
+    return Check(
+        "a place takes the panel",
+        [
+            Reading("a line is drawn first", line["pages"]["keys"], ["profile", "details"]),
+            Reading("and the place takes the panel whole", place["pages"]["keys"], ["details"]),
+            Reading("the row names it", bool(place["name"]), True, note=place["name"]),
+            # The sentence for an empty panel, under the name of the thing the
+            # reader had just chosen.
+            Reading("and says nothing under the name", place["under"], ""),
+            Reading("no file is offered for a place", place["file"], "none"),
+            # Both were read off rows the panel had filled in for the line.
+            Reading("no colour key under it", "How the curve is coloured" in place["held"], False),
+            Reading("nor the route's own sources", "Sources and licences" in place["held"], False),
+            Reading("but its own source line stands", "Source:" in place["held"], True),
+            Reading("the line is let go of on the map", place["highlighted"], None),
+            Reading(
+                "and the panel is what a place needs",
+                place["high"] < line["high"],
+                True,
+                note=f"{line['high']} px to {place['high']}",
+            ),
+        ],
+    )
+
+
 def the_theme_switch(page: Any) -> Check:
     """Auto, light and dark, and whether the page turns with them.
 
@@ -4475,6 +4559,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(narrow_sheets(page))
     if wanted(the_sources_are_a_page):
         checks.append(the_sources_are_a_page(page))
+    if wanted(a_place_takes_the_panel):
+        checks.append(a_place_takes_the_panel(page))
     if wanted(the_theme_switch):
         checks.append(the_theme_switch(page))
     select(page, LONG_CHAIN)

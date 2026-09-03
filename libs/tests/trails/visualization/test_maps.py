@@ -2840,6 +2840,24 @@ class TestProfilePanel:
         # one call and can never be about two.
         assert "name.textContent = planning()" in html
 
+    def test_a_place_takes_the_panel_over_whole(self, group):
+        """Tapping a place while a line was chosen left the line's curve standing
+        with the place's table beside it: two things in one panel, and the row
+        naming the second while the first was drawn. A place is a selection of
+        its own — no curve, no colour key, no file, and nothing under its name
+        telling the reader to click a line to see a profile."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "if (isPoint && !suspended) {" in html
+        assert "if (window.trailsHighlight) { window.trailsHighlight.clear(); }" in html
+        # Nothing under the name: it said *click a line to see its profile*,
+        # under the name of the thing the reader had just chosen.
+        assert "if (selected.detail) { say(''); return; }" in html
+        # And nothing below the table that belongs to a drawing it has not got.
+        assert "if (!(selected && selected.shape)) { return box; }" in html
+
     def test_a_press_on_what_it_says_opens_it_or_puts_it_away(self, group):
         """It used to walk to the page it names first and fold only from there,
         so a reader who wanted the map back got the table they had not asked for
@@ -4910,7 +4928,9 @@ class TestComposedProfile:
         """The file has to say what its legs are and where its waypoints went. A
         button this panel could not honour is worse than no button at all."""
         html = self.drawn().get_root().render()
-        assert "var writable = !!(selected && (!selected.composed || selected.plan));" in html
+        assert "var writable = !!(selected && !selected.detail && (!selected.composed || selected.plan));" in html
+        # And a place has no walk to write out at all: the mark would do nothing.
+        assert "if (selected && selected.detail) { carries.textContent = ''; licensed.textContent = ''; return; }" in html
         assert "offer.style.display = writable ? 'block' : 'none';" in html
         # The mark stands in the row at the foot now, laid out as a box a thumb
         # can hit, so the condition has to be said to it as well.
@@ -5312,7 +5332,11 @@ class TestChrome:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "window.trailsProfilePanel.detail(titleFor(popup), content);" in html
+        assert "window.trailsProfilePanel.detail(titleFor(popup), content, isPoint);" in html
+        # **And it says which kind of thing it came off.** A place replaces
+        # whatever was chosen; a line's popup is that line's own second page.
+        # A marker has one position, a line has many.
+        assert "var isPoint = !!(source && source.getLatLng && !source.getLatLngs);" in html
         # Asked first, and the sheet only where there is nothing to ask.
         assert html.index("window.trailsProfilePanel.detail(titleFor(popup)") < html.index("readInSheet(titleFor(popup), content, true, 'popup')")
 
