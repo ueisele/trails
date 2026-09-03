@@ -2121,7 +2121,7 @@ def copying_a_position(page: Any) -> Check:
                 x: Math.round(r.left + at.x), y: Math.round(r.top + at.y)}; }"""
     )
 
-    def tap(x: int, y: int) -> dict:
+    def tap(x: int, y: int) -> Any:
         """Tap the map where a reader would, and say what was asked for."""
         at = page.evaluate(where, {"x": x, "y": y})
         page.mouse.click(at["x"], at["y"])
@@ -2191,8 +2191,7 @@ def copying_a_position(page: Any) -> Check:
             # Where the rail is not, and where it is.
             Reading("narrow: the two marks are drawn", marks["shown"], True),
             Reading("narrow: px they take", marks["w"], 46),
-            Reading("narrow: and they clear the row at the foot", marks["clearOfTheRow"] > 0, True,
-                    note=f"{marks['clearOfTheRow']} px"),
+            Reading("narrow: and they clear the row at the foot", marks["clearOfTheRow"] > 0, True, note=f"{marks['clearOfTheRow']} px"),
             Reading("wide: the marks give way to the rail", wide["marks"], False),
             Reading("wide: which carries the switch", wide["inTheRail"], True),
             # The same lamp plan mode and offline are lit with: a tool that is
