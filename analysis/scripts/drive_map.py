@@ -2151,6 +2151,62 @@ def copying_a_position(page: Any) -> Check:
                 marked: m.style.display === 'block'}; }"""
     )
 
+    # 1b. **The height beside the position, where this map has one.** It carries
+    # no height raster: what it has is sampled every 5 m along the network, so a
+    # tap on the route being planned can be told its height and a tap on open
+    # ground cannot. The figure is compared with the panel's own series at the
+    # same place — one derivation, two renderings — and never with a number this
+    # check remembers.
+    seen = page.evaluate(with_map("() => { const c = __MAP__.getCenter(); return [c.lat, c.lng, __MAP__.getZoom()]; }"))
+    on_track = page.evaluate(
+        """() => { const s = window.trailsProfile && window.trailsProfile.shape;
+        if (!s || !s.lon.length) { return null; }
+        const at = Math.floor(s.lon.length / 2);
+        let near = 0, best = Infinity;
+        for (let i = 0; i < s.distance.length; i += 1) {
+          const away = Math.abs(s.distance[i] - s.along[at]);
+          if (away < best && !isNaN(s.height[i])) { best = away; near = i; }
+        }
+        return {lat: s.lat[at], lon: s.lon[at], says: Math.round(s.height[near])}; }"""
+    )
+    middle = with_map(
+        """() => { const r = __MAP__.getContainer().getBoundingClientRect();
+        return {x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2)}; }"""
+    )
+    told = None
+    under = None
+    if on_track:
+        page.evaluate(with_map("(w) => { __MAP__.setView([w.lat, w.lon], 16, {animate: false}); }"), on_track)
+        page.wait_for_timeout(900)
+        at = page.evaluate(middle)
+        # What is under the tap and whether the switch is still armed, so that a
+        # tap that does nothing says why rather than only that.
+        under = page.evaluate(
+            """(at) => { const node = document.elementFromPoint(at.x, at.y);
+            return {on: node ? ((node.className || node.tagName) + '').slice(0, 40) : null,
+                    chrome: !!(node && node.closest &&
+                      node.closest('.leaflet-control-container, .leaflet-popup, .trails-chrome')),
+                    armed: window.trailsChrome.state().picking}; }""",
+            at,
+        )
+        page.mouse.click(at["x"], at["y"])
+        page.wait_for_timeout(800)
+        told = page.evaluate(
+            """() => { const t = document.querySelector('.trails-pick-said').textContent;
+            const found = t.match(/\\u00b7\\s*~?([\\d,]+) m/);
+            return {text: t, metres: found ? Number(found[1].replace(/,/g, '')) : null,
+                    copied: window.trailsChrome.copied()}; }"""
+        )
+    # And where there is no path within a hundred metres, nothing is claimed.
+    page.evaluate(with_map("() => __MAP__.setView([65.75, 12.10], 12, {animate: false})"))
+    page.wait_for_timeout(900)
+    at = page.evaluate(middle)
+    page.mouse.click(at["x"], at["y"])
+    page.wait_for_timeout(800)
+    at_sea = page.evaluate("() => document.querySelector('.trails-pick-said').textContent")
+    page.evaluate(with_map("(v) => __MAP__.setView([v[0], v[1]], v[2], {animate: false})"), seen)
+    page.wait_for_timeout(700)
+
     # 2. disarmed: the tap is plan mode's again.
     page.evaluate("() => window.trailsChrome.picking(false)")
     page.wait_for_timeout(400)
@@ -2187,6 +2243,32 @@ def copying_a_position(page: Any) -> Check:
             Reading("the page says what it did", said["drawn"], True, note=said["says"]),
             Reading("and marks where it was taken", said["marked"], True),
             Reading("armed, nothing is said until something is tapped", quiet["drawn"], False, note=str(quiet["said"])),
+            # One derivation, two renderings: the panel draws this height and the
+            # picker reads it, and they may never be two numbers.
+            Reading(
+                "on the network, the height beside the position",
+                told["metres"] if told else None,
+                on_track["says"] if on_track else None,
+                within=1,
+                note=told["text"] if told else "no series to compare against",
+            ),
+            Reading(
+                "and still only the position is copied",
+                told["copied"] if told else None,
+                told["text"].split(" · ")[0] if told else None,
+            ),
+            # **And what it says does not swallow the next tap.** It stands over
+            # the map, and the map is what is being tapped: driven, a second
+            # position picked while the first was still on the screen landed on
+            # the message and did nothing at all.
+            Reading(
+                "what was said takes no tap of its own",
+                under["chrome"] if under else None,
+                False,
+                note=str(under["on"]) if under else "not reached",
+            ),
+            # A number about somewhere else is worse than no number.
+            Reading("off the network, no height is claimed", " m" in at_sea, False, note=at_sea),
             Reading("disarmed, the tap is plan mode's again", laid, 1),
             # Where the rail is not, and where it is.
             Reading("narrow: the two marks are drawn", marks["shown"], True),
@@ -5029,6 +5111,18 @@ def main() -> int:
             return report(checks)
         page.evaluate("() => window.trailsGraph.ready")
         checks += drive(page)
+        # **And nothing threw while it was driven.** The reading above is about
+        # loading; everything after it -- every handler a click reaches, every
+        # panel a check opens -- could throw into a listener nobody is watching,
+        # and a handler that dies half way leaves a page that looks like one
+        # where the gesture simply did nothing. Measured the hard way: a picker
+        # that copied the first position and silently nothing afterwards.
+        checks.append(
+            Check(
+                "nothing threw while it was driven",
+                [Reading("errors thrown after loading", len(thrown), 0, note="; ".join(thrown[:3]))],
+            )
+        )
         # **Last, and in a context of its own.** A service worker outlives the
         # page that registered it and would answer for every check after it.
         #

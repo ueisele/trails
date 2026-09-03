@@ -16493,11 +16493,20 @@ class _Chrome(MacroElement):
                 pickSaid = null;
             }
 
-            function sayCopied(text, went) {
+            function sayCopied(text, went, high) {
                 pickSaid = text;
                 pickToast.innerHTML = '';
                 var said = document.createElement('b');
                 said.textContent = text;
+                if (high) {
+                    // **A tilde where it is not the tapped place's own height.**
+                    // Within a few metres of the line the sample *is* the place;
+                    // sixty metres off a path it is the nearest ground this map
+                    // ever measured, and a figure that does not say so is a
+                    // figure somebody trusts by mistake.
+                    said.textContent = text + ' \u00b7 ' + (high.away > EXACT_M ? '~' : '') +
+                        Math.round(high.metres).toLocaleString('en-GB') + ' m';
+                }
                 var after = document.createElement('span');
                 after.style.cssText = 'font-weight:400;font-size:11.5px;opacity:0.75';
                 // **What a browser refused, said as a fact.** Safari writes to
@@ -16509,11 +16518,96 @@ class _Chrome(MacroElement):
                 pickToast.appendChild(said);
                 pickToast.appendChild(after);
                 pickToast.style.display = 'flex';
+                // **What it says must not eat the next tap.** It stands over the
+                // map, and the map is what is being tapped: driven, a second
+                // position picked while the first was still on the screen landed
+                // on this and did nothing at all -- the handler steps around
+                // everything in the chrome, and this is in the chrome.
+                //
+                // A success is a notice and takes no pointer; a refusal is a
+                // thing to read, select and dismiss, and keeps one. That case is
+                // rare and is asking for the reader's hands anyway.
+                pickToast.style.pointerEvents = went ? 'none' : 'auto';
                 if (pickTimer) { window.clearTimeout(pickTimer); }
                 // A refusal stays until it is dismissed; a success goes on its
                 // own, because it has already done what it says.
                 pickTimer = went ? window.setTimeout(hideCopied, 2600) : null;
                 place();
+            }
+
+            // **How high the tapped place is, where this map knows.** It has no
+            // height raster: the only heights it carries are the ones sampled
+            // every 5 m along the network, in the routing graph. So a tap on a
+            // path can be told its height and a tap on an open hillside cannot,
+            // and the honest thing is to say the first and stay quiet about the
+            // second rather than quote a number about somewhere else.
+            //
+            // Measured on the built graph before this was written: 949,704
+            // vertices, and a scan over every one of them is **3 ms** -- once
+            // per tap, which is why there is no index here and nothing to keep
+            // in step with the geometry. `nearestNode` two panels away says the
+            // same thing about a hundred thousand nodes.
+            var NEAR_M = 100, EXACT_M = 25;
+
+            function heightAt(lat, lon) {
+                var graph = window.trailsGraph;
+                var panel = window.trailsProfilePanel;
+                if (!graph || !graph.coordinates || !graph.heights || !panel) { return null; }
+                // The metre this page measures distance with, asked of the one
+                // place that owns it: a second haversine here would be a second
+                // answer to *how far is that*.
+                var far = panel.metresBetween;
+                var scale = Math.cos(lat * Math.PI / 180);
+                var best = -1, closest = Infinity, i;
+                for (i = 0; i + 1 < graph.coordinates.length; i += 2) {
+                    var dx = (graph.coordinates[i] - lon) * scale;
+                    var dy = graph.coordinates[i + 1] - lat;
+                    var away = dx * dx + dy * dy;
+                    if (away < closest) { closest = away; best = i >> 1; }
+                }
+                if (best < 0) { return null; }
+                // Which edge that vertex belongs to. `vertexAt` is a prefix
+                // array, so this is a search and not a walk.
+                var low = 0, high = graph.vertexAt.length - 1;
+                while (low < high) {
+                    var middle = (low + high + 1) >> 1;
+                    if (graph.vertexAt[middle] <= best) { low = middle; } else { high = middle - 1; }
+                }
+                var edge = low;
+                var v0 = graph.vertexAt[edge], v1 = graph.vertexAt[edge + 1];
+                var s0 = graph.sampleAt[edge], s1 = graph.sampleAt[edge + 1];
+                var samples = s1 - s0;
+                if (!(v1 > v0) || samples < 1) { return null; }
+                // **The nearest place on the line, not the nearest vertex.** Two
+                // vertices 200 m apart can both be 100 m from a tap that is five
+                // metres from the line between them, and refusing a height there
+                // would be refusing one this map holds.
+                var along = 0, total = 0, hit = 0, shortest = Infinity, v;
+                var lastLon = graph.coordinates[2 * v0], lastLat = graph.coordinates[2 * v0 + 1];
+                for (v = v0 + 1; v < v1; v += 1) {
+                    var x = graph.coordinates[2 * v], y = graph.coordinates[2 * v + 1];
+                    var span = far(lastLon, lastLat, x, y);
+                    // Projected in degrees with the latitude's own scale, which
+                    // is what every other point-to-line on this page uses; the
+                    // metres come back out of `metresBetween`.
+                    var ax = (lon - lastLon) * scale, ay = lat - lastLat;
+                    var bx = (x - lastLon) * scale, by = y - lastLat;
+                    var square = bx * bx + by * by;
+                    var t = square > 0 ? Math.max(0, Math.min(1, (ax * bx + ay * by) / square)) : 0;
+                    var onLon = lastLon + (x - lastLon) * t, onLat = lastLat + (y - lastLat) * t;
+                    var gap = far(lon, lat, onLon, onLat);
+                    if (gap < shortest) { shortest = gap; hit = total + span * t; }
+                    total += span;
+                    lastLon = x; lastLat = y;
+                }
+                if (!(shortest <= NEAR_M)) { return null; }
+                // Every 5 m along the edge means the samples are spread evenly
+                // between its ends, which is what `layEdges` writes and what an
+                // index into them therefore means.
+                var at = samples < 2 ? 0 : Math.round((total > 0 ? hit / total : 0) * (samples - 1));
+                var value = graph.heights[s0 + Math.max(0, Math.min(samples - 1, at))];
+                if (value === null || value === undefined || isNaN(value)) { return null; }
+                return {metres: value, away: shortest};
             }
 
             function copyHere(event) {
@@ -16523,15 +16617,20 @@ class _Chrome(MacroElement):
                 pickMark.style.top = Math.round(at.y) + 'px';
                 pickMark.style.display = 'block';
                 var text = pickText(where);
+                // **Shown beside the position and never copied with it.** What
+                // goes to the clipboard is what was asked for -- a position --
+                // and a height read off a path 30 m away would be a figure
+                // somebody pastes into a note as if it were measured there.
+                var high = heightAt(where.lat, where.lng);
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(text).then(function () {
-                        sayCopied(text, true);
+                        sayCopied(text, true, high);
                     }, function () {
-                        sayCopied(text, false);
+                        sayCopied(text, false, high);
                     });
                     return;
                 }
-                sayCopied(text, false);
+                sayCopied(text, false, high);
             }
 
             // The same two facts plan mode's own handler is built from: what is

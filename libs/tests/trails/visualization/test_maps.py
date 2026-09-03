@@ -5468,6 +5468,47 @@ class TestChrome:
         assert "sayCopied" not in armed
         assert "hideCopied" in armed
 
+    def test_the_height_comes_off_the_network_or_not_at_all(self):
+        """This map carries no height raster. The only heights it has are the
+        ones sampled every 5 m along the network, in the routing graph — so a tap
+        on a path can be told its height and a tap on an open hillside cannot,
+        and the honest thing is to say the first and stay quiet about the second
+        rather than quote a number about somewhere else.
+
+        Measured on the built graph before this was written: 949,704 vertices,
+        and a scan over every one of them is 3 ms — once per tap, which is why
+        there is no index here to keep in step with the geometry."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var NEAR_M = 100, EXACT_M = 25;" in html
+        assert "if (!(shortest <= NEAR_M)) { return null; }" in html
+        # The metre this page measures distance with, asked of the one place
+        # that owns it: a second haversine here would be a second answer to
+        # *how far is that*.
+        assert "var far = panel.metresBetween;" in html
+        # A tilde where it is not the tapped place's own height.
+        assert "(high.away > EXACT_M ? '~' : '')" in html
+        # **And never copied.** What goes to the clipboard is what was asked for
+        # — a position — and a height read off a path 30 m away would be a figure
+        # somebody pastes into a note as if it were measured there.
+        assert "navigator.clipboard.writeText(text)" in html
+        assert "return where.lat.toFixed(5) + ', ' + where.lng.toFixed(5);" in html
+
+    def test_what_it_said_does_not_eat_the_next_tap(self):
+        """It stands over the map, and the map is what is being tapped. Driven: a
+        second position picked while the first was still on the screen landed on
+        the message and did nothing at all — the handler steps around everything
+        in the chrome, and this is in the chrome. A success is a notice and takes
+        no pointer; a refusal is a thing to read, select and dismiss, and keeps
+        one."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "pickToast.style.pointerEvents = went ? 'none' : 'auto';" in html
+
     def test_the_two_marks_stand_where_the_rail_is_not(self):
         """The rail is the desktop's answer and these are the phone's — the same
         two switches, drawn where the rail is hidden behind the burger. Measured
