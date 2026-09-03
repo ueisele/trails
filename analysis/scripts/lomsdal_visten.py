@@ -197,8 +197,8 @@ FKB_POPUP_FIELDS = {
     "typeveg": "Road type",
     "length_km": "Length (km)",
     "climb": "Ascent / descent",
+    "high_low": "High / low point",
     "steepness": "Steepest",
-    "high_point": "High point",
     "marking_all": "Marking, all sources",
     "unrecorded": "Unrecorded ground",
 }
@@ -207,8 +207,8 @@ FERRY_POPUP_FIELDS = {
     "typeveg": "Ferry type",
     "length_km": "Crossing (km)",
     "climb": "Ascent / descent",
+    "high_low": "High / low point",
     "steepness": "Steepest",
-    "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
 }
@@ -236,8 +236,8 @@ ROAD_POPUP_FIELDS = {
     "length_km": "This stretch (km)",
     "whole_km": "Road in total (km)",
     "climb": "Ascent / descent",
+    "high_low": "High / low point",
     "steepness": "Steepest",
-    "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
     "marking_all": "Marking, all sources",
@@ -251,8 +251,8 @@ N50_POPUP_FIELDS = {
     "medium": "Medium",
     "length_km": "Length (km)",
     "climb": "Ascent / descent",
+    "high_low": "High / low point",
     "steepness": "Steepest",
-    "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
     "marking_all": "Marking, all sources",
@@ -294,8 +294,8 @@ UT_POPUP_FIELDS = {
     "category_label": "Kind",
     "length_km": "Track length (km)",
     "climb": "Ascent / descent",
+    "high_low": "High / low point",
     "steepness": "Steepest",
-    "high_point": "High point",
     "marking_all": "Marking, all sources",
     "unrecorded": "Unrecorded ground",
 }
@@ -343,8 +343,8 @@ TRAIL_POPUP_FIELDS = {
     "length_km": "Length (km)",
     "whole_km": "Route in total (km)",
     "climb": "Ascent / descent",
+    "high_low": "High / low point",
     "steepness": "Steepest",
-    "high_point": "High point",
     "survey_method": "Captured",
     "surveyed": "Captured on",
     # 80 % of this register's geometry here is "Rett i kartet" — entered by the
@@ -364,8 +364,8 @@ OSM_POPUP_FIELDS = {
     "length_km": "Length (km)",
     "whole_km": "Way in total (km)",
     "climb": "Ascent / descent",
+    "high_low": "High / low point",
     "steepness": "Steepest",
-    "high_point": "High point",
     # Plural, and it is not pedantry: 64 % of these chains span more than one
     # OSM way — median 2, worst 33 — so a single id would be wrong for most of
     # them. The value is joined like every other multi-valued field.
@@ -1244,8 +1244,16 @@ def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.
     # that reunites two fragments of one road and the *name* is a separate
     # column — a road id is not a thing to write into a <trk><name>.
     described["track_name"] = described["identity"].where(described["source"] != N50_ROADS, described["road_name"])
-    described["high_point"] = pd.Series(
-        [f"{_metres(value)} m" if pd.notna(value) else "" for value in described["high_m"]],
+    # **The two ends of the climb on one line, under it.** They are one fact
+    # about a walk -- how high it gets and how low -- and read as two rows two
+    # rows apart, with the low one arriving from a different place entirely. The
+    # metre is `_metres` for the same reason it always was: the panel and the
+    # popup must round one number the same way.
+    described["high_low"] = pd.Series(
+        [
+            "" if pd.isna(high) else (f"{_metres(high)} m" if pd.isna(low) else f"{_metres(high)} / {_metres(low)} m")
+            for high, low in zip(described["high_m"], described["low_m"], strict=True)
+        ],
         index=described.index,
         dtype="string",
     )

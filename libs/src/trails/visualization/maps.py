@@ -5559,11 +5559,12 @@ class _ProfilePanel(MacroElement):
                 // drawn where there is no table -- a planned route, which has no
                 // popup at all.
                 if (table) {
-                    var lowest = '';
-                    saidLines.forEach(function (line) {
-                        if (line.indexOf('low ') === 0) { lowest = line.slice(4); }
-                    });
-                    addRow(table, 'Low point', lowest);
+                    // **The low point is not one of these any more.** It came in
+                    // here because the popup had only the high one; the two ends
+                    // of a climb are one fact and are written as one row where
+                    // the rest of the figures are written. What is left is the
+                    // count, which is about the file rather than about the walk
+                    // and exists nowhere but here.
                     var counted = carries.textContent || '';
                     addRow(table, 'Points read',
                            counted.indexOf(' points') > 0 ? counted.replace(' points', '') : '');

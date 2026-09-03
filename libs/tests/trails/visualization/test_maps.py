@@ -2990,9 +2990,11 @@ class TestProfilePanel:
         html = fmap.get_root().render()
         assert "var figures = withFigures" in html
         assert "var figures = detailFigures(!table);" in html
-        # The two the table is missing, in the table's own hand.
-        assert "addRow(table, 'Low point', lowest);" in html
+        # The one the table is missing, in the table's own hand. The low point
+        # is not one of them: it is written beside the high one, where the rest
+        # of the figures are written.
         assert "addRow(table, 'Points read'," in html
+        assert "addRow(table, 'Low point'" not in html
         assert "[[noted.textContent, 'The ground this covers']," in html
         assert "[licensed.textContent, 'Sources and licences']].forEach(function (part) {" in html
         assert "coloured.textContent = 'How the curve is coloured';" in html
