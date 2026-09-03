@@ -713,6 +713,11 @@ def ascent_method(params: Params) -> str:
 #: that a reader aiming at a path gets the path, far enough that a click on open
 #: ground stays on open ground. Beyond it the raw point stands and the leg is
 #: drawn straight.
+#: How long the page waits for one height request before giving up on it. See
+#: ``heightsTimeoutMs`` in :func:`plan_settings` for why it is not the build's
+#: own minute.
+PLAN_HEIGHTS_TIMEOUT_MS = 5_000
+
 SNAP_M = 150.0
 
 #: How far a single leg may be drawn straight before the page refuses to sample
@@ -854,6 +859,18 @@ def plan_settings(params: Params) -> dict[str, object]:
         # The build's concurrency and for the build's reason: this is somebody
         # else's endpoint, and one number rather than two.
         "heightsWorkers": hoydedata.DEFAULT_WORKERS,
+        # **And a deadline, which the build does not need and a reader does.**
+        # `fetch` has none of its own: a server that accepts a connection and
+        # then says nothing leaves a leg outstanding for ever, and plan mode
+        # says *working…* with nothing left that will ever finish it. The build
+        # waits a minute per request because nothing is waiting on the build; a
+        # finger on a map is. Five seconds, three attempts and the backoff
+        # between them is about eighteen before the leg says it has no heights
+        # and draws itself straight — which is a thing a reader can act on.
+        # Measured with the endpoint taken away: 27 s at eight seconds an
+        # attempt, and half a minute of *working…* is most of the way back to
+        # the fault this cures.
+        "heightsTimeoutMs": PLAN_HEIGHTS_TIMEOUT_MS,
         "terrainModel": hoydedata.TERRAIN_MODEL,
         "seaTerrain": hoydedata.SEA_TERRAIN,
         "sampleStepM": params.elevation_step_m,

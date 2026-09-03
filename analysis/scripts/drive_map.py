@@ -2328,6 +2328,99 @@ def copying_a_position(page: Any) -> Check:
     )
 
 
+def a_leg_whose_heights_never_arrive(page: Any) -> Check:
+    """A height request that is accepted and then never answered.
+
+    **This is the fault that was reported as *working…* for ever.** `fetch` has
+    no deadline of its own, so a server that takes a connection and then says
+    nothing leaves a promise that neither resolves nor rejects. The retry above
+    it never sees a refusal to retry; the leg stays outstanding; plan mode counts
+    it as unsettled; and every wait after that inherits it, on this map and in
+    this suite alike. Reproduced on the build before the fix as well, so it was
+    nobody's recent doing -- it needed a slow day at the far end, and this
+    endpoint's neighbours had one.
+
+    Driven by taking the endpoint away rather than by waiting for a bad day: the
+    request is intercepted and never fulfilled, which is exactly the case that
+    hung.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        Whether the leg gave up, how long it took, and what it says
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(500)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.picking(false); }")
+    # Accepted and never answered. `route` with a handler that does nothing at
+    # all leaves the request in flight, which is the case in question.
+    held: list[Any] = []
+    page.route("**/hoydedata/**", lambda route: held.append(route))
+
+    page.evaluate("() => { if (!window.trailsPlan.state().on) { window.trailsPlan.toggle(true); } }")
+    page.wait_for_timeout(400)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+
+    # **Two points on open water**, which is the shortest way to a leg the
+    # network cannot answer: nothing is within snapping distance, so the leg is
+    # drawn straight and its heights have to be asked for.
+    page.evaluate("() => window.trailsPlan.place(65.905, 12.180)")
+    settled(page)
+    began = time.monotonic()
+    page.evaluate("() => window.trailsPlan.place(65.907, 12.183)")
+    # Three attempts of five seconds and the backoff between them is about
+    # eighteen; this waits twice that before calling it a hang.
+    gave_up = settled(page, 40_000)
+    took = round(time.monotonic() - began, 1)
+
+    said = page.evaluate(
+        """() => { const s = window.trailsPlan.state();
+        const legs = s.legs || [];
+        return {working: s.working, legs: legs.length,
+                failed: legs.filter(l => l && l.failed).length,
+                why: (legs.find(l => l && l.failed) || {}).failed || ''}; }"""
+    )
+
+    page.unroute("**/hoydedata/**")
+    for route in held:
+        try:
+            route.abort()
+        except Exception:
+            pass
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(500)
+
+    return Check(
+        "a leg whose heights never arrive",
+        [
+            # The whole of it: the wait ends.
+            Reading("the leg gives up rather than hanging", gave_up, True),
+            Reading("and plan mode is not working any more", said["working"], False),
+            Reading(
+                "seconds it took to give up",
+                took,
+                18,
+                within=14,
+                holds=False,
+                note=f"{took} s: three attempts of five and the backoff between them",
+            ),
+            # And what it becomes is a leg with no heights, which the route
+            # already knows how to draw and to say.
+            Reading("the leg says why", said["failed"] > 0, True, note=said["why"][:60]),
+        ],
+    )
+
+
 def the_point_list_takes_the_room(page: Any) -> Check:
     """A list of waypoints on a screen that has room for them.
 
@@ -5101,6 +5194,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(planning_keeps_what_it_had(page))
     if wanted(copying_a_position):
         checks.append(copying_a_position(page))
+    if wanted(a_leg_whose_heights_never_arrive):
+        checks.append(a_leg_whose_heights_never_arrive(page))
     if wanted(the_point_list_takes_the_room):
         checks.append(the_point_list_takes_the_room(page))
     if wanted(undo_undoes_the_last_change):

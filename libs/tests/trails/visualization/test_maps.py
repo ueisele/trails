@@ -3654,6 +3654,11 @@ class TestPlanMode:
             "heightsCrs": 4326,
             "heightsBatch": 50,
             "heightsWorkers": 6,
+            # A deadline, because `fetch` has none: a server that accepts a
+            # connection and then says nothing would leave a leg outstanding for
+            # ever, and plan mode saying *working…* with nothing left to finish
+            # it. See `heightsTimeoutMs` in the build's own settings.
+            "heightsTimeoutMs": 8000,
             "terrainModel": "dtm",
             "seaTerrain": "Havflate",
             "sampleStepM": 5.0,
@@ -4872,6 +4877,32 @@ class TestPlanMode:
         assert "loadDetail = describeFile(loaded);" in planning
         assert "loadSaid = 'Back as you left it.';" in planning
         assert "window.trailsChrome.detail('This route', told, 'plan');" in planning
+
+    def test_a_height_request_that_never_answers_is_given_up_on(self):
+        """`fetch` has no deadline of its own: a server that accepts a connection
+        and then says nothing leaves a promise that neither resolves nor rejects.
+        The retry below it never sees a refusal to retry, the leg stays
+        outstanding, and plan mode says *working…* with nothing left that will
+        ever finish it — reported from the map, and reproduced on the build
+        before it.
+
+        Aborted rather than merely raced, so the connection goes with the wait: a
+        page that gave up on the answer and left the socket open would be leaning
+        on somebody else's service on the way out."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        assert "var stop = window.AbortController ? new AbortController() : null;" in html
+        assert "window.setTimeout(function () { stop.abort(); }, PLAN.heightsTimeoutMs)" in html
+        # Let go of only when the whole exchange is over, body and all: a header
+        # that arrives and a body that never finishes is the same hang one step
+        # later.
+        assert "return asking.then(function (answers) {" in html
+        assert "throw new Error('the height model did not answer within '" in html
+        # And what it becomes is a refusal like any other, which the retry and
+        # then the leg already know how to say.
+        assert "if (attempt >= ATTEMPTS) { throw failure; }" in html
 
     def test_a_page_without_a_panel_says_so_rather_than_throwing(self):
         """Plan mode composes with the walk the panel owns, so a page carrying

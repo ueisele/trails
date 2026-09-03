@@ -2426,6 +2426,7 @@ PLAN_SETTINGS = (
     "heightsCrs",
     "heightsBatch",
     "heightsWorkers",
+    "heightsTimeoutMs",
     "terrainModel",
     "seaTerrain",
     "sampleStepM",
@@ -9048,9 +9049,27 @@ class _PlanMode(MacroElement):
                 };
             }
 
+            // **A request that never answers is not a request that failed**, and
+            // that is the whole of this. `fetch` has no deadline of its own: a
+            // server that accepts a connection and then says nothing leaves a
+            // promise that neither resolves nor rejects, the retry below never
+            // sees a refusal to retry, and the leg it belongs to stays
+            // outstanding for ever -- plan mode saying *working...* with nothing
+            // left that will ever finish it. Reported as exactly that, and
+            // reproduced on the build before it.
+            //
+            // Aborted rather than merely raced, so the connection goes with the
+            // wait: a page that gave up on the answer and left the socket open
+            // would be leaning on somebody else's service on the way out.
             function askOnce(points) {
-                return fetch(PLAN.heightsUrl + '?punkter=' + encodeURIComponent(JSON.stringify(points)) +
-                             '&koordsys=' + encodeURIComponent(PLAN.heightsCrs))
+                var stop = window.AbortController ? new AbortController() : null;
+                var giveUp = stop
+                    ? window.setTimeout(function () { stop.abort(); }, PLAN.heightsTimeoutMs)
+                    : null;
+                function letGo() { if (giveUp !== null) { window.clearTimeout(giveUp); giveUp = null; } }
+                var asking = fetch(PLAN.heightsUrl + '?punkter=' + encodeURIComponent(JSON.stringify(points)) +
+                                   '&koordsys=' + encodeURIComponent(PLAN.heightsCrs),
+                                   stop ? {signal: stop.signal} : undefined)
                     .then(function (response) {
                         if (!response.ok) { throw new Error('the height model answered ' + response.status); }
                         return response.json();
@@ -9066,6 +9085,20 @@ class _PlanMode(MacroElement):
                         }
                         return answered.map(reading);
                     });
+                // The timer is let go of only when the whole exchange is over,
+                // body and all: a header that arrives and a body that never
+                // finishes is the same hang one step later.
+                return asking.then(function (answers) {
+                    letGo();
+                    return answers;
+                }, function (failure) {
+                    letGo();
+                    if (stop && stop.signal.aborted) {
+                        throw new Error('the height model did not answer within ' +
+                                        Math.round(PLAN.heightsTimeoutMs / 1000) + ' s');
+                    }
+                    throw failure;
+                });
             }
 
             // Retried the way the build retries: this endpoint is shared and a
