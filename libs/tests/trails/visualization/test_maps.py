@@ -4125,7 +4125,12 @@ class TestPlanMode:
             ".trails-chrome",
         }
         assert "if (!on || overFurniture(event)) { return; }" in html
-        assert "if (on && !overFurniture(event)) { event.stopPropagation(); }" in html
+        # **And the double click steps around the same list**, written as the
+        # single click is since the picker joined them: one guard for what is
+        # not terrain, one for the switch that owns the next tap whatever else
+        # does.
+        assert html.count("if (!on || overFurniture(event)) { return; }") >= 2
+        assert "window.trailsChrome.state().picking) { return; }" in html
 
     def test_switching_on_lets_go_of_a_highlighted_line(self):
         """The click-highlight's only two ways out are a click on the line and a
@@ -5424,6 +5429,63 @@ class TestChrome:
         assert "window.trailsProfilePanel.planning(summary);" in html
         # Two answers, not one: the row stands, and the pages are the switch.
         assert "if (pager.pages().open !== want) { pager.page(want ? true : false); }" in html
+
+    def test_the_picker_owns_the_next_tap_whatever_else_does(self):
+        """It is the one switch on this map that has to work in every mode — so
+        it is not a fourth thing asking politely. Plan mode takes every click on
+        the container in the capture phase and stops it there, and a line's click
+        is taken by the highlight, the panel and its popup; this is a capture
+        handler on the same container that stops the click where it lands, and
+        plan mode asks it first whether it may have the tap at all."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "if (!picking || overChrome(event)) { return; }" in html
+        assert "event.stopPropagation();\n                copyHere(event);" in html
+        # The same two facts plan mode's own handler is built from: what is not
+        # terrain, and how far a pointer may roll and still be a tap.
+        assert "var slop = window.trailsReach ? window.trailsReach.slop() : 3;" in html
+        assert "picking: function (want) { return askPicking(want); }," in html
+
+    def test_a_position_is_five_decimals_and_the_page_says_what_it_did(self):
+        """Five decimals is a metre and a bit at this latitude — finer than a
+        phone's own fix and coarse enough to read out loud. And Safari writes to
+        the clipboard only from a gesture it believes in, so a refusal leaves the
+        text on the screen, selectable, rather than the page claiming something
+        it did not do."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "return where.lat.toFixed(5) + ', ' + where.lng.toFixed(5);" in html
+        assert "after.textContent = went ? 'copied' : '\u2014 copy it by hand';" in html
+        assert "pickTimer = went ? window.setTimeout(hideCopied, 2600) : null;" in html
+        # **Nothing is said before the fact.** A reader who armed a picker knows
+        # what a tap does, and a line telling them so is a line over the ground
+        # they are aiming at: arming draws no message at all.
+        armed = html.split("function askPicking(want) {")[1].split("}")[0]
+        assert "sayCopied" not in armed
+        assert "hideCopied" in armed
+
+    def test_the_two_marks_stand_where_the_rail_is_not(self):
+        """The rail is the desktop's answer and these are the phone's — the same
+        two switches, drawn where the rail is hidden behind the burger. Measured
+        on the desktop before this was built: an open tool ends at x 1334 and the
+        rail begins at 1344, so a second stack there would collide with nothing
+        and read as a second rail 362 px under the first."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "quick.style.display = (narrow && !covering) ? 'flex' : 'none';" in html
+        # Above whatever is at the foot: the row of a selection, a keyboard, or
+        # the 16 px the attribution is left.
+        assert "var footRoom = Math.max(covered, size.y - floor, 16);" in html
+        assert "quick.style.bottom = (footRoom + 12) + 'px';" in html
+        # And on a wide screen it is a lamp in the rail, like plan mode's.
+        assert "(tool.key === 'pick' && picking) ||" in html
+        assert "{key: 'pick', label: 'Copy a position', width: 300, selector: null," in html
 
     def test_the_offline_tool_has_a_drawing_and_it_says_which_state_it_is_in(self):
         """It had none at all: `icon()` reads `ICONS[key]` and there was no

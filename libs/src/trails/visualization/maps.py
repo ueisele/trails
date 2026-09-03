@@ -12615,6 +12615,13 @@ class _PlanMode(MacroElement):
 
             container.addEventListener('click', function (event) {
                 if (!on || overFurniture(event)) { return; }
+                // **And not while a position is being picked.** That switch owns
+                // the next tap whatever else does -- it is the one thing on this
+                // map that is meant to work in every mode -- so this yields
+                // rather than stopping the click, and the chrome's own handler,
+                // which is the next one in the capture phase, takes it.
+                if (window.trailsChrome && window.trailsChrome.state &&
+                        window.trailsChrome.state().picking) { return; }
                 // A pan ends in a click too. Leaflet drops that one for its own
                 // listeners; this one is not Leaflet's, so how far the pointer
                 // travelled is what tells the two apart.
@@ -12658,7 +12665,10 @@ class _PlanMode(MacroElement):
             // Two clicks place two points, which the button takes back one at a
             // time; zooming as well would leave the reader somewhere else too.
             container.addEventListener('dblclick', function (event) {
-                if (on && !overFurniture(event)) { event.stopPropagation(); }
+                if (!on || overFurniture(event)) { return; }
+                if (window.trailsChrome && window.trailsChrome.state &&
+                        window.trailsChrome.state().picking) { return; }
+                event.stopPropagation();
             }, true);
 
             // What the plan is, and the entry a click uses, the way the graph
@@ -15525,6 +15535,11 @@ class _Chrome(MacroElement):
                 close: '<path d="M4.8 4.8 13.2 13.2M13.2 4.8 4.8 13.2"/>',
                 here: '<circle cx="9" cy="9" r="3.1"/><circle cx="9" cy="9" r="6.4"/>' +
                       '<path d="M9 1.4v2.2M9 14.4v2.2M1.4 9h2.2M14.4 9h2.2"/>',
+                // A pin and not a second crosshair: `here` is where the reader
+                // is and this is a place they point at, and two targets in one
+                // column would be one drawing asked to mean two things.
+                pick: '<path d="M9 16.1s5.1-4.9 5.1-8.3a5.1 5.1 0 1 0-10.2 0C3.9 11.2 9 16.1 9 16.1Z"/>' +
+                      '<circle cx="9" cy="7.7" r="1.9"/>',
                 // A disc with one half filled: the same drawing whichever way
                 // the page is turned, which is right for a control that is
                 // about the turning and not about either side of it.
@@ -15577,6 +15592,12 @@ class _Chrome(MacroElement):
                  hint: 'The climb of a trail you tap, or of a route you plan.'},
                 {key: 'here', label: 'Where I am', width: 300, selector: null,
                  hint: 'Your own position on this map, while you ask for it.'},
+                // **A switch and not a panel**, like the profile: there is
+                // nothing to read in it, only a state the map is in. On a narrow
+                // screen it is one of the two buttons at the foot, where the
+                // rail is not.
+                {key: 'pick', label: 'Copy a position', width: 300, selector: null,
+                 hint: 'Tap the map and its coordinates go to the clipboard.'},
                 {key: 'offline', label: 'Offline', width: 330, selector: null,
                  hint: 'Keep the ground on this device, and walk with no signal.'},
                 {key: 'theme', label: 'Theme', width: 300, selector: null,
@@ -16422,6 +16443,176 @@ class _Chrome(MacroElement):
             burger.addEventListener('click', function () { openMenu(); });
             chrome.appendChild(burger);
 
+            // ---- copying a position off the map ------------------------------
+            // **A switch that owns the next tap, whatever else does.** Plan mode
+            // takes every click on the container in the capture phase and stops
+            // it there; the click-highlight, the panel and every popup take a
+            // line's own click. So this is not a fourth thing asking politely:
+            // it is a capture handler on the same container that stops the click
+            // where it lands, and plan mode asks it first whether it may have
+            // the tap at all. One state, asked by everyone who owns clicks --
+            // the rule the panel's `suspend` already follows.
+            var picking = false, pickPressed = null, pickSaid = null;
+
+            // Five decimals is a metre and a bit at this latitude, which is
+            // finer than a phone's own fix and coarse enough to read out loud.
+            function pickText(where) {
+                return where.lat.toFixed(5) + ', ' + where.lng.toFixed(5);
+            }
+
+            // What was copied, said where the reader is looking -- at the foot,
+            // over the map, above whatever stands there. **No hint before the
+            // fact**: a reader who armed a picker knows what a tap does, and a
+            // line telling them so is a line over the ground they are aiming at.
+            var pickToast = document.createElement('div');
+            pickToast.className = 'trails-pick-said';
+            pickToast.style.cssText = 'position:absolute;left:10px;right:10px;display:none;' +
+                'pointer-events:auto;background:var(--trails-strong);color:var(--trails-on-strong);' +
+                'border-radius:10px;padding:9px 12px;font-size:13px;font-weight:600;' +
+                'align-items:center;gap:8px;box-shadow:0 2px 12px rgba(0,0,0,0.45);' +
+                'user-select:text;-webkit-user-select:text';
+            L.DomEvent.disableClickPropagation(pickToast);
+            pickToast.addEventListener('click', function () { hideCopied(); });
+            chrome.appendChild(pickToast);
+
+            // The mark goes on the container and not in the chrome: the chrome is
+            // held inside the safe area, and this has to land on the pixel that
+            // was tapped.
+            var pickMark = document.createElement('div');
+            pickMark.className = 'trails-pick-mark';
+            pickMark.style.cssText = 'position:absolute;display:none;width:18px;height:18px;' +
+                'margin:-9px 0 0 -9px;border-radius:50%;pointer-events:none;z-index:1000;' +
+                'border:2px solid var(--trails-accent);background:rgba(127,176,240,0.35)';
+            container.appendChild(pickMark);
+
+            var pickTimer = null;
+            function hideCopied() {
+                if (pickTimer) { window.clearTimeout(pickTimer); pickTimer = null; }
+                pickToast.style.display = 'none';
+                pickMark.style.display = 'none';
+                pickSaid = null;
+            }
+
+            function sayCopied(text, went) {
+                pickSaid = text;
+                pickToast.innerHTML = '';
+                var said = document.createElement('b');
+                said.textContent = text;
+                var after = document.createElement('span');
+                after.style.cssText = 'font-weight:400;font-size:11.5px;opacity:0.75';
+                // **What a browser refused, said as a fact.** Safari writes to
+                // the clipboard only from a gesture it believes in, and a
+                // standalone app is where that is least certain -- so the text
+                // stays on the screen, selectable, rather than the page claiming
+                // something it did not do.
+                after.textContent = went ? 'copied' : '\u2014 copy it by hand';
+                pickToast.appendChild(said);
+                pickToast.appendChild(after);
+                pickToast.style.display = 'flex';
+                if (pickTimer) { window.clearTimeout(pickTimer); }
+                // A refusal stays until it is dismissed; a success goes on its
+                // own, because it has already done what it says.
+                pickTimer = went ? window.setTimeout(hideCopied, 2600) : null;
+                place();
+            }
+
+            function copyHere(event) {
+                var where = map.mouseEventToLatLng(event);
+                var at = map.mouseEventToContainerPoint(event);
+                pickMark.style.left = Math.round(at.x) + 'px';
+                pickMark.style.top = Math.round(at.y) + 'px';
+                pickMark.style.display = 'block';
+                var text = pickText(where);
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(function () {
+                        sayCopied(text, true);
+                    }, function () {
+                        sayCopied(text, false);
+                    });
+                    return;
+                }
+                sayCopied(text, false);
+            }
+
+            // The same two facts plan mode's own handler is built from: what is
+            // not terrain, and how far a pointer may roll and still be a tap.
+            function overChrome(event) {
+                if (!event.target || !event.target.closest) { return false; }
+                return !!event.target.closest('.leaflet-control-container, .leaflet-popup, .trails-chrome');
+            }
+            var pressEvent = window.PointerEvent ? 'pointerdown' : 'mousedown';
+            container.addEventListener(pressEvent, function (event) {
+                pickPressed = {x: event.clientX, y: event.clientY};
+            }, true);
+            container.addEventListener('click', function (event) {
+                if (!picking || overChrome(event)) { return; }
+                var slop = window.trailsReach ? window.trailsReach.slop() : 3;
+                if (pickPressed && Math.abs(event.clientX - pickPressed.x) +
+                        Math.abs(event.clientY - pickPressed.y) >= slop) { return; }
+                // Stopped here, which is the whole point of being in the capture
+                // phase: no waypoint, no selection, no popup -- the tap meant a
+                // position and nothing else.
+                event.stopPropagation();
+                copyHere(event);
+            }, true);
+
+            function askPicking(want) {
+                picking = want === undefined ? !picking : !!want;
+                if (!picking) { hideCopied(); }
+                container.style.cursor = picking ? 'crosshair' : '';
+                paintRail();
+                paintQuick();
+                place();
+                return picking;
+            }
+
+            // ---- the two quick marks, where the rail is not -------------------
+            // **The rail is the desktop's answer and this is the phone's.** They
+            // are the same two switches: on a wide screen they stand in the rail
+            // with the other tools, on a narrow one the rail is hidden behind the
+            // burger and these two are what a thumb reaches -- at the foot, on
+            // the right, which is where a map on a phone has kept its position
+            // button for a decade. Measured on the desktop before this was
+            // built: the dock ends at x 1334 and the rail begins at 1344, so a
+            // second stack there would not collide with anything -- and would
+            // read as a second rail, 362 px under the first one.
+            var quick = document.createElement('div');
+            quick.className = 'trails-quick';
+            quick.style.cssText = 'position:absolute;right:10px;display:none;flex-direction:column;' +
+                'gap:8px;pointer-events:auto';
+            function quickMark(key, label, act) {
+                var made = document.createElement('button');
+                made.type = 'button';
+                made.className = 'trails-quick-' + key;
+                made.title = label;
+                made.setAttribute('aria-label', label);
+                made.innerHTML = icon(key, 21);
+                made.style.cssText = 'width:46px;height:46px;display:flex;align-items:center;' +
+                    'justify-content:center;border-radius:10px;cursor:pointer;' +
+                    'background:var(--trails-panel);border:1px solid var(--trails-edge);' +
+                    'color:var(--trails-ink);box-shadow:0 1px 3px rgba(0,0,0,0.18)';
+                made.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    act();
+                });
+                quick.appendChild(made);
+                return made;
+            }
+            var quickPick = quickMark('pick', 'Copy a position', function () { askPicking(); });
+            var quickHere = quickMark('here', 'Where I am', function () { pick('here'); });
+            L.DomEvent.disableClickPropagation(quick);
+            chrome.appendChild(quick);
+
+            function paintQuick() {
+                [[quickPick, picking], [quickHere, hereWatch !== null]].forEach(function (each) {
+                    var lit = each[1];
+                    each[0].style.background = lit ? 'var(--trails-accent)' : 'var(--trails-panel)';
+                    each[0].style.borderColor = lit ? 'var(--trails-accent)' : 'var(--trails-edge)';
+                    each[0].style.color = lit ? 'var(--trails-on-accent)' : 'var(--trails-ink)';
+                    each[0].setAttribute('aria-pressed', String(!!lit));
+                });
+            }
+
             // ---- what is being looked at, and who says so --------------------
             // **Planning on a phone had a bar of its own and does not need
             // one.** Measured before that bar: with the plan panel shut, the
@@ -16541,6 +16732,7 @@ class _Chrome(MacroElement):
                     var running = (tool.key === 'plan' && planOn()) ||
                         (tool.key === 'profile' && profileShowing()) ||
                         (tool.key === 'here' && hereWatch !== null) ||
+                        (tool.key === 'pick' && picking) ||
                         (tool.key === 'offline' && offlineOn());
                     button.style.color = lit ? 'var(--trails-on-accent)' : (running ? 'var(--trails-accent)' : 'var(--trails-ink-3)');
                     button.setAttribute('aria-pressed', String(lit));
@@ -16579,6 +16771,15 @@ class _Chrome(MacroElement):
                 // With something selected this shows and hides the pages and
                 // opens no dock: the panel *is* what the tool is for. With
                 // nothing selected it falls through and the dock explains it.
+                // **A switch and not a panel.** There is nothing to read in
+                // it: it is a state the map is in, and the rail's own lamp is
+                // what says so. Opening a dock to explain that would be a panel
+                // whose whole content is the sentence in the menu beside it.
+                if (key === 'pick') {
+                    askPicking();
+                    closeMenu();
+                    return;
+                }
                 if (key === 'profile' && selection) {
                     // **The pages, not the panel.** The row at the foot says
                     // what is selected and stands whether the pages are open or
@@ -16804,6 +17005,19 @@ class _Chrome(MacroElement):
                     (!landscape && detailShown));
                 burger.style.display = (narrow && !covering) ? 'flex' : 'none';
                 veil.style.display = covering ? 'block' : 'none';
+                // **Where the rail is not.** On a wide screen these two stand in
+                // it with the other tools; here they are what a thumb reaches.
+                // Above whatever is at the foot -- the row of a selection, the
+                // keyboard, or the 16 px the attribution is left -- because that
+                // is the one edge everything else at the foot is measured from.
+                quick.style.display = (narrow && !covering) ? 'flex' : 'none';
+                var footRoom = Math.max(covered, size.y - floor, 16);
+                quick.style.bottom = (footRoom + 12) + 'px';
+                paintQuick();
+                // And what was copied stands over the marks that copied it.
+                if (pickToast.style.display !== 'none') {
+                    pickToast.style.bottom = (footRoom + (narrow ? 116 : 12)) + 'px';
+                }
 
                 if (narrow) {
                     [dock, menu, sheet].forEach(function (box) {
@@ -16965,6 +17179,14 @@ class _Chrome(MacroElement):
                 // everything, and everything is not what a second press on one
                 // panel's own button means.
                 closeDetail: function () { closeSheet(); },
+                // **Whether the next tap on the map is a position and nothing
+                // else.** Asked by plan mode before it takes a click of its own,
+                // set by the rail, by the mark at the foot and from here.
+                picking: function (want) { return askPicking(want); },
+                // What the last tap copied, so a check can read it rather than
+                // ask the clipboard -- which a headless browser will not hand
+                // over without a permission nobody can grant it.
+                copied: function () { return pickSaid; },
                 // The panel telling the chrome it has changed shape, so whatever
                 // is measured against its top -- a tool, the menu -- is measured
                 // against where it actually is.
@@ -17017,6 +17239,7 @@ class _Chrome(MacroElement):
                         detailKey: detailKey,
                         profile: profileShowing(),
                         planning: planOn(),
+                        picking: picking,
                         planPoints: planState ? planState.points : 0,
                         // The row at the foot, which is the panel's own now:
                         // standing while anything is selected or planned.

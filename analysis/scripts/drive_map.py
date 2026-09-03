@@ -2075,6 +2075,133 @@ def planning_keeps_what_it_had(page: Any) -> Check:
     )
 
 
+def copying_a_position(page: Any) -> Check:
+    """The one switch that has to work whatever else owns the tap.
+
+    Plan mode takes every click on the container in the capture phase and stops
+    it there; a line's own click is taken by the highlight, the panel and its
+    popup. So an armed picker is not a fourth thing asking politely: it is a
+    capture handler on the same container, and plan mode asks it first whether it
+    may have the tap at all. What is measured here is that the tap ends where it
+    should — a position copied and nothing else moved — in each of the three
+    states a reader can be in.
+
+    **The clipboard itself is not read.** A headless browser hands it over only
+    behind a permission nobody can grant it here, so what the page copied is read
+    from the page, and whether Safari accepts the write is the one thing only a
+    phone can answer.
+
+    Args:
+        page: The driven page, in plan mode with points down
+
+    Returns:
+        What each tap did, armed and disarmed
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(700)
+    page.evaluate("() => window.trailsChrome.close()")
+    page.evaluate("() => { if (!window.trailsPlan.state().on) { window.trailsPlan.toggle(true); } }")
+    settled(page)
+    page.wait_for_timeout(600)
+
+    marks = page.evaluate(
+        """() => { const q = document.querySelector('.trails-quick');
+        const r = q.getBoundingClientRect();
+        const row = document.querySelector('.trails-profile-panel');
+        const foot = row && row.getClientRects().length ? row.getBoundingClientRect().top : window.innerHeight;
+        return {shown: q.getClientRects().length > 0, w: Math.round(r.width), h: Math.round(r.height),
+                clearOfTheRow: Math.round(foot - r.bottom)}; }"""
+    )
+
+    where = with_map(
+        """(at) => { const map = __MAP__;
+        const r = map.getContainer().getBoundingClientRect();
+        const point = map.containerPointToLatLng([at.x, at.y]);
+        return {said: point.lat.toFixed(5) + ', ' + point.lng.toFixed(5),
+                x: Math.round(r.left + at.x), y: Math.round(r.top + at.y)}; }"""
+    )
+
+    def tap(x: int, y: int) -> dict:
+        """Tap the map where a reader would, and say what was asked for."""
+        at = page.evaluate(where, {"x": x, "y": y})
+        page.mouse.click(at["x"], at["y"])
+        page.wait_for_timeout(700)
+        return at
+
+    # 1. armed while a route is being planned: no waypoint, a position.
+    page.evaluate("() => window.trailsChrome.picking(true)")
+    page.wait_for_timeout(300)
+    lit = page.evaluate("() => window.trailsChrome.state().picking")
+    # **Nothing is said before the fact.** A reader who armed a picker knows what
+    # a tap does, and a line telling them so is a line over the ground they are
+    # aiming at -- so arming draws no message at all, and this is read here
+    # rather than after the tap that does.
+    quiet = page.evaluate(
+        """() => { const t = document.querySelector('.trails-pick-said');
+        return {said: window.trailsChrome.copied(), drawn: t.getClientRects().length > 0}; }"""
+    )
+    before = page.evaluate("() => window.trailsPlan.state().points.length")
+    asked = tap(150, 300)
+    planned = page.evaluate("() => window.trailsPlan.state().points.length") - before
+    copied = page.evaluate("() => window.trailsChrome.copied()")
+    said = page.evaluate(
+        """() => { const t = document.querySelector('.trails-pick-said');
+        const m = document.querySelector('.trails-pick-mark');
+        return {drawn: t.getClientRects().length > 0, says: t.textContent,
+                marked: m.style.display === 'block'}; }"""
+    )
+
+    # 2. disarmed: the tap is plan mode's again.
+    page.evaluate("() => window.trailsChrome.picking(false)")
+    page.wait_for_timeout(400)
+    tap(160, 320)
+    settled(page)
+    laid = page.evaluate("() => window.trailsPlan.state().points.length") - before
+    page.evaluate("() => window.trailsPlan.undo()")
+    settled(page)
+
+    # 3. and on a wide screen the two marks are the rail's job.
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(900)
+    wide = page.evaluate(
+        """() => { const q = document.querySelector('.trails-quick');
+        const rail = document.querySelector('.trails-rail button[data-tool=pick]');
+        return {marks: q.getClientRects().length > 0, inTheRail: !!rail}; }"""
+    )
+    page.evaluate("() => window.trailsChrome.picking(true)")
+    page.wait_for_timeout(400)
+    lamp = page.evaluate(
+        """() => { const b = document.querySelector('.trails-rail button[data-tool=pick]');
+        return b ? getComputedStyle(b).color : null; }"""
+    )
+    page.evaluate("() => window.trailsChrome.picking(false)")
+    page.wait_for_timeout(300)
+
+    return Check(
+        "copying a position off the map",
+        [
+            Reading("the switch can be armed", lit, True),
+            # The whole claim: it owns the tap, and plan mode yields it.
+            Reading("an armed tap copies the position", copied, asked["said"]),
+            Reading("and places no waypoint", planned, 0),
+            Reading("the page says what it did", said["drawn"], True, note=said["says"]),
+            Reading("and marks where it was taken", said["marked"], True),
+            Reading("armed, nothing is said until something is tapped", quiet["drawn"], False, note=str(quiet["said"])),
+            Reading("disarmed, the tap is plan mode's again", laid, 1),
+            # Where the rail is not, and where it is.
+            Reading("narrow: the two marks are drawn", marks["shown"], True),
+            Reading("narrow: px they take", marks["w"], 46),
+            Reading("narrow: and they clear the row at the foot", marks["clearOfTheRow"] > 0, True,
+                    note=f"{marks['clearOfTheRow']} px"),
+            Reading("wide: the marks give way to the rail", wide["marks"], False),
+            Reading("wide: which carries the switch", wide["inTheRail"], True),
+            # The same lamp plan mode and offline are lit with: a tool that is
+            # *running* rather than open is drawn in the accent's own ink.
+            Reading("and lights it while it is armed", lamp, "rgb(13, 71, 161)"),
+        ],
+    )
+
+
 def the_point_list_takes_the_room(page: Any) -> Check:
     """A list of waypoints on a screen that has room for them.
 
@@ -4781,6 +4908,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_row_at_the_foot(page))
     if wanted(planning_keeps_what_it_had):
         checks.append(planning_keeps_what_it_had(page))
+    if wanted(copying_a_position):
+        checks.append(copying_a_position(page))
     if wanted(the_point_list_takes_the_room):
         checks.append(the_point_list_takes_the_room(page))
     if wanted(undo_undoes_the_last_change):
