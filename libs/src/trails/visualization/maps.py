@@ -5594,8 +5594,13 @@ class _ProfilePanel(MacroElement):
             var pointsPage = document.createElement('div');
             pointsPage.className = 'trails-profile-list';
             pointsPage.style.cssText = 'padding:0 0 6px';
+            // **The name and the way back on one line.** They were two rows for
+            // one row's worth of content -- a field across the width and a
+            // button alone under it -- and on a phone every row here is a
+            // waypoint a reader cannot see. The name takes what is left when
+            // the button has what it needs.
             var undoRow = document.createElement('div');
-            undoRow.style.cssText = 'display:flex;justify-content:flex-end;padding:0 0 4px';
+            undoRow.style.cssText = 'display:flex;align-items:center;gap:8px;padding:0 0 4px';
             var undoOne = document.createElement('button');
             undoOne.type = 'button';
             undoOne.className = 'trails-profile-undo';
@@ -7606,9 +7611,15 @@ class _ProfilePanel(MacroElement):
                 // panel whole on a page that never opens this one.
                 list: function (node, named) {
                     if (!node) { return false; }
-                    // The name above the list, because that is what the list is
-                    // a list of -- the order it stood in where it came from.
-                    if (named) { pointsPage.insertBefore(named, undoRow); }
+                    // The name beside the way back rather than above it: it is
+                    // still over the list, which is what it is the name of, and
+                    // it costs one row instead of two.
+                    if (named) {
+                        named.style.flex = '1 1 auto';
+                        named.style.minWidth = '0';
+                        named.style.marginTop = '0';
+                        undoRow.insertBefore(named, undoOne);
+                    }
                     node.style.display = '';
                     node.style.maxHeight = 'none';
                     node.style.marginTop = '0';

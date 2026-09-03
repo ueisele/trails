@@ -4162,7 +4162,7 @@ class TestPlanMode:
         # of: lent away without it, a reader planning on a phone had no way to
         # call the tour anything.
         assert "if (!lentOut) { box.appendChild(titleRow); }" in html
-        assert "if (named) { pointsPage.insertBefore(named, undoRow); }" in html
+        assert "undoRow.insertBefore(named, undoOne);" in html
         # Drawn from the walk the panel is fed, so how far along a point comes is
         # the walk's answer and not a sum of the legs'.
         assert "drawList(shape.stations || []);" in html
