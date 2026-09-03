@@ -2840,6 +2840,63 @@ class TestProfilePanel:
         # one call and can never be about two.
         assert "name.textContent = planning()" in html
 
+    def test_the_mark_and_the_page_it_names_are_the_same_page(self, group):
+        """The pages were appended once, in the order they are written in, and
+        the marks are drawn in the order the pages come — two lists of the same
+        three things, agreeing until the day one of them was conditional. With a
+        route being planned the mark for *points and stages* slid the box to the
+        details of whatever line had been chosen before it, and the *i* showed
+        the points."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "if (order !== laidPages) {" in html
+        assert "wanted.forEach(function (node) { track.appendChild(node); });" in html
+        # Only when it changes: appending a node moves it, and a moved node
+        # loses where it was scrolled to.
+        assert "var laidPages = '';" in html
+
+    def test_the_handle_is_the_strip_and_not_the_bar(self, group):
+        """Seven pixels of bar is what a mouse needs. A finger that missed by
+        four pixels scrolled the page underneath instead of resizing the panel —
+        reported as a height that could hardly be set at all. The strip around
+        the bar, dots included, is what can be pressed, and `touch-action: none`
+        is what stops the browser reading the drag as a scroll before the handler
+        sees it."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "hold.className = 'trails-profile-hold';" in html
+        assert "touch-action:none" in html
+        assert "hold.addEventListener('touchstart', function (event) {" in html
+        assert "hold.addEventListener('mousedown', function (event) {" in html
+
+    def test_a_finger_is_given_more_of_the_handle_than_a_mouse(self):
+        """How big a target has to be is a question about hands, and the rules
+        that answer it live with the chrome — one place that has to win over
+        every panel's inline styles."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert ".trails-profile-hold { min-height: 16px; }" in html
+        assert ".trails-coarse .trails-profile-hold { min-height: 30px; padding-top: 8px; }" in html
+
+    def test_a_popup_belongs_to_the_thing_it_came_off(self, group):
+        """Cleared when the selection goes and not when it changes: a line's own
+        popup arrives *before* the click that selects the line — Leaflet fires
+        the popup's handler first — so clearing on every change would throw away
+        the page that had just arrived. Driven, plan mode showed the table of
+        whatever line had been chosen before it, on the page where the points
+        belong."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "if (given === null) { detailHtml = null; }" in html
+
     def test_a_place_takes_the_panel_over_whole(self, group):
         """Tapping a place while a line was chosen left the line's curve standing
         with the place's table beside it: two things in one panel, and the row
@@ -3937,10 +3994,17 @@ class TestPlanMode:
 
         assert "if (stages.length > 1) {" in html
         # And only where the panel can write a file at all, and only while the
-        # list is open -- each heading composes its own stage to state its
+        # list is showing -- each heading composes its own stage to state its
         # figures, which is a walk over the route per stage nobody is looking at.
-        assert "var gathered = writes && listOpen && stagesOf().length > 1;" in html
-        assert "var stages = (listOpen && points.length) ? stagesOf() : [];" in html
+        #
+        # **Showing, not folded open.** The list is lent to the profile panel,
+        # where it stands whether or not this control's own fold has been
+        # touched; everything drawn *because* the list is showing was still
+        # asking that fold, so a route cut into two stages drew neither heading
+        # and the save menu opened empty.
+        assert "function listShowing() { return lentOut || listOpen; }" in html
+        assert "var gathered = writes && listShowing() && stagesOf().length > 1;" in html
+        assert "var stages = (listShowing() && points.length) ? stagesOf() : [];" in html
         # The ends are never marked: a tour ends where it ends, and a mark there
         # would make a stage of no legs.
         assert "if (at < 1 || at + 1 >= points.length) { return; }" in html
@@ -4089,11 +4153,16 @@ class TestPlanMode:
 
         assert "function drawList(stations) {" in html
         assert "listOpen = !listOpen;" in html
-        assert "listBox.style.display = (lentOut || (listable && listOpen)) ? '' : 'none';" in html
+        assert "listBox.style.display = (listShowing() && (lentOut || listable)) ? '' : 'none';" in html
         # Moved rather than copied: a second rendering of a sequence is how two
         # of them come to disagree about the order.
-        assert "if (!lentOut && panel() && panel().list) { lentOut = !!panel().list(listBox); }" in html
+        assert "if (!lentOut && panel() && panel().list) { lentOut = !!panel().list(listBox, titleRow); }" in html
         assert "if (!lentOut) { box.appendChild(listBox); }" in html
+        # **And the name goes with it**, because it is what the list is a list
+        # of: lent away without it, a reader planning on a phone had no way to
+        # call the tour anything.
+        assert "if (!lentOut) { box.appendChild(titleRow); }" in html
+        assert "if (named) { pointsPage.insertBefore(named, undoRow); }" in html
         # Drawn from the walk the panel is fed, so how far along a point comes is
         # the walk's answer and not a sum of the legs'.
         assert "drawList(shape.stations || []);" in html

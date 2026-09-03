@@ -1560,7 +1560,10 @@ def room_on_a_short_screen(page: Any) -> Check:
       const meta = document.querySelector('.trails-profile-meta');
       // The page is the scroller and the box around it is the window: asking the
       // window how far it scrolls is asking the wrong box, which reads zero.
-      const first = document.querySelector('.trails-profile-page');
+      // **The page the curve is on**, named by what it holds rather than by
+      // coming first: the pages are reordered as the set changes, and one that
+      // is put away is still a page in the document.
+      const first = chart ? chart.closest('.trails-profile-page') : null;
       const high = node => node ? Math.round(node.getBoundingClientRect().height) : null;
       return {panel: high(panel), pages: high(pages), chart: high(chart), meta: high(meta),
               // What the page holds beyond what it shows: the row is under the
@@ -1924,6 +1927,154 @@ def the_row_at_the_foot(page: Any) -> Check:
     )
 
 
+def planning_keeps_what_it_had(page: Any) -> Check:
+    """Everything a route being planned needs, in the panel it was moved into.
+
+    **Three things went missing when the list moved and nothing said so.** The
+    pages were appended once in the order they are written in while the marks
+    are drawn in the order the pages come, so with a route being planned the mark
+    for *points and stages* slid the box to the details of whatever line had been
+    chosen before it. The stage headings — each with the name of its stage and
+    its own file button — were drawn only while this control's own fold was open,
+    and nothing opens that fold any more. And the tour's name field stayed behind
+    in a control that no longer holds what it names.
+
+    Args:
+        page: The driven page, in plan mode with points down
+
+    Returns:
+        What the marks reach, and what a cut leaves behind
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(700)
+    page.evaluate("() => window.trailsChrome.close()")
+    # **Planning, because that is what this is about.** The check before this one
+    # ends by pressing the mark that finishes it, and the route it made stays --
+    # so this asks for plan mode rather than assuming it, and the points are
+    # still where that check left them.
+    page.evaluate("() => { if (!window.trailsPlan.state().on) { window.trailsPlan.toggle(true); } }")
+    settled(page)
+    page.evaluate("() => window.trailsProfilePanel.page('list')")
+    page.wait_for_timeout(800)
+
+    # Each mark, pressed, and what the page under it actually holds — not what
+    # the panel says it is showing, which is the half that stayed right.
+    reached = page.evaluate(
+        """() => { const out = [];
+        const marks = () => [...document.querySelectorAll('.trails-profile-mark')];
+        for (let at = 0; at < marks().length; at += 1) {
+          const mark = marks()[at];
+          const named = mark.title;
+          mark.click();
+          const page = document.querySelectorAll('.trails-profile-track > *')[0];
+          const shown = [...document.querySelectorAll('.trails-profile-page')]
+            .filter(n => n.style.display !== 'none');
+          const now = shown[window.trailsProfilePanel.pages().at];
+          out.push({mark: named,
+                    key: window.trailsProfilePanel.pages().keys[window.trailsProfilePanel.pages().at],
+                    holdsTheList: !!(now && now.querySelector('.trails-plan-points')),
+                    holdsTheCurve: !!(now && now.querySelector('.trails-profile-chart'))});
+        }
+        return out; }"""
+    )
+
+    page.evaluate("() => window.trailsProfilePanel.page('list')")
+    page.wait_for_timeout(600)
+    named = page.evaluate(
+        """() => { const title = document.querySelector('.trails-plan-title');
+        return {there: !!title, inThePanel: !!(title && title.closest('.trails-profile-list')),
+                shown: !!(title && title.getClientRects().length > 0)}; }"""
+    )
+
+    before = page.evaluate("() => document.querySelectorAll('.trails-plan-stage').length")
+    page.evaluate(
+        """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+          .filter(row => !row.classList.contains('trails-plan-stage'));
+        const more = rows[1] && rows[1].querySelector('.trails-plan-more');
+        if (!more) { return; }
+        more.click();
+        const cut = rows[1].querySelector('.trails-plan-cut');
+        if (cut) { cut.click(); } }"""
+    )
+    settled(page)
+    page.wait_for_timeout(800)
+    cut = page.evaluate(
+        """() => ({heads: document.querySelectorAll('.trails-plan-stage').length,
+        names: document.querySelectorAll('.trails-plan-stage-name').length,
+        files: document.querySelectorAll('.trails-plan-stage button').length,
+        drawn: [...document.querySelectorAll('.trails-plan-stage')].every(n => n.getClientRects().length > 0),
+        stages: window.trailsPlan.stages()})"""
+    )
+
+    # The strip above the pages, which is what a finger drags the panel by.
+    grip = page.evaluate(
+        """() => { const hold = document.querySelector('.trails-profile-hold');
+        const box = hold.getBoundingClientRect();
+        return {h: Math.round(box.height), touch: getComputedStyle(hold).touchAction}; }"""
+    )
+    tall = "() => Math.round(document.querySelector('.trails-profile-panel').getBoundingClientRect().height)"
+    was = page.evaluate(tall)
+    where = page.evaluate(
+        """() => { const r = document.querySelector('.trails-profile-hold').getBoundingClientRect();
+        return {x: r.left + r.width / 2, y: r.top + r.height / 2}; }"""
+    )
+    page.mouse.move(where["x"], where["y"])
+    page.mouse.down()
+    page.mouse.move(where["x"], where["y"] - 120, steps=6)
+    page.mouse.up()
+    page.wait_for_timeout(700)
+    dragged = page.evaluate(tall)
+
+    # **And handed back the way it was found.** A height a reader has set is
+    # theirs and outlives everything — which is the point of it, and which makes
+    # a check that drags one and walks away a check that has moved the panel for
+    # every reading after it. Measured the hard way: three of them, in the check
+    # after this one.
+    back = page.evaluate(
+        """() => { const r = document.querySelector('.trails-profile-hold').getBoundingClientRect();
+        return {x: r.left + r.width / 2, y: r.top + r.height / 2}; }"""
+    )
+    page.mouse.move(back["x"], back["y"])
+    page.mouse.down()
+    page.mouse.move(back["x"], back["y"] + 120, steps=6)
+    page.mouse.up()
+    page.wait_for_timeout(700)
+    given_back = page.evaluate(tall)
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(700)
+
+    by_mark = {one["mark"]: one for one in reached}
+    listed = by_mark.get("Points and stages", {})
+    curved = by_mark.get("Elevation profile", {})
+    return Check(
+        "planning keeps what it had",
+        [
+            # **What the mark says and what the box slides to.** Two lists of the
+            # same pages, agreeing until one of them was conditional.
+            Reading("the marks are the pages there are", sorted(by_mark), ["Elevation profile", "Points and stages"]),
+            Reading("the points mark reaches the points", listed.get("holdsTheList"), True, note=listed.get("key")),
+            Reading("and the profile mark the curve", curved.get("holdsTheCurve"), True, note=curved.get("key")),
+            # The name of the tour goes where the list of its points went.
+            Reading("the tour can be named", named["shown"], True),
+            Reading("where its points are", named["inThePanel"], True),
+            # Each heading composes its own stage to state its figures, so they
+            # were drawn only while the list was open — and nothing opens that
+            # fold since the list moved.
+            Reading("a cut makes a stage", cut["stages"], before + 2 if before else 2),
+            Reading("and the stage is drawn", cut["heads"], cut["stages"]),
+            Reading("with a name to give it", cut["names"], cut["stages"]),
+            Reading("and a file of its own", cut["files"], cut["stages"]),
+            Reading("all of them on the screen", cut["drawn"], True),
+            # 7 px of bar is what a mouse needs; a finger needs the strip.
+            Reading("px of handle to drag the panel by", grip["h"], 30, within=8),
+            Reading("and the browser does not take the drag first", grip["touch"], "none"),
+            Reading("dragging it makes the panel taller", dragged - was, 120, within=12, note=f"{was} px to {dragged}"),
+            Reading("and dragging it back gives the map its room", given_back - was, 0, within=12, note=f"{given_back} px"),
+        ],
+    )
+
+
 def the_point_list_takes_the_room(page: Any) -> Check:
     """A list of waypoints on a screen that has room for them.
 
@@ -1976,8 +2127,15 @@ def the_point_list_takes_the_room(page: Any) -> Check:
     listed = """() => { const rows = document.querySelector('.trails-plan-points');
         const page = rows.closest('.trails-profile-page');
         const room = document.querySelector('.trails-profile-panel').getBoundingClientRect();
+        const chart = document.querySelector('.trails-profile-chart');
         return {h: Math.round(rows.getBoundingClientRect().height),
                 page: Math.round(page.getBoundingClientRect().height),
+                // **The drawing's own height and not a number this check
+                // remembers.** It is the reader's to drag, and a height a reader
+                // set outlives a rotation -- so a check that had dragged one
+                // earlier in the run left this one measuring against a constant
+                // that had stopped being the default.
+                chart: Math.round(chart.getBoundingClientRect().height),
                 panel: Math.round(room.height),
                 over: page.scrollHeight - page.clientHeight,
                 rows: [...rows.children].length}; }"""
@@ -2030,7 +2188,7 @@ def the_point_list_takes_the_room(page: Any) -> Check:
             # more.** Pages of their own heights meant a panel that jumped as it
             # was turned; one height means the row at the foot never moves and
             # the reader sets it once, for all of them.
-            Reading("the page is the height of the drawing", wide["page"], 205, within=6),
+            Reading("the page is the height of the drawing", wide["page"], wide["chart"], within=3, note=f"{wide['page']} px"),
             Reading("and ten rows scroll inside it", wide["over"] > 0, True, note=f"{wide['over']} px below the fold"),
             Reading(
                 "dragging the panel taller gives the room to the page",
@@ -2122,8 +2280,11 @@ def files_from_the_page(page: Any) -> Check:
     # their download is called is asking for the tour in it, and an unnamed tour
     # falls back to a stem that would never show whether the name travels.
     tour = "Vistenfjord runde"
+    # **Where the name is, which is where its list is.** The field went to the
+    # profile panel with the points it names; typing into it through the plan
+    # tool now types into a field that is in the document and drawn nowhere.
     page.evaluate("() => window.trailsPlan.showList(true)")
-    page.evaluate(SHOW_TOOL, "plan")
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsProfilePanel.page('list'); }")
     page.wait_for_timeout(900)
     page.fill(".trails-plan-title", tour)
     # A real blur, because the field commits on one: one name is one change and
@@ -2189,9 +2350,10 @@ def files_from_the_page(page: Any) -> Check:
     caught.value.save_as(beside)
     same = {"name": caught.value.suggested_filename, "bytes": beside.stat().st_size}
 
-    # A stage, and the archive that gathers them.
+    # A stage, and the archive that gathers them. Cut where the rows are, which
+    # is the profile panel's own page.
     page.evaluate("() => window.trailsPlan.showList(true)")
-    page.evaluate(SHOW_TOOL, "plan")
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsProfilePanel.page('list'); }")
     page.wait_for_timeout(900)
     page.evaluate(
         """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
@@ -2675,9 +2837,10 @@ def undo_undoes_the_last_change(page: Any) -> Check:
     reordered = page.evaluate(ids)
     after_move = take_back()
 
-    # 4. a stage mark, which changes no points.
+    # 4. a stage mark, which changes no points. Pressed where the rows are,
+    # which is the profile panel's own page since the list was lent to it.
     page.evaluate("() => window.trailsPlan.showList(true)")
-    page.evaluate(SHOW_TOOL, "plan")
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsProfilePanel.page('list'); }")
     page.wait_for_timeout(900)
     pressed = page.evaluate(
         """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
@@ -3148,7 +3311,7 @@ def a_plan_survives_a_reload(page: Any) -> Check:
     # reading.
     tour = "Strompdalen over"
     page.evaluate("() => window.trailsPlan.showList(true)")
-    page.evaluate(SHOW_TOOL, "plan")
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsProfilePanel.page('list'); }")
     page.wait_for_timeout(800)
     page.evaluate(
         """(name) => { const title = document.querySelector('.trails-plan-title');
@@ -4616,6 +4779,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_finger_can_use_it(page))
     if wanted(the_row_at_the_foot):
         checks.append(the_row_at_the_foot(page))
+    if wanted(planning_keeps_what_it_had):
+        checks.append(planning_keeps_what_it_had(page))
     if wanted(the_point_list_takes_the_room):
         checks.append(the_point_list_takes_the_room(page))
     if wanted(undo_undoes_the_last_change):

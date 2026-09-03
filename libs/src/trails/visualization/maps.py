@@ -5671,6 +5671,11 @@ class _ProfilePanel(MacroElement):
                 track.appendChild(node);
             });
 
+            //: What order the track's children were last put in, so they are
+            //: only moved when that changes: appending a node moves it, and a
+            //: moved node loses where it was scrolled to.
+            var laidPages = '';
+
             function paintPages(moved) {
                 pages = wantedPages();
                 if (pageAt >= pages.length) { pageAt = 0; }
@@ -5678,6 +5683,25 @@ class _ProfilePanel(MacroElement):
                 [body, detailBox, pointsPage].forEach(function (node) {
                     node.style.display = wanted.indexOf(node) >= 0 ? '' : 'none';
                 });
+                // **The track's order is the pages' order.** They were appended
+                // once, in the order they were written in, and the marks were
+                // drawn in the order the pages come -- so with a route being
+                // planned the mark for *points and stages* slid the box to the
+                // details of whatever line had been chosen before it, and the
+                // *i* showed the points. Two lists of the same three things,
+                // agreeing until the day one of them was conditional.
+                var order = pages.map(function (page) { return page.key; }).join(',');
+                if (order !== laidPages) {
+                    laidPages = order;
+                    // The wanted ones in their order and the rest behind them,
+                    // so that the document's order is the reader's order: the
+                    // first `.trails-profile-page` is the first page, and not
+                    // whichever one happens to be put away.
+                    wanted.forEach(function (node) { track.appendChild(node); });
+                    [body, detailBox, pointsPage].forEach(function (node) {
+                        if (wanted.indexOf(node) < 0) { track.appendChild(node); }
+                    });
+                }
                 if (!pages.length) {
                     pagesBox.style.display = 'none';
                     pips.style.display = 'none';
@@ -5837,10 +5861,22 @@ class _ProfilePanel(MacroElement):
             // 6.96 to 4.72 metres a pixel. On a long gentle route the width
             // binds and dragging changes the picture's size and nothing else,
             // which is honest — there is no detail there to uncover.
+            // **The whole strip above the pages is the handle, not the bar.**
+            // The bar is 7 px and the page under it scrolls, so a finger that
+            // missed by four pixels scrolled the page instead of resizing the
+            // panel -- reported as a height that could hardly be set at all.
+            // What is drawn stays a 38 x 3 bar; what can be pressed is the strip
+            // it sits in, the dots below it included, and `touch-action: none`
+            // is what stops the browser reading the drag as a scroll before the
+            // handler ever sees it.
+            var hold = document.createElement('div');
+            hold.className = 'trails-profile-hold';
+            hold.title = 'Drag to change the height of the panel';
+            hold.style.cssText = 'cursor:ns-resize;touch-action:none;padding:3px 0 1px;' +
+                'margin:-4px -10px 0';
             var grip = document.createElement('div');
-            grip.title = 'Drag to change the height of the profile';
-            grip.style.cssText = 'height:7px;margin:-4px -10px 1px;cursor:ns-resize;' +
-                'display:flex;align-items:center;justify-content:center';
+            grip.className = 'trails-profile-grip';
+            grip.style.cssText = 'height:7px;display:flex;align-items:center;justify-content:center';
             var grabbed = document.createElement('div');
             grabbed.style.cssText = 'width:38px;height:3px;border-radius:2px;background:var(--trails-grip)';
             grip.appendChild(grabbed);
@@ -5850,8 +5886,9 @@ class _ProfilePanel(MacroElement):
             // box on the page still measures the old one.
             var laidOut = chartHeight;
             var stretching = null, awaiting = false;
-            grip.addEventListener('mouseenter', function () { grabbed.style.background = 'var(--trails-grip-held)'; });
-            grip.addEventListener('mouseleave', function () { if (!stretching) { grabbed.style.background = 'var(--trails-grip)'; } });
+            hold.appendChild(grip);
+            hold.addEventListener('mouseenter', function () { grabbed.style.background = 'var(--trails-grip-held)'; });
+            hold.addEventListener('mouseleave', function () { if (!stretching) { grabbed.style.background = 'var(--trails-grip)'; } });
 
             function stretchTo(pixels) {
                 // **Only while the panel is open**, and that is not tidiness.
@@ -5934,7 +5971,7 @@ class _ProfilePanel(MacroElement):
                 return Math.max(60, wanted);
             }
 
-            grip.addEventListener('mousedown', function (event) {
+            hold.addEventListener('mousedown', function (event) {
                 if (!open) { return; }
                 readerSized = true;
                 // The panel is anchored to the bottom of the map, so it grows
@@ -5958,7 +5995,7 @@ class _ProfilePanel(MacroElement):
             // reader. The move listener preventDefaults only while something is
             // actually being stretched, or it would take the scroll away from
             // every panel on the page.
-            grip.addEventListener('touchstart', function (event) {
+            hold.addEventListener('touchstart', function (event) {
                 if (!open || event.touches.length !== 1) { return; }
                 readerSized = true;
                 stretching = {from: event.touches[0].clientY, height: chartHeight};
@@ -5985,8 +6022,8 @@ class _ProfilePanel(MacroElement):
                     // Clear of the attribution, which sits in the corner opposite
                     // and would otherwise be covered by a panel this wide.
                     'margin-bottom:22px';
-                box.appendChild(grip);
-                box.appendChild(pips);
+                hold.appendChild(pips);
+                box.appendChild(hold);
                 box.appendChild(pagesBox);
                 box.appendChild(header);
                 // Clicking and dragging inside the panel must not reach the map;
@@ -6022,7 +6059,7 @@ class _ProfilePanel(MacroElement):
                 // line, a route being planned -- with no points down yet as much
                 // as with four -- or a place whose popup has been handed over.
                 paintPages();
-                grip.style.display = (open && pagesOpen) ? 'flex' : 'none';
+                hold.style.display = (open && pagesOpen) ? 'block' : 'none';
                 header.style.marginTop = (open && pagesOpen) ? '4px' : '0';
                 // **Folded, the row is the whole panel and pays a row's price.**
                 // Plan mode's bar was 44 px; this was 63 with the panel's own
@@ -7457,6 +7494,14 @@ class _ProfilePanel(MacroElement):
             // was handed, and a series composed elsewhere — and they differ
             // only in how they arrive.
             function present(given) {
+                // **A popup belongs to the thing it came off.** Cleared when the
+                // selection goes and not when it changes: a line's own popup
+                // arrives *before* the click that selects the line -- Leaflet
+                // fires the popup's handler first -- so clearing on every change
+                // would throw away the page that had just arrived. Driven, plan
+                // mode showed the table of whatever line had been chosen before
+                // it, on the page where the points belong.
+                if (given === null) { detailHtml = null; }
                 selected = given;
                 // A window belongs to the chain it was opened on. Carried over,
                 // it would open the panel somewhere in the middle of whatever
@@ -7559,8 +7604,11 @@ class _ProfilePanel(MacroElement):
                 // Plan mode's list of points, lent rather than copied. It is
                 // given back when planning stops, which is what keeps the plan
                 // panel whole on a page that never opens this one.
-                list: function (node) {
+                list: function (node, named) {
                     if (!node) { return false; }
+                    // The name above the list, because that is what the list is
+                    // a list of -- the order it stood in where it came from.
+                    if (named) { pointsPage.insertBefore(named, undoRow); }
                     node.style.display = '';
                     node.style.maxHeight = 'none';
                     node.style.marginTop = '0';
@@ -11300,6 +11348,17 @@ class _PlanMode(MacroElement):
             // was just cured of.
             var listOpen = false, listStations = [], heldRow = null;
 
+            // **Whether the list is showing at all.** It used to be one flag,
+            // set by the count that is the list's handle inside this control.
+            // The list is lent to the profile panel now, where it stands whether
+            // or not anything here has been folded open -- and everything drawn
+            // *because* the list is showing was still asking the old flag: the
+            // stage headings, with the name of each stage and its own file
+            // button, and both entries of the save menu. Driven: a route cut
+            // into two stages drew neither heading, and the save menu opened
+            // empty.
+            function listShowing() { return lentOut || listOpen; }
+
             // Which stage heading is being typed into, or null. The list is not
             // rebuilt while one is, for the reason it is not rebuilt while a row
             // is in the air.
@@ -11442,7 +11501,7 @@ class _PlanMode(MacroElement):
                 // 9.65 ms shut against 10.20 open, which is to say shutting the
                 // list saved almost nothing. During a drag that is eight of them
                 // a second.
-                var stages = (listOpen && points.length) ? stagesOf() : [];
+                var stages = (listShowing() && points.length) ? stagesOf() : [];
                 var heads = Object.create(null);
                 if (stages.length > 1) {
                     stages.forEach(function (stage) { heads[stage.from] = stage; });
@@ -11998,7 +12057,13 @@ class _PlanMode(MacroElement):
                 // route is; then the tools; then the list, which is the panel's
                 // actual content. It used to open with five stacked word buttons
                 // and a paragraph, and the first waypoint came 234 px down.
-                box.appendChild(titleRow);
+                // **The name goes where the list goes.** It stands above the
+                // list because that is what the list is a list of, and lending
+                // the list away without it left a reader planning on a phone
+                // with no way to call the tour anything -- the field was two
+                // panels behind a burger, in a control that no longer holds
+                // what it names.
+                if (!lentOut) { box.appendChild(titleRow); }
                 box.appendChild(tools);
                 // Loading is how a plan starts from a file, so it is offered
                 // whether or not plan mode is already on — and switching it on
@@ -12078,7 +12143,10 @@ class _PlanMode(MacroElement):
             var lastFigures = null;
             function paintFigures() {
                 var listable = on && points.length > 0;
-                var mark = listable ? (listOpen ? '\\u25be ' : '\\u25b8 ') : '';
+                // The caret is the handle for a list this control still holds.
+                // Lent away, it would be a handle for nothing: the figures are
+                // then a count and not a fold.
+                var mark = (listable && !lentOut) ? (listOpen ? '\\u25be ' : '\\u25b8 ') : '';
                 if (!points.length) {
                     say(mark + 'Click the map to place the first point.');
                     return;
@@ -12127,7 +12195,7 @@ class _PlanMode(MacroElement):
                 var listable = on && points.length > 0;
                 status.style.cursor = listable ? 'pointer' : '';
                 status.title = listable ? 'Show or hide the points, one to a row' : '';
-                listBox.style.display = (lentOut || (listable && listOpen)) ? '' : 'none';
+                listBox.style.display = (listShowing() && (lentOut || listable)) ? '' : 'none';
                 // The name stands with the route, above the tools, and only
                 // where there is a route: a box asking what to call nothing is a
                 // row of the control spent on nothing.
@@ -12139,12 +12207,12 @@ class _PlanMode(MacroElement):
                 // Offered only where there is more than one stage to gather and
                 // where the panel can write a file at all.
                 var writes = !!(panel() && panel().writes());
-                var gathered = writes && listOpen && stagesOf().length > 1;
+                var gathered = writes && listShowing() && stagesOf().length > 1;
                 // A route of one point is not a file, and the reason the button
                 // is not merely disabled there is the same one the profile panel
                 // gives: an offer over nothing is furniture.
                 var refusing = writable().why;
-                oneFile.style.display = (writes && listOpen && points.length > 1) ? '' : 'none';
+                oneFile.style.display = (writes && listShowing() && points.length > 1) ? '' : 'none';
                 oneFile.disabled = !!refusing;
                 // Why it is refused, where it is: 'still working out 2 legs' is
                 // the difference between a button that is waiting and one that
@@ -12389,7 +12457,7 @@ class _PlanMode(MacroElement):
                 // Handed over once, on the first refresh there is a panel for:
                 // by then everything that draws into it exists, and asking again
                 // afterwards would move a node a reader may be scrolling.
-                if (!lentOut && panel() && panel().list) { lentOut = !!panel().list(listBox); }
+                if (!lentOut && panel() && panel().list) { lentOut = !!panel().list(listBox, titleRow); }
                 if (!window.trailsChrome || !window.trailsChrome.planning) { return; }
                 window.trailsChrome.planning({
                     on: on,
@@ -12695,7 +12763,7 @@ class _PlanMode(MacroElement):
                 showList: function (want) {
                     listOpen = want === undefined ? !listOpen : !!want;
                     refresh();
-                    return listOpen && points.length > 0;
+                    return listShowing() && points.length > 0;
                 },
                 state: function () {
                     var shape = composeRoute();
@@ -15628,6 +15696,10 @@ class _Chrome(MacroElement):
                 // written as buttons beside them.
                 '.trails-coarse .trails-profile-head button',
                 '  { min-width: 40px; min-height: 40px; }',
+                // The strip a finger drags the panel by. 7 px of bar is what a
+                // mouse needs; a finger needs the strip around it.
+                '.trails-profile-hold { min-height: 16px; }',
+                '.trails-coarse .trails-profile-hold { min-height: 30px; padding-top: 8px; }',
                 '.trails-coarse .trails-profile-undo { min-height: 40px; }',
                 // **16px is not a taste.** iOS Safari zooms the whole page when
                 // a field smaller than that takes focus, which on a map is the
