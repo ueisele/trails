@@ -3580,6 +3580,148 @@ def where_the_reader_is(page: Any) -> Check:
     )
 
 
+#: Where the walk in ``which_way_the_reader_faces`` starts, and the two steps it
+#: takes: north-east, far enough apart that the bearing between them is a walk
+#: and not the noise on one place seen twice.
+WALK = [(65.4279, 13.0335), (65.4288, 13.0355), (65.4297, 13.0375)]
+
+
+def bearing_between(start: tuple[float, float], end: tuple[float, float]) -> float:
+    """The bearing the page works out, worked out here to compare it with.
+
+    The page's own formula, in Python: a check that measured the cone against a
+    number typed in by hand would be measuring the typing.
+
+    Args:
+        start: Latitude and longitude walked from
+        end: Latitude and longitude walked to
+
+    Returns:
+        Degrees clockwise from north
+    """
+    lat1, lat2 = math.radians(start[0]), math.radians(end[0])
+    apart = math.radians(end[1] - start[1])
+    y = math.sin(apart) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(apart)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+#: What the marks say, read off the page rather than off a screenshot: the cone
+#: is turned by an attribute and painted by another, and the rim is a count of
+#: arcs.
+HERE_MARKS = """() => {
+  const cone = document.querySelector('.trails-here-cone');
+  const halo = document.querySelector('.trails-here-facing');
+  const box = document.querySelector('.trails-here-marks');
+  const turn = cone ? (cone.getAttribute('transform') || '') : '';
+  const said = turn.match(/rotate\\(([-\\d.]+)\\)/);
+  return {drawn: !!box && box.style.display !== 'none',
+          cone: !!cone && cone.getAttribute('display') !== 'none',
+          bearing: said ? Math.round(Number(said[1])) : null,
+          strength: cone ? Number(cone.getAttribute('fill-opacity')) : null,
+          arcs: halo ? halo.children.length : 0}; }"""
+
+
+def which_way_the_reader_faces(page: Any) -> Check:
+    """Which way the reader is going, and which way they are pointing.
+
+    **Two questions and two marks.** The cone is the course over the ground --
+    the device's own where it reports one, and the bearing between two fixes far
+    enough apart where it does not -- and it fades rather than vanishing when the
+    walking stops, because *how you came here* is worth more than nothing to
+    somebody standing still reading a map. The rim is the compass: red, thin and
+    filling nothing, because facing is a different question from going and a
+    needle over the dot covers the ground it points at.
+
+    **Neither sensor exists in a headless browser**, which is what makes this
+    driveable at all: the walk is three geolocations set in turn, and the compass
+    is one event dispatched by hand. What is being driven is the page's handling
+    of them, which is the part that was written here.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the marks said at each step of the walk
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.context.set_geolocation({"latitude": WALK[0][0], "longitude": WALK[0][1], "accuracy": 24})
+    page.evaluate(f"() => {MAP_OBJECT}.setView([{WALK[0][0]}, {WALK[0][1]}], 14)")
+    page.wait_for_timeout(600)
+
+    def stepped(where: tuple[float, float]) -> Any:
+        """Move the fix and wait for the page to have drawn the one that follows."""
+        page.context.set_geolocation({"latitude": where[0], "longitude": where[1], "accuracy": 24})
+        page.wait_for_timeout(2500)
+        return page.evaluate(HERE_MARKS)
+
+    page.evaluate("() => window.trailsChrome.here(true)")
+    page.wait_for_function(
+        with_map(
+            """() => { let there = false;
+            __MAP__.eachLayer(l => { if (l.options && l.options.className === 'trails-here-dot') { there = true; } });
+            return there; }"""
+        ),
+        timeout=20_000,
+    )
+    page.wait_for_timeout(600)
+    first = page.evaluate(HERE_MARKS)
+    walking = stepped(WALK[1])
+    stepped(WALK[2])
+    # A metre and a half on, which is a fix standing still: under the ten metres
+    # a bearing needs, so the last one stands and only the paint changes.
+    standing = stepped((WALK[2][0] + 0.00001, WALK[2][1] + 0.00001))
+
+    # **The compass, fired by hand and under the name this browser has.** The
+    # newer event is the one the page listens for where it exists, and a probe
+    # that fired the older name against a browser carrying both drew nothing --
+    # measured, and the reason this asks the window rather than assuming.
+    page.evaluate(
+        """() => { const kind = ('ondeviceorientationabsolute' in window)
+            ? 'deviceorientationabsolute' : 'deviceorientation';
+        const e = new Event(kind); e.webkitCompassHeading = 92; e.absolute = true;
+        window.dispatchEvent(e); }"""
+    )
+    page.wait_for_timeout(700)
+    facing = page.evaluate(HERE_MARKS)
+
+    page.evaluate("() => window.trailsChrome.here(false)")
+    page.wait_for_timeout(500)
+    off = page.evaluate(HERE_MARKS)
+    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+
+    return Check(
+        "which way the reader faces",
+        [
+            # One fix is a place and not a direction: there is nothing to draw
+            # until a second one says which way the first was walked from.
+            Reading("one fix draws no direction", first["drawn"], False),
+            Reading("a step draws the cone", walking["cone"], True),
+            Reading(
+                "turned the way the step went",
+                walking["bearing"],
+                round(bearing_between(WALK[0], WALK[1])),
+                within=3,
+                note=f"{walking['bearing']}\u00b0 drawn, {bearing_between(WALK[0], WALK[1]):.0f}\u00b0 walked",
+            ),
+            Reading("painted as a walk", walking["strength"], 0.62, within=0.01),
+            # Standing still keeps the angle and fades it. It used to be the
+            # question the mockup got wrong: a reader who stops has not lost
+            # the direction they arrived from.
+            Reading("standing still keeps the direction", standing["bearing"], walking["bearing"]),
+            Reading("and fades it", standing["strength"], 0.26, within=0.01),
+            # Three bands and the glow over the brightest of them.
+            Reading("a compass reading draws the rim", facing["arcs"], 4),
+            Reading("and the cone is still there", facing["cone"], True),
+            Reading("switching off takes both away", off["drawn"], False),
+        ],
+    )
+
+
 def the_dark_set(page: Any) -> Check:
     """Two sets of colours for the furniture, and one for the ground.
 
@@ -5213,6 +5355,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(sharing_the_room(page))
     if wanted(where_the_reader_is):
         checks.append(where_the_reader_is(page))
+    if wanted(which_way_the_reader_faces):
+        checks.append(which_way_the_reader_faces(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be

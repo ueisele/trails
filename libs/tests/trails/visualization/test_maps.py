@@ -5907,3 +5907,126 @@ class TestWhereTheReaderIs:
         assert "problem.code === 1" in html
         assert "This browser was told not to share your position." in html
         assert "problem.code === 3" in html
+
+    def test_which_way_is_asked_of_whichever_can_say(self):
+        """A phone reports a course over the ground only while it is moving, and
+        several report none at all — so where the device says nothing, the
+        bearing from the last fix far enough away is the answer, and a reader
+        cannot tell the two apart. Under ten metres the two fixes are one place
+        seen twice and a bearing off them spins with the noise."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var MOVED_M = 10;" in html
+        assert "function bearingBetween(from, to) {" in html
+        assert "var told = position.coords.heading;" in html
+        assert "if (told !== null && told !== undefined && !isNaN(told)) {" in html
+        assert "} else if (hereFrom && moved >= MOVED_M) {" in html
+        assert "hereBearing = bearingBetween(hereFrom, where);" in html
+        # The metre is asked of the one place that owns it rather than worked
+        # out a second time here.
+        assert "var far = window.trailsProfilePanel && window.trailsProfilePanel.metresBetween;" in html
+
+    def test_standing_still_keeps_the_last_direction_and_fades_it(self):
+        """*How you came here* is worth more than nothing while a map is being
+        read, which is exactly when nobody is walking. The angle stands and the
+        fading is what says it is from before; only a watch switched off and on
+        again starts with no direction at all."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var strong = hereMoving ? 0.62 : 0.26;" in html
+        assert "hereCone.setAttribute('fill-opacity', String(strong));" in html
+        # Nothing in the standing branch clears the bearing.
+        standing = html.split("hereBearing = bearingBetween(hereFrom, where);")[1].split("hereAt = where;")[0]
+        assert "hereMoving = false;" in standing
+        assert "hereBearing" not in standing
+        # Switching off does clear it, so the next watch starts blank.
+        dropped = html.split("function dropHere() {")[1].split("\n            }")[0]
+        assert "hereBearing = null;" in dropped
+        assert "hereMoving = false;" in dropped
+
+    def test_the_facing_rim_is_arcs_and_fills_nothing(self):
+        """A needle over the dot covers the map it is pointing at. The rim is
+        three bands round the core, brightest where the reader faces and running
+        out behind them, with a white glow over the brightest so it reads on a
+        sunlit tile — and every one of them `fill: none`, so the map shows
+        through everywhere."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var HALO_BANDS = [[70, 0.95, 3.2], [110, 0.5, 2.6], [160, 0.22, 2]];" in html
+        assert "arc.setAttribute('d', arcPath(17, hereFacing - band[0] / 2, hereFacing + band[0] / 2));" in html
+        assert "lit.setAttribute('d', arcPath(17, hereFacing - 36, hereFacing + 36));" in html
+        rim = html.split("if (hereFacing !== null) {")[1].split("placeHereMarks();")[0]
+        assert rim.count("setAttribute('fill', 'none')") == 2
+        # Red, because facing is a different question from going and the cone
+        # already owns the blue.
+        assert "var HERE_FACING = '#d32f2f';" in html
+
+    def test_the_compass_is_asked_for_on_the_press_that_starts_the_watch(self):
+        """iOS gives orientation only after `requestPermission` and only from a
+        gesture; the press on the mark is that gesture. One dialogue, on a press
+        the reader made anyway — a refusal leaves the rim off and asks nothing
+        further, and the watch that ends takes the listener with it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "if (typeof DeviceOrientationEvent.requestPermission === 'function') {" in html
+        assert "if (answer === 'granted') { listen(); }" in html
+        assert "}, function () { /* refused, and nothing is asked again */ });" in html
+        # Started with the watch and stopped with it, and the newer event name
+        # where the browser has it.
+        started = html.split("function askHere(want) {")[1].split("\n            }")[0]
+        assert "startCompass();" in started
+        assert "stopCompass();" in html.split("function stopHere(said) {")[1].split("\n            }")[0]
+        assert "? 'deviceorientationabsolute' : 'deviceorientation';" in html
+        assert "window.removeEventListener(hereCompass, heardCompass);" in html
+
+    def test_the_compass_reading_is_turned_with_the_screen(self):
+        """Safari reports degrees clockwise from north; everywhere else counts
+        alpha the other way round. And a phone held sideways points across
+        itself unless the screen's own angle is added back."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "facing = event.webkitCompassHeading;" in html
+        assert "facing = (360 - event.alpha) % 360;" in html
+        assert "turned = window.screen.orientation.angle;" in html
+        assert "hereFacing = (facing + turned + 360) % 360;" in html
+
+    def test_the_sensor_repaints_once_a_frame(self):
+        """It fires some sixty times a second and every one of them would
+        otherwise rebuild four arcs — the mistake this page has made twice, on a
+        curve and on a drag."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "if (herePainting) { return; }" in html
+        assert "herePainting = true;" in html
+        assert "window.requestAnimationFrame(function () {" in html
+        assert "if (hereWatch !== null) { paintHereMarks(); }" in html
+
+    def test_the_marks_are_pixels_in_a_pane_of_their_own(self):
+        """The cone and the rim are measured on the screen and not on the
+        ground — the accuracy ring is the only mark here that is metres — so
+        they are an SVG placed by hand and turned by an attribute, the idiom the
+        direction arrow already uses, re-placed whenever the map moves under it.
+        Below the overlay pane, so neither can cover the dot."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "pane = map.createPane('trailsHereMarks');" in html
+        assert "pane.style.zIndex = 395;" in html
+        assert "pane.style.pointerEvents = 'none';" in html
+        assert "L.DomUtil.setPosition(hereMarks, map.latLngToLayerPoint(hereAt));" in html
+        assert "map.on('zoomend viewreset moveend resize', placeHereMarks);" in html
+        # Nothing is drawn before there is anything to say.
+        assert "if (!hereDot || (hereBearing === null && hereFacing === null)) {" in html

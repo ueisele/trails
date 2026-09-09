@@ -16268,7 +16268,152 @@ class _Chrome(MacroElement):
             // Blue, and not a themed colour: the tiles stay light in both sets,
             // so this is drawn on the same ground either way.
             var HERE_BLUE = '#1565c0';
+            // **Red, and it is the only red on this map that is not a gradient
+            // band.** Which way the reader is *facing* is a different question
+            // from which way they are *going*, and two blues at one position
+            // would be one answer in two sizes: the cone is blue, filled and
+            // wide -- a movement with slack in it -- and this is red, thin and
+            // hard-edged, which is what an instrument looks like.
+            var HERE_FACING = '#d32f2f';
+            //: The namespace the marks are drawn in. The profile panel has its
+            //: own copy of this line for its own arrow; a shared one would have
+            //: to live above both closures, and one constant is not worth a
+            //: third place to look.
+            var HERE_SVG = 'http://www.w3.org/2000/svg';
+            //: How far a fix has to have moved before the bearing between it and
+            //: the one before is worth believing. Under this the two are one
+            //: place seen twice, and a bearing off them spins with the noise.
+            var MOVED_M = 10;
             var hereWatch = null, hereDot = null, hereRing = null, hereFixes = 0;
+            //: The last bearing worth drawing, whether the device reported it or
+            //: it was worked out here, and where it was worked out from.
+            var hereBearing = null, hereFrom = null, hereMoving = false;
+            //: Which way the device is pointing, while the compass says.
+            var hereFacing = null, hereCompass = null, herePainting = false;
+            var hereMarks = null, hereCone = null, hereHalo = null, hereAt = null;
+
+            // **The bearing from one fix to the next**, which is the whole of
+            // 2b: a phone reports a course over the ground only while it is
+            // moving, and on the devices that do not report one at all this is
+            // the only way to say which way somebody is walking.
+            function bearingBetween(from, to) {
+                var lat1 = from.lat * Math.PI / 180, lat2 = to.lat * Math.PI / 180;
+                var apart = (to.lng - from.lng) * Math.PI / 180;
+                var y = Math.sin(apart) * Math.cos(lat2);
+                var x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(apart);
+                return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+            }
+
+            // A wedge, and an arc, in the pane the direction arrow already uses
+            // the idiom of: an SVG placed by hand at the position and turned by
+            // an attribute, re-placed whenever the map moves under it. Not
+            // Leaflet layers, because both are measured in pixels rather than in
+            // metres -- the accuracy ring is the only mark here that is ground.
+            function hereMarksNode() {
+                if (hereMarks) { return hereMarks; }
+                var pane = map.getPane('trailsHereMarks');
+                if (!pane) {
+                    pane = map.createPane('trailsHereMarks');
+                    // Above the tiles and below the overlay pane the dot and the
+                    // ring are drawn in, so nothing here can cover them.
+                    pane.style.zIndex = 395;
+                    pane.style.pointerEvents = 'none';
+                    L.DomUtil.addClass(pane, 'leaflet-zoom-hide');
+                }
+                hereMarks = document.createElementNS(HERE_SVG, 'svg');
+                hereMarks.setAttribute('class', 'trails-here-marks');
+                hereMarks.setAttribute('width', '200');
+                hereMarks.setAttribute('height', '200');
+                hereMarks.setAttribute('viewBox', '-100 -100 200 200');
+                hereMarks.style.cssText = 'position:absolute;margin:-100px 0 0 -100px;overflow:visible;display:none';
+                hereCone = document.createElementNS(HERE_SVG, 'path');
+                hereCone.setAttribute('class', 'trails-here-cone');
+                hereHalo = document.createElementNS(HERE_SVG, 'g');
+                hereHalo.setAttribute('class', 'trails-here-facing');
+                hereMarks.appendChild(hereCone);
+                hereMarks.appendChild(hereHalo);
+                pane.appendChild(hereMarks);
+                return hereMarks;
+            }
+
+            // **The wedge is drawn once and turned after that.** Its shape never
+            // changes -- 62 degrees and 64 px, which is what a course over the
+            // ground is worth on a screen -- so only the angle and how strongly
+            // it is painted ever move.
+            function coneShape() {
+                var wide = 62 * Math.PI / 180, reach = 64;
+                var a = -wide / 2 - Math.PI / 2, b = wide / 2 - Math.PI / 2;
+                return 'M 0 0 L ' + (reach * Math.cos(a)).toFixed(1) + ' ' + (reach * Math.sin(a)).toFixed(1) +
+                    ' A ' + reach + ' ' + reach + ' 0 0 1 ' + (reach * Math.cos(b)).toFixed(1) + ' ' +
+                    (reach * Math.sin(b)).toFixed(1) + ' Z';
+            }
+
+            function arcPath(radius, from, to) {
+                var a = (from - 90) * Math.PI / 180, b = (to - 90) * Math.PI / 180;
+                return 'M ' + (radius * Math.cos(a)).toFixed(2) + ' ' + (radius * Math.sin(a)).toFixed(2) +
+                    ' A ' + radius + ' ' + radius + ' 0 ' + ((to - from) > 180 ? 1 : 0) + ' 1 ' +
+                    (radius * Math.cos(b)).toFixed(2) + ' ' + (radius * Math.sin(b)).toFixed(2);
+            }
+
+            //: The rim, brightest where the reader is facing and running out
+            //: behind them. Nothing is filled: the map shows through everywhere,
+            //: and the dot still has a front.
+            var HALO_BANDS = [[70, 0.95, 3.2], [110, 0.5, 2.6], [160, 0.22, 2]];
+
+            function paintHereMarks() {
+                var node = hereMarksNode();
+                if (!hereDot || (hereBearing === null && hereFacing === null)) {
+                    node.style.display = 'none';
+                    return;
+                }
+                node.style.display = '';
+                if (hereBearing === null) {
+                    hereCone.setAttribute('display', 'none');
+                } else {
+                    // Faded where the last fix did not move: the angle is the
+                    // last one measured, and the fading is what says it is from
+                    // before. *How you came here*, not *how you are going*.
+                    var strong = hereMoving ? 0.62 : 0.26;
+                    hereCone.removeAttribute('display');
+                    hereCone.setAttribute('d', coneShape());
+                    hereCone.setAttribute('transform', 'rotate(' + hereBearing + ')');
+                    hereCone.setAttribute('fill', HERE_BLUE);
+                    hereCone.setAttribute('fill-opacity', String(strong));
+                    hereCone.setAttribute('stroke', '#ffffff');
+                    hereCone.setAttribute('stroke-width', '1');
+                    hereCone.setAttribute('stroke-opacity', String(hereMoving ? 0.45 : 0.22));
+                }
+                hereHalo.innerHTML = '';
+                if (hereFacing !== null) {
+                    HALO_BANDS.forEach(function (band) {
+                        var arc = document.createElementNS(HERE_SVG, 'path');
+                        arc.setAttribute('d', arcPath(17, hereFacing - band[0] / 2, hereFacing + band[0] / 2));
+                        arc.setAttribute('fill', 'none');
+                        arc.setAttribute('stroke', HERE_FACING);
+                        arc.setAttribute('stroke-opacity', String(band[1]));
+                        arc.setAttribute('stroke-width', String(band[2]));
+                        arc.setAttribute('stroke-linecap', 'round');
+                        hereHalo.appendChild(arc);
+                    });
+                    // The glow last, over the brightest band: it is what makes
+                    // the rim readable on a sunlit tile without filling anything.
+                    var lit = document.createElementNS(HERE_SVG, 'path');
+                    lit.setAttribute('d', arcPath(17, hereFacing - 36, hereFacing + 36));
+                    lit.setAttribute('fill', 'none');
+                    lit.setAttribute('stroke', '#ffffff');
+                    lit.setAttribute('stroke-opacity', '0.5');
+                    lit.setAttribute('stroke-width', '5.4');
+                    lit.setAttribute('stroke-linecap', 'round');
+                    hereHalo.appendChild(lit);
+                }
+                placeHereMarks();
+            }
+
+            function placeHereMarks() {
+                if (!hereMarks || !hereAt || hereMarks.style.display === 'none') { return; }
+                L.DomUtil.setPosition(hereMarks, map.latLngToLayerPoint(hereAt));
+            }
+            map.on('zoomend viewreset moveend resize', placeHereMarks);
 
             // **No panel, and nothing to press twice.** It used to open a tool
             // whose whole content was a paragraph and a button called *Show my
@@ -16288,12 +16433,18 @@ class _Chrome(MacroElement):
             function dropHere() {
                 if (hereDot) { map.removeLayer(hereDot); hereDot = null; }
                 if (hereRing) { map.removeLayer(hereRing); hereRing = null; }
+                if (hereMarks) { hereMarks.style.display = 'none'; }
+                hereBearing = null;
+                hereFrom = null;
+                hereMoving = false;
+                hereAt = null;
             }
 
             function stopHere(said) {
                 if (hereWatch !== null && navigator.geolocation) {
                     navigator.geolocation.clearWatch(hereWatch);
                 }
+                stopCompass();
                 hereWatch = null;
                 hereFixes = 0;
                 dropHere();
@@ -16353,6 +16504,35 @@ class _Chrome(MacroElement):
                 }
                 hereFixes += 1;
                 if (hereFixes === 1) { goThere(where); }
+                // **Which way, from whichever of the two can say.** The device's
+                // own course over the ground where it reports one -- iOS does,
+                // while it is moving -- and the bearing from the last fix that
+                // was far enough away where it does not. A reader cannot tell
+                // the two apart, which is the point of drawing them the same.
+                var told = position.coords.heading;
+                // The metre this page measures distance with, asked of the one
+                // place that owns it -- the same rule the picker follows.
+                var far = window.trailsProfilePanel && window.trailsProfilePanel.metresBetween;
+                var moved = (hereFrom && far) ? far(hereFrom.lng, hereFrom.lat, where.lng, where.lat) : 0;
+                if (told !== null && told !== undefined && !isNaN(told)) {
+                    hereBearing = told;
+                    hereMoving = true;
+                    hereFrom = where;
+                } else if (hereFrom && moved >= MOVED_M) {
+                    hereBearing = bearingBetween(hereFrom, where);
+                    hereMoving = true;
+                    hereFrom = where;
+                } else {
+                    // **Kept, and faded.** Standing still is when a map is read,
+                    // and *how you came here* is worth more then than nothing at
+                    // all -- so the last angle stands and the fading is what
+                    // says it is from before. Only a watch that was switched off
+                    // and on again starts with no direction.
+                    hereMoving = false;
+                    if (!hereFrom) { hereFrom = where; }
+                }
+                hereAt = where;
+                paintHereMarks();
                 // **The circle is the sentence.** It was said in words as well,
                 // once, with the fix that moved the map -- and a line of text is
                 // the wrong place for a quantity a map can draw: it is read once
@@ -16379,6 +16559,68 @@ class _Chrome(MacroElement):
             // **Pressed once and it watches; pressed again and it stops.** No
             // panel, no second button, and nothing asked: a reader who pressed
             // *where am I* has said what they want.
+            // **The compass, asked for on the press that starts the watch.**
+            // iOS gives orientation only after `requestPermission`, and only
+            // from a gesture -- the press on the mark is that gesture, which is
+            // why this is asked here and not when the first fix lands. One
+            // dialogue, on a press the reader made anyway, and never again: a
+            // refusal leaves the rim off and asks nothing further.
+            function heardCompass(event) {
+                var facing = null;
+                if (typeof event.webkitCompassHeading === 'number' && !isNaN(event.webkitCompassHeading)) {
+                    // Safari's own, and already degrees clockwise from north.
+                    facing = event.webkitCompassHeading;
+                } else if (event.absolute && typeof event.alpha === 'number' && !isNaN(event.alpha)) {
+                    // Everywhere else: alpha counts the other way round.
+                    facing = (360 - event.alpha) % 360;
+                }
+                if (facing === null) { return; }
+                // Turned with the screen, or a phone held sideways points across
+                // itself. `screen.orientation` is what a browser tells a page
+                // about that, and the fallback is the older number.
+                var turned = 0;
+                if (window.screen && window.screen.orientation &&
+                        typeof window.screen.orientation.angle === 'number') {
+                    turned = window.screen.orientation.angle;
+                } else if (typeof window.orientation === 'number') {
+                    turned = window.orientation;
+                }
+                hereFacing = (facing + turned + 360) % 360;
+                // **One repaint a frame.** The sensor fires some sixty times a
+                // second and every one of them would otherwise rebuild four
+                // arcs: the mistake this page has made twice, on a curve and on
+                // a drag.
+                if (herePainting) { return; }
+                herePainting = true;
+                window.requestAnimationFrame(function () {
+                    herePainting = false;
+                    if (hereWatch !== null) { paintHereMarks(); }
+                });
+            }
+
+            function startCompass() {
+                if (hereCompass || !window.DeviceOrientationEvent) { return; }
+                var kind = 'ondeviceorientationabsolute' in window
+                    ? 'deviceorientationabsolute' : 'deviceorientation';
+                function listen() {
+                    hereCompass = kind;
+                    window.addEventListener(kind, heardCompass);
+                }
+                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission().then(function (answer) {
+                        if (answer === 'granted') { listen(); }
+                    }, function () { /* refused, and nothing is asked again */ });
+                    return;
+                }
+                listen();
+            }
+
+            function stopCompass() {
+                if (hereCompass) { window.removeEventListener(hereCompass, heardCompass); }
+                hereCompass = null;
+                hereFacing = null;
+            }
+
             function askHere(want) {
                 var wanted = want === undefined ? hereWatch === null : !!want;
                 if (!wanted) { stopHere(''); return false; }
@@ -16387,6 +16629,7 @@ class _Chrome(MacroElement):
                     paintHere('This browser has no way to tell the page where it is.');
                     return false;
                 }
+                startCompass();
                 hereWatch = navigator.geolocation.watchPosition(drawHere, failedHere, {
                     enableHighAccuracy: true, maximumAge: 10000, timeout: 20000
                 });
