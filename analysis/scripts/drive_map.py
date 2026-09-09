@@ -3813,6 +3813,118 @@ def the_accuracy_only_gets_better(page: Any) -> Check:
     )
 
 
+#: What is stacked over what. **Not read off the elements**: this map renders
+#: its vectors into a canvas, so a dot has no node to ask and the layer's own
+#: `pane` option is what says where it is drawn -- which is the reading anyway,
+#: because the pane is what carries the z-index the browser stacks by.
+THE_STACK = """() => {
+  const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
+  let dot = null;
+  map.eachLayer(l => { if (l.options && l.options.className === 'trails-here-dot') { dot = l; } });
+  const named = node => [...node.classList]
+      .filter(c => c !== 'leaflet-pane' && c.indexOf('leaflet-') === 0)
+      .map(c => c.replace(/^leaflet-/, '').replace(/-pane$/, ''))[0] || '';
+  const high = node => Number(getComputedStyle(node).zIndex) || 0;
+  const mine = dot ? (dot.options.pane || 'overlayPane') : null;
+  const panes = [...document.querySelectorAll('.leaflet-map-pane > .leaflet-pane')]
+      .map(n => ({name: named(n), z: high(n)}));
+  return {mine: mine, at: mine ? high(map.getPane(mine)) : null, panes: panes,
+          route: window.trailsPlan.geometry().lat.length}; }"""
+
+
+def the_position_is_over_the_plan(page: Any) -> Check:
+    """Where the reader is, against everything else drawn on the same ground.
+
+    **Reported from a phone: with a plan loaded the dot sat under the route.**
+    It was drawn into Leaflet's overlay pane at 400, and a planned route has a
+    pane of its own at 460 -- as do the profile's own marks at 450 and 470 -- so
+    anything the reader had asked the page to draw covered the one mark that
+    answers a question nothing else on the map can.
+
+    **Measured as stacking and not as a screenshot.** Which of two things covers
+    the other is a z-index question, the panes carry their names, and the
+    browser's own computed value is the answer; a picture would have to be looked
+    at, and by somebody who already knew what to look for.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        Which pane the dot is in, and every pane it is stacked against
+    """
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+    # Plan mode off to pick the chain, for the reason the file check names:
+    # while it is on the panel stops answering clicks and selecting one selects
+    # nothing.
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.wait_for_timeout(500)
+    # **A route actually drawn**, so the pane it is compared against is a pane
+    # with something in it: a stacking order argued about empty boxes is not the
+    # thing the reader reported.
+    laid = select(page, LONG_CHAIN)
+    # Read off the chain **before** plan mode is asked for: switching it on
+    # clears the selection, and the ground the route is laid on goes with it.
+    places = page.evaluate(
+        """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
+        if (!shape) { return null; }
+        return [0.2, 0.5].map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
+    )
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+    for at in places or []:
+        page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
+        settled(page)
+
+    # The fix goes on the route, which is where a reader walking one has it.
+    on_route = places[0] if places else {"lat": 65.55, "lon": 13.05}
+    page.context.set_geolocation({"latitude": on_route["lat"], "longitude": on_route["lon"], "accuracy": 20})
+    page.evaluate("() => window.trailsChrome.here(true)")
+    page.wait_for_function(
+        with_map(
+            """() => { let there = false;
+            __MAP__.eachLayer(l => { if (l.options && l.options.className === 'trails-here-dot') { there = true; } });
+            return there; }"""
+        ),
+        timeout=20_000,
+    )
+    page.wait_for_timeout(600)
+    stack = page.evaluate(THE_STACK)
+    page.evaluate("() => { window.trailsChrome.here(false); window.trailsPlan.toggle(false); }")
+    page.wait_for_timeout(400)
+
+    named = {pane["name"]: pane for pane in stack["panes"]}
+    route = named.get("trailsPlanRoute", {})
+    drawn = stack["route"]
+    # Everything the map draws on its own account: not the popups and tooltips,
+    # which are answers a reader asked for by touching something, and not the
+    # dot's own two panes.
+    under = [pane["z"] for pane in stack["panes"] if pane["name"] not in ("trailsHere", "trailsHereMarks", "popup", "tooltip")]
+    return Check(
+        "the position is drawn over the plan",
+        [
+            Reading("a route was laid down to ask against", laid, True),
+            # The route's own geometry, because the pane holds a canvas and not
+            # a shape to count: what is drawn into it is what the page composed.
+            Reading("and the planned route is drawn", drawn > 0, True, note=f"{drawn} coordinates"),
+            Reading("the dot has a pane of its own", stack["mine"], "trailsHere"),
+            Reading("over the planned route", (stack["at"] or 0) > (route.get("z") or 0), True, note=f"{stack['at']} against {route.get('z')}"),
+            Reading(
+                "and over everything else the map draws",
+                (stack["at"] or 0) > max(under or [0]),
+                True,
+                note=f"{stack['at']} against {max(under or [0])}",
+            ),
+        ],
+    )
+
+
 def the_dark_set(page: Any) -> Check:
     """Two sets of colours for the furniture, and one for the ground.
 
@@ -5450,6 +5562,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(which_way_the_reader_faces(page))
     if wanted(the_accuracy_only_gets_better):
         checks.append(the_accuracy_only_gets_better(page))
+    if wanted(the_position_is_over_the_plan):
+        checks.append(the_position_is_over_the_plan(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be

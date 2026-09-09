@@ -16301,11 +16301,42 @@ class _Chrome(MacroElement):
             //: Which way the device is pointing, while the compass says.
             var hereFacing = null, hereCompass = null, herePainting = false;
             var hereMarks = null, hereCone = null, hereHalo = null, hereAt = null;
+            // **Where the reader is is the last thing drawn on this map.**
+            // Reported: with a plan loaded the dot sat *under* the route --
+            // because it was in the overlay pane at 400 and the route has a pane
+            // of its own at 460, as do the profile's own marks at 450 and 470.
+            // A position hidden under a line is not a position: it is the one
+            // mark here that answers a question nothing else on the map can, and
+            // a reader looks for it exactly when the map is busiest.
+            //
+            // Over the marker pane too, at 600. A place under the dot is still
+            // where it was and can be read by moving a finger; the dot has
+            // nowhere else to be. Below the tooltips and popups at 650 and
+            // above, which are answers a reader asked for by touching something.
+            var HERE_MARKS_Z = 610;
+            var HERE_Z = 620;
 
             // **The bearing from one fix to the next**, which is the whole of
             // 2b: a phone reports a course over the ground only while it is
             // moving, and on the devices that do not report one at all this is
             // the only way to say which way somebody is walking.
+            // The pane the dot and the ring are drawn into, made on the first
+            // fix. Not `leaflet-zoom-hide`: these are Leaflet's own vectors and
+            // its renderer animates them with the map, which is what keeps the
+            // dot on its ground through a zoom.
+            function herePane() {
+                if (!map.getPane('trailsHere')) {
+                    var pane = map.createPane('trailsHere');
+                    pane.style.zIndex = HERE_Z;
+                    // Nothing here is ever a click target -- both layers are
+                    // built `interactive: false` -- and a pane over the whole
+                    // map that took clicks would take them from every trail
+                    // under it.
+                    pane.style.pointerEvents = 'none';
+                }
+                return 'trailsHere';
+            }
+
             function bearingBetween(from, to) {
                 var lat1 = from.lat * Math.PI / 180, lat2 = to.lat * Math.PI / 180;
                 var apart = (to.lng - from.lng) * Math.PI / 180;
@@ -16324,9 +16355,9 @@ class _Chrome(MacroElement):
                 var pane = map.getPane('trailsHereMarks');
                 if (!pane) {
                     pane = map.createPane('trailsHereMarks');
-                    // Above the tiles and below the overlay pane the dot and the
-                    // ring are drawn in, so nothing here can cover them.
-                    pane.style.zIndex = 395;
+                    // Just under the dot, and over everything else this map
+                    // draws -- the reason is in `herePane` above.
+                    pane.style.zIndex = HERE_MARKS_Z;
                     pane.style.pointerEvents = 'none';
                     L.DomUtil.addClass(pane, 'leaflet-zoom-hide');
                 }
@@ -16542,10 +16573,12 @@ class _Chrome(MacroElement):
                 if (!hereDot) {
                     hereRing = L.circle(where, {radius: spread, color: HERE_BLUE, weight: 1,
                                                 opacity: 0.7, fillColor: HERE_BLUE, fillOpacity: 0.12,
-                                                interactive: false, className: 'trails-here-ring'}).addTo(map);
+                                                interactive: false, pane: herePane(),
+                                                className: 'trails-here-ring'}).addTo(map);
                     hereDot = L.circleMarker(where, {radius: 6, color: '#ffffff', weight: 2.5,
                                                      fillColor: HERE_BLUE, fillOpacity: 1,
-                                                     interactive: false, className: 'trails-here-dot'}).addTo(map);
+                                                     interactive: false, pane: herePane(),
+                                                     className: 'trails-here-dot'}).addTo(map);
                 } else {
                     hereRing.setLatLng(where);
                     hereRing.setRadius(spread);

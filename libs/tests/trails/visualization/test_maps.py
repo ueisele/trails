@@ -6018,13 +6018,13 @@ class TestWhereTheReaderIs:
         ground — the accuracy ring is the only mark here that is metres — so
         they are an SVG placed by hand and turned by an attribute, the idiom the
         direction arrow already uses, re-placed whenever the map moves under it.
-        Below the overlay pane, so neither can cover the dot."""
+        Just under the dot, so neither can cover it."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
         assert "pane = map.createPane('trailsHereMarks');" in html
-        assert "pane.style.zIndex = 395;" in html
+        assert "pane.style.zIndex = HERE_MARKS_Z;" in html
         assert "pane.style.pointerEvents = 'none';" in html
         assert "L.DomUtil.setPosition(hereMarks, map.latLngToLayerPoint(hereAt));" in html
         assert "map.on('zoomend viewreset moveend resize', placeHereMarks);" in html
@@ -6071,3 +6071,37 @@ class TestWhereTheReaderIs:
         assert "var when = position.timestamp || Date.now();" in html
         dropped = html.split("function dropHere() {")[1].split("\n            }")[0]
         assert "hereKept = null;" in dropped
+
+    def test_the_position_is_the_last_thing_drawn_on_the_map(self):
+        """Reported from a phone: with a plan loaded the dot sat *under* the
+        route. It was in the overlay pane at 400 and the route has a pane of its
+        own at 460 — as do the profile's own marks at 450 and 470 — so anything
+        the reader had asked the page to draw covered the one mark that answers
+        a question nothing else on the map can.
+
+        Over the marker pane at 600 as well: a place under the dot is still
+        where it was and can be read by moving a finger, and the dot has nowhere
+        else to be. Below the tooltips and popups, which are answers a reader
+        asked for by touching something."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var HERE_MARKS_Z = 610;" in html
+        assert "var HERE_Z = 620;" in html
+        assert "var pane = map.createPane('trailsHere');" in html
+        assert "pane.style.zIndex = HERE_Z;" in html
+        # Both layers are drawn into it, and neither takes a click: a pane over
+        # the whole map that did would take them from every trail under it.
+        assert "interactive: false, pane: herePane()," in html
+        assert "interactive: false, pane: herePane()," in html.split("hereDot = L.circleMarker")[1]
+        # And over every other pane this page makes, whichever part of it made
+        # them: 350 offline, 450 and 470 for the profile's own marks, 460 for
+        # the planned route. Read out of the source rather than listed here,
+        # because a pane added later would otherwise pass this quietly.
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        made = [int(z) for z in re.findall(r"\.style\.zIndex = (\d+);", source)]
+        assert made, "no pane z-index was found at all"
+        # The popup pane is the exception and is meant to be: a popup is an
+        # answer the reader asked for by touching something.
+        assert sorted(made) == [350, 450, 460, 470, 1050]
