@@ -5816,7 +5816,7 @@ class TestWhereTheReaderIs:
 
         html = fmap.get_root().render()
         assert "hereRing = L.circle(where, {radius: spread" in html
-        assert "var spread = Math.max(1, position.coords.accuracy || 0);" in html
+        assert "var claimed = Math.max(1, position.coords.accuracy || 0);" in html
 
     def test_the_accuracy_is_a_circle_and_not_a_sentence(self):
         """It was said in words as well, once, with the fix that moved the map —
@@ -6030,3 +6030,44 @@ class TestWhereTheReaderIs:
         assert "map.on('zoomend viewreset moveend resize', placeHereMarks);" in html
         # Nothing is drawn before there is anything to say.
         assert "if (!hereDot || (hereBearing === null && hereFacing === null)) {" in html
+
+    def test_a_vaguer_fix_does_not_replace_a_sharper_one(self):
+        """Standing still while the sky thins, the reported radius grows from
+        8 m to 40 m without the reader having moved a step — and a ring redrawn
+        at 40 m says the map has learnt something, when what happened is that it
+        learnt less.
+
+        Kept only while the new claim *contains* the old one, which is exactly
+        the case where the new fix rules out nothing the old one had not already
+        ruled out. Two discs that merely overlap are a reader who has walked
+        off, and then the new fix wins — because keeping the smallest radius
+        ever seen and re-centring it on a later fix 30 m away would be a precise
+        claim about the wrong place."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "function keepingBetter(fix, spread, when) {" in html
+        assert "if (!hereKept || spread <= hereKept.spread) { return null; }" in html
+        assert "return (apart + hereKept.spread <= spread) ? hereKept : null;" in html
+        # What is drawn is the better claim; what is remembered is what was drawn.
+        assert "var kept = keepingBetter(fix, claimed, when);" in html
+        assert "var where = kept ? kept.at : fix;" in html
+        assert "var spread = kept ? kept.spread : claimed;" in html
+        assert "if (!kept) { hereKept = {at: fix, spread: claimed, when: when}; }" in html
+
+    def test_a_kept_fix_does_not_stand_for_ever(self):
+        """Every fix after it says the same place and says it vaguer, so nothing
+        breaks the hold on its own — but a reader walking slowly under a sky
+        that is getting worse would be shown where they were a quarter of an
+        hour ago. And a watch switched off keeps nothing at all: the next one is
+        somebody somewhere else."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var HOLD_MS = 90000;" in html
+        assert "if (when - hereKept.when >= HOLD_MS) { return null; }" in html
+        assert "var when = position.timestamp || Date.now();" in html
+        dropped = html.split("function dropHere() {")[1].split("\n            }")[0]
+        assert "hereKept = null;" in dropped

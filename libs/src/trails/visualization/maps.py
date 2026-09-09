@@ -16284,6 +16284,16 @@ class _Chrome(MacroElement):
             //: the one before is worth believing. Under this the two are one
             //: place seen twice, and a bearing off them spins with the noise.
             var MOVED_M = 10;
+            //: How long a fix kept for its accuracy may go on standing for the
+            //: reader. While the sky thins under somebody who has not moved,
+            //: every fix after it says the same place and says it vaguer -- but
+            //: a reader walking slowly under a sky that is getting worse would
+            //: otherwise be shown where they were a quarter of an hour ago.
+            var HOLD_MS = 90000;
+            //: The fix on the screen, which is not always the last one that
+            //: arrived: where it was, how wide its claim was, and when it was
+            //: made.
+            var hereKept = null;
             var hereWatch = null, hereDot = null, hereRing = null, hereFixes = 0;
             //: The last bearing worth drawing, whether the device reported it or
             //: it was worked out here, and where it was worked out from.
@@ -16438,6 +16448,10 @@ class _Chrome(MacroElement):
                 hereFrom = null;
                 hereMoving = false;
                 hereAt = null;
+                // A watch switched off keeps nothing: the next one is a reader
+                // somewhere else, and the fix held for its accuracy would be a
+                // claim about the place they left.
+                hereKept = null;
             }
 
             function stopHere(said) {
@@ -16482,9 +16496,44 @@ class _Chrome(MacroElement):
                 map.setView(where, Math.max(map.getZoom(), 13));
             }
 
+            // **A worse fix that says nothing new does not replace a better
+            // one.** Standing still while the sky thins, the radius grows from
+            // 8 m to 40 m without the reader having moved a step, and a ring
+            // redrawn at 40 m says the map has learnt something -- when what
+            // happened is that it learnt less. The better fix stands, and the
+            // dot stands with it.
+            //
+            // **Kept only while the new claim contains the old one.** The old
+            // disc lying wholly inside the new one is exactly the case where the
+            // new fix rules out nothing the old one had not already ruled out:
+            // keeping it is then the sharper reading of the same evidence and
+            // not a guess about where somebody has got to. The moment the two
+            // merely overlap -- which is what a reader who has walked off looks
+            // like -- the new fix wins, ring, dot and all.
+            //
+            // Which is also why this cannot be *keep the smallest radius ever
+            // seen*: a small circle re-centred on a later fix 30 m away is a
+            // precise claim about the wrong place, and the one thing a position
+            // on a mountain must never be is confidently wrong.
+            function keepingBetter(fix, spread, when) {
+                if (!hereKept || spread <= hereKept.spread) { return null; }
+                if (when - hereKept.when >= HOLD_MS) { return null; }
+                var far = window.trailsProfilePanel && window.trailsProfilePanel.metresBetween;
+                if (!far) { return null; }
+                var apart = far(hereKept.at.lng, hereKept.at.lat, fix.lng, fix.lat);
+                return (apart + hereKept.spread <= spread) ? hereKept : null;
+            }
+
             function drawHere(position) {
-                var where = L.latLng(position.coords.latitude, position.coords.longitude);
-                var spread = Math.max(1, position.coords.accuracy || 0);
+                var fix = L.latLng(position.coords.latitude, position.coords.longitude);
+                var claimed = Math.max(1, position.coords.accuracy || 0);
+                var when = position.timestamp || Date.now();
+                // What is drawn is the better of the two claims, and what is
+                // remembered is whichever of them was drawn.
+                var kept = keepingBetter(fix, claimed, when);
+                var where = kept ? kept.at : fix;
+                var spread = kept ? kept.spread : claimed;
+                if (!kept) { hereKept = {at: fix, spread: claimed, when: when}; }
                 // **Wherever it is.** This used to refuse a fix outside the
                 // ground the map draws and stop watching -- on the grounds that
                 // a dot on a blank square is not an answer. It is one: it says

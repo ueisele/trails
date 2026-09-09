@@ -3722,6 +3722,97 @@ def which_way_the_reader_faces(page: Any) -> Check:
     )
 
 
+#: The spot the accuracy check stands on, a step off it, and a walk away from
+#: it -- 200 m, which no vaguer fix can explain away.
+STANDING = (65.4400, 13.0400)
+A_STEP = (65.44002, 13.04002)
+A_WALK = (65.4418, 13.0400)
+
+#: What the ring claims: where it is and how far it reaches, in metres, which
+#: is the question here -- ``where_the_reader_is`` asks the other one, how wide
+#: that comes out at this map's scale.
+HERE_RING = """() => {
+  const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
+  let ring = null;
+  map.eachLayer(l => { if (l.options && l.options.className === 'trails-here-ring') { ring = l; } });
+  if (!ring) { return {ring: false}; }
+  return {ring: true, reach: Math.round(ring.getRadius()),
+          off: Math.round(map.distance(ring.getLatLng(), [STANDING_LAT, STANDING_LON]))}; }"""
+
+
+def the_accuracy_only_gets_better(page: Any) -> Check:
+    """A fix that is vaguer than the one before it, at the place it was made.
+
+    **Standing still while the sky thins is not new knowledge.** The radius
+    grows from 20 m to 80 m without the reader having moved a step, and a ring
+    redrawn at 80 m says the map has learnt something when what happened is that
+    it learnt less. The sharper fix stands, and the dot stands with it.
+
+    **But only while the vaguer claim contains it.** The old disc lying wholly
+    inside the new one is the case where the new fix rules out nothing the old
+    one had not: keeping it is the sharper reading of the same evidence. Two
+    hundred metres on, the two only overlap or not at all -- that is a reader
+    who has walked off, and the new fix wins, ring, dot and all. Which is the
+    leg that says this is not *keep the smallest radius ever seen*: that would
+    be a precise claim about the wrong place.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the ring claimed after each of the three fixes
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    reading = HERE_RING.replace("STANDING_LAT", str(STANDING[0])).replace("STANDING_LON", str(STANDING[1]))
+
+    def fix(where: tuple[float, float], spread: int) -> Any:
+        """Hand the page one fix and wait for it to have been drawn."""
+        page.context.set_geolocation({"latitude": where[0], "longitude": where[1], "accuracy": spread})
+        page.wait_for_timeout(2500)
+        return page.evaluate(reading)
+
+    page.context.set_geolocation({"latitude": STANDING[0], "longitude": STANDING[1], "accuracy": 20})
+    page.evaluate(f"() => {MAP_OBJECT}.setView([{STANDING[0]}, {STANDING[1]}], 14)")
+    page.wait_for_timeout(500)
+    page.evaluate("() => window.trailsChrome.here(true)")
+    page.wait_for_function(
+        with_map(
+            """() => { let there = false;
+            __MAP__.eachLayer(l => { if (l.options && l.options.className === 'trails-here-ring') { there = true; } });
+            return there; }"""
+        ),
+        timeout=20_000,
+    )
+    page.wait_for_timeout(600)
+    sharp = page.evaluate(reading)
+    # A step off the spot with four times the radius: the old claim is wholly
+    # inside the new one, so nothing was learnt and nothing changes.
+    vague = fix(A_STEP, 80)
+    # Sharper again, and it is taken at once -- the hold is one-way.
+    again = fix(A_STEP, 12)
+    # And a walk no vaguer fix can explain away.
+    walked = fix(A_WALK, 80)
+    page.evaluate("() => window.trailsChrome.here(false)")
+    page.wait_for_timeout(400)
+    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+
+    return Check(
+        "the accuracy only gets better where you stand",
+        [
+            Reading("the first fix draws what it claims", sharp["reach"], 20),
+            Reading("a vaguer fix at the same place changes nothing", vague["reach"], 20),
+            Reading("and does not move the dot", vague["off"], 0, within=3, note=f"{vague['off']} m off the spot"),
+            Reading("a sharper one is taken at once", again["reach"], 12),
+            Reading("a fix 200 m on is a reader who walked", walked["reach"], 80),
+            Reading("and the ring goes with them", walked["off"], 200, within=25, note=f"{walked['off']} m off the spot"),
+        ],
+    )
+
+
 def the_dark_set(page: Any) -> Check:
     """Two sets of colours for the furniture, and one for the ground.
 
@@ -5357,6 +5448,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(where_the_reader_is(page))
     if wanted(which_way_the_reader_faces):
         checks.append(which_way_the_reader_faces(page))
+    if wanted(the_accuracy_only_gets_better):
+        checks.append(the_accuracy_only_gets_better(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be
