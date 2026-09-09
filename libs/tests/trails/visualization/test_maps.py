@@ -5818,6 +5818,27 @@ class TestWhereTheReaderIs:
         assert "hereRing = L.circle(where, {radius: spread" in html
         assert "var spread = Math.max(1, position.coords.accuracy || 0);" in html
 
+    def test_the_accuracy_is_a_circle_and_not_a_sentence(self):
+        """It was said in words as well, once, with the fix that moved the map —
+        and a line of text is the wrong place for a quantity a map can draw: it
+        is read once and then gone, while the ring is there for as long as the
+        fix is, at the scale everything else here is drawn at.
+
+        The ring stays true to scale and the core does not: 24 m is 12 px at z15
+        and a third of a pixel at z10, so a ring that never shrank would be
+        saying *this uncertain* on a map too coarse to mean it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "hereRing = L.circle(where, {radius: spread" in html
+        assert "hereRing.setRadius(spread);" in html
+        assert "hereDot = L.circleMarker(where, {radius: 6," in html
+        # Nothing says it in words any more; what is still said is why a fix did
+        # not arrive, which is not a quantity.
+        assert "Accurate to about" not in html
+        assert "This browser was told not to share your position." in html
+
     def test_the_map_is_moved_once_and_never_again(self):
         """A map that re-centres on every fix cannot be read while walking: the
         reader pans to look ahead and the next fix takes it back. It moves on the

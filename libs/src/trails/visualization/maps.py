@@ -16352,13 +16352,19 @@ class _Chrome(MacroElement):
                     hereDot.setLatLng(where);
                 }
                 hereFixes += 1;
-                if (hereFixes === 1) {
-                    goThere(where);
-                    // Said once, with the fix that moved the map: an accuracy
-                    // repeated every few seconds is a line a reader stops
-                    // reading, and the circle on the map says it anyway.
-                    saySomething('Accurate to about ' + Math.round(spread) + ' m', false);
-                }
+                if (hereFixes === 1) { goThere(where); }
+                // **The circle is the sentence.** It was said in words as well,
+                // once, with the fix that moved the map -- and a line of text is
+                // the wrong place for a quantity a map can draw: it is read once
+                // and then gone, while the ring is there for as long as the fix
+                // is, at the scale everything else on this map is drawn at.
+                //
+                // Which is also why the ring is left true to scale and the core
+                // is not: 24 m is 12 px at z15 and a third of a pixel at z10, so
+                // a ring that never shrank would be saying *this uncertain* on a
+                // map too coarse to mean it. Hidden under a core of constant
+                // size, it says the one thing that is true there -- better than
+                // this map can draw.
             }
 
             function failedHere(problem) {

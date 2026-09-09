@@ -3557,7 +3557,10 @@ def where_the_reader_is(page: Any) -> Check:
                 within=3,
                 note=f"{after['across']} px across, {after['wanted']} wanted for 24 m",
             ),
-            Reading("and said in words once", "24 m" in after["said"], True, note=after["said"][:60]),
+            # **And not said in words at all.** A line of text is the wrong
+            # place for a quantity a map can draw: it is read once and then
+            # gone, while the ring is there for as long as the fix is.
+            Reading("and not said in words", "24 m" in after["said"], False, note=after["said"][:60] or "nothing said"),
             Reading("the map went to it", moved < 0.05, True, note=str(moved)),
             Reading("the rail says it is watching", lit, "rgb(13, 71, 161)"),
             # **And the menu does not offer it.** It is a mark at the foot on the
