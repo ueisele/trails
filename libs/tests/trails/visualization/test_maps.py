@@ -376,8 +376,8 @@ class TestOfflineWorker:
         reader with the switch on never reaches the network at all: exactly the
         one carrying a stale map for a fortnight."""
         assert 'if (said.trails === "check")' in maps.SERVICE_WORKER
-        assert "function askForNewer()" in maps.SERVICE_WORKER
-        looking = maps.SERVICE_WORKER.split("function askForNewer()")[1].split("\nfunction ")[0]
+        assert "function askForNewer(mark) {" in maps.SERVICE_WORKER
+        looking = maps.SERVICE_WORKER.split("function askForNewer(mark) {")[1].split("\nfunction ")[0]
         # **A HEAD, and only a HEAD.** The page is 5.2 MB over the wire, and
         # spending that to be told nothing had changed is what a reader walking
         # would pay for — so looking costs a few hundred bytes and nothing else.
@@ -429,10 +429,39 @@ class TestOfflineWorker:
         assert "window.trailsWorker.ask = function () {" in html
         asking = html.split("window.trailsWorker.ask = function () {")[1].split("};")[0]
         assert "if (!navigator.onLine) { return false; }" in asking
-        assert "postMessage({trails: 'check'})" in asking
+        # **And it hands in what is on the screen.** The worker holds a cache
+        # and the cache is refreshed behind whatever answer it served, so a
+        # comparison made there is about a page nobody is looking at — which is
+        # how *check for a newer map* came to answer *up to date* to somebody
+        # reading the old one.
+        assert "postMessage(" in asking
+        assert "{trails: 'check', mark: Date.parse(document.lastModified) || null}" in asking
         # And the only listener left on a resume is the wake lock and a redraw.
         for block in html.split("document.addEventListener('visibilitychange'")[1:]:
             assert "postMessage" not in block.split("});")[0]
+
+    def test_the_check_is_about_the_page_on_the_screen(self):
+        """Reported from the phone: *check for a newer map* said the map was up
+        to date while the reader was looking at the old one — and it was telling
+        the truth about the wrong thing. ``pageFor`` writes the fresh body
+        *behind* the answer it serves, so one visit after a publish leaves the
+        cache holding the new map and the screen showing the old, and a
+        comparison made against the cache then says there is nothing to do.
+        There was: reload.
+
+        The page hands in its own identity, which is ``document.lastModified``
+        and is exact through the worker — measured on the published page, where
+        it carries the header and not the moment the page was drawn. Compared as
+        instants, because one of the two is an HTTP date and the other is
+        whatever the browser writes locally. The cache is still compared where
+        the page cannot say: a worker woken with no page to ask, or a server
+        that sends an etag and no ``last-modified``."""
+        assert "function newerThanShown(mark, row, head) {" in maps.SERVICE_WORKER
+        judging = maps.SERVICE_WORKER.split("function newerThanShown(mark, row, head) {")[1].split("\nfunction ")[0]
+        assert 'var said = Date.parse(head.headers.get("last-modified"));' in judging
+        assert "if (mark && said && !isNaN(said)) { return said > mark; }" in judging
+        assert "return movedFrom(row, head);" in judging
+        assert "event.waitUntil(askForNewer(said.mark));" in maps.SERVICE_WORKER
 
 
 class TestOfflinePanel:

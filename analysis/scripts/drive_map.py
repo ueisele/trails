@@ -6015,7 +6015,10 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         before_tiles = first.evaluate(ROWS, "tiles")
         page_path.touch()
         got_before = _Quiet.asked.get(f"/{page_path.name}", 0)
-        first.evaluate("() => { navigator.serviceWorker.controller.postMessage({trails: 'check'}); }")
+        # Through the page's own switch and not a hand-written message: what is
+        # being driven is the button in the offline panel, and the mark it hands
+        # in is half of what makes the answer true.
+        first.evaluate("() => window.trailsWorker.ask()")
         found = True
         try:
             first.wait_for_selector(".trails-newer", timeout=30_000)
@@ -6058,6 +6061,72 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 _Quiet.asked.get(f"/{page_path.name}", 0),
                 got_before,
                 note="the body is what the Reload button spends",
+            )
+        )
+
+        # **And the case as it was reported from the phone.** `pageFor` writes
+        # the fresh body *behind* the answer it serves, so one visit after a
+        # publish leaves the cache holding the new map and the screen showing the
+        # old -- and a check made against the cache then answers *up to date* to
+        # somebody looking at the previous one. There was something to do:
+        # reload.
+        #
+        # **The cache is put into that state by hand rather than by a second
+        # visit.** Here the browser's own cache answers the worker's background
+        # fetch without going to the server -- which is the property measured two
+        # readings above and must not be switched off to drive this one. What is
+        # written is one header of one row: the same one the worker compares, set
+        # to what the server is now serving.
+        page_path.touch()
+        published = int(page_path.stat().st_mtime * 1000)
+        stamped = first.evaluate(
+            """(when) => new Promise(resolve => {
+                const stamp = new Date(when).toUTCString();
+                const ask = indexedDB.open('trails', 2);
+                ask.onsuccess = () => { const db = ask.result;
+                  const store = db.transaction('pages', 'readwrite').objectStore('pages');
+                  const got = store.get(location.href);
+                  got.onsuccess = () => { const row = got.result;
+                    if (!row) { resolve(null); return; }
+                    row.headers = row.headers.map(
+                        pair => pair[0].toLowerCase() === 'last-modified' ? [pair[0], stamp] : pair);
+                    const put = store.put(row, location.href);
+                    put.onsuccess = () => resolve(stamp);
+                    put.onerror = () => resolve(null); };
+                  got.onerror = () => resolve(null); };
+                ask.onerror = () => resolve(null); })""",
+            published,
+        )
+        first.evaluate("() => { const line = document.querySelector('.trails-newer'); if (line) { line.remove(); } }")
+        first.evaluate("() => window.trailsWorker.ask()")
+        about_screen = True
+        try:
+            first.wait_for_selector(".trails-newer", timeout=30_000)
+        except Exception:
+            about_screen = False
+        screen = first.evaluate("() => Date.parse(document.lastModified)")
+        newer.append(
+            Reading(
+                "the cache was made to hold the newer map",
+                bool(stamped),
+                True,
+                note=str(stamped),
+            )
+        )
+        newer.append(
+            Reading(
+                "while the screen still held the older one",
+                screen < published - 1000,
+                True,
+                note=f"{(published - screen) / 1000:.0f} s between the two",
+            )
+        )
+        newer.append(
+            Reading(
+                "and the check answers about the screen, not the cache",
+                about_screen,
+                True,
+                note="a comparison against the cache answers the other way",
             )
         )
 

@@ -470,7 +470,7 @@ function setOffline(on) {
 self.addEventListener("message", function (event) {
     var said = event.data || {};
     if (said.trails === "check") {
-        event.waitUntil(askForNewer());
+        event.waitUntil(askForNewer(said.mark));
         return;
     }
     if (said.trails === "take") {
@@ -512,18 +512,40 @@ function heldPage() {
 // **A HEAD, and nothing else.** The page is 5.2 MB over the wire, and the body
 // is now the reader's decision: what comes back from this is a size to quote
 // them before they spend it.
-function askForNewer() {
+function askForNewer(mark) {
     return heldPage().then(function (both) {
         if (!both) { return null; }
         return fetch(both.url, {method: "HEAD", cache: "reload"}).then(function (head) {
             if (!head || !head.ok) { return tell("checked", {failed: true, newer: false, bytes: null}); }
             return tell("checked", {
                 failed: false,
-                newer: movedFrom(both.row, head),
+                newer: newerThanShown(mark, both.row, head),
                 bytes: Number(head.headers.get("content-length")) || null
             });
         });
     }).catch(function () { return tell("checked", {failed: true, newer: false, bytes: null}); });
+}
+
+// **The question is about the page on the screen and not about the cache.**
+// Reported from the phone: *check for a newer map* answered that the map was up
+// to date while the reader was looking at the old one -- and it was telling the
+// truth about the wrong thing. `pageFor` writes the fresh body *behind* the
+// answer it serves, so one visit after a publish leaves the cache holding the
+// new map and the screen showing the old, and a comparison made against the
+// cache then says there is nothing to do. There was: reload.
+//
+// The page hands in its own identity, which is `document.lastModified` and is
+// exact through the worker -- measured on the published page, where it carries
+// the header and not the moment it was drawn. Compared as instants rather than
+// as strings, because one of the two is an HTTP date and the other is whatever
+// the browser writes locally.
+//
+// The cache is still compared where the page cannot say: a worker woken with no
+// page to ask, or a server that sends an etag and no `last-modified`.
+function newerThanShown(mark, row, head) {
+    var said = Date.parse(head.headers.get("last-modified"));
+    if (mark && said && !isNaN(said)) { return said > mark; }
+    return movedFrom(row, head);
 }
 
 // **The body, because the reader asked for it.** The HEAD runs again rather
@@ -1343,7 +1365,15 @@ class _ServiceWorker(MacroElement):
                     if (!navigator.onLine) { return false; }
                     if (!navigator.serviceWorker.controller) { return false; }
                     window.trailsWorker.checking = true;
-                    navigator.serviceWorker.controller.postMessage({trails: 'check'});
+                    // **What is on the screen, handed in with the question.**
+                    // The worker cannot see it: it holds a cache, and the cache
+                    // is refreshed behind whatever answer it served, so a
+                    // comparison made there is about a page nobody is looking
+                    // at. `document.lastModified` is this page's own — measured
+                    // through the worker, where it still carries the published
+                    // `Last-Modified` and not the time it was drawn.
+                    navigator.serviceWorker.controller.postMessage(
+                        {trails: 'check', mark: Date.parse(document.lastModified) || null});
                     return true;
                 };
 
