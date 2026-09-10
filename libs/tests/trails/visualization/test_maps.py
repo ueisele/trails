@@ -3693,7 +3693,7 @@ class TestProfilePanel:
         assert "return entry.source || entry.label || 'this line';" in html
         assert "return sourceKey(selected.className) === entry.key;" in html
         assert "var CHOICES_MAX = 6;" in html
-        assert "choices = choices.slice(0, CHOICES_MAX);" in html
+        assert "choices = choices.slice(0, route ? CHOICES_MAX - 1 : CHOICES_MAX);" in html
 
     def test_the_planned_route_is_a_choice_like_any_other(self, group):
         """Reported from a phone: leaving plan mode leaves the route drawn and
@@ -3703,32 +3703,51 @@ class TestProfilePanel:
         trail under it; the only way back was switching plan mode on and off
         again, which is a mode change to look at something.
 
-        It is ranked with the rest and not pinned: `onRoute` answers in metres,
-        so the gap is put back into pixels and one sort decides the whole row.
-        Not offered while plan mode is on — there the panel is showing it
-        already, and a tap means *put a point here*."""
+        **Last in the row, however near it ran.** It is not one of this map's
+        sources and it lies on them by construction — it was routed along them —
+        so ranking it by distance dropped it into the middle of the row and
+        moved the sources a reader was choosing between. Not offered at all
+        while plan mode is on: there the panel is showing it already, and a tap
+        means *put a point here*.
+
+        **And taking it makes the line let go.** Reported: the panel changed to
+        the route while the trail underneath stayed widened and the rest of the
+        map stayed faded — and the two being out of step then made every second
+        press of that trail's chip mark nothing at all."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "if (!planNow && window.trailsPlan && window.trailsPlan.onRoute) {" in html
-        assert "var near = window.trailsPlan.onRoute(at.lat, at.lng);" in html
-        assert "choices.push({gap: near.away / perPixel, plan: true, key: 'plan'," in html
+        assert "? window.trailsPlan.onRoute(at.lat, at.lng) : null;" in html
+        assert "choices = choices.slice(0, route ? CHOICES_MAX - 1 : CHOICES_MAX);" in html
+        assert "choices.push({gap: Infinity, plan: true, key: 'plan', className: null," in html
         assert "if (entry.plan) { return !!selected.composed; }" in html
+        assert "if (window.trailsHighlight) { window.trailsHighlight.clear(); }" in html
         assert "if (window.trailsPlan && window.trailsPlan.show) { window.trailsPlan.show(); }" in html
+        # The plan is worked out at all only where plan mode is off.
+        assert "var route = (!planNow && window.trailsPlan && window.trailsPlan.onRoute)" in html
 
     def test_pressing_a_chip_is_the_click_it_stands_for(self, group):
         """Everything a click on that line does — the highlight widening it, its
         own details arriving, the panel selecting it — is already wired to that
         event, and a second path through them is a second set of rules to keep
-        in step. The point the reader tapped travels with it, so the row comes
-        back the same rather than being rebuilt from where the chip was."""
+        in step.
+
+        **And it carries no point, which is what keeps the row still.** The list
+        came from a measurement to the *paint*, and selecting a line widens it
+        by four pixels and brings it to the front: re-asking after the press
+        moved the pressed chip to the head of the row, under the reader's
+        finger, every time. Reported from a phone, and the row belongs to the
+        tap that made it rather than to what is selected now."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "entry.layer.fire('click', {latlng: entry.at, layer: entry.layer});" in html
+        assert "entry.layer.fire('click', {layer: entry.layer});" in html
         assert "if (litChoice(entry)) { return; }" in html
+        # Which is only sound because the list is taken at the tap: a click with
+        # no point on it leaves the row alone.
+        assert "if (event && event.latlng) { gather(event.latlng); }" in html
 
 
 class TestPlanMode:

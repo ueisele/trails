@@ -3931,6 +3931,10 @@ THE_CHOICES = """() => { const row = document.querySelector('.trails-profile-pic
   return {shown: !!row && row.style.display !== 'none',
           chips: chips.map(c => c.textContent),
           lit: chips.filter(c => c.getAttribute('aria-pressed') === 'true').map(c => c.textContent),
+          // The map's own selection beside the panel's, because the two being
+          // out of step is what was reported: the row said one thing and the
+          // widened line under it said another.
+          highlighted: window.trailsHighlight ? window.trailsHighlight.selected() : null,
           name: (document.querySelector('.trails-profile-name') || {}).textContent || ''}; }"""
 
 
@@ -3962,6 +3966,17 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
     page.evaluate("() => window.trailsChrome.coarse(true)")
     page.wait_for_timeout(400)
+
+    def press_chip(text: str) -> Any:
+        """Press the chip with that name, and read the row it left behind."""
+        page.evaluate(
+            """(text) => { const chips = [...document.querySelectorAll('.trails-profile-pick')];
+            const one = chips.filter(c => c.textContent === text)[0];
+            if (one) { one.click(); } }""",
+            text,
+        )
+        page.wait_for_timeout(1400)
+        return page.evaluate(THE_CHOICES)
 
     def tap_at(where: dict[str, float]) -> None:
         """Tap the map where a latitude and longitude say, not where a pixel does."""
@@ -4064,13 +4079,18 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
     if on_route:
         tap_at(on_route)
         taken = page.evaluate(THE_CHOICES)
-        page.evaluate(
-            """() => { const chips = [...document.querySelectorAll('.trails-profile-pick')];
-            const plan = chips.filter(c => c.textContent === 'Planned route')[0];
-            if (plan) { plan.click(); } }"""
-        )
-        page.wait_for_timeout(1500)
-        back = page.evaluate(THE_CHOICES)
+        back = press_chip("Planned route")
+
+    # **Back and forth, because that is where it came apart.** Reported: the
+    # order moved when another source was taken, the trail stayed highlighted
+    # under the route, and from there every second press marked nothing at all.
+    # Six presses, and every one of them is read.
+    steps = []
+    if taken["chips"]:
+        first = taken["chips"][0]
+        second = taken["chips"][1] if len(taken["chips"]) > 2 else first
+        for which in ("Planned route", first, "Planned route", second, "Planned route", first):
+            steps.append(press_chip(which))
 
     page.evaluate("() => window.trailsChrome.coarse(false)")
     page.set_viewport_size({"width": 1400, "height": 900})
@@ -4099,6 +4119,25 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
             Reading("and the tap itself took a line, as it always did", taken["lit"] != ["Planned route"], True, note=taken["name"][:40]),
             Reading("pressing the chip gives the route back", back["name"], "planned route"),
             Reading("and says so", back["lit"], ["Planned route"]),
+            # The three the reader reported, over six presses back and forth.
+            Reading("the planned route is last in the row", (taken["chips"] or [""])[-1], "Planned route"),
+            Reading(
+                "the row keeps its order while chips are pressed",
+                [step["chips"] for step in steps if step["chips"] != taken["chips"]],
+                [],
+                note=f"{len(steps)} presses",
+            ),
+            Reading("exactly one chip is lit at every step", sorted({len(step["lit"]) for step in steps}), [1]),
+            Reading(
+                "taking the route makes the line let go",
+                [step["highlighted"] for step in steps if step["lit"] == ["Planned route"]],
+                [None, None, None],
+            ),
+            Reading(
+                "and taking a line takes it back",
+                all(step["highlighted"] for step in steps if step["lit"] != ["Planned route"]),
+                True,
+            ),
         ],
     )
 

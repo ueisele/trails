@@ -7311,27 +7311,26 @@ class _ProfilePanel(MacroElement):
                     if (!key || seen[key]) { return; }
                     seen[key] = true;
                     choices.push({gap: found.gap, key: key, className: className, layer: found.layer,
-                                  at: at, label: labelOf(found.layer, className),
+                                  label: labelOf(found.layer, className),
                                   source: figures[className].source || ''});
                 });
-                // The planned route, measured the same way and ranked with the
-                // rest. `onRoute` answers in metres, which is what plan mode
-                // needs and not what a reach is: the gap is put back into pixels
-                // here so that one sort decides the whole row.
+                // **The planned route last, however near it ran.** It is not one
+                // of this map's sources, and it lies on them by construction --
+                // it was routed along them -- so ranking it by distance dropped
+                // it into the middle of the row and moved the sources a reader
+                // was choosing between. Its place is a fact about what it is and
+                // not about where the finger landed.
                 //
-                // Not while plan mode is on -- there the panel is showing the
-                // route already, and a tap means *put a point here*.
-                if (!planNow && window.trailsPlan && window.trailsPlan.onRoute) {
-                    var near = window.trailsPlan.onRoute(at.lat, at.lng);
-                    if (near) {
-                        var perPixel = 40075016.686 * Math.cos(at.lat * Math.PI / 180) /
-                            Math.pow(2, map.getZoom() + 8);
-                        choices.push({gap: near.away / perPixel, plan: true, key: 'plan',
-                                      className: null, label: 'Planned route', source: 'Planned route'});
-                    }
-                }
+                // Not offered while plan mode is on: there the panel is showing
+                // it already, and a tap means *put a point here*.
+                var route = (!planNow && window.trailsPlan && window.trailsPlan.onRoute)
+                    ? window.trailsPlan.onRoute(at.lat, at.lng) : null;
                 choices.sort(function (a, b) { return a.gap - b.gap; });
-                choices = choices.slice(0, CHOICES_MAX);
+                choices = choices.slice(0, route ? CHOICES_MAX - 1 : CHOICES_MAX);
+                if (route) {
+                    choices.push({gap: Infinity, plan: true, key: 'plan', className: null,
+                                  label: 'Planned route', source: 'Planned route'});
+                }
             }
 
             // The source, because that is what the row is asking about. A line
@@ -7351,20 +7350,34 @@ class _ProfilePanel(MacroElement):
             }
 
             function takeChoice(entry) {
+                if (litChoice(entry)) { return; }
                 if (entry.plan) {
+                    // **The line that was chosen has to let go.** Reported: the
+                    // panel changed to the route and the trail underneath it
+                    // stayed widened and the rest of the map stayed faded --
+                    // and worse, the two were then out of step, so pressing
+                    // that trail's chip again cleared the highlight instead of
+                    // taking it and every other press marked nothing. The
+                    // highlight is a selection made by clicking and this is a
+                    // selection; one of them has to go.
+                    if (window.trailsHighlight) { window.trailsHighlight.clear(); }
                     if (window.trailsPlan && window.trailsPlan.show) { window.trailsPlan.show(); }
                     return;
                 }
-                if (litChoice(entry)) { return; }
-                // **Fired as the click it stands for**, with the point the tap
-                // landed on. Everything a click on that line does -- the
-                // highlight widening it, its own details arriving, this panel
-                // selecting it -- is already wired to that event, and a second
-                // path through them is a second set of rules to keep in step.
-                // The point travels so that the row comes back the same: the
-                // list is worked out again from where the reader tapped, not
-                // from where the chip was.
-                entry.layer.fire('click', {latlng: entry.at, layer: entry.layer});
+                // **Fired as the click it stands for.** Everything a click on
+                // that line does -- the highlight widening it, its own details
+                // arriving, this panel selecting it -- is already wired to that
+                // event, and a second path through them is a second set of
+                // rules to keep in step.
+                //
+                // **And without the point it was tapped at**, which is what
+                // keeps the row still. The list came from a measurement to the
+                // paint, and selecting a line widens it by four pixels and
+                // brings it to the front: measured, re-asking after the press
+                // moved the pressed chip to the head of the row, under the
+                // reader's finger, every single time. The row belongs to the
+                // tap that made it and not to what is selected now.
+                entry.layer.fire('click', {layer: entry.layer});
             }
 
             function paintChoices() {
