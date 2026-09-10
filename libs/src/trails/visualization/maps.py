@@ -2036,6 +2036,28 @@ class _TouchReach(MacroElement):
                 }
             });
 
+            // **Everything the tap reached, nearest first.** The loop above
+            // measures the gap to every line in order to pick one; *what else
+            // was under there* is the same measurement asked a second way, and
+            // it has to be the same one -- a row of choices offering a line the
+            // tap could never have hit would be worse than no row.
+            //
+            // Not gated on a coarse pointer, although the winner still is:
+            // which line a click *takes* is Leaflet's business under a mouse and
+            // stays so, while six sources through one valley are no easier to
+            // aim at with a pointer than with a thumb.
+            function near(point) {
+                var found = [];
+                map.eachLayer(function (layer) {
+                    if (!layer.options || !layer.options.interactive) { return; }
+                    var gap = away(layer, point);
+                    if (gap === null || gap > FINGER) { return; }
+                    found.push({layer: layer, gap: gap});
+                });
+                found.sort(function (a, b) { return a.gap - b.gap; });
+                return found;
+            }
+
             // Exposed the way the graph and the highlight are: so a browser
             // check reads the reach and drives a tap at a measured distance
             // rather than guessing at one, and so plan mode -- which takes
@@ -2045,6 +2067,7 @@ class _TouchReach(MacroElement):
                 finger: FINGER,
                 slop: function () { return coarse() ? SLOP : MOUSE_SLOP; },
                 away: away,
+                near: near,
                 recount: apply
             };
         })();
@@ -5140,6 +5163,32 @@ class _ProfilePanel(MacroElement):
             // changes: three renderings of one number, which is the only way a
             // reader who swiped and a reader who pressed end up in the same
             // place.
+            // ---- what else the tap reached ----------------------------------
+            // **Six sources can map one valley, and the tap takes the nearest
+            // paint.** That is the right rule -- `_TouchReach` says why -- but
+            // it is not an answer the reader gave: two lines a pixel apart are
+            // a coin toss, and until now the coin was the whole of the choice.
+            //
+            // So a tap keeps what else it was within reach of, nearest first,
+            // and this row offers them by the name of the source they came
+            // from. **Only where there was a choice**: a row that is always
+            // there costs a line of a 390 px panel for the ordinary tap that
+            // hit one line and meant it.
+            //
+            // The planned route is in this row and can be in no other: its line
+            // is drawn in a pane that takes no clicks at all -- deliberately, so
+            // that it never stands between a reader and the trail under it --
+            // so once a reader has chosen a line, this is the only way back to
+            // it that is not switching plan mode on and off again.
+            var choices = [];
+            var picks = document.createElement('div');
+            picks.className = 'trails-profile-picks';
+            picks.style.cssText = 'display:none;gap:4px;align-items:center;padding:0 0 5px;' +
+                // Scrolled rather than wrapped, for the reason the heading is:
+                // a second row is the defect this panel was cured of, and six
+                // sources will not fit on 390 px however short their names are.
+                'overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none';
+
             var pill = document.createElement('div');
             pill.className = 'trails-profile-pages';
             pill.style.cssText = 'flex:none;display:none;border:1px solid var(--trails-rule);' +
@@ -6031,6 +6080,10 @@ class _ProfilePanel(MacroElement):
                 hold.appendChild(pips);
                 box.appendChild(hold);
                 box.appendChild(pagesBox);
+                // Over the row at the foot and under the pages: the row is the
+                // part that never moves, and what a tap found is about the
+                // selection that row names.
+                box.appendChild(picks);
                 box.appendChild(header);
                 // Clicking and dragging inside the panel must not reach the map;
                 // scrolling must, or the map freezes under an open panel.
@@ -7221,6 +7274,136 @@ class _ProfilePanel(MacroElement):
                 return (figures[className] || {}).id;
             }
 
+            //: How many chips the row may hold. Four fit across 390 px and
+            //: the rest are scrolled to; past six a reader is reading a list
+            //: rather than making a choice, and the ones cut off are the
+            //: furthest from the finger.
+            var CHOICES_MAX = 6;
+
+            // What a line is *one of*, which is the question a bundle raises.
+            // The figures carry it; a line whose source went missing stands for
+            // itself, and its own name is then the key as well as the label.
+            function sourceKey(className) {
+                var figure = className ? figures[className] : null;
+                if (!figure) { return null; }
+                return figure.source || figure.name || className;
+            }
+
+            // **Everything that tap could have meant**, in the order the reach
+            // ranks them: the same measurement that picked the winner, asked
+            // for the whole list. A line with no figures is not offered --
+            // there would be nothing to show for it.
+            //
+            // **One chip per source and not one per line.** Measured at the
+            // busiest crossing on this map: thirteen lines within one finger,
+            // eight of them FKB fragments of the same path, and a row of
+            // thirteen chips reading `fkb-373967-7264149-8` is not a choice
+            // anybody can make. *Which source* is the question that was asked;
+            // the nearest line of each is the answer, and it is the line the tap
+            // would have taken anyway.
+            function gather(at) {
+                choices = [];
+                if (!at || !window.trailsReach || !window.trailsReach.near) { return; }
+                var seen = {};
+                window.trailsReach.near(map.latLngToLayerPoint(at)).forEach(function (found) {
+                    var className = found.layer.options.className;
+                    var key = sourceKey(className);
+                    if (!key || seen[key]) { return; }
+                    seen[key] = true;
+                    choices.push({gap: found.gap, key: key, className: className, layer: found.layer,
+                                  at: at, label: labelOf(found.layer, className),
+                                  source: figures[className].source || ''});
+                });
+                // The planned route, measured the same way and ranked with the
+                // rest. `onRoute` answers in metres, which is what plan mode
+                // needs and not what a reach is: the gap is put back into pixels
+                // here so that one sort decides the whole row.
+                //
+                // Not while plan mode is on -- there the panel is showing the
+                // route already, and a tap means *put a point here*.
+                if (!planNow && window.trailsPlan && window.trailsPlan.onRoute) {
+                    var near = window.trailsPlan.onRoute(at.lat, at.lng);
+                    if (near) {
+                        var perPixel = 40075016.686 * Math.cos(at.lat * Math.PI / 180) /
+                            Math.pow(2, map.getZoom() + 8);
+                        choices.push({gap: near.away / perPixel, plan: true, key: 'plan',
+                                      className: null, label: 'Planned route', source: 'Planned route'});
+                    }
+                }
+                choices.sort(function (a, b) { return a.gap - b.gap; });
+                choices = choices.slice(0, CHOICES_MAX);
+            }
+
+            // The source, because that is what the row is asking about. A line
+            // whose source went missing says whatever it can about itself.
+            function choiceName(entry) {
+                return entry.source || entry.label || 'this line';
+            }
+
+            // Which chip is the one being shown. **By source and not by line**:
+            // the chip stands for a source, and the fragment of it the reader is
+            // looking at may not be the fragment the chip would select -- one
+            // path drawn in eight pieces is eight class names and one answer.
+            function litChoice(entry) {
+                if (!selected) { return false; }
+                if (entry.plan) { return !!selected.composed; }
+                return sourceKey(selected.className) === entry.key;
+            }
+
+            function takeChoice(entry) {
+                if (entry.plan) {
+                    if (window.trailsPlan && window.trailsPlan.show) { window.trailsPlan.show(); }
+                    return;
+                }
+                if (litChoice(entry)) { return; }
+                // **Fired as the click it stands for**, with the point the tap
+                // landed on. Everything a click on that line does -- the
+                // highlight widening it, its own details arriving, this panel
+                // selecting it -- is already wired to that event, and a second
+                // path through them is a second set of rules to keep in step.
+                // The point travels so that the row comes back the same: the
+                // list is worked out again from where the reader tapped, not
+                // from where the chip was.
+                entry.layer.fire('click', {latlng: entry.at, layer: entry.layer});
+            }
+
+            function paintChoices() {
+                var wanted = selected && choices.length > 1;
+                var was = picks.style.display;
+                picks.innerHTML = '';
+                picks.style.display = wanted ? 'flex' : 'none';
+                if (wanted) {
+                    choices.forEach(function (entry) {
+                        var lit = litChoice(entry);
+                        var chip = document.createElement('button');
+                        chip.type = 'button';
+                        chip.className = 'trails-profile-pick' + (lit ? ' trails-profile-pick-on' : '');
+                        chip.textContent = choiceName(entry);
+                        chip.title = entry.label || entry.source;
+                        chip.setAttribute('aria-pressed', String(lit));
+                        chip.style.cssText = 'font:inherit;font-size:11px;padding:3px 9px;flex:none;' +
+                            'max-width:44%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+                            'border:1px solid var(--trails-rule);border-radius:10px;cursor:pointer;' +
+                            'background:' + (lit ? 'var(--trails-accent)' : 'var(--trails-solid)') + ';' +
+                            'color:' + (lit ? 'var(--trails-on-accent)' : 'var(--trails-ink-2)');
+                        chip.addEventListener('click', function (event) {
+                            event.stopPropagation();
+                            takeChoice(entry);
+                        });
+                        picks.appendChild(chip);
+                    });
+                }
+                // The panel is a different height with this row than without it,
+                // and two things measure that height: the pages cap themselves
+                // against it and the chrome places everything else around it.
+                // Only when it actually appears or goes, or every repaint would
+                // ask the chrome to lay the page out again.
+                if (was !== picks.style.display) {
+                    sizePages();
+                    if (window.trailsChrome && window.trailsChrome.placed) { window.trailsChrome.placed(); }
+                }
+            }
+
             // **What the heading says and what the sheet says are one list.**
             // The heading takes the first three -- how far, how much climb, how
             // steep at worst, which is what a walk is decided on -- and the
@@ -7288,6 +7471,7 @@ class _ProfilePanel(MacroElement):
                 paintSummary();
                 showLicences();
                 paintPages();
+                paintChoices();
             }
 
             function say(message) {
@@ -7297,6 +7481,7 @@ class _ProfilePanel(MacroElement):
                 paintSummary();
                 showLicences();
                 paintPages();
+                paintChoices();
             }
 
             // What a composed series says about itself. The distance is the
@@ -7507,7 +7692,7 @@ class _ProfilePanel(MacroElement):
                 // would throw away the page that had just arrived. Driven, plan
                 // mode showed the table of whatever line had been chosen before
                 // it, on the page where the points belong.
-                if (given === null) { detailHtml = null; }
+                if (given === null) { detailHtml = null; choices = []; }
                 selected = given;
                 // A window belongs to the chain it was opened on. Carried over,
                 // it would open the panel somewhere in the middle of whatever
@@ -7810,9 +7995,15 @@ class _ProfilePanel(MacroElement):
             groups.forEach(function (group) {
                 group.eachLayer(function (layer) {
                     if (!layer.setStyle || !layer.options.className) { return; }
-                    layer.on('click', function () {
+                    layer.on('click', function (event) {
                         if (suspended) { return; }
                         var className = layer.options.className;
+                        // Where the tap landed decides what else it could have
+                        // meant, so the list is taken before anything is shown.
+                        // A click fired without one -- a chip pressing the line
+                        // it stands for -- leaves the list alone, which is what
+                        // keeps the row still under a reader's finger.
+                        if (event && event.latlng) { gather(event.latlng); }
                         show(selected && selected.className === className ? null : className, labelOf(layer, className));
                     });
                 });
@@ -12797,6 +12988,15 @@ class _PlanMode(MacroElement):
                 // chrome owns whether the profile is standing and this panel
                 // draws that state, so the chrome has to be able to say so.
                 repaint: refresh,
+                // **Back onto the panel without going through plan mode.**
+                // Reported: leaving plan mode leaves the route drawn and on the
+                // panel, which is right -- and then one tap on any other line
+                // took the panel for good, because this route's line is in a
+                // pane that takes no clicks. The panel's row of choices offers
+                // it wherever it runs and this is what that press calls;
+                // switching plan mode on and off again was the only way back,
+                // and it is a mode change to look at something.
+                show: function () { present(); },
                 // What is kept in this browser, so a check can read it without
                 // knowing the key, and what writing it cost.
                 kept: function () {
@@ -15771,6 +15971,14 @@ class _Chrome(MacroElement):
                 '.trails-profile-hold { min-height: 16px; }',
                 '.trails-coarse .trails-profile-hold { min-height: 30px; padding-top: 8px; }',
                 '.trails-coarse .trails-profile-undo { min-height: 40px; }',
+                // The row of choices is a row of targets, and it is only there
+                // when there is something to hit. 32 and not 40: it stands over
+                // the row at the foot rather than in it, and every pixel it
+                // takes is a pixel off the curve.
+                '.trails-coarse .trails-profile-pick { min-height: 32px; }',
+                // The scrollbar is furniture on a strip 26 px tall; the row
+                // scrolls with a thumb and says so by clipping.
+                '.trails-profile-picks::-webkit-scrollbar { display: none; }',
                 // **16px is not a taste.** iOS Safari zooms the whole page when
                 // a field smaller than that takes focus, which on a map is the
                 // reader losing their place to type a name.

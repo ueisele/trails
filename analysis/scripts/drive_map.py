@@ -3925,6 +3925,184 @@ def the_position_is_over_the_plan(page: Any) -> Check:
     )
 
 
+#: What the row of choices says, read off the chips themselves.
+THE_CHOICES = """() => { const row = document.querySelector('.trails-profile-picks');
+  const chips = [...document.querySelectorAll('.trails-profile-pick')];
+  return {shown: !!row && row.style.display !== 'none',
+          chips: chips.map(c => c.textContent),
+          lit: chips.filter(c => c.getAttribute('aria-pressed') === 'true').map(c => c.textContent),
+          name: (document.querySelector('.trails-profile-name') || {}).textContent || ''}; }"""
+
+
+def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
+    """Where several sources map one stretch, which one a tap took.
+
+    **The rule is *nearest paint wins*, and it is not an answer the reader
+    gave.** Two lines a pixel apart are a coin toss; measured at the busiest
+    crossing on this map, thirteen lines lie within one finger of a single
+    point. So a tap keeps everything it was within reach of and the row at the
+    foot offers them -- **one chip per source**, because eight of those thirteen
+    are FKB fragments of the same path and a row of eight chips reading
+    `fkb-373967-7264149-8` is not a choice anybody can make.
+
+    **And the planned route is one of them.** Reported from a phone: leaving
+    plan mode leaves the route drawn and on the panel, and then one tap on any
+    other line took the panel for good -- the route's own line is in a pane that
+    takes no clicks, so nothing could give it back but switching plan mode on
+    and off again.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the row offered at a crossing, at a lonely line, and on the route
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.wait_for_timeout(400)
+
+    def tap_at(where: dict[str, float]) -> None:
+        """Tap the map where a latitude and longitude say, not where a pixel does."""
+        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 15, {animate: false})"), where)
+        page.wait_for_timeout(700)
+        spot = page.evaluate(
+            with_map(
+                """(at) => { const pt = __MAP__.latLngToContainerPoint([at.lat, at.lng]);
+                const box = __MAP__.getContainer().getBoundingClientRect();
+                return {x: box.left + pt.x, y: box.top + pt.y}; }"""
+            ),
+            where,
+        )
+        page.mouse.click(spot["x"], spot["y"])
+        page.wait_for_timeout(1500)
+
+    # **The busiest point on this map, found rather than typed in.** A crossing
+    # written down here would be a crossing until the sources next move.
+    crossing = page.evaluate(
+        with_map(
+            """() => { const map = __MAP__;
+            const lines = []; map.eachLayer(l => { if (l.options && l.options.className && l._latlngs) { lines.push(l); } });
+            let best = {n: 0, at: null};
+            for (let i = 0; i < lines.length; i += 37) {
+              const pts = lines[i].getLatLngs();
+              const at = pts[Math.floor(pts.length / 2)];
+              if (!at || !at.lat) { continue; }
+              map.setView(at, 15, {animate: false});
+              const found = window.trailsReach.near(map.latLngToLayerPoint(at));
+              if (found.length > best.n) { best = {n: found.length, at: {lat: at.lat, lng: at.lng}}; } }
+            return best; }"""
+        )
+    )
+    busy: dict[str, Any] = {"shown": False, "chips": [], "lit": [], "name": ""}
+    switched: dict[str, Any] = dict(busy)
+    if crossing["at"]:
+        tap_at(crossing["at"])
+        busy = page.evaluate(THE_CHOICES)
+        # The second chip pressed, which is the whole of the point: another
+        # source for the same stretch, without a second tap on the map.
+        page.evaluate(
+            """() => { const chips = [...document.querySelectorAll('.trails-profile-pick')];
+            if (chips[1]) { chips[1].click(); } }"""
+        )
+        page.wait_for_timeout(1500)
+        switched = page.evaluate(THE_CHOICES)
+
+    # A line nothing else runs beside: no row at all, because there is no choice.
+    lonely = page.evaluate(
+        with_map(
+            """() => { const map = __MAP__;
+            const lines = []; map.eachLayer(l => { if (l.options && l.options.className && l._latlngs) { lines.push(l); } });
+            for (const line of lines) { const pts = line.getLatLngs();
+              const at = pts[Math.floor(pts.length / 2)];
+              if (!at || !at.lat) { continue; }
+              map.setView(at, 16, {animate: false});
+              if (window.trailsReach.near(map.latLngToLayerPoint(at)).length === 1) { return {lat: at.lat, lng: at.lng}; } }
+            return null; }"""
+        )
+    )
+    alone: dict[str, Any] = {"shown": True, "chips": []}
+    if lonely:
+        tap_at(lonely)
+        alone = page.evaluate(THE_CHOICES)
+
+    # And the planned route, offered wherever it runs. The chain is picked with
+    # plan mode off, because while it is on the panel stops answering clicks and
+    # selecting one selects nothing -- and its ground is read before plan mode
+    # is asked for, because switching it on clears the selection.
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(500)
+    laid = select(page, LONG_CHAIN)
+    places = page.evaluate(
+        """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
+        if (!shape) { return null; }
+        return [0.3, 0.6].map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
+    )
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+    for at in places or []:
+        page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
+        settled(page)
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(1200)
+    left = page.evaluate(THE_CHOICES)
+    on_route = page.evaluate(
+        """() => { const shape = window.trailsPlan.geometry();
+        if (!shape.lat.length) { return null; }
+        const at = Math.floor(shape.lat.length / 2);
+        return {lat: shape.lat[at], lng: shape.lon[at]}; }"""
+    )
+    taken: dict[str, Any] = {"chips": [], "lit": [], "name": ""}
+    back: dict[str, Any] = {"chips": [], "lit": [], "name": ""}
+    if on_route:
+        tap_at(on_route)
+        taken = page.evaluate(THE_CHOICES)
+        page.evaluate(
+            """() => { const chips = [...document.querySelectorAll('.trails-profile-pick')];
+            const plan = chips.filter(c => c.textContent === 'Planned route')[0];
+            if (plan) { plan.click(); } }"""
+        )
+        page.wait_for_timeout(1500)
+        back = page.evaluate(THE_CHOICES)
+
+    page.evaluate("() => window.trailsChrome.coarse(false)")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+
+    return Check(
+        "a tap that could have meant several lines",
+        [
+            Reading("the busiest point has several lines under one finger", crossing["n"] >= 3, True, note=f"{crossing['n']} within one finger"),
+            Reading("and the row offers them", busy["shown"], True),
+            # One per source: the chips are source names and not chain ids, and
+            # there are fewer of them than there were lines.
+            Reading("one chip per source", len(busy["chips"]) < crossing["n"], True, note=", ".join(busy["chips"])),
+            Reading("nothing is offered twice", len(set(busy["chips"])), len(busy["chips"])),
+            Reading("no chip is a chain id", [c for c in busy["chips"] if "-" in c and c[0].islower()], []),
+            Reading("the one being shown is lit", len(busy["lit"]), 1, note=", ".join(busy["lit"])),
+            # Pressing another one selects it, without a second tap on the map.
+            Reading("pressing another takes it", switched["lit"] and switched["lit"] != busy["lit"], True, note=", ".join(switched["lit"])),
+            Reading("and the panel followed", switched["name"] != busy["name"], True, note=switched["name"][:40]),
+            # And where there is nothing to choose between, no row.
+            Reading("a lonely line gets no row", alone["shown"], False),
+            # The planned route, which can be reached no other way.
+            Reading("a route was laid down to ask against", laid and bool(on_route), True),
+            Reading("leaving plan mode leaves it on the panel", left["name"], "planned route"),
+            Reading("a tap on it offers it beside the lines under it", "Planned route" in taken["chips"], True, note=", ".join(taken["chips"])),
+            Reading("and the tap itself took a line, as it always did", taken["lit"] != ["Planned route"], True, note=taken["name"][:40]),
+            Reading("pressing the chip gives the route back", back["name"], "planned route"),
+            Reading("and says so", back["lit"], ["Planned route"]),
+        ],
+    )
+
+
 def the_dark_set(page: Any) -> Check:
     """Two sets of colours for the furniture, and one for the ground.
 
@@ -5564,6 +5742,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_accuracy_only_gets_better(page))
     if wanted(the_position_is_over_the_plan):
         checks.append(the_position_is_over_the_plan(page))
+    if wanted(a_tap_that_could_have_meant_several_lines):
+        checks.append(a_tap_that_could_have_meant_several_lines(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be

@@ -2895,7 +2895,7 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "if (given === null) { detailHtml = null; }" in html
+        assert "if (given === null) { detailHtml = null; choices = []; }" in html
 
     def test_a_place_takes_the_panel_over_whole(self, group):
         """Tapping a place while a line was chosen left the line's curve standing
@@ -3635,6 +3635,100 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         assert "var open = false;" in fmap.get_root().render()
+
+    def test_a_tap_keeps_what_else_it_reached(self, group):
+        """Six sources can map one valley and the tap takes the nearest paint —
+        the right rule, and not an answer the reader gave: two lines a pixel
+        apart are a coin toss. The tap now keeps everything within the same
+        reach that picked the winner, ranked the same way, and the row at the
+        foot offers them.
+
+        The same measurement and not a second one: a row offering a line the tap
+        could never have hit would be worse than no row at all."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "function near(point) {" in html
+        assert "near: near," in html
+        assert "window.trailsReach.near(map.latLngToLayerPoint(at)).forEach(function (found) {" in html
+        assert "if (event && event.latlng) { gather(event.latlng); }" in html
+        # A line with nothing to show for it is not offered.
+        assert "if (!key || seen[key]) { return; }" in html
+
+    def test_the_row_of_choices_is_only_there_when_there_is_a_choice(self, group):
+        """A row that is always there costs a line of a 390 px panel for the
+        ordinary tap that hit one line and meant it. It appears at two, and the
+        panel is a different height with it — which the pages cap themselves
+        against and the chrome lays the page out around, so both are told, and
+        told only when it actually comes or goes."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "var wanted = selected && choices.length > 1;" in html
+        assert "picks.style.display = wanted ? 'flex' : 'none';" in html
+        assert "if (was !== picks.style.display) {" in html
+        assert "if (window.trailsChrome && window.trailsChrome.placed) { window.trailsChrome.placed(); }" in html
+        # Nothing selected is nothing to choose between.
+        assert "if (given === null) { detailHtml = null; choices = []; }" in html
+
+    def test_one_chip_per_source_and_not_one_per_line(self, group):
+        """Measured at the busiest crossing on this map: thirteen lines within
+        one finger, eight of them FKB fragments of the same path, and a row of
+        thirteen chips reading `fkb-373967-7264149-8` is not a choice anybody
+        can make.
+
+        *Which source* is the question a bundle raises, and the figures already
+        carry the answer. The nearest line of each source is the one the chip
+        selects — which is the line the tap would have taken anyway — and the
+        lit chip is decided by source too, because one path drawn in eight
+        pieces is eight class names and one answer. Six at most: past that a
+        reader is reading a list rather than choosing."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "return figure.source || figure.name || className;" in html
+        assert "return entry.source || entry.label || 'this line';" in html
+        assert "return sourceKey(selected.className) === entry.key;" in html
+        assert "var CHOICES_MAX = 6;" in html
+        assert "choices = choices.slice(0, CHOICES_MAX);" in html
+
+    def test_the_planned_route_is_a_choice_like_any_other(self, group):
+        """Reported from a phone: leaving plan mode leaves the route drawn and
+        on the panel — which is right — and then one tap on any other line took
+        the panel for good. The route's line is in a pane that takes no clicks
+        at all, deliberately, so that it never stands between a reader and the
+        trail under it; the only way back was switching plan mode on and off
+        again, which is a mode change to look at something.
+
+        It is ranked with the rest and not pinned: `onRoute` answers in metres,
+        so the gap is put back into pixels and one sort decides the whole row.
+        Not offered while plan mode is on — there the panel is showing it
+        already, and a tap means *put a point here*."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "if (!planNow && window.trailsPlan && window.trailsPlan.onRoute) {" in html
+        assert "var near = window.trailsPlan.onRoute(at.lat, at.lng);" in html
+        assert "choices.push({gap: near.away / perPixel, plan: true, key: 'plan'," in html
+        assert "if (entry.plan) { return !!selected.composed; }" in html
+        assert "if (window.trailsPlan && window.trailsPlan.show) { window.trailsPlan.show(); }" in html
+
+    def test_pressing_a_chip_is_the_click_it_stands_for(self, group):
+        """Everything a click on that line does — the highlight widening it, its
+        own details arriving, the panel selecting it — is already wired to that
+        event, and a second path through them is a second set of rules to keep
+        in step. The point the reader tapped travels with it, so the row comes
+        back the same rather than being rebuilt from where the chip was."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "entry.layer.fire('click', {latlng: entry.at, layer: entry.layer});" in html
+        assert "if (litChoice(entry)) { return; }" in html
 
 
 class TestPlanMode:
