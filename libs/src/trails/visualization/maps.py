@@ -3000,6 +3000,22 @@ class _ClickHighlight(MacroElement):
                 eachPath(function (layer) { layer.setStyle(layer._baseStyle); });
             }
 
+            // **A tap somebody else has already answered.** The panel takes a
+            // tap in reach of a planned route for the route, and a line under
+            // that route must not light up as well -- but both handlers are on
+            // the same click and this one runs second, so clearing from over
+            // there was undone half a millisecond later. Measured: the trail
+            // stayed widened with the route on the panel.
+            //
+            // Held for the turn of the loop the click is in, which is what makes
+            // it a statement about *this* tap rather than a mode.
+            var held = false;
+            function hold() {
+                held = true;
+                clear();
+                window.setTimeout(function () { held = false; }, 0);
+            }
+
             function select(key) {
                 // Restyling is the expensive part on a map with thousands of lines,
                 // so only what actually changes is touched: the first selection
@@ -3027,6 +3043,7 @@ class _ClickHighlight(MacroElement):
 
             eachPath(function (layer) {
                 layer.on('click', function () {
+                    if (held) { return; }
                     if (selected === layer.options.className) { clear(); } else { select(layer.options.className); }
                 });
             });
@@ -3044,6 +3061,10 @@ class _ClickHighlight(MacroElement):
             // rather than measuring opacities.
             window.trailsHighlight = {
                 clear: clear,
+                // Let go, and stay let go for this click: what the panel calls
+                // when a tap meant the planned route rather than the line the
+                // route was drawn along.
+                hold: hold,
                 selected: function () { return selected; }
             };
         })();
@@ -7511,8 +7532,9 @@ class _ProfilePanel(MacroElement):
                 //
                 // Not offered while plan mode is on: there the panel is showing
                 // it already, and a tap means *put a point here*.
+                var reach = (window.trailsReach && window.trailsReach.finger) || undefined;
                 var route = (!planNow && window.trailsPlan && window.trailsPlan.onRoute)
-                    ? window.trailsPlan.onRoute(at.lat, at.lng) : null;
+                    ? window.trailsPlan.onRoute(at.lat, at.lng, reach) : null;
                 choices.sort(function (a, b) { return a.gap - b.gap; });
                 choices = choices.slice(0, route ? CHOICES_MAX - 1 : CHOICES_MAX);
                 if (route) {
@@ -7537,8 +7559,23 @@ class _ProfilePanel(MacroElement):
                 return sourceKey(selected.className) === entry.key;
             }
 
+            // The planned route among what the tap reached, if it is there at
+            // all. Its own line takes no clicks, so this is the only way it can
+            // be part of what a tap meant.
+            function planChoice() {
+                for (var at = 0; at < choices.length; at += 1) {
+                    if (choices[at].plan) { return choices[at]; }
+                }
+                return null;
+            }
+
             function takeChoice(entry) {
-                if (litChoice(entry)) { return; }
+                // **The route first, and before the question of whether it is
+                // already showing.** A tap in reach of it lands on a line as
+                // well, and that line's own handler lights it up: measured, a
+                // tap on the route while the route was already on the panel
+                // left the trail under it widened, because this returned early
+                // and never told the highlight to let go.
                 if (entry.plan) {
                     // **The line that was chosen has to let go.** Reported: the
                     // panel changed to the route and the trail underneath it
@@ -7548,10 +7585,24 @@ class _ProfilePanel(MacroElement):
                     // taking it and every other press marked nothing. The
                     // highlight is a selection made by clicking and this is a
                     // selection; one of them has to go.
-                    if (window.trailsHighlight) { window.trailsHighlight.clear(); }
-                    if (window.trailsPlan && window.trailsPlan.show) { window.trailsPlan.show(); }
+                    // `hold` and not `clear`: on a tap this runs before the
+                    // highlight's own handler, so clearing would be undone by
+                    // the line that was tapped a moment later.
+                    if (window.trailsHighlight) {
+                        if (window.trailsHighlight.hold) { window.trailsHighlight.hold(); }
+                        else { window.trailsHighlight.clear(); }
+                    }
+                    if (!litChoice(entry) && window.trailsPlan && window.trailsPlan.show) {
+                        window.trailsPlan.show();
+                    }
+                    // **Painted even where nothing changes.** The row belongs to
+                    // the tap that gathered it, and a tap that selects what is
+                    // already selected still gathered a new row -- driven, that
+                    // row came out empty, because only a repaint draws it.
+                    paintChoices();
                     return;
                 }
+                if (litChoice(entry)) { paintChoices(); return; }
                 // **Fired as the click it stands for.** Everything a click on
                 // that line does -- the highlight widening it, its own details
                 // arriving, this panel selecting it -- is already wired to that
@@ -8235,6 +8286,15 @@ class _ProfilePanel(MacroElement):
                         // it stands for -- leaves the list alone, which is what
                         // keeps the row still under a reader's finger.
                         if (event && event.latlng) { gather(event.latlng); }
+                        // **A planned route takes the tap wherever it runs.**
+                        // It is the one line on this map the reader made, and
+                        // it lies on the others by construction -- it was routed
+                        // along them -- so a tap in reach of it that chose the
+                        // trail underneath answered a question nobody asked.
+                        // The row of choices still holds those trails, one press
+                        // away, and the route stands last in it.
+                        var mine = event && event.latlng ? planChoice() : null;
+                        if (mine) { takeChoice(mine); return; }
                         show(selected && selected.className === className ? null : className, labelOf(layer, className));
                     });
                 });
@@ -8242,7 +8302,21 @@ class _ProfilePanel(MacroElement):
             // Leaflet only fires a map click where the click hit no layer, which
             // is what clears the selection on empty terrain — the same rule the
             // click-highlight follows, so the two cannot drift apart.
-            map.on('click', function () { if (!suspended) { show(null); } });
+            //
+            // **Except where the planned route runs there.** A leg over
+            // trackless ground has no line under it to carry the tap, and the
+            // route's own takes none, so a tap on the route out there used to be
+            // a tap on nothing and put the panel away — with the route drawn
+            // under the finger that did it.
+            map.on('click', function (event) {
+                if (suspended) { return; }
+                if (event && event.latlng) {
+                    gather(event.latlng);
+                    var mine = planChoice();
+                    if (mine) { takeChoice(mine); return; }
+                }
+                show(null);
+            });
             // **The machine can turn dark under a drawing that is already on
             // the screen.** Everything painted through CSS follows on its own;
             // the curve does not, because it is drawn with attributes read at
@@ -11616,9 +11690,16 @@ class _PlanMode(MacroElement):
             // click already costs. A leg still being worked out is hit-tested
             // as the straight line it is drawn as, so a point can be put into
             // one before it settles.
-            function onRoute(lat, lon) {
+            function onRoute(lat, lon, withinPx) {
                 var cosine = Math.cos(lat * Math.PI / 180);
-                var withinM = ON_ROUTE_PX * 40075016.686 * cosine / Math.pow(2, map.getZoom() + 8);
+                // **Two reaches, because two questions.** Putting a point into a
+                // leg is aiming at a line and takes the tighter one; asking
+                // whether a tap *meant* the route is the same question the panel
+                // asks of every other line under the finger, and it has to be
+                // asked at the same distance or the route would be the one
+                // candidate a reader had to hit twice as accurately.
+                var reach = withinPx || ON_ROUTE_PX;
+                var withinM = reach * 40075016.686 * cosine / Math.pow(2, map.getZoom() + 8);
                 var best = null;
                 for (var i = 0; i < legs.length; i += 1) {
                     var parts = legs[i].parts || straightAcross(legs[i].from, legs[i].to);

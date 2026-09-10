@@ -3896,14 +3896,46 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "? window.trailsPlan.onRoute(at.lat, at.lng) : null;" in html
+        assert "? window.trailsPlan.onRoute(at.lat, at.lng, reach) : null;" in html
+        # At the same distance as everything else the tap could have meant: the
+        # tighter reach is for aiming a point into a leg.
+        assert "var reach = (window.trailsReach && window.trailsReach.finger) || undefined;" in html
         assert "choices = choices.slice(0, route ? CHOICES_MAX - 1 : CHOICES_MAX);" in html
         assert "choices.push({gap: Infinity, plan: true, key: 'plan', className: null," in html
         assert "if (entry.plan) { return !!selected.composed; }" in html
-        assert "if (window.trailsHighlight) { window.trailsHighlight.clear(); }" in html
-        assert "if (window.trailsPlan && window.trailsPlan.show) { window.trailsPlan.show(); }" in html
+        # `hold` and not `clear`: on a tap the panel's handler runs before the
+        # highlight's own, so clearing would be undone by the line that was
+        # tapped a moment later.
+        assert "if (window.trailsHighlight.hold) { window.trailsHighlight.hold(); }" in html
+        assert "if (!litChoice(entry) && window.trailsPlan && window.trailsPlan.show) {" in html
         # The plan is worked out at all only where plan mode is off.
         assert "var route = (!planNow && window.trailsPlan && window.trailsPlan.onRoute)" in html
+
+    def test_a_planned_route_takes_the_tap_wherever_it_runs(self, group):
+        """It is the one line on this map the reader made, and it lies on the
+        others by construction — it was routed along them — so a tap in reach of
+        it that chose the trail underneath answered a question nobody asked.
+
+        **Including where no trail is under it.** A leg over trackless ground
+        has no line to carry the tap and the route's own takes none, so a tap
+        out there used to be a tap on nothing: it put the panel away, with the
+        route drawn under the finger that did it.
+
+        The trails the tap also reached are still in the row, one press away,
+        and the route stands last in it."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "function planChoice() {" in html
+        assert "var mine = event && event.latlng ? planChoice() : null;" in html
+        assert "if (mine) { takeChoice(mine); return; }" in html
+        # And on ground with nothing else on it, where Leaflet fires the map's
+        # own click rather than a line's.
+        assert "map.on('click', function (event) {" in html
+        assert "var mine = planChoice();" in html
+        # Plan mode still owns its own clicks, and nothing here runs there.
+        assert html.count("if (suspended) { return; }") >= 2
 
     def test_pressing_a_chip_is_the_click_it_stands_for(self, group):
         """Everything a click on that line does — the highlight widening it, its
@@ -3922,7 +3954,7 @@ class TestProfilePanel:
 
         html = fmap.get_root().render()
         assert "entry.layer.fire('click', {layer: entry.layer});" in html
-        assert "if (litChoice(entry)) { return; }" in html
+        assert "if (litChoice(entry)) { paintChoices(); return; }" in html
         # Which is only sound because the list is taken at the tap: a click with
         # no point on it leaves the row alone.
         assert "if (event && event.latlng) { gather(event.latlng); }" in html
@@ -4513,6 +4545,25 @@ class TestPlanMode:
         assert "named.textContent = stage.name || stageName(stage);" in html
         assert "head.appendChild(file);" in html
 
+    def test_the_highlight_can_be_told_a_tap_was_not_its_own(self):
+        """The panel takes a tap in reach of a planned route for the route, and
+        the line under that route must not light up as well — but both handlers
+        are on the same click and this one runs second, so clearing from over
+        there was undone half a millisecond later. Measured: the trail stayed
+        widened with the route on the panel.
+
+        Held for the turn of the loop the click is in, which is what makes it a
+        statement about *this* tap rather than a mode."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = folium.FeatureGroup(name="Trails").add_to(fmap)
+        maps.add_click_highlight(fmap, [group])
+
+        html = fmap.get_root().render()
+        assert "function hold() {" in html
+        assert "window.setTimeout(function () { held = false; }, 0);" in html
+        assert "if (held) { return; }" in html
+        assert "hold: hold," in html
+
     def test_a_row_can_be_dragged_to_any_place_in_the_route(self):
         """A splice and not a run of swaps: a swap is a full re-route of the two
         legs it touches, so dragging a point four places would route eight legs
@@ -5020,7 +5071,11 @@ class TestPlanMode:
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "pane.style.pointerEvents = 'none';" in planning
         assert planning.count("interactive: false") == 1
-        assert "function onRoute(lat, lon)" in planning
+        assert "function onRoute(lat, lon, withinPx)" in planning
+        # Two reaches for two questions: aiming a point into a leg is the
+        # tighter one, and whether a tap *meant* the route is asked at the same
+        # distance as every other line under the finger.
+        assert "var reach = withinPx || ON_ROUTE_PX;" in planning
         assert "var ON_ROUTE_PX = 8;" in planning
         # Pin, then route, then a point on the end: a pin sits on the route.
         decided = planning.split("container.addEventListener('click'")[-1]
@@ -5388,7 +5443,8 @@ class TestComposedProfile:
     def test_the_panel_stops_answering_clicks_while_something_else_owns_them(self):
         html = self.drawn().get_root().render()
         assert "if (suspended) { return; }" in html
-        assert "if (!suspended) { show(null); }" in html
+        assert "map.on('click', function (event) {" in html
+        assert html.count("if (suspended) { return; }") >= 2
 
     def test_a_straight_stretch_is_dashed_in_the_curve(self):
         """The profile has to say the same thing the map does about the same

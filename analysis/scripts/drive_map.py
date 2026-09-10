@@ -4004,9 +4004,9 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
         page.wait_for_timeout(1400)
         return page.evaluate(THE_CHOICES)
 
-    def tap_at(where: dict[str, float]) -> None:
+    def tap_at(where: dict[str, float], zoom: int = 15) -> None:
         """Tap the map where a latitude and longitude say, not where a pixel does."""
-        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 15, {animate: false})"), where)
+        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], at.zoom, {animate: false})"), {**where, "zoom": zoom})
         page.wait_for_timeout(700)
         spot = page.evaluate(
             with_map(
@@ -4118,6 +4118,38 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
         for which in ("Planned route", first, "Planned route", second, "Planned route", first):
             steps.append(press_chip(which))
 
+    # **And the tap itself takes the route, wherever it runs.** Last, because it
+    # leaves the panel on the route and the readings above are about what a tap
+    # on a line does.
+    took: dict[str, Any] = {"chips": [], "lit": [], "name": ""}
+    fired: dict[str, Any] = {"chips": [], "lit": [], "name": ""}
+    if on_route:
+        tap_at(on_route)
+        took = page.evaluate(THE_CHOICES)
+        # **And the same on ground with nothing else drawn on it.** A leg over
+        # trackless ground has no line to carry the tap and the route's own
+        # takes none, so Leaflet fires the map's click and the panel used to
+        # read that as *nothing was tapped* and put itself away -- with the
+        # route drawn under the finger that did it.
+        #
+        # Fired rather than tapped, because this route has no such ground:
+        # every leg of it was routed along a path, so there is a line within
+        # reach of every metre of it. The map's own click is exactly what
+        # Leaflet delivers where nothing was hit, and it is the handler under
+        # test.
+        # `series(null)` is *nothing is selected* said through the panel's own
+        # entry, which is what the × in the row at the foot does.
+        page.evaluate("() => { window.trailsHighlight.clear(); window.trailsProfilePanel.series(null); }")
+        page.wait_for_timeout(500)
+        emptied = page.evaluate(THE_CHOICES)
+        page.evaluate(
+            with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"),
+            on_route,
+        )
+        page.wait_for_timeout(1200)
+        fired = page.evaluate(THE_CHOICES)
+        fired["was"] = emptied["name"]
+
     page.evaluate("() => window.trailsChrome.coarse(false)")
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(400)
@@ -4142,9 +4174,16 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
             Reading("a route was laid down to ask against", laid and bool(on_route), True),
             Reading("leaving plan mode leaves it on the panel", left["name"], "planned route"),
             Reading("a tap on it offers it beside the lines under it", "Planned route" in taken["chips"], True, note=", ".join(taken["chips"])),
-            Reading("and the tap itself took a line, as it always did", taken["lit"] != ["Planned route"], True, note=taken["name"][:40]),
+            Reading("and the tap itself takes the route", taken["lit"], ["Planned route"], note=taken["name"][:40]),
             Reading("pressing the chip gives the route back", back["name"], "planned route"),
             Reading("and says so", back["lit"], ["Planned route"]),
+            # The tap itself, once there is a route to take it.
+            Reading("a tap on the route takes the route", took["name"], "planned route"),
+            Reading("and the trails it crosses stay in the row", len(took["chips"]) > 1, True, note=", ".join(took["chips"])),
+            # Including where nothing else is drawn at all, which used to put
+            # the panel away with the route under the finger that did it.
+            Reading("the panel was let go of first", fired.get("was", "not asked"), ""),
+            Reading("a click on ground with nothing on it takes the route too", fired["name"], "planned route"),
             # The three the reader reported, over six presses back and forth.
             Reading("the planned route is last in the row", (taken["chips"] or [""])[-1], "Planned route"),
             Reading(
