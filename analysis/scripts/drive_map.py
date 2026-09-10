@@ -4166,7 +4166,15 @@ THE_GOAL = """() => {
   const row = document.querySelector('.trails-profile-goal');
   const said = row ? row.querySelector('.trails-profile-goal-said') : null;
   const ways = row ? [...row.querySelectorAll('.trails-profile-goal-way')] : [];
+  const panel = window.trailsProfilePanel;
   return {goal: window.trailsGoal.state(), aim: window.trailsChrome.aim(),
+          // What the panel is showing, because setting a goal is meant to put
+          // the way there on it: the reader asked a second ago.
+          shown: window.trailsProfile ? (window.trailsProfile.label || null) : null,
+          mine: !!(window.trailsProfile && window.trailsProfile.goal),
+          page: panel.page(), pages: panel.pages().keys,
+          carries: (document.querySelector('.trails-profile-carries') || {}).textContent || null,
+          chips: [...document.querySelectorAll('.trails-profile-pick')].map(c => c.textContent),
           armed: window.trailsChrome.state().aiming,
           lamp: window.trailsChrome.state().goal,
           row: !!row && row.style.display !== 'none',
@@ -4263,6 +4271,17 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(900)
     routed = page.evaluate(THE_GOAL)
 
+    # **A tap away from the way there is not a tap on it.** The row offers the
+    # goal wherever its line runs -- that line takes no clicks, so the row is
+    # the only way to it -- and the row's rule is that a line the reader made
+    # takes the tap. Offered unconditionally it took *every* tap on the map.
+    away = {"lat": here["lat"] + 0.05, "lng": here["lng"] + 0.05}
+    page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 13, {animate: false})"), away)
+    page.wait_for_timeout(600)
+    page.evaluate(with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"), away)
+    page.wait_for_timeout(1200)
+    elsewhere = page.evaluate(THE_GOAL)
+
     # **The cap, driven and not assumed.** A fix arrives about once a second;
     # nothing may set a search over the network going more often than this,
     # whatever the reader has done in between. Asked from 2 km off the line,
@@ -4279,11 +4298,20 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     again = page.evaluate(THE_GOAL)
 
     # The row of choices offers it, last of all, and pressing it draws it.
-    page.context.set_geolocation({"latitude": here["lat"], "longitude": here["lng"], "accuracy": 20})
-    page.wait_for_timeout(2400)
-    page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 14, {animate: false})"), here)
+    # **Tapped on the way there and not at the reader**, and read off the way
+    # itself: it was routed again from where they now stand, and its first point
+    # is the node that position snapped to -- which is up to `snapM` away from
+    # them. A tap at the reader is a tap 150 m off the line, and the row is
+    # right not to offer it there.
+    on_route = page.evaluate(
+        """() => { const shape = window.trailsGoal.line();
+        if (!shape) { return null; }
+        const at = Math.floor(0.5 * (shape.lon.length - 1));
+        return {lat: shape.lat[at], lng: shape.lon[at]}; }"""
+    )
+    page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 14, {animate: false})"), on_route)
     page.wait_for_timeout(600)
-    page.evaluate(with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"), here)
+    page.evaluate(with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"), on_route)
     page.wait_for_timeout(1200)
     chips = page.evaluate(THE_CHOICES)
     pressed = press_chip("To the goal")
@@ -4389,6 +4417,18 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             # two are not the same direction, and the one under the feet wins.
             Reading("and the head follows the route, not the goal", apart > 5, True, note=f"{apart:.0f} deg between the path and the goal"),
             Reading("the row at the foot says what it is", (routed["row"], routed["way"]), (True, ["Routed"]), note=routed["says"]),
+            Reading("setting it puts the way there on the panel", (routed["mine"], routed["shown"]), (True, "to the goal")),
+            Reading("opened at the curve", routed["page"], "profile"),
+            # Its own count of points and not the one the line read before it
+            # left there: the row under the drawing used to return before it was
+            # reached for a composed route with no plan, which is what a goal is.
+            Reading("with figures of its own under it", bool(routed["carries"]), True, note=str(routed["carries"])),
+            Reading(
+                "a tap well away from it does not take the goal",
+                (elsewhere["mine"], "To the goal" in (elsewhere["chips"] or [])),
+                (False, False),
+                note=str(elsewhere["chips"]),
+            ),
             Reading("a second route is not started within the half minute", capped, False),
             Reading("and is once it has run out", took, True),
             Reading("routed again from where the reader now is", round(again["goal"]["from"]["lat"], 3), round(astray["lat"], 3)),
@@ -4897,6 +4937,34 @@ def a_line_is_named_at_the_foot_and_not_on_the_ground(page: Any) -> Check:
         """() => { const box = document.querySelector('.trails-profile-detail');
         return box ? box.textContent.replace(/\\s+/g, ' ').trim() : ''; }"""
     )
+    # **And a place, which keeps its label and must not open one under a
+    # thumb.** Leaflet opens a hover label on a *click* as well as on a hover,
+    # so a tap put the name over the ground and left it there — the same defect
+    # the lines were cured of, one layer along. A place is named by nothing else
+    # on this page, so its label stays bound and is closed instead of unbound.
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.wait_for_timeout(400)
+    before = page.evaluate("() => document.querySelectorAll('.leaflet-tooltip').length")
+    tapped_place = page.evaluate(
+        with_map(
+            """() => { let best = null;
+        const walk = l => { if (best) { return; }
+          if (l.getLatLng && !l.getLatLngs && l.getTooltip && l.getTooltip() &&
+              !l.getTooltip().options.permanent) { best = l; return; }
+          if (l.eachLayer) { l.eachLayer(walk); } };
+        __MAP__.eachLayer(walk);
+        if (!best) { return null; }
+        best.fire('click', {latlng: best.getLatLng(), target: best});
+        return true; }"""
+        )
+    )
+    place_label = None
+    place_head = None
+    if tapped_place:
+        page.wait_for_timeout(900)
+        place_label = page.evaluate("() => document.querySelectorAll('.leaflet-tooltip').length")
+        place_head = page.evaluate("() => (document.querySelector('.trails-profile-name') || {}).textContent || ''")
+    page.evaluate("() => window.trailsChrome.coarse(false)")
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(400)
     return Check(
@@ -4909,6 +4977,12 @@ def a_line_is_named_at_the_foot_and_not_on_the_ground(page: Any) -> Check:
             # nothing said what a line is called.
             Reading("and it is a name and not an id", said["banner"].startswith("ut-no-"), False, note=said["banner"][:48]),
             Reading("the popup still docks as a page", bool(docked), True),
+            Reading("a place was there to tap", bool(tapped_place), True),
+            # Not *no labels at all*: the permanent ones are the map's own
+            # labelling and are what a reader reads the ground by. What may not
+            # happen is a tap adding one.
+            Reading("and tapping it adds no label to the ground", place_label, before, note=f"{before} before, {place_label} after"),
+            Reading("while the foot still names it", bool(place_head), True, note=str(place_head)),
             Reading("and says the same name there", said["carried"] in docked, True, note=docked[:48]),
         ],
     )

@@ -5499,6 +5499,10 @@ class _ProfilePanel(MacroElement):
                 'cursor:pointer;width:40px;height:40px;display:none;align-items:center;' +
                 'justify-content:center';
             var carries = document.createElement('span');
+            // Named so a check can read what a selection put there rather than
+            // the whole row it sits in: this one is the only part of it that is
+            // about the file and not about the ground.
+            carries.className = 'trails-profile-carries';
             carries.style.cssText = 'color:var(--trails-ink-2);margin-right:8px';
             var licensed = document.createElement('span');
             licensed.className = 'trails-profile-licences';
@@ -5990,7 +5994,13 @@ class _ProfilePanel(MacroElement):
                     pill.style.display = 'none';
                     return;
                 }
-                if (pages[pageAt] && pages[pageAt].kind === 'details') { fillDetail(); }
+                // **Filled whether or not it is the page being shown.** The
+                // pages lie side by side in one track and the track slides, so
+                // the page a reader is swiping *towards* is on the screen before
+                // it arrives -- and one filled only on arrival showed the last
+                // selection's table for the length of the slide, which is
+                // exactly long enough to read the wrong name.
+                pages.forEach(function (page) { if (page.kind === 'details') { fillDetail(); } });
                 pagesBox.style.display = pagesOpen ? '' : 'none';
                 pips.style.display = (pagesOpen && pages.length > 1) ? 'flex' : 'none';
                 track.style.width = (pages.length * 100) + '%';
@@ -7643,7 +7653,11 @@ class _ProfilePanel(MacroElement):
                 // takes. Wherever it runs, not only where the finger landed --
                 // its line takes no clicks either.
                 var wayThere = (!planNow && window.trailsGoal) ? window.trailsGoal.state() : null;
-                if (wayThere && wayThere.line) {
+                // **And only where it runs**, which is the rule the planned
+                // route follows and the one this was missing: offered wherever
+                // the tap landed, it took every tap on the map, and a way tapped
+                // in order to be read was answered with the goal.
+                if (wayThere && wayThere.line && window.trailsGoal.near(at.lat, at.lng, reach)) {
                     mine.push({gap: Infinity, mine: 'goal', key: 'goal', className: null,
                                label: 'To the goal', source: 'To the goal'});
                 }
@@ -7971,7 +7985,7 @@ class _ProfilePanel(MacroElement):
                 // its popup names them itself -- so the row underneath the
                 // drawing is about a drawing that is not there.
                 if (selected && selected.detail) { carries.textContent = ''; licensed.textContent = ''; return; }
-                if (!selected || (selected.composed && !selected.plan)) { return; }
+                if (!selected) { return; }
                 if (!selected.shape) {
                     download.disabled = true;
                     // Whatever went wrong with the graph is said once, above,
@@ -7985,17 +7999,27 @@ class _ProfilePanel(MacroElement):
                 selected.runs = runsOf(selected.shape);
                 var points = pointsIn(selected.runs);
                 if (selected.composed) {
+                    // **A composed route without a plan is the way to a goal**,
+                    // and it has figures of its own like any other. This used to
+                    // return before reaching them, on the grounds that only a
+                    // plan is composed -- so a goal's page kept whatever the
+                    // line read before it had said: its point count, its
+                    // licences, its marking. Reported from the phone as *the
+                    // info is from another way*, and it was.
+                    var plan = selected.plan;
                     // **Refused while any leg is unsettled, and said.** The file
                     // states that it breaks only at crossings; a leg still being
                     // worked out, or one the height service refused, is a hole
                     // that would break it somewhere else and nothing in the file
-                    // would say so.
-                    download.disabled = points < 2 || !!selected.plan.why;
+                    // would say so. A goal is not written out at all -- the
+                    // button is already hidden above -- so there is nothing to
+                    // refuse and nothing to say about refusing it.
+                    download.disabled = !plan || points < 2 || !!plan.why;
                     // Only what the header does not already say. It carried
                     // the climb, the crossings and the distance a second time,
                     // word for word, in the row underneath the row that said
                     // them — five rows where two will do.
-                    carries.textContent = selected.plan.why ? selected.plan.why
+                    carries.textContent = (plan && plan.why) ? plan.why
                         : points.toLocaleString('en-GB') + ' points';
                     licensed.textContent = routeCredits(selected.shape, selected.runs).map(licenceLine).join(' \\u00b7 ');
                     noted.textContent = markingLine(selected.shape.tally);
@@ -13638,6 +13662,11 @@ class _PlanMode(MacroElement):
             //: How near counts as arrived: the circle the map is already drawing
             //: round the reader. Inside it there is no direction to give, which
             //: is the same rule the goal mark follows on a route.
+            //: Whether this way to the goal has been shown yet. Set when a
+            //: goal is *set*, and not on the routing that happens on its own as
+            //: the reader walks: taking the panel from under somebody every half
+            //: minute is not an answer, it is an interruption.
+            var goalFresh = false;
             var goalAt = null, goalWay = 'direct';
             var goalLeg = null, goalShape = null, goalLayers = [], goalMark = null;
             var goalFrom = null, goalWhen = 0, goalWorking = 0, goalToken = null;
@@ -13731,6 +13760,11 @@ class _PlanMode(MacroElement):
                             ? draw(goalLeg.parts, goalLeg.provisional, {pane: goalPane(), colour: GOAL_COLOUR})
                             : [];
                         goalShape = goalLeg.parts ? composeRoute(null, null, [goalLeg]) : null;
+                        // **A goal just worked out is what the reader is looking
+                        // at.** They asked for it a second ago; a panel still
+                        // showing whatever they were reading before is a page
+                        // answering a question nobody has any more.
+                        if (goalShape && goalFresh) { goalFresh = false; showGoalProfile(); }
                         refreshGoal();
                     });
                 }, function () {});
@@ -13788,6 +13822,7 @@ class _PlanMode(MacroElement):
 
             function setGoal(lat, lon, name) {
                 goalAt = {lat: lat, lon: lon, name: name || null};
+                goalFresh = true;
                 dropGoalLine();
                 goalToken = null;
                 paintGoalMark();
@@ -13817,6 +13852,7 @@ class _PlanMode(MacroElement):
                     goalToken = null;
                     if (goalShowing) { goalShowing = false; if (panel()) { panel().series(null); } }
                 } else {
+                    goalFresh = true;
                     routeToGoal(goalHere());
                 }
                 keepGoal();
@@ -13835,6 +13871,17 @@ class _PlanMode(MacroElement):
                 showing.series({label: 'to the goal', figure: figuresOf(goalShape), shape: goalShape,
                                 told: told(goalShape), goal: true});
                 return true;
+            }
+
+            // The way there, on its own page, opened at the curve: the reader
+            // asked *how do I get there*, and the profile is the half of that
+            // answer the map cannot draw.
+            function showGoalProfile() {
+                if (!showGoal()) { return false; }
+                var showing = panel();
+                if (!showing || !showing.page) { return false; }
+                showing.page(true);
+                return showing.page('profile') === 'profile';
             }
 
             function refreshGoal() {
@@ -13863,6 +13910,27 @@ class _PlanMode(MacroElement):
                         // this one is a promise only for the part that came off
                         // the network.
                         straight: goalShape ? (goalShape.straight + goalShape.crossed) : null};
+            }
+
+            // **Whether a tap could have meant the way to the goal**, at the
+            // same reach the panel asks of every other line under the finger --
+            // the question `onRoute` answers for the plan, asked of this.
+            //
+            // Reported from the phone: without it the goal took *every* tap on
+            // the map, wherever it landed, because the row offers it wherever it
+            // runs and the row's own rule is that a line the reader made takes
+            // the tap. A way tapped in order to be read was answered with the
+            // goal, and the panel then said so under the wrong name.
+            function nearGoal(lat, lon, withinPx) {
+                if (!goalShape) { return false; }
+                var cosine = Math.cos(lat * Math.PI / 180);
+                var reach = (withinPx || ON_ROUTE_PX) * 40075016.686 * cosine /
+                    Math.pow(2, map.getZoom() + 8);
+                for (var i = 0; i + 1 < goalShape.lon.length; i += 1) {
+                    if (goalShape.lon[i] === null || goalShape.lon[i + 1] === null) { continue; }
+                    if (goalNear(lat, lon, cosine, i) <= reach) { return true; }
+                }
+                return false;
             }
 
             //: Every segment of the way there, for the position mark, in the
@@ -13924,6 +13992,14 @@ class _PlanMode(MacroElement):
                 state: goalState,
                 segments: goalSegments,
                 goal: goalEnd,
+                near: nearGoal,
+                // The way there as a shape, which `state()` deliberately does
+                // not carry for the same reason the plan's own does not: it is
+                // read on every check and by the chrome, and a route is not a
+                // status. Handed out for whoever has to put a finger on it.
+                line: function () {
+                    return goalShape ? {lon: goalShape.lon, lat: goalShape.lat} : null;
+                },
                 show: showGoal,
                 showing: function () { return goalShowing; },
                 //: Let go of the panel without clearing the goal: another line
@@ -17058,6 +17134,26 @@ class _Chrome(MacroElement):
                 '  { box-sizing: border-box; min-height: 40px !important; font-size: 16px !important; }'
             ].join('\\n');
             document.head.appendChild(sheet);
+
+            // **A label opened by a tap is a second heading over the ground.**
+            // Leaflet opens a hover label on a *click* as well as on a hover --
+            // its own rule, and on a touch device a tap is a click -- so tapping
+            // a place put its name over the map and left it standing there until
+            // something else was tapped, saying what the row at the foot says
+            // and under the same name. The lines lost their labels outright when
+            // this was reported for them; a place keeps its own, because a place
+            // is named by nothing else on this page -- the docked popup is
+            // headed with it -- and only the tap is taken off it.
+            //
+            // Closed rather than unbound, and only where the pointer is coarse:
+            // under a mouse a hover label is a hover label and costs nothing.
+            // Permanent ones are left alone outright -- those are the map's own
+            // labelling, which is what a reader is reading the ground by.
+            map.on('tooltipopen', function (event) {
+                if (!event.tooltip || event.tooltip.options.permanent) { return; }
+                if (!container.classList.contains('trails-coarse')) { return; }
+                map.closeTooltip(event.tooltip);
+            });
 
             var pointer = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
             var forcedCoarse = null;

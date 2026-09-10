@@ -3983,7 +3983,11 @@ class TestProfilePanel:
 
         html = fmap.get_root().render()
         assert "mine.push({gap: Infinity, mine: 'goal', key: 'goal', className: null," in html
-        assert "if (wayThere && wayThere.line) {" in html
+        # **And only where it runs.** Offered wherever the tap landed, it took
+        # every tap on the map — the row's own rule is that a line the reader
+        # made takes the tap — and a way tapped in order to be read was
+        # answered with the goal.
+        assert "if (wayThere && wayThere.line && window.trailsGoal.near(at.lat, at.lng, reach)) {" in html
         # Room kept for both, rather than for one: six chips is the ceiling and
         # the reader's own lines are not what it is protecting them from.
         assert "choices = choices.slice(0, Math.max(1, CHOICES_MAX - mine.length)).concat(mine);" in html
@@ -4017,6 +4021,26 @@ class TestProfilePanel:
         assert "said += ' \\u00b7 no way there \\u2014 straight'; }" in html
         # And how much of a partly routed way was never a path.
         assert "said += ' \\u00b7 ' + (goalNow.straight / 1000).toFixed(2) + ' km off the paths';" in html
+
+    def test_a_goal_has_figures_of_its_own(self):
+        """Reported from the phone as *the info is from another way*, and it
+        was. The row under the drawing — the point count, the licences, the
+        marking — returned before it was reached whenever a composed route had
+        no plan attached, on the grounds that only a plan is composed. A goal is
+        composed too, and has none: so its page kept whatever the line read
+        before it had said, word for word, about a walk that was not this one."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "if (!selected) { return; }" in html
+        assert "var plan = selected.plan;" in html
+        assert "carries.textContent = (plan && plan.why) ? plan.why" in html
+        # And the page is filled whether or not it is the one being shown: the
+        # pages lie side by side in a track that slides, so the page a reader is
+        # swiping towards is on the screen before it arrives — long enough to
+        # read the wrong name off it.
+        assert "pages.forEach(function (page) { if (page.kind === 'details') { fillDetail(); } });" in html
 
 
 class TestPlanMode:
@@ -5577,6 +5601,50 @@ class TestPlanMode:
         # with it either.
         assert "function () { return plainParts(from, to, length); }" in planning
 
+    def test_a_tap_means_the_goal_only_where_the_way_there_runs(self):
+        """Reported from the phone: with a goal set, the panel answered every
+        tap with the goal. The row offers the way there wherever it runs — its
+        line takes no clicks, so the row is the only way to it — and the row's
+        own rule is that a line the reader made takes the tap. Offered
+        unconditionally, that made *every* tap the reader's own line, and a way
+        tapped in order to be read came back named *to the goal*.
+
+        The same question the planned route answers with ``onRoute``, asked of
+        this, and at the same reach the panel asks of every other line under the
+        finger."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function nearGoal(lat, lon, withinPx) {" in planning
+        assert "var reach = (withinPx || ON_ROUTE_PX) * 40075016.686 * cosine /" in planning
+        assert "near: nearGoal," in planning
+        # And the shape itself, handed out rather than carried in `state()`:
+        # it is read on every check and by the chrome, and a route is not a
+        # status. The plan's own geometry is handed out under the same rule.
+        assert "return goalShape ? {lon: goalShape.lon, lat: goalShape.lat} : null;" in planning
+
+    def test_setting_a_goal_opens_the_way_there(self):
+        """A goal worked out a second ago is what the reader is looking at, and
+        a panel still showing whatever they were reading before it is a page
+        answering a question nobody has any more. Opened at the curve, because
+        the profile is the half of *how do I get there* that the map cannot
+        draw.
+
+        Only when it was **set**, and not on the routing that happens on its own
+        as they walk: taking the panel out from under somebody every half minute
+        is not an answer, it is an interruption."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "if (goalShape && goalFresh) { goalFresh = false; showGoalProfile(); }" in planning
+        assert "function showGoalProfile() {" in planning
+        assert "return showing.page('profile') === 'profile';" in planning
+        # Set by setting a goal and by asking for it to be routed, and by
+        # nothing else — least of all by the re-routing rule.
+        assert planning.count("goalFresh = true;") == 2
+
 
 class TestRoutingGraphAreas:
     """Tests for the boundaries the page is handed with the graph."""
@@ -5710,7 +5778,10 @@ class TestComposedProfile:
         still being worked out, or one the height service refused, would break
         it somewhere else with nothing in the file to say so."""
         html = self.drawn().get_root().render()
-        assert "download.disabled = points < 2 || !!selected.plan.why;" in html
+        # The plan is guarded for, because a composed route without one is the
+        # way to a goal — which is never written to a file and therefore has
+        # nothing to refuse.
+        assert "download.disabled = !plan || points < 2 || !!plan.why;" in html
         assert "if (!selected.plan || selected.plan.why) { return; }" in html
 
     def test_the_panel_stops_answering_clicks_while_something_else_owns_them(self):
@@ -7091,3 +7162,25 @@ class TestWhereTheReaderIs:
 
         assert "var HERE_GOAL = '#00a152';" in fmap.get_root().render()
         assert "var GOAL_COLOUR = '#00a152';" in source
+
+    def test_a_tap_does_not_leave_a_label_over_the_ground(self):
+        """Leaflet opens a hover label on a *click* as well as on a hover — its
+        own rule, and on a touch device a tap is a click — so tapping a place
+        put its name over the map and left it standing there until something
+        else was tapped: a second heading over the ground, saying what the row
+        at the foot says and under the same name.
+
+        The lines lost their labels outright when this was first reported. A
+        place keeps its own, because a place is named by nothing else on this
+        page — the docked popup is headed with it — so the label is closed
+        rather than unbound, and only where the pointer is coarse. Permanent
+        ones are left alone outright: those are the map's own labelling, which
+        is what a reader is reading the ground by."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "map.on('tooltipopen', function (event) {" in html
+        assert "if (!event.tooltip || event.tooltip.options.permanent) { return; }" in html
+        assert "if (!container.classList.contains('trails-coarse')) { return; }" in html
+        assert "map.closeTooltip(event.tooltip);" in html
