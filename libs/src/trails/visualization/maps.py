@@ -5276,6 +5276,90 @@ class _ProfilePanel(MacroElement):
                 // sources will not fit on 390 px however short their names are.
                 'overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none';
 
+            // ---- the goal, at the foot ---------------------------------------
+            // **Where somebody walking is already looking.** The switch that
+            // *sets* a goal is in the rail, because arming the next tap is what
+            // the rail does; what there is to do with one once it is set --
+            // which way to read it, work it out again, be rid of it -- is here.
+            // Drawn only while there is a goal, so it costs a line of a 390 px
+            // panel exactly when it is answering something.
+            var goalNow = null;
+            var goalRow = document.createElement('div');
+            goalRow.className = 'trails-profile-goal';
+            goalRow.style.cssText = 'display:none;gap:6px;align-items:center;padding:0 0 5px;font-size:11px';
+            var goalSaid = document.createElement('span');
+            goalSaid.className = 'trails-profile-goal-said';
+            goalSaid.style.cssText = 'flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;' +
+                'text-overflow:ellipsis;color:var(--trails-ink-2)';
+
+            function goalButton(className, text, title, act) {
+                var made = document.createElement('button');
+                made.type = 'button';
+                made.className = className;
+                made.innerHTML = text;
+                made.title = title;
+                made.setAttribute('aria-label', title);
+                made.style.cssText = 'font:inherit;font-size:11px;padding:2px 8px;flex:none;' +
+                    'border:1px solid var(--trails-rule);border-radius:9px;cursor:pointer;' +
+                    'background:var(--trails-solid);color:var(--trails-ink-2)';
+                made.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    act();
+                });
+                return made;
+            }
+
+            // **Two readings of one point and not two goals.** Which of them a
+            // reader wants changes on the ground -- routed in fog, straight at
+            // it with the slope in front of them -- and having to set the goal
+            // again to say so would be the page asking them to repeat
+            // themselves.
+            var goalStraight = goalButton('trails-profile-goal-way', 'Direct', 'Straight at the goal',
+                                          function () { if (window.trailsGoal) { window.trailsGoal.way('direct'); } });
+            var goalRouted = goalButton('trails-profile-goal-way', 'Routed', 'A way there over the network',
+                                        function () { if (window.trailsGoal) { window.trailsGoal.way('routed'); } });
+            // **Routed again now.** It happens on its own when the reader has
+            // left the line; this is for the other case, where they have not
+            // left it and know something the rule does not.
+            var goalAgain = goalButton('trails-profile-goal-again', '\\u21bb', 'Work the way out again',
+                                       function () { if (window.trailsGoal) { window.trailsGoal.again(); } });
+            var goalDrop = goalButton('trails-profile-goal-clear', '\\u00d7', 'Drop this goal',
+                                      function () { if (window.trailsGoal) { window.trailsGoal.clear(); } });
+            goalRow.appendChild(goalSaid);
+            goalRow.appendChild(goalStraight);
+            goalRow.appendChild(goalRouted);
+            goalRow.appendChild(goalAgain);
+            goalRow.appendChild(goalDrop);
+
+            function paintGoal() {
+                var standing = !!(goalNow && goalNow.at);
+                goalRow.style.display = standing ? 'flex' : 'none';
+                if (!standing) { return; }
+                var routed = goalNow.way === 'routed';
+                var said = goalNow.name || 'Goal';
+                if (routed && goalNow.working) { said += ' \\u00b7 working\\u2026'; }
+                else if (routed && goalNow.line) {
+                    said += ' \\u00b7 ' + (goalNow.metres / 1000).toFixed(2) + ' km';
+                    if (goalNow.ascent !== null && !isNaN(goalNow.ascent)) {
+                        said += ' \\u00b7 \\u2191' + Math.round(goalNow.ascent) + ' m';
+                    }
+                // **Said, and not silently fallen back on.** A routed goal off
+                // the network is drawn straight at, which is the right thing to
+                // draw and the wrong thing to leave unexplained: a reader would
+                // read the line as a way somebody had checked.
+                } else if (routed) { said += ' \\u00b7 no way there \\u2014 straight'; }
+                goalSaid.textContent = said;
+                [[goalStraight, !routed], [goalRouted, routed]].forEach(function (each) {
+                    var lit = each[1];
+                    each[0].style.background = lit ? 'var(--trails-accent)' : 'var(--trails-solid)';
+                    each[0].style.borderColor = lit ? 'var(--trails-accent)' : 'var(--trails-rule)';
+                    each[0].style.color = lit ? 'var(--trails-on-accent)' : 'var(--trails-ink-2)';
+                    each[0].setAttribute('aria-pressed', String(lit));
+                });
+                goalAgain.style.display = routed ? 'flex' : 'none';
+                goalAgain.disabled = !!goalNow.working;
+            }
+
             var pill = document.createElement('div');
             pill.className = 'trails-profile-pages';
             pill.style.cssText = 'flex:none;display:none;border:1px solid var(--trails-rule);' +
@@ -6223,6 +6307,10 @@ class _ProfilePanel(MacroElement):
                 // part that never moves, and what a tap found is about the
                 // selection that row names.
                 box.appendChild(picks);
+                // Under the chips and over the heading: the chips are about the
+                // tap that just happened and this is about a thing that is still
+                // standing, so it sits nearer the name it is not part of.
+                box.appendChild(goalRow);
                 box.appendChild(header);
                 // Clicking and dragging inside the panel must not reach the map;
                 // scrolling must, or the map freezes under an open panel.
@@ -7535,12 +7623,25 @@ class _ProfilePanel(MacroElement):
                 var reach = (window.trailsReach && window.trailsReach.finger) || undefined;
                 var route = (!planNow && window.trailsPlan && window.trailsPlan.onRoute)
                     ? window.trailsPlan.onRoute(at.lat, at.lng, reach) : null;
-                choices.sort(function (a, b) { return a.gap - b.gap; });
-                choices = choices.slice(0, route ? CHOICES_MAX - 1 : CHOICES_MAX);
+                var mine = [];
                 if (route) {
-                    choices.push({gap: Infinity, plan: true, key: 'plan', className: null,
-                                  label: 'Planned route', source: 'Planned route'});
+                    mine.push({gap: Infinity, mine: 'plan', key: 'plan', className: null,
+                               label: 'Planned route', source: 'Planned route'});
                 }
+                // **And the way to a goal, after it and by the same rule.** It
+                // is the reader's own line too and lies on the sources by
+                // construction, so ranking it by distance would move the sources
+                // about; and it goes last of the two because it is the more
+                // recent of the two things they made, which is the one a tap
+                // takes. Wherever it runs, not only where the finger landed --
+                // its line takes no clicks either.
+                var wayThere = (!planNow && window.trailsGoal) ? window.trailsGoal.state() : null;
+                if (wayThere && wayThere.line) {
+                    mine.push({gap: Infinity, mine: 'goal', key: 'goal', className: null,
+                               label: 'To the goal', source: 'To the goal'});
+                }
+                choices.sort(function (a, b) { return a.gap - b.gap; });
+                choices = choices.slice(0, Math.max(1, CHOICES_MAX - mine.length)).concat(mine);
             }
 
             // The source, because that is what the row is asking about. A line
@@ -7555,18 +7656,25 @@ class _ProfilePanel(MacroElement):
             // path drawn in eight pieces is eight class names and one answer.
             function litChoice(entry) {
                 if (!selected) { return false; }
-                if (entry.plan) { return !!selected.composed; }
+                // The two composed routes are told apart by which one it is and
+                // not by `composed`, which both of them are.
+                if (entry.mine === 'goal') { return !!selected.goal; }
+                if (entry.mine === 'plan') { return !!(selected.composed && !selected.goal); }
                 return sourceKey(selected.className) === entry.key;
             }
 
-            // The planned route among what the tap reached, if it is there at
-            // all. Its own line takes no clicks, so this is the only way it can
-            // be part of what a tap meant.
+            // **The reader's own line among what the tap reached**, if either
+            // is there: the way to a goal before the planned route, because it
+            // is the more particular of the two and the one they set last.
+            // Neither line takes a click, so this is the only way either can be
+            // part of what a tap meant.
             function planChoice() {
+                var found = null;
                 for (var at = 0; at < choices.length; at += 1) {
-                    if (choices[at].plan) { return choices[at]; }
+                    if (choices[at].mine === 'goal') { return choices[at]; }
+                    if (choices[at].mine === 'plan' && !found) { found = choices[at]; }
                 }
-                return null;
+                return found;
             }
 
             function takeChoice(entry) {
@@ -7576,7 +7684,7 @@ class _ProfilePanel(MacroElement):
                 // tap on the route while the route was already on the panel
                 // left the trail under it widened, because this returned early
                 // and never told the highlight to let go.
-                if (entry.plan) {
+                if (entry.mine) {
                     // **The line that was chosen has to let go.** Reported: the
                     // panel changed to the route and the trail underneath it
                     // stayed widened and the rest of the map stayed faded --
@@ -7592,8 +7700,17 @@ class _ProfilePanel(MacroElement):
                         if (window.trailsHighlight.hold) { window.trailsHighlight.hold(); }
                         else { window.trailsHighlight.clear(); }
                     }
-                    if (!litChoice(entry) && window.trailsPlan && window.trailsPlan.show) {
-                        window.trailsPlan.show();
+                    // And so does the other composed route, which is not
+                    // highlighted on the map and therefore not covered by the
+                    // line above: two of them can be offered and one of them is
+                    // what the panel is drawing.
+                    if (!litChoice(entry)) {
+                        if (entry.mine === 'goal' && window.trailsGoal) {
+                            window.trailsGoal.show();
+                        } else if (window.trailsPlan && window.trailsPlan.show) {
+                            if (window.trailsGoal) { window.trailsGoal.letGo(); }
+                            window.trailsPlan.show();
+                        }
                     }
                     // **Painted even where nothing changes.** The row belongs to
                     // the tap that gathered it, and a tap that selects what is
@@ -7616,6 +7733,7 @@ class _ProfilePanel(MacroElement):
                 // moved the pressed chip to the head of the row, under the
                 // reader's finger, every single time. The row belongs to the
                 // tap that made it and not to what is selected now.
+                if (window.trailsGoal) { window.trailsGoal.letGo(); }
                 entry.layer.fire('click', {layer: entry.layer});
             }
 
@@ -8039,6 +8157,15 @@ class _ProfilePanel(MacroElement):
                     fold();
                     paintSummary();
                 },
+                // What the goal control is doing, pushed by the chrome the way
+                // plan mode's summary is. The row at the foot draws itself from
+                // this and asks the goal nothing.
+                goal: function (summary) {
+                    goalNow = summary && summary.at ? summary : null;
+                    paintGoal();
+                    paintChoices();
+                    fold();
+                },
                 // What plan mode is doing, pushed by the chrome on every refresh
                 // -- the same summary its bar used to draw itself from. A plan
                 // with no points down is still a plan, and the row says so.
@@ -8092,6 +8219,11 @@ class _ProfilePanel(MacroElement):
                         // point the same; what a point *means* belongs to
                         // whatever composed the series.
                         stages: spec.stages || null,
+                        // **Whose composed route this is.** Two of them can be
+                        // offered at once -- the plan and the way to a goal --
+                        // and the row at the foot has to light the right chip.
+                        // `composed` alone said only *not a trail*.
+                        goal: !!spec.goal,
                         // What the panel cannot work out from a series alone and
                         // the file cannot be written without: where the reader
                         // put its points down, what each leg is made of, and
@@ -8234,6 +8366,11 @@ class _ProfilePanel(MacroElement):
             };
 
             function show(className, label) {
+                // **Whatever is chosen here, the way to a goal is not it.** The
+                // goal control keeps its own note of whether this panel is
+                // drawing its route, and a stale yes would let its next refresh
+                // take the panel back from the line the reader just tapped.
+                if (window.trailsGoal) { window.trailsGoal.letGo(); }
                 var chosen = className === null ? null : {className: className, figure: figures[className], label: label, shape: null, mid: null};
                 if (chosen && !chosen.figure) { chosen = null; }
                 present(chosen);
@@ -10727,9 +10864,15 @@ class _PlanMode(MacroElement):
             // maximum over its own window, and a marking bucket is a sum over
             // its own edges. Given no range this is the whole route, which is
             // every call that existed before stages did.
-            function composeRoute(fromLeg, toLeg) {
+            // **Over a list of legs and not only over the route's own.** The
+            // goal's way is one leg composed by exactly this walk -- the heights
+            // laid end to end, the holes left as holes, the crossings counted --
+            // and a second copy of it would be a second answer to *how long is
+            // this and how much does it climb*.
+            function composeRoute(fromLeg, toLeg, over) {
+                var walking = over || legs;
                 var first = fromLeg === undefined || fromLeg === null ? 0 : fromLeg;
-                var last = toLeg === undefined || toLeg === null ? legs.length : toLeg;
+                var last = toLeg === undefined || toLeg === null ? walking.length : toLeg;
                 var lon = [], lat = [], along = [], height = [], distance = [], free = [];
                 var stretches = [], stretch = null, tally = blankTally(), gaps = [];
                 var walked = 0, crossings = 0, crossed = 0, straight = 0, read = false, joined = false;
@@ -10773,7 +10916,7 @@ class _PlanMode(MacroElement):
                 // at the head of leg i is point i's, and the walk's end is the
                 // last point's.
                 var stations = [];
-                legs.slice(first, last).forEach(function (leg) {
+                walking.slice(first, last).forEach(function (leg) {
                     stations.push(walked);
                     if (!leg.parts) { breakHere(); return; }
                     leg.parts.forEach(function (part) {
@@ -11010,18 +11153,24 @@ class _PlanMode(MacroElement):
             // switch too many to have to remember.
             pane.style.pointerEvents = 'none';
 
-            function draw(parts, waiting) {
+            // `into` is the goal's, which draws the same shapes in its own
+            // colour and its own pane: the width, the casing and the dashes are
+            // what say *this is a route*, and they are not the goal's to differ
+            // in -- only which route it is.
+            function draw(parts, waiting, into) {
                 var layers = [];
+                var pane = into ? into.pane : 'trailsPlanRoute';
                 parts.forEach(function (part) {
                     var corners = [];
                     for (var i = 0; i < part.lon.length; i += 1) { corners.push([part.lat[i], part.lon[i]]); }
                     if (corners.length < 2) { return; }
-                    var colour = (waiting || part.kind === 'waiting') ? WAITING : ROUTE;
+                    var ink = into ? into.colour : ROUTE;
+                    var colour = (waiting || part.kind === 'waiting') ? WAITING : ink;
                     // The casing first, so it lies under. Dashed identically, or
                     // white would show through every gap.
                     [[CASING, PLAN.routeWidth + HALO_PX * 2], [colour, PLAN.routeWidth]].forEach(function (stroke) {
                         layers.push(L.polyline(corners, {
-                            pane: 'trailsPlanRoute', color: stroke[0], weight: stroke[1], opacity: 0.95,
+                            pane: pane, color: stroke[0], weight: stroke[1], opacity: 0.95,
                             dashArray: DASH[part.kind], interactive: false
                         }).addTo(map));
                     });
@@ -13092,6 +13241,19 @@ class _PlanMode(MacroElement):
                 });
             }
 
+            // **The panel is one panel and two routes can be offered.** While
+            // it is drawing the way to a goal, a refresh of the plan is still a
+            // refresh -- the list, the bar, the figures -- but it is not a
+            // reason to take the panel back from a route the reader chose. Plan
+            // mode being switched on is: there the panel is what planning is
+            // read in.
+            function feedPanel(spec) {
+                var showing = panel();
+                if (!showing) { return; }
+                if (goalShowing && !on) { return; }
+                showing.series(spec);
+            }
+
             function present() {
                 var showing = panel();
                 if (!points.length) {
@@ -13100,7 +13262,7 @@ class _PlanMode(MacroElement):
                     // comes is the walk's answer, not a sum of the legs'.
                     drawList([]);
                     sayPlanning(null);
-                    if (showing) { showing.series(null); }
+                    feedPanel(null);
                     return;
                 }
                 var shape = composeRoute();
@@ -13113,18 +13275,21 @@ class _PlanMode(MacroElement):
                 // was trying to tap went with it. Not a narrow-screen rule —
                 // there is nothing to draw on any screen — so the panel is told
                 // there is nothing rather than told to be small.
-                if (points.length < 2) { showing.series(null); return; }
-                showing.series({label: 'planned route', figure: figuresOf(shape), shape: shape,
+                if (points.length < 2) { feedPanel(null); return; }
+                feedPanel({label: 'planned route', figure: figuresOf(shape), shape: shape,
                                 told: told(shape), plan: writable(),
                                 // Which of the marks below the curve are where a
                                 // stage changes hands. The panel draws the
                                 // points; only the plan knows what they mean.
-                                stages: cutsOf()});
+                              stages: cutsOf()});
             }
 
             function switchTo(want) {
                 if (want === on) { return; }
                 on = want;
+                // Planning is read in this panel, so switching it on is the one
+                // thing that takes the panel back from a goal's route.
+                if (on) { goalShowing = false; }
                 toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
                 var showing = panel();
                 // While plan mode is on the map's clicks are its own, so the
@@ -13227,13 +13392,15 @@ class _PlanMode(MacroElement):
 
             container.addEventListener('click', function (event) {
                 if (!on || overFurniture(event)) { return; }
-                // **And not while a position is being picked.** That switch owns
+                // **And not while a position is being picked or a goal set.**
+                // Either switch owns
                 // the next tap whatever else does -- it is the one thing on this
                 // map that is meant to work in every mode -- so this yields
                 // rather than stopping the click, and the chrome's own handler,
                 // which is the next one in the capture phase, takes it.
                 if (window.trailsChrome && window.trailsChrome.state &&
-                        window.trailsChrome.state().picking) { return; }
+                        (window.trailsChrome.state().picking ||
+                         window.trailsChrome.state().aiming)) { return; }
                 // A pan ends in a click too. Leaflet drops that one for its own
                 // listeners; this one is not Leaflet's, so how far the pointer
                 // travelled is what tells the two apart.
@@ -13279,7 +13446,8 @@ class _PlanMode(MacroElement):
             container.addEventListener('dblclick', function (event) {
                 if (!on || overFurniture(event)) { return; }
                 if (window.trailsChrome && window.trailsChrome.state &&
-                        window.trailsChrome.state().picking) { return; }
+                        (window.trailsChrome.state().picking ||
+                         window.trailsChrome.state().aiming)) { return; }
                 event.stopPropagation();
             }, true);
 
@@ -13287,6 +13455,320 @@ class _PlanMode(MacroElement):
             // arrives as window.trailsGraph and the panel's selection as
             // window.trailsProfile: so a browser check can drive it and read it
             // rather than screenshot it.
+            // ---- the goal ---------------------------------------------------------
+            // **A goal is not a plan.** A plan is a tour made beforehand, at a
+            // table; a goal is a point set while walking, and the two stand side
+            // by side -- setting one never touches the other, and a reader on a
+            // planned route may still say *but first I want to get to that hut*.
+            //
+            // It lives in this control because the router does. The graph, the
+            // snapping and `resolve` are all here, and a second copy of any of
+            // them would be a second answer to the same question -- the rule
+            // `layEdges` is exposed under, and the reason nothing else on this
+            // page walks a route for itself.
+            //
+            // Two readings of one point, and not two modes: *direct* is the
+            // bearing to it and *routed* is a way there over the network. The
+            // point is the same either way, because which of the two a reader
+            // wants changes on the ground -- routed in fog, direct with the
+            // slope in front of them -- and having to set the goal again to say
+            // so would be the page asking them to repeat themselves.
+            var GOAL_COLOUR = '#00a152';
+            //: How far off the line the reader has to have got before routing
+            //: again is worth it, and how much of that is their own uncertainty:
+            //: a fix that is 40 m vague reads as 40 m off a line it is standing
+            //: on. Never under the floor, because a line drawn along a path is
+            //: not the path to the metre.
+            var GOAL_ASTRAY_M = 50;
+            var GOAL_ASTRAY_SPREADS = 3;
+            //: And at most this often. A fix arrives about once a second and
+            //: each route is a search over the network; a line rebuilt whenever
+            //: the fix shivered would shiver with it, and the distance left
+            //: would stop counting down and start jittering.
+            var GOAL_AGAIN_MS = 30000;
+            //: How near counts as arrived: the circle the map is already drawing
+            //: round the reader. Inside it there is no direction to give, which
+            //: is the same rule the goal mark follows on a route.
+            var goalAt = null, goalWay = 'direct';
+            var goalLeg = null, goalShape = null, goalLayers = [], goalMark = null;
+            var goalFrom = null, goalWhen = 0, goalWorking = 0, goalToken = null;
+            //: Whether the panel is showing the way to the goal rather than the
+            //: plan. Both can be offered at once and only one of them is drawn.
+            var goalShowing = false;
+
+            function goalPane() {
+                if (!map.getPane('trailsGoalRoute')) {
+                    var made = map.createPane('trailsGoalRoute');
+                    // Over the planned route at 460: a goal is the more
+                    // particular of the two and the one the reader set last.
+                    made.style.zIndex = 462;
+                    // For the reason the plan's own pane gives: a line that took
+                    // clicks would stand between a reader and the trail under it.
+                    made.style.pointerEvents = 'none';
+                }
+                return 'trailsGoalRoute';
+            }
+
+            //: A target and not a pin: the waypoints are numbered discs because
+            //: a route has an order, and a goal has nothing to be third of.
+            function goalIcon() {
+                return '<span style="display:block;width:100%;height:100%;box-sizing:border-box;' +
+                    'border-radius:50%;border:3px solid ' + GOAL_COLOUR + ';background:' + CASING +
+                    ';box-shadow:0 0 0 2px ' + CASING + ',0 0 0 4px ' + GOAL_COLOUR + '"></span>';
+            }
+
+            function paintGoalMark() {
+                if (!goalAt) {
+                    if (goalMark) { map.removeLayer(goalMark); goalMark = null; }
+                    return;
+                }
+                if (!goalMark) {
+                    goalMark = L.marker([goalAt.lat, goalAt.lon], {
+                        icon: L.divIcon({className: 'trails-goal-mark', iconSize: [16, 16],
+                                         iconAnchor: [8, 8], html: goalIcon()}),
+                        keyboard: false, interactive: false, zIndexOffset: 1200
+                    }).addTo(map);
+                    return;
+                }
+                goalMark.setLatLng([goalAt.lat, goalAt.lon]);
+            }
+
+            function dropGoalLine() {
+                undraw(goalLayers);
+                goalLayers = [];
+                goalLeg = null;
+                goalShape = null;
+            }
+
+            // **Routed from where the reader is, which is the whole of what
+            // *routed* means.** Not from the goal outwards and not from where
+            // the goal was set: a way to somewhere starts where you are.
+            function routeToGoal(from) {
+                if (!goalAt || goalWay !== 'routed' || !from) { return; }
+                goalFrom = {lat: from.lat, lon: from.lon};
+                goalWhen = Date.now();
+                goalWorking += 1;
+                refreshGoal();
+                var mine = {};
+                // **One token and not a queue.** A reply about a way from ground
+                // the reader has since left is not a shorter answer to the same
+                // question, it is an answer to a question nobody asked -- and
+                // this is the same one line that cancels a plan's leg.
+                goalToken = mine;
+                withGraph(function (graph) {
+                    var head = snapped(graph, from.lat, from.lon);
+                    var tail = snapped(graph, goalAt.lat, goalAt.lon);
+                    Promise.resolve().then(function () {
+                        return resolve(graph, head, tail, true);
+                    }).then(function (parts) {
+                        if (goalToken !== mine) { return; }
+                        goalLeg = {from: head, to: tail, parts: parts, failed: null,
+                                   provisional: parts.some(function (part) { return part.provisional; })};
+                    }, function (failure) {
+                        if (goalToken !== mine) { return; }
+                        goalLeg = {from: head, to: tail, parts: null, provisional: false,
+                                   failed: String(failure && failure.message ? failure.message : failure)};
+                    }).then(function () {
+                        goalWorking -= 1;
+                        if (goalToken !== mine) { return; }
+                        undraw(goalLayers);
+                        goalLayers = goalLeg.parts
+                            ? draw(goalLeg.parts, goalLeg.provisional, {pane: goalPane(), colour: GOAL_COLOUR})
+                            : [];
+                        goalShape = goalLeg.parts ? composeRoute(null, null, [goalLeg]) : null;
+                        refreshGoal();
+                    });
+                }, function () {});
+            }
+
+            // Whether the way there is worth working out again, asked on every
+            // fix. **Only when the reader has left it**, because a route that is
+            // still under their feet is still the answer -- and their own circle
+            // is part of how far off they look, so a vague fix does not send
+            // this off routing the same way twice.
+            function goalStood(lat, lon, spread) {
+                if (!goalAt || goalWay !== 'routed') { return false; }
+                if (goalWorking > 0) { return false; }
+                if (!goalShape) { return goalAgain({lat: lat, lon: lon}); }
+                if (Date.now() - goalWhen < GOAL_AGAIN_MS) { return false; }
+                var astray = Math.max(GOAL_ASTRAY_M, GOAL_ASTRAY_SPREADS * (spread || 0));
+                var cosine = Math.cos(lat * Math.PI / 180);
+                var away = Infinity;
+                for (var i = 0; i + 1 < goalShape.lon.length; i += 1) {
+                    if (goalShape.lon[i] === null || goalShape.lon[i + 1] === null) { continue; }
+                    var near = goalNear(lat, lon, cosine, i);
+                    if (near < away) { away = near; }
+                }
+                return away > astray ? goalAgain({lat: lat, lon: lon}) : false;
+            }
+
+            //: The gap to one segment of the composed way, flat, in the metre
+            //: this page measures with. `onRoute` does the same sum over the
+            //: plan's legs and answers a different question with it.
+            function goalNear(lat, lon, cosine, at) {
+                var aLat = goalShape.lat[at], aLon = goalShape.lon[at];
+                var bLat = goalShape.lat[at + 1], bLon = goalShape.lon[at + 1];
+                var ax = (aLon - lon) * cosine, ay = aLat - lat;
+                var dx = (bLon - aLon) * cosine, dy = bLat - aLat;
+                var span = dx * dx + dy * dy;
+                var t = span > 0 ? -(ax * dx + ay * dy) / span : 0;
+                t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                var cx = ax + t * dx, cy = ay + t * dy;
+                return Math.sqrt(cx * cx + cy * cy) * 111320;
+            }
+
+            function goalAgain(from) {
+                routeToGoal(from);
+                return true;
+            }
+
+            //: Where the reader is, asked of the one thing on this page that
+            //: knows -- the same figure the position ring is drawn at, which is
+            //: not always the last fix that arrived.
+            function goalHere() {
+                var said = window.trailsChrome && window.trailsChrome.position
+                    ? window.trailsChrome.position() : null;
+                return said ? {lat: said.lat, lon: said.lon} : null;
+            }
+
+            function setGoal(lat, lon, name) {
+                goalAt = {lat: lat, lon: lon, name: name || null};
+                dropGoalLine();
+                goalToken = null;
+                paintGoalMark();
+                routeToGoal(goalHere());
+                keepGoal();
+                refreshGoal();
+            }
+
+            function clearGoal() {
+                goalAt = null;
+                goalToken = null;
+                goalFrom = null;
+                goalWhen = 0;
+                dropGoalLine();
+                paintGoalMark();
+                if (goalShowing) { goalShowing = false; if (panel()) { panel().series(null); } }
+                keepGoal();
+                refreshGoal();
+            }
+
+            function setGoalWay(want) {
+                var wanted = want === 'routed' ? 'routed' : 'direct';
+                if (wanted === goalWay) { return goalWay; }
+                goalWay = wanted;
+                if (goalWay === 'direct') {
+                    dropGoalLine();
+                    goalToken = null;
+                    if (goalShowing) { goalShowing = false; if (panel()) { panel().series(null); } }
+                } else {
+                    routeToGoal(goalHere());
+                }
+                keepGoal();
+                refreshGoal();
+                return goalWay;
+            }
+
+            // The way to the goal on the panel, which is the same call the plan
+            // makes with its own route. **Not marked `plan`**: what that field
+            // carries is a route a reader can write to a file with the points
+            // they put down, and a goal has one point that is not theirs.
+            function showGoal() {
+                var showing = panel();
+                if (!showing || !goalShape) { return false; }
+                goalShowing = true;
+                showing.series({label: 'to the goal', figure: figuresOf(goalShape), shape: goalShape,
+                                told: told(goalShape), goal: true});
+                return true;
+            }
+
+            function refreshGoal() {
+                if (goalShowing && goalShape) { showGoal(); }
+                if (window.trailsChrome && window.trailsChrome.goal) {
+                    window.trailsChrome.goal(goalState());
+                }
+            }
+
+            function goalState() {
+                return {at: goalAt ? {lat: goalAt.lat, lon: goalAt.lon} : null,
+                        name: goalAt ? goalAt.name : null, way: goalWay,
+                        working: goalWorking > 0,
+                        // Whether there is a way there to point along, which is a
+                        // different question from whether one was asked for: a
+                        // routed goal off the network has none.
+                        line: !!goalShape,
+                        failed: goalLeg ? goalLeg.failed : null,
+                        from: goalFrom, metres: goalShape ? goalShape.total : null,
+                        ascent: goalShape ? figuresOf(goalShape).ascent : null};
+            }
+
+            //: Every segment of the way there, for the position mark, in the
+            //: shape the planned route hands its own out in.
+            function goalSegments(visit) {
+                if (!goalShape) { return; }
+                for (var i = 0; i + 1 < goalShape.lon.length; i += 1) {
+                    if (goalShape.lon[i] === null || goalShape.lon[i + 1] === null) { continue; }
+                    visit(goalShape.lat[i], goalShape.lon[i], goalShape.lat[i + 1], goalShape.lon[i + 1], 0);
+                }
+            }
+
+            //: And what lies at either end of it. There is one stretch and one
+            //: goal, so walking it the wrong way round is the only thing this
+            //: has to answer differently -- and then the goal is behind you.
+            function goalEnd(stretch, forward) {
+                if (!goalAt || forward < 0) { return null; }
+                return {lat: goalAt.lat, lon: goalAt.lon, name: goalAt.name || 'the goal'};
+            }
+
+            function goalKeptKey() { return keptKey() + '.goal'; }
+
+            function keepGoal() {
+                try {
+                    if (!goalAt) { window.localStorage.removeItem(goalKeptKey()); return; }
+                    window.localStorage.setItem(goalKeptKey(), JSON.stringify(
+                        {lat: goalAt.lat, lon: goalAt.lon, name: goalAt.name, way: goalWay}));
+                } catch (blocked) { return; }
+            }
+
+            // **Kept, because a goal outlives the page it was set on.** A reader
+            // sets one in a hut with a signal and reads it in the fog an hour
+            // later, by which time the tab has been thrown away and rebuilt at
+            // least once. Its own key beside the plan's, so restoring one cannot
+            // touch the other.
+            function restoreGoal() {
+                var text = null;
+                try { text = window.localStorage.getItem(goalKeptKey()); } catch (blocked) { return; }
+                if (!text) { return; }
+                var said = null;
+                try { said = JSON.parse(text); } catch (broken) { return; }
+                if (!said || typeof said.lat !== 'number' || typeof said.lon !== 'number') { return; }
+                goalWay = said.way === 'routed' ? 'routed' : 'direct';
+                setGoal(said.lat, said.lon, said.name || null);
+            }
+
+            window.trailsGoal = {
+                set: setGoal,
+                clear: clearGoal,
+                // Read with no argument, set with one. The same shape the
+                // profile's own scale switch answers in.
+                way: function (want) { return want === undefined ? goalWay : setGoalWay(want); },
+                // Routed again now, whatever the rule above would have said.
+                again: function () { routeToGoal(goalHere()); return goalWorking > 0; },
+                // Where the reader is standing, handed in by whoever has the
+                // fix. Answers whether it set anything going, so a check can
+                // wait for it rather than sleeping.
+                stood: goalStood,
+                state: goalState,
+                segments: goalSegments,
+                goal: goalEnd,
+                show: showGoal,
+                showing: function () { return goalShowing; },
+                //: Let go of the panel without clearing the goal: another line
+                //: was chosen and this route is no longer what is drawn.
+                letGo: function () { goalShowing = false; },
+                restore: restoreGoal
+            };
+
             window.trailsPlan = {
                 place: place,
                 undo: undo,
@@ -13366,6 +13848,16 @@ class _PlanMode(MacroElement):
                 // Which leg a position falls on, and where along it — the same
                 // answer the click uses to decide that it means an insertion.
                 onRoute: onRoute,
+                // **What this map already calls the ground under a point**, for
+                // whoever is putting something there. A waypoint standing beside
+                // a hut takes the hut's name and the hut's position; a goal set
+                // by tapping one is the same question asked by somebody else,
+                // and two answers to it would differ the day the register does.
+                named: function (lat, lon) {
+                    var said = nameOf({lat: lat, lon: lon}, 0);
+                    return said.name ? {name: said.name, lat: said.lat, lon: said.lon,
+                                        kind: said.kind, away: said.away} : null;
+                },
                 // **What the position mark measures itself against**, without
                 // asking for the route as a shape. `segments` walks it and
                 // `goal` names either end of a leg; together they are enough to
@@ -13492,9 +13984,11 @@ class _PlanMode(MacroElement):
                 // way in; both belong after the payload the page already waits
                 // for rather than in front of a reader watching it load.
                 if (window.trailsGraph) {
-                    window.trailsGraph.ready.then(function () { restoreKept(); }, function () {});
+                    window.trailsGraph.ready.then(function () { restoreKept(); restoreGoal(); },
+                                                  function () {});
                 } else {
                     restoreKept();
+                    restoreGoal();
                 }
             } else {
                 console.error('plan mode: there is no profile panel in this page, so nothing can be planned');
@@ -16167,6 +16661,11 @@ class _Chrome(MacroElement):
                 // column would be one drawing asked to mean two things.
                 pick: '<path d="M9 16.1s5.1-4.9 5.1-8.3a5.1 5.1 0 1 0-10.2 0C3.9 11.2 9 16.1 9 16.1Z"/>' +
                       '<circle cx="9" cy="7.7" r="1.9"/>',
+                // **A pennant, and deliberately neither a target nor a pin.**
+                // `here` is two rings and `pick` is a pin; a goal is a third
+                // thing at the same size in the same column, and the one shape
+                // that reads as *somewhere to get to* without borrowing either.
+                goal: '<path d="M5 16.2V2.6"/><path d="M5 3.4h8.3l-2.1 3.1 2.1 3.1H5Z"/>',
                 // A disc with one half filled: the same drawing whichever way
                 // the page is turned, which is right for a control that is
                 // about the turning and not about either side of it.
@@ -16231,6 +16730,14 @@ class _Chrome(MacroElement):
                 // rail is not.
                 {key: 'pick', label: 'Copy a position', width: 300, selector: null, quick: true,
                  hint: 'Tap the map and its coordinates go to the clipboard.'},
+                // **A switch and not a panel, for the same reason the picker is
+                // one**: pressed, the next tap on the map is a goal and nothing
+                // else, and it lets go of itself afterwards. What there is to do
+                // with a goal once it is set -- how to read it, how to be rid of
+                // it -- is at the foot, where somebody walking is already
+                // looking, and not behind a tool they would have to open.
+                {key: 'goal', label: 'Set a goal', width: 300, selector: null, quick: true,
+                 hint: 'Tap the map and the mark points the way there.'},
                 {key: 'offline', label: 'Offline', width: 330, selector: null,
                  hint: 'Keep the ground on this device, and walk with no signal.'},
                 {key: 'theme', label: 'Theme', width: 300, selector: null,
@@ -17021,6 +17528,31 @@ class _Chrome(MacroElement):
                 return found;
             }
 
+            //: How far along the route the head looks when the reader is on it.
+            //: Under this the bearing shivers with the fix; much over it and the
+            //: head cuts the corners the route was drawn to go round. Three
+            //: times the circle wherever that is more, so a vague fix looks
+            //: further ahead and gets a steadier answer for it.
+            var AHEAD_M = 60;
+            var AHEAD_SPREADS = 3;
+
+            //: The point a given distance along the route, walked from its
+            //: start. One more pass over the segments, which is what the whole
+            //: of this costs anyway.
+            function alongAt(target, cosine, want) {
+                var run = 0, found = null;
+                target.segments(function (aLat, aLon, bLat, bLon) {
+                    if (found) { return; }
+                    var length = awayFrom({lat: aLat, lng: aLon}, cosine, bLat, bLon);
+                    if (run + length >= want) {
+                        var t = length > 0 ? (want - run) / length : 0;
+                        found = {lat: aLat + t * (bLat - aLat), lon: aLon + t * (bLon - aLon)};
+                    }
+                    run += length;
+                });
+                return found;
+            }
+
             //: How many places on the rim of the accuracy circle are asked.
             //: Every 30 degrees: the answer turns slowly with the reader's
             //: position and the extremes are on the rim, which is where the
@@ -17051,19 +17583,40 @@ class _Chrome(MacroElement):
             // which is exact and needs no asking.
             function aimAlong(at, spread, target) {
                 var cosine = Math.cos(at.lat * Math.PI / 180);
-                var best = null, run = 0, atLeg = null, spans = {};
+                // **A point the reader set needs no asking.** It does not move,
+                // so the whole of the width is their own circle turning a
+                // bearing to a fixed thing -- `asin(r / d)`, exactly, either
+                // side. The dozen questions below exist because a *route* moves
+                // the answer about; a goal does not.
+                if (target.point) {
+                    var straight = awayFrom(at, cosine, target.point.lat, target.point.lon);
+                    // Inside the circle there is no direction to give: the
+                    // reader may be standing on it. 180 either way is 360, which
+                    // is wider than anything is drawn at, and that is the mark
+                    // going quiet rather than a special case for arriving.
+                    var half = straight > spread
+                        ? Math.asin(Math.min(1, spread / straight)) * 180 / Math.PI : 180;
+                    return {to: bearingBetween(at, {lat: target.point.lat, lng: target.point.lon}),
+                            left: -half, right: half, away: straight, on: straight <= spread,
+                            at: {lat: target.point.lat, lon: target.point.lon},
+                            goal: target.point, name: target.name};
+                }
+                var best = null, run = 0, whole = 0, atLeg = null, spans = {};
                 target.segments(function (aLat, aLon, bLat, bLon, which) {
                     // The legs arrive one at a time and in order, so the run
                     // resets where one hands over to the next and `spans` ends
-                    // up holding how long each of them was.
+                    // up holding how long each of them was. `whole` does not
+                    // reset: a look-ahead is measured along the route and not
+                    // along whichever leg it happens to fall in.
                     if (which !== atLeg) { atLeg = which; run = 0; }
                     var near = nearOnSegment(at, cosine, aLat, aLon, bLat, bLon);
                     if (!best || near.away < best.away) {
                         best = {away: near.away, lat: near.lat, lon: near.lon, leg: which,
-                                run: run + near.along,
+                                run: run + near.along, along: whole + near.along,
                                 way: bearingBetween({lat: aLat, lng: aLon}, {lat: bLat, lng: bLon})};
                     }
                     run += near.length;
+                    whole += near.length;
                     spans[which] = run;
                 });
                 if (!best) { return null; }
@@ -17104,8 +17657,17 @@ class _Chrome(MacroElement):
                 // same bearing the cone is drawn from -- and without one there
                 // is nothing for a goal to be ahead of, so the mark says so by
                 // not being drawn.
-                if (hereBearing === null || !target.goal) { return found; }
-                var forward = Math.abs(swung(hereBearing - best.way)) < 90 ? 1 : -1;
+                if (!target.goal) { return found; }
+                // **Some routes have only one way along them.** A way to a goal
+                // runs from where the reader was to the thing they asked for;
+                // *ahead* is toward the goal and cannot be anything else, so it
+                // is not asked. A planned route has waypoints at both ends of
+                // every leg and can be walked either way, and there the
+                // direction of travel is the only thing that says which.
+                var forward = target.oneWay ? 1
+                    : (hereBearing === null ? 0
+                       : (Math.abs(swung(hereBearing - best.way)) < 90 ? 1 : -1));
+                if (!forward) { return found; }
                 var leg = best.leg;
                 var remains = forward > 0 ? (spans[leg] - best.run) : best.run;
                 var goal = target.goal(leg, forward);
@@ -17119,8 +17681,20 @@ class _Chrome(MacroElement):
                     goal = target.goal(leg, forward);
                 }
                 if (!goal) { return found; }
-                var straight = awayFrom(at, cosine, goal.lat, goal.lon);
-                found.to = bearingBetween(at, {lat: goal.lat, lng: goal.lon});
+                // **On a route, which way to walk is the route and not the
+                // goal.** Measured on a 19 km way to one: the bearing to the
+                // goal and the bearing of the path under the reader's feet were
+                // tens of degrees apart, and the path was right -- a head
+                // pointing at the goal would send a reader across the lake the
+                // route goes round. So it follows the route a little way ahead:
+                // far enough not to shiver with the fix, near enough not to cut
+                // the corner, and the distance is the fix's own for both
+                // reasons. The label goes on naming the goal and what is left.
+                var look = Math.max(AHEAD_M, AHEAD_SPREADS * spread);
+                var want = best.along + forward * look;
+                var mark = alongAt(target, cosine, Math.max(0, Math.min(whole, want))) || goal;
+                var straight = awayFrom(at, cosine, mark.lat, mark.lon);
+                found.to = bearingBetween(at, {lat: mark.lat, lng: mark.lon});
                 found.right = straight > spread
                     ? Math.asin(Math.min(1, spread / straight)) * 180 / Math.PI : 180;
                 found.left = -found.right;
@@ -17137,6 +17711,23 @@ class _Chrome(MacroElement):
             // either side of that line. Otherwise whatever line is selected.
             // Neither, and there is no goal to draw.
             function aimTarget() {
+                // **A goal first, because it is the one line here a reader set
+                // on purpose while walking.** A plan is a tour made beforehand
+                // and a selection is something they tapped in order to read it;
+                // a goal is an instruction, and it outranks both.
+                var goal = window.trailsGoal ? window.trailsGoal.state() : null;
+                if (goal && goal.at) {
+                    if (goal.way === 'routed' && goal.line) {
+                        return {name: 'the goal', segments: window.trailsGoal.segments,
+                                goal: window.trailsGoal.goal, oneWay: true};
+                    }
+                    // Straight at it -- and equally where a routed goal has no
+                    // way to it yet or could not be given one. A route that
+                    // failed is not a reason to stop saying which way the goal
+                    // lies; it is the reason the reader most wants to know.
+                    return {name: 'the goal', point: {lat: goal.at.lat, lon: goal.at.lon,
+                                                      name: goal.name || 'the goal'}};
+                }
                 var showing = window.trailsProfile || null;
                 var plan = window.trailsPlan;
                 if (plan && plan.segments &&
@@ -17606,6 +18197,13 @@ class _Chrome(MacroElement):
                     if (!hereFrom) { hereFrom = where; }
                 }
                 hereAt = where;
+                // **The goal routes from where the reader is**, and this is the
+                // only place on the page that knows they have moved. Whether
+                // that is worth routing again for is the goal's own judgement;
+                // all this owes it is the news.
+                if (window.trailsGoal && window.trailsGoal.stood) {
+                    window.trailsGoal.stood(where.lat, where.lng, spread);
+                }
                 aimAgain();
                 // **The circle is the sentence.** It was said in words as well,
                 // once, with the fix that moved the map -- and a line of text is
@@ -17842,12 +18440,22 @@ class _Chrome(MacroElement):
             // one did not arrive. A second line for the second of them would be
             // two surfaces on a phone that have to agree about which is on top,
             // which is the defect this chrome exists to end.
+            // **Three states and not two, because staying and taking a pointer
+            // are two things.** `true` is something to read and dismiss -- a
+            // copied coordinate, which is selectable text and has to be
+            // tappable. `'notice'` stands for as long as a mode does and is not
+            // a control. Anything else fades.
+            //
+            // Found by driving it: *Tap the map to set a goal* was said sticky,
+            // which put a full-width band across the middle of the map with
+            // `pointer-events: auto` on it -- and it then swallowed the very tap
+            // it was asking for. A hint that eats its own gesture is a good
+            // joke and a bad control.
             function showSaid(sticky) {
                 pickToast.style.display = 'flex';
-                // A notice takes no pointer -- it stands over the map, and the
-                // map is what is being tapped. Something to read and dismiss
-                // keeps one.
-                pickToast.style.pointerEvents = sticky ? 'auto' : 'none';
+                // A notice takes no pointer: it stands over the map, and the
+                // map is what is being tapped.
+                pickToast.style.pointerEvents = sticky === true ? 'auto' : 'none';
                 if (pickTimer) { window.clearTimeout(pickTimer); }
                 pickTimer = sticky ? null : window.setTimeout(hideCopied, 2600);
                 place();
@@ -18016,6 +18624,71 @@ class _Chrome(MacroElement):
                 copyHere(event);
             }, true);
 
+            // ---- setting a goal ---------------------------------------------
+            // **Armed, and it lets go of itself.** One tap sets a goal; a
+            // switch that stayed on would make every later tap a goal, which is
+            // the mistake plan mode is allowed to make because planning is a
+            // mode a reader is *in* and this is one thing they are doing.
+            var aiming = false;
+
+            function askAiming(want) {
+                aiming = want === undefined ? !aiming : !!want;
+                // Never both: the picker owns the next tap while it is on, and
+                // two crosshairs over one map is a page that cannot say what a
+                // tap will do.
+                if (aiming && picking) { askPicking(false); }
+                container.style.cursor = aiming ? 'crosshair' : '';
+                // Standing while the switch is armed and gone the moment it is
+                // not, because it is saying what the next tap will do.
+                saySomething(aiming ? 'Tap the map to set a goal.' : '', 'notice');
+                paintRail();
+                paintQuick();
+                return aiming;
+            }
+
+            function setGoalHere(event) {
+                if (!window.trailsGoal) { return; }
+                var where = map.mouseEventToLatLng(event);
+                var standing = window.trailsGoal.state();
+                // **A tap on the goal takes it away.** Setting one and moving
+                // one are the same gesture, so being rid of it has to be a
+                // gesture too -- and the only place a reader would look for it
+                // is the mark itself.
+                if (standing && standing.at) {
+                    var mark = map.latLngToContainerPoint(L.latLng(standing.at.lat, standing.at.lon));
+                    var at = map.mouseEventToContainerPoint(event);
+                    var reach = ((window.trailsReach && window.trailsReach.finger) || 12) + 8;
+                    if (Math.abs(mark.x - at.x) <= reach && Math.abs(mark.y - at.y) <= reach) {
+                        window.trailsGoal.clear();
+                        askAiming(false);
+                        saySomething('Goal cleared.', false);
+                        return;
+                    }
+                }
+                // **Named where the map already names something within reach,
+                // and standing where that thing stands** -- the rule a waypoint
+                // follows. A goal called *Storvasshytta* is one a reader can
+                // check they meant, and the hut is where they are going rather
+                // than the pixel they hit.
+                var named = (window.trailsPlan && window.trailsPlan.named)
+                    ? window.trailsPlan.named(where.lat, where.lng) : null;
+                if (named) { window.trailsGoal.set(named.lat, named.lon, named.name); }
+                else { window.trailsGoal.set(where.lat, where.lng, null); }
+                askAiming(false);
+                saySomething(named ? ('Goal: ' + named.name) : 'Goal set.', false);
+            }
+
+            container.addEventListener('click', function (event) {
+                if (!aiming || overChrome(event)) { return; }
+                var slop = window.trailsReach ? window.trailsReach.slop() : 3;
+                if (pickPressed && Math.abs(event.clientX - pickPressed.x) +
+                        Math.abs(event.clientY - pickPressed.y) >= slop) { return; }
+                // Stopped in the capture phase for the reason the picker's is:
+                // no waypoint, no selection, no popup -- the tap meant a goal.
+                event.stopPropagation();
+                setGoalHere(event);
+            }, true);
+
             function askPicking(want) {
                 picking = want === undefined ? !picking : !!want;
                 if (!picking) { hideCopied(); }
@@ -18059,6 +18732,7 @@ class _Chrome(MacroElement):
                 return made;
             }
             var quickPick = quickMark('pick', 'Copy a position', function () { askPicking(); });
+            var quickGoal = quickMark('goal', 'Set a goal', function () { askAiming(); });
             var quickHere = quickMark('here', 'Where I am', function () { askHere(); });
             L.DomEvent.disableClickPropagation(quick);
             chrome.appendChild(quick);
@@ -18066,8 +18740,9 @@ class _Chrome(MacroElement):
             function paintQuick() {
                 // Called from the position switch as well, which is written
                 // above these two and runs once before they exist.
-                if (!quickPick || !quickHere) { return; }
-                [[quickPick, picking], [quickHere, hereWatch !== null]].forEach(function (each) {
+                if (!quickPick || !quickHere || !quickGoal) { return; }
+                [[quickPick, picking], [quickGoal, aiming || goalSet()],
+                 [quickHere, hereWatch !== null]].forEach(function (each) {
                     var lit = each[1];
                     each[0].style.background = lit ? 'var(--trails-accent)' : 'var(--trails-panel)';
                     each[0].style.borderColor = lit ? 'var(--trails-accent)' : 'var(--trails-edge)';
@@ -18098,6 +18773,11 @@ class _Chrome(MacroElement):
             // `true` and `false` are the reader overriding that, in either
             // direction, and they outlast the state that set the default.
             var planState = null, profileAsked = null, selection = null;
+            //: What the goal control last said about itself. The rail's lamp,
+            //: the row at the foot and the position mark all draw from this
+            //: rather than asking it, the way plan mode's summary works.
+            var goalNow = null;
+            function goalSet() { return !!(goalNow && goalNow.at); }
 
             // **Plan mode's bar is the panel's own row now.** It stood above
             // the profile panel while a route was being made -- its figures over
@@ -18196,6 +18876,7 @@ class _Chrome(MacroElement):
                         (tool.key === 'profile' && profileShowing()) ||
                         (tool.key === 'here' && hereWatch !== null) ||
                         (tool.key === 'pick' && picking) ||
+                        (tool.key === 'goal' && (aiming || goalSet())) ||
                         (tool.key === 'offline' && offlineOn());
                     button.style.color = lit ? 'var(--trails-on-accent)' : (running ? 'var(--trails-accent)' : 'var(--trails-ink-3)');
                     button.setAttribute('aria-pressed', String(lit));
@@ -18370,6 +19051,33 @@ class _Chrome(MacroElement):
                 place();
             }
 
+            function goalOffer(where, called) {
+                return '<div style="padding:7px 0 0;margin-top:5px;border-top:1px solid var(--trails-rule)">' +
+                    '<button type="button" class="trails-goal-take" data-lat="' + esc(where.lat) +
+                    '" data-lon="' + esc(where.lng) + '" data-name="' + esc(called || '') + '" ' +
+                    'style="font:inherit;font-size:12px;padding:4px 10px;cursor:pointer;' +
+                    'border:1px solid var(--trails-rule);border-radius:9px;' +
+                    'background:var(--trails-solid);color:var(--trails-ink)">Set as goal</button></div>';
+            }
+
+            // **Delegated, on the document, because the button is markup and not
+            // an element this holds.** The panel takes the popup's HTML in as a
+            // page of its own, so there is nothing here to hang a listener on --
+            // and re-finding the node after every popup would be a second thing
+            // to keep in step with the panel's own paging. Leaflet's
+            // `disableClickPropagation` stops mousedown and dblclick on the
+            // panel and deliberately not click, which is what lets this work.
+            document.addEventListener('click', function (event) {
+                var button = (event.target && event.target.closest)
+                    ? event.target.closest('.trails-goal-take') : null;
+                if (!button || !window.trailsGoal) { return; }
+                event.stopPropagation();
+                var called = button.getAttribute('data-name') || null;
+                window.trailsGoal.set(Number(button.getAttribute('data-lat')),
+                                      Number(button.getAttribute('data-lon')), called);
+                saySomething(called ? ('Goal: ' + called) : 'Goal set.', false);
+            });
+
             var adopting = false;
             map.on('popupopen', function (event) {
                 if (adopting) { return; }
@@ -18401,6 +19109,15 @@ class _Chrome(MacroElement):
                     // second page. A marker has one position; a line has many.
                     var source = popup._source;
                     var isPoint = !!(source && source.getLatLng && !source.getLatLngs);
+                    // **A place is somewhere to go, so it is offered as one.**
+                    // Nearly every goal a reader sets is a named thing -- a hut,
+                    // a quay, a summit -- and this is the moment they have just
+                    // read what it is. Added to the markup here rather than
+                    // built into the popup: a popup is composed in the build out
+                    // of a table of columns, and a control is not one of them.
+                    if (isPoint && window.trailsGoal) {
+                        content = (content || '') + goalOffer(source.getLatLng(), titleFor(popup));
+                    }
                     window.trailsProfilePanel.detail(titleFor(popup), content, isPoint);
                     paintProfile();
                     place();
@@ -18735,6 +19452,31 @@ class _Chrome(MacroElement):
                     // the route whatever else was chosen.
                     aimAgain();
                 },
+                // What the goal control pushes on every change, and what the
+                // rail's lamp and the row at the foot draw themselves from.
+                // Nothing here asks it anything back -- the same arrangement
+                // plan mode's summary is pushed under.
+                goal: function (said) {
+                    goalNow = said;
+                    if (window.trailsProfilePanel && window.trailsProfilePanel.goal) {
+                        window.trailsProfilePanel.goal(said);
+                    }
+                    paintRail();
+                    paintQuick();
+                    // A goal is the first thing the position mark aims at, so a
+                    // goal that has just arrived, moved or gone is a new answer.
+                    aimAgain();
+                    place();
+                },
+                // **Where the reader is, as it is drawn** -- which is not always
+                // the last fix that arrived, because a sharper one may be being
+                // held. Asked by the goal control, which routes from here and
+                // must route from the place the map is showing.
+                position: function () {
+                    if (!hereAt || !hereRing) { return null; }
+                    return {lat: hereAt.lat, lon: hereAt.lng, spread: hereRing.getRadius()};
+                },
+                aiming: function (want) { return askAiming(want); },
                 // **Where the mark says to walk, as it was worked out rather
                 // than as it is drawn.** A check cannot measure an angle off a
                 // canvas and should not have to read a path back to find one --
@@ -18759,6 +19501,11 @@ class _Chrome(MacroElement):
                         profile: profileShowing(),
                         planning: planOn(),
                         picking: picking,
+                        // Armed for the next tap, and whether there is a goal at
+                        // all: two states of one switch, and the lamp is lit for
+                        // either.
+                        aiming: aiming,
+                        goal: goalSet(),
                         here: hereWatch !== null,
                         planPoints: planState ? planState.points : 0,
                         // The row at the foot, which is the panel's own now:

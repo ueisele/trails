@@ -4159,6 +4159,228 @@ def the_way_to_the_next_goal(page: Any) -> Check:
     )
 
 
+#: What the goal is, what the mark makes of it, and what the row at the foot
+#: says about it -- read off the page's own working rather than off the screen,
+#: for the reason `THE_AIM` gives.
+THE_GOAL = """() => {
+  const row = document.querySelector('.trails-profile-goal');
+  const said = row ? row.querySelector('.trails-profile-goal-said') : null;
+  const ways = row ? [...row.querySelectorAll('.trails-profile-goal-way')] : [];
+  return {goal: window.trailsGoal.state(), aim: window.trailsChrome.aim(),
+          armed: window.trailsChrome.state().aiming,
+          lamp: window.trailsChrome.state().goal,
+          row: !!row && row.style.display !== 'none',
+          says: said ? said.textContent : null,
+          way: ways.filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.textContent),
+          again: row ? (row.querySelector('.trails-profile-goal-again') || {}).style.display : null}; }"""
+
+
+def a_goal_the_reader_sets(page: Any) -> Check:
+    """A point set while walking, read two ways, and what the mark makes of it.
+
+    **Asked for from a phone: I set a point and it becomes the goal.** Direct is
+    the bearing to it; routed is a way there over the network, from where the
+    reader is standing -- which is the whole of what *routed* means, and the
+    reason it goes stale as they walk.
+
+    **Two readings of one point and not two modes.** Which of them somebody
+    wants changes on the ground -- routed in fog, straight at it with the slope
+    in front of them -- so the switch is beside the goal and the goal does not
+    move when it is thrown.
+
+    **And on a route, which way to walk is the route.** Measured here: the
+    bearing to the goal and the bearing of the path under the reader's feet are
+    tens of degrees apart over a long way, and the path is right.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the goal was at each step, and what the mark said about it
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.evaluate("() => { if (window.trailsGoal) { window.trailsGoal.clear(); } }")
+    page.wait_for_timeout(500)
+    laid = select(page, LONG_CHAIN)
+    spots = page.evaluate(
+        """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
+        if (!shape) { return null; }
+        return [0.1, 0.7].map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lng: shape.lon[i]})); }"""
+    )
+    here, there = spots[0], spots[1]
+    page.context.set_geolocation({"latitude": here["lat"], "longitude": here["lng"], "accuracy": 20})
+    page.evaluate("() => window.trailsChrome.here(true)")
+    page.wait_for_function(
+        with_map(
+            """() => { let there = false;
+            __MAP__.eachLayer(l => { if (l.options && l.options.className === 'trails-here-dot') { there = true; } });
+            return there; }"""
+        ),
+        timeout=20_000,
+    )
+    page.wait_for_timeout(800)
+
+    def tap_goal(where: dict[str, float]) -> None:
+        """Tap the map where a latitude and longitude say, not where a pixel does."""
+        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 14, {animate: false})"), where)
+        page.wait_for_timeout(700)
+        spot = page.evaluate(
+            with_map(
+                """(at) => { const pt = __MAP__.latLngToContainerPoint([at.lat, at.lng]);
+                const box = __MAP__.getContainer().getBoundingClientRect();
+                return {x: box.left + pt.x, y: box.top + pt.y}; }"""
+            ),
+            where,
+        )
+        page.mouse.click(spot["x"], spot["y"])
+        page.wait_for_timeout(1500)
+
+    def press_chip(text: str) -> Any:
+        """Press the chip with that name, and read the row it left behind."""
+        page.evaluate(
+            """(text) => { const chips = [...document.querySelectorAll('.trails-profile-pick')];
+            const one = chips.filter(c => c.textContent === text)[0];
+            if (one) { one.click(); } }""",
+            text,
+        )
+        page.wait_for_timeout(1400)
+        return page.evaluate(THE_CHOICES)
+
+    # **Armed by the switch and set by the tap**, which is the gesture as a
+    # reader performs it and not the API underneath it.
+    page.evaluate("() => window.trailsChrome.aiming(true)")
+    page.wait_for_timeout(300)
+    armed = page.evaluate(THE_GOAL)
+    tap_goal(there)
+    direct = page.evaluate(THE_GOAL)
+
+    # Routed, and the same point: the switch is a reading and not a new goal.
+    page.evaluate("() => window.trailsGoal.way('routed')")
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
+    page.wait_for_timeout(900)
+    routed = page.evaluate(THE_GOAL)
+
+    # **The cap, driven and not assumed.** A fix arrives about once a second;
+    # nothing may set a search over the network going more often than this,
+    # whatever the reader has done in between. Asked from 2 km off the line,
+    # which is astray by any measure.
+    astray = {"lat": here["lat"] + 0.018, "lng": here["lng"]}
+    capped = page.evaluate("(at) => window.trailsGoal.stood(at.lat, at.lng, 20)", astray)
+    # And then the same question once the cap has run out. The wait *is* the
+    # rule being driven: a check that skipped it would be checking that a route
+    # can be asked for, which is the other reading.
+    page.wait_for_timeout(31_000)
+    took = page.evaluate("(at) => window.trailsGoal.stood(at.lat, at.lng, 20)", astray)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
+    page.wait_for_timeout(600)
+    again = page.evaluate(THE_GOAL)
+
+    # The row of choices offers it, last of all, and pressing it draws it.
+    page.context.set_geolocation({"latitude": here["lat"], "longitude": here["lng"], "accuracy": 20})
+    page.wait_for_timeout(2400)
+    page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 14, {animate: false})"), here)
+    page.wait_for_timeout(600)
+    page.evaluate(with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"), here)
+    page.wait_for_timeout(1200)
+    chips = page.evaluate(THE_CHOICES)
+    pressed = press_chip("To the goal")
+
+    # A tap on the goal, with the switch armed, takes it away.
+    page.evaluate("() => window.trailsChrome.aiming(true)")
+    page.wait_for_timeout(300)
+    tap_goal(there)
+    gone = page.evaluate(THE_GOAL)
+
+    # **And a place is offered as one where the reader has just read what it
+    # is.** Nearly every goal somebody sets is a named thing, and the popup is
+    # the moment they are looking at its name.
+    opened = page.evaluate(
+        with_map(
+            """() => { let best = null;
+        const walk = l => { if (best) { return; }
+          if (l.getPopup && l.getPopup() && l.getLatLng && !l.getLatLngs) { best = l; return; }
+          if (l.eachLayer) { l.eachLayer(walk); } };
+        __MAP__.eachLayer(walk);
+        if (!best) { return null; }
+        best.openPopup();
+        return true; }"""
+        )
+    )
+    from_place: dict[str, Any] = {"offered": None, "goal": None}
+    if opened:
+        page.wait_for_timeout(1200)
+        from_place["offered"] = page.evaluate(
+            """() => { const b = document.querySelector('.trails-goal-take');
+            return b ? b.textContent : null; }"""
+        )
+        page.evaluate("""() => { const b = document.querySelector('.trails-goal-take'); if (b) { b.click(); } }""")
+        page.wait_for_timeout(1200)
+        from_place["goal"] = page.evaluate("() => window.trailsGoal.state()")
+
+    page.evaluate("() => { window.trailsGoal.clear(); window.trailsChrome.here(false); window.trailsChrome.aiming(false); }")
+    page.wait_for_timeout(400)
+    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+
+    straight = bearing_between((here["lat"], here["lng"]), (there["lat"], there["lng"]))
+    aimed = direct["aim"] or {}
+    turned = abs(((aimed.get("to", 0) - straight + 540) % 360) - 180)
+    # What the circle leaves open at that range, worked out here from the page's
+    # own rule: a set point does not move, so this is the whole of the width.
+    opens = 2 * math.degrees(math.asin(min(1.0, 20 / max(1.0, aimed.get("away", 1)))))
+    onward = routed["aim"] or {}
+    apart = abs(((onward.get("to", 0) - straight + 540) % 360) - 180)
+
+    return Check(
+        "a goal the reader sets, direct and routed",
+        [
+            Reading("a chain was there to set a goal along", laid, True),
+            Reading("the switch arms the next tap", (armed["armed"], (armed["goal"] or {}).get("at")), (True, None)),
+            Reading("and the tap sets a goal and lets the switch go", (direct["goal"]["at"] is not None, direct["armed"]), (True, False)),
+            Reading("read straight at first", direct["goal"]["way"], "direct"),
+            Reading("the mark aims at it", (aimed.get("target"), aimed.get("goal") is not None), ("the goal", True)),
+            Reading("on the bearing to it", turned, 0, within=0.6, note=f"{turned:.2f} deg off"),
+            Reading(
+                "as wide as the circle leaves it and no wider",
+                aimed.get("wide", 0),
+                opens,
+                within=0.05,
+                note=f"{aimed.get('wide', 0):.2f} deg at {aimed.get('away', 0):.0f} m",
+            ),
+            Reading(
+                "switched to routed, the point does not move", (routed["goal"]["at"] == direct["goal"]["at"], routed["goal"]["way"]), (True, "routed")
+            ),
+            Reading(
+                "and there is a way there, with its climb",
+                (routed["goal"]["line"], routed["goal"]["ascent"] is not None),
+                (True, True),
+                note=f"{(routed['goal']['metres'] or 0) / 1000:.2f} km",
+            ),
+            # The whole reason the head follows the route: over a long way these
+            # two are not the same direction, and the one under the feet wins.
+            Reading("and the head follows the route, not the goal", apart > 5, True, note=f"{apart:.0f} deg between the path and the goal"),
+            Reading("the row at the foot says what it is", (routed["row"], routed["way"]), (True, ["Routed"]), note=routed["says"]),
+            Reading("a second route is not started within the half minute", capped, False),
+            Reading("and is once it has run out", took, True),
+            Reading("routed again from where the reader now is", round(again["goal"]["from"]["lat"], 3), round(astray["lat"], 3)),
+            Reading("the row of choices offers it last", chips["chips"][-1] if chips["chips"] else None, "To the goal"),
+            Reading("and pressing it draws it", pressed["lit"], ["To the goal"]),
+            Reading("a tap on the goal takes it away", (gone["goal"]["at"], gone["aim"]), (None, None)),
+            Reading("a place offers itself as a goal", from_place["offered"], "Set as goal"),
+            Reading(
+                "and taking it up names the goal after the place",
+                bool((from_place["goal"] or {}).get("name")),
+                True,
+                note=str((from_place["goal"] or {}).get("name")),
+            ),
+        ],
+    )
+
+
 #: What the row of choices says, read off the chips themselves.
 THE_CHOICES = """() => { const row = document.querySelector('.trails-profile-picks');
   const chips = [...document.querySelectorAll('.trails-profile-pick')];
@@ -6591,6 +6813,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_position_is_over_the_plan(page))
     if wanted(the_way_to_the_next_goal):
         checks.append(the_way_to_the_next_goal(page))
+    if wanted(a_goal_the_reader_sets):
+        checks.append(a_goal_the_reader_sets(page))
     if wanted(a_tap_that_could_have_meant_several_lines):
         checks.append(a_tap_that_could_have_meant_several_lines(page))
     if wanted(the_chosen_line_is_on_top):

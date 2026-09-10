@@ -3871,7 +3871,7 @@ class TestProfilePanel:
         assert "return entry.source || entry.label || 'this line';" in html
         assert "return sourceKey(selected.className) === entry.key;" in html
         assert "var CHOICES_MAX = 6;" in html
-        assert "choices = choices.slice(0, route ? CHOICES_MAX - 1 : CHOICES_MAX);" in html
+        assert "choices = choices.slice(0, Math.max(1, CHOICES_MAX - mine.length)).concat(mine);" in html
 
     def test_the_planned_route_is_a_choice_like_any_other(self, group):
         """Reported from a phone: leaving plan mode leaves the route drawn and
@@ -3900,14 +3900,23 @@ class TestProfilePanel:
         # At the same distance as everything else the tap could have meant: the
         # tighter reach is for aiming a point into a leg.
         assert "var reach = (window.trailsReach && window.trailsReach.finger) || undefined;" in html
-        assert "choices = choices.slice(0, route ? CHOICES_MAX - 1 : CHOICES_MAX);" in html
-        assert "choices.push({gap: Infinity, plan: true, key: 'plan', className: null," in html
-        assert "if (entry.plan) { return !!selected.composed; }" in html
+        assert "choices = choices.slice(0, Math.max(1, CHOICES_MAX - mine.length)).concat(mine);" in html
+        # **Two of the reader's own lines can be offered now**, so they are
+        # gathered apart from the sources and appended after them: the planned
+        # route and, after it, the way to a goal. `mine` is what they are.
+        assert "mine.push({gap: Infinity, mine: 'plan', key: 'plan', className: null," in html
+        # Told apart by *which* composed route it is and not by `composed`,
+        # which both of them are: two can be offered at once.
+        assert "if (entry.mine === 'plan') { return !!(selected.composed && !selected.goal); }" in html
         # `hold` and not `clear`: on a tap the panel's handler runs before the
         # highlight's own, so clearing would be undone by the line that was
         # tapped a moment later.
         assert "if (window.trailsHighlight.hold) { window.trailsHighlight.hold(); }" in html
-        assert "if (!litChoice(entry) && window.trailsPlan && window.trailsPlan.show) {" in html
+        # And the other composed route has to let go of the panel, which the
+        # highlight above does not cover: it is not on the map's highlight at
+        # all, it is what the panel is drawing.
+        assert "if (!litChoice(entry)) {" in html
+        assert "if (window.trailsGoal) { window.trailsGoal.letGo(); }" in html
         # The plan is worked out at all only where plan mode is off.
         assert "var route = (!planNow && window.trailsPlan && window.trailsPlan.onRoute)" in html
 
@@ -3958,6 +3967,54 @@ class TestProfilePanel:
         # Which is only sound because the list is taken at the tap: a click with
         # no point on it leaves the row alone.
         assert "if (event && event.latlng) { gather(event.latlng); }" in html
+
+    def test_the_way_to_a_goal_is_a_choice_after_the_planned_route(self):
+        """Both are lines the reader made rather than sources this map carries,
+        and both lie on the sources by construction — they were routed along
+        them — so ranking either by distance would drop it into the middle of
+        the row and move the sources somebody was choosing between. Their place
+        is a fact about what they are.
+
+        The goal goes last of the two because it is the more recent of the two
+        things they made, and last is where the one a tap takes has stood since
+        the planned route was put there."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "mine.push({gap: Infinity, mine: 'goal', key: 'goal', className: null," in html
+        assert "if (wayThere && wayThere.line) {" in html
+        # Room kept for both, rather than for one: six chips is the ceiling and
+        # the reader's own lines are not what it is protecting them from.
+        assert "choices = choices.slice(0, Math.max(1, CHOICES_MAX - mine.length)).concat(mine);" in html
+        # And a tap takes the goal before the plan, for the same reason it
+        # takes the plan before a trail: it is the more particular instruction.
+        assert "if (choices[at].mine === 'goal') { return choices[at]; }" in html
+
+    def test_a_goal_is_read_in_the_row_at_the_foot(self):
+        """The switch that *sets* a goal is in the rail, because arming the next
+        tap is what the rail does. What there is to do with one once it is set —
+        which way to read it, work it out again, be rid of it — is at the foot,
+        where somebody walking is already looking, and it is drawn only while
+        there is a goal.
+
+        Two readings of one point and not two goals: which of them a reader
+        wants changes on the ground, and having to set the goal again to say so
+        would be the page asking them to repeat themselves."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "goalRow.className = 'trails-profile-goal';" in html
+        assert "goalRow.style.display = standing ? 'flex' : 'none';" in html
+        assert "window.trailsGoal.way('direct')" in html
+        assert "window.trailsGoal.way('routed')" in html
+        assert "window.trailsGoal.again()" in html
+        assert "window.trailsGoal.clear()" in html
+        # A routed goal off the network is drawn straight at, which is the right
+        # thing to draw and the wrong thing to leave unexplained: a reader would
+        # read the line as a way somebody had checked.
+        assert "said += ' \\u00b7 no way there \\u2014 straight'; }" in html
 
 
 class TestPlanMode:
@@ -4355,7 +4412,7 @@ class TestPlanMode:
         planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
 
         assert "composeRoute(stage.from, stage.to)" in planning
-        assert planning.count("function composeRoute(fromLeg, toLeg)") == 1
+        assert planning.count("function composeRoute(fromLeg, toLeg, over)") == 1
         # And the writer works its runs and its crossings out from the shape it
         # is handed, which is what makes a stage's file its own.
         panelling = source.split("class _ProfilePanel")[1].split("class _PlanMode")[0]
@@ -4427,10 +4484,14 @@ class TestPlanMode:
         html = fmap.get_root().render()
         assert "createPane('trailsPlanRoute')" in html
         planning = html.split("var PLAN =")[-1]
-        assert "pane: 'trailsPlanRoute'" in planning
+        # **Which pane is an argument now**, because the goal draws the same
+        # shapes — same width, same casing, same dashes — in its own pane and
+        # its own colour: what a route *is* is not the goal's to differ in, only
+        # which route it is. The default is still the plan's own.
+        assert "var pane = into ? into.pane : 'trailsPlanRoute';" in planning
         # Every layer it makes names that pane. One that did not would land in
         # the overlay pane by default, which is the whole thing being avoided.
-        assert planning.count("L.polyline(") == planning.count("pane: 'trailsPlanRoute'") - planning.count("L.circleMarker(")
+        assert planning.count("L.polyline(") == planning.count("pane: pane") - planning.count("L.circleMarker(")
 
     def test_a_click_in_a_popup_is_not_a_click_on_the_ground(self):
         """A popup is not in the control container -- it lives in a pane inside
@@ -4462,7 +4523,10 @@ class TestPlanMode:
         # not terrain, one for the switch that owns the next tap whatever else
         # does.
         assert html.count("if (!on || overFurniture(event)) { return; }") >= 2
-        assert "window.trailsChrome.state().picking) { return; }" in html
+        # **Two switches now, and the same yielding.** The goal switch owns the
+        # next tap exactly as the picker does, so plan mode stands back for
+        # either rather than stopping the click.
+        assert "window.trailsChrome.state().aiming)) { return; }" in html
 
     def test_switching_on_lets_go_of_a_highlighted_line(self):
         """The click-highlight's only two ways out are a click on the line and a
@@ -4888,10 +4952,10 @@ class TestPlanMode:
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         # One walk, which a stage narrows rather than repeats: a second walk
         # over a range would be the same failure at a smaller scale.
-        assert planning.count("function composeRoute(fromLeg, toLeg)") == 1
+        assert planning.count("function composeRoute(fromLeg, toLeg, over)") == 1
         # The shape a chain's series has, which is what the writer reads.
         for field in ("lon:", "lat:", "along:", "height:", "distance:", "stretches:"):
-            assert field in planning.split("function composeRoute(fromLeg, toLeg)")[-1], field
+            assert field in planning.split("function composeRoute(fromLeg, toLeg, over)")[-1], field
 
     def test_a_crossing_ends_a_stretch_and_an_unread_sample_does_not(self):
         """The two kinds of NaN mean opposite things: no ground under a
@@ -5070,7 +5134,9 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "pane.style.pointerEvents = 'none';" in planning
-        assert planning.count("interactive: false") == 1
+        # Two now and not one: the goal's way is drawn by the same function
+        # into a pane of its own, and neither line is ever a click target.
+        assert planning.count("interactive: false") == 2
         assert "function onRoute(lat, lon, withinPx)" in planning
         # Two reaches for two questions: aiming a point into a leg is the
         # tighter one, and whether a tap *meant* the route is asked at the same
@@ -5326,6 +5392,110 @@ class TestPlanMode:
         # router: the points are exactly the places the reader chose.
         assert "function placeAt(leg, forward) {" in html
         assert "name: said.name || ('Waypoint ' + said.number)};" in html
+
+    def test_a_goal_lives_where_the_router_does(self):
+        """A goal is not a plan — a plan is a tour made beforehand, at a table,
+        and a goal is a point set while walking — but the router, the graph and
+        the snapping are all in this control, and a second copy of any of them
+        would be a second answer to the same question.
+
+        Its own pane over the planned route, because a goal is the more
+        particular of the two and the one the reader set last; and its line
+        takes no clicks, for the reason the plan's own does not."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "window.trailsGoal = {" in planning
+        assert "createPane('trailsGoalRoute')" in planning
+        assert "made.style.zIndex = 462;" in planning
+        assert "made.style.pointerEvents = 'none';" in planning
+        # Composed by the same walk that composes the plan's own route: the
+        # heights laid end to end, the holes left as holes, the crossings
+        # counted. Two walks would give two answers to *how far and how high*.
+        assert "goalShape = goalLeg.parts ? composeRoute(null, null, [goalLeg]) : null;" in planning
+        assert "draw(goalLeg.parts, goalLeg.provisional, {pane: goalPane(), colour: GOAL_COLOUR})" in planning
+
+    def test_a_goal_is_routed_from_where_the_reader_is(self):
+        """Not from where the goal was set and not from the goal outwards: a way
+        to somewhere starts where you are. Which means it goes stale as the
+        reader walks — so it is worked out again once they have *left* it, and
+        their own circle is part of how far off they look, because a fix that is
+        40 m vague reads as 40 m off a line it is standing on.
+
+        And at most every half minute. A fix arrives about once a second and
+        each route is a search over the network; a line rebuilt whenever the fix
+        shivered would shiver with it, and the distance left would stop counting
+        down and start jittering."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "var GOAL_ASTRAY_M = 50;" in planning
+        assert "var GOAL_ASTRAY_SPREADS = 3;" in planning
+        assert "var GOAL_AGAIN_MS = 30000;" in planning
+        assert "if (Date.now() - goalWhen < GOAL_AGAIN_MS) { return false; }" in planning
+        assert "var astray = Math.max(GOAL_ASTRAY_M, GOAL_ASTRAY_SPREADS * (spread || 0));" in planning
+        assert "return away > astray ? goalAgain({lat: lat, lon: lon}) : false;" in planning
+        # Where the reader is, asked of the one thing that knows — and it is the
+        # figure the ring is drawn at, which is not always the last fix.
+        assert "window.trailsChrome.position()" in planning
+
+    def test_a_reply_about_ground_the_reader_has_left_is_dropped(self):
+        """One token and not a queue. A way worked out from where somebody stood
+        two minutes ago is not a shorter answer to the same question, it is an
+        answer to a question nobody asked — the same one line that cancels a
+        plan's leg, for the same reason."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "goalToken = mine;" in planning
+        assert planning.count("if (goalToken !== mine) { return; }") == 3
+
+    def test_a_goal_is_kept_in_a_key_of_its_own(self):
+        """A reader sets one in a hut with a signal and reads it in the fog an
+        hour later, by which time the tab has been thrown away and rebuilt at
+        least once. Its own key beside the plan's, so restoring one cannot touch
+        the other — and after the graph, because a routed goal is routed on the
+        way in."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function goalKeptKey() { return keptKey() + '.goal'; }" in planning
+        assert "window.trailsGraph.ready.then(function () { restoreKept(); restoreGoal(); }," in planning
+        # A goal that is not there is not a goal stored as null: the entry goes.
+        assert "if (!goalAt) { window.localStorage.removeItem(goalKeptKey()); return; }" in planning
+
+    def test_a_goal_takes_the_name_the_map_already_gives_the_ground(self):
+        """A waypoint standing beside a hut takes the hut's name and the hut's
+        position; a goal set by tapping one is the same question asked by
+        somebody else, and two answers to it would differ the day the register
+        does. So the chrome asks this control rather than carrying its own
+        table."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "named: function (lat, lon) {" in planning
+        assert "var said = nameOf({lat: lat, lon: lon}, 0);" in planning
+
+    def test_the_plan_does_not_take_the_panel_back_from_a_goal(self):
+        """Two composed routes can be offered and the panel is one panel. A
+        refresh of the plan is still a refresh — the list, the bar, the figures
+        — but it is not a reason to take the panel from a route the reader
+        chose. Plan mode being switched *on* is: there the panel is what
+        planning is read in."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function feedPanel(spec) {" in planning
+        assert "if (goalShowing && !on) { return; }" in planning
+        assert "if (on) { goalShowing = false; }" in planning
+        # And nothing feeds the panel round it.
+        assert "showing.series(" not in planning.split("function present() {")[1].split("function switchTo")[0]
 
 
 class TestRoutingGraphAreas:
@@ -5948,12 +6118,21 @@ class TestChrome:
         the message and did nothing at all — the handler steps around everything
         in the chrome, and this is in the chrome. A success is a notice and takes
         no pointer; a refusal is a thing to read, select and dismiss, and keeps
-        one."""
+        one.
+
+        **Three states now, because the same defect came back in a new shape.**
+        *Tap the map to set a goal* has to stand for as long as the switch is
+        armed, so it was said sticky — and sticky meant tappable, so a
+        full-width band lay across the middle of the map and swallowed the very
+        tap it was asking for. Staying and taking a pointer are two things, and
+        only the second of them is what makes a message a control."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "pickToast.style.pointerEvents = sticky ? 'auto' : 'none';" in html
+        assert "pickToast.style.pointerEvents = sticky === true ? 'auto' : 'none';" in html
+        # And a notice that stands is still a notice: no timer, no pointer.
+        assert "pickTimer = sticky ? null : window.setTimeout(hideCopied, 2600);" in html
         # One line, and two things say things in it: what the picker copied, and
         # how accurate a fix is. A second line for the second would be two
         # surfaces on a phone that have to agree about which is on top.
@@ -6535,7 +6714,10 @@ class TestWhereTheReaderIs:
         assert made, "no pane z-index was found at all"
         # The popup pane is the exception and is meant to be: a popup is an
         # answer the reader asked for by touching something.
-        assert sorted(made) == [350, 450, 460, 465, 470, 1050]
+        # 462 is the way to a goal: over the planned route at 460, because a
+        # goal is the more particular of the two and the one the reader set
+        # last. Added on the run that added goals, deliberately.
+        assert sorted(made) == [350, 450, 460, 462, 465, 470, 1050]
 
     def test_off_the_route_the_wedge_is_asked_and_not_derived(self):
         """Asked for from a phone: a mark saying which way the next goal is.
@@ -6583,8 +6765,13 @@ class TestWhereTheReaderIs:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "if (hereBearing === null || !target.goal) { return found; }" in html
-        assert "var forward = Math.abs(swung(hereBearing - best.way)) < 90 ? 1 : -1;" in html
+        # **And some routes have only one way along them.** A way to a goal
+        # runs from where the reader was to the thing they asked for, so *ahead*
+        # is toward the goal and is not asked; a planned route has waypoints at
+        # both ends of every leg and can be walked either way.
+        assert "if (!target.goal) { return found; }" in html
+        assert "var forward = target.oneWay ? 1" in html
+        assert "(Math.abs(swung(hereBearing - best.way)) < 90 ? 1 : -1));" in html
         assert "var remains = forward > 0 ? (spans[leg] - best.run) : best.run;" in html
         assert "while (goal && remains <= spread) {" in html
         assert "if (spans[leg] === undefined) { goal = null; break; }" in html
@@ -6625,8 +6812,12 @@ class TestWhereTheReaderIs:
         assert "? aimAlong(hereAt, hereRing.getRadius(), target) : null;" in html
         # Called from the fix, from choosing a line and from switching plan
         # mode — the three things that can change the answer.
-        assert "hereAt = where;\n                aimAgain();" in html
-        assert html.count("aimAgain();") == 3
+        # The fix reaches the goal control first — it routes from where the
+        # reader is, and this is the only place that knows they have moved.
+        assert "window.trailsGoal.stood(where.lat, where.lng, spread);" in html
+        # Four call sites: the fix, choosing a line, switching plan mode, and a
+        # goal arriving or going — the four things that can change the answer.
+        assert html.count("aimAgain();") == 4
 
     def test_which_line_the_mark_aims_at_is_not_a_choice_the_reader_makes(self):
         """Plan mode's route while it is being planned, and equally while it is
@@ -6690,3 +6881,127 @@ class TestWhereTheReaderIs:
         # *is* the route, and its name under the figure would be the mark
         # saying what it already is.
         assert "aimLabel(hereAimNamed, hereGoal.goal ? hereGoal.goal.name : null, hereGoal.to, 42);" in html
+
+    def test_a_goal_outranks_the_plan_and_the_selection(self):
+        """A plan is a tour made beforehand and a selection is something the
+        reader tapped in order to read it; a goal is an instruction, set while
+        walking, and it is the one line here that means *take me there*.
+
+        And a routed goal that could not be given a way is still aimed at
+        straight. A route that failed is not a reason to stop saying which way
+        the goal lies — it is the reason the reader most wants to know."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        aiming = html.split("function aimTarget() {")[1].split("function aimSaid")[0]
+        assert "var goal = window.trailsGoal ? window.trailsGoal.state() : null;" in aiming
+        # Before either of the other two are so much as looked at.
+        assert aiming.index("window.trailsGoal") < aiming.index("window.trailsProfile")
+        assert "if (goal.way === 'routed' && goal.line) {" in aiming
+        assert "return {name: 'the goal', point: {lat: goal.at.lat, lon: goal.at.lon," in aiming
+
+    def test_a_point_the_reader_set_needs_no_asking(self):
+        """The wedge over a route is asked of a dozen places on the accuracy
+        circle because a route moves the answer about — which point of it is
+        nearest depends on where in the circle you are. A goal does not move.
+        So the whole of the width is the reader's own circle turning a bearing
+        to a fixed thing, which is ``asin(r / d)`` exactly, either side.
+
+        Inside the circle there is no direction to give at all: 180 either way
+        is 360, which is wider than anything is drawn at — the mark going quiet
+        rather than a special case for arriving."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "if (target.point) {" in html
+        assert "var straight = awayFrom(at, cosine, target.point.lat, target.point.lon);" in html
+        assert "? Math.asin(Math.min(1, spread / straight)) * 180 / Math.PI : 180;" in html
+        assert "left: -half, right: half, away: straight, on: straight <= spread," in html
+
+    def test_on_a_route_the_head_follows_the_route(self):
+        """Measured on a 19 km way to a goal: the bearing to the goal and the
+        bearing of the path under the reader's feet were tens of degrees apart,
+        and the path was right — a head pointing at the goal would send somebody
+        across the lake the route goes round.
+
+        So it follows the route a little way ahead: far enough not to shiver
+        with the fix, near enough not to cut the corner, and the distance is the
+        fix's own for both reasons. What the label names is unchanged — the goal
+        and what is left of it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var AHEAD_M = 60;" in html
+        assert "var AHEAD_SPREADS = 3;" in html
+        assert "var look = Math.max(AHEAD_M, AHEAD_SPREADS * spread);" in html
+        assert "var mark = alongAt(target, cosine, Math.max(0, Math.min(whole, want))) || goal;" in html
+        # The distance said is still the distance to the goal, and the point
+        # marked is still the goal: only where the head points has changed.
+        assert "found.away = remains;" in html
+        assert "found.at = {lat: goal.lat, lon: goal.lon};" in html
+
+    def test_the_goal_switch_arms_one_tap_and_lets_go(self):
+        """A switch that stayed on would make every later tap a goal, which is
+        the mistake plan mode is allowed to make because planning is a mode a
+        reader is *in* and this is one thing they are doing.
+
+        Never both switches at once, either: the picker owns the next tap while
+        it is on, and two crosshairs over one map is a page that cannot say what
+        a tap will do."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "function askAiming(want) {" in html
+        assert "if (aiming && picking) { askPicking(false); }" in html
+        assert "askAiming(false);" in html
+        # **And the hint it says takes no pointer.** Driven: *Tap the map to set
+        # a goal* was said sticky, which put a full-width band across the middle
+        # of the map with `pointer-events: auto` on it — and it swallowed the
+        # very tap it was asking for. Standing and being tappable are two
+        # things, so they are two states now.
+        assert "pickToast.style.pointerEvents = sticky === true ? 'auto' : 'none';" in html
+        assert "saySomething(aiming ? 'Tap the map to set a goal.' : '', 'notice');" in html
+        # A tap on the goal takes it away: setting one and moving one are the
+        # same gesture, so being rid of it has to be a gesture too — and the
+        # mark is the only place a reader would look for it.
+        assert "window.trailsGoal.clear();" in html.split("function setGoalHere")[1]
+        # And it is the tap and nothing else: no waypoint, no selection, no
+        # popup, which is what the capture phase is for.
+        assert "setGoalHere(event);" in html
+
+    def test_a_place_is_offered_as_a_goal(self):
+        """Nearly every goal a reader sets is a named thing — a hut, a quay, a
+        summit — and the popup is the moment they have just read what it is.
+
+        Added to the markup as the popup is docked, and not built into the popup
+        itself: a popup is composed in the build out of a table of columns, and
+        a control is not one of them. The listener is on the document because
+        the button is markup the panel takes in as a page, so there is nothing
+        here to hang one on — and Leaflet stops mousedown and dblclick on the
+        panel and deliberately not click, which is what lets that work."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "function goalOffer(where, called) {" in html
+        assert "content = (content || '') + goalOffer(source.getLatLng(), titleFor(popup));" in html
+        assert "if (isPoint && window.trailsGoal) {" in html
+        assert "event.target.closest('.trails-goal-take')" in html
+        # Escaped into the attributes it rides in, like every other name this
+        # page takes out of somebody else's register.
+        assert "'\" data-name=\"' + esc(called || '') + '\" '" in html
+
+    def test_the_goal_is_the_only_green_line_this_map_draws(self):
+        """The same green the position mark aims in, because they are one
+        answer: the line is where to walk and the wedge is which way along it.
+        A second green would read as a second thing."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+
+        assert "var HERE_GOAL = '#00a152';" in fmap.get_root().render()
+        assert "var GOAL_COLOUR = '#00a152';" in source
