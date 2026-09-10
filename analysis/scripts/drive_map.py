@@ -4172,7 +4172,21 @@ THE_PAINT = """(at) => {
     return [d[0], d[1], d[2], d[3]]; };
   const z = (name) => { const pane = map.getPane(name);
     return pane ? (Number(getComputedStyle(pane).zIndex) || 0) : null; };
+  // How wide each is drawn, which is the other half of *which of these two do
+  // I see*: the route's own line against the widest line it can be planned
+  // along. Its casing is in the list too and is the wider of the two.
+  const widths = {route: [], trails: []};
+  map.eachLayer(l => { if (!l.options || l.options.weight === undefined) { return; }
+    if ((l.options.pane || '') === 'trailsPlanRoute') { widths.route.push(l.options.weight); }
+    else if (l.options.className && l.options.className.indexOf('trail-group-') === 0) {
+      // **The width it was drawn with and not the one it has now.** A chosen
+      // line is four pixels wider while it is chosen, and this check chooses
+      // one -- read live, the widest trail on the map is whatever was last
+      // tapped, which is a reading about the highlight and not about the build.
+      widths.trails.push(l._baseStyle ? l._baseStyle.weight : l.options.weight); } });
   return {copy: !!picked, clickable: picked ? picked.options.interactive : null,
+          routeWidth: widths.route.length ? Math.min.apply(null, widths.route) : null,
+          widestTrail: widths.trails.length ? Math.max.apply(null, widths.trails) : null,
           pane: picked ? picked.options.pane : null,
           at: z('trailsPicked'), route: z('trailsPlanRoute'),
           colour: chain ? chain.options.color : null,
@@ -4277,6 +4291,16 @@ def the_chosen_line_is_on_top(page: Any) -> Check:
             # and the row of choices cannot offer it as a source of its own.
             Reading("the copy takes no clicks", drawn["clickable"], False),
             Reading("and it goes when the selection does", gone["copy"], False),
+            # **And as wide as what it runs over.** Reported: the route reads
+            # thinner than a UT.no line beside it, and it was — 2.6 px of colour
+            # against 4. The widest trail is measured here rather than typed in,
+            # because that is where the number comes from in the build too.
+            Reading(
+                "the route is as wide as the widest line it runs over",
+                drawn["routeWidth"],
+                drawn["widestTrail"],
+                note=f"{drawn['routeWidth']} px against {drawn['widestTrail']} px",
+            ),
         ],
     )
 

@@ -3861,6 +3861,10 @@ class TestPlanMode:
             # ever, and plan mode saying *working…* with nothing left to finish
             # it. See `heightsTimeoutMs` in the build's own settings.
             "heightsTimeoutMs": 8000,
+            # As wide as the widest line this map draws, which is the build's
+            # decision and not the page's: a route thinner than the line under
+            # it reads as the lesser of the two.
+            "routeWidth": 4.0,
             "terrainModel": "dtm",
             "seaTerrain": "Havflate",
             "sampleStepM": 5.0,
@@ -4378,6 +4382,25 @@ class TestPlanMode:
         # Drawn from the walk the panel is fed, so how far along a point comes is
         # the walk's answer and not a sum of the legs'.
         assert "drawList(shape.stations || []);" in html
+
+    def test_the_route_is_as_wide_as_the_widest_line_under_it(self):
+        """Reported from the device: the planned route reads thinner than a
+        UT.no route beside it — and it was, 2.6 px of colour against 4.0,
+        however wide the white casing around it made the whole mark.
+
+        The width is the build's to decide, because which line is widest is a
+        fact about the layers a build draws and not about planning. The casing
+        keeps the 1.7 px it stands proud on each side: that is what makes the
+        route legible over a dark line, not what makes it thick."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        assert "var HALO_PX = 1.7;" in html
+        assert "[[CASING, PLAN.routeWidth + HALO_PX * 2], [colour, PLAN.routeWidth]]" in html
+        # And a build that does not say how wide is refused, like every other
+        # setting plan mode is handed.
+        assert "routeWidth" in maps.PLAN_SETTINGS
 
     def test_the_list_is_an_overview_where_nothing_can_be_edited(self):
         """Outside plan mode the same list is a route somebody is reading: the

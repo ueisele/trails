@@ -836,7 +836,7 @@ MATCH_MAX_TURN_DEG = 60.0
 MATCH_ANCHOR_M = 250.0
 
 
-def plan_settings(params: Params) -> dict[str, object]:
+def plan_settings(params: Params, layers: list[TrailLayer]) -> dict[str, object]:
     """Hand the page what it needs to plan a route over the graph it carries.
 
     Everything here is a fact the build already settled, and the page must not
@@ -848,6 +848,8 @@ def plan_settings(params: Params) -> dict[str, object]:
 
     Args:
         params: What decided the build
+        layers: The line layers this map draws, which is what the route's own
+            width is measured against
 
     Returns:
         The ``plan`` argument of :func:`~trails.visualization.maps.add_plan_mode`
@@ -873,6 +875,13 @@ def plan_settings(params: Params) -> dict[str, object]:
         # attempt, and half a minute of *working…* is most of the way back to
         # the fault this cures.
         "heightsTimeoutMs": PLAN_HEIGHTS_TIMEOUT_MS,
+        # **As wide as the widest line it can be planned along.** Reported from
+        # the device: the route reads thinner than a UT.no route under it, and
+        # it does — 2.6 px of colour against 4.0, however wide the white casing
+        # around it makes the whole mark. Taken from the layer weights rather
+        # than written down again, so a layer drawn wider tomorrow takes the
+        # route with it instead of quietly overtaking it.
+        "routeWidth": max(layer.weight for layer in layers),
         "terrainModel": hoydedata.TERRAIN_MODEL,
         "seaTerrain": hoydedata.SEA_TERRAIN,
         "sampleStepM": params.elevation_step_m,
@@ -1943,7 +1952,7 @@ def main() -> int:
     # beside a hut comes back called after the hut. The line layers go in too
     # and carry nothing: only a layer given a point_type has a table, and a
     # place name drawn as text asserts no single position to be named after.
-    maps.add_plan_mode(fmap, plan_settings(params), searchable)
+    maps.add_plan_mode(fmap, plan_settings(params, layers), searchable)
 
     # And the one way into all of it, which is why it goes last: it adopts the
     # search, the legend, the base-map picker and the plan control, so every one

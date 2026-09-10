@@ -2450,6 +2450,7 @@ PLAN_SETTINGS = (
     "heightsBatch",
     "heightsWorkers",
     "heightsTimeoutMs",
+    "routeWidth",
     "terrainModel",
     "seaTerrain",
     "sampleStepM",
@@ -8408,6 +8409,13 @@ class _PlanMode(MacroElement):
             // and should not read as another dataset. A pale wide stroke under
             // a dark narrow one, or it disappears over a dark line.
             var ROUTE = '#111111', CASING = '#ffffff', WAITING = '#9e9e9e';
+            //: How far the casing stands out beyond the line on each side. The
+            //: pair used to be 6 and 2.6 written down; the line is the build's
+            //: to decide now -- it is drawn as wide as the widest line it can be
+            //: planned along -- and this is what is left of that pair, which is
+            //: what makes the route legible over a dark line rather than what
+            //: makes it thick.
+            var HALO_PX = 1.7;
 
             // What the payload's own header calls a crossing and an inferred
             // connector, handed in rather than spelled here: renaming either in
@@ -10807,7 +10815,7 @@ class _PlanMode(MacroElement):
                     var colour = (waiting || part.kind === 'waiting') ? WAITING : ROUTE;
                     // The casing first, so it lies under. Dashed identically, or
                     // white would show through every gap.
-                    [[CASING, 6], [colour, 2.6]].forEach(function (stroke) {
+                    [[CASING, PLAN.routeWidth + HALO_PX * 2], [colour, PLAN.routeWidth]].forEach(function (stroke) {
                         layers.push(L.polyline(corners, {
                             pane: 'trailsPlanRoute', color: stroke[0], weight: stroke[1], opacity: 0.95,
                             dashArray: DASH[part.kind], interactive: false
