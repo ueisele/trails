@@ -5195,6 +5195,18 @@ class _ProfilePanel(MacroElement):
                 'border:1px solid var(--trails-rule);border-radius:10px;background:var(--trails-solid);' +
                 'color:var(--trails-ink-2);cursor:pointer;display:none';
             var body = document.createElement('div');
+            // **What scale the heights are drawn at, said where they are drawn
+            // and switched there.** A picture at two possible scales has to say
+            // which one it is at, and the place to say it is over the picture:
+            // in the menu it would be a setting nobody connects to the shape
+            // they are looking at, and in the row at the foot it would cost a
+            // mark on a row that has none to spare.
+            var lift = document.createElement('button');
+            lift.type = 'button';
+            lift.className = 'trails-profile-lift';
+            lift.style.cssText = 'font:inherit;font-weight:400;font-size:11px;padding:2px 8px;flex:none;' +
+                'border:1px solid var(--trails-rule);border-radius:10px;background:var(--trails-solid);' +
+                'color:var(--trails-ink-2);cursor:pointer';
             // Under the name, not beside it. A line of 10.5 px carries about
             // forty characters beside three marks and a name, which is what the
             // plan bar has been measuring with all along; the figures that do
@@ -5541,6 +5553,47 @@ class _ProfilePanel(MacroElement):
             whole.style.right = '2px';
             whole.style.zIndex = '2';
             body.appendChild(whole);
+            // The opposite corner from the way back, because both can stand at
+            // once. Over the axis rather than over the curve: the top left of a
+            // profile is the one corner the drawing itself never reaches, since
+            // the band is centred in the box and the labels are outside it.
+            lift.style.position = 'absolute';
+            lift.style.top = '2px';
+            lift.style.left = '2px';
+            lift.style.zIndex = '2';
+            lift.addEventListener('click', function (event) {
+                event.stopPropagation();
+                setLift(!lifted);
+            });
+            body.appendChild(lift);
+
+            // **Kept, because it is a decision about reading and not about this
+            // route.** A reader who wants the ground's own scale wants it for
+            // the next line they tap as well, and for tomorrow.
+            function setLift(want) {
+                lifted = !!want;
+                try {
+                    if (lifted) { window.localStorage.removeItem(SCALE_KEY); }
+                    else { window.localStorage.setItem(SCALE_KEY, 'true'); }
+                } catch (blocked) { /* a browser that keeps nothing still draws */ }
+                render();
+                paintLift();
+            }
+
+            function paintLift() {
+                // Only over a drawing: there is nothing to say about the scale
+                // of a table.
+                var drawing = !!(selected && selected.shape && !selected.detail);
+                lift.style.display = drawing ? '' : 'none';
+                if (!drawing) { return; }
+                var factor = liftNow >= 1.05 ? '\u00d7' + (liftNow >= 9.95 ? Math.round(liftNow) : liftNow.toFixed(1)) : '1:1';
+                lift.textContent = lifted ? factor : '1:1';
+                lift.title = lifted
+                    ? 'Heights are drawn ' + factor + ' the scale of the distance, so a long route has a shape. Tap for the ground\u2019s own scale.'
+                    : 'Heights and distances are drawn at one scale, so the angle drawn is the angle on the ground. Tap to lift the heights.';
+                lift.setAttribute('aria-label', lift.title);
+                lift.setAttribute('aria-pressed', String(!lifted));
+            }
 
             // ---- the pages ---------------------------------------------------
             // **Everything about the thing in hand, side by side, in the panel
@@ -6370,6 +6423,42 @@ class _ProfilePanel(MacroElement):
             // turns out to be steeper than the panel — see render().
             var view = {zoom: 1, at: 0, centre: null};
 
+            //: Where the reader's answer to *which scale* is kept, and the key
+            //: it is kept under. The theme is kept the same way and for the same
+            //: reason: it is a decision about how this page is read, not about
+            //: what is on it, and it should survive the next visit.
+            var SCALE_KEY = 'trails:profile-scale';
+            //: **How far the readable scale may lift the heights.** Measured on
+            //: this map's own longest route: 44 km across a phone's panel is
+            //: 119 metres to the pixel, so 691 m of relief draws as six pixels
+            //: at the ground's own scale -- a straight line with a colour on it.
+            //: Ten times that is 58 px, which has a shape.
+            //:
+            //: **And a cap rather than *fill the box*, because a molehill blown
+            //: up to a mountain is a lie a picture tells better than words can
+            //: correct it.** A 20 m rise over 40 km filling the panel would be
+            //: an exaggeration of two hundred; at ten it stays the ribbon it is.
+            var LIFT_MAX = 10;
+            //: How much of the box the lifted band may fill. The rest is room
+            //: over the summit and under the low point, so a curve at the
+            //: readable scale is not jammed against the ceiling.
+            var LIFT_FILL = 0.86;
+
+            function keptScale() {
+                try { return window.localStorage.getItem(SCALE_KEY); } catch (blocked) { return null; }
+            }
+
+            //: **Lifted unless the reader said otherwise**, which is the answer
+            //: to *I cannot see anything on a long tour*. What is given up is
+            //: that the drawn angle is the angle on the ground -- so the factor
+            //: is written over the drawing, and the colours, which are the truth
+            //: about steepness, do not move with it: they are read off the
+            //: ground and not off the picture.
+            var lifted = keptScale() !== 'true';
+            //: What the last render worked out, for the mark that says so and
+            //: for a check that reads it.
+            var liftNow = 1;
+
             // The waypoint pins' own ink. Plan mode names it ROUTE and draws
             // its pins with it; a station on this panel is the same point seen
             // from the side, and two colours for one point would be two points.
@@ -6675,7 +6764,27 @@ class _ProfilePanel(MacroElement):
                 // down as well, and this is the only case where that does
                 // anything: below it the middle is pinned and a vertical drag
                 // cannot take the curve off the panel.
-                var carries = tall * metresPerPixel;
+                // **The vertical scale, which is the reader's to choose.** At
+                // the ground's own scale a long route is a ribbon: 44 km across
+                // a phone's panel is 119 m to the pixel, and 691 m of relief is
+                // six pixels of it. Lifted, the band is drawn to fill the box --
+                // never more than `LIFT_MAX`, so a flat route stays flat -- and
+                // the factor is written over the drawing, because a picture at
+                // two scales that does not say so is a picture that lies.
+                //
+                // Only the heights move. The colours are read off the ground and
+                // not off the drawing, so what is steep is still steep here, and
+                // the crosshair's own reading is a gradient rather than an
+                // angle. That is what makes the lift honest rather than merely
+                // labelled.
+                var liftBy = 1;
+                if (lifted) {
+                    var relief = Math.max(1e-6, seenHigh - seenLow);
+                    liftBy = Math.min(LIFT_MAX, Math.max(1, tall * metresPerPixel * LIFT_FILL / relief));
+                }
+                liftNow = liftBy;
+                var metresPerY = metresPerPixel / liftBy;
+                var carries = tall * metresPerY;
                 if (seenHigh - seenLow > carries) {
                     if (view.centre === null) { view.centre = (seenLow + seenHigh) / 2; }
                     view.centre = Math.min(Math.max(view.centre, seenLow + carries / 2), seenHigh - carries / 2);
@@ -6702,7 +6811,7 @@ class _ProfilePanel(MacroElement):
                     // pixels — and capped against the panel's own height, or a
                     // reader who drags it short spends a quarter of what is left
                     // on empty water.
-                    var spare = Math.min(18, tall / 4) * metresPerPixel;
+                    var spare = Math.min(18, tall / 4) * metresPerY;
                     // Where the floor would have to stand for that, and how low
                     // it may go at all without pushing the high point out of the
                     // box. Where sea level cannot be reached the old midpoint is
@@ -6717,7 +6826,7 @@ class _ProfilePanel(MacroElement):
 
                 var middleY = (box.top + box.bottom) / 2;
                 var x = function (value) { return box.left + (value - from) / metresPerPixel; };
-                var y = function (value) { return middleY - (value - view.centre) / metresPerPixel; };
+                var y = function (value) { return middleY - (value - view.centre) / metresPerY; };
                 var plot = {left: box.left, right: box.left + shown / metresPerPixel,
                             top: Math.max(box.top, y(seenHigh)), bottom: Math.min(box.bottom, y(seenLow))};
                 plot.width = plot.right - plot.left;
@@ -6932,7 +7041,10 @@ class _ProfilePanel(MacroElement):
                 [rule, dot].forEach(function (node) { node.style.display = 'none'; inside.appendChild(node); });
                 crosshair = {rule: rule, dot: dot, plot: plot, width: width, x: x, y: y, at: -1,
                              slope: slope, box: box, from: from, shown: shown, mpp: metresPerPixel,
-                             base: base, closest: closest};
+                             lift: liftBy, base: base, closest: closest};
+                // The mark says what this render worked out, so the two cannot
+                // say different factors.
+                paintLift();
             }
 
             // The nearest sample to a distance, over the full series: the
@@ -7561,6 +7673,7 @@ class _ProfilePanel(MacroElement):
                 showLicences();
                 paintPages();
                 paintChoices();
+                paintLift();
             }
 
             function say(message) {
@@ -7571,6 +7684,7 @@ class _ProfilePanel(MacroElement):
                 showLicences();
                 paintPages();
                 paintChoices();
+                paintLift();
             }
 
             // What a composed series says about itself. The distance is the
@@ -7942,6 +8056,16 @@ class _ProfilePanel(MacroElement):
                 // line: the chrome heads a docked popup with it, and it used to
                 // read the map's own label for that. One table, one name.
                 nameOf: function (className) { return (figures[className] || {}).name || null; },
+                // Which scale the heights are drawn at, and the way to say
+                // which: `'true'` for the ground's own and `'readable'` for the
+                // lifted one. Read with no argument, and it answers with the
+                // factor the last render used as well -- which is worked out
+                // from the route and the panel's height and is therefore not a
+                // thing a caller could know.
+                scale: function (want) {
+                    if (want !== undefined) { setLift(want !== 'true'); }
+                    return {mode: lifted ? 'readable' : 'true', lift: liftNow};
+                },
                 // The two things a second consumer must not write for itself:
                 // the walk that lays edges end to end, and the metre this page
                 // measures distance with. A route composed by a second walk
@@ -7962,6 +8086,12 @@ class _ProfilePanel(MacroElement):
                 view: function () {
                     return {zoom: view.zoom, at: view.at, centre: view.centre,
                             metresPerPixel: crosshair ? crosshair.mpp : null,
+                            // What the height axis is drawn at, as a factor on
+                            // the one above: the two are the same number at the
+                            // ground's own scale and this is what the other
+                            // scale is *for*, so anything working in metres up
+                            // the box has to ask for it.
+                            lift: crosshair ? crosshair.lift : 1,
                             shown: crosshair ? crosshair.shown : null,
                             closest: crosshair ? crosshair.closest : null};
                 },

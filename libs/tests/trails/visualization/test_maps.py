@@ -3242,7 +3242,11 @@ class TestProfilePanel:
     def test_a_zoomed_window_is_drawn_at_the_same_true_scale(self, group):
         """One metres-per-pixel for both axes, whatever the window: zooming
         changes how much of the chain is on the panel and never its angle.
-        """
+
+        The heights may be lifted off that scale now — a long route is a ribbon
+        at the ground's own — but the lift is one factor over the whole drawing
+        and does not move with the zoom either, so what this is about is
+        unchanged: the shape of a window is the shape of the ground in it."""
         fmap, layer = group
         maps.add_profile_panel(fmap, [layer])
 
@@ -3250,7 +3254,83 @@ class TestProfilePanel:
 
         assert "var metresPerPixel = base / view.zoom;" in html
         assert "return box.left + (value - from) / metresPerPixel;" in html
-        assert "return middleY - (value - view.centre) / metresPerPixel;" in html
+        assert "var metresPerY = metresPerPixel / liftBy;" in html
+        assert "return middleY - (value - view.centre) / metresPerY;" in html
+
+    def test_the_heights_can_be_lifted_off_the_ground_scale(self, group):
+        """Reported: on a long tour there is nothing to see. There is not — 44 km
+        across a phone's panel is 119 metres to the pixel, so 691 m of relief
+        draws as six pixels: a straight line with a colour on it.
+
+        Lifted, the band fills the box. Never more than ten times, because a
+        20 m rise blown up to fill a panel is a lie a picture tells better than
+        words can correct it, and never less than once, so a steep chain that
+        already fills the box is drawn exactly as it was."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "var LIFT_MAX = 10;" in html
+        assert "var LIFT_FILL = 0.86;" in html
+        assert "liftBy = Math.min(LIFT_MAX, Math.max(1, tall * metresPerPixel * LIFT_FILL / relief));" in html
+        # Everything the height axis is measured in follows the lift, and
+        # nothing the distance axis is.
+        assert "var carries = tall * metresPerY;" in html
+        assert "var spare = Math.min(18, tall / 4) * metresPerY;" in html
+        assert "return box.left + (value - from) / metresPerPixel;" in html
+
+    def test_the_lift_is_said_where_the_drawing_is(self, group):
+        """A picture at two possible scales has to say which one it is at, and
+        the place to say it is over the picture: in the menu it would be a
+        setting nobody connects to the shape they are looking at.
+
+        The factor is what the mark says, because the lift is worked out from
+        the route and the panel's height — it is not a setting with a number a
+        reader chose."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "lift.className = 'trails-profile-lift';" in html
+        assert "lift.textContent = lifted ? factor : '1:1';" in html
+        assert "lift.style.left = '2px';" in html
+        # Over the axis and not over the curve, opposite the way back, and only
+        # where there is a drawing to say it about.
+        assert "whole.style.right = '2px';" in html
+        assert "lift.style.display = drawing ? '' : 'none';" in html
+
+    def test_the_scale_a_reader_chose_is_kept(self, group):
+        """It is a decision about reading rather than about this route: somebody
+        who wants the ground's own scale wants it for the next line they tap as
+        well. Lifted is the default, which is the answer to the report — and the
+        key is only written for the answer that is not the default, so a browser
+        that keeps nothing still opens on the readable one."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "var SCALE_KEY = 'trails:profile-scale';" in html
+        assert "var lifted = keptScale() !== 'true';" in html
+        assert "if (lifted) { window.localStorage.removeItem(SCALE_KEY); }" in html
+        assert "else { window.localStorage.setItem(SCALE_KEY, 'true'); }" in html
+        # And a browser that refuses to keep anything still draws.
+        assert "catch (blocked) { /* a browser that keeps nothing still draws */ }" in html
+
+    def test_what_is_steep_is_still_steep_at_either_scale(self, group):
+        """What is given up by lifting is that the drawn angle is the angle on
+        the ground. What is not given up is the answer to *is this steep*: the
+        colours are read off the ground rather than off the picture, and the
+        crosshair says a gradient rather than an angle. That is what makes the
+        lift honest rather than merely labelled."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "var slope = gradients(shape);" in html
+        assert "var strokes = drawCurve(shape, plot, x, y, slope, from, to);" in html
+        # And the panel says which scale it is at, for a check and for anything
+        # else that has to know.
+        assert "return {mode: lifted ? 'readable' : 'true', lift: liftNow};" in html
 
     def test_a_window_steeper_than_the_panel_is_clipped(self, group):
         """The panel's own shape is a gradient, 14.6 %, and it does not move with

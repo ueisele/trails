@@ -346,7 +346,11 @@ SEA = """() => {
   const svg = document.querySelector('.trails-profile-chart');
   const height = parseFloat(svg.getAttribute('height'));
   const view = window.trailsProfilePanel.view();
-  const carries = (height - 34) * view.metresPerPixel;
+  // **Up the box and not along it.** The height axis may be lifted off the
+  // ground's own scale, and this reading is entirely about where a metre lands
+  // vertically: measured with the horizontal one it put the floor at -2,394 m
+  // on a chain whose lowest reading is 235.
+  const carries = (height - 34) * view.metresPerPixel / (view.lift || 1);
   const floor = view.centre - carries / 2;
   const line = [...svg.querySelectorAll('line')].filter(l => l.getAttribute('stroke') === '#4fa3c7');
   return {'floor stands at m': floor,
@@ -691,6 +695,11 @@ def true_scale(page: Any) -> Check:
         """() => { const chart = document.querySelector('.trails-profile-chart');
         chart.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, cancelable: true})); }"""
     )
+    # **At the ground's own scale, because that is what this is about.** The
+    # panel opens with the heights lifted -- a long route is a ribbon otherwise
+    # -- and the lift is a factor between the two axes, so measuring it here
+    # would be measuring the lift and calling it a fault.
+    page.evaluate("() => window.trailsProfilePanel.scale('true')")
     page.wait_for_timeout(400)
     readings = []
     for label, notches in (("at rest", 0), ("zoomed in", 8), ("at the ceiling", 40)):
@@ -710,6 +719,8 @@ def true_scale(page: Any) -> Check:
                 note=f"{seen['along']:.6f} along, {seen['up']:.6f} up",
             )
         )
+    page.evaluate("() => window.trailsProfilePanel.scale('readable')")
+    page.wait_for_timeout(400)
     return Check("the profile is drawn true to scale", readings)
 
 
@@ -810,7 +821,15 @@ def sea_level(page: Any) -> Check:
     Returns:
         Where the floor stands and whether the 0 m line is drawn clear of it
     """
+    # **At the ground's own scale, because that is where the claim lives.**
+    # The floor is anchored to sea level to spend the surplus a true scale
+    # leaves over a long route -- lifted, there is no surplus to spend and the
+    # band is centred, so a chain in the mountains has no 0 m line at all.
+    page.evaluate("() => window.trailsProfilePanel.scale('true')")
+    page.wait_for_timeout(500)
     seen = page.evaluate(SEA)
+    page.evaluate("() => window.trailsProfilePanel.scale('readable')")
+    page.wait_for_timeout(400)
     return Check(
         "the floor of the box means sea level",
         [
@@ -4576,6 +4595,107 @@ def a_sheet_over_a_panel(page: Any) -> Check:
     )
 
 
+#: What the curve comes to on the screen, and what the panel says it is drawn
+#: at. The band is measured off the drawn strokes rather than off the data:
+#: what is being asked is whether there is anything to see.
+THE_RELIEF = """() => { const svg = document.querySelector('.trails-profile-chart');
+  const strokes = [...svg.querySelectorAll('path')]
+      .filter(p => p.getAttribute('fill') === 'none' && p.getAttribute('stroke'));
+  let top = Infinity, bottom = -Infinity;
+  const bands = {};
+  strokes.forEach(p => { const box = p.getBBox();
+    top = Math.min(top, box.y); bottom = Math.max(bottom, box.y + box.height);
+    const colour = p.getAttribute('stroke');
+    bands[colour] = (bands[colour] || 0) + 1; });
+  const mark = document.querySelector('.trails-profile-lift');
+  return {said: window.trailsProfilePanel.scale(),
+          mark: mark && mark.offsetParent !== null ? mark.textContent.trim() : null,
+          band: isFinite(top) ? Math.round(bottom - top) : null,
+          chart: Math.round(svg.getBoundingClientRect().height),
+          bands: bands}; }"""
+
+
+def two_scales_for_one_profile(page: Any) -> Check:
+    """How much of a long route's shape there is to see, at either scale.
+
+    **Reported: on a longer tour there is nothing to make out.** There is not --
+    one metres-per-pixel for both axes is the truth about the ground, and 44 km
+    across a phone's panel is 119 metres to the pixel, so 691 m of relief is six
+    pixels of drawing. It is a straight line with a colour on it.
+
+    So the heights are lifted to fill the box unless the reader says otherwise,
+    by a factor said over the drawing and switched there. What is given up is
+    that the drawn angle is the angle on the ground; what is not given up is the
+    answer to *is this steep*, because the colours are read off the ground
+    rather than off the picture -- which this check holds by counting them at
+    both scales.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        The band each scale draws, and what was coloured at each
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(600)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.evaluate("() => window.trailsProfilePanel.scale('readable')")
+    laid = select(page, LONG_CHAIN)
+    page.wait_for_timeout(900)
+    readable = page.evaluate(THE_RELIEF)
+    # Pressed rather than called: the mark over the drawing is the whole of the
+    # way to the other scale, and a check that called the API would not know
+    # whether it was reachable.
+    page.evaluate(
+        """() => { const mark = document.querySelector('.trails-profile-lift');
+        if (mark) { mark.click(); } }"""
+    )
+    page.wait_for_timeout(900)
+    ground = page.evaluate(THE_RELIEF)
+    kept = page.evaluate("() => { try { return window.localStorage.getItem('trails:profile-scale'); } catch (no) { return 'denied'; } }")
+    page.evaluate(
+        """() => { const mark = document.querySelector('.trails-profile-lift');
+        if (mark) { mark.click(); } }"""
+    )
+    page.wait_for_timeout(900)
+    back = page.evaluate(THE_RELIEF)
+    forgotten = page.evaluate("() => { try { return window.localStorage.getItem('trails:profile-scale'); } catch (no) { return 'denied'; } }")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(500)
+
+    return Check(
+        "two scales for one profile",
+        [
+            Reading("a long chain was chosen", laid, True),
+            # The default, which is the answer to the report.
+            Reading("it opens lifted", readable["said"]["mode"], "readable"),
+            Reading("and says by how much", readable["mark"], "\u00d7" + str(round(readable["said"]["lift"]))),
+            # The reading the report was about: something to see, against
+            # almost nothing.
+            Reading(
+                "the lifted band is worth looking at",
+                readable["band"] > 40,
+                True,
+                note=f"{readable['band']} px of {readable['chart']}",
+            ),
+            Reading("the ground's own scale draws a ribbon", ground["band"] < 12, True, note=f"{ground['band']} px"),
+            Reading("and it is the factor apart", round(readable["band"] / max(1, ground["band"])), round(readable["said"]["lift"]), within=2),
+            # The mark is the way there and back, and it says which scale it is
+            # at rather than which one it offers.
+            Reading("the mark presses through to the ground's own", ground["said"]["mode"], "true"),
+            Reading("and says so", ground["mark"], "1:1"),
+            Reading("and back again", back["said"]["mode"], "readable"),
+            # Kept, and only the answer that is not the default is written.
+            Reading("the ground's own scale is kept", kept, "true"),
+            Reading("and the default keeps nothing", forgotten, None),
+            # **What is steep is still steep.** The colours are read off the
+            # ground, so the same stretches are coloured the same way at either
+            # scale — the lift changes the picture and not the claim.
+            Reading("the same stretches are coloured at either scale", ground["bands"], readable["bands"]),
+        ],
+    )
+
+
 def the_dark_set(page: Any) -> Check:
     """Two sets of colours for the furniture, and one for the ground.
 
@@ -6225,6 +6345,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_route_read_after_planning(page))
     if wanted(a_sheet_over_a_panel):
         checks.append(a_sheet_over_a_panel(page))
+    if wanted(two_scales_for_one_profile):
+        checks.append(two_scales_for_one_profile(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be
