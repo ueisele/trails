@@ -1263,9 +1263,18 @@ class TestTheWideLayoutNeedsRoomInBothDirections:
     def test_the_sheet_a_short_screen_gets_can_be_scrolled(self):
         """Which is the whole reason the burger is the right answer here: the
         menu is bounded to the room there is and its body carries the overflow,
-        so nine tools fit a screen that cannot show nine tools."""
+        so nine tools fit a screen that cannot show nine tools.
+
+        The room there is, on a narrow screen, is the screen: the veil is over
+        the panel at the foot, so a sheet has no reason to stop where the map
+        does. What still takes room is the keyboard, which hides part of the
+        viewport under fields these sheets are the only ones to hold."""
         html = self.rendered()
-        assert "box.style.height = Math.max(40, floor) + 'px';" in html
+        assert "var deep = Math.max(40, size.y - covered);" in html
+        assert "box.style.height = deep + 'px';" in html
+        # Held sideways the detail is a column beside the panel rather than a
+        # sheet over it, and there the panel's top is the floor again.
+        assert "sheet.style.height = Math.max(40, floor) + 'px';" in html
         assert "overflow: auto" in html or "overflow:auto" in html
 
 

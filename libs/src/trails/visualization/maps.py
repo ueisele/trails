@@ -17856,13 +17856,26 @@ class _Chrome(MacroElement):
                 }
 
                 if (narrow) {
+                    // **A sheet with the veil behind it has the whole screen.**
+                    // Reported with a picture: Sources opened over a panel
+                    // showing a profile stopped at the top of that panel and
+                    // left 450 px of nothing under it. The floor is where the
+                    // *map* ends, which is what a box standing beside the panel
+                    // has to respect -- and one of these is not beside it. The
+                    // veil is over the panel, the marks at the foot are put
+                    // away, and there is nothing down there to keep clear of.
+                    //
+                    // The keyboard is the one thing that still takes room:
+                    // `covered` is what it hides, and both places this page
+                    // asks for typing are fields inside one of these sheets.
+                    var deep = Math.max(40, size.y - covered);
                     [dock, menu, sheet].forEach(function (box) {
                         box.style.left = '0';
                         box.style.right = '0';
                         box.style.top = '0';
                         box.style.bottom = 'auto';
                         box.style.width = 'auto';
-                        box.style.height = Math.max(40, floor) + 'px';
+                        box.style.height = deep + 'px';
                         box.style.maxHeight = 'none';
                         box.style.border = '0';
                         box.style.borderBottom = '1px solid var(--trails-edge)';
@@ -17871,8 +17884,12 @@ class _Chrome(MacroElement):
                     if (landscape) {
                         // Sideways the width is there and the height is not, so
                         // the detail becomes a column and the map keeps the rest.
+                        // **And there it is beside the panel rather than over
+                        // it** -- nothing is veiled for a detail held sideways --
+                        // so this one does stop where the panel starts.
                         sheet.style.right = 'auto';
                         sheet.style.width = Math.min(340, Math.round(size.x * 0.44)) + 'px';
+                        sheet.style.height = Math.max(40, floor) + 'px';
                         sheet.style.borderRight = '1px solid var(--trails-edge)';
                     } else {
                         sheet.style.borderRight = '0';

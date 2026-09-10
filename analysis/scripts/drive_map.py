@@ -4479,6 +4479,103 @@ def a_route_read_after_planning(page: Any) -> Check:
     )
 
 
+#: How tall each covering surface comes out, and where the panel it is drawn
+#: over stands. `offsetParent` rather than a style, because what is asked is
+#: whether a reader can see it.
+THE_SURFACES = """() => { const high = sel => { const node = document.querySelector(sel);
+    if (!node || node.offsetParent === null) { return null; }
+    const box = node.getBoundingClientRect();
+    return {top: Math.round(box.top), height: Math.round(box.height)}; };
+  return {screen: window.innerHeight, sheet: high('.trails-detail'), menu: high('.trails-menu'),
+          dock: high('.trails-dock'), panel: high('.trails-profile-panel')}; }"""
+
+
+def a_sheet_over_a_panel(page: Any) -> Check:
+    """How much of a narrow screen a covering surface gets.
+
+    **Reported with a picture: Sources opened over a profile stopped where the
+    profile panel began** and left 450 px of nothing under it. The floor this
+    page measures is where the *map* ends, which is the right bound for a box
+    standing beside the panel -- and a full-screen sheet is not one of those.
+    The veil is over the panel, the marks at the foot are put away, and there is
+    nothing down there to keep clear of.
+
+    Held sideways the detail is a column beside the map instead, with nothing
+    veiled and the panel in plain sight, so there the panel's top *is* the
+    floor. Both halves are driven, because they are the same three lines.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What each surface measured against the screen and against the panel
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(600)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    laid = select(page, LONG_CHAIN)
+    page.wait_for_timeout(900)
+    resting = page.evaluate(THE_SURFACES)
+
+    page.evaluate("() => window.trailsChrome.menu()")
+    page.wait_for_timeout(700)
+    menu = page.evaluate(THE_SURFACES)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.detail('Sources', 'A reading', 'driven'); }")
+    page.wait_for_timeout(800)
+    sheet = page.evaluate(THE_SURFACES)
+    page.evaluate("() => window.trailsChrome.open('layers')")
+    page.wait_for_timeout(800)
+    dock = page.evaluate(THE_SURFACES)
+
+    # Sideways, where the detail stands beside the panel rather than over it.
+    page.evaluate("() => window.trailsChrome.close()")
+    page.set_viewport_size({"width": 844, "height": 390})
+    page.wait_for_timeout(1200)
+    page.evaluate("() => window.trailsChrome.detail('Sources', 'A reading', 'driven')")
+    page.wait_for_timeout(900)
+    sideways = page.evaluate(THE_SURFACES)
+    page.evaluate("() => window.trailsChrome.close()")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(600)
+
+    def tall(seen: Any, which: str) -> Any:
+        """How tall that surface was, or nothing where it was not drawn."""
+        return (seen.get(which) or {}).get("height")
+
+    return Check(
+        "a sheet over a panel",
+        [
+            Reading(
+                "a line was chosen, so a panel stands at the foot",
+                laid and bool(resting["panel"]),
+                True,
+                note=f"panel {tall(resting, 'panel')} px of {resting['screen']}",
+            ),
+            # All three are the same surface below the threshold, and all three
+            # have the screen.
+            Reading("the menu has the whole screen", tall(menu, "menu"), menu["screen"]),
+            Reading("so does a reading handed over", tall(sheet, "sheet"), sheet["screen"]),
+            Reading("and so does a tool", tall(dock, "dock"), dock["screen"]),
+            # Which is the reading the picture was about: nothing is left over.
+            Reading("nothing is left under it", (sheet["sheet"] or {}).get("top"), 0),
+            Reading(
+                "and it reaches past the panel it covers",
+                tall(sheet, "sheet") > (resting["panel"] or {}).get("top", 0),
+                True,
+                note=f"panel top {(resting['panel'] or {}).get('top')}",
+            ),
+            # Sideways it is a column beside the panel, and stops at it.
+            Reading(
+                "held sideways it stops where the panel starts",
+                tall(sideways, "sheet"),
+                (sideways["panel"] or {}).get("top"),
+                within=2,
+                note=f"{tall(sideways, 'sheet')} px of {sideways['screen']}",
+            ),
+        ],
+    )
+
+
 def the_dark_set(page: Any) -> Check:
     """Two sets of colours for the furniture, and one for the ground.
 
@@ -6126,6 +6223,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_line_is_named_at_the_foot_and_not_on_the_ground(page))
     if wanted(a_route_read_after_planning):
         checks.append(a_route_read_after_planning(page))
+    if wanted(a_sheet_over_a_panel):
+        checks.append(a_sheet_over_a_panel(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be
