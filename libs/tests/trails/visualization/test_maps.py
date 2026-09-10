@@ -2365,6 +2365,35 @@ class TestClickHighlight:
 
         assert "var groups = [" not in fmap.get_root().render()
 
+    def test_the_chosen_line_is_lifted_over_the_planned_route(self):
+        """Reported from the device: a chosen line stays *under* the planned
+        route. `bringToFront` can only reach as far as its own pane, and that is
+        not a stacking accident but the arrangement — the trails are Leaflet's
+        overlay pane at 400 and a planned route has a pane of its own at 460 —
+        so widening a line the route runs along widened something nobody could
+        see.
+
+        It is drawn a second time in a pane above it rather than moved: a canvas
+        layer belongs to the renderer of the pane it was made in, and moving it
+        would mean taking it out of the group the legend switches. The copy
+        takes no clicks, so the line underneath is still the thing being tapped
+        and the reach that ranks what a tap could have meant skips it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = folium.FeatureGroup(name="Trails").add_to(fmap)
+        maps.add_click_highlight(fmap, [group])
+
+        html = fmap.get_root().render()
+        assert "var pane = map.createPane('trailsPicked');" in html
+        assert "pane.style.zIndex = 465;" in html
+        assert "pane.style.pointerEvents = 'none';" in html
+        assert "interactive: false, pane: liftPane(), className: 'trails-picked'" in html
+        # A chain split into pieces is several layers and one selection.
+        assert "lift(layer);" in html
+        # And it goes when the selection does, or the map would keep a widened
+        # line nothing on the page still claims.
+        assert "lifted.forEach(function (copy) { map.removeLayer(copy); });" in html
+        assert html.count("drop();") == 2
+
 
 class TestAddTrails:
     """Tests for add_trails."""
@@ -6210,11 +6239,12 @@ class TestWhereTheReaderIs:
         assert "interactive: false, pane: herePane()," in html.split("hereDot = L.circleMarker")[1]
         # And over every other pane this page makes, whichever part of it made
         # them: 350 offline, 450 and 470 for the profile's own marks, 460 for
-        # the planned route. Read out of the source rather than listed here,
-        # because a pane added later would otherwise pass this quietly.
+        # the planned route, 465 for the line a reader chose. Read out of the
+        # source rather than listed here, because a pane added later would
+        # otherwise pass this quietly — as 465 did, on the run that added it.
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
         made = [int(z) for z in re.findall(r"\.style\.zIndex = (\d+);", source)]
         assert made, "no pane z-index was found at all"
         # The popup pane is the exception and is meant to be: a popup is an
         # answer the reader asked for by touching something.
-        assert sorted(made) == [350, 450, 460, 470, 1050]
+        assert sorted(made) == [350, 450, 460, 465, 470, 1050]

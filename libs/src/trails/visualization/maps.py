@@ -2919,10 +2919,14 @@ class _ClickHighlight(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
         (function () {
+            var map = {{ this._parent.get_name() }};
             var groups = [{{ this.group_names|join(', ') }}];
             var boost = {{ this.weight_boost }};
             var dim = {{ this.dim_opacity }};
             var selected = null;
+            //: The chosen line drawn a second time, over everything else this
+            //: map puts on the ground.
+            var lifted = [];
 
             function eachPath(fn) {
                 groups.forEach(function (group) {
@@ -2947,9 +2951,51 @@ class _ClickHighlight(MacroElement):
                 layer.setStyle({weight: layer._baseStyle.weight, opacity: dim});
             }
 
+            // **`bringToFront` can only reach as far as its own pane.**
+            // Reported from the device: a chosen line stays *under* the planned
+            // route -- and that is not a stacking accident but the arrangement,
+            // because the trails are Leaflet's overlay pane at 400 and a planned
+            // route has a pane of its own at 460. Widening a line the route runs
+            // along therefore widened something nobody could see.
+            //
+            // A pane above it, and the chosen line drawn into it a second time.
+            // Not moved: a canvas layer belongs to the renderer of the pane it
+            // was made in, and moving it would mean taking it out of the group
+            // the legend switches and putting it back somewhere else. A copy is
+            // one layer for as long as a selection lasts, and it takes no clicks
+            // -- the line underneath is still the thing being tapped, and the
+            // reach that ranks what a tap could have meant skips anything that
+            // is not interactive, so it cannot be offered as a choice of its own.
+            function liftPane() {
+                if (!map.getPane('trailsPicked')) {
+                    var pane = map.createPane('trailsPicked');
+                    // Over the planned route at 460 and under the profile's own
+                    // mark at 470: this is a line on the ground, and that is a
+                    // reading of where somebody is on it.
+                    pane.style.zIndex = 465;
+                    pane.style.pointerEvents = 'none';
+                }
+                return 'trailsPicked';
+            }
+
+            function drop() {
+                lifted.forEach(function (copy) { map.removeLayer(copy); });
+                lifted = [];
+            }
+
+            function lift(layer) {
+                if (!layer.getLatLngs) { return; }
+                var base = layer._baseStyle;
+                lifted.push(L.polyline(layer.getLatLngs(), {
+                    color: base.color, weight: base.weight + boost, opacity: 1,
+                    interactive: false, pane: liftPane(), className: 'trails-picked'
+                }).addTo(map));
+            }
+
             function clear() {
                 if (selected === null) { return; }
                 selected = null;
+                drop();
                 eachPath(function (layer) { layer.setStyle(layer._baseStyle); });
             }
 
@@ -2960,11 +3006,18 @@ class _ClickHighlight(MacroElement):
                 // routes involved.
                 var previous = selected;
                 selected = key;
+                drop();
                 eachPath(function (layer) {
                     var mine = layer.options.className === key;
                     if (mine) {
                         layer.setStyle({weight: layer._baseStyle.weight + boost, opacity: 1});
+                        // Kept, because it is what puts the chosen line over the
+                        // other trails in its own pane; the copy above is what
+                        // puts it over what is drawn in the panes above that.
                         layer.bringToFront();
+                        // A chain split into pieces is several layers and one
+                        // selection, so every piece is lifted.
+                        lift(layer);
                     } else if (previous === null || layer.options.className === previous) {
                         step_back(layer);
                     }

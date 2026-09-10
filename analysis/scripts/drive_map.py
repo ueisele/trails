@@ -4142,6 +4142,138 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
     )
 
 
+#: What is drawn where, read off the canvases themselves. Each pane has its own
+#: renderer, so *which pane painted this pixel* is a question with an answer --
+#: and it is the question, because stacking decides what a reader sees and the
+#: panes are what carries it.
+THE_PAINT = """(at) => {
+  const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
+  const here = L.latLng(at.lat, at.lng);
+  let picked = null, chain = null;
+  map.eachLayer(l => { if (!l.options) { return; }
+    if (l.options.className === 'trails-picked') { picked = l; }
+    if (l.options.className === at.chain) { chain = l; } });
+  const read = (name) => { const pane = map.getPane(name);
+    const canvas = pane && pane.querySelector('canvas');
+    if (!canvas) { return null; }
+    const cbox = canvas.getBoundingClientRect();
+    const mbox = map.getContainer().getBoundingClientRect();
+    const pt = map.latLngToContainerPoint(here);
+    const x = Math.round((mbox.left + pt.x - cbox.left) * (canvas.width / cbox.width));
+    const y = Math.round((mbox.top + pt.y - cbox.top) * (canvas.height / cbox.height));
+    const d = canvas.getContext('2d').getImageData(x, y, 1, 1).data;
+    return [d[0], d[1], d[2], d[3]]; };
+  const z = (name) => { const pane = map.getPane(name);
+    return pane ? (Number(getComputedStyle(pane).zIndex) || 0) : null; };
+  return {copy: !!picked, clickable: picked ? picked.options.interactive : null,
+          pane: picked ? picked.options.pane : null,
+          at: z('trailsPicked'), route: z('trailsPlanRoute'),
+          colour: chain ? chain.options.color : null,
+          painted: read('trailsPicked'), onRoute: read('trailsPlanRoute')}; }"""
+
+
+def the_chosen_line_is_on_top(page: Any) -> Check:
+    """Which of two lines drawn on the same ground a reader actually sees.
+
+    **Reported from the device: a chosen line stays under the planned route.**
+    `bringToFront` reaches only as far as its own pane, and that a line cannot
+    leave its pane is the arrangement rather than an accident -- the trails are
+    Leaflet's overlay pane at 400 and a planned route has a pane of its own at
+    460. So selecting a trail the route was routed along widened something
+    nobody could see, which is the one case where the widening matters most.
+
+    **Measured off the canvases and not off a screenshot.** Every pane renders
+    into its own, so *which pane painted this pixel* has an answer, and stacking
+    is exactly what decides which of them a reader sees.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        Where the copy is, what it painted, and whether it goes when the
+        selection does
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.wait_for_timeout(500)
+    laid = select(page, LONG_CHAIN)
+    places = page.evaluate(
+        """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
+        if (!shape) { return null; }
+        return [0.3, 0.6].map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
+    )
+    # A route along that very chain, so that the two lines are on one piece of
+    # ground and one of them has to be on top.
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+    for at in places or []:
+        page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
+        settled(page)
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(1200)
+
+    shared = page.evaluate(
+        """() => { const shape = window.trailsPlan.geometry();
+        if (!shape.lat.length) { return null; }
+        const at = Math.floor(shape.lat.length / 2);
+        return {lat: shape.lat[at], lng: shape.lon[at]}; }"""
+    )
+    drawn: dict[str, Any] = {"copy": False}
+    gone: dict[str, Any] = {"copy": True}
+    if shared:
+        # **Chosen first and looked at second.** Choosing a chain puts its whole
+        # length on the panel and the map goes with it, so a view laid down
+        # before the click is a view the click throws away -- measured, the point
+        # this reads was 1,725 px off the left of a 390 px screen and every pixel
+        # came back empty.
+        select(page, LONG_CHAIN)
+        page.wait_for_timeout(900)
+        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 16, {animate: false})"), shared)
+        page.wait_for_timeout(900)
+        drawn = page.evaluate(THE_PAINT, {**shared, "chain": LONG_CHAIN})
+        # And given up again: a widened line nothing still claims is a line
+        # pointing at a selection that is over.
+        page.evaluate("() => window.trailsHighlight.clear()")
+        page.wait_for_timeout(600)
+        gone = page.evaluate(THE_PAINT, {**shared, "chain": LONG_CHAIN})
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+
+    def paint(rgba: Any) -> str:
+        """A pixel as something a reader of the report can compare."""
+        return "transparent" if not rgba or rgba[3] == 0 else f"rgb({rgba[0]}, {rgba[1]}, {rgba[2]})"
+
+    wanted = ""
+    if drawn.get("colour"):
+        colour = drawn["colour"].lstrip("#")
+        wanted = f"rgb({int(colour[0:2], 16)}, {int(colour[2:4], 16)}, {int(colour[4:6], 16)})"
+    return Check(
+        "the chosen line is on top",
+        [
+            Reading("a route was laid along the chain", laid and bool(shared), True),
+            Reading("choosing a line draws it again, above the route", drawn["copy"], True),
+            Reading("in a pane of its own", drawn["pane"], "trailsPicked"),
+            Reading("over the planned route", (drawn["at"] or 0) > (drawn["route"] or 0), True, note=f"{drawn['at']} against {drawn['route']}"),
+            # The pixel, which is what a reader sees and the only reading here
+            # that a wrong z-index could not talk its way out of.
+            Reading("and it is the chosen line's own colour there", paint(drawn["painted"]), wanted),
+            Reading("the route is still painting under it", paint(drawn["onRoute"]) != "transparent", True, note=paint(drawn["onRoute"])),
+            # It takes no clicks, so the line under it is still what a tap hits
+            # and the row of choices cannot offer it as a source of its own.
+            Reading("the copy takes no clicks", drawn["clickable"], False),
+            Reading("and it goes when the selection does", gone["copy"], False),
+        ],
+    )
+
+
 def the_dark_set(page: Any) -> Check:
     """Two sets of colours for the furniture, and one for the ground.
 
@@ -5783,6 +5915,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_position_is_over_the_plan(page))
     if wanted(a_tap_that_could_have_meant_several_lines):
         checks.append(a_tap_that_could_have_meant_several_lines(page))
+    if wanted(the_chosen_line_is_on_top):
+        checks.append(the_chosen_line_is_on_top(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be
