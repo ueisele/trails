@@ -3935,6 +3935,13 @@ THE_CHOICES = """() => { const row = document.querySelector('.trails-profile-pic
           // out of step is what was reported: the row said one thing and the
           // widened line under it said another.
           highlighted: window.trailsHighlight ? window.trailsHighlight.selected() : null,
+          // **The class and not the heading.** Since a line is named by what it
+          // carries rather than by the label the map used to draw, two sources
+          // through one valley can put the same name in the heading -- measured
+          // at that crossing, where FKB and Turrutebasen are both
+          // `Langheistabben` -- and a check that compared headings would then
+          // report that nothing had changed when the whole selection had.
+          chosen: window.trailsProfile ? (window.trailsProfile.className || null) : null,
           name: (document.querySelector('.trails-profile-name') || {}).textContent || ''}; }"""
 
 
@@ -4109,7 +4116,7 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
             Reading("the one being shown is lit", len(busy["lit"]), 1, note=", ".join(busy["lit"])),
             # Pressing another one selects it, without a second tap on the map.
             Reading("pressing another takes it", switched["lit"] and switched["lit"] != busy["lit"], True, note=", ".join(switched["lit"])),
-            Reading("and the panel followed", switched["name"] != busy["name"], True, note=switched["name"][:40]),
+            Reading("and the panel followed", switched["chosen"] != busy["chosen"], True, note=str(switched["chosen"])[:40]),
             # And where there is nothing to choose between, no row.
             Reading("a lonely line gets no row", alone["shown"], False),
             # The planned route, which can be reached no other way.
@@ -4270,6 +4277,67 @@ def the_chosen_line_is_on_top(page: Any) -> Check:
             # and the row of choices cannot offer it as a source of its own.
             Reading("the copy takes no clicks", drawn["clickable"], False),
             Reading("and it goes when the selection does", gone["copy"], False),
+        ],
+    )
+
+
+def a_line_is_named_at_the_foot_and_not_on_the_ground(page: Any) -> Check:
+    """Where a line's name is written once a reader has chosen it.
+
+    **Reported from the device: the label of the first line chosen stays open.**
+    On a phone a hover label opens on a *tap* -- that is Leaflet's own rule for
+    a touch device -- and it then stands over the ground until something else is
+    tapped: a second heading, saying what the row at the foot already says under
+    the same name, over the map it is naming.
+
+    So the two UT.no layers, the only ones that ever carried a label, no longer
+    do. The name travels with the figures instead and is read from there by the
+    panel's heading and by a docked popup's title alike -- which is the half
+    that had to be got right, because the title read the label and would
+    otherwise have headed every line *Details*.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What is written on the map, and what is written at the foot
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.wait_for_timeout(400)
+    laid = select(page, LONG_CHAIN)
+    page.wait_for_timeout(800)
+    said = page.evaluate(
+        """() => ({
+          labels: [...document.querySelectorAll('.leaflet-tooltip')].map(n => n.textContent.trim()),
+          banner: (document.querySelector('.trails-profile-name') || {}).textContent || '',
+          carried: window.trailsProfilePanel.nameOf('LONG_CHAIN')}); """.replace("LONG_CHAIN", LONG_CHAIN)
+    )
+    # **The popup still docks, and still under the name.** This is the half that
+    # had to be got right: the chrome titled a docked popup by reading the line's
+    # own label, so removing the label would have headed every line *Details*.
+    # It asks the panel's table now, which is the table the heading above came
+    # from.
+    page.evaluate("() => window.trailsProfilePanel.page('details')")
+    page.wait_for_timeout(700)
+    docked = page.evaluate(
+        """() => { const box = document.querySelector('.trails-profile-detail');
+        return box ? box.textContent.replace(/\\s+/g, ' ').trim() : ''; }"""
+    )
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+    return Check(
+        "a line is named at the foot and not on the ground",
+        [
+            Reading("a line was chosen to ask about", laid, True),
+            Reading("nothing is written on the map", said["labels"], []),
+            Reading("the row at the foot names it", said["banner"], said["carried"]),
+            # Not the chain id, which is what the heading falls back to when
+            # nothing said what a line is called.
+            Reading("and it is a name and not an id", said["banner"].startswith("ut-no-"), False, note=said["banner"][:48]),
+            Reading("the popup still docks as a page", bool(docked), True),
+            Reading("and says the same name there", said["carried"] in docked, True, note=docked[:48]),
         ],
     )
 
@@ -5917,6 +5985,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_tap_that_could_have_meant_several_lines(page))
     if wanted(the_chosen_line_is_on_top):
         checks.append(the_chosen_line_is_on_top(page))
+    if wanted(a_line_is_named_at_the_foot_and_not_on_the_ground):
+        checks.append(a_line_is_named_at_the_foot_and_not_on_the_ground(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be

@@ -7315,16 +7315,27 @@ class _ProfilePanel(MacroElement):
             // also answered it would select a chain out from under the route.
             var suspended = false;
 
-            // What to call the selected line in the heading: its own hover text
-            // where it has one, and its chain id where it has not. A tooltip is
-            // markup — folium wraps the name in a div — and this is written into
-            // a heading as text, so the tags come out rather than being rendered.
+            // **What to call the selected line, asked of what the line carries.**
+            // It used to be read off the line's own hover label, which is how
+            // the name came to be drawn on the map at all — and a label that
+            // opens on a tap and stays there is a second heading over the
+            // ground, saying what the row at the foot already says. The name
+            // travels with the figures, is the same string the file writer
+            // uses, and needs nothing drawn to be readable.
+            //
+            // The hover label is still read where there is one, so a page built
+            // with labels and without carried names still names its lines. A
+            // tooltip is markup — folium wraps the name in a div — and this is
+            // written into a heading as text, so the tags come out rather than
+            // being rendered.
             function labelOf(layer, className) {
-                var tooltip = layer.getTooltip && layer.getTooltip();
+                var figure = figures[className] || {};
+                if (figure.name) { return figure.name; }
+                var tooltip = layer && layer.getTooltip && layer.getTooltip();
                 var content = tooltip && tooltip.getContent();
                 if (typeof content === 'string') { return content.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim(); }
                 if (content && content.textContent) { return content.textContent.trim(); }
-                return (figures[className] || {}).id;
+                return figure.id;
             }
 
             //: How many chips the row may hold. Four fit across 390 px and
@@ -7907,6 +7918,10 @@ class _ProfilePanel(MacroElement):
                     suspended = !!taken;
                     if (suspended) { present(null); }
                 },
+                // What a line is called, for whoever holds the class and not the
+                // line: the chrome heads a docked popup with it, and it used to
+                // read the map's own label for that. One table, one name.
+                nameOf: function (className) { return (figures[className] || {}).name || null; },
                 // The two things a second consumer must not write for itself:
                 // the walk that lays edges end to end, and the metre this page
                 // measures distance with. A route composed by a second walk
@@ -17598,6 +17613,13 @@ class _Chrome(MacroElement):
             // profile panel puts in its own heading, so the two agree.
             function titleFor(popup) {
                 var source = popup._source;
+                // The name the line carries, which is what the panel heads
+                // itself with — so the sheet and the panel cannot disagree, and
+                // neither needs a label drawn on the map to know it.
+                var className = source && source.options ? source.options.className : null;
+                var carried = className && window.trailsProfilePanel && window.trailsProfilePanel.nameOf
+                    ? window.trailsProfilePanel.nameOf(className) : null;
+                if (carried) { return carried; }
                 if (source && source.getTooltip) {
                     var tooltip = source.getTooltip();
                     var content = tooltip && tooltip.getContent();

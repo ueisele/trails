@@ -550,7 +550,9 @@ class TrailLayer(NamedTuple):
         published_fields: Mapping of column name to label for what somebody else
             states about the line, shown under that heading rather than among
             the figures this map worked out
-        tooltip_field: Column shown on hover
+        tooltip_field: Column shown on hover. Nothing sets it here any more:
+            on a phone a hover label opens on a tap and stays there, and the row
+            at the foot already names the line under the same name
         search_field: Column the search box matches against. Not the chain id:
             what a reader types is a name, and a road's identity is a register
             id because names repeat across the county.
@@ -1634,8 +1636,22 @@ def main() -> int:
         # with a written description, so they should win wherever they share a
         # path with a Turrutebasen or FKB line. They also carry links, which no
         # other layer does.
+        # **No hover label on either of these.** They are the only layers that
+        # ever had one, and on a phone a label opens on a tap and stays there:
+        # a second heading over the ground, saying what the row at the foot
+        # already says under the same name. The name is carried as a figure and
+        # read from there — by the panel's heading and by a docked popup's
+        # title alike — so nothing is lost by not drawing it.
         TrailLayer(
-            ut_core, "Routes [UT.no]", "#d81b60", 4.0, UT_POPUP_FIELDS, UT_LINK_FIELDS, "name", "name", None, UT_LINK_HEADING, UT_PUBLISHED_FIELDS
+            ut_core,
+            "Routes [UT.no]",
+            "#d81b60",
+            4.0,
+            UT_POPUP_FIELDS,
+            UT_LINK_FIELDS,
+            search_field="name",
+            link_heading=UT_LINK_HEADING,
+            published_fields=UT_PUBLISHED_FIELDS,
         ),
         TrailLayer(
             ut_access,
@@ -1644,11 +1660,9 @@ def main() -> int:
             3.0,
             UT_POPUP_FIELDS,
             UT_LINK_FIELDS,
-            "name",
-            "name",
-            None,
-            UT_LINK_HEADING,
-            UT_PUBLISHED_FIELDS,
+            search_field="name",
+            link_heading=UT_LINK_HEADING,
+            published_fields=UT_PUBLISHED_FIELDS,
         ),
     ]
 

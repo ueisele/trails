@@ -3665,6 +3665,36 @@ class TestProfilePanel:
 
         assert "var open = false;" in fmap.get_root().render()
 
+    def test_a_line_is_named_from_what_it_carries(self, group):
+        """It used to be read off the line's own hover label, which is how the
+        name came to be drawn on the map at all — and on a phone that label
+        opens on a tap and stays there: a second heading over the ground,
+        saying what the row at the foot already says.
+
+        The name travels with the figures and is the same string the file writer
+        uses. The hover label is still read where there is one, so a page built
+        with labels and without carried names still names its lines."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "var figure = figures[className] || {};" in html
+        assert "if (figure.name) { return figure.name; }" in html
+        # And then the label, and then the id — a line has to be called
+        # something even where nothing said what.
+        assert "var tooltip = layer && layer.getTooltip && layer.getTooltip();" in html
+        assert "return figure.id;" in html
+
+    def test_the_name_is_lent_to_whoever_has_only_the_class(self, group):
+        """The chrome heads a docked popup with the line's name and used to read
+        the map's own label for it — so removing the label would have left the
+        info page headed *Details*. One table, one name, asked for by class."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "nameOf: function (className) { return (figures[className] || {}).name || null; }," in html
+
     def test_a_tap_keeps_what_else_it_reached(self, group):
         """Six sources can map one valley and the tap takes the nearest paint —
         the right rule, and not an answer the reader gave: two lines a pixel
@@ -5909,6 +5939,18 @@ class TestTheme:
         # A page built without the theme still opens; the panel says why it can
         # turn nothing rather than throwing on the first click.
         assert "This page was built without the theme" in panel
+
+    def test_a_docked_popup_is_headed_by_the_carried_name(self):
+        """It read the line's own hover label, which is the label that is no
+        longer drawn — so without this the info page would be headed *Details*
+        for every line on the map. The panel owns the table of names; this asks
+        it by class, and falls back to the label for a page that still has
+        one."""
+        chrome = self.chrome()
+        assert "window.trailsProfilePanel.nameOf" in chrome
+        assert "if (carried) { return carried; }" in chrome
+        assert "if (source && source.getTooltip) {" in chrome
+        assert "return 'Details';" in chrome
 
     @staticmethod
     def chrome():
