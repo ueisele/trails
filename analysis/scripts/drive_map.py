@@ -4300,6 +4300,18 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     partly = page.evaluate(THE_GOAL)
     flown = metres_between((here["lat"], here["lng"]), (beyond["lat"], beyond["lng"]))
 
+    # **And the case as it was reported: 112 km away, off the mapped ground
+    # altogether.** The approach to the network is then far longer than a
+    # straight stretch may be *sampled*, which used to sink the whole answer and
+    # report *no way there* with a route in hand. A refusal by the height
+    # service is a fact about sampling and not about the ground.
+    page.context.set_geolocation({"latitude": 66.3128, "longitude": 14.1428, "accuracy": 20})
+    page.wait_for_timeout(2500)
+    page.evaluate("(at) => window.trailsGoal.set(at.lat, at.lng, 'Far off the map')", here)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(900)
+    afar = page.evaluate(THE_GOAL)
+
     # **The flag, pressed while it is lit, puts the goal away.** Reported from
     # the phone: it armed the next tap instead, which is not what pressing a
     # switch that is on means.
@@ -4397,6 +4409,15 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 note=f"{(partly['goal']['metres'] or 0) / 1000:.2f} km walked against {flown / 1000:.2f} km flown",
             ),
             Reading("the row says which part was never a path", "off the paths" in (partly["says"] or ""), True, note=partly["says"]),
+            Reading(
+                "a reader off the mapped ground still gets the path part",
+                (
+                    (afar["goal"]["line"] or False),
+                    (afar["goal"]["metres"] or 0) - (afar["goal"]["straight"] or 0) > 10_000,
+                ),
+                (True, True),
+                note=f"{(afar['goal']['metres'] or 0) / 1000:.2f} km, {(afar['goal']['straight'] or 0) / 1000:.2f} km of it off the paths",
+            ),
             Reading(
                 "the flag, pressed while lit, puts the goal away",
                 (pressed_off["goal"]["at"], pressed_off["armed"], pressed_off["lamp"]),

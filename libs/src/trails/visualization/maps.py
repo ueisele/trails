@@ -8986,11 +8986,16 @@ class _PlanMode(MacroElement):
             // Read off the search above rather than run again: saying a node is
             // unreachable *is* exhausting its component, so by the time `route`
             // answers null every node the start can reach is settled in `best`
-            // and the nearest of them to the goal is where a walker leaves the
-            // paths. Only ever asked after a failure, because a search that
-            // succeeded stopped early and settled only part of the graph -- and
-            // it costs no second search, which is the whole reason it is read
-            // off `best` rather than run again.
+            // and the nearest of them to a given place is where a walker joins
+            // or leaves the paths. Only ever read after a search that did *not*
+            // stop early: one that found its target settled a part of the graph
+            // and nothing can be concluded about the rest.
+            //
+            // Given `-1` as its target, `route` runs its own search with a node
+            // number nothing can equal -- so it never breaks early, exhausts the
+            // component and answers null because a typed array has no entry
+            // there. That is the whole of *tell me what I can reach*: one router
+            // asked a second way, rather than a second router.
             function nearestReached(graph, lat, lon) {
                 var work = router(graph);
                 var cosine = Math.cos(lat * Math.PI / 180);
@@ -10027,24 +10032,24 @@ class _PlanMode(MacroElement):
                     // which is right for placing a waypoint and wrong here.
                     // Unbounded, because *the nearest node* is always an answer
                     // and the walk to it is drawn as what it is.
-                    var head = from.node >= 0 ? from.node : graph.nearestNode(from.lat, from.lon);
                     var tail = to.node >= 0 ? to.node : graph.nearestNode(to.lat, to.lon);
-                    if (head >= 0 && tail >= 0) {
-                        var over = head === tail ? null : route(graph, head, tail);
-                        if (!over && head !== tail) {
-                            // Not connected -- and the search that said so has
-                            // just settled everything `head` can reach, so the
-                            // nearest of those to the goal is where the paths
-                            // give out and the walking begins.
-                            var reached = nearestReached(graph, to.lat, to.lon);
-                            if (reached >= 0 && reached !== head) {
-                                over = route(graph, head, reached);
-                                if (over) { tail = reached; }
+                    if (tail >= 0) {
+                        // **Searched from the goal outwards, once.** Which makes
+                        // the entry the nearest node that can *actually get
+                        // there* and not merely the nearest node: a fragment of
+                        // path on the wrong side of a river is nearer and no use
+                        // at all, and picking it produced a route between two
+                        // places, neither of which was where the reader wanted
+                        // to be. Rooting the search at the goal costs exactly
+                        // what finding that out the hard way used to cost.
+                        route(graph, tail, -1);
+                        var head = nearestReached(graph, from.lat, from.lon);
+                        if (head >= 0) {
+                            var over = head === tail ? null : route(graph, head, tail);
+                            if (over || head === tail) {
+                                var made = partlyRouted(graph, from, to, head, tail, over, mayAsk);
+                                if (made) { return made; }
                             }
-                        }
-                        if (over || head === tail) {
-                            var made = partlyRouted(graph, from, to, head, tail, over, mayAsk);
-                            if (made) { return made; }
                         }
                     }
                 }
@@ -10088,14 +10093,41 @@ class _PlanMode(MacroElement):
             //: splits the last kilometre into the land it crosses and the water
             //: it does not.
             function walkTo(graph, from, to, mayAsk) {
-                if (panel().metresBetween(from.lon, from.lat, to.lon, to.lat) < 1) {
-                    return Promise.resolve([]);
-                }
+                var length = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
+                if (length < 1) { return Promise.resolve([]); }
+                // **Too long to sample is not too long to walk.** Reported from
+                // the phone, 112 km from the goal: the way *was* routed, the
+                // approach to the network came out at ninety-odd kilometres, and
+                // the height service refuses a straight stretch past
+                // `maxStraightM` -- which sank the whole answer and reported *no
+                // way there* with a route in hand. That refusal is a fact about
+                // sampling and not about the ground. The stretch is drawn for
+                // what it is and the profile shows a hole in it, which is what a
+                // hole in what is known looks like everywhere else on this page.
+                if (length > PLAN.maxStraightM) { return Promise.resolve(plainParts(from, to, length)); }
                 var answering = heightsFor(from, to, mayAsk);
                 // Nothing may be asked -- a live drag -- so it is drawn straight
                 // with no heights, which the route already knows how to say.
                 if (!answering) { return Promise.resolve(waitingParts(from, to)); }
-                return answering.then(function (answered) { return straightParts(graph, from, to, answered); });
+                return answering.then(
+                    function (answered) { return straightParts(graph, from, to, answered); },
+                    // And a service that refused for any other reason does not
+                    // get to take the route down with it either.
+                    function () { return plainParts(from, to, length); }
+                );
+            }
+
+            //: A stretch drawn straight with nothing claimed about its heights,
+            //: and not marked provisional: nothing is still being worked out
+            //: here, this *is* the answer. `waitingParts` below is the other
+            //: one, for a leg whose answer has not arrived yet, and it refuses a
+            //: length this one has to accept.
+            function plainParts(from, to, length) {
+                var tally = blankTally();
+                tally.unmarked = length;
+                return [{kind: 'land', lon: [from.lon, to.lon], lat: [from.lat, to.lat],
+                         along: [0, length], length: length, height: [NaN, NaN], distance: [0, length],
+                         read: false, tally: tally}];
             }
 
             // What such a leg is in the meantime: its own straight line, its own

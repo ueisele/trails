@@ -5506,10 +5506,12 @@ class TestPlanMode:
         end, and a line that long is refused outright — so a journey that is
         twenty kilometres of path and two of open ground came out as nothing.
 
-        The search has already settled every node it can reach by the time it
-        can say the goal is unreachable — that is what exhausting a component
-        means — so the nearest of those to the goal is where a walker leaves the
-        paths, and it costs no second search.
+        **Searched from the goal outwards**, which makes the entry the nearest
+        node that can *actually get there* rather than merely the nearest node:
+        a fragment of path on the wrong side of a river is nearer and no use at
+        all. Exhausting a component is what saying *unreachable* costs anyway,
+        so rooting the search at the goal costs exactly what finding that out
+        the hard way used to.
 
         **And routing is for reducing the trackless part, so it is taken exactly
         when it does that.** Walking straight is trackless the whole way; this
@@ -5527,14 +5529,14 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function nearestReached(graph, lat, lon) {" in planning
-        assert "var reached = nearestReached(graph, to.lat, to.lon);" in planning
+        assert "route(graph, tail, -1);" in planning
+        assert "var head = nearestReached(graph, from.lat, from.lon);" in planning
         assert "return ends[0].concat(middle, ends[1]); });" in planning
         assert "if (off >= far(from.lon, from.lat, to.lon, to.lat)) { return null; }" in planning
         # **Both ends, and neither need be on a path.** The reader is as likely
         # to be off the network as the goal is — somebody standing in a bog is
         # exactly the person asking which way — and `snapped` gives up beyond
         # its own reach, which is right for placing a waypoint and wrong here.
-        assert "var head = from.node >= 0 ? from.node : graph.nearestNode(from.lat, from.lon);" in planning
         assert "var tail = to.node >= 0 ? to.node : graph.nearestNode(to.lat, to.lon);" in planning
         # Only ever read after a failure: a search that succeeded stopped early
         # and settled only part of the graph.
@@ -5553,6 +5555,27 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "straight: goalShape ? (goalShape.straight + goalShape.crossed) : null};" in planning
+
+    def test_a_stretch_too_long_to_sample_is_still_a_stretch_to_walk(self):
+        """Reported from the phone, 112 km from the goal: the way *was* routed,
+        the approach to the network came out at ninety-odd kilometres, and the
+        height service refuses a straight stretch past ``maxStraightM`` — which
+        sank the whole answer and reported *no way there* with a route in hand.
+
+        That refusal is a fact about sampling and not about the ground. The
+        stretch is drawn for what it is, with nothing claimed about its heights,
+        and the profile shows a hole in it — which is what a hole in what is
+        known looks like everywhere else on this page. Not marked provisional
+        either: nothing is still being worked out there, this is the answer."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "if (length > PLAN.maxStraightM) { return Promise.resolve(plainParts(from, to, length)); }" in planning
+        assert "function plainParts(from, to, length) {" in planning
+        # And a refusal for any other reason does not take the route down
+        # with it either.
+        assert "function () { return plainParts(from, to, length); }" in planning
 
 
 class TestRoutingGraphAreas:
