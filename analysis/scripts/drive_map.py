@@ -4178,6 +4178,10 @@ THE_GOAL = """() => {
           // The stops on the way, as marks on the ground rather than as a list:
           // what is drawn is what a reader is looking at.
           marks: document.querySelectorAll('.trails-goal-stop').length,
+          // What is standing over the ground, if anything. A switch that
+          // announces its own obvious acts teaches a reader to stop reading it.
+          notice: (function () { const line = document.querySelector('.trails-pick-said');
+              return (line && line.style.display !== 'none') ? line.textContent : null; })(),
           armed: window.trailsChrome.state().aiming,
           lamp: window.trailsChrome.state().goal,
           row: !!row && row.style.display !== 'none',
@@ -4282,6 +4286,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.evaluate("() => window.trailsChrome.aiming('stop')")
     page.wait_for_timeout(300)
     armed_stop = page.evaluate("() => window.trailsChrome.state().aimingFor")
+    stop_hint = page.evaluate(THE_GOAL)["notice"]
     tap_goal(aside)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
     page.wait_for_timeout(900)
@@ -4419,6 +4424,17 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             Reading("the switch arms the next tap", (armed["armed"], (armed["goal"] or {}).get("at")), (True, None)),
             Reading("and the tap sets a goal and lets the switch go", (direct["goal"]["at"] is not None, direct["armed"]), (True, False)),
             Reading("read straight at first", direct["goal"]["way"], "direct"),
+            # **And it says nothing while it does any of it.** The lamp is lit,
+            # the crosshair is up and the target appears where the tap landed;
+            # three ways of saying the same thing in words stood over the ground
+            # as well, and a page that explains its own obvious acts teaches a
+            # reader to stop reading it.
+            Reading("arming for a goal says nothing", armed["notice"], None),
+            Reading("and setting one says nothing either", direct["notice"], None),
+            # The one hint left, and it earns its place: no mark on the map says
+            # that a tap on a stop takes that stop away.
+            Reading("arming for a stop says the one thing no mark says", "take it away" in (stop_hint or ""), True, note=str(stop_hint)),
+            Reading("and it goes once the stop is down", stopped["notice"], None),
             Reading("the mark aims at it", (aimed.get("target"), aimed.get("goal") is not None), ("the goal", True)),
             Reading("on the bearing to it", turned, 0, within=0.6, note=f"{turned:.2f} deg off"),
             Reading(

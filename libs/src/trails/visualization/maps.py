@@ -19201,6 +19201,22 @@ class _Chrome(MacroElement):
             // rather than being a flag -- and the notice over the map says it,
             // because a crosshair cannot.
             var aiming = null;
+            //: Whether the notice standing over the map is this switch's own. A
+            //: switch that cleared without asking would wipe whatever the
+            //: position or the picker had just said.
+            //:
+            //: Named apart from `aimSaid`, which is the figure on the wedge and
+            //: had the name first: two declarations of one name in one scope is
+            //: not a shadow but a replacement, and this one silently took the
+            //: formatter's place until a fix tried to draw a distance with it.
+            var aimNotice = false;
+
+            function sayAiming(text) {
+                if (text) { aimNotice = true; saySomething(text, 'notice'); return; }
+                if (!aimNotice) { return; }
+                aimNotice = false;
+                saySomething('', 'notice');
+            }
 
             function askAiming(want) {
                 var wanted = want === 'stop' ? 'stop' : (want === undefined ? (aiming ? null : 'goal')
@@ -19211,11 +19227,21 @@ class _Chrome(MacroElement):
                 // tap will do.
                 if (aiming && picking) { askPicking(false); }
                 container.style.cursor = aiming ? 'crosshair' : '';
-                // Standing while the switch is armed and gone the moment it is
-                // not, because it is saying what the next tap will do.
-                saySomething(aiming === 'stop'
-                    ? 'Tap the map to add a stop \u2014 or a stop to take it away.'
-                    : (aiming ? 'Tap the map to set a goal.' : ''), 'notice');
+                // **Only where there is something a mark does not say.** Arming
+                // for a goal used to put *Tap the map to set a goal* over the
+                // ground, and setting one answered *Goal set*: the lamp is lit,
+                // the crosshair is up, and the target appears where the tap
+                // landed -- so all three said in words what had just been done
+                // in front of the reader. A page that explains its own obvious
+                // acts teaches people to stop reading it. Reported from the
+                // phone, and they went.
+                //
+                // The stop's hint stays, because it carries the one thing no
+                // mark says: that a tap on a stop takes that stop away. Arming
+                // for a goal has one meaning and arming for a stop has two,
+                // which is the whole of the difference.
+                sayAiming(aiming === 'stop'
+                    ? 'Tap the map to add a stop \\u2014 or a stop to take it away.' : '');
                 paintRail();
                 paintQuick();
                 // The row at the foot lights the button that armed this, and it
@@ -19243,7 +19269,6 @@ class _Chrome(MacroElement):
                 if (aiming) { askAiming(false); return; }
                 if (goalSet() && window.trailsGoal) {
                     window.trailsGoal.clear();
-                    saySomething('Goal cleared.', false);
                     return;
                 }
                 askAiming(true);
@@ -19264,7 +19289,6 @@ class _Chrome(MacroElement):
                     if (standing >= 0) {
                         window.trailsGoal.dropStop(standing);
                         askAiming(false);
-                        saySomething('Stop taken away.', false);
                         return;
                     }
                     var called = (window.trailsPlan && window.trailsPlan.named)
@@ -19272,7 +19296,6 @@ class _Chrome(MacroElement):
                     if (called) { window.trailsGoal.addStop(called.lat, called.lon, called.name); }
                     else { window.trailsGoal.addStop(where.lat, where.lng, null); }
                     askAiming(false);
-                    saySomething(called ? ('By way of ' + called.name) : 'Stop added.', false);
                     return;
                 }
                 // **Named where the map already names something within reach,
@@ -19285,7 +19308,6 @@ class _Chrome(MacroElement):
                 if (named) { window.trailsGoal.set(named.lat, named.lon, named.name); }
                 else { window.trailsGoal.set(where.lat, where.lng, null); }
                 askAiming(false);
-                saySomething(named ? ('Goal: ' + named.name) : 'Goal set.', false);
             }
 
             container.addEventListener('click', function (event) {
@@ -19694,7 +19716,6 @@ class _Chrome(MacroElement):
                 // of a goal, and a crosshair left over it would take the next
                 // tap for a second one.
                 askAiming(false);
-                saySomething(called ? ('Goal: ' + called) : 'Goal set.', false);
             });
 
             var adopting = false;

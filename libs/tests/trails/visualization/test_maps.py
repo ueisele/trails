@@ -7258,13 +7258,18 @@ class TestWhereTheReaderIs:
         assert "function askAiming(want) {" in html
         assert "if (aiming && picking) { askPicking(false); }" in html
         assert "askAiming(false);" in html
-        # **And the hint it says takes no pointer.** Driven: *Tap the map to set
-        # a goal* was said sticky, which put a full-width band across the middle
-        # of the map with `pointer-events: auto` on it — and it swallowed the
-        # very tap it was asking for. Standing and being tappable are two
-        # things, so they are two states now.
+        # **And it says nothing while it does it.** *Tap the map to set a goal*
+        # stood over the ground while the lamp was lit and the crosshair was up,
+        # and setting one answered *Goal set* under a target that had just
+        # appeared where the tap landed: three ways of saying in words what had
+        # been done in front of the reader. A page that explains its own obvious
+        # acts teaches people to stop reading it. Reported from the phone.
+        assert "'Tap the map to set a goal.'" not in html
+        assert "'Goal set.'" not in html
+        assert "'Goal cleared.'" not in html
+        # A notice that stands is still one that takes no pointer — the trap
+        # that hint fell into while it existed, and the rule that outlives it.
         assert "pickToast.style.pointerEvents = sticky === true ? 'auto' : 'none';" in html
-        assert "(aiming ? 'Tap the map to set a goal.' : ''), 'notice');" in html
         # **And a lit lamp pressed puts the goal away.** Reported from the
         # phone: pressing the flag again armed the next tap instead, which is
         # not what pressing a switch that is *on* means. Three states, one
@@ -7359,7 +7364,15 @@ class TestWhereTheReaderIs:
 
         html = fmap.get_root().render()
         assert "var wanted = want === 'stop' ? 'stop' :" in html
+        # **The one hint left, and it earns its place.** A tap on a stop takes
+        # that stop away, which no mark on the map says: arming for a goal has
+        # one meaning and arming for a stop has two, and that is the whole of
+        # the difference between the two switches.
         assert "Tap the map to add a stop" in html
+        # And it is this switch's own notice that it clears, never somebody
+        # else's: the position and the picker say things in the same line.
+        assert "function sayAiming(text) {" in html
+        assert "if (!aimNotice) { return; }" in html
         assert "if (aiming === 'stop') {" in html
         assert "window.trailsGoal.dropStop(standing);" in html
         assert "window.trailsGoal.addStop(called.lat, called.lon, called.name);" in html
