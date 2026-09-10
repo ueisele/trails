@@ -11481,14 +11481,35 @@ class _PlanMode(MacroElement):
                 return -1;
             }
 
+            // **The points belong to the route, and are drawn while the route
+            // is.** Reported from the phone: after plan mode was left the
+            // numbered discs stayed on the map, standing over every other line a
+            // reader chose afterwards -- a route's own furniture over somebody
+            // else's reading. Shown while it is being planned and while it is
+            // what the panel is showing; the line itself stays either way, which
+            // is what says the plan has not gone anywhere.
+            //
+            // The same test the row at the foot lights the route's chip by, and
+            // it has to be that one: `composed` alone is true of the way to a
+            // goal as well, and a goal's points are not these.
+            function planShowing() {
+                var said = window.trailsProfile;
+                return !!(said && said.composed && !said.goal);
+            }
+
             // Applied as differences, never rewritten wholesale. This runs on
             // every edit and, while a waypoint is being dragged, several times a
             // second — and writing a style that is already set is one of the two
             // things that have frozen this map outright.
             function dressPins() {
                 var most = Math.min(pins.length, points.length);
+                var shown = on || planShowing();
                 for (var i = 0; i < most; i += 1) {
                     var record = pins[i], element = record.marker.getElement();
+                    if (element && record.shown !== shown) {
+                        element.style.display = shown ? '' : 'none';
+                        record.shown = shown;
+                    }
                     var label = String(i + 1), picked = i === chosen;
                     var ends = i > 0 && i + 1 < points.length && typeof points[i].stage === 'string';
                     if (element && record.label !== label) {
@@ -14114,6 +14135,12 @@ class _PlanMode(MacroElement):
                     chosen = (at === null || at === undefined || at < 0 || at >= points.length) ? -1 : at;
                     refresh();
                 },
+                // **The pins drawn again without the route being composed.**
+                // Whether they are drawn depends on something outside this
+                // control -- which route the panel is showing -- and `repaint`
+                // would compose the whole route to find that out, 45 ms over a
+                // long one, on every tap that changes a selection.
+                dress: dressPins,
                 // Which leg a position falls on, and where along it — the same
                 // answer the click uses to decide that it means an insertion.
                 onRoute: onRoute,
@@ -19732,6 +19759,11 @@ class _Chrome(MacroElement):
                     // Which line is chosen is half of what the goal mark aims
                     // at, so choosing one is a reason to work it out again.
                     aimAgain();
+                    // And the planned route's own points are drawn while that
+                    // route is what is being shown, so this is where they come
+                    // and go. Cheap on purpose: it dresses the pins and composes
+                    // nothing.
+                    if (window.trailsPlan && window.trailsPlan.dress) { window.trailsPlan.dress(); }
                 },
                 // What plan mode pushes on every refresh, and everything the bar
                 // draws. Nothing here asks plan mode anything back.

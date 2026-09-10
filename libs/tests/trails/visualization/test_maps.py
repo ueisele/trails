@@ -5674,6 +5674,30 @@ class TestPlanMode:
         # nothing else — least of all by the re-routing rule.
         assert planning.count("goalFresh = true;") == 2
 
+    def test_the_route_s_points_are_drawn_while_the_route_is(self):
+        """Reported from the phone: after plan mode was left the numbered discs
+        stayed on the map, standing over every other line a reader chose
+        afterwards — a route's own furniture over somebody else's reading.
+
+        They are drawn while it is being planned and while it is what the panel
+        is showing; the line itself stays either way, which is what says the plan
+        has not gone anywhere. The test is the one the row at the foot lights the
+        route's chip by, and it has to be that one: ``composed`` alone is true of
+        the way to a goal as well, and a goal's points are not these.
+
+        Dressed rather than repainted when the selection changes: `repaint`
+        composes the whole route to find out what to draw, 45 ms over a long one,
+        on every tap that changes what is chosen."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function planShowing() {" in planning
+        assert "return !!(said && said.composed && !said.goal);" in planning
+        assert "var shown = on || planShowing();" in planning
+        assert "element.style.display = shown ? '' : 'none';" in planning
+        assert "dress: dressPins," in planning
+
 
 class TestRoutingGraphAreas:
     """Tests for the boundaries the page is handed with the graph."""
@@ -7213,3 +7237,14 @@ class TestWhereTheReaderIs:
         assert "if (!event.tooltip || event.tooltip.options.permanent) { return; }" in html
         assert "if (!container.classList.contains('trails-coarse')) { return; }" in html
         assert "map.closeTooltip(event.tooltip);" in html
+
+    def test_the_plan_s_points_come_and_go_with_the_selection(self):
+        """Whether the route's own numbered discs are drawn depends on which
+        route the panel is showing, so a selection changing is when they come and
+        go. Dressed and not repainted: repainting composes the whole route to
+        find out what to draw."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "if (window.trailsPlan && window.trailsPlan.dress) { window.trailsPlan.dress(); }" in html

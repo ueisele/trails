@@ -5074,6 +5074,20 @@ def a_route_read_after_planning(page: Any) -> Check:
     page.wait_for_timeout(700)
     listed = page.evaluate(THE_ROUTE_PAGES)
 
+    # **The route's own points, drawn while the route is.** Reported from the
+    # phone: after plan mode was left the numbered discs stayed on the map,
+    # standing over every other line chosen afterwards. The line itself stays
+    # either way -- that is what says the plan has not gone anywhere.
+    pins = """() => [...document.querySelectorAll('.trails-plan-pin')]
+        .filter(n => n.style.display !== 'none').length"""
+    on_panel = page.evaluate(pins)
+    away = select(page, LONG_CHAIN)
+    page.wait_for_timeout(900)
+    elsewhere = page.evaluate(pins)
+    back = press_route_chip(page)
+    page.wait_for_timeout(900)
+    again = page.evaluate(pins)
+
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(400)
     return Check(
@@ -5097,8 +5111,40 @@ def a_route_read_after_planning(page: Any) -> Check:
             Reading("the row of edits is away", listed["edits"], "none", note=f"{planning['edits']} while planning"),
             # What is not an edit stays.
             Reading("the stage files stay", listed["files"], planning["files"], note=f"{listed['files']} stages"),
+            # And the points on the ground follow what the panel is showing.
+            Reading("the route's points are drawn while it is shown", on_panel, planning["rows"]),
+            Reading("a line chosen instead takes them away", (away, elsewhere), (True, 0)),
+            Reading("and choosing the route again brings them back", (back, again), (True, on_panel)),
         ],
     )
+
+
+def press_route_chip(page: Any) -> bool:
+    """Press the planned route's chip in the row at the foot.
+
+    The route's own line takes no clicks — deliberately, so that it never stands
+    between a reader and the trail underneath — so the row is the only way back
+    to it, and a tap has to gather the row first.
+
+    Args:
+        page: The driven page, with a route laid down
+
+    Returns:
+        Whether the row offered the route and it was pressed
+    """
+    where = page.evaluate(
+        """() => { const shape = window.trailsPlan.geometry();
+        if (!shape || !shape.lon.length) { return null; }
+        const at = Math.floor(0.5 * (shape.lon.length - 1));
+        return {lat: shape.lat[at], lng: shape.lon[at]}; }"""
+    )
+    if not where:
+        return False
+    page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 14, {animate: false})"), where)
+    page.wait_for_timeout(600)
+    page.evaluate(with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"), where)
+    page.wait_for_timeout(1200)
+    return bool(page.evaluate("() => !!(window.trailsProfile && window.trailsProfile.composed && !window.trailsProfile.goal)"))
 
 
 #: How tall each covering surface comes out, and where the panel it is drawn
