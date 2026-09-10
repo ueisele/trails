@@ -5726,7 +5726,15 @@ class _ProfilePanel(MacroElement):
                     made.push({key: 'profile', kind: 'profile', node: body,
                                label: 'Elevation profile'});
                 }
-                if (planNow && planNow.on) {
+                // **And after plan mode has been left**, for a route still on
+                // the panel: the points and the stages are what that route *is*,
+                // and going back into plan mode to read them is a mode change to
+                // look at something. Read-only there -- the list draws itself
+                // without its grips, its menus and its name fields, and the
+                // stage files stay, because writing one changes nothing.
+                if ((planNow && planNow.on) ||
+                        (selected && selected.composed && selected.plan &&
+                         selected.plan.waypoints && selected.plan.waypoints.length)) {
                     made.push({key: 'list', kind: 'list', node: pointsPage,
                                label: 'Points and stages'});
                 }
@@ -5828,6 +5836,9 @@ class _ProfilePanel(MacroElement):
                 pips.innerHTML = '';
                 pill.innerHTML = '';
                 pill.style.display = (pages.length > 1) ? 'flex' : 'none';
+                // The name of the tour and the way back sit in this row, and
+                // both are edits: away with them where nothing can be edited.
+                undoRow.style.display = (planNow && planNow.on) ? 'flex' : 'none';
                 if (planNow) {
                     undoOne.disabled = !planNow.undoable;
                     undoOne.style.opacity = planNow.undoable ? '' : '0.35';
@@ -7770,6 +7781,14 @@ class _ProfilePanel(MacroElement):
                 // mode showed the table of whatever line had been chosen before
                 // it, on the page where the points belong.
                 if (given === null) { detailHtml = null; choices = []; }
+                // **And a composed route has no popup of its own.** Reported:
+                // taking the planned route from the row of choices left the
+                // ⓘ page showing the table of the line chosen before it --
+                // because a popup is cleared when the selection *goes* and this
+                // is a selection changing. Nothing ever hands a popup for a
+                // route somebody planned, so the page is the route's own
+                // figures, which is what it has to say about itself.
+                if (given && given.composed) { detailHtml = null; }
                 selected = given;
                 // A window belongs to the chain it was opened on. Carried over,
                 // it would open the panel somewhere in the middle of whatever
@@ -11817,6 +11836,14 @@ class _PlanMode(MacroElement):
                 // 9.65 ms shut against 10.20 open, which is to say shutting the
                 // list saved almost nothing. During a drag that is eight of them
                 // a second.
+                // **Whether this list can be edited at all.** Outside plan
+                // mode it is an overview of a route somebody is reading: the
+                // grip promises a drag that would change the route, the menu
+                // offers four edits, and the stage name is a field. None of them
+                // is drawn there. What stays is what a route says about itself
+                // -- the order, the names, how far in each point comes -- and
+                // the stage files, because writing one changes nothing.
+                var editable = on;
                 var stages = (listShowing() && points.length) ? stagesOf() : [];
                 var heads = Object.create(null);
                 if (stages.length > 1) {
@@ -11851,15 +11878,21 @@ class _PlanMode(MacroElement):
                     }
                     var called = nameOf(point, index);
                     var row = document.createElement('div');
-                    row.draggable = true;
+                    row.draggable = editable;
                     row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 3px;' +
                         'border-radius:3px;cursor:pointer;' +
-                        (index === chosen ? 'background:color-mix(in srgb, var(--trails-accent) 14%, transparent)' : '');
+                        // Painted only where it can be changed: outside plan
+                        // mode the chosen row is where the *last* edit aimed,
+                        // and a lit row nobody can move is a selection offered
+                        // to a reader who cannot make one.
+                        (editable && index === chosen
+                            ? 'background:color-mix(in srgb, var(--trails-accent) 14%, transparent)' : '');
                     var grip = document.createElement('span');
                     grip.className = 'trails-plan-grip';
                     grip.textContent = '\u2261';
                     grip.title = 'Drag to move this point in the route';
-                    grip.style.cssText = 'cursor:grab;color:var(--trails-ink-5);flex:none';
+                    grip.style.cssText = 'cursor:grab;color:var(--trails-ink-5);flex:none;' +
+                        'display:' + (editable ? '' : 'none');
                     var number = document.createElement('span');
                     number.textContent = String(index + 1);
                     number.style.cssText = 'flex:none;min-width:14px;text-align:right;font-weight:600;color:' + ROUTE;
@@ -11923,6 +11956,9 @@ class _PlanMode(MacroElement):
                         remove(index);
                     });
                     row.addEventListener('click', function () {
+                        // Choosing a point is where the next one goes in, which
+                        // is an edit's aim rather than a reading.
+                        if (!editable) { return; }
                         shutMenus();
                         chosen = chosen === index ? -1 : index;
                         refresh();
@@ -12007,7 +12043,8 @@ class _PlanMode(MacroElement):
                     more.title = 'What can be done with this point';
                     more.setAttribute('aria-label', 'What can be done with this point');
                     more.style.cssText = 'flex:none;font:inherit;font-size:15px;line-height:1;padding:0 5px;' +
-                        'border:0;background:none;color:var(--trails-ink-4);cursor:pointer';
+                        'border:0;background:none;color:var(--trails-ink-4);cursor:pointer;' +
+                        'display:' + (editable ? '' : 'none');
                     more.addEventListener('click', function (event) {
                         event.stopPropagation();
                         var wasOpen = menu.style.display !== 'none';
@@ -12091,7 +12128,21 @@ class _PlanMode(MacroElement):
                     }
                 });
 
-                head.appendChild(called);
+                // **A field where it can be typed in, and text where it cannot.**
+                // A read-only input still looks like something to type into, and
+                // a stage a reader cannot rename should not offer a caret. The
+                // placeholder is what a stage is called when nobody named it, so
+                // the text says the same thing the empty field would have.
+                if (on) {
+                    head.appendChild(called);
+                } else {
+                    var named = document.createElement('span');
+                    named.className = 'trails-plan-stage-named';
+                    named.textContent = stage.name || stageName(stage);
+                    named.style.cssText = 'flex:1 1 auto;min-width:0;overflow:hidden;' +
+                        'text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--trails-ink-2)';
+                    head.appendChild(named);
+                }
                 head.appendChild(says);
                 head.appendChild(file);
                 return head;

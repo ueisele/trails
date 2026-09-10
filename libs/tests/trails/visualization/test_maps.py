@@ -3695,6 +3695,36 @@ class TestProfilePanel:
         html = fmap.get_root().render()
         assert "nameOf: function (className) { return (figures[className] || {}).name || null; }," in html
 
+    def test_a_composed_route_is_not_the_thing_the_popup_came_off(self, group):
+        """Reported: taking the planned route from the row of choices left the ⓘ
+        page showing the table of the line chosen before it. A popup is cleared
+        when the selection *goes* and not when it changes — deliberately, because
+        a line's popup arrives before the click that selects it — but nothing
+        ever hands a popup for a route somebody planned. Its page is its own
+        figures, which is what it has to say about itself."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "if (given && given.composed) { detailHtml = null; }" in html
+        # And the page is still offered, because a composed route says its
+        # figures there rather than a table.
+        assert "if (detailHtml || (!(planNow && planNow.on) && saidLines.length)) {" in html
+
+    def test_the_points_and_stages_are_a_page_after_plan_mode_too(self, group):
+        """The points and the stages are what a planned route *is*, and going
+        back into plan mode to read them is a mode change to look at something.
+
+        Read-only there: the row of edits at its head carries the tour's name
+        and the way back, and both are edits."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "(selected && selected.composed && selected.plan &&" in html
+        assert "selected.plan.waypoints && selected.plan.waypoints.length)) {" in html
+        assert "undoRow.style.display = (planNow && planNow.on) ? 'flex' : 'none';" in html
+
     def test_a_tap_keeps_what_else_it_reached(self, group):
         """Six sources can map one valley and the tap takes the nearest paint —
         the right rule, and not an answer the reader gave: two lines a pixel
@@ -4349,6 +4379,28 @@ class TestPlanMode:
         # the walk's answer and not a sum of the legs'.
         assert "drawList(shape.stations || []);" in html
 
+    def test_the_list_is_an_overview_where_nothing_can_be_edited(self):
+        """Outside plan mode the same list is a route somebody is reading: the
+        grip promises a drag that would change the route, the menu offers four
+        edits, and the stage name is a field. None of them is drawn there.
+
+        What stays is what the route says about itself — the order, the names,
+        how far into the walk each point comes — and the stage files, because
+        writing one changes nothing. A read-only input is not the answer: it
+        still looks like something to type into, so a stage nobody can rename is
+        written as text."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        assert "var editable = on;" in html
+        assert "row.draggable = editable;" in html
+        assert "'display:' + (editable ? '' : 'none');" in html
+        assert "if (!editable) { return; }" in html
+        # The stage keeps its name and its file, and loses its caret.
+        assert "named.textContent = stage.name || stageName(stage);" in html
+        assert "head.appendChild(file);" in html
+
     def test_a_row_can_be_dragged_to_any_place_in_the_route(self):
         """A splice and not a run of swaps: a swap is a full re-route of the two
         legs it touches, so dragging a point four places would route eight legs
@@ -4363,7 +4415,7 @@ class TestPlanMode:
 
         assert "function moveTo(at, to) {" in html
         assert "points.splice(to, 0, points.splice(at, 1)[0]);" in html
-        assert "row.draggable = true;" in html
+        assert "row.draggable = editable;" in html
         # Firefox starts no drag at all without something in the transfer.
         assert "event.dataTransfer.setData('text/plain', String(index));" in html
         assert "if (from !== null && from !== index) { moveTo(from, index); }" in html

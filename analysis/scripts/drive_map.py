@@ -4342,6 +4342,119 @@ def a_line_is_named_at_the_foot_and_not_on_the_ground(page: Any) -> Check:
     )
 
 
+#: What the panel is showing about a planned route, and what the list under it
+#: lets a reader do.
+THE_ROUTE_PAGES = """() => {
+  const shown = (sel) => [...document.querySelectorAll(sel)]
+      .filter(n => getComputedStyle(n).display !== 'none').length;
+  const box = document.querySelector('.trails-profile-detail');
+  const undo = document.querySelector('.trails-profile-undo');
+  const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+      .filter(n => !n.classList.contains('trails-plan-stage'));
+  return {pages: window.trailsProfilePanel.pages().keys,
+          name: (document.querySelector('.trails-profile-name') || {}).textContent || '',
+          info: box ? box.textContent.replace(/\\s+/g, ' ').trim() : '',
+          rows: rows.length, draggable: rows.filter(n => n.draggable).length,
+          grips: shown('.trails-plan-grip'), menus: shown('.trails-plan-more'),
+          fields: document.querySelectorAll('.trails-plan-stage-name').length,
+          named: document.querySelectorAll('.trails-plan-stage-named').length,
+          files: document.querySelectorAll('.trails-plan-stage-file').length,
+          edits: undo && undo.parentNode ? getComputedStyle(undo.parentNode).display : null}; }"""
+
+
+def a_route_read_after_planning(page: Any) -> Check:
+    """What a planned route says about itself once plan mode has been left.
+
+    **Reported: the ⓘ page kept showing the line chosen before it.** A popup is
+    cleared when the selection *goes* and not when it changes -- deliberately,
+    because a line's popup arrives before the click that selects it -- but
+    nothing ever hands a popup for a route somebody planned, so what stood there
+    was another route's table.
+
+    **And the points and the stages are a page there now.** They are what that
+    route *is*, and going back into plan mode to read them is a mode change to
+    look at something. Read-only: no grip, no row menu, no name field and no row
+    of edits at its head -- the stage files stay, because writing one changes
+    nothing.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the pages held while planning, and what they hold after it
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.wait_for_timeout(500)
+    laid = select(page, LONG_CHAIN)
+    page.evaluate("() => window.trailsProfilePanel.page('details')")
+    page.wait_for_timeout(700)
+    line = page.evaluate(THE_ROUTE_PAGES)
+    places = page.evaluate(
+        """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
+        if (!shape) { return null; }
+        return [0.2, 0.5, 0.8].map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
+    )
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+    for at in places or []:
+        page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
+        settled(page)
+    # A stage, so that the overview has one to show and one to offer a file for.
+    page.evaluate(
+        """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+          .filter(row => !row.classList.contains('trails-plan-stage'));
+        const cut = rows[1] && rows[1].querySelector('.trails-plan-cut');
+        if (cut) { cut.click(); } }"""
+    )
+    settled(page)
+    page.evaluate("() => window.trailsProfilePanel.page('list')")
+    page.wait_for_timeout(700)
+    planning = page.evaluate(THE_ROUTE_PAGES)
+
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(1200)
+    page.evaluate("() => window.trailsProfilePanel.page('details')")
+    page.wait_for_timeout(800)
+    reading = page.evaluate(THE_ROUTE_PAGES)
+    page.evaluate("() => window.trailsProfilePanel.page('list')")
+    page.wait_for_timeout(700)
+    listed = page.evaluate(THE_ROUTE_PAGES)
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+    return Check(
+        "a route read after planning",
+        [
+            Reading("a line was chosen first", laid, True),
+            Reading("and its own table stood on the info page", line["name"] in line["info"], True, note=line["info"][:40]),
+            # The route's page, and not the table that was there before it.
+            Reading("the route is what the panel shows", reading["name"], "planned route"),
+            Reading("the info page is the route's own", line["name"] in reading["info"], False, note=reading["info"][:60]),
+            Reading("and says what the route comes to", "on foot" in reading["info"], True),
+            # The points and the stages, offered outside plan mode too.
+            Reading("the points and stages are a page while planning", "list" in planning["pages"], True, note=", ".join(planning["pages"])),
+            Reading("and still are once it is left", "list" in listed["pages"], True, note=", ".join(listed["pages"])),
+            Reading("with every point in it", listed["rows"], planning["rows"]),
+            # And nothing in it can change the route.
+            Reading("nothing can be dragged", listed["draggable"], 0, note=f"{planning['draggable']} while planning"),
+            Reading("no grip is drawn", listed["grips"], 0, note=f"{planning['grips']} while planning"),
+            Reading("no row menu is drawn", listed["menus"], 0, note=f"{planning['menus']} while planning"),
+            Reading("a stage's name is text and not a field", [listed["fields"], listed["named"] > 0], [0, True]),
+            Reading("the row of edits is away", listed["edits"], "none", note=f"{planning['edits']} while planning"),
+            # What is not an edit stays.
+            Reading("the stage files stay", listed["files"], planning["files"], note=f"{listed['files']} stages"),
+        ],
+    )
+
+
 def the_dark_set(page: Any) -> Check:
     """Two sets of colours for the furniture, and one for the ground.
 
@@ -5987,6 +6100,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_chosen_line_is_on_top(page))
     if wanted(a_line_is_named_at_the_foot_and_not_on_the_ground):
         checks.append(a_line_is_named_at_the_foot_and_not_on_the_ground(page))
+    if wanted(a_route_read_after_planning):
+        checks.append(a_route_read_after_planning(page))
     if wanted(the_dark_set):
         checks.append(the_dark_set(page))
     # **Last, because it reloads the page.** Everything after it would be
