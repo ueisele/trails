@@ -5353,11 +5353,20 @@ class _ProfilePanel(MacroElement):
             // left it and know something the rule does not.
             var goalAgain = goalButton('trails-profile-goal-again', '\\u21bb', 'Work the way out again',
                                        function () { if (window.trailsGoal) { window.trailsGoal.again(); } });
+            // **A stop on the way, and its button is here rather than in the
+            // rail.** The rail arms a tap for the one thing a reader does with
+            // nothing set; a stop is something they add to a journey that
+            // already exists, and this row is that journey.
+            var goalStop = goalButton('trails-profile-goal-stop', '+', 'Add a stop on the way',
+                                      function () {
+                                          if (window.trailsChrome) { window.trailsChrome.aiming('stop'); }
+                                      });
             var goalDrop = goalButton('trails-profile-goal-clear', '\\u00d7', 'Drop this goal',
                                       function () { if (window.trailsGoal) { window.trailsGoal.clear(); } });
             goalRow.appendChild(goalSaid);
             goalRow.appendChild(goalStraight);
             goalRow.appendChild(goalRouted);
+            goalRow.appendChild(goalStop);
             goalRow.appendChild(goalAgain);
             goalRow.appendChild(goalDrop);
 
@@ -5367,8 +5376,14 @@ class _ProfilePanel(MacroElement):
                 if (!standing) { return; }
                 var routed = goalNow.way === 'routed';
                 var said = goalNow.name || 'Goal';
-                if (routed && goalNow.working) { said += ' \\u00b7 working\\u2026'; }
-                else if (routed && goalNow.line) {
+                // **How many places it goes by, said before the figures.** Two
+                // stops turn a line into a journey, and a reader looking at
+                // 19 km has to know whether that is the way there or the way
+                // there by way of two huts.
+                var stops = (goalNow.stops || []).length - 1;
+                if (stops > 0) { said += ' \\u00b7 by ' + stops + (stops === 1 ? ' stop' : ' stops'); }
+                if (goalNow.working) { said += ' \\u00b7 working\\u2026'; }
+                else if (goalNow.line) {
                     said += ' \\u00b7 ' + (goalNow.metres / 1000).toFixed(2) + ' km';
                     if (goalNow.ascent !== null && !isNaN(goalNow.ascent)) {
                         said += ' \\u00b7 \\u2191' + Math.round(goalNow.ascent) + ' m';
@@ -5386,6 +5401,12 @@ class _ProfilePanel(MacroElement):
                 // read the line as a way somebody had checked.
                 } else if (routed) { said += ' \\u00b7 no way there \\u2014 straight'; }
                 goalSaid.textContent = said;
+                var arming = (window.trailsChrome && window.trailsChrome.aimingFor)
+                    ? window.trailsChrome.aimingFor() : null;
+                goalStop.style.background = arming === 'stop' ? 'var(--trails-accent)' : 'var(--trails-solid)';
+                goalStop.style.borderColor = arming === 'stop' ? 'var(--trails-accent)' : 'var(--trails-rule)';
+                goalStop.style.color = arming === 'stop' ? 'var(--trails-on-accent)' : 'var(--trails-ink-2)';
+                goalStop.setAttribute('aria-pressed', String(arming === 'stop'));
                 [[goalStraight, !routed], [goalRouted, routed]].forEach(function (each) {
                     var lit = each[1];
                     each[0].style.background = lit ? 'var(--trails-accent)' : 'var(--trails-solid)';
@@ -5393,7 +5414,9 @@ class _ProfilePanel(MacroElement):
                     each[0].style.color = lit ? 'var(--trails-on-accent)' : 'var(--trails-ink-2)';
                     each[0].setAttribute('aria-pressed', String(lit));
                 });
-                goalAgain.style.display = routed ? 'flex' : 'none';
+                // Both readings are worked out from where the reader is, so both
+                // can be out of date and both can be asked for again.
+                goalAgain.style.display = 'flex';
                 goalAgain.disabled = !!goalNow.working;
             }
 
@@ -13719,7 +13742,12 @@ class _PlanMode(MacroElement):
             //: minute is not an answer, it is an interruption.
             var goalFresh = false;
             var goalAt = null, goalWay = 'direct';
-            var goalLeg = null, goalShape = null, goalLayers = [], goalMark = null;
+            //: The stops the reader put between themselves and the goal, in the
+            //: order they are to be walked. The goal is the last of them and is
+            //: kept apart, because it is the one that can stand alone.
+            var goalVia = [];
+            var goalLegs = [], goalShape = null, goalLayers = [], goalMark = null;
+            var goalPins = [];
             var goalFrom = null, goalWhen = 0, goalWorking = 0, goalToken = null;
             //: Whether the panel is showing the way to the goal rather than the
             //: plan. Both can be offered at once and only one of them is drawn.
@@ -13765,15 +13793,84 @@ class _PlanMode(MacroElement):
             function dropGoalLine() {
                 undraw(goalLayers);
                 goalLayers = [];
-                goalLeg = null;
+                goalLegs = [];
                 goalShape = null;
             }
 
-            // **Routed from where the reader is, which is the whole of what
-            // *routed* means.** Not from the goal outwards and not from where
-            // the goal was set: a way to somewhere starts where you are.
+            //: Everywhere the reader has said they want to be, in order. The
+            //: goal is the last of them; the ones before it are stops.
+            function stopsOf() {
+                return goalAt ? goalVia.concat([goalAt]) : [];
+            }
+
+            //: What a stop is called on the mark and in the row. A stop the map
+            //: names is named; the rest are numbered, and the last of them is
+            //: not a stop at all.
+            function stopSaid(at) {
+                var stops = stopsOf();
+                if (at + 1 >= stops.length) { return stops[at] ? (stops[at].name || 'the goal') : 'the goal'; }
+                return stops[at].name || ('Stop ' + (at + 1));
+            }
+
+            //: A small disc in the goal's own colour, numbered. Not the plan's
+            //: pin, which is black and belongs to a route somebody is editing,
+            //: and not the goal's target ring: a stop is on the way to
+            //: something, which is what being numbered says.
+            function stopIcon(at) {
+                return '<span style="display:block;width:100%;height:100%;box-sizing:border-box;' +
+                    'border-radius:50%;border:2px solid ' + GOAL_COLOUR + ';background:' + CASING +
+                    ';color:' + GOAL_COLOUR + ';text-align:center;font:bold 9px/12px sans-serif">' +
+                    (at + 1) + '</span>';
+            }
+
+            function paintStops() {
+                while (goalPins.length > goalVia.length) { map.removeLayer(goalPins.pop()); }
+                for (var at = 0; at < goalVia.length; at += 1) {
+                    if (goalPins[at]) {
+                        goalPins[at].setLatLng([goalVia[at].lat, goalVia[at].lon]);
+                        goalPins[at].setIcon(L.divIcon({className: 'trails-goal-stop', iconSize: [16, 16],
+                                                        iconAnchor: [8, 8], html: stopIcon(at)}));
+                        continue;
+                    }
+                    goalPins.push(L.marker([goalVia[at].lat, goalVia[at].lon], {
+                        icon: L.divIcon({className: 'trails-goal-stop', iconSize: [16, 16],
+                                         iconAnchor: [8, 8], html: stopIcon(at)}),
+                        keyboard: false, interactive: false, zIndexOffset: 1150
+                    }).addTo(map));
+                }
+            }
+
+            // **One leg between two places the reader named**, made the way the
+            // reading they chose says. That is the whole of the difference
+            // between the two now: *routed* is a way over the network and
+            // *direct* is the straight line, and both are legs -- so the shape,
+            // the profile, the row of choices and the mark all work on one
+            // thing and not on two. Which also gives the straight reading a
+            // profile it never had: a line across a mountainside is a climb
+            // whether or not anybody laid a path along it.
+            //
+            // Not snapped where it is straight: a straight leg runs between the
+            // places the reader put down, and moving one of them onto the
+            // network would be routing without saying so.
+            function goalLegBetween(graph, head, tail) {
+                if (goalWay !== 'routed') { return walkTo(graph, head, tail, true); }
+                // **Partly, which is the whole of the difference between a goal
+                // and a plan's leg.** A leg is between two points a reader chose
+                // and its file is written from what it is made of; a goal is
+                // somewhere they want to get to, and *most of the way is a path*
+                // is a better answer than *there is no way*.
+                return resolve(graph, snapped(graph, head.lat, head.lon),
+                               snapped(graph, tail.lat, tail.lon), true, true);
+            }
+
+            // **Worked out from where the reader is, which is the whole of what
+            // a way to a goal means.** Not from the goal outwards and not from
+            // where it was set: a way to somewhere starts where you are. The
+            // stops between are theirs and do not move, so only the first leg
+            // depends on the position -- but all of them are made together,
+            // because a chain half rebuilt is two answers about one walk.
             function routeToGoal(from) {
-                if (!goalAt || goalWay !== 'routed' || !from) { return; }
+                if (!goalAt || !from) { return; }
                 goalFrom = {lat: from.lat, lon: from.lon};
                 goalWhen = Date.now();
                 goalWorking += 1;
@@ -13785,32 +13882,25 @@ class _PlanMode(MacroElement):
                 // this is the same one line that cancels a plan's leg.
                 goalToken = mine;
                 withGraph(function (graph) {
-                    var head = snapped(graph, from.lat, from.lon);
-                    var tail = snapped(graph, goalAt.lat, goalAt.lon);
-                    Promise.resolve().then(function () {
-                        // **Partly, which is the whole of the difference between
-                        // a goal and a leg.** A leg is between two points a
-                        // reader chose and its file is written from what it is
-                        // made of; a goal is somewhere they want to get to, and
-                        // *most of the way is a path* is a better answer than
-                        // *there is no way*.
-                        return resolve(graph, head, tail, true, true);
-                    }).then(function (parts) {
-                        if (goalToken !== mine) { return; }
-                        goalLeg = {from: head, to: tail, parts: parts, failed: null,
-                                   provisional: parts.some(function (part) { return part.provisional; })};
-                    }, function (failure) {
-                        if (goalToken !== mine) { return; }
-                        goalLeg = {from: head, to: tail, parts: null, provisional: false,
-                                   failed: String(failure && failure.message ? failure.message : failure)};
-                    }).then(function () {
+                    var chain = [{lat: from.lat, lon: from.lon}].concat(stopsOf());
+                    var making = [];
+                    for (var at = 0; at + 1 < chain.length; at += 1) {
+                        making.push(oneLeg(graph, chain[at], chain[at + 1]));
+                    }
+                    Promise.all(making).then(function (legs) {
                         goalWorking -= 1;
                         if (goalToken !== mine) { return; }
                         undraw(goalLayers);
-                        goalLayers = goalLeg.parts
-                            ? draw(goalLeg.parts, goalLeg.provisional, {pane: goalPane(), colour: GOAL_COLOUR})
-                            : [];
-                        goalShape = goalLeg.parts ? composeRoute(null, null, [goalLeg]) : null;
+                        goalLegs = legs;
+                        goalLayers = [];
+                        legs.forEach(function (leg) {
+                            if (!leg.parts) { return; }
+                            goalLayers = goalLayers.concat(
+                                draw(leg.parts, leg.provisional, {pane: goalPane(), colour: GOAL_COLOUR}));
+                        });
+                        var whole = legs.filter(function (leg) { return !!leg.parts; });
+                        goalShape = whole.length === legs.length && legs.length
+                            ? composeRoute(null, null, legs) : null;
                         // **A goal just worked out is what the reader is looking
                         // at.** They asked for it a second ago; a panel still
                         // showing whatever they were reading before is a page
@@ -13821,13 +13911,32 @@ class _PlanMode(MacroElement):
                 }, function () {});
             }
 
+            //: A leg, and a refusal turned into a leg that says it failed --
+            //: `Promise.all` would otherwise throw the whole chain away because
+            //: one stop of five could not be reached.
+            function oneLeg(graph, head, tail) {
+                return Promise.resolve().then(function () {
+                    return goalLegBetween(graph, head, tail);
+                }).then(function (parts) {
+                    return {from: head, to: tail, parts: parts, failed: null,
+                            provisional: parts.some(function (part) { return part.provisional; })};
+                }, function (failure) {
+                    return {from: head, to: tail, parts: null, provisional: false,
+                            failed: String(failure && failure.message ? failure.message : failure)};
+                });
+            }
+
             // Whether the way there is worth working out again, asked on every
             // fix. **Only when the reader has left it**, because a route that is
             // still under their feet is still the answer -- and their own circle
             // is part of how far off they look, so a vague fix does not send
             // this off routing the same way twice.
             function goalStood(lat, lon, spread) {
-                if (!goalAt || goalWay !== 'routed') { return false; }
+                // **Whichever reading is standing.** A straight leg starts where
+                // the reader was as surely as a routed one does, so it goes just
+                // as stale when they walk -- and it is worked out again under
+                // the same rule, at the same cost.
+                if (!goalAt) { return false; }
                 if (goalWorking > 0) { return false; }
                 if (!goalShape) { return goalAgain({lat: lat, lon: lon}); }
                 if (Date.now() - goalWhen < GOAL_AGAIN_MS) { return false; }
@@ -13871,19 +13980,102 @@ class _PlanMode(MacroElement):
                 return said ? {lat: said.lat, lon: said.lon} : null;
             }
 
+            // **A new goal is a new journey, so the stops go with the old
+            // one.** They were put down on the way to somewhere; kept across a
+            // change of destination they would be a detour nobody asked for,
+            // and the reader would have to find and remove each of them.
             function setGoal(lat, lon, name) {
                 goalAt = {lat: lat, lon: lon, name: name || null};
+                goalVia = [];
                 goalFresh = true;
                 dropGoalLine();
                 goalToken = null;
                 paintGoalMark();
+                paintStops();
                 routeToGoal(goalHere());
                 keepGoal();
                 refreshGoal();
             }
 
+            // **A stop goes into the leg it is nearest, and there is always
+            // one.** A reader putting a stop down means *and by way of here*,
+            // and where in the order that falls is a fact about the ground
+            // rather than something to be asked: the leg it lands nearest to is
+            // the leg it belongs in. No reach and no threshold -- every point
+            // has a nearest leg, which is what makes the answer always defined.
+            function addStop(lat, lon, name) {
+                if (!goalAt) { return false; }
+                goalVia.splice(legNearest(lat, lon), 0, {lat: lat, lon: lon, name: name || null});
+                goalFresh = true;
+                goalToken = null;
+                paintStops();
+                routeToGoal(goalHere());
+                keepGoal();
+                refreshGoal();
+                return true;
+            }
+
+            //: Which leg of the way a position falls nearest to, as an index
+            //: into the stops: leg *i* ends at stop *i*, so a stop inserted at
+            //: *i* is walked before whatever was there.
+            function legNearest(lat, lon) {
+                if (!goalLegs.length) { return goalVia.length; }
+                var cosine = Math.cos(lat * Math.PI / 180);
+                var best = goalVia.length, closest = Infinity;
+                for (var at = 0; at < goalLegs.length; at += 1) {
+                    var parts = goalLegs[at].parts || [];
+                    for (var p = 0; p < parts.length; p += 1) {
+                        var part = parts[p];
+                        for (var v = 0; v + 1 < part.lon.length; v += 1) {
+                            var gap = awayFromLine(lat, lon, cosine, part.lat[v], part.lon[v],
+                                                   part.lat[v + 1], part.lon[v + 1]);
+                            if (gap < closest) { closest = gap; best = at; }
+                        }
+                    }
+                }
+                return Math.min(best, goalVia.length);
+            }
+
+            //: The gap from a position to one segment, flat, in the metre this
+            //: page measures with.
+            function awayFromLine(lat, lon, cosine, aLat, aLon, bLat, bLon) {
+                var ax = (aLon - lon) * cosine, ay = aLat - lat;
+                var dx = (bLon - aLon) * cosine, dy = bLat - aLat;
+                var span = dx * dx + dy * dy;
+                var t = span > 0 ? -(ax * dx + ay * dy) / span : 0;
+                t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                var cx = ax + t * dx, cy = ay + t * dy;
+                return Math.sqrt(cx * cx + cy * cy) * 111320;
+            }
+
+            //: Which stop a position is standing on, or -1. The same reach a tap
+            //: is judged by everywhere else on this page.
+            function stopAt(lat, lon, withinPx) {
+                var cosine = Math.cos(lat * Math.PI / 180);
+                var reach = (withinPx || ON_ROUTE_PX) * 40075016.686 * cosine /
+                    Math.pow(2, map.getZoom() + 8);
+                for (var at = 0; at < goalVia.length; at += 1) {
+                    var dx = (goalVia[at].lon - lon) * cosine, dy = goalVia[at].lat - lat;
+                    if (Math.sqrt(dx * dx + dy * dy) * 111320 <= reach) { return at; }
+                }
+                return -1;
+            }
+
+            function dropStop(at) {
+                if (at < 0 || at >= goalVia.length) { return false; }
+                goalVia.splice(at, 1);
+                goalToken = null;
+                paintStops();
+                routeToGoal(goalHere());
+                keepGoal();
+                refreshGoal();
+                return true;
+            }
+
             function clearGoal() {
                 goalAt = null;
+                goalVia = [];
+                paintStops();
                 goalToken = null;
                 goalFrom = null;
                 goalWhen = 0;
@@ -13898,14 +14090,14 @@ class _PlanMode(MacroElement):
                 var wanted = want === 'routed' ? 'routed' : 'direct';
                 if (wanted === goalWay) { return goalWay; }
                 goalWay = wanted;
-                if (goalWay === 'direct') {
-                    dropGoalLine();
-                    goalToken = null;
-                    if (goalShowing) { goalShowing = false; if (panel()) { panel().series(null); } }
-                } else {
-                    goalFresh = true;
-                    routeToGoal(goalHere());
-                }
+                // **Both readings are worked out, because both are legs now.**
+                // Straight used to mean *no line at all*, so switching to it
+                // threw the way away and took the panel with it; it is the same
+                // walk read a second way, and a reader switching wants to see
+                // what that comes to.
+                goalFresh = true;
+                goalToken = null;
+                routeToGoal(goalHere());
                 keepGoal();
                 refreshGoal();
                 return goalWay;
@@ -13950,7 +14142,17 @@ class _PlanMode(MacroElement):
                         // different question from whether one was asked for: a
                         // routed goal off the network has none.
                         line: !!goalShape,
-                        failed: goalLeg ? goalLeg.failed : null,
+                        // Where the reader wants to be on the way, in order,
+                        // with the goal last -- the same list the row at the
+                        // foot counts and a check reads.
+                        stops: stopsOf().map(function (stop, at) {
+                            return {lat: stop.lat, lon: stop.lon, name: stopSaid(at),
+                                    goal: at + 1 === stopsOf().length};
+                        }),
+                        // The first leg that could not be made, if any: one stop
+                        // of five being unreachable is a fact about that stop
+                        // and not about the journey.
+                        failed: (goalLegs.filter(function (leg) { return leg.failed; })[0] || {}).failed || null,
                         from: goalFrom, metres: goalShape ? goalShape.total : null,
                         ascent: goalShape ? figuresOf(goalShape).ascent : null,
                         // **How much of it is not a path.** Where the network
@@ -13984,22 +14186,32 @@ class _PlanMode(MacroElement):
                 return false;
             }
 
-            //: Every segment of the way there, for the position mark, in the
-            //: shape the planned route hands its own out in.
+            // **Every segment of the way there, leg by leg**, in the shape the
+            // planned route hands its own out in -- and walked over the legs
+            // rather than over the composed shape, because which leg a segment
+            // belongs to is what says which stop lies at the end of it. The
+            // composed shape has that boundary nowhere in it.
             function goalSegments(visit) {
-                if (!goalShape) { return; }
-                for (var i = 0; i + 1 < goalShape.lon.length; i += 1) {
-                    if (goalShape.lon[i] === null || goalShape.lon[i + 1] === null) { continue; }
-                    visit(goalShape.lat[i], goalShape.lon[i], goalShape.lat[i + 1], goalShape.lon[i + 1], 0);
+                for (var at = 0; at < goalLegs.length; at += 1) {
+                    var parts = goalLegs[at].parts || [];
+                    for (var p = 0; p < parts.length; p += 1) {
+                        var part = parts[p];
+                        for (var v = 0; v + 1 < part.lon.length; v += 1) {
+                            visit(part.lat[v], part.lon[v], part.lat[v + 1], part.lon[v + 1], at);
+                        }
+                    }
                 }
             }
 
-            //: And what lies at either end of it. There is one stretch and one
-            //: goal, so walking it the wrong way round is the only thing this
-            //: has to answer differently -- and then the goal is behind you.
-            function goalEnd(stretch, forward) {
-                if (!goalAt || forward < 0) { return null; }
-                return {lat: goalAt.lat, lon: goalAt.lon, name: goalAt.name || 'the goal'};
+            //: And what lies at the end of one: leg *i* ends at stop *i*, and
+            //: the last stop is the goal. Walking it the wrong way round is the
+            //: only thing this has to answer differently, and then everything is
+            //: behind you -- but a way to a goal has one direction, so the mark
+            //: never asks.
+            function goalEnd(leg, forward) {
+                var stops = stopsOf();
+                if (forward < 0 || leg < 0 || leg >= stops.length) { return null; }
+                return {lat: stops[leg].lat, lon: stops[leg].lon, name: stopSaid(leg)};
             }
 
             function goalKeptKey() { return keptKey() + '.goal'; }
@@ -14008,7 +14220,13 @@ class _PlanMode(MacroElement):
                 try {
                     if (!goalAt) { window.localStorage.removeItem(goalKeptKey()); return; }
                     window.localStorage.setItem(goalKeptKey(), JSON.stringify(
-                        {lat: goalAt.lat, lon: goalAt.lon, name: goalAt.name, way: goalWay}));
+                        {lat: goalAt.lat, lon: goalAt.lon, name: goalAt.name, way: goalWay,
+                         // The stops with it, because a journey with stops in it
+                         // is the journey: kept without them, a page rebuilt in
+                         // a valley would quietly straighten the way out.
+                         via: goalVia.map(function (stop) {
+                             return {lat: stop.lat, lon: stop.lon, name: stop.name};
+                         })}));
                 } catch (blocked) { return; }
             }
 
@@ -14026,11 +14244,29 @@ class _PlanMode(MacroElement):
                 if (!said || typeof said.lat !== 'number' || typeof said.lon !== 'number') { return; }
                 goalWay = said.way === 'routed' ? 'routed' : 'direct';
                 setGoal(said.lat, said.lon, said.name || null);
+                // After the goal, because setting one is what clears them: a new
+                // destination is a new journey and the old stops go with it.
+                (said.via || []).forEach(function (stop) {
+                    if (typeof stop.lat === 'number' && typeof stop.lon === 'number') {
+                        goalVia.push({lat: stop.lat, lon: stop.lon, name: stop.name || null});
+                    }
+                });
+                if (goalVia.length) { paintStops(); routeToGoal(goalHere()); refreshGoal(); }
             }
 
             window.trailsGoal = {
                 set: setGoal,
                 clear: clearGoal,
+                // A stop on the way, put into the leg it is nearest; and one
+                // taken away again, by where it stands.
+                addStop: addStop,
+                dropStop: dropStop,
+                stopAt: stopAt,
+                stops: function () {
+                    return goalVia.map(function (stop) {
+                        return {lat: stop.lat, lon: stop.lon, name: stop.name};
+                    });
+                },
                 // Read with no argument, set with one. The same shape the
                 // profile's own scale switch answers in.
                 way: function (want) { return want === undefined ? goalWay : setGoalWay(want); },
@@ -18006,7 +18242,7 @@ class _Chrome(MacroElement):
                 // far enough not to shiver with the fix, near enough not to cut
                 // the corner, and the distance is the fix's own for both
                 // reasons. The label goes on naming the goal and what is left.
-                var look = Math.max(AHEAD_M, AHEAD_SPREADS * spread);
+                var look = target.straight ? remains : Math.max(AHEAD_M, AHEAD_SPREADS * spread);
                 var want = best.along + forward * look;
                 var mark = alongAt(target, cosine, Math.max(0, Math.min(whole, want))) || goal;
                 var straight = awayFrom(at, cosine, mark.lat, mark.lon);
@@ -18033,14 +18269,28 @@ class _Chrome(MacroElement):
                 // a goal is an instruction, and it outranks both.
                 var goal = window.trailsGoal ? window.trailsGoal.state() : null;
                 if (goal && goal.at) {
-                    if (goal.way === 'routed' && goal.line) {
+                    // **Whichever reading is standing**, because both are a way
+                    // now: straight is a chain of straight legs and routed is a
+                    // chain of routed ones, and a goal with stops on the way has
+                    // a next place to walk to either way. Keying this on
+                    // *routed* aimed the straight reading past every stop the
+                    // reader had put down, at the goal beyond them.
+                    if (goal.line) {
                         return {name: 'the goal', segments: window.trailsGoal.segments,
-                                goal: window.trailsGoal.goal, oneWay: true};
+                                goal: window.trailsGoal.goal, oneWay: true,
+                                // **A leg drawn straight is straight**, so the
+                                // whole of it is one direction and the head can
+                                // look to its far end. Cutting it at sixty
+                                // metres would open the fan to what sixty metres
+                                // is worth rather than to what the walk is:
+                                // measured, a goal 9 km off went from a quarter
+                                // of a degree to thirty-eight.
+                                straight: goal.way !== 'routed'};
                     }
-                    // Straight at it -- and equally where a routed goal has no
-                    // way to it yet or could not be given one. A route that
-                    // failed is not a reason to stop saying which way the goal
-                    // lies; it is the reason the reader most wants to know.
+                    // Straight at it, where there is no way yet or none could be
+                    // made. A route that failed is not a reason to stop saying
+                    // which way the goal lies; it is the reason the reader most
+                    // wants to know.
                     return {name: 'the goal', point: {lat: goal.at.lat, lon: goal.at.lon,
                                                       name: goal.name || 'the goal'}};
                 }
@@ -18945,10 +19195,17 @@ class _Chrome(MacroElement):
             // switch that stayed on would make every later tap a goal, which is
             // the mistake plan mode is allowed to make because planning is a
             // mode a reader is *in* and this is one thing they are doing.
-            var aiming = false;
+            // **Two things the next tap can mean, and it says which.** A goal
+            // and a stop on the way to it are set by the same gesture and are
+            // not the same act, so the switch carries which one it is armed for
+            // rather than being a flag -- and the notice over the map says it,
+            // because a crosshair cannot.
+            var aiming = null;
 
             function askAiming(want) {
-                aiming = want === undefined ? !aiming : !!want;
+                var wanted = want === 'stop' ? 'stop' : (want === undefined ? (aiming ? null : 'goal')
+                                                         : (want ? 'goal' : null));
+                aiming = wanted;
                 // Never both: the picker owns the next tap while it is on, and
                 // two crosshairs over one map is a page that cannot say what a
                 // tap will do.
@@ -18956,9 +19213,16 @@ class _Chrome(MacroElement):
                 container.style.cursor = aiming ? 'crosshair' : '';
                 // Standing while the switch is armed and gone the moment it is
                 // not, because it is saying what the next tap will do.
-                saySomething(aiming ? 'Tap the map to set a goal.' : '', 'notice');
+                saySomething(aiming === 'stop'
+                    ? 'Tap the map to add a stop \u2014 or a stop to take it away.'
+                    : (aiming ? 'Tap the map to set a goal.' : ''), 'notice');
                 paintRail();
                 paintQuick();
+                // The row at the foot lights the button that armed this, and it
+                // is the panel that draws that row.
+                if (window.trailsProfilePanel && window.trailsProfilePanel.goal && goalNow) {
+                    window.trailsProfilePanel.goal(goalNow);
+                }
                 return aiming;
             }
 
@@ -18988,6 +19252,29 @@ class _Chrome(MacroElement):
             function setGoalHere(event) {
                 if (!window.trailsGoal) { return; }
                 var where = map.mouseEventToLatLng(event);
+                var reach = (window.trailsReach && window.trailsReach.finger) || 12;
+                if (aiming === 'stop') {
+                    // **A tap on a stop takes that stop away.** Putting one down
+                    // and taking it back are the same gesture at the same
+                    // moment, and the only place a reader would look for the
+                    // second is the mark itself -- which is unambiguous here in
+                    // a way it was not for the goal, because a stop is the thing
+                    // this switch is armed about.
+                    var standing = window.trailsGoal.stopAt(where.lat, where.lng, reach);
+                    if (standing >= 0) {
+                        window.trailsGoal.dropStop(standing);
+                        askAiming(false);
+                        saySomething('Stop taken away.', false);
+                        return;
+                    }
+                    var called = (window.trailsPlan && window.trailsPlan.named)
+                        ? window.trailsPlan.named(where.lat, where.lng) : null;
+                    if (called) { window.trailsGoal.addStop(called.lat, called.lon, called.name); }
+                    else { window.trailsGoal.addStop(where.lat, where.lng, null); }
+                    askAiming(false);
+                    saySomething(called ? ('By way of ' + called.name) : 'Stop added.', false);
+                    return;
+                }
                 // **Named where the map already names something within reach,
                 // and standing where that thing stands** -- the rule a waypoint
                 // follows. A goal called *Storvasshytta* is one a reader can
@@ -19814,6 +20101,9 @@ class _Chrome(MacroElement):
                     return {lat: hereAt.lat, lon: hereAt.lng, spread: hereRing.getRadius()};
                 },
                 aiming: function (want) { return askAiming(want); },
+                // What the armed tap will do, for whoever draws a control that
+                // armed it: `'goal'`, `'stop'` or nothing.
+                aimingFor: function () { return aiming; },
                 // **Where the mark says to walk, as it was worked out rather
                 // than as it is drawn.** A check cannot measure an angle off a
                 // canvas and should not have to read a path back to find one --
@@ -19841,7 +20131,8 @@ class _Chrome(MacroElement):
                         // Armed for the next tap, and whether there is a goal at
                         // all: two states of one switch, and the lamp is lit for
                         // either.
-                        aiming: aiming,
+                        aiming: !!aiming,
+                        aimingFor: aiming,
                         goal: goalSet(),
                         here: hereWatch !== null,
                         planPoints: planState ? planState.points : 0,

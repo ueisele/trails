@@ -4175,6 +4175,9 @@ THE_GOAL = """() => {
           page: panel.page(), pages: panel.pages().keys,
           carries: (document.querySelector('.trails-profile-carries') || {}).textContent || null,
           chips: [...document.querySelectorAll('.trails-profile-pick')].map(c => c.textContent),
+          // The stops on the way, as marks on the ground rather than as a list:
+          // what is drawn is what a reader is looking at.
+          marks: document.querySelectorAll('.trails-goal-stop').length,
           armed: window.trailsChrome.state().aiming,
           lamp: window.trailsChrome.state().goal,
           row: !!row && row.style.display !== 'none',
@@ -4270,6 +4273,27 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
     page.wait_for_timeout(900)
     routed = page.evaluate(THE_GOAL)
+
+    # **A stop on the way**, put down off the line so that the way has to bend
+    # through it: a journey by way of somewhere is a different journey, and the
+    # figures have to say so. Set through the switch the button in the row arms,
+    # because that is the gesture a reader performs.
+    aside = {"lat": (here["lat"] + there["lat"]) / 2 + 0.012, "lng": (here["lng"] + there["lng"]) / 2}
+    page.evaluate("() => window.trailsChrome.aiming('stop')")
+    page.wait_for_timeout(300)
+    armed_stop = page.evaluate("() => window.trailsChrome.state().aimingFor")
+    tap_goal(aside)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(900)
+    stopped = page.evaluate(THE_GOAL)
+
+    # And the same tap on the stop itself takes it away again.
+    page.evaluate("() => window.trailsChrome.aiming('stop')")
+    page.wait_for_timeout(300)
+    tap_goal(aside)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(900)
+    unstopped = page.evaluate(THE_GOAL)
 
     # **A tap away from the way there is not a tap on it.** The row offers the
     # goal wherever its line runs -- that line takes no clicks, so the row is
@@ -4423,6 +4447,36 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             # left there: the row under the drawing used to return before it was
             # reached for a composed route with no plan, which is what a goal is.
             Reading("with figures of its own under it", bool(routed["carries"]), True, note=str(routed["carries"])),
+            Reading("the button arms the tap for a stop and not a goal", armed_stop, "stop"),
+            Reading(
+                "a stop bends the way through it",
+                (
+                    len(stopped["goal"]["stops"] or []),
+                    (stopped["goal"]["metres"] or 0) > (routed["goal"]["metres"] or 0),
+                    stopped["marks"],
+                ),
+                (2, True, 1),
+                note=f"{(routed['goal']['metres'] or 0) / 1000:.2f} km direct to it, "
+                f"{(stopped['goal']['metres'] or 0) / 1000:.2f} km by way of the stop",
+            ),
+            # And the mark aims at the stop, because that is the next place the
+            # reader has to get to. The goal is behind it.
+            Reading(
+                "and the mark aims at the stop, not past it",
+                (stopped["aim"] or {}).get("goal"),
+                "Stop 1",
+            ),
+            Reading(
+                "the row says how many places it goes by",
+                "by 1 stop" in (stopped["says"] or ""),
+                True,
+                note=stopped["says"],
+            ),
+            Reading(
+                "and a tap on the stop takes it away",
+                (len(unstopped["goal"]["stops"] or []), unstopped["marks"]),
+                (1, 0),
+            ),
             Reading(
                 "a tap well away from it does not take the goal",
                 (elsewhere["mine"], "To the goal" in (elsewhere["chips"] or [])),

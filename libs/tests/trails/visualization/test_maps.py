@@ -4071,6 +4071,24 @@ class TestProfilePanel:
         # read the wrong name off it.
         assert "pages.forEach(function (page) { if (page.kind === 'details') { fillDetail(); } });" in html
 
+    def test_the_goal_row_offers_a_stop_on_the_way(self):
+        """The rail arms the one thing a reader does with nothing set; a stop is
+        something they add to a journey that already exists, and this row is
+        that journey. How many places it goes by is said before the figures: two
+        stops turn a line into a journey, and somebody looking at 19 km has to
+        know whether that is the way there or the way there by way of two huts.
+
+        And *route again* stands for both readings now, because both are worked
+        out from where the reader is and both can be out of date."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "var goalStop = goalButton('trails-profile-goal-stop', '+', 'Add a stop on the way'," in html
+        assert "window.trailsChrome.aiming('stop');" in html
+        assert "if (stops > 0) { said += ' \\u00b7 by ' + stops + (stops === 1 ? ' stop' : ' stops'); }" in html
+        assert "goalAgain.style.display = 'flex';" in html
+
 
 class TestPlanMode:
     """Tests for clicking a route together over the graph in the page."""
@@ -5191,7 +5209,9 @@ class TestPlanMode:
         assert "pane.style.pointerEvents = 'none';" in planning
         # Two now and not one: the goal's way is drawn by the same function
         # into a pane of its own, and neither line is ever a click target.
-        assert planning.count("interactive: false") == 2
+        # Three now: the plan's own route, the way to a goal, and the stops on
+        # the way to one. None of them is ever a click target.
+        assert planning.count("interactive: false") == 3
         assert "function onRoute(lat, lon, withinPx)" in planning
         # Two reaches for two questions: aiming a point into a leg is the
         # tighter one, and whether a tap *meant* the route is asked at the same
@@ -5468,8 +5488,10 @@ class TestPlanMode:
         # Composed by the same walk that composes the plan's own route: the
         # heights laid end to end, the holes left as holes, the crossings
         # counted. Two walks would give two answers to *how far and how high*.
-        assert "goalShape = goalLeg.parts ? composeRoute(null, null, [goalLeg]) : null;" in planning
-        assert "draw(goalLeg.parts, goalLeg.provisional, {pane: goalPane(), colour: GOAL_COLOUR})" in planning
+        # Composed over the legs of the chain — one where the goal stands
+        # alone, one more for every stop the reader put on the way.
+        assert "? composeRoute(null, null, legs) : null;" in planning
+        assert "draw(leg.parts, leg.provisional, {pane: goalPane(), colour: GOAL_COLOUR})" in planning
 
     def test_a_goal_is_routed_from_where_the_reader_is(self):
         """Not from where the goal was set and not from the goal outwards: a way
@@ -5506,7 +5528,9 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "goalToken = mine;" in planning
-        assert planning.count("if (goalToken !== mine) { return; }") == 3
+        # Once now and not three times: the legs are made together and the
+        # token is looked at once, where the answer for the whole chain lands.
+        assert planning.count("if (goalToken !== mine) { return; }") == 1
 
     def test_a_goal_is_kept_in_a_key_of_its_own(self):
         """A reader sets one in a hut with a signal and reads it in the fog an
@@ -5595,7 +5619,7 @@ class TestPlanMode:
         # and settled only part of the graph.
         assert "if (!isFinite(work.best[node])) { continue; }" in planning
         # And the goal is the one caller that asks for it.
-        assert "return resolve(graph, head, tail, true, true);" in planning
+        assert "return resolve(graph, snapped(graph, head.lat, head.lon)," in planning
 
     def test_the_part_that_was_never_a_path_is_said(self):
         """A line on a map is a promise, and a partly routed one is a promise
@@ -5672,7 +5696,10 @@ class TestPlanMode:
         assert "return showing.page('profile') === 'profile';" in planning
         # Set by setting a goal and by asking for it to be routed, and by
         # nothing else — least of all by the re-routing rule.
-        assert planning.count("goalFresh = true;") == 2
+        # Set wherever the reader changed what the way *is* — a goal, a stop,
+        # or which reading of it — and never by the routing that happens on its
+        # own as they walk.
+        assert planning.count("goalFresh = true;") == 3
 
     def test_the_route_s_points_are_drawn_while_the_route_is(self):
         """Reported from the phone: after plan mode was left the numbered discs
@@ -5697,6 +5724,67 @@ class TestPlanMode:
         assert "var shown = on || planShowing();" in planning
         assert "element.style.display = shown ? '' : 'none';" in planning
         assert "dress: dressPins," in planning
+
+    def test_both_readings_of_a_goal_are_a_chain_of_legs(self):
+        """Asked for from a phone: stops between the reader and a goal, in both
+        readings. What that turns into is that *direct* and *routed* stop being
+        two things — one is a chain of straight legs and the other a chain of
+        routed ones, and everything downstream works on one shape rather than on
+        two: the profile, the row of choices, the figures and the mark.
+
+        Which also gives the straight reading a profile it never had. A line
+        across a mountainside is a climb whether or not anybody laid a path
+        along it, and a reader choosing between the two is entitled to know what
+        each of them costs.
+
+        A straight leg is not snapped: it runs between the places the reader put
+        down, and moving one of them onto the network would be routing without
+        saying so."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function goalLegBetween(graph, head, tail) {" in planning
+        assert "if (goalWay !== 'routed') { return walkTo(graph, head, tail, true); }" in planning
+        assert "var chain = [{lat: from.lat, lon: from.lon}].concat(stopsOf());" in planning
+        # One refusal must not throw the chain away: a stop of five that cannot
+        # be reached is a fact about that stop and not about the journey.
+        assert "function oneLeg(graph, head, tail) {" in planning
+        assert "return {from: head, to: tail, parts: null, provisional: false," in planning
+
+    def test_a_stop_goes_into_the_leg_it_is_nearest(self):
+        """A reader putting a stop down means *and by way of here*, and where in
+        the order that falls is a fact about the ground rather than something to
+        be asked. No reach and no threshold: every point has a nearest leg,
+        which is what makes the answer always defined — the same shape as the
+        rule that decides whether routing is worth taking at all."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "goalVia.splice(legNearest(lat, lon), 0, {lat: lat, lon: lon, name: name || null});" in planning
+        assert "function legNearest(lat, lon) {" in planning
+        assert "return Math.min(best, goalVia.length);" in planning
+        # Leg i ends at stop i, which is what makes the mark name the next place
+        # rather than the last one.
+        assert "return {lat: stops[leg].lat, lon: stops[leg].lon, name: stopSaid(leg)};" in planning
+
+    def test_a_new_goal_is_a_new_journey(self):
+        """The stops were put down on the way to somewhere. Kept across a change
+        of destination they would be a detour nobody asked for, and the reader
+        would have to find and remove each of them — so setting a goal clears
+        them, and only setting a goal does.
+
+        They are kept beside it, though: a page rebuilt in a valley would
+        otherwise quietly straighten the way out."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "goalVia = [];" in planning.split("function setGoal(lat, lon, name) {")[1]
+        assert "via: goalVia.map(function (stop) {" in planning
+        # Restored after the goal, because setting one is what clears them.
+        assert "(said.via || []).forEach(function (stop) {" in planning
 
 
 class TestRoutingGraphAreas:
@@ -7102,7 +7190,11 @@ class TestWhereTheReaderIs:
         assert "var goal = window.trailsGoal ? window.trailsGoal.state() : null;" in aiming
         # Before either of the other two are so much as looked at.
         assert aiming.index("window.trailsGoal") < aiming.index("window.trailsProfile")
-        assert "if (goal.way === 'routed' && goal.line) {" in aiming
+        # Whichever reading is standing, because both are a way now: keying
+        # this on *routed* aimed the straight one past every stop the reader had
+        # put down, at the goal beyond them.
+        assert "if (goal.line) {" in aiming
+        assert "straight: goal.way !== 'routed'};" in aiming
         assert "return {name: 'the goal', point: {lat: goal.at.lat, lon: goal.at.lon," in aiming
 
     def test_a_point_the_reader_set_needs_no_asking(self):
@@ -7140,7 +7232,11 @@ class TestWhereTheReaderIs:
         html = fmap.get_root().render()
         assert "var AHEAD_M = 60;" in html
         assert "var AHEAD_SPREADS = 3;" in html
-        assert "var look = Math.max(AHEAD_M, AHEAD_SPREADS * spread);" in html
+        # **A leg drawn straight is straight**, so the head looks to its far
+        # end: cutting it at sixty metres would open the fan to what sixty
+        # metres is worth rather than to what the walk is — measured, a goal
+        # 9 km off went from a quarter of a degree to thirty-eight.
+        assert "var look = target.straight ? remains : Math.max(AHEAD_M, AHEAD_SPREADS * spread);" in html
         assert "var mark = alongAt(target, cosine, Math.max(0, Math.min(whole, want))) || goal;" in html
         # The distance said is still the distance to the goal, and the point
         # marked is still the goal: only where the head points has changed.
@@ -7168,7 +7264,7 @@ class TestWhereTheReaderIs:
         # very tap it was asking for. Standing and being tappable are two
         # things, so they are two states now.
         assert "pickToast.style.pointerEvents = sticky === true ? 'auto' : 'none';" in html
-        assert "saySomething(aiming ? 'Tap the map to set a goal.' : '', 'notice');" in html
+        assert "(aiming ? 'Tap the map to set a goal.' : ''), 'notice');" in html
         # **And a lit lamp pressed puts the goal away.** Reported from the
         # phone: pressing the flag again armed the next tap instead, which is
         # not what pressing a switch that is *on* means. Three states, one
@@ -7248,3 +7344,25 @@ class TestWhereTheReaderIs:
 
         html = fmap.get_root().render()
         assert "if (window.trailsPlan && window.trailsPlan.dress) { window.trailsPlan.dress(); }" in html
+
+    def test_the_switch_says_what_the_next_tap_will_do(self):
+        """A goal and a stop on the way to it are set by the same gesture and are
+        not the same act, so the switch carries which one it is armed for rather
+        than being a flag — and the notice over the map says it, because a
+        crosshair cannot.
+
+        The stop's own button is in the row at the foot and not in the rail: the
+        rail arms the one thing a reader does with nothing set, and a stop is
+        something they add to a journey that already exists."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var wanted = want === 'stop' ? 'stop' :" in html
+        assert "Tap the map to add a stop" in html
+        assert "if (aiming === 'stop') {" in html
+        assert "window.trailsGoal.dropStop(standing);" in html
+        assert "window.trailsGoal.addStop(called.lat, called.lon, called.name);" in html
+        # And what it is armed for is readable, because the row at the foot
+        # lights the button that armed it.
+        assert "aimingFor: function () { return aiming; }," in html
