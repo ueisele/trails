@@ -3625,6 +3625,24 @@ def bearing_between(start: tuple[float, float], end: tuple[float, float]) -> flo
     return (math.degrees(math.atan2(y, x)) + 360) % 360
 
 
+def metres_between(start: tuple[float, float], end: tuple[float, float]) -> float:
+    """How far apart two positions are, flat, in the metre the page uses.
+
+    Flat rather than spherical for the same reason the page is: over the few
+    hundred metres anything here measures, a degree of longitude is a constant
+    and the error is under a centimetre.
+
+    Args:
+        start: Latitude and longitude measured from
+        end: Latitude and longitude measured to
+
+    Returns:
+        Metres between them
+    """
+    cosine = math.cos(math.radians(start[0]))
+    return math.hypot((end[1] - start[1]) * cosine, end[0] - start[0]) * 111320
+
+
 #: What the marks say, read off the page rather than off a screenshot: the cone
 #: is turned by an attribute and painted by another, and the rim is a count of
 #: arcs.
@@ -3634,8 +3652,14 @@ HERE_MARKS = """() => {
   const box = document.querySelector('.trails-here-marks');
   const turn = cone ? (cone.getAttribute('transform') || '') : '';
   const said = turn.match(/rotate\\(([-\\d.]+)\\)/);
-  return {drawn: !!box && box.style.display !== 'none',
-          cone: !!cone && cone.getAttribute('display') !== 'none',
+  const drawn = !!box && box.style.display !== 'none';
+  // **Visible, and not merely un-hidden.** The cone is made with the box and
+  // carries no `display` until it has been painted once, so a cone that was
+  // never drawn read as shown -- which passed only because this used to ask
+  // about the box instead, and stopped passing the day the box gained a second
+  // reason to be up.
+  return {drawn: drawn,
+          cone: drawn && !!cone && cone.getAttribute('display') !== 'none',
           bearing: said ? Math.round(Number(said[1])) : null,
           strength: cone ? Number(cone.getAttribute('fill-opacity')) : null,
           arcs: halo ? halo.children.length : 0}; }"""
@@ -3718,7 +3742,13 @@ def which_way_the_reader_faces(page: Any) -> Check:
         [
             # One fix is a place and not a direction: there is nothing to draw
             # until a second one says which way the first was walked from.
-            Reading("one fix draws no direction", first["drawn"], False),
+            #
+            # **The cone and not the box it is in.** This read the box until the
+            # goal mark went in beside the cone, and a goal is known from the
+            # first fix -- so where anything is selected the box is up on fix
+            # one, carrying a wedge and no cone. Which is the mark saying what
+            # it knows, and this reading is about what it does not.
+            Reading("one fix draws no direction", first["cone"], False),
             Reading("a step draws the cone", walking["cone"], True),
             Reading(
                 "turned the way the step went",
@@ -3940,6 +3970,191 @@ def the_position_is_over_the_plan(page: Any) -> Check:
                 True,
                 note=f"{stack['at']} against {max(under or [0])}",
             ),
+        ],
+    )
+
+
+#: What the goal mark says and what it draws. The angles come from the page's
+#: own working rather than off the wedge's path: a check that read a path back
+#: would be re-deriving the arithmetic it is meant to be checking, and an angle
+#: cannot be measured off a canvas at all.
+THE_AIM = """() => {
+  const said = window.trailsChrome.aim();
+  const shown = sel => { const n = document.querySelector(sel);
+    return !!n && n.getAttribute('display') !== 'none'; };
+  const text = sel => { const n = document.querySelector(sel);
+    return (!!n && n.getAttribute('display') !== 'none') ? n.textContent : null; };
+  const box = document.querySelector('.trails-here-marks');
+  return {aim: said, box: !!box && box.style.display !== 'none',
+          wedge: shown('.trails-here-aim'), head: shown('.trails-here-aim-head'),
+          says: text('.trails-here-aim-said'), names: text('.trails-here-aim-named')}; }"""
+
+
+def the_way_to_the_next_goal(page: Any) -> Check:
+    """Which way to walk, and how much of that direction the fix can support.
+
+    **Asked for from a phone: a mark that says which way the next goal is.**
+    Off the route the goal is the route -- the nearest point of it, which is
+    what getting back on it means. On it, the nearest point is under the
+    reader's feet and says nothing, so the goal becomes the next waypoint ahead.
+
+    **The wedge is the answer and the head is the middle of it.** How wide it
+    opens is not a style: it is read off the same circle the map already draws,
+    so the mark is exactly as vague as the fix is. Two things open it, and this
+    check drives both -- the reader could be anywhere in the circle, which turns
+    a bearing to a fixed point by up to ``asin(r / d)`` either way; and which
+    point of the route is the nearest one depends on where in the circle they
+    are, so every part of the route within ``d + 2r`` is a candidate too.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the mark aimed at from four places, and what it drew
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.wait_for_timeout(500)
+    # The ground to lay a route on, read off a chain before plan mode is asked
+    # for: switching it on clears the selection and the chain goes with it.
+    laid = select(page, LONG_CHAIN)
+    places = page.evaluate(
+        """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
+        if (!shape) { return null; }
+        return [0.15, 0.45, 0.75].map(f => Math.floor(f * (shape.lon.length - 1)))
+          .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
+    )
+    named = page.evaluate("() => window.trailsProfile ? window.trailsProfile.label : null")
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+
+    def fix(lat: float, lon: float, spread: float) -> Any:
+        """Hand the page one fix and read what the mark made of it."""
+        page.context.set_geolocation({"latitude": lat, "longitude": lon, "accuracy": spread})
+        page.wait_for_timeout(2500)
+        return page.evaluate(THE_AIM)
+
+    # **Nothing to aim at is not a mark that guesses.** Plan mode on with no
+    # points down and no line chosen: there is no goal, and the page says so
+    # rather than pointing somewhere.
+    page.context.set_geolocation({"latitude": places[0]["lat"] + 0.0018, "longitude": places[0]["lon"], "accuracy": 20})
+    page.evaluate("() => window.trailsChrome.here(true)")
+    page.wait_for_function(
+        with_map(
+            """() => { let there = false;
+            __MAP__.eachLayer(l => { if (l.options && l.options.className === 'trails-here-dot') { there = true; } });
+            return there; }"""
+        ),
+        timeout=20_000,
+    )
+    page.wait_for_timeout(800)
+    empty = page.evaluate(THE_AIM)
+
+    for at in places or []:
+        page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
+        settled(page)
+    page.wait_for_timeout(800)
+
+    # A fix a couple of hundred metres off the line, vague and then sharp: the
+    # same place both times, so the only thing that moves is the circle.
+    #
+    # **Vague first, and the watch restarted for it.** Handing the page a
+    # vaguer fix where it already has a sharper one changes nothing at all --
+    # that is `the_accuracy_only_gets_better` doing its job, and it held the
+    # 20 m fix from the reading above against a 120 m one, so the wedge came out
+    # identical twice. The hold is one-way, so vague then sharp drives both
+    # circles; and a watch switched off keeps nothing, which is what gets the
+    # first of them onto the screen.
+    off = (places[0]["lat"] + 0.0018, places[0]["lon"])
+    page.evaluate("() => window.trailsChrome.here(false)")
+    page.wait_for_timeout(400)
+    page.context.set_geolocation({"latitude": off[0], "longitude": off[1], "accuracy": 120})
+    page.evaluate("() => window.trailsChrome.here(true)")
+    page.wait_for_timeout(3000)
+    vague = page.evaluate(THE_AIM)
+    sharp = fix(off[0], off[1], 15)
+
+    # Onto the route and walking, which is what makes *ahead* a question with an
+    # answer: the first fix has no bearing to read the direction of travel off.
+    route = page.evaluate("() => window.trailsPlan.geometry()")
+    walk = [(route["lat"][i], route["lon"][i]) for i in range(0, len(route["lat"]))]
+    first = walk[len(walk) // 8]
+    onward = next(
+        (spot for spot in walk[len(walk) // 8 :] if metres_between(first, spot) > 40),
+        walk[len(walk) // 4],
+    )
+    fix(first[0], first[1], 15)
+    along = fix(onward[0], onward[1], 15)
+
+    # And a line chosen off the map takes the goal from the route, because that
+    # is the line the reader is now reading.
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(500)
+    chosen = select(page, LONG_CHAIN)
+    page.wait_for_timeout(900)
+    mine = page.evaluate(THE_AIM)
+
+    page.evaluate("() => { window.trailsChrome.here(false); window.trailsPlan.toggle(false); }")
+    page.wait_for_timeout(400)
+    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+
+    # The bearing the page drew, against the bearing to the point it says it
+    # aimed at -- worked out here, from the page's own formula.
+    aimed = sharp["aim"] or {}
+    to_point = bearing_between(off, (aimed.get("at", {}).get("lat", 0), aimed.get("at", {}).get("lon", 0)))
+    turned = abs(((aimed.get("to", 0) - to_point + 540) % 360) - 180)
+    open_vague = (vague["aim"] or {}).get("wide", 0)
+    open_sharp = aimed.get("wide", 0)
+    walked = along["aim"] or {}
+
+    return Check(
+        "the way to the next goal, as wide as the fix allows",
+        [
+            Reading("a route was laid down to aim at", laid, True),
+            Reading("nothing down and nothing chosen is no goal", empty["aim"], None),
+            Reading("off the route, the goal is the route", (aimed.get("target"), aimed.get("on")), ("planned route", False)),
+            Reading("and the head points at the nearest point of it", turned, 0, within=0.6, note=f"{turned:.2f} deg off"),
+            # The fan is asked of the circle, so it has to hold the direction
+            # the head points in: the fix itself is one of the places asked.
+            Reading(
+                "and the fan holds that direction",
+                (aimed.get("left", 1) <= 0, aimed.get("right", -1) >= 0),
+                (True, True),
+                note=f"{aimed.get('left', 0):.1f} to {aimed.get('right', 0):+.1f} deg",
+            ),
+            Reading(
+                "a vaguer fix opens it at least as far",
+                open_vague >= open_sharp,
+                True,
+                note=f"{open_vague:.1f} deg vague against {open_sharp:.1f} deg sharp",
+            ),
+            Reading(
+                "the wedge is drawn, with a head and a distance",
+                (sharp["wedge"], sharp["head"], bool(sharp["says"])),
+                (True, True, True),
+                note=f"reads {sharp['says']}",
+            ),
+            Reading("and no name, because the goal is the route itself", sharp["names"], None),
+            Reading(
+                "walking on the route, the goal is the next waypoint",
+                (walked.get("on"), bool(walked.get("goal"))),
+                (True, True),
+                note=f"{walked.get('goal')} at {walked.get('away', 0):.0f} m",
+            ),
+            Reading("named under the distance", bool(along["names"]), True, note=f"reads {along['says']} / {along['names']}"),
+            Reading("a line chosen off the map takes the goal", (chosen, (mine["aim"] or {}).get("target")), (True, named)),
+            # Walked on every fix, over a route that can be tens of thousands
+            # of vertices long: twice the whole of it off the route, and a
+            # dozen times over the handful of segments that survive that.
+            Reading("what one fix costs to aim", aimed.get("ms", 0), 12, within=12, note=f"{aimed.get('ms')} ms"),
         ],
     )
 
@@ -6374,6 +6589,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_accuracy_only_gets_better(page))
     if wanted(the_position_is_over_the_plan):
         checks.append(the_position_is_over_the_plan(page))
+    if wanted(the_way_to_the_next_goal):
+        checks.append(the_way_to_the_next_goal(page))
     if wanted(a_tap_that_could_have_meant_several_lines):
         checks.append(a_tap_that_could_have_meant_several_lines(page))
     if wanted(the_chosen_line_is_on_top):

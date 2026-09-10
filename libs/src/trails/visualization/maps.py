@@ -11730,6 +11730,43 @@ class _PlanMode(MacroElement):
                 return best;
             }
 
+            // **Every segment of the route, handed out rather than copied.**
+            // `geometry()` hands the whole shape back as two arrays and
+            // `state()` composes the route to answer anything at all -- 45 ms
+            // over a 37 km one. A mark that is worked out on every fix can
+            // afford neither, and it does not want the shape: it wants to
+            // measure one point against every segment and keep three numbers.
+            //
+            // The legs are walked exactly as `onRoute` walks them, one leg at a
+            // time and in order, and every segment says which leg it came from
+            // -- which is what lets a caller ask for *the next waypoint ahead*
+            // without knowing anything else about how a route is put together.
+            function eachSegment(visit) {
+                for (var i = 0; i < legs.length; i += 1) {
+                    var parts = legs[i].parts || straightAcross(legs[i].from, legs[i].to);
+                    for (var p = 0; p < parts.length; p += 1) {
+                        var part = parts[p];
+                        for (var v = 0; v + 1 < part.lon.length; v += 1) {
+                            visit(part.lat[v], part.lon[v], part.lat[v + 1], part.lon[v + 1], i);
+                        }
+                    }
+                }
+            }
+
+            // The place at one end of a leg. **Every waypoint is a goal**, and
+            // that is not a rule about waypoints but about this route: the
+            // bends between them belong to the router, so the points are
+            // exactly the places the reader chose to walk by. The ones standing
+            // beside something this map already names take that name; the rest
+            // are numbered, which is what the list beside them does too.
+            function placeAt(leg, forward) {
+                var at = forward > 0 ? leg + 1 : leg;
+                if (at < 0 || at >= points.length) { return null; }
+                var said = nameOf(points[at], at);
+                return {lat: points[at].lat, lon: points[at].lon,
+                        name: said.name || ('Waypoint ' + said.number)};
+            }
+
             // What a waypoint is called, and where the file puts it. Where the
             // map already draws something named within reach — a hut, a quay, a
             // trailhead, a farm — the waypoint takes that thing's name, what it
@@ -13329,6 +13366,13 @@ class _PlanMode(MacroElement):
                 // Which leg a position falls on, and where along it — the same
                 // answer the click uses to decide that it means an insertion.
                 onRoute: onRoute,
+                // **What the position mark measures itself against**, without
+                // asking for the route as a shape. `segments` walks it and
+                // `goal` names either end of a leg; together they are enough to
+                // work out which way a reader has to walk and what lies that
+                // way, and neither costs anything that is not walked anyway.
+                segments: eachSegment,
+                goal: placeAt,
                 toggle: function (want) { switchTo(want === undefined ? !on : !!want); },
                 // **Whether anything is still being worked out, cheaply.**
                 // `state()` answers it too, but composing the whole route to
@@ -16839,6 +16883,28 @@ class _Chrome(MacroElement):
             //: to live above both closures, and one constant is not worth a
             //: third place to look.
             var HERE_SVG = 'http://www.w3.org/2000/svg';
+            // **Green, because it is the one mark at this position that is not
+            // about the reader.** The cone says how they are going and the rim
+            // which way they are facing; this one says where to *go*, which is
+            // a different kind of statement and gets a different colour. It is
+            // also the only green this map draws: the ways are brown and slate,
+            // the route is black, the position is blue and the compass red.
+            var HERE_GOAL = '#00a152';
+            //: How far the wedge reaches on the screen, and the head and its
+            //: figure sit just past that. Pixels rather than metres, like the
+            //: cone: a goal four kilometres off would otherwise have no mark on
+            //: the screen at all, and the question it answers is which way.
+            var AIM_REACH = 72;
+            //: How wide the wedge may open before it stops being a direction.
+            //: Past this it says no more than *look around you*, and a mark
+            //: that points confidently into a fan a reader could walk anywhere
+            //: inside is worse than no mark at all.
+            var AIM_WIDEST = 120;
+            //: And how narrow it may be drawn. Under a couple of degrees a
+            //: wedge is a hairline, which the eye reads as a line rather than
+            //: as a direction with a width; the head is what points, and this
+            //: keeps the fan behind it visible while it is honestly tiny.
+            var AIM_NARROWEST = 3;
             //: How far a fix has to have moved before the bearing between it and
             //: the one before is worth believing. Under this the two are one
             //: place seen twice, and a bearing off them spins with the noise.
@@ -16860,6 +16926,12 @@ class _Chrome(MacroElement):
             //: Which way the device is pointing, while the compass says.
             var hereFacing = null, hereCompass = null, herePainting = false;
             var hereMarks = null, hereCone = null, hereHalo = null, hereAt = null;
+            //: Where to walk, as it was worked out on the last fix: which way,
+            //: how much of that direction the fix leaves open either side, what
+            //: is being aimed at and how far off it is.
+            var hereGoal = null;
+            var hereAim = null, hereAimEdge = null, hereAimHead = null;
+            var hereAimSaid = null, hereAimNamed = null, hereAimMs = null;
             // **Where the reader is is the last thing drawn on this map.**
             // Reported: with a plan loaded the dot sat *under* the route --
             // because it was in the overlay pane at 400 and the route has a pane
@@ -16904,6 +16976,223 @@ class _Chrome(MacroElement):
                 return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
             }
 
+            //: Two bearings subtracted and brought back into -180..180, so a
+            //: pair either side of north is four degrees apart and not 356.
+            function swung(angle) { return ((angle % 360) + 540) % 360 - 180; }
+
+            //: How far a point is, flat, in the same metre the rest of this
+            //: page uses. Over the few hundred metres any of this measures, a
+            //: degree of longitude is a constant and the error is under a
+            //: centimetre.
+            function awayFrom(at, cosine, lat, lon) {
+                var dx = (lon - at.lng) * cosine, dy = lat - at.lat;
+                return Math.sqrt(dx * dx + dy * dy) * 111320;
+            }
+
+            // **The nearest point of one segment, and how long the segment is.**
+            // Plan mode has its own copy of this arithmetic, for putting a
+            // waypoint into a leg; lifting one of them out would need a third
+            // home for a function whose two callers have nothing else in common
+            // -- and this one answers two things that one does not, because
+            // *how far along* is what says which goal lies ahead.
+            function nearOnSegment(at, cosine, aLat, aLon, bLat, bLon) {
+                var ax = (aLon - at.lng) * cosine, ay = aLat - at.lat;
+                var dx = (bLon - aLon) * cosine, dy = bLat - aLat;
+                var span = dx * dx + dy * dy;
+                var t = span > 0 ? -(ax * dx + ay * dy) / span : 0;
+                t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                var cx = ax + t * dx, cy = ay + t * dy;
+                return {away: Math.sqrt(cx * cx + cy * cy) * 111320,
+                        lat: aLat + t * (bLat - aLat), lon: aLon + t * (bLon - aLon),
+                        along: t * Math.sqrt(span) * 111320,
+                        length: Math.sqrt(span) * 111320};
+            }
+
+            //: The nearest point among a handful of segments already known to be
+            //: worth looking at, which is what makes asking the question a
+            //: dozen times cheap.
+            function nearestAmong(from, cosine, segments) {
+                var found = null;
+                for (var i = 0; i < segments.length; i += 1) {
+                    var seg = segments[i];
+                    var near = nearOnSegment(from, cosine, seg[0], seg[1], seg[2], seg[3]);
+                    if (!found || near.away < found.away) { found = near; }
+                }
+                return found;
+            }
+
+            //: How many places on the rim of the accuracy circle are asked.
+            //: Every 30 degrees: the answer turns slowly with the reader's
+            //: position and the extremes are on the rim, which is where the
+            //: nearest point has moved furthest.
+            var AIM_SAMPLES = 12;
+
+            // **Which way the next goal is, and how much of that direction the
+            // fix can actually support.** The wedge is not decoration around an
+            // arrow: it is the answer, and the arrow is the middle of it.
+            //
+            // **Off the route it is asked and not derived.** The reader could be
+            // anywhere in the circle the map already draws, so the question is
+            // put from a dozen places on its rim: *standing there, which way
+            // would I be sent?* The wedge is what those answers span.
+            //
+            // Which is not the same as the bound this started as -- every part
+            // of the route within `d + 2r`, since that is provably where the
+            // nearest point of any position in the circle lies. That bound is
+            // true and far too generous: measured 62 m off a straight leg with
+            // a 22 m circle, it made 121 degrees of a fan that is really 0. A
+            // straight line sends every position in the circle off at the same
+            // perpendicular, and it should say so. What opens the wedge is the
+            // route bending, ending or doubling back -- the cases where which
+            // way to walk really does depend on where in the circle you are.
+            //
+            // On the route, the goal is the next place along instead, and that
+            // is a fixed point: the whole of the width is then `asin(r / d)`,
+            // which is exact and needs no asking.
+            function aimAlong(at, spread, target) {
+                var cosine = Math.cos(at.lat * Math.PI / 180);
+                var best = null, run = 0, atLeg = null, spans = {};
+                target.segments(function (aLat, aLon, bLat, bLon, which) {
+                    // The legs arrive one at a time and in order, so the run
+                    // resets where one hands over to the next and `spans` ends
+                    // up holding how long each of them was.
+                    if (which !== atLeg) { atLeg = which; run = 0; }
+                    var near = nearOnSegment(at, cosine, aLat, aLon, bLat, bLon);
+                    if (!best || near.away < best.away) {
+                        best = {away: near.away, lat: near.lat, lon: near.lon, leg: which,
+                                run: run + near.along,
+                                way: bearingBetween({lat: aLat, lng: aLon}, {lat: bLat, lng: bLon})};
+                    }
+                    run += near.length;
+                    spans[which] = run;
+                });
+                if (!best) { return null; }
+                var to = bearingBetween(at, {lat: best.lat, lng: best.lon});
+                var found = {to: to, left: 0, right: 0, away: best.away, on: best.away <= spread,
+                             at: {lat: best.lat, lon: best.lon}, goal: null, name: target.name};
+                if (!found.on) {
+                    // The bound is still worth keeping, for what it is good
+                    // for: the nearest point of *any* position in the circle is
+                    // within `d + 2r` of the fix, so everything outside that can
+                    // be dropped once and the dozen questions below are then
+                    // asked of a handful of segments instead of the whole route.
+                    var reach = best.away + 2 * spread;
+                    var could = [];
+                    target.segments(function (aLat, aLon, bLat, bLon) {
+                        if (nearOnSegment(at, cosine, aLat, aLon, bLat, bLon).away <= reach) {
+                            could.push([aLat, aLon, bLat, bLon]);
+                        }
+                    });
+                    var north = spread / 111320, east = spread / (111320 * cosine);
+                    for (var s = 0; s < AIM_SAMPLES; s += 1) {
+                        var turn = s * 2 * Math.PI / AIM_SAMPLES;
+                        // Where the reader might really be, and the bearing from
+                        // *there* -- not from the fix. Which way to walk is a
+                        // question asked at the place the walking starts.
+                        var maybe = {lat: at.lat + north * Math.cos(turn),
+                                     lng: at.lng + east * Math.sin(turn)};
+                        var sent = nearestAmong(maybe, cosine, could);
+                        if (!sent) { continue; }
+                        var off = swung(bearingBetween(maybe, {lat: sent.lat, lng: sent.lon}) - to);
+                        if (off < found.left) { found.left = off; }
+                        if (off > found.right) { found.right = off; }
+                    }
+                    return found;
+                }
+                // On the route, as far as the fix can say. Which way *along* it
+                // to look is the direction the reader is going, read off the
+                // same bearing the cone is drawn from -- and without one there
+                // is nothing for a goal to be ahead of, so the mark says so by
+                // not being drawn.
+                if (hereBearing === null || !target.goal) { return found; }
+                var forward = Math.abs(swung(hereBearing - best.way)) < 90 ? 1 : -1;
+                var leg = best.leg;
+                var remains = forward > 0 ? (spans[leg] - best.run) : best.run;
+                var goal = target.goal(leg, forward);
+                // **A goal under the reader is not one.** It is the place they
+                // are standing at, the bearing to it spins with the noise, and
+                // a reader walking through a waypoint means the one after it.
+                while (goal && remains <= spread) {
+                    leg += forward;
+                    if (spans[leg] === undefined) { goal = null; break; }
+                    remains += spans[leg];
+                    goal = target.goal(leg, forward);
+                }
+                if (!goal) { return found; }
+                var straight = awayFrom(at, cosine, goal.lat, goal.lon);
+                found.to = bearingBetween(at, {lat: goal.lat, lng: goal.lon});
+                found.right = straight > spread
+                    ? Math.asin(Math.min(1, spread / straight)) * 180 / Math.PI : 180;
+                found.left = -found.right;
+                found.away = remains;
+                found.at = {lat: goal.lat, lon: goal.lon};
+                found.goal = goal;
+                return found;
+            }
+
+            // **What the mark aims at, and the reader never chooses it.** Plan
+            // mode's route while it is being planned, and equally while it is
+            // simply what the panel is showing -- leaving plan mode does not
+            // put a plan away, and a reader walking one wants it aimed at
+            // either side of that line. Otherwise whatever line is selected.
+            // Neither, and there is no goal to draw.
+            function aimTarget() {
+                var showing = window.trailsProfile || null;
+                var plan = window.trailsPlan;
+                if (plan && plan.segments &&
+                        (planOn() || !!(showing && showing.composed && showing.plan))) {
+                    return {name: 'planned route', segments: plan.segments, goal: plan.goal};
+                }
+                if (!showing || !showing.className) { return null; }
+                // **The lines themselves, because this map has no DOM for
+                // them.** `preferCanvas` paints vectors into a pane's canvas, so
+                // a selection is a class name and the geometry is only ever on
+                // the layer -- which is how the reach and the highlight find one
+                // too.
+                var rings = [];
+                map.eachLayer(function (layer) {
+                    if (!layer.options || layer.options.className !== showing.className) { return; }
+                    if (typeof layer.getLatLngs !== 'function') { return; }
+                    var got = layer.getLatLngs();
+                    if (!got || !got.length) { return; }
+                    if (got[0] instanceof L.LatLng) { rings.push(got); return; }
+                    got.forEach(function (ring) { if (ring && ring.length > 1) { rings.push(ring); } });
+                });
+                if (!rings.length) { return null; }
+                return {
+                    name: showing.label || null,
+                    segments: function (visit) {
+                        for (var r = 0; r < rings.length; r += 1) {
+                            for (var v = 0; v + 1 < rings[r].length; v += 1) {
+                                visit(rings[r][v].lat, rings[r][v].lng,
+                                      rings[r][v + 1].lat, rings[r][v + 1].lng, r);
+                            }
+                        }
+                    },
+                    // A line the reader picked off the map carries no waypoints,
+                    // so what lies ahead on it is where it ends -- and its own
+                    // end, not the whole selection's: two stretches of one way
+                    // that meet nowhere are two lines, and the reader is walking
+                    // one of them.
+                    goal: function (ring, forward) {
+                        var line = rings[ring];
+                        if (!line) { return null; }
+                        var end = forward > 0 ? line[line.length - 1] : line[0];
+                        return {lat: end.lat, lon: end.lng, name: 'the end'};
+                    }
+                };
+            }
+
+            //: A goal's distance at the size the mark can carry it: two figures
+            //: and no more. '4.2 km' is what a reader does something with, and
+            //: the 20 m under that is the ring's business rather than this
+            //: label's.
+            function aimSaid(metres) {
+                if (metres >= 1000) { return (metres / 1000).toFixed(1) + ' km'; }
+                if (metres >= 100) { return (Math.round(metres / 10) * 10) + ' m'; }
+                return Math.round(metres) + ' m';
+            }
+
             // A wedge, and an arc, in the pane the direction arrow already uses
             // the idiom of: an SVG placed by hand at the position and turned by
             // an attribute, re-placed whenever the map moves under it. Not
@@ -16930,8 +17219,44 @@ class _Chrome(MacroElement):
                 hereCone.setAttribute('class', 'trails-here-cone');
                 hereHalo = document.createElementNS(HERE_SVG, 'g');
                 hereHalo.setAttribute('class', 'trails-here-facing');
+                // **Cased, the way every line on this map is cased.** Measured
+                // at 0.18 with a white edge and nothing else: over contour lines
+                // and a stream the fan was there to be found rather than seen.
+                // A white edge under a green one is the idiom the routes and the
+                // trails already use, and it costs one path.
+                hereAimEdge = document.createElementNS(HERE_SVG, 'path');
+                hereAimEdge.setAttribute('class', 'trails-here-aim-edge');
+                hereAimEdge.setAttribute('fill', 'none');
+                hereAimEdge.setAttribute('stroke', '#ffffff');
+                hereAimEdge.setAttribute('stroke-width', '3.6');
+                hereAimEdge.setAttribute('stroke-opacity', '0.8');
+                hereAimEdge.setAttribute('stroke-linejoin', 'round');
+                hereAim = document.createElementNS(HERE_SVG, 'path');
+                hereAim.setAttribute('class', 'trails-here-aim');
+                hereAim.setAttribute('fill', HERE_GOAL);
+                hereAim.setAttribute('fill-opacity', '0.24');
+                hereAim.setAttribute('stroke', HERE_GOAL);
+                hereAim.setAttribute('stroke-width', '1.4');
+                hereAim.setAttribute('stroke-opacity', '0.9');
+                hereAim.setAttribute('stroke-linejoin', 'round');
+                hereAimHead = document.createElementNS(HERE_SVG, 'path');
+                hereAimHead.setAttribute('class', 'trails-here-aim-head');
+                hereAimHead.setAttribute('fill', HERE_GOAL);
+                hereAimHead.setAttribute('stroke', '#ffffff');
+                hereAimHead.setAttribute('stroke-width', '1.2');
+                hereAimHead.setAttribute('stroke-linejoin', 'round');
+                hereAimSaid = aimText('trails-here-aim-said', 700);
+                hereAimNamed = aimText('trails-here-aim-named', 500);
+                // The cone under the wedge, and the rim over both: the rim is
+                // 17 px of the 72 the wedge covers and would otherwise be
+                // painted over at exactly the angle a reader is looking at.
                 hereMarks.appendChild(hereCone);
+                hereMarks.appendChild(hereAimEdge);
+                hereMarks.appendChild(hereAim);
+                hereMarks.appendChild(hereAimHead);
                 hereMarks.appendChild(hereHalo);
+                hereMarks.appendChild(hereAimSaid);
+                hereMarks.appendChild(hereAimNamed);
                 pane.appendChild(hereMarks);
                 return hereMarks;
             }
@@ -16960,9 +17285,94 @@ class _Chrome(MacroElement):
             //: and the dot still has a front.
             var HALO_BANDS = [[70, 0.95, 3.2], [110, 0.5, 2.6], [160, 0.22, 2]];
 
+            //: A figure that stays readable over whatever the tile puts under
+            //: it: the white is painted first and the green over it, which is
+            //: what `paint-order` is for and is cheaper than a second node.
+            function aimText(className, weight) {
+                var node = document.createElementNS(HERE_SVG, 'text');
+                node.setAttribute('class', className);
+                node.setAttribute('text-anchor', 'middle');
+                node.setAttribute('fill', HERE_GOAL);
+                node.setAttribute('stroke', '#ffffff');
+                node.setAttribute('stroke-width', '3.2');
+                node.setAttribute('stroke-linejoin', 'round');
+                node.setAttribute('paint-order', 'stroke');
+                node.setAttribute('font-size', '11');
+                node.setAttribute('font-weight', String(weight));
+                return node;
+            }
+
+            //: The wedge, in absolute bearings rather than turned by an
+            //: attribute the way the cone is: it is not symmetric about the
+            //: direction it points -- a route bending away on one side opens
+            //: that side and not the other -- so there is no angle to turn.
+            function wedgePath(from, to, reach) {
+                var a = (from - 90) * Math.PI / 180, b = (to - 90) * Math.PI / 180;
+                return 'M 0 0 L ' + (reach * Math.cos(a)).toFixed(1) + ' ' + (reach * Math.sin(a)).toFixed(1) +
+                    ' A ' + reach + ' ' + reach + ' 0 ' + ((to - from) > 180 ? 1 : 0) + ' 1 ' +
+                    (reach * Math.cos(b)).toFixed(1) + ' ' + (reach * Math.sin(b)).toFixed(1) + ' Z';
+            }
+
+            //: The head, which is what actually points: the wedge says how much
+            //: is not known and this says the middle of it.
+            function headPath(to, reach) {
+                var a = (to - 90) * Math.PI / 180;
+                var tip = reach + 13, base = reach + 1, wide = 6.5;
+                var cx = Math.cos(a), cy = Math.sin(a);
+                return 'M ' + (tip * cx).toFixed(1) + ' ' + (tip * cy).toFixed(1) +
+                    ' L ' + (base * cx - wide * cy).toFixed(1) + ' ' + (base * cy + wide * cx).toFixed(1) +
+                    ' L ' + (base * cx + wide * cy).toFixed(1) + ' ' + (base * cy - wide * cx).toFixed(1) + ' Z';
+            }
+
+            //: Where the figure sits: past the head, on the same bearing, and
+            //: upright wherever that is. A label turned with the mark would be
+            //: upside down for half the compass.
+            function aimLabel(node, said, to, out) {
+                var a = (to - 90) * Math.PI / 180;
+                if (!said) { node.setAttribute('display', 'none'); return; }
+                node.removeAttribute('display');
+                node.textContent = said;
+                node.setAttribute('x', ((AIM_REACH + out) * Math.cos(a)).toFixed(1));
+                node.setAttribute('y', ((AIM_REACH + out) * Math.sin(a) + 4).toFixed(1));
+            }
+
+            function paintAim() {
+                // Nothing to aim at, a fan too wide to mean anything, or a
+                // reader standing on the route with no direction of travel to
+                // say what *ahead* is: in all three the mark is not drawn, which
+                // is the only honest thing it can do.
+                var wide = hereGoal ? hereGoal.right - hereGoal.left : 0;
+                if (!hereGoal || wide > AIM_WIDEST || (hereGoal.on && !hereGoal.goal)) {
+                    hereAim.setAttribute('display', 'none');
+                    hereAimEdge.setAttribute('display', 'none');
+                    hereAimHead.setAttribute('display', 'none');
+                    hereAimSaid.setAttribute('display', 'none');
+                    hereAimNamed.setAttribute('display', 'none');
+                    return;
+                }
+                var pad = wide < AIM_NARROWEST ? (AIM_NARROWEST - wide) / 2 : 0;
+                var shape = wedgePath(hereGoal.to + hereGoal.left - pad,
+                                      hereGoal.to + hereGoal.right + pad, AIM_REACH);
+                hereAim.removeAttribute('display');
+                hereAim.setAttribute('d', shape);
+                hereAimEdge.removeAttribute('display');
+                hereAimEdge.setAttribute('d', shape);
+                hereAimHead.removeAttribute('display');
+                hereAimHead.setAttribute('d', headPath(hereGoal.to, AIM_REACH));
+                aimLabel(hereAimSaid, aimSaid(hereGoal.away), hereGoal.to, 30);
+                // The name only where there is one to give. Off the route the
+                // goal *is* the route, and writing its name under the figure
+                // would be the mark saying what it already is.
+                aimLabel(hereAimNamed, hereGoal.goal ? hereGoal.goal.name : null, hereGoal.to, 42);
+            }
+
             function paintHereMarks() {
                 var node = hereMarksNode();
-                if (!hereDot || (hereBearing === null && hereFacing === null)) {
+                // The goal counts as a reason to draw: a reader who has just
+                // switched the position on has no bearing and no compass yet,
+                // and *which way to the route* is the one thing that is already
+                // known from the first fix.
+                if (!hereDot || (hereBearing === null && hereFacing === null && !hereGoal)) {
                     node.style.display = 'none';
                     return;
                 }
@@ -17006,7 +17416,29 @@ class _Chrome(MacroElement):
                     lit.setAttribute('stroke-linecap', 'round');
                     hereHalo.appendChild(lit);
                 }
+                paintAim();
                 placeHereMarks();
+            }
+
+            // **Worked out again without a new fix.** The goal moves when the
+            // reader moves, and equally when what is selected changes or plan
+            // mode is switched -- and a mark still pointing at the line that
+            // was chosen before is worse than one that is not drawn.
+            //
+            // The spread is read off the ring rather than off the last fix: the
+            // ring is what is *drawn*, and where a better fix is being held the
+            // two are deliberately not the same number.
+            function aimAgain() {
+                var started = (window.performance && window.performance.now) ? window.performance.now() : 0;
+                var target = hereDot ? aimTarget() : null;
+                hereGoal = target && hereAt && hereRing
+                    ? aimAlong(hereAt, hereRing.getRadius(), target) : null;
+                // **What it cost**, because it is walked on every fix and a
+                // route can be tens of thousands of vertices long. Recorded
+                // rather than guarded against: the number is what says whether
+                // it needs guarding, and this page has no other way to know.
+                if (started) { hereAimMs = Math.round((window.performance.now() - started) * 10) / 10; }
+                paintHereMarks();
             }
 
             function placeHereMarks() {
@@ -17038,6 +17470,7 @@ class _Chrome(MacroElement):
                 hereFrom = null;
                 hereMoving = false;
                 hereAt = null;
+                hereGoal = null;
                 // A watch switched off keeps nothing: the next one is a reader
                 // somewhere else, and the fix held for its accuracy would be a
                 // claim about the place they left.
@@ -17173,7 +17606,7 @@ class _Chrome(MacroElement):
                     if (!hereFrom) { hereFrom = where; }
                 }
                 hereAt = where;
-                paintHereMarks();
+                aimAgain();
                 // **The circle is the sentence.** It was said in words as well,
                 // once, with the fix that moved the map -- and a line of text is
                 // the wrong place for a quantity a map can draw: it is read once
@@ -18274,6 +18707,9 @@ class _Chrome(MacroElement):
                     if (!chosen) { closeSheet(); }
                     paintProfile();
                     place();
+                    // Which line is chosen is half of what the goal mark aims
+                    // at, so choosing one is a reason to work it out again.
+                    aimAgain();
                 },
                 // What plan mode pushes on every refresh, and everything the bar
                 // draws. Nothing here asks plan mode anything back.
@@ -18295,6 +18731,23 @@ class _Chrome(MacroElement):
                     paintProfile();
                     paintRail();
                     place();
+                    // And so is plan mode: switching it on hands the goal to
+                    // the route whatever else was chosen.
+                    aimAgain();
+                },
+                // **Where the mark says to walk, as it was worked out rather
+                // than as it is drawn.** A check cannot measure an angle off a
+                // canvas and should not have to read a path back to find one --
+                // and the two figures that matter here, how wide the fan is and
+                // whether the mark is drawn at all, are a decision and not a
+                // shape.
+                aim: function () {
+                    if (!hereGoal) { return null; }
+                    return {to: hereGoal.to, left: hereGoal.left, right: hereGoal.right,
+                            wide: hereGoal.right - hereGoal.left, away: hereGoal.away,
+                            on: hereGoal.on, at: hereGoal.at, target: hereGoal.name || null,
+                            goal: hereGoal.goal ? hereGoal.goal.name : null, ms: hereAimMs,
+                            drawn: !!(hereAim && hereAim.getAttribute('display') !== 'none')};
                 },
                 state: function () {
                     return {

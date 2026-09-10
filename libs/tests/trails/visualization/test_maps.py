@@ -5304,6 +5304,29 @@ class TestPlanMode:
         html = fmap.get_root().render()
         assert "console.error('plan mode: there is no profile panel" in html
 
+    def test_the_route_hands_out_segments_rather_than_its_shape(self):
+        """``geometry()`` hands the whole shape back as two arrays and
+        ``state()`` composes the route to answer anything at all — 45 ms over a
+        37 km one. A mark worked out on every fix can afford neither, and it
+        does not want the shape: it wants to measure one point against every
+        segment and keep three numbers.
+
+        Every segment says which leg it came from, which is what lets the caller
+        ask for *the next waypoint ahead* without knowing anything about how a
+        route is put together."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        assert "function eachSegment(visit) {" in html
+        assert "visit(part.lat[v], part.lon[v], part.lat[v + 1], part.lon[v + 1], i);" in html
+        assert "segments: eachSegment," in html
+        assert "goal: placeAt," in html
+        # Every waypoint is a goal, because the bends between them belong to the
+        # router: the points are exactly the places the reader chose.
+        assert "function placeAt(leg, forward) {" in html
+        assert "name: said.name || ('Waypoint ' + said.number)};" in html
+
 
 class TestRoutingGraphAreas:
     """Tests for the boundaries the page is handed with the graph."""
@@ -6432,8 +6455,11 @@ class TestWhereTheReaderIs:
         assert "pane.style.pointerEvents = 'none';" in html
         assert "L.DomUtil.setPosition(hereMarks, map.latLngToLayerPoint(hereAt));" in html
         assert "map.on('zoomend viewreset moveend resize', placeHereMarks);" in html
-        # Nothing is drawn before there is anything to say.
-        assert "if (!hereDot || (hereBearing === null && hereFacing === null)) {" in html
+        # Nothing is drawn before there is anything to say — and the goal
+        # counts as something: a reader who has just switched the position on
+        # has no bearing and no compass yet, while *which way to the route* is
+        # known from the first fix.
+        assert "if (!hereDot || (hereBearing === null && hereFacing === null && !hereGoal)) {" in html
 
     def test_a_vaguer_fix_does_not_replace_a_sharper_one(self):
         """Standing still while the sky thins, the reported radius grows from
@@ -6510,3 +6536,157 @@ class TestWhereTheReaderIs:
         # The popup pane is the exception and is meant to be: a popup is an
         # answer the reader asked for by touching something.
         assert sorted(made) == [350, 450, 460, 465, 470, 1050]
+
+    def test_off_the_route_the_wedge_is_asked_and_not_derived(self):
+        """Asked for from a phone: a mark saying which way the next goal is.
+        Off the route that goal is the route — its nearest point, which is what
+        getting back on it means.
+
+        **How wide the wedge opens is put as a question to the accuracy circle
+        the map already draws.** The reader could be anywhere in it, so the
+        question is asked from a dozen places on its rim: *standing there, which
+        way would I be sent?* The wedge is what those answers span.
+
+        Which is not the bound this started as — every part of the route within
+        ``d + 2r``, since that is provably where the nearest point of any
+        position in the circle lies. That bound is true and far too generous:
+        measured 62 m off a straight leg with a 22 m circle, it made 121° of a
+        fan that is really 0°, because a straight line sends every position in
+        the circle off at the same perpendicular. The bound is kept for the one
+        thing it is good for — dropping everything the dozen questions need not
+        look at."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var AIM_SAMPLES = 12;" in html
+        assert "var reach = best.away + 2 * spread;" in html
+        assert "could.push([aLat, aLon, bLat, bLon]);" in html
+        assert "var sent = nearestAmong(maybe, cosine, could);" in html
+        # The bearing from where the reader might really be, and not from the
+        # fix: which way to walk is a question asked where the walking starts.
+        assert "var off = swung(bearingBetween(maybe, {lat: sent.lat, lng: sent.lon}) - to);" in html
+        # And the wedge is not symmetric about the direction it points, so
+        # there is no angle to turn it by the way the cone is turned.
+        assert "function wedgePath(from, to, reach) {" in html
+
+    def test_on_the_route_the_goal_is_the_next_waypoint_ahead(self):
+        """The nearest point is then under the reader's feet and says nothing.
+        Which way *along* the route to look is the direction they are going,
+        read off the same bearing the cone is drawn from — and without one there
+        is nothing for a goal to be ahead of, so the mark is not drawn.
+
+        A goal already under the reader is not one either: the bearing to it
+        spins with the noise, and somebody walking through a waypoint means the
+        one after it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "if (hereBearing === null || !target.goal) { return found; }" in html
+        assert "var forward = Math.abs(swung(hereBearing - best.way)) < 90 ? 1 : -1;" in html
+        assert "var remains = forward > 0 ? (spans[leg] - best.run) : best.run;" in html
+        assert "while (goal && remains <= spread) {" in html
+        assert "if (spans[leg] === undefined) { goal = null; break; }" in html
+        # A waypoint is one point and does not move about, so only the reader's
+        # own circle opens the wedge here.
+        assert "found.right = straight > spread" in html
+
+    def test_a_wedge_too_wide_to_mean_anything_is_not_drawn(self):
+        """Past a fan of 120° it says no more than *look around you*, and a mark
+        pointing confidently into ground a reader could walk anywhere inside is
+        worse than no mark. The other two silences are the same rule: nothing
+        to aim at, and standing on the route with no direction of travel to say
+        what *ahead* means."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var AIM_WIDEST = 120;" in html
+        assert "if (!hereGoal || wide > AIM_WIDEST || (hereGoal.on && !hereGoal.goal)) {" in html
+        # And a floor, because under a couple of degrees a wedge is a hairline
+        # the eye reads as a line rather than as a direction with a width.
+        assert "var AIM_NARROWEST = 3;" in html
+        assert "var pad = wide < AIM_NARROWEST ? (AIM_NARROWEST - wide) / 2 : 0;" in html
+
+    def test_the_goal_follows_the_selection_and_not_only_the_fix(self):
+        """The goal moves when the reader moves, and equally when what is
+        selected changes or plan mode is switched. A mark still pointing at the
+        line that was chosen before is worse than one that is not drawn.
+
+        The spread it is worked out at is read off the ring rather than off the
+        last fix: the ring is what is *drawn*, and where a better fix is being
+        held the two are deliberately not the same number."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "function aimAgain() {" in html
+        assert "? aimAlong(hereAt, hereRing.getRadius(), target) : null;" in html
+        # Called from the fix, from choosing a line and from switching plan
+        # mode — the three things that can change the answer.
+        assert "hereAt = where;\n                aimAgain();" in html
+        assert html.count("aimAgain();") == 3
+
+    def test_which_line_the_mark_aims_at_is_not_a_choice_the_reader_makes(self):
+        """Plan mode's route while it is being planned, and equally while it is
+        simply what the panel is showing — leaving plan mode does not put a plan
+        away, and a reader walking one wants the mark aimed at it either side of
+        that line. Otherwise whatever line is selected, whose geometry is only
+        ever on the layer: this map paints its vectors into a canvas, so a
+        selection is a class name and there is no node to read."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "(planOn() || !!(showing && showing.composed && showing.plan))" in html
+        assert "return {name: 'planned route', segments: plan.segments, goal: plan.goal};" in html
+        assert "if (!layer.options || layer.options.className !== showing.className) { return; }" in html
+        assert "if (got[0] instanceof L.LatLng) { rings.push(got); return; }" in html
+        # A line picked off the map carries no waypoints, so what lies ahead on
+        # it is where that ring ends — its own end and not the selection's.
+        assert "var end = forward > 0 ? line[line.length - 1] : line[0];" in html
+
+    def test_the_wedge_is_read_rather_than_measured_off_a_canvas(self):
+        """A check cannot measure an angle off a canvas and should not have to
+        read a path back to find one — and the two figures that matter, how wide
+        the fan is and whether the mark is drawn at all, are a decision rather
+        than a shape."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "aim: function () {" in html
+        assert "wide: hereGoal.right - hereGoal.left, away: hereGoal.away," in html
+        assert "drawn: !!(hereAim && hereAim.getAttribute('display') !== 'none')};" in html
+        # And what it cost, because it is walked on every fix and a route can
+        # be tens of thousands of vertices long. Recorded rather than guarded
+        # against: the number is what says whether it needs guarding.
+        assert "if (started) { hereAimMs = Math.round((window.performance.now() - started) * 10) / 10; }" in html
+
+    def test_the_goal_is_the_only_green_on_this_map(self):
+        """The cone says how the reader is going and the rim which way they are
+        facing; this one says where to *go*, which is a different kind of
+        statement and gets a different colour. The ways are brown and slate, the
+        route is black, the position is blue and the compass red — so green is
+        free, and its being free is the reason.
+
+        The figure past the head is upright wherever the head points: a label
+        turned with the mark would be upside down for half the compass."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var HERE_GOAL = '#00a152';" in html
+        assert "hereAim.setAttribute('fill', HERE_GOAL);" in html
+        # Cased the way every line on this map is cased. Measured at 0.18 with
+        # a white edge and nothing else: over contour lines and a stream the fan
+        # was there to be found rather than seen.
+        assert "hereAimEdge.setAttribute('stroke', '#ffffff');" in html
+        assert "hereAim.setAttribute('stroke', HERE_GOAL);" in html
+        assert "node.setAttribute('paint-order', 'stroke');" in html
+        assert "function aimLabel(node, said, to, out) {" in html
+        # And the name only where there is one to give: off the route the goal
+        # *is* the route, and its name under the figure would be the mark
+        # saying what it already is.
+        assert "aimLabel(hereAimNamed, hereGoal.goal ? hereGoal.goal.name : null, hereGoal.to, 42);" in html
