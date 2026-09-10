@@ -4288,11 +4288,24 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     chips = page.evaluate(THE_CHOICES)
     pressed = press_chip("To the goal")
 
-    # A tap on the goal, with the switch armed, takes it away.
-    page.evaluate("() => window.trailsChrome.aiming(true)")
-    page.wait_for_timeout(300)
-    tap_goal(there)
-    gone = page.evaluate(THE_GOAL)
+    # **A goal the network does not reach.** Two kilometres past the far end of
+    # the chain, which is beyond snapping distance of anything -- so there is no
+    # node to route to at all. What that used to give was one straight line from
+    # the reader to the goal, across whatever lay between; what it gives now is
+    # the path as far as the path goes and the rest straight.
+    beyond = {"lat": there["lat"] + 0.02, "lng": there["lng"]}
+    page.evaluate("(at) => window.trailsGoal.set(at.lat, at.lng, 'Past the end')", beyond)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
+    page.wait_for_timeout(900)
+    partly = page.evaluate(THE_GOAL)
+    flown = metres_between((here["lat"], here["lng"]), (beyond["lat"], beyond["lng"]))
+
+    # **The flag, pressed while it is lit, puts the goal away.** Reported from
+    # the phone: it armed the next tap instead, which is not what pressing a
+    # switch that is on means.
+    page.evaluate("() => document.querySelector('.trails-quick-goal').click()")
+    page.wait_for_timeout(700)
+    pressed_off = page.evaluate(THE_GOAL)
 
     # **And a place is offered as one where the reader has just read what it
     # is.** Nearly every goal somebody sets is a named thing, and the popup is
@@ -4369,7 +4382,26 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             Reading("routed again from where the reader now is", round(again["goal"]["from"]["lat"], 3), round(astray["lat"], 3)),
             Reading("the row of choices offers it last", chips["chips"][-1] if chips["chips"] else None, "To the goal"),
             Reading("and pressing it draws it", pressed["lit"], ["To the goal"]),
-            Reading("a tap on the goal takes it away", (gone["goal"]["at"], gone["aim"]), (None, None)),
+            # The whole of what was asked for: not *there is no way there*, but
+            # the way as far as there is one.
+            Reading(
+                "a goal off the network is still mostly a path",
+                ((partly["goal"]["line"] or False), (partly["goal"]["straight"] or 0) > 0),
+                (True, True),
+                note=f"{(partly['goal']['metres'] or 0) / 1000:.2f} km, {(partly['goal']['straight'] or 0) / 1000:.2f} km of it off the paths",
+            ),
+            Reading(
+                "and it is a route and not a line across the map",
+                (partly["goal"]["metres"] or 0) > flown * 1.3,
+                True,
+                note=f"{(partly['goal']['metres'] or 0) / 1000:.2f} km walked against {flown / 1000:.2f} km flown",
+            ),
+            Reading("the row says which part was never a path", "off the paths" in (partly["says"] or ""), True, note=partly["says"]),
+            Reading(
+                "the flag, pressed while lit, puts the goal away",
+                (pressed_off["goal"]["at"], pressed_off["armed"], pressed_off["lamp"]),
+                (None, False, False),
+            ),
             Reading("a place offers itself as a goal", from_place["offered"], "Set as goal"),
             Reading(
                 "and taking it up names the goal after the place",

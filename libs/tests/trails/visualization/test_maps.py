@@ -4015,6 +4015,8 @@ class TestProfilePanel:
         # thing to draw and the wrong thing to leave unexplained: a reader would
         # read the line as a way somebody had checked.
         assert "said += ' \\u00b7 no way there \\u2014 straight'; }" in html
+        # And how much of a partly routed way was never a path.
+        assert "said += ' \\u00b7 ' + (goalNow.straight / 1000).toFixed(2) + ' km off the paths';" in html
 
 
 class TestPlanMode:
@@ -4266,7 +4268,7 @@ class TestPlanMode:
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
         planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
-        deciding = planning.split("function resolve(graph, from, to, mayAsk) {")[1]
+        deciding = planning.split("function resolve(graph, from, to, mayAsk, partly) {")[1]
 
         assert deciding.index("from.restore") < deciding.index("from.track === loaded.id")
         assert deciding.index("from.restore") < deciding.index("from.node >= 0")
@@ -5496,6 +5498,61 @@ class TestPlanMode:
         assert "if (on) { goalShowing = false; }" in planning
         # And nothing feeds the panel round it.
         assert "showing.series(" not in planning.split("function present() {")[1].split("function switchTo")[0]
+
+    def test_what_is_walkable_is_walked_and_only_the_rest_crossed(self):
+        """Reported from the phone: a goal with no continuous way to it was
+        answered with *there is no way there*. What happened underneath is that
+        the fallback for an unroutable pair is one straight line from end to
+        end, and a line that long is refused outright — so a journey that is
+        twenty kilometres of path and two of open ground came out as nothing.
+
+        The search has already settled every node it can reach by the time it
+        can say the goal is unreachable — that is what exhausting a component
+        means — so the nearest of those to the goal is where a walker leaves the
+        paths, and it costs no second search.
+
+        **And routing is for reducing the trackless part, so it is taken exactly
+        when it does that.** Walking straight is trackless the whole way; this
+        is trackless at both ends and a path in between, so the question is only
+        whether the two ends come to less than the straight line. No threshold —
+        the comparison is the rule, and it settles by itself the case where both
+        ends snap to one node, because two sides of a triangle are never shorter
+        than the third.
+
+        Asked for by the goal and not by the plan: a plan's legs are what its
+        file is written from, and changing what a leg is made of changes every
+        figure and every file that comes out of one."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function nearestReached(graph, lat, lon) {" in planning
+        assert "var reached = nearestReached(graph, to.lat, to.lon);" in planning
+        assert "return ends[0].concat(middle, ends[1]); });" in planning
+        assert "if (off >= far(from.lon, from.lat, to.lon, to.lat)) { return null; }" in planning
+        # **Both ends, and neither need be on a path.** The reader is as likely
+        # to be off the network as the goal is — somebody standing in a bog is
+        # exactly the person asking which way — and `snapped` gives up beyond
+        # its own reach, which is right for placing a waypoint and wrong here.
+        assert "var head = from.node >= 0 ? from.node : graph.nearestNode(from.lat, from.lon);" in planning
+        assert "var tail = to.node >= 0 ? to.node : graph.nearestNode(to.lat, to.lon);" in planning
+        # Only ever read after a failure: a search that succeeded stopped early
+        # and settled only part of the graph.
+        assert "if (!isFinite(work.best[node])) { continue; }" in planning
+        # And the goal is the one caller that asks for it.
+        assert "return resolve(graph, head, tail, true, true);" in planning
+
+    def test_the_part_that_was_never_a_path_is_said(self):
+        """A line on a map is a promise, and a partly routed one is a promise
+        only for the part that came off the network. Said whenever there is any
+        of it and not only where the whole way is trackless: the reader is being
+        shown a line, and which part of it is not a path is what they have to
+        know before they set off along it."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "straight: goalShape ? (goalShape.straight + goalShape.crossed) : null};" in planning
 
 
 class TestRoutingGraphAreas:
@@ -6965,10 +7022,16 @@ class TestWhereTheReaderIs:
         # things, so they are two states now.
         assert "pickToast.style.pointerEvents = sticky === true ? 'auto' : 'none';" in html
         assert "saySomething(aiming ? 'Tap the map to set a goal.' : '', 'notice');" in html
-        # A tap on the goal takes it away: setting one and moving one are the
-        # same gesture, so being rid of it has to be a gesture too — and the
-        # mark is the only place a reader would look for it.
-        assert "window.trailsGoal.clear();" in html.split("function setGoalHere")[1]
+        # **And a lit lamp pressed puts the goal away.** Reported from the
+        # phone: pressing the flag again armed the next tap instead, which is
+        # not what pressing a switch that is *on* means. Three states, one
+        # press — arm, let go, put away — which leaves moving a goal at two
+        # presses and a tap, and that is the right trade: an accidental goal is
+        # what arm-and-let-go exists to prevent.
+        assert "function pressGoal() {" in html
+        assert "if (aiming) { askAiming(false); return; }" in html
+        assert "if (goalSet() && window.trailsGoal) {" in html
+        assert "quickMark('goal', 'Set a goal', function () { pressGoal(); });" in html
         # And it is the tap and nothing else: no waypoint, no selection, no
         # popup, which is what the capture phase is for.
         assert "setGoalHere(event);" in html

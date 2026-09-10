@@ -5343,6 +5343,13 @@ class _ProfilePanel(MacroElement):
                     if (goalNow.ascent !== null && !isNaN(goalNow.ascent)) {
                         said += ' \\u00b7 \\u2191' + Math.round(goalNow.ascent) + ' m';
                     }
+                    // Said whenever there is any of it, and not only where the
+                    // whole way is trackless: the reader is being shown a line,
+                    // and the part of it that is not a path is the part they
+                    // have to know about before they set off along it.
+                    if (goalNow.straight > 1) {
+                        said += ' \\u00b7 ' + (goalNow.straight / 1000).toFixed(2) + ' km off the paths';
+                    }
                 // **Said, and not silently fallen back on.** A routed goal off
                 // the network is drawn straight at, which is the right thing to
                 // draw and the wrong thing to leave unexplained: a reader would
@@ -8975,6 +8982,28 @@ class _PlanMode(MacroElement):
                 return {edges: edges, reversed: reversed, cost: best[to]};
             }
 
+            // **Where the network gets to, when it does not get all the way.**
+            // Read off the search above rather than run again: saying a node is
+            // unreachable *is* exhausting its component, so by the time `route`
+            // answers null every node the start can reach is settled in `best`
+            // and the nearest of them to the goal is where a walker leaves the
+            // paths. Only ever asked after a failure, because a search that
+            // succeeded stopped early and settled only part of the graph -- and
+            // it costs no second search, which is the whole reason it is read
+            // off `best` rather than run again.
+            function nearestReached(graph, lat, lon) {
+                var work = router(graph);
+                var cosine = Math.cos(lat * Math.PI / 180);
+                var found = -1, closest = Infinity;
+                for (var node = 0; node < graph.header.nodes; node += 1) {
+                    if (!isFinite(work.best[node])) { continue; }
+                    var dx = (graph.nodeLon[node] - lon) * cosine, dy = graph.nodeLat[node] - lat;
+                    var gap = dx * dx + dy * dy;
+                    if (gap < closest) { closest = gap; found = node; }
+                }
+                return found;
+            }
+
             // ---- what a route's metres are made of ----------------------------
             // Summed per edge while the edges are still in hand. A part keeps
             // its geometry and its heights and nothing downstream can get back
@@ -9951,7 +9980,21 @@ class _PlanMode(MacroElement):
             // pointer is let go. Ground already in hand is used either way,
             // which is what makes dragging a point back where it came from cost
             // nothing at all.
-            function resolve(graph, from, to, mayAsk) {
+            // `partly` asks for the honest answer where there is no continuous
+            // way: **what is walkable, walked, and only the rest crossed.**
+            // Reported from the phone -- a goal with no path to it was answered
+            // with *no way there*, because the fallback is one straight line
+            // from end to end and a line that long is refused outright. Nearly
+            // all of such a journey is on paths and the part that is not is
+            // usually its last stretch, so this routes to the reachable node
+            // nearest the goal and draws the remainder straight from there.
+            //
+            // Asked for by the goal and not by the plan, for now: a plan's legs
+            // are what its file is written from, and changing what a leg is
+            // made of changes every figure and every file that comes out of one.
+            // The mechanism is here rather than beside the goal so that plan
+            // mode can take it up by passing a flag.
+            function resolve(graph, from, to, mayAsk, partly) {
                 // **A leg the file described is laid out the way it described
                 // it**, before anything else is tried. It has to come first for
                 // the same reason the recorded test does and one more: both ends
@@ -9976,7 +10019,81 @@ class _PlanMode(MacroElement):
                     var found = route(graph, from.node, to.node);
                     if (found) { return Promise.resolve(routedParts(graph, found)); }
                 }
+                if (partly) {
+                    // **Both ends, and neither of them need be on a path.** The
+                    // reader is as likely to be off the network as the goal is
+                    // -- somebody standing in a bog is exactly the person asking
+                    // which way -- and `snapped` gives up beyond its own reach,
+                    // which is right for placing a waypoint and wrong here.
+                    // Unbounded, because *the nearest node* is always an answer
+                    // and the walk to it is drawn as what it is.
+                    var head = from.node >= 0 ? from.node : graph.nearestNode(from.lat, from.lon);
+                    var tail = to.node >= 0 ? to.node : graph.nearestNode(to.lat, to.lon);
+                    if (head >= 0 && tail >= 0) {
+                        var over = head === tail ? null : route(graph, head, tail);
+                        if (!over && head !== tail) {
+                            // Not connected -- and the search that said so has
+                            // just settled everything `head` can reach, so the
+                            // nearest of those to the goal is where the paths
+                            // give out and the walking begins.
+                            var reached = nearestReached(graph, to.lat, to.lon);
+                            if (reached >= 0 && reached !== head) {
+                                over = route(graph, head, reached);
+                                if (over) { tail = reached; }
+                            }
+                        }
+                        if (over || head === tail) {
+                            var made = partlyRouted(graph, from, to, head, tail, over, mayAsk);
+                            if (made) { return made; }
+                        }
+                    }
+                }
                 var answering = heightsFor(from, to, mayAsk);
+                if (!answering) { return Promise.resolve(waitingParts(from, to)); }
+                return answering.then(function (answered) { return straightParts(graph, from, to, answered); });
+            }
+
+            // **The three pieces of a way that is only partly a path**: what the
+            // reader walks to reach the network, the network itself, and what
+            // they walk at the far end. Either straight piece is left out where
+            // it has no length -- which is every end that was on a node to begin
+            // with, because that is what `snapped` did to it.
+            function partlyRouted(graph, from, to, head, tail, over, mayAsk) {
+                var far = panel().metresBetween;
+                var enter = {lat: graph.nodeLat[head], lon: graph.nodeLon[head], node: head};
+                var leave = {lat: graph.nodeLat[tail], lon: graph.nodeLon[tail], node: tail};
+                // **Routing is for reducing the trackless part, so it is worth
+                // it exactly when it does that.** Walking straight is trackless
+                // the whole way; this is trackless at both ends and a path in
+                // between, so the question is only whether the two ends come to
+                // less than the straight line. A reader 200 m off a path whose
+                // goal is 300 m away across the grass would otherwise be sent
+                // 200 m to the path, along it and 200 m back off it -- further,
+                // and over more ground with nothing on it, which is the thing
+                // being avoided. No threshold: the comparison *is* the rule, and
+                // it settles by itself the case where both ends snap to one
+                // node, because two sides of a triangle are never shorter than
+                // the third.
+                var off = far(from.lon, from.lat, enter.lon, enter.lat) +
+                    far(leave.lon, leave.lat, to.lon, to.lat);
+                if (off >= far(from.lon, from.lat, to.lon, to.lat)) { return null; }
+                var middle = over ? routedParts(graph, over) : [];
+                return Promise.all([walkTo(graph, from, enter, mayAsk),
+                                    walkTo(graph, leave, to, mayAsk)])
+                    .then(function (ends) { return ends[0].concat(middle, ends[1]); });
+            }
+
+            //: A stretch nobody routed, drawn straight and classified by its own
+            //: height samples the way any other straight leg is -- which is what
+            //: splits the last kilometre into the land it crosses and the water
+            //: it does not.
+            function walkTo(graph, from, to, mayAsk) {
+                if (panel().metresBetween(from.lon, from.lat, to.lon, to.lat) < 1) {
+                    return Promise.resolve([]);
+                }
+                var answering = heightsFor(from, to, mayAsk);
+                // Nothing may be asked -- a live drag -- so it is drawn straight
+                // with no heights, which the route already knows how to say.
                 if (!answering) { return Promise.resolve(waitingParts(from, to)); }
                 return answering.then(function (answered) { return straightParts(graph, from, to, answered); });
             }
@@ -13559,7 +13676,13 @@ class _PlanMode(MacroElement):
                     var head = snapped(graph, from.lat, from.lon);
                     var tail = snapped(graph, goalAt.lat, goalAt.lon);
                     Promise.resolve().then(function () {
-                        return resolve(graph, head, tail, true);
+                        // **Partly, which is the whole of the difference between
+                        // a goal and a leg.** A leg is between two points a
+                        // reader chose and its file is written from what it is
+                        // made of; a goal is somewhere they want to get to, and
+                        // *most of the way is a path* is a better answer than
+                        // *there is no way*.
+                        return resolve(graph, head, tail, true, true);
                     }).then(function (parts) {
                         if (goalToken !== mine) { return; }
                         goalLeg = {from: head, to: tail, parts: parts, failed: null,
@@ -13699,7 +13822,15 @@ class _PlanMode(MacroElement):
                         line: !!goalShape,
                         failed: goalLeg ? goalLeg.failed : null,
                         from: goalFrom, metres: goalShape ? goalShape.total : null,
-                        ascent: goalShape ? figuresOf(goalShape).ascent : null};
+                        ascent: goalShape ? figuresOf(goalShape).ascent : null,
+                        // **How much of it is not a path.** Where the network
+                        // does not reach the goal, the way is routed as far as
+                        // it does and drawn straight from there -- and a reader
+                        // has to be told which part of what they are looking at
+                        // was never a way. A line on a map is a promise, and
+                        // this one is a promise only for the part that came off
+                        // the network.
+                        straight: goalShape ? (goalShape.straight + goalShape.crossed) : null};
             }
 
             //: Every segment of the way there, for the position mark, in the
@@ -18646,25 +18777,32 @@ class _Chrome(MacroElement):
                 return aiming;
             }
 
+            // **The switch a lit lamp promises.** Reported from the phone:
+            // pressing the flag again did not take the goal away, it armed the
+            // next tap -- which is not what pressing a switch that is *on*
+            // means. Three states and one press:
+            //
+            // * nothing set and not armed -- arm the next tap
+            // * armed -- let go, and set nothing
+            // * a goal standing -- put it away
+            //
+            // Which leaves moving one at two presses and a tap. That is the
+            // right trade: an accidental goal is exactly what arm-and-let-go
+            // exists to prevent, and a press that both cleared *and* armed
+            // would leave a crosshair over the map nobody asked for.
+            function pressGoal() {
+                if (aiming) { askAiming(false); return; }
+                if (goalSet() && window.trailsGoal) {
+                    window.trailsGoal.clear();
+                    saySomething('Goal cleared.', false);
+                    return;
+                }
+                askAiming(true);
+            }
+
             function setGoalHere(event) {
                 if (!window.trailsGoal) { return; }
                 var where = map.mouseEventToLatLng(event);
-                var standing = window.trailsGoal.state();
-                // **A tap on the goal takes it away.** Setting one and moving
-                // one are the same gesture, so being rid of it has to be a
-                // gesture too -- and the only place a reader would look for it
-                // is the mark itself.
-                if (standing && standing.at) {
-                    var mark = map.latLngToContainerPoint(L.latLng(standing.at.lat, standing.at.lon));
-                    var at = map.mouseEventToContainerPoint(event);
-                    var reach = ((window.trailsReach && window.trailsReach.finger) || 12) + 8;
-                    if (Math.abs(mark.x - at.x) <= reach && Math.abs(mark.y - at.y) <= reach) {
-                        window.trailsGoal.clear();
-                        askAiming(false);
-                        saySomething('Goal cleared.', false);
-                        return;
-                    }
-                }
                 // **Named where the map already names something within reach,
                 // and standing where that thing stands** -- the rule a waypoint
                 // follows. A goal called *Storvasshytta* is one a reader can
@@ -18732,7 +18870,7 @@ class _Chrome(MacroElement):
                 return made;
             }
             var quickPick = quickMark('pick', 'Copy a position', function () { askPicking(); });
-            var quickGoal = quickMark('goal', 'Set a goal', function () { askAiming(); });
+            var quickGoal = quickMark('goal', 'Set a goal', function () { pressGoal(); });
             var quickHere = quickMark('here', 'Where I am', function () { askHere(); });
             L.DomEvent.disableClickPropagation(quick);
             chrome.appendChild(quick);
@@ -18927,6 +19065,11 @@ class _Chrome(MacroElement):
                     closeMenu();
                     return;
                 }
+                if (key === 'goal') {
+                    pressGoal();
+                    closeMenu();
+                    return;
+                }
                 // The same, and for the same reason: what it opened was a
                 // paragraph and a button asking whether the reader meant it.
                 if (key === 'here') {
@@ -19075,6 +19218,10 @@ class _Chrome(MacroElement):
                 var called = button.getAttribute('data-name') || null;
                 window.trailsGoal.set(Number(button.getAttribute('data-lat')),
                                       Number(button.getAttribute('data-lon')), called);
+                // The armed tap is not wanted any more: this *was* the setting
+                // of a goal, and a crosshair left over it would take the next
+                // tap for a second one.
+                askAiming(false);
                 saySomething(called ? ('Goal: ' + called) : 'Goal set.', false);
             });
 
