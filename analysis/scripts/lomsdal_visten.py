@@ -737,6 +737,29 @@ SNAP_M = 150.0
 #: trip rather than being one leg.
 MAX_STRAIGHT_M = 20_000.0
 
+#: What a metre of open ground costs against a metre of path, in the currency
+#: the edge costs are already in -- an edge costs its length times its source's
+#: factor, 1.00 for a marked route up to 1.30 for a connector nobody drew. It is
+#: the whole of the rule that decides where a way to somewhere off the network
+#: joins the paths and whether it bothers: a path is taken exactly while it is
+#: cheaper in these metres than walking straight, so a route is never more than
+#: this many times the line it could have flown.
+#:
+#: **Three, and the figure was driven rather than reasoned.** Four goals were
+#: set in a browser at 2, 3, 4 and 6, and the answers part company in one place
+#: only. At two, a goal 7.2 km away with 15.9 km of marked path leading to it
+#: was answered with a straight line across the mountain, and so was a goal 2 km
+#: past the end of the network -- both of which throw the reader's own question
+#: away, because *routed* is a request for the paths. At three the first becomes
+#: the path and the second becomes 18.4 km of path with 1.3 km of open ground at
+#: the end, which is the answer that was asked for. Four gives the same five
+#: answers as three. Six buys 0.6 km less open ground for 4 km more walking,
+#: which is nobody's preference.
+#:
+#: It has to be above 1.30 whatever else it is, or a route would rather cross
+#: open ground than take a line somebody surveyed.
+OFF_PATH_FACTOR = 3.0
+
 #: How near a waypoint has to land to something the map draws by name before it
 #: is called after it. The same fifty metres ``--hut-name-m`` already joins N50's
 #: cabins to the place-name register by, and for the same reason: two registers
@@ -888,6 +911,7 @@ def plan_settings(params: Params, layers: list[TrailLayer]) -> dict[str, object]
         "ascentThresholdM": params.ascent_threshold_m,
         "snapM": SNAP_M,
         "maxStraightM": MAX_STRAIGHT_M,
+        "offPathFactor": OFF_PATH_FACTOR,
         # What the payload's header calls a crossing and an inferred connector.
         # The page reads both off the header for every edge it routes over, and
         # renaming either here without telling it would leave it counting every

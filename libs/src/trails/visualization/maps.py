@@ -2487,6 +2487,7 @@ PLAN_SETTINGS = (
     "ascentThresholdM",
     "snapM",
     "maxStraightM",
+    "offPathFactor",
     "crossingKind",
     "connectorKind",
     "touchedM",
@@ -9059,31 +9060,140 @@ class _PlanMode(MacroElement):
                 return {edges: edges, reversed: reversed, cost: best[to]};
             }
 
-            // **Where the network gets to, when it does not get all the way.**
-            // Read off the search above rather than run again: saying a node is
-            // unreachable *is* exhausting its component, so by the time `route`
-            // answers null every node the start can reach is settled in `best`
-            // and the nearest of them to a given place is where a walker joins
-            // or leaves the paths. Only ever read after a search that did *not*
-            // stop early: one that found its target settled a part of the graph
-            // and nothing can be concluded about the rest.
+            // ---- a way to somewhere that is not on the network ----------------
+            // **A layer of connectors over the graph, and not a point moved on
+            // to it.** Reported from the phone: a goal with stops on the way
+            // came out as a 138 km walk between places 20 km apart, and one of
+            // the stops stood visibly beside the line instead of on it. Both
+            // are the same defect and both were measured here. A stop was
+            // *snapped* -- replaced by the nearest node within `snapM` -- so the
+            // mark stayed where the reader put it while the way ran from
+            // somewhere else; and having replaced it, the router was asked for
+            // the way between two node numbers and took whatever it found,
+            // which for a node on a fragment of path in the next valley was a
+            // 66 km loop. Neither step ever asked whether the answer was worth
+            // having.
             //
-            // Given `-1` as its target, `route` runs its own search with a node
-            // number nothing can equal -- so it never breaks early, exhausts the
-            // component and answers null because a typed array has no entry
-            // there. That is the whole of *tell me what I can reach*: one router
-            // asked a second way, rather than a second router.
-            function nearestReached(graph, lat, lon) {
+            // **Nothing is snapped here, and there is no second graph either.**
+            // Every node is joined to each end of the leg by a connector -- the
+            // straight walk to it, priced at `offPathFactor` -- and the leg's
+            // own straight line is one more connector between the two ends.
+            // The cheapest way through that is the answer, and the three
+            // readings a leg could have stop being three cases: walking
+            // straight is the direct connector winning, a routed leg is two
+            // connectors with the network between them, and *most of the way is
+            // a path* is the same thing with one long connector on the end. No
+            // threshold and no reach anywhere in it, because the comparison is
+            // the rule.
+            //
+            // **One entry and one exit**, which is what makes this a walk to
+            // the network rather than a shortcut across it: a route free to
+            // leave the paths wherever they bend would cut every corner on the
+            // map.
+            //
+            // Held together by the cost being in metres throughout. An edge
+            // costs its length times its source's factor -- 1.00 for a marked
+            // route up to 1.30 for an inferred connector -- so a connector
+            // priced at `offPathFactor` metres to the metre is the same
+            // currency, and the comparison between walking and routing is one
+            // subtraction rather than two units.
+            //
+            // Which also puts a ceiling on an answer, and it is the one thing
+            // the rule this replaced could not promise. A leg costs at least
+            // its own metres, every factor here being at least one, and it may
+            // not cost more than the straight line times `offPathFactor` or the
+            // direct connector would have won -- so no leg can ever be more
+            // than that many times the line it could have flown. The 66 km
+            // answer to a 2.15 km question was not a near miss; it was a sum
+            // nobody was doing.
+            function joinedRoute(graph, from, to) {
+                var nodes = graph.header.nodes;
+                if (!nodes) { return null; }
+                var far = panel().metresBetween;
+                var off = PLAN.offPathFactor;
                 var work = router(graph);
-                var cosine = Math.cos(lat * Math.PI / 180);
-                var found = -1, closest = Infinity;
-                for (var node = 0; node < graph.header.nodes; node += 1) {
-                    if (!isFinite(work.best[node])) { continue; }
-                    var dx = (graph.nodeLon[node] - lon) * cosine, dy = graph.nodeLat[node] - lat;
-                    var gap = dx * dx + dy * dy;
-                    if (gap < closest) { closest = gap; found = node; }
+                var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
+                viaEdge.fill(-1); viaNode.fill(-1);
+                var heap = new Heap(), i;
+                // **Seeded at every node at once, from the far end.** That is
+                // the connector layer itself and not a trick: `best[n]` starts
+                // at what it costs to leave the network at n and walk the rest,
+                // so what the search settles at n is the whole cost of getting
+                // from n to where the leg ends -- and the entry can then be
+                // chosen knowing it, which is the thing the old two searches
+                // could not do.
+                for (i = 0; i < nodes; i += 1) {
+                    best[i] = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;
+                    heap.push(i, best[i]);
                 }
-                return found;
+                // Bounded and thrown for, as every loop over this graph is: a
+                // settled node is never settled twice and every stale entry was
+                // pushed by a relaxation, so the pops cannot exceed one per node
+                // plus one per arc. A defect that runs for ever in a page is
+                // indistinguishable from a page that has hung.
+                var pops = 0, mostPops = nodes + 2 * graph.header.edges + 1;
+                while (heap.node.length) {
+                    pops += 1;
+                    if (pops > mostPops) { throw new Error('the search took more than ' + mostPops + ' steps'); }
+                    var taken = heap.pop();
+                    if (taken.cost > best[taken.node]) { continue; }
+                    for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
+                        var edge = work.arc[a];
+                        var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
+                        var reached = taken.cost + work.cost[edge];
+                        if (reached < best[other]) {
+                            best[other] = reached; viaEdge[other] = edge; viaNode[other] = taken.node;
+                            heap.push(other, reached);
+                        }
+                    }
+                }
+                // The direct connector: the line the reader would walk if the
+                // network were not there at all. It is what every other answer
+                // has to beat, and it is why no case below needs a threshold --
+                // two sides of a triangle are never shorter than the third, so
+                // an entry that leads nowhere loses to it by itself.
+                var plain = far(from.lon, from.lat, to.lon, to.lat) * off;
+                var head = -1, cheapest = plain;
+                for (i = 0; i < nodes; i += 1) {
+                    var whole = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];
+                    if (whole < cheapest) { cheapest = whole; head = i; }
+                }
+                if (head < 0) { return null; }
+                return leavingAt(graph, head);
+            }
+
+            // **The way out of an entry node, read off the search that settled
+            // it.** `viaNode` there points at the *next* node on the way to the
+            // leg's far end rather than at the one before, because the search
+            // ran from that end -- so this walks forwards along the journey and
+            // the edges come out in the order they are walked, with no reverse
+            // at the end. It stops at the node nothing relaxed, which is where
+            // the walker leaves the network: the search reached it by its own
+            // connector and not over an edge, and that *is* the exit.
+            //
+            // Reading the route out of the same search is also what keeps the
+            // two halves of the answer in step. The buffers are one shared set,
+            // so a second search would overwrite the costs this one was chosen
+            // from -- and every other caller here is careful to finish with them
+            // before the next leg starts.
+            function leavingAt(graph, head) {
+                var work = router(graph);
+                var edges = [], reversed = [], walk = head, steps = 0;
+                while (work.viaEdge[walk] >= 0) {
+                    steps += 1;
+                    if (steps > graph.header.edges) { throw new Error('the way out is longer than the graph'); }
+                    var used = work.viaEdge[walk];
+                    edges.push(used);
+                    // The edge's geometry runs from its own from-node to its own
+                    // to-node and the walk can take it either way round. Read off
+                    // the node being left rather than off the edge's ends, which
+                    // say nothing about direction on the fourteen edges here
+                    // that begin and end at the same node.
+                    reversed.push(graph.fromNode[used] !== walk);
+                    walk = work.viaNode[walk];
+                }
+                return {head: head, tail: walk,
+                        over: edges.length ? {edges: edges, reversed: reversed, cost: work.best[head]} : null};
             }
 
             // ---- what a route's metres are made of ----------------------------
@@ -10106,29 +10216,20 @@ class _PlanMode(MacroElement):
                     // reader is as likely to be off the network as the goal is
                     // -- somebody standing in a bog is exactly the person asking
                     // which way -- and `snapped` gives up beyond its own reach,
-                    // which is right for placing a waypoint and wrong here.
-                    // Unbounded, because *the nearest node* is always an answer
-                    // and the walk to it is drawn as what it is.
-                    var tail = to.node >= 0 ? to.node : graph.nearestNode(to.lat, to.lon);
-                    if (tail >= 0) {
-                        // **Searched from the goal outwards, once.** Which makes
-                        // the entry the nearest node that can *actually get
-                        // there* and not merely the nearest node: a fragment of
-                        // path on the wrong side of a river is nearer and no use
-                        // at all, and picking it produced a route between two
-                        // places, neither of which was where the reader wanted
-                        // to be. Rooting the search at the goal costs exactly
-                        // what finding that out the hard way used to cost.
-                        route(graph, tail, -1);
-                        var head = nearestReached(graph, from.lat, from.lon);
-                        if (head >= 0) {
-                            var over = head === tail ? null : route(graph, head, tail);
-                            if (over || head === tail) {
-                                var made = partlyRouted(graph, from, to, head, tail, over, mayAsk);
-                                if (made) { return made; }
-                            }
-                        }
+                    // which is right for placing a waypoint and wrong here. So
+                    // neither end is snapped at all: they are joined to the
+                    // graph by connectors and the cheapest way through wins.
+                    var joined = joinedRoute(graph, from, to);
+                    if (joined) {
+                        return partlyRouted(graph, from, to, joined.head, joined.tail, joined.over, mayAsk);
                     }
+                    // The direct connector won, which in this reading is an
+                    // answer and not a failure -- and it is drawn by the one
+                    // path here that cannot fail. A height service that refuses
+                    // must not be able to take a leg down with it: the leg
+                    // vanishes, and what a reader sees is a gap in the way with
+                    // a stop marooned in it.
+                    return walkTo(graph, from, to, mayAsk);
                 }
                 var answering = heightsFor(from, to, mayAsk);
                 if (!answering) { return Promise.resolve(waitingParts(from, to)); }
@@ -10138,27 +10239,21 @@ class _PlanMode(MacroElement):
             // **The three pieces of a way that is only partly a path**: what the
             // reader walks to reach the network, the network itself, and what
             // they walk at the far end. Either straight piece is left out where
-            // it has no length -- which is every end that was on a node to begin
-            // with, because that is what `snapped` did to it.
+            // it has no length, which is every end that was standing on a node
+            // already -- and it is a piece a metre long where the reader is a
+            // metre off one, because nothing here moves them on to it.
             function partlyRouted(graph, from, to, head, tail, over, mayAsk) {
-                var far = panel().metresBetween;
                 var enter = {lat: graph.nodeLat[head], lon: graph.nodeLon[head], node: head};
                 var leave = {lat: graph.nodeLat[tail], lon: graph.nodeLon[tail], node: tail};
-                // **Routing is for reducing the trackless part, so it is worth
-                // it exactly when it does that.** Walking straight is trackless
-                // the whole way; this is trackless at both ends and a path in
-                // between, so the question is only whether the two ends come to
-                // less than the straight line. A reader 200 m off a path whose
-                // goal is 300 m away across the grass would otherwise be sent
-                // 200 m to the path, along it and 200 m back off it -- further,
-                // and over more ground with nothing on it, which is the thing
-                // being avoided. No threshold: the comparison *is* the rule, and
-                // it settles by itself the case where both ends snap to one
-                // node, because two sides of a triangle are never shorter than
-                // the third.
-                var off = far(from.lon, from.lat, enter.lon, enter.lat) +
-                    far(leave.lon, leave.lat, to.lon, to.lat);
-                if (off >= far(from.lon, from.lat, to.lon, to.lat)) { return null; }
+                // **Whether this was worth doing at all was settled before it
+                // was asked for**, by `joinedRoute`, which weighed the whole of
+                // it -- both walks *and* the path between them -- against the
+                // straight line. It used to be settled here and only half of it
+                // was: the two walks were compared with the straight line and
+                // the routed part was not, so a reader 100 m off a path was
+                // sent along 66 km of it to reach a stop 2 km away, and the sum
+                // that would have caught it had already returned yes. This
+                // assembles the three pieces and judges nothing.
                 var middle = over ? routedParts(graph, over) : [];
                 return Promise.all([walkTo(graph, from, enter, mayAsk),
                                     walkTo(graph, leave, to, mayAsk)])
@@ -13859,8 +13954,15 @@ class _PlanMode(MacroElement):
                 // and its file is written from what it is made of; a goal is
                 // somewhere they want to get to, and *most of the way is a path*
                 // is a better answer than *there is no way*.
-                return resolve(graph, snapped(graph, head.lat, head.lon),
-                               snapped(graph, tail.lat, tail.lon), true, true);
+                //
+                // **And handed over raw.** A stop used to be snapped on the way
+                // in, which moved the end of the way up to `snapM` from the mark
+                // standing for it -- 67 m, measured, with the disc sitting in
+                // open ground beside the line. A stop is a place the reader
+                // chose; the walk from it to the path is part of the answer and
+                // is drawn as what it is.
+                return resolve(graph, {lat: head.lat, lon: head.lon, node: -1},
+                               {lat: tail.lat, lon: tail.lon, node: -1}, true, true);
             }
 
             // **Worked out from where the reader is, which is the whole of what
@@ -14600,7 +14702,11 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
             two halves of one profile answer differently; ``snapM`` is how near
             a click has to land to be taken as a node; ``maxStraightM`` is how
             far a leg may be drawn straight before it is refused, which bounds
-            what one misclick can ask of a public service; ``crossingKind`` and
+            what one misclick can ask of a public service; ``offPathFactor``
+            is what a metre of open ground costs against a metre of path, in
+            the same currency the edge costs are in, and it is what decides
+            whether a way to somewhere off the network goes round by the paths
+            or straight across; ``crossingKind`` and
             ``connectorKind`` are what the payload's header calls a crossing and
             an inferred connector, which the page tests every edge it routes over
             against — spelled in the page instead, a rename would leave it

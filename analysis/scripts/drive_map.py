@@ -4162,6 +4162,17 @@ def the_way_to_the_next_goal(page: Any) -> Check:
 #: What the goal is, what the mark makes of it, and what the row at the foot
 #: says about it -- read off the page's own working rather than off the screen,
 #: for the reason `THE_AIM` gives.
+THE_JOINS = """() => {
+  const legs = {};
+  window.trailsGoal.segments((aLat, aLon, bLat, bLon, leg) => {
+    const L = legs[leg] = legs[leg] || {first: [aLat, aLon], last: null, m: 0};
+    const cos = Math.cos(aLat * Math.PI / 180);
+    const dx = (bLon - aLon) * cos, dy = bLat - aLat;
+    L.m += Math.sqrt(dx * dx + dy * dy) * 111320;
+    L.last = [bLat, bLon]; });
+  return {legs: legs, state: window.trailsGoal.state()}; }"""
+
+
 THE_GOAL = """() => {
   const row = document.querySelector('.trails-profile-goal');
   const said = row ? row.querySelector('.trails-profile-goal-said') : null;
@@ -4300,6 +4311,59 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(900)
     unstopped = page.evaluate(THE_GOAL)
 
+    # **Several stops, which is how it was reported.** With more than one the
+    # way came apart: a stop stood beside the line rather than on it and the
+    # walk between two of them was thirty times what it should have been --
+    # 66.6 km for a straight 2.15 km, measured in this browser. Both were the
+    # same defect, and both are measured here rather than described: every
+    # stop is where the leg that ends at it ends, and no leg wanders far from
+    # the line it could have walked.
+    #
+    # Set through the same call the tap makes, because what is being measured
+    # is the way and not the gesture -- the gesture is driven above.
+    for part, side in ((1 / 3, 0.010), (2 / 3, -0.008)):
+        at = {
+            "lat": here["lat"] + part * (there["lat"] - here["lat"]) + side,
+            "lng": here["lng"] + part * (there["lng"] - here["lng"]),
+        }
+        page.evaluate("(at) => window.trailsGoal.addStop(at.lat, at.lng, null)", at)
+        page.wait_for_function("() => !window.trailsGoal.state().working", timeout=240_000)
+        page.wait_for_timeout(600)
+    several = page.evaluate(THE_JOINS)
+    stops_at = several["state"]["stops"]
+    ends = several["legs"]
+    apart_from_line = max(
+        (
+            metres_between(
+                (ends[str(at)]["last"][0], ends[str(at)]["last"][1]),
+                (stops_at[at]["lat"], stops_at[at]["lon"]),
+            )
+            for at in range(len(stops_at))
+            if str(at) in ends
+        ),
+        default=None,
+    )
+    started = {"lat": several["state"]["from"]["lat"], "lon": several["state"]["from"]["lon"]}
+    wandered = max(
+        (
+            ends[str(at)]["m"]
+            / max(
+                1.0,
+                metres_between(
+                    (started["lat"], started["lon"]) if at == 0 else (stops_at[at - 1]["lat"], stops_at[at - 1]["lon"]),
+                    (stops_at[at]["lat"], stops_at[at]["lon"]),
+                ),
+            )
+            for at in range(len(stops_at))
+            if str(at) in ends
+        ),
+        default=None,
+    )
+    while page.evaluate("() => window.trailsGoal.stops().length"):
+        page.evaluate("() => window.trailsGoal.dropStop(0)")
+        page.wait_for_function("() => !window.trailsGoal.state().working", timeout=240_000)
+    page.wait_for_timeout(600)
+
     # **A tap away from the way there is not a tap on it.** The row offers the
     # goal wherever its line runs -- that line takes no clicks, so the row is
     # the only way to it -- and the row's rule is that a line the reader made
@@ -4327,11 +4391,9 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     again = page.evaluate(THE_GOAL)
 
     # The row of choices offers it, last of all, and pressing it draws it.
-    # **Tapped on the way there and not at the reader**, and read off the way
-    # itself: it was routed again from where they now stand, and its first point
-    # is the node that position snapped to -- which is up to `snapM` away from
-    # them. A tap at the reader is a tap 150 m off the line, and the row is
-    # right not to offer it there.
+    # **Tapped on the way there and read off the way itself**, at its middle:
+    # the reader has moved since it was drawn, so a tap where they now stand is
+    # not a tap on it, and the row is right not to offer it there.
     on_route = page.evaluate(
         """() => { const shape = window.trailsGoal.line();
         if (!shape) { return null; }
@@ -4464,16 +4526,24 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             # reached for a composed route with no plan, which is what a goal is.
             Reading("with figures of its own under it", bool(routed["carries"]), True, note=str(routed["carries"])),
             Reading("the button arms the tap for a stop and not a goal", armed_stop, "stop"),
+            # **Not that it is longer, which it need not be.** A stop away from
+            # the paths takes the way off them, and once a leg is off the
+            # network the straight line across can be shorter than the way round
+            # -- here 12.11 km with 5.62 km of open ground in it against 19.11
+            # km all on paths. That is the answer the rule gives and the row
+            # says so in the same breath; what a stop promises is that the way
+            # goes through it, which is measured two readings down.
             Reading(
                 "a stop bends the way through it",
                 (
                     len(stopped["goal"]["stops"] or []),
-                    (stopped["goal"]["metres"] or 0) > (routed["goal"]["metres"] or 0),
+                    (stopped["goal"]["metres"] or 0) != (routed["goal"]["metres"] or 0),
                     stopped["marks"],
                 ),
                 (2, True, 1),
                 note=f"{(routed['goal']['metres'] or 0) / 1000:.2f} km direct to it, "
-                f"{(stopped['goal']['metres'] or 0) / 1000:.2f} km by way of the stop",
+                f"{(stopped['goal']['metres'] or 0) / 1000:.2f} km by way of the stop, "
+                f"{(stopped['goal']['straight'] or 0) / 1000:.2f} km of it off the paths",
             ),
             # And the mark aims at the stop, because that is the next place the
             # reader has to get to. The goal is behind it.
@@ -4492,6 +4562,35 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 "and a tap on the stop takes it away",
                 (len(unstopped["goal"]["stops"] or []), unstopped["marks"]),
                 (1, 0),
+            ),
+            # Reported from the phone with a screenshot: with several stops set,
+            # one of them stood off the line. It was snapped -- replaced by the
+            # nearest node within `snapM` -- so the way ran from up to 150 m
+            # from the mark that stood for it. Nothing is snapped now: the walk
+            # from a stop to the path is part of the answer and is drawn.
+            Reading(
+                "every stop is where the way to it ends",
+                apart_from_line,
+                0.0,
+                within=1.0,
+                note=f"{(apart_from_line or 0):.1f} m at the worst of {len(stops_at)}",
+            ),
+            # And the other half of the same report. Having replaced the stop
+            # with a node, the router was asked for the way between two node
+            # numbers and took whatever it found -- 66.6 km between places 2.15
+            # km apart, because the node it had been given sat on a fragment of
+            # path in the next valley. Which way is worth walking is now a
+            # comparison against the straight line with the path's own cost in
+            # it, and `offPathFactor` is the whole of that comparison: a leg
+            # costs at least its own metres and may not cost more than the
+            # straight line times the factor, so it can never be more than that
+            # many times the line it could have flown. Driven here rather than
+            # argued, because an arithmetic bound nobody measures is a comment.
+            Reading(
+                "and no leg wanders further than the rule allows",
+                wandered is not None and wandered <= 3.0,
+                True,
+                note=f"{(wandered or 0):.2f} times the straight line at the worst, and 3.0 is the ceiling",
             ),
             Reading(
                 "a tap well away from it does not take the goal",

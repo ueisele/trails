@@ -4122,6 +4122,11 @@ class TestPlanMode:
             "ascentThresholdM": 5.0,
             "snapM": 150.0,
             "maxStraightM": 20000.0,
+            # What a metre of open ground costs against a metre of path, in the
+            # currency the edge costs are in. Above the dearest factor any drawn
+            # line carries, or a route would rather cross a bog than take a
+            # surveyed line.
+            "offPathFactor": 3.0,
             "crossingKind": "ferry",
             "connectorKind": "bridge",
             "touchedM": 100.0,
@@ -5583,20 +5588,11 @@ class TestPlanMode:
         end, and a line that long is refused outright — so a journey that is
         twenty kilometres of path and two of open ground came out as nothing.
 
-        **Searched from the goal outwards**, which makes the entry the nearest
-        node that can *actually get there* rather than merely the nearest node:
-        a fragment of path on the wrong side of a river is nearer and no use at
-        all. Exhausting a component is what saying *unreachable* costs anyway,
-        so rooting the search at the goal costs exactly what finding that out
-        the hard way used to.
-
-        **And routing is for reducing the trackless part, so it is taken exactly
-        when it does that.** Walking straight is trackless the whole way; this
-        is trackless at both ends and a path in between, so the question is only
-        whether the two ends come to less than the straight line. No threshold —
-        the comparison is the rule, and it settles by itself the case where both
-        ends snap to one node, because two sides of a triangle are never shorter
-        than the third.
+        The three pieces are assembled here and judged nowhere: what the reader
+        walks to reach the network, the network, and what they walk at the far
+        end. Either walk is left out where it has no length, and the whole of
+        *whether this was worth doing* is settled before it is asked for — see
+        :meth:`test_a_point_off_the_network_is_joined_to_it_not_moved_on_to_it`.
 
         Asked for by the goal and not by the plan: a plan's legs are what its
         file is written from, and changing what a leg is made of changes every
@@ -5605,21 +5601,74 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "function nearestReached(graph, lat, lon) {" in planning
-        assert "route(graph, tail, -1);" in planning
-        assert "var head = nearestReached(graph, from.lat, from.lon);" in planning
+        assert "function partlyRouted(graph, from, to, head, tail, over, mayAsk) {" in planning
+        assert "var middle = over ? routedParts(graph, over) : [];" in planning
         assert "return ends[0].concat(middle, ends[1]); });" in planning
-        assert "if (off >= far(from.lon, from.lat, to.lon, to.lat)) { return null; }" in planning
         # **Both ends, and neither need be on a path.** The reader is as likely
         # to be off the network as the goal is — somebody standing in a bog is
         # exactly the person asking which way — and `snapped` gives up beyond
         # its own reach, which is right for placing a waypoint and wrong here.
-        assert "var tail = to.node >= 0 ? to.node : graph.nearestNode(to.lat, to.lon);" in planning
-        # Only ever read after a failure: a search that succeeded stopped early
-        # and settled only part of the graph.
-        assert "if (!isFinite(work.best[node])) { continue; }" in planning
-        # And the goal is the one caller that asks for it.
-        assert "return resolve(graph, snapped(graph, head.lat, head.lon)," in planning
+        assert "var joined = joinedRoute(graph, from, to);" in planning
+        # And the goal is the one caller that asks for it, with both of its ends
+        # raw: a stop is a place the reader chose and nothing may move it.
+        assert "return resolve(graph, {lat: head.lat, lon: head.lon, node: -1}," in planning
+
+    def test_a_point_off_the_network_is_joined_to_it_not_moved_on_to_it(self):
+        """Reported from the phone with a screenshot: with several stops set,
+        one of them stood beside the way instead of on it, and the walk came out
+        at 138 km between places 20 km apart. Both are one defect, measured in a
+        browser before it was touched — 67 m of gap, and a leg of 66.6 km for a
+        straight 2.15 km.
+
+        A stop used to be *snapped*: replaced by the nearest node within
+        ``snapM``, so the mark stayed where the reader put it while the way ran
+        from somewhere else. And having replaced it, the router was asked for
+        the way between two node numbers and took whatever it found — which for
+        a node on a fragment of path in the next valley is a loop round half the
+        park. Nothing in either step asked whether the answer was worth having.
+
+        **The whole graph is joined to each end of the leg by connectors**, each
+        priced at ``offPathFactor`` metres to the metre, with the leg's own
+        straight line as one more connector between the two ends; then the
+        cheapest way through wins. That makes the three readings one reading:
+        walking straight is the direct connector winning, a routed leg is two
+        connectors with the network between them, and *most of the way is a
+        path* is the same thing with one long connector on the end. No
+        threshold, because the comparison is the rule — and it is the cost of
+        the path that the old rule never put on the scales.
+
+        Seeded from the far end at every node at once, so the search settles
+        what it costs to get from each node to where the leg ends, walk off the
+        network included; the entry is then the node that minimises the walk to
+        it plus that. The route is read back out of the same search: ``viaNode``
+        points at the *next* node on the way, because the search ran backwards,
+        so the edges come out already in the order they are walked."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function joinedRoute(graph, from, to) {" in planning
+        assert "var off = PLAN.offPathFactor;" in planning
+        # Every node seeded with the walk off the network at it.
+        assert "best[i] = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;" in planning
+        # The straight line as one more connector, and what everything else has
+        # to beat.
+        assert "var plain = far(from.lon, from.lat, to.lon, to.lat) * off;" in planning
+        assert "var head = -1, cheapest = plain;" in planning
+        assert "var whole = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];" in planning
+        # Bounded like every other loop over this graph.
+        assert "var pops = 0, mostPops = nodes + 2 * graph.header.edges + 1;" in planning
+        # And the way out read off the same search, forwards.
+        assert "function leavingAt(graph, head) {" in planning
+        assert "while (work.viaEdge[walk] >= 0) {" in planning
+        assert "reversed.push(graph.fromNode[used] !== walk);" in planning
+        assert "if (steps > graph.header.edges) { throw new Error('the way out is longer than the graph'); }" in planning
+        # The straight answer is drawn by the one path that cannot fail: a leg
+        # that throws is a gap in the way with a stop marooned in it.
+        assert "return walkTo(graph, from, to, mayAsk);\n                }" in planning
+        # And the two searches it replaced are gone, not left beside it.
+        assert "nearestReached" not in planning
+        assert "route(graph, tail, -1);" not in planning
 
     def test_the_part_that_was_never_a_path_is_said(self):
         """A line on a map is a promise, and a partly routed one is a promise
