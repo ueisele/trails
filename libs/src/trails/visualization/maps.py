@@ -10903,8 +10903,19 @@ class _PlanMode(MacroElement):
                         // missing. A metre, because a waypoint is written at the
                         // position the track passes through and the two agree to
                         // seven decimals or not at all.
+                        //
+                        // **And where it is not, the written position stands.**
+                        // It used to be snapped, which moves it up to `snapM`
+                        // -- so a plan whose waypoints were not on the network
+                        // came back somewhere else and was routed between the
+                        // somewhere elses. Measured by the reload check the day
+                        // gestures stopped snapping at 150 m: 19.1 km saved,
+                        // 68.3 km restored, and nothing about the drawing looked
+                        // wrong. A file says where the reader put a point; there
+                        // is nothing to improve on that, and a leg from a point
+                        // off the network reaches it by a connector anyway.
                         var here = panel().metresBetween(wp.lon, wp.lat, loaded.lon[at], loaded.lat[at]) <= 1.0
-                            ? anchored(graph, at) : snapped(graph, wp.lat, wp.lon);
+                            ? anchored(graph, at) : {lat: wp.lat, lon: wp.lon, node: -1};
                         here.station = stations[i];
                         // The cuts come back with the points they were made on,
                         // which is the whole reason they live on a waypoint: a
@@ -11828,7 +11839,11 @@ class _PlanMode(MacroElement):
                     // name is the tour's, which is what `stem` is for.
                     name: title,
                     stem: tourName || null,
-                    waypoints: points.slice(from, to + 1).map(nameOf),
+                    // Named one at a time rather than handed to `map`, which
+                    // would pass the array as a reach: see `nameOf`.
+                    waypoints: points.slice(from, to + 1).map(function (point, at) {
+                        return nameOf(point, at);
+                    }),
                     legs: legs.slice(from, to).map(function (leg) {
                         return (leg.parts || []).map(function (part) {
                             return {kind: part.kind, length: part.length};
@@ -12077,6 +12092,19 @@ class _PlanMode(MacroElement):
                 var across = PLAN.snapPx * 40075016.686 * Math.cos(lat * Math.PI / 180) /
                     Math.pow(2, map.getZoom() + 8);
                 return Math.min(PLAN.snapM, across);
+            }
+
+            // **The same question about a named thing, and it narrows only.**
+            // A tap is taken as the hut it lands on, and at a fixed `namedM` it
+            // was taken as one from 50 m away however far in the reader had
+            // pinched -- so a goal deliberately set beside a hut became the hut,
+            // and there was no zoom at which it did not. Held at `namedM`
+            // rather than at `snapM` where a finger is the wider of the two:
+            // that figure is the build's judgement about *naming*, not about
+            // pointing, and a waypoint called after something 150 m away would
+            // disagree with every other name on this map.
+            function namedReach(lat) {
+                return Math.min(PLAN.namedM, fingerReach(lat));
             }
 
             function place(lat, lon) {
@@ -12374,7 +12402,27 @@ class _PlanMode(MacroElement):
             // the layers were added in. Beyond reach the point keeps its own
             // position and is numbered, which is what it did before this
             // existed.
-            function nameOf(point, index) {
+            // **The reach is handed in for the reason `snapped`'s is.** Asked
+            // of a finger on the map it is a question about what the reader
+            // could have been pointing at; asked of a waypoint already down --
+            // to fill the list, or to name the place a leg ends at for the mark
+            // -- it is a question about the ground, and one that has to answer
+            // the same whatever the map happens to be showing. A name that
+            // changed with the zoom would put a different word in the list every
+            // time the reader pinched, and a different one again in the file.
+            //
+            // **A number or nothing, and `undefined` is not the test.** This
+            // function is handed to `Array.prototype.map` in two places, which
+            // calls it with three arguments -- the value, the index and *the
+            // array*. So the day a third parameter was added, every waypoint in
+            // every file was named after the nearest thing at any distance
+            // whatever: `closest > []` coerces to `closest > NaN`, which is
+            // false, so the reach stopped rejecting anything. Measured in the
+            // file it wrote: a waypoint called *Steinbua, Tosenfjellet* 2,419 m
+            // away and one called *Gamme* 9,196 m away. The call sites are named
+            // properly below; this is the belt.
+            function nameOf(point, index, within) {
+                var reach = typeof within === 'number' ? within : PLAN.namedM;
                 var best = null, closest = Infinity;
                 for (var i = 0; i < NAMED.length; i += 1) {
                     var away = panel().metresBetween(point.lon, point.lat, NAMED[i].lon, NAMED[i].lat);
@@ -12384,7 +12432,7 @@ class _PlanMode(MacroElement):
                 // this and not the point: a cut the reader made would otherwise
                 // be in the plan and in no file it writes.
                 var cut = typeof point.stage === 'string' ? point.stage : null;
-                if (!best || closest > PLAN.namedM) {
+                if (!best || closest > reach) {
                     return {lat: point.lat, lon: point.lon, name: null, kind: null,
                             away: null, number: index + 1, stage: cut};
                 }
@@ -13518,7 +13566,7 @@ class _PlanMode(MacroElement):
                     // file is called and what the track is called are two
                     // decisions, and here they happen to agree.
                     stem: tourName || null,
-                    waypoints: points.map(nameOf),
+                    waypoints: points.map(function (point, at) { return nameOf(point, at); }),
                     legs: legs.map(function (leg) {
                         return (leg.parts || []).map(function (part) { return {kind: part.kind, length: part.length}; });
                     })
@@ -14631,7 +14679,7 @@ class _PlanMode(MacroElement):
                 // by tapping one is the same question asked by somebody else,
                 // and two answers to it would differ the day the register does.
                 named: function (lat, lon) {
-                    var said = nameOf({lat: lat, lon: lon}, 0);
+                    var said = nameOf({lat: lat, lon: lon}, 0, namedReach(lat));
                     return said.name ? {name: said.name, lat: said.lat, lon: said.lon,
                                         kind: said.kind, away: said.away} : null;
                 },

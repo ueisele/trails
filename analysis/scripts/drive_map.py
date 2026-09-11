@@ -4432,9 +4432,15 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     )
     page.wait_for_timeout(800)
 
-    def tap_goal(where: dict[str, float]) -> None:
-        """Tap the map where a latitude and longitude say, not where a pixel does."""
-        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 14, {animate: false})"), where)
+    def tap_goal(where: dict[str, float], zoom: int = 14) -> None:
+        """Tap the map where a latitude and longitude say, not where a pixel does.
+
+        **The zoom is part of the gesture**, because what a tap is taken to mean
+        is measured on the screen: a finger covers 48 m of ground at z14 and 3 m
+        at z18, and both the line it snaps to and the place it is named after
+        are found within that.
+        """
+        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], at.zoom, {animate: false})"), {**where, "zoom": zoom})
         page.wait_for_timeout(700)
         spot = page.evaluate(
             with_map(
@@ -4589,6 +4595,42 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(1200)
     chips = page.evaluate(THE_CHOICES)
     pressed = press_chip("To the goal")
+
+    # **What a tap is named after, and how far in the reader has pinched.** A
+    # goal set beside a hut is that hut -- a reader going to a hut wants the hut
+    # and not the pixel they hit -- and at a fixed `namedM` it was that hut from
+    # 50 m away however far in they had zoomed, with no way to say otherwise.
+    # The reach a name is found within is now the reach a finger covers, held at
+    # `namedM` where a finger is wider: 50 m at z13, 3 m at z18. Pinching in is
+    # how a reader says *this spot, beside the hut*.
+    place = page.evaluate(
+        with_map(
+            """() => { let best = null;
+        const walk = l => { if (best) { return; }
+          if (l.getPopup && l.getPopup() && l.getLatLng && !l.getLatLngs) { best = l; return; }
+          if (l.eachLayer) { l.eachLayer(walk); } };
+        __MAP__.eachLayer(walk);
+        if (!best) { return null; }
+        const at = best.getLatLng();
+        return {lat: at.lat, lng: at.lng}; }"""
+        )
+    )
+    named: dict[str, Any] = {"out": None, "in": None, "name": None, "away": None}
+    if place:
+        # Twenty metres north of it: inside `namedM`, outside a finger at z18.
+        beside = {"lat": place["lat"] + 0.00018, "lng": place["lng"]}
+        named["name"] = page.evaluate("(at) => (window.trailsPlan.named(at.lat, at.lng) || {}).name || null", beside)
+        for zoom, key in ((13, "out"), (18, "in")):
+            page.evaluate("() => window.trailsChrome.aiming(true)")
+            page.wait_for_timeout(300)
+            tap_goal(beside, zoom)
+            page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+            page.wait_for_timeout(600)
+            state = page.evaluate("() => window.trailsGoal.state()")
+            named[key] = {
+                "name": state["name"],
+                "away": metres_between((beside["lat"], beside["lng"]), (state["at"]["lat"], state["at"]["lon"])) if state["at"] else None,
+            }
 
     # **A goal the network does not reach.** Two kilometres past the far end of
     # the chain, which is beyond snapping distance of anything -- so there is no
@@ -4786,6 +4828,20 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             Reading("routed again from where the reader now is", round(again["goal"]["from"]["lat"], 3), round(astray["lat"], 3)),
             Reading("the row of choices offers it last", chips["chips"][-1] if chips["chips"] else None, "To the goal"),
             Reading("and pressing it draws it", pressed["lit"], ["To the goal"]),
+            Reading(
+                "zoomed out, a tap beside a place is that place",
+                (named["out"] or {}).get("name"),
+                named["name"],
+                note=f"{(named['out'] or {}).get('away', 0) or 0:.0f} m from the tap",
+            ),
+            # And pinched in, where the reader can see the two apart and point
+            # between them, it is where they put it.
+            Reading(
+                "pinched in, the same tap stands where it fell",
+                ((named["in"] or {}).get("name"), ((named["in"] or {}).get("away") or 0) < 5.0),
+                (None, True),
+                note=f"{(named['in'] or {}).get('away', 0) or 0:.1f} m from the tap at z18",
+            ),
             # The whole of what was asked for: not *there is no way there*, but
             # the way as far as there is one.
             Reading(
@@ -5834,6 +5890,13 @@ def a_plan_survives_a_reload(page: Any) -> Check:
         return [0.1, 0.4, 0.7].map(f => Math.floor(f * (shape.lon.length - 1)))
           .map(i => ({lat: shape.lat[i], lon: shape.lon[i]})); }"""
     )
+    # **At a zoom of its own, because a waypoint snaps by what a finger
+    # covers.** What this check is about is what survives a reload, and it was
+    # leaning on the zoom the check before it happened to leave behind: from
+    # z18, where a finger is 3 m, the three points do not land on the network,
+    # and the restored plan is then a different question from the saved one.
+    page.evaluate(with_map("() => __MAP__.setZoom(13, {animate: false})"))
+    page.wait_for_timeout(400)
     page.evaluate("() => window.trailsPlan.toggle(true)")
     page.wait_for_timeout(600)
     page.evaluate(

@@ -4386,13 +4386,23 @@ class TestPlanMode:
         the nearest trackpoint would put it on the shore, and the shore is where
         it went: measured, three points out and eight back with the offshore one
         gone. Restored, it comes home at the position it was set.
+
+        **And it stays there.** The position used to be snapped once it was off
+        the track, which moves it up to ``snapM`` — so it came home to a node
+        rather than to where it was written, and the legs either side of it were
+        routed between somewhere elses. Caught by the reload check the day
+        gestures stopped snapping at 150 m and raw waypoints became ordinary:
+        19.1 km saved, 68.3 km restored, and nothing about the drawing looked
+        wrong. A file says where the reader put a point, there is nothing to
+        improve on that, and a leg from a point off the network reaches it by a
+        connector anyway.
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
         planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
         placing = planning.split("if (restoring()) {")[1].split("if (loaded.mode === 'align')")[0]
 
         assert "<= 1.0" in placing
-        assert "anchored(graph, at) : snapped(graph, wp.lat, wp.lon)" in placing
+        assert "anchored(graph, at) : {lat: wp.lat, lon: wp.lon, node: -1};" in placing
         # And a crossing contributes none of its length to the walking, so the
         # stations cannot be summed off the parts without saying so.
         assert "part.kind !== 'water' && part.kind !== CROSSING" in placing
@@ -5567,7 +5577,29 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "named: function (lat, lon) {" in planning
-        assert "var said = nameOf({lat: lat, lon: lon}, 0);" in planning
+        # At the reach a finger covers, held at `namedM` where a finger is
+        # wider: a goal set beside a hut used to become the hut from 50 m away
+        # however far in the reader had pinched, and there was no zoom at which
+        # it did not. Narrowing only — the figure is the build's judgement about
+        # naming, and nothing here widens it.
+        assert "var said = nameOf({lat: lat, lon: lon}, 0, namedReach(lat));" in planning
+        assert "function namedReach(lat) {" in planning
+        assert "return Math.min(PLAN.namedM, fingerReach(lat));" in planning
+        # **A number or nothing, and `undefined` is not the test.** `nameOf` is
+        # handed to `Array.prototype.map` in two places, which calls it with the
+        # value, the index and *the array* — so the day a third parameter was
+        # added, `closest > []` coerced to `closest > NaN`, the reach rejected
+        # nothing, and every waypoint in every file was named after the nearest
+        # thing at any distance: *Steinbua, Tosenfjellet* 2,419 m away, *Gamme*
+        # 9,196 m away, measured in the file it wrote. Belt and braces both.
+        assert "var reach = typeof within === 'number' ? within : PLAN.namedM;" in planning
+        assert "points.map(function (point, at) { return nameOf(point, at); })" in planning
+        assert ".map(nameOf)" not in planning
+        # And a waypoint already down is named without asking the screen, or the
+        # list would say a different word every time the reader pinched and the
+        # file a different one again.
+        assert "var said = nameOf(points[at], at);" in planning
+        assert "var called = nameOf(point, index);" in planning
 
     def test_the_plan_does_not_take_the_panel_back_from_a_goal(self):
         """Two composed routes can be offered and the panel is one panel. A
@@ -5651,8 +5683,14 @@ class TestPlanMode:
         # Every gesture asks the screen.
         assert "points.push(snapped(graph, lat, lon, fingerReach(lat)));" in planning
         assert "points[dragging.at] = snapped(held, where.lat, where.lng, fingerReach(where.lat));" in planning
-        # And the file does not.
-        assert "anchored(graph, at) : snapped(graph, wp.lat, wp.lon)" in planning
+        # And the file does not ask the screen — nor, restoring a plan, does it
+        # move the point at all: a file says where the reader put one, and a leg
+        # from a point off the network reaches it by a connector anyway. Snapped
+        # here, a plan whose waypoints were not on the network came back
+        # somewhere else — 19.1 km saved, 68.3 km restored, measured.
+        assert "anchored(graph, at) : {lat: wp.lat, lon: wp.lon, node: -1};" in planning
+        # Align mode still snaps, because that is the whole of what it offers.
+        assert "var here = snapped(graph, point.lat, point.lon);" in planning
 
     def test_a_plan_reaches_the_network_rather_than_being_moved_on_to_it(self):
         """The other half of what a point that did not snap used to mean.
