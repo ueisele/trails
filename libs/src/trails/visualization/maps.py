@@ -5552,16 +5552,11 @@ class _ProfilePanel(MacroElement):
                         function () { if (window.trailsGoal) { window.trailsGoal.dropStop(at); } });
                     out.style.color = 'var(--trails-extreme, #c62828)';
                     menu.appendChild(out);
-                    // **Being rid of the goal, behind the goal's own menu.** It
-                    // was a × at the end of the row of switches, one thumb-width
-                    // from *add a stop*, and pressing the flag put the goal
-                    // away as well; both were a journey lost to a slip. It is a
-                    // line in a menu now, in words, and nothing else clears one.
-                    var drop = stopStep('trails-profile-stop-drop', 'Drop the goal',
-                        'Put the goal away, and every stop with it', last,
-                        function () { if (window.trailsGoal) { window.trailsGoal.clear(); } });
-                    drop.style.color = 'var(--trails-extreme, #c62828)';
-                    menu.appendChild(drop);
+                    // **Not *drop the goal*.** That was here for a while, in
+                    // words, and was asked for from the phone as *how do I
+                    // leave this now*: two taps down a page is where nobody
+                    // looks for the way out. It is the panel's own button now,
+                    // drawn as a struck flag while the way is what it shows.
 
                     var more = document.createElement('button');
                     more.type = 'button';
@@ -5658,6 +5653,16 @@ class _ProfilePanel(MacroElement):
             hide.style.cssText = 'font:inherit;font-size:16px;line-height:1;border:1px solid var(--trails-rule);' +
                 'border-radius:8px;background:var(--trails-solid);color:var(--trails-ink-3);cursor:pointer;' +
                 'width:40px;height:40px;display:none;align-items:center;justify-content:center';
+            // **The same flag the lit switch on the map carries, struck
+            // through.** While the panel is drawing the way to a goal this
+            // button is done with the goal, and it has to look like it: it sits
+            // where a thumb goes to put a panel away, and a × there would be
+            // read as one. Drawn in place rather than through the chrome's icon
+            // set, which is another function's scope.
+            var GOAL_STRUCK = '<svg width="17" height="17" viewBox="0 0 18 18" fill="none" ' +
+                'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" ' +
+                'aria-hidden="true"><path d="M5 16.2V2.6"/><path d="M5 3.4h8.3l-2.1 3.1 2.1 3.1H5Z"/>' +
+                '<path d="M2.4 15.6 15.6 2.4"/></svg>';
             hide.addEventListener('click', function (event) {
                 event.stopPropagation();
                 // Planning is the thing being finished where one is running;
@@ -5665,11 +5670,26 @@ class _ProfilePanel(MacroElement):
                 // click-highlight and this panel already agree means *nothing is
                 // chosen* -- so it goes through the one entry both of them have.
                 if (planNow && window.trailsPlan) { window.trailsPlan.toggle(false); return; }
+                // **And the way to a goal is the goal.** It used to be a line
+                // in the goal's own menu, two taps down a page, and was asked
+                // for from the phone as *how do I leave this now*. Dropping the
+                // goal takes every stop with it, and stops are work: asked
+                // about once where there are any, and not for a goal alone,
+                // which is a tap to set again. The same question the offline
+                // panel asks before deleting the terrain it keeps.
+                if (selected && selected.goal && window.trailsGoal) {
+                    var stops = window.trailsGoal.state().stops.length - 1;
+                    if (stops > 0 && !window.confirm('Drop the goal and ' + stops +
+                            (stops === 1 ? ' stop?' : ' stops?'))) { return; }
+                    window.trailsGoal.clear();
+                    return;
+                }
                 if (window.trailsHighlight) { window.trailsHighlight.clear(); }
                 // **And the goal's own note that this panel is drawing it.** A
                 // stale yes would let the next fix put the way back on a panel
                 // the reader just put away -- the goal stands, the flag stays
-                // lit, and the flag is what brings it back.
+                // lit, and a tap on empty ground is what puts the page away
+                // while keeping it.
                 if (window.trailsGoal) { window.trailsGoal.letGo(); }
                 present(null);
             });
@@ -8133,8 +8153,10 @@ class _ProfilePanel(MacroElement):
                 name.textContent = planning()
                     ? planSays()
                     : ((selected && selected.label) || '');
-                hide.innerHTML = planning() ? '\\u2713' : '\\u00d7';
-                hide.title = planning() ? 'Finish planning' : 'Put this away';
+                var goalShown = !!(!planning() && selected && selected.goal);
+                hide.innerHTML = planning() ? '\\u2713' : goalShown ? GOAL_STRUCK : '\\u00d7';
+                hide.title = planning() ? 'Finish planning' : goalShown ? 'Drop the goal' : 'Put this away';
+                hide.classList.toggle('trails-profile-hide-goal', goalShown);
                 hide.setAttribute('aria-label', hide.title);
                 // Only where there is something to be done with: a page that
                 // has nothing selected and nothing being planned says so in the

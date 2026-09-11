@@ -4200,6 +4200,11 @@ THE_GOAL = """() => {
           armed: window.trailsChrome.state().aiming,
           lamp: window.trailsChrome.state().goal,
           row: !!row && row.style.display !== 'none' && !!pageOf && pageOf.style.display !== 'none',
+          // What the panel's own way out is at the moment: a x, or the struck
+          // flag that drops the goal.
+          hide: (function () { const h = document.querySelector('.trails-profile-hide');
+              return {title: h ? h.title : null,
+                      struck: !!(h && h.classList.contains('trails-profile-hide-goal') && h.querySelector('svg'))}; })(),
           // The one line the heading has no room for, over the list.
           note: (function () { const n = document.querySelector('.trails-profile-goal-note');
               return (n && n.style.display !== 'none') ? n.textContent : null; })(),
@@ -4919,10 +4924,14 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(900)
     pressed_back = page.evaluate(THE_GOAL)
 
-    # **And the panel's × puts the goal's page away without the goal.** The
-    # next fix must not put it back: the goal control's own note that the
-    # panel is drawing it has to go with the page.
-    page.evaluate("() => document.querySelector('.trails-profile-hide').click()")
+    # **And a tap on empty ground puts the goal's page away without the
+    # goal.** It was the panel's × that did this, but that button is the way
+    # out of the goal now; the map's own click, which clears whatever is
+    # shown, is what puts a page away. The next fix must not put it back: the
+    # goal control's own note that the panel is drawing it has to go with the
+    # page. Fired as the map's event, because a tap that lands on a line is a
+    # selection and the ground here is thick with them.
+    page.evaluate(with_map("() => __MAP__.fire('click', {latlng: __MAP__.getCenter()})"))
     page.wait_for_timeout(600)
     put_away = page.evaluate(THE_GOAL)
     page.evaluate("() => window.trailsGoal.again()")
@@ -4930,16 +4939,36 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(900)
     stayed_away = page.evaluate(THE_GOAL)
 
-    # **Being rid of it is a line in the goal's own menu**, in words, and the
-    # only thing that clears one.
+    # **Being rid of it is the panel's own button**, drawn as a struck flag
+    # while the way to the goal is what the panel shows -- asked for from the
+    # phone as *how do I leave this now* when it was a line two taps down the
+    # goal's menu. With a stop on the way it asks first; declined, everything
+    # stands. Playwright dismisses a dialog nobody handles, which is the
+    # declined case for free; the accepted one is handled by name.
     page.evaluate("() => document.querySelector('.trails-quick-goal').click()")
     page.wait_for_timeout(600)
+    page.evaluate("(at) => window.trailsGoal.addStop(at.lat, at.lng, 'A stop')", there)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(900)
+    drop_offered = page.evaluate(THE_GOAL)
     goal_rows = page.evaluate("() => document.querySelectorAll('.trails-profile-stop').length")
-    press_row(goal_rows - 1, "trails-profile-stop-more")
-    drop_offered = page.evaluate(THE_STOPS)
-    press_row(goal_rows - 1, "trails-profile-stop-drop")
+    asked: list[str] = []
+    page.once("dialog", lambda dialog: (asked.append(dialog.message), dialog.dismiss()))
+    page.evaluate("() => document.querySelector('.trails-profile-hide').click()")
+    page.wait_for_timeout(700)
+    declined = page.evaluate(THE_GOAL)
+    page.once("dialog", lambda dialog: (asked.append(dialog.message), dialog.accept()))
+    page.evaluate("() => document.querySelector('.trails-profile-hide').click()")
     page.wait_for_timeout(700)
     dropped = page.evaluate(THE_GOAL)
+    # And a goal alone goes without a question: nothing to lose but a tap.
+    page.evaluate("(at) => window.trailsGoal.set(at.lat, at.lng, 'Alone')", beyond)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
+    page.wait_for_timeout(900)
+    alone = page.evaluate(THE_GOAL)
+    page.evaluate("() => document.querySelector('.trails-profile-hide').click()")
+    page.wait_for_timeout(700)
+    dropped_alone = page.evaluate(THE_GOAL)
 
     # **And a place is offered as one where the reader has just read what it
     # is.** Nearly every goal somebody sets is a named thing, and the popup is
@@ -5137,7 +5166,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             Reading(
                 "the goal's own row offers only a move",
                 (goal_menu["rows"][-1]["open"], goal_menu["rows"][-1]["offers"]),
-                (True, ["trails-profile-stop-move", "trails-profile-stop-drop"]),
+                (True, ["trails-profile-stop-move"]),
             ),
             Reading(
                 "which arms the tap for the goal",
@@ -5232,22 +5261,33 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 note=str(pressed_back["shown"]),
             ),
             Reading(
-                "the panel's x puts the page away and keeps the goal",
+                "a tap on empty ground puts the page away and keeps the goal",
                 (put_away["mine"], put_away["row"], put_away["goal"]["at"] is not None, put_away["lamp"]),
                 (False, False, True, True),
             ),
             Reading("and the next routing does not put it back", (stayed_away["mine"], stayed_away["row"]), (False, False)),
             Reading(
-                "the goal's own menu offers to drop it",
-                "trails-profile-stop-drop" in (drop_offered["rows"][-1]["offers"] if drop_offered["rows"] else []),
-                True,
-                note=str(drop_offered["rows"][-1]["offers"] if drop_offered["rows"] else None),
+                "the panel's button is a struck flag that drops the goal",
+                (drop_offered["mine"], drop_offered["hide"]["title"], drop_offered["hide"]["struck"], goal_rows),
+                (True, "Drop the goal", True, 2),
             ),
             Reading(
-                "and that line puts the goal away",
-                (dropped["goal"]["at"], dropped["marks"], dropped["lamp"], dropped["mine"]),
-                (None, 0, False, False),
+                "with a stop on the way it asks first, and declined keeps everything",
+                (asked[:1], declined["goal"]["at"] is not None, declined["marks"], declined["mine"], declined["lamp"]),
+                (["Drop the goal and 1 stop?"], True, 1, True, True),
             ),
+            Reading(
+                "and accepted puts the goal and its stop away",
+                (len(asked), dropped["goal"]["at"], dropped["marks"], dropped["lamp"], dropped["mine"]),
+                (2, None, 0, False, False),
+            ),
+            Reading(
+                "a goal alone goes without a question",
+                (alone["mine"], alone["hide"]["struck"], len(asked), dropped_alone["goal"]["at"], dropped_alone["lamp"]),
+                (True, True, 2, None, False),
+            ),
+            Reading("and the button is a x again once nothing of the goal is shown",
+                    (other_shown["hide"]["title"], other_shown["hide"]["struck"]), ("Put this away", False)),
             Reading("a place offers itself as a goal", from_place["offered"], "Set as goal"),
             Reading(
                 "and taking it up names the goal after the place",

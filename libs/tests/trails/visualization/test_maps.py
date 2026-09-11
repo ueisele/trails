@@ -4096,14 +4096,26 @@ class TestProfilePanel:
         assert "goalNote.className = 'trails-profile-goal-note';" in html
         assert "note = (goalNow.straight / 1000).toFixed(2) + ' km of it drawn straight, not a path';" in html
         assert "} else if (!goalNow.line && routed) { note = 'No way there \\u2014 drawn straight'; }" in html
-        # Rid of, in words, behind the goal's own menu -- and by nothing else.
+        # Rid of by the panel's own button, drawn as a struck flag while the
+        # way is what the panel shows -- and by nothing else. The line in the
+        # goal's menu was asked for from the phone as *how do I leave this*.
         assert "trails-profile-goal-clear" not in html
-        assert "var drop = stopStep('trails-profile-stop-drop', 'Drop the goal'," in html
-        assert "'Put the goal away, and every stop with it', last," in html
-        # And the panel's own × lets go of the goal's note that it is drawing
-        # it, or the next fix would put the way back on a panel just put away.
-        hide = html.split("hide.addEventListener('click', function (event) {")[1].split("});")[0]
+        assert "trails-profile-stop-drop" not in html
+        hide = html.split("hide.addEventListener('click', function (event) {")[1].split("            });")[0]
+        assert "if (selected && selected.goal && window.trailsGoal) {" in hide
+        assert "var stops = window.trailsGoal.state().stops.length - 1;" in hide
+        # A goal alone is a tap to set again; stops are work, and asked about.
+        assert "if (stops > 0 && !window.confirm('Drop the goal and ' + stops +" in hide
+        assert "window.trailsGoal.clear();" in hide
+        # For anything else shown, the × lets go of the goal's note that the
+        # panel is drawing it, or the next fix would put the way back.
         assert "if (window.trailsGoal) { window.trailsGoal.letGo(); }" in hide
+        # The same flag the lit switch carries, struck through, only then.
+        assert "var goalShown = !!(!planning() && selected && selected.goal);" in html
+        assert "hide.innerHTML = planning() ? '\\u2713' : goalShown ? GOAL_STRUCK : '\\u00d7';" in html
+        assert "hide.title = planning() ? 'Finish planning' : goalShown ? 'Drop the goal' : 'Put this away';" in html
+        assert "hide.classList.toggle('trails-profile-hide-goal', goalShown);" in html
+        assert '<path d="M5 3.4h8.3l-2.1 3.1 2.1 3.1H5Z"/>' in html.split("var GOAL_STRUCK = ")[1].split(";")[0]
 
     def test_a_goal_has_figures_of_its_own(self):
         """Reported from the phone as *the info is from another way*, and it
