@@ -9001,10 +9001,7 @@ class _PlanMode(MacroElement):
                 // where node v + 1's begin, so afterwards node v owns
                 // arc[at[v] .. at[v + 1]).
                 routing = {length: length, cost: cost, at: at, arc: arc,
-                           best: new Float64Array(nodes), viaEdge: new Int32Array(nodes), viaNode: new Int32Array(nodes),
-                           // Whether a node's own connector has been priced
-                           // by what it crosses yet: see `joinedRoute`.
-                           exact: new Uint8Array(nodes)};
+                           best: new Float64Array(nodes), viaEdge: new Int32Array(nodes), viaNode: new Int32Array(nodes)};
                 return routing;
             }
 
@@ -9177,21 +9174,31 @@ class _PlanMode(MacroElement):
             // **Priced when it is asked for, not when it is seeded.** Every
             // node is seeded with its connector's price over ground, which is
             // a floor -- water only adds -- and the true price is worked out
-            // the first time the node comes out of the heap with that seed
-            // still standing. If it is dearer the node goes back in at the
-            // true price and the search carries on; it is the ordinary trick
-            // for an edge whose weight is dear to compute, and it is what
-            // keeps the grid from being asked about 117,000 connectors on
-            // every tick of a drag. The bound and the pruning are unchanged,
-            // because a floor is all either of them needs.
+            // when that floor reaches the top of the queue. It is the
+            // ordinary trick for an edge whose weight is dear to compute, and
+            // it is what keeps the grid from being asked about 117,000
+            // connectors on every tick of a drag. The bound and the pruning
+            // are unchanged, because a floor is all either of them needs.
+            //
+            // **A floor is not a label.** The first version wrote the floor
+            // into `best` and priced it for real when the node was popped.
+            // Measured against an eagerly priced search on seven legs to one
+            // headland, three disagreed -- one of them by a straight walk of
+            // 2.1 km where the road was there to take. The fault: a settled
+            // node offers its neighbour a way in, the neighbour's floor is
+            // cheaper and the offer is refused, and then the floor turns out
+            // to be a fjord and is raised -- but the neighbour that offered
+            // is settled and never offers again. So floors live in a queue of
+            // their own and `best` holds only prices that are exact: a
+            // relaxation is refused by nothing that can later be withdrawn.
             function joinedRoute(graph, from, to) {
                 var nodes = graph.header.nodes;
                 if (!nodes) { return null; }
                 var far = panel().metresBetween;
                 var off = PLAN.offPathFactor;
                 var work = router(graph);
-                var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode, exact = work.exact;
-                viaEdge.fill(-1); viaNode.fill(-1); exact.fill(0);
+                var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
+                viaEdge.fill(-1); viaNode.fill(-1);
                 // The direct connector: the line the reader would walk if the
                 // network were not there at all. It is what every other answer
                 // has to beat, and it is why no case below needs a threshold --
@@ -9200,7 +9207,8 @@ class _PlanMode(MacroElement):
                 // what it crosses, like every connector: over a sound it is
                 // dear, and that is what lets the road round beat it.
                 var plain = priced(graph, from.lon, from.lat, to.lon, to.lat);
-                var heap = new Heap(), i;
+                // Two queues: the floors, and the prices that are exact.
+                var floors = new Heap(), heap = new Heap(), i;
                 // **Seeded at every node at once, from the far end.** That is
                 // the connector layer itself and not a trick: `best[n]` starts
                 // at what it costs to leave the network at n and walk the rest,
@@ -9216,44 +9224,56 @@ class _PlanMode(MacroElement):
                 // before it, so nothing that matters is pruned. Measured on
                 // one 13.6 km leg, routed and redrawn: 157 ms seeding and
                 // exhausting the whole graph, 64 ms bounded. Seeded with the
-                // price over ground, which is a floor on the true one.
+                // price over ground, which is a floor on the true one -- and
+                // into the floors' own queue, not into `best`.
                 best.fill(Infinity);
                 for (i = 0; i < nodes; i += 1) {
                     var leave = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;
                     if (leave >= plain) { continue; }
-                    best[i] = leave;
-                    heap.push(i, leave);
+                    floors.push(i, leave);
                 }
                 // Bounded and thrown for, as every loop over this graph is: a
                 // settled node is never settled twice and every stale entry was
                 // pushed by a relaxation, so the pops cannot exceed one per node
                 // plus one per arc. A defect that runs for ever in a page is
                 // indistinguishable from a page that has hung.
-                // One more push per node than before: a seed re-entered at
-                // its true price.
+                // One pop per floor, one per seed priced, one per arc relaxed.
                 var pops = 0, mostPops = 2 * nodes + 2 * graph.header.edges + 1;
-                while (heap.node.length) {
+                while (floors.node.length || heap.node.length) {
                     pops += 1;
                     if (pops > mostPops) { throw new Error('the search took more than ' + mostPops + ' steps'); }
-                    var taken = heap.pop();
-                    // Everything left in the heap is dearer than walking, and a
-                    // heap answers its cheapest first -- so this is the whole
-                    // of the bound and not a heuristic.
-                    if (taken.cost >= plain) { break; }
-                    if (taken.cost > best[taken.node]) { continue; }
-                    // A node still standing on its own seed is priced for real
-                    // before anything is relaxed from it, so that everything
-                    // relaxed from a settled node is exact too. A node reached
-                    // over an edge instead was relaxed from one that was.
-                    if (viaEdge[taken.node] < 0 && !exact[taken.node]) {
-                        exact[taken.node] = 1;
-                        var truly = priced(graph, graph.nodeLon[taken.node], graph.nodeLat[taken.node], to.lon, to.lat);
-                        if (truly > taken.cost) {
-                            best[taken.node] = truly;
-                            heap.push(taken.node, truly);
-                            continue;
+                    // **The cheaper of the two tops goes first.** A floor is
+                    // never above the price it stands for, so by the time an
+                    // exact price is taken every seed that could undercut it
+                    // has been priced and is in the queue beside it -- which
+                    // is what keeps the exact prices coming out in order.
+                    var floorTop = floors.node.length ? floors.cost[0] : Infinity;
+                    var exactTop = heap.node.length ? heap.cost[0] : Infinity;
+                    // Everything left in either queue is dearer than walking,
+                    // and a heap answers its cheapest first -- so this is the
+                    // whole of the bound and not a heuristic.
+                    if (Math.min(floorTop, exactTop) >= plain) { break; }
+                    if (floorTop <= exactTop) {
+                        var seed = floors.pop();
+                        // A node already reached over the network for no more
+                        // than its floor cannot be undercut by its connector,
+                        // which costs at least the floor -- so the grid is not
+                        // asked. Measured on a 13 km leg: 480 ms with every
+                        // floor priced, 200 ms with these skipped.
+                        if (best[seed.node] <= seed.cost) { continue; }
+                        var truly = priced(graph, graph.nodeLon[seed.node], graph.nodeLat[seed.node], to.lon, to.lat);
+                        // Cheaper than any way in over the network found so
+                        // far, so the connector is this node's way out. A way
+                        // in found later and cheaper still overwrites it, as
+                        // any relaxation does.
+                        if (truly < best[seed.node]) {
+                            best[seed.node] = truly; viaEdge[seed.node] = -1; viaNode[seed.node] = -1;
+                            heap.push(seed.node, truly);
                         }
+                        continue;
                     }
+                    var taken = heap.pop();
+                    if (taken.cost > best[taken.node]) { continue; }
                     for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
                         var edge = work.arc[a];
                         var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
@@ -9264,11 +9284,11 @@ class _PlanMode(MacroElement):
                         }
                     }
                 }
-                // The entry, chosen the same way: every settled node's cost-to-go
-                // is exact by now -- what the search left in the heap is dearer
-                // than `plain` and is never an answer -- and the walk in to it
-                // is priced for real only in the order its floor puts it,
-                // until the next floor is dearer than the best whole found.
+                // The entry, chosen the same way: `best` holds nothing but exact
+                // prices, and what the search left in either queue is dearer
+                // than `plain` and is never an answer -- so the walk in to a
+                // node is priced for real only in the order its floor puts
+                // it, until the next floor is dearer than the best whole found.
                 var entries = new Heap();
                 for (i = 0; i < nodes; i += 1) {
                     if (!isFinite(best[i])) { continue; }

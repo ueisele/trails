@@ -791,9 +791,9 @@ OFF_PATH_FACTOR = 3.0
 #: path, which is a worse crossing bought cheaply; 30, 100 and 300 gave one
 #: answer, 2.0 km of road and 390 m of water where the line across would have
 #: been 960 m. The figure also bounds the search -- everything cheaper than
-#: the priced line is explored -- and the search took 65 ms at 30, 1.8 s at
-#: 100 and 5 s at 300 on the same leg. So thirty: the first figure that gives
-#: the road-and-narrowest answer, at a cost a drag can carry.
+#: the priced line is explored -- and the search took 65 ms at 30, 1.0 s at
+#: 100 and 4.3 s at 300 on the same leg. So thirty: the first figure that
+#: gives the road-and-narrowest answer, at a cost a drag can carry.
 #:
 #: Above ``OFF_PATH_FACTOR``, or water would be no dearer than ground and the
 #: page would be carrying the grid for nothing.

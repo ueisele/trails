@@ -4453,6 +4453,25 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
     planned = page.evaluate("() => window.trailsPlan.state()")
     plan_straight = (planned["straight"] or 0) + (planned["crossed"] or 0)
     on_paths = planned["walked"] - plan_straight
+
+    # **And from far away**, which is where the first version went wrong: a
+    # floor written into `best` refused a settled node's offer and was raised
+    # afterwards, and from 10 km off the leg walked 2.1 km straight where the
+    # road was there. Measured against an eagerly priced search, which
+    # answers the same: 8.5 km on paths, 4.0 km straight of which 390 m are
+    # water -- recorded, so that a search that loses an offer again moves a
+    # figure rather than passing.
+    far_off = {"lat": 65.4000, "lng": 13.0500}
+    for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
+        page.evaluate("() => window.trailsPlan.remove(0)")
+        page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
+        page.wait_for_timeout(200)
+    for where in (far_off, headland):
+        page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", where)
+        page.wait_for_function("() => !window.trailsPlan.busy()", timeout=240_000)
+        page.wait_for_timeout(300)
+    from_afar = page.evaluate("() => window.trailsPlan.state()")
+    afar_straight = (from_afar["straight"] or 0) + (from_afar["crossed"] or 0)
     page.evaluate("() => window.trailsPlan.toggle(false)")
     page.wait_for_timeout(300)
 
@@ -4515,6 +4534,16 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
                 note=f"{planned['walked'] / 1000:.2f} km in all",
             ),
             Reading("and crosses this much water", round((planned["crossed"] or 0) / 1000, 2), 0.39, within=0.005, holds=False),
+            Reading(
+                "from 10 km off, the way is on paths for",
+                round((from_afar["walked"] - afar_straight) / 1000, 1),
+                8.5,
+                within=0.05,
+                holds=False,
+                note=f"{from_afar['walked'] / 1000:.2f} km in all",
+            ),
+            Reading("and straight for", round(afar_straight / 1000, 1), 4.0, within=0.05, holds=False),
+            Reading("crossing this much water", round((from_afar["crossed"] or 0) / 1000, 2), 0.39, within=0.005, holds=False),
         ],
     )
 

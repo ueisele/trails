@@ -5889,7 +5889,7 @@ class TestPlanMode:
         # 157 ms unbounded against 64 ms bounded.
         assert "var leave = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;" in planning
         assert "if (leave >= plain) { continue; }" in planning
-        assert "if (taken.cost >= plain) { break; }" in planning
+        assert "if (Math.min(floorTop, exactTop) >= plain) { break; }" in planning
         # The straight line as one more connector, and what everything else has
         # to beat.
         assert "var plain = priced(graph, from.lon, from.lat, to.lon, to.lat);" in planning
@@ -5927,10 +5927,18 @@ class TestPlanMode:
         ground, which is what every page did before.
 
         **Priced when it is asked for.** Every node is seeded with its price
-        over ground, which is a floor, and priced for real the first time it
-        comes out of the heap on that seed; dearer, it goes back in. That keeps
-        the grid from being asked about 117,000 connectors on every tick of a
-        drag, and the bound and the pruning need nothing more than a floor."""
+        over ground, which is a floor, and priced for real when that floor
+        reaches the top of the queue. That keeps the grid from being asked
+        about 117,000 connectors on every tick of a drag, and the bound and
+        the pruning need nothing more than a floor.
+
+        **And a floor is not a label.** The first version wrote the floor into
+        ``best`` and repriced on pop; measured against an eagerly priced search
+        on seven legs to one headland, three disagreed, one by a straight walk
+        of 2.1 km where the road was there to take. A settled node's offer to
+        a neighbour was refused against the neighbour's floor, the floor was
+        then raised, and the settled node never offered again. So the floors
+        have a queue of their own and ``best`` holds only exact prices."""
         fmap, _ = self.drawn()
         maps.add_plan_mode(fmap, self.planned())
 
@@ -5940,12 +5948,18 @@ class TestPlanMode:
         assert "var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0;" in planning
         assert "if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }" in planning
         assert "return (length - water) * PLAN.offPathFactor + water * PLAN.waterFactor;" in planning
-        # Lazily: a seed is priced for real when it is popped, and re-entered
-        # if that made it dearer.
-        assert "if (viaEdge[taken.node] < 0 && !exact[taken.node]) {" in planning
-        assert "var truly = priced(graph, graph.nodeLon[taken.node], graph.nodeLat[taken.node], to.lon, to.lat);" in planning
-        assert "if (truly > taken.cost) {" in planning
-        assert "heap.push(taken.node, truly);" in planning
+        # Lazily, and in a queue of its own: a floor is priced for real when
+        # it is the cheaper top, and only an exact price is ever a label.
+        assert "var floors = new Heap(), heap = new Heap(), i;" in planning
+        assert "floors.push(i, leave);" in planning
+        assert "best[i] = leave;" not in planning
+        assert "if (Math.min(floorTop, exactTop) >= plain) { break; }" in planning
+        assert "if (floorTop <= exactTop) {" in planning
+        # A node already reached over the network for no more than its floor
+        # is not priced: its connector costs at least the floor.
+        assert "if (best[seed.node] <= seed.cost) { continue; }" in planning
+        assert "var truly = priced(graph, graph.nodeLon[seed.node], graph.nodeLat[seed.node], to.lon, to.lat);" in planning
+        assert "if (truly < best[seed.node]) {" in planning
         # And the entry side walks its floors in order and stops at the first
         # floor dearer than the best whole.
         assert "var entries = new Heap();" in planning
