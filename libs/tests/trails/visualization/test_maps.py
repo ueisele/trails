@@ -5682,6 +5682,69 @@ class TestPlanMode:
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "return resolve(graph, from, to, mayAsk, mayAsk); }" in planning
 
+    def test_a_tapped_goal_takes_the_line_under_the_finger_too(self):
+        """The rule the plan follows, asked of the goal — and it is one rule.
+
+        A finger's width on the screen is the finest a reader can point at the
+        zoom they are looking at, so a line inside it is the line they were
+        pointing at and taking it as one is not a guess. Zooming in is how they
+        say otherwise: 48 m of ground at z14, 12 m at z16, 3 m at z18, and the
+        tiles here go to 18.
+
+        **Third in a ladder of three.** A named thing within ``namedM`` wins,
+        because a hut is a place and not a position; then a line within a
+        finger; then the tap as it fell.
+
+        **And nothing that is not a tap snaps.** A goal taken from a place's
+        popup arrives already named — the reader pressed a button on something
+        they were reading, and a place moved on to the path beside it is no
+        longer that place. One restored from the last visit was snapped when it
+        was set. A file is read under ``snapM`` or not at all, which is a
+        question about the ground rather than about a screen.
+
+        The graph is asked, so the answer lands a microtask after the tap rather
+        than in it; where it never arrives the tap stands, because a goal set in
+        a page that cannot route is still a goal."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function onTheLine(lat, lon, then) {" in planning
+        assert "var at = snapped(graph, lat, lon, fingerReach(lat));" in planning
+        # The tap stands where no graph ever arrives.
+        assert "}, function () { if (!asked) { then(lat, lon); } });" in planning
+        # Both take it, and only when told the position came off a finger.
+        assert "function setGoal(lat, lon, name, tapped) {" in planning
+        assert "function addStop(lat, lon, name, tapped) {" in planning
+        assert "onTheLine(lat, lon, function (at, on) { setGoal(at, on, name); });" in planning
+        assert "onTheLine(lat, lon, function (at, on) { addStop(at, on, name); });" in planning
+
+    def test_one_walker_and_one_sum_for_two_routes(self):
+        """The plan and the goal share everything that decides an answer — the
+        router, the connector layer, the composing, the drawing — and kept a
+        copy each of two small pieces of geometry that decide nothing.
+
+        The triple loop over a list of legs was written twice and differed in
+        one expression: what a leg still being worked out counts as. The gap
+        from a position to a segment was written *three* times, two of them
+        character for character the same. Three copies of one piece of
+        arithmetic is three places for it to stop agreeing, and the page has
+        found that failure three times in other guises.
+
+        (A fourth copy stands in the position mark, which is its own component
+        with its own closure and reaches none of this.)"""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function segmentsOf(list, over, visit) {" in planning
+        assert "segmentsOf(legs, function (leg) { return straightAcross(leg.from, leg.to); }, visit);" in planning
+        assert "segmentsOf(goalLegs, function () { return []; }, visit);" in planning
+        assert "return nearSegment(lat, lon, cosine, aLat, aLon, bLat, bLon).away;" in planning
+        assert "return awayFromLine(lat, lon, cosine, goalShape.lat[at], goalShape.lon[at]," in planning
+        # One sum, and it is the one that hands back the foot as well.
+        assert planning.count("var t = span > 0 ? -(ax * dx + ay * dy) / span : 0;") == 1
+
     def test_a_way_round_has_to_beat_walking(self):
         """A leg between two waypoints that both sit on the network used to take
         whatever the router found, however long, because nothing compared it
@@ -5937,7 +6000,7 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "goalVia = [];" in planning.split("function setGoal(lat, lon, name) {")[1]
+        assert "goalVia = [];" in planning.split("function setGoal(lat, lon, name, tapped) {")[1]
         assert "via: goalVia.map(function (stop) {" in planning
         # Restored after the goal, because setting one is what clears them.
         assert "(said.via || []).forEach(function (stop) {" in planning

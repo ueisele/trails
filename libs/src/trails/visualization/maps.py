@@ -12321,9 +12321,17 @@ class _PlanMode(MacroElement):
             // time and in order, and every segment says which leg it came from
             // -- which is what lets a caller ask for *the next waypoint ahead*
             // without knowing anything else about how a route is put together.
-            function eachSegment(visit) {
-                for (var i = 0; i < legs.length; i += 1) {
-                    var parts = legs[i].parts || straightAcross(legs[i].from, legs[i].to);
+            // **Every segment of a list of legs, leg by leg, in the order they
+            // are walked** -- with the leg's index, because which leg a segment
+            // belongs to is what says which place lies at the end of it, and the
+            // composed shape has that boundary nowhere in it.
+            //
+            // One walker and two callers. The plan and the goal kept a copy each
+            // of this triple loop, differing in one expression: what a leg still
+            // being worked out counts as. `over` is that expression.
+            function segmentsOf(list, over, visit) {
+                for (var i = 0; i < list.length; i += 1) {
+                    var parts = list[i].parts || over(list[i]);
                     for (var p = 0; p < parts.length; p += 1) {
                         var part = parts[p];
                         for (var v = 0; v + 1 < part.lon.length; v += 1) {
@@ -12331,6 +12339,13 @@ class _PlanMode(MacroElement):
                         }
                     }
                 }
+            }
+
+            //: A leg of the plan that has not settled is walked as the straight
+            //: line it is drawn as, so a point can be put into one before it is
+            //: worked out.
+            function eachSegment(visit) {
+                segmentsOf(legs, function (leg) { return straightAcross(leg.from, leg.to); }, visit);
             }
 
             // The place at one end of a leg. **Every waypoint is a goal**, and
@@ -14155,15 +14170,8 @@ class _PlanMode(MacroElement):
             //: this page measures with. `onRoute` does the same sum over the
             //: plan's legs and answers a different question with it.
             function goalNear(lat, lon, cosine, at) {
-                var aLat = goalShape.lat[at], aLon = goalShape.lon[at];
-                var bLat = goalShape.lat[at + 1], bLon = goalShape.lon[at + 1];
-                var ax = (aLon - lon) * cosine, ay = aLat - lat;
-                var dx = (bLon - aLon) * cosine, dy = bLat - aLat;
-                var span = dx * dx + dy * dy;
-                var t = span > 0 ? -(ax * dx + ay * dy) / span : 0;
-                t = t < 0 ? 0 : (t > 1 ? 1 : t);
-                var cx = ax + t * dx, cy = ay + t * dy;
-                return Math.sqrt(cx * cx + cy * cy) * 111320;
+                return awayFromLine(lat, lon, cosine, goalShape.lat[at], goalShape.lon[at],
+                                    goalShape.lat[at + 1], goalShape.lon[at + 1]);
             }
 
             function goalAgain(from) {
@@ -14180,11 +14188,51 @@ class _PlanMode(MacroElement):
                 return said ? {lat: said.lat, lon: said.lon} : null;
             }
 
+            // **A tap snaps, and nothing that is not a tap does.**
+            //
+            // The reach is a finger's width on the screen, which is the finest
+            // a reader can point at the zoom they are looking at -- so a line
+            // inside it is the line they were pointing at, and taking it as one
+            // is not a guess. Zooming in is how they say otherwise: 48 m of
+            // ground at z14, 12 m at z16, 3 m at z18, and the tiles here go to
+            // 18. A hut beside a path is a choice a reader can make by
+            // pinching, and one they cannot make while the two are eight pixels
+            // apart.
+            //
+            // The same rule the plan's waypoints follow, and it is the same
+            // `snapped` and the same `fingerReach` -- the goal lives in this
+            // closure exactly so that there is one of each.
+            //
+            // **Third in a ladder of three**, not first. A named thing within
+            // `namedM` wins, because a hut is a place and not a position; then
+            // a line within a finger; then the tap as it fell. And a goal taken
+            // from a place's popup is not a finger on the map at all -- the
+            // reader pressed a button on something they were reading -- so it
+            // arrives already named and snaps to nothing, as does one restored
+            // from the last visit, which was snapped when it was set.
+            //
+            // Asked of the graph, so it lands a microtask after the tap rather
+            // than in it. Where the graph never arrives the tap stands: a goal
+            // set in a page that cannot route is still a goal, and this is the
+            // only part of setting one that needs a graph.
+            function onTheLine(lat, lon, then) {
+                var asked = false;
+                withGraph(function (graph) {
+                    var at = snapped(graph, lat, lon, fingerReach(lat));
+                    asked = true;
+                    then(at.lat, at.lon);
+                }, function () { if (!asked) { then(lat, lon); } });
+            }
+
             // **A new goal is a new journey, so the stops go with the old
             // one.** They were put down on the way to somewhere; kept across a
             // change of destination they would be a detour nobody asked for,
             // and the reader would have to find and remove each of them.
-            function setGoal(lat, lon, name) {
+            function setGoal(lat, lon, name, tapped) {
+                if (tapped) {
+                    onTheLine(lat, lon, function (at, on) { setGoal(at, on, name); });
+                    return;
+                }
                 goalAt = {lat: lat, lon: lon, name: name || null};
                 goalVia = [];
                 goalFresh = true;
@@ -14203,8 +14251,12 @@ class _PlanMode(MacroElement):
             // rather than something to be asked: the leg it lands nearest to is
             // the leg it belongs in. No reach and no threshold -- every point
             // has a nearest leg, which is what makes the answer always defined.
-            function addStop(lat, lon, name) {
+            function addStop(lat, lon, name, tapped) {
                 if (!goalAt) { return false; }
+                if (tapped) {
+                    onTheLine(lat, lon, function (at, on) { addStop(at, on, name); });
+                    return true;
+                }
                 goalVia.splice(legNearest(lat, lon), 0, {lat: lat, lon: lon, name: name || null});
                 goalFresh = true;
                 goalToken = null;
@@ -14237,15 +14289,12 @@ class _PlanMode(MacroElement):
             }
 
             //: The gap from a position to one segment, flat, in the metre this
-            //: page measures with.
+            //: page measures with. **The same sum `nearSegment` does**, which
+            //: hands back the foot of the perpendicular as well -- only putting
+            //: a point into a leg needs that, and three copies of one piece of
+            //: arithmetic is three places for it to stop agreeing.
             function awayFromLine(lat, lon, cosine, aLat, aLon, bLat, bLon) {
-                var ax = (aLon - lon) * cosine, ay = aLat - lat;
-                var dx = (bLon - aLon) * cosine, dy = bLat - aLat;
-                var span = dx * dx + dy * dy;
-                var t = span > 0 ? -(ax * dx + ay * dy) / span : 0;
-                t = t < 0 ? 0 : (t > 1 ? 1 : t);
-                var cx = ax + t * dx, cy = ay + t * dy;
-                return Math.sqrt(cx * cx + cy * cy) * 111320;
+                return nearSegment(lat, lon, cosine, aLat, aLon, bLat, bLon).away;
             }
 
             //: Which stop a position is standing on, or -1. The same reach a tap
@@ -14391,16 +14440,12 @@ class _PlanMode(MacroElement):
             // rather than over the composed shape, because which leg a segment
             // belongs to is what says which stop lies at the end of it. The
             // composed shape has that boundary nowhere in it.
+            //: And a leg of the way to a goal is never unsettled for long
+            //: enough to matter: one that could not be worked out is drawn plain
+            //: rather than handed back empty, so the fallback here is the empty
+            //: list it used to need.
             function goalSegments(visit) {
-                for (var at = 0; at < goalLegs.length; at += 1) {
-                    var parts = goalLegs[at].parts || [];
-                    for (var p = 0; p < parts.length; p += 1) {
-                        var part = parts[p];
-                        for (var v = 0; v + 1 < part.lon.length; v += 1) {
-                            visit(part.lat[v], part.lon[v], part.lat[v + 1], part.lon[v + 1], at);
-                        }
-                    }
-                }
+                segmentsOf(goalLegs, function () { return []; }, visit);
             }
 
             //: And what lies at the end of one: leg *i* ends at stop *i*, and
@@ -19501,8 +19546,12 @@ class _Chrome(MacroElement):
                     }
                     var called = (window.trailsPlan && window.trailsPlan.named)
                         ? window.trailsPlan.named(where.lat, where.lng) : null;
+                    // Named where something is named within reach and
+                    // standing where it stands; otherwise the tap, which the
+                    // goal takes as the line under it where there is one within
+                    // a finger. A named thing does not snap: it is a place.
                     if (called) { window.trailsGoal.addStop(called.lat, called.lon, called.name); }
-                    else { window.trailsGoal.addStop(where.lat, where.lng, null); }
+                    else { window.trailsGoal.addStop(where.lat, where.lng, null, true); }
                     askAiming(false);
                     return;
                 }
@@ -19514,7 +19563,7 @@ class _Chrome(MacroElement):
                 var named = (window.trailsPlan && window.trailsPlan.named)
                     ? window.trailsPlan.named(where.lat, where.lng) : null;
                 if (named) { window.trailsGoal.set(named.lat, named.lon, named.name); }
-                else { window.trailsGoal.set(where.lat, where.lng, null); }
+                else { window.trailsGoal.set(where.lat, where.lng, null, true); }
                 askAiming(false);
             }
 
