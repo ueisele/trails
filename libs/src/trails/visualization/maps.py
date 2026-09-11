@@ -5573,7 +5573,9 @@ class _ProfilePanel(MacroElement):
                         // armed and the row says what for.
                         (at === moving ? 'background:color-mix(in srgb, var(--trails-accent) 14%, transparent)' : '');
                     var number = document.createElement('span');
-                    number.textContent = String(at + 1);
+                    // The goal is the ring on the map and the ring here, not a
+                    // number one past the last stop.
+                    number.textContent = last ? '\u25ce' : String(at + 1);
                     number.style.cssText = 'flex:none;min-width:14px;text-align:right;font-weight:600;color:#00a152';
                     var says = document.createElement('span');
                     says.className = 'trails-profile-stop-said';
@@ -7493,14 +7495,43 @@ class _ProfilePanel(MacroElement):
                         ring.setAttribute('stroke-width', '1');
                         marks.appendChild(ring);
                     }
+                    // **Drawn as the map draws the same place.** A plan's points
+                    // are numbered from its first, and so were these -- which
+                    // for the way to a goal put a 1 on where the reader stands,
+                    // a place the map marks with no number at all, and a 2 on
+                    // the stop the map calls 1. Reported from the phone. The
+                    // series now says what each station is: the start is a
+                    // dot, the goal is the ring-in-a-ring the map's mark is,
+                    // and only the stops between carry the numbers the map
+                    // gives them.
+                    var mark = selected && selected.marks ? selected.marks[index] : null;
+                    var kind = mark && mark.kind ? mark.kind : 'numbered';
+                    if (kind === 'start') {
+                        var dot = document.createElementNS(SVG, 'circle');
+                        dot.setAttribute('cx', here); dot.setAttribute('cy', level);
+                        dot.setAttribute('r', String(STATION_R - 3));
+                        dot.setAttribute('fill', ink);
+                        marks.appendChild(dot);
+                        return;
+                    }
                     var disc = document.createElementNS(SVG, 'circle');
                     disc.setAttribute('cx', here); disc.setAttribute('cy', level);
                     disc.setAttribute('r', String(STATION_R));
                     disc.setAttribute('fill', PAPER);
                     disc.setAttribute('stroke', ink);
-                    disc.setAttribute('stroke-width', '1.5');
+                    disc.setAttribute('stroke-width', kind === 'goal' ? '2.5' : '1.5');
                     marks.appendChild(disc);
-                    var number = text(here, level + 3, String(index + 1), 'middle');
+                    if (kind === 'goal') {
+                        var target = document.createElementNS(SVG, 'circle');
+                        target.setAttribute('cx', here); target.setAttribute('cy', level);
+                        target.setAttribute('r', String(STATION_R + 3));
+                        target.setAttribute('fill', 'none');
+                        target.setAttribute('stroke', ink);
+                        target.setAttribute('stroke-width', '1.5');
+                        marks.appendChild(target);
+                        return;
+                    }
+                    var number = text(here, level + 3, mark && mark.label ? mark.label : String(index + 1), 'middle');
                     number.setAttribute('font-size', '9');
                     number.setAttribute('font-weight', 'bold');
                     number.setAttribute('fill', ink);
@@ -8640,6 +8671,10 @@ class _ProfilePanel(MacroElement):
                         // point the same; what a point *means* belongs to
                         // whatever composed the series.
                         stages: spec.stages || null,
+                        // What each station is, where the series says: the
+                        // way to a goal starts where the reader stands and ends
+                        // at the goal, and neither is a numbered stop.
+                        marks: spec.marks || null,
                         // **Whose composed route this is.** Two of them can be
                         // offered at once -- the plan and the way to a goal --
                         // and the row at the foot has to light the right chip.
@@ -15051,7 +15086,13 @@ class _PlanMode(MacroElement):
                 var byStops = goalVia.length ? ' \\u00b7 by ' + goalVia.length + (goalVia.length === 1 ? ' stop' : ' stops') : '';
                 showing.series({label: 'To ' + (goalAt.name || 'the goal') + byStops,
                                 figure: figuresOf(goalShape), shape: goalShape,
-                                told: told(goalShape), goal: true});
+                                told: told(goalShape), goal: true,
+                                // The stations as the map marks them: a dot
+                                // where the reader stands, the stops by their
+                                // numbers, the goal as its ring.
+                                marks: [{kind: 'start'}].concat(goalVia.map(function (stop, at) {
+                                    return {kind: 'numbered', label: String(at + 1)};
+                                }), [{kind: 'goal'}])});
                 return true;
             }
 

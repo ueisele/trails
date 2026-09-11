@@ -4199,6 +4199,14 @@ THE_GOAL = """() => {
               return (line && line.style.display !== 'none') ? line.textContent : null; })(),
           armed: window.trailsChrome.state().aiming,
           lamp: window.trailsChrome.state().goal,
+          // The stations on the profile, as drawn: a dot for where the reader
+          // stands, the stops' numbers, the goal's ring -- the map's marks.
+          profileMarks: (function () { const chart = document.querySelector('.trails-profile-chart');
+              if (!chart) { return null; }
+              const circles = [...chart.querySelectorAll('circle')].map(c => +c.getAttribute('r'));
+              const bold = t => t.getAttribute('font-size') === '9' && t.getAttribute('font-weight') === 'bold';
+              const numbers = [...chart.querySelectorAll('text')].filter(bold).map(t => t.textContent);
+              return {dots: circles.filter(r => r === 4).length, rings: circles.filter(r => r === 10).length, numbers: numbers}; })(),
           // The switch on the goal's page, and the price it turns, read
           // from each side: the knob must say what the routing does.
           paths: (function () { const sw = document.querySelector('.trails-profile-goal-paths');
@@ -5301,6 +5309,17 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 (False, False, True, True),
             ),
             Reading("and the next routing does not put it back", (stayed_away["mine"], stayed_away["row"]), (False, False)),
+            Reading(
+                "the profile marks its stations as the map does: a dot, the stop's number, the goal's ring",
+                (drop_offered["profileMarks"] or {}).get("dots"),
+                1,
+                note=str(drop_offered["profileMarks"]),
+            ),
+            Reading(
+                "with no number on the start and none on the goal",
+                ((drop_offered["profileMarks"] or {}).get("numbers"), (drop_offered["profileMarks"] or {}).get("rings")),
+                (["1"], 1),
+            ),
             Reading(
                 "the panel's button is a struck flag that drops the goal",
                 (drop_offered["mine"], drop_offered["hide"]["title"], drop_offered["hide"]["struck"], goal_rows),

@@ -4142,6 +4142,25 @@ class TestProfilePanel:
         # And nowhere else: not a tool, not a lamp on the rail.
         assert "key: 'paths'" not in html
 
+    def test_the_goal_profile_marks_its_stations_as_the_map_does(self):
+        """Reported from the phone: the profile put a 1 on where the reader
+        stands, a place the map marks with no number, and a 2 on the stop the
+        map calls 1. The series says what each station is now -- start, stop,
+        goal -- and the profile draws a dot, the numbers the map gives, and the
+        map's own ring. The list on the goal's page shows the ring too."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "marks: spec.marks || null," in html
+        drawn = html.split("var mark = selected && selected.marks ? selected.marks[index] : null;")[1].split("});")[0]
+        assert "if (kind === 'start') {" in drawn
+        assert "dot.setAttribute('r', String(STATION_R - 3));" in drawn
+        assert "target.setAttribute('r', String(STATION_R + 3));" in drawn
+        assert "mark && mark.label ? mark.label : String(index + 1)" in drawn
+        # Rendered, because this region of the template writes the character.
+        assert "number.textContent = last ? '\u25ce' : String(at + 1);" in html
+
     def test_a_goal_has_figures_of_its_own(self):
         """Reported from the phone as *the info is from another way*, and it
         was. The row under the drawing — the point count, the licences, the
@@ -6308,6 +6327,19 @@ class TestPlanMode:
         assert "withGraph(function (graph) { relink(graph, true); }, function () { refresh(); });" in switching
         assert "if (goalAt) { goalToken = null; routeToGoal(goalHere()); }" in switching
         assert "stayOnPaths: stayOnPaths," in planning
+
+    def test_the_way_to_a_goal_says_what_each_station_is(self):
+        """A dot where the reader stands, the stops by the numbers the map's
+        marks carry, the goal as its ring: the profile is drawn from this and
+        cannot count the start as a stop again."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        series = planning.split("showing.series({label: 'To ' + (goalAt.name || 'the goal') + byStops,")[1].split("return true;")[0]
+        assert "marks: [{kind: 'start'}].concat(goalVia.map(function (stop, at) {" in series
+        assert "return {kind: 'numbered', label: String(at + 1)};" in series
+        assert "}), [{kind: 'goal'}])});" in series
 
     def test_a_new_goal_is_a_new_journey(self):
         """The stops were put down on the way to somewhere. Kept across a change
