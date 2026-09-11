@@ -4882,10 +4882,10 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             # reader to stop reading it.
             Reading("arming for a goal says nothing", armed["notice"], None),
             Reading("and setting one says nothing either", direct["notice"], None),
-            # The one hint left, and it earns its place: no mark on the map says
-            # that a tap on a stop takes that stop away.
-            Reading("arming for a stop says the one thing no mark says", "take it away" in (stop_hint or ""), True, note=str(stop_hint)),
-            Reading("and it goes once the stop is down", stopped["notice"], None),
+            # Nor does arming for a stop, any more: its hint stood across the
+            # ground the tap was meant for. Reported from the phone.
+            Reading("arming for a stop says nothing", stop_hint, None),
+            Reading("and nothing once the stop is down", stopped["notice"], None),
             Reading("the mark aims at it", (aimed.get("target"), aimed.get("goal") is not None), ("the goal", True)),
             Reading("on the bearing to it", turned, 0, within=0.6, note=f"{turned:.2f} deg off"),
             Reading(

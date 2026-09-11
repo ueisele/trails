@@ -7716,11 +7716,13 @@ class TestWhereTheReaderIs:
         html = fmap.get_root().render()
         assert "if (window.trailsPlan && window.trailsPlan.dress) { window.trailsPlan.dress(); }" in html
 
-    def test_the_switch_says_what_the_next_tap_will_do(self):
+    def test_the_switch_knows_what_the_next_tap_will_do_and_says_nothing(self):
         """A goal and a stop on the way to it are set by the same gesture and are
         not the same act, so the switch carries which one it is armed for rather
-        than being a flag — and the notice over the map says it, because a
-        crosshair cannot.
+        than being a flag — and the row at the foot lights the button that
+        armed it. Nothing is said over the map: the stop's hint was the last
+        notice standing there, and it stood across the ground the tap was
+        meant for. Reported from the phone, and it went.
 
         The stop's own button is in the row at the foot and not in the rail: the
         rail arms the one thing a reader does with nothing set, and a stop is
@@ -7730,15 +7732,11 @@ class TestWhereTheReaderIs:
 
         html = fmap.get_root().render()
         assert "var wanted = want === 'stop' ? 'stop' :" in html
-        # **The one hint left, and it earns its place.** A tap on a stop takes
-        # that stop away, which no mark on the map says: arming for a goal has
-        # one meaning and arming for a stop has two, and that is the whole of
-        # the difference between the two switches.
-        assert "Tap the map to add a stop" in html
-        # And it is this switch's own notice that it clears, never somebody
-        # else's: the position and the picker say things in the same line.
-        assert "function sayAiming(text) {" in html
-        assert "if (!aimNotice) { return; }" in html
+        # No notice and nothing left that could raise one: the code that said
+        # the hint is gone, not just the words.
+        assert "'Tap the map to add a stop" not in html
+        assert "sayAiming" not in html
+        assert "aimNotice" not in html
         assert "if (aiming === 'stop') {" in html
         assert "window.trailsGoal.dropStop(standing);" in html
         assert "window.trailsGoal.addStop(called.lat, called.lon, called.name);" in html
