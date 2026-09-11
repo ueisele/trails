@@ -16256,6 +16256,18 @@ class _OfflinePanel(MacroElement):
                     }
                     return whenInFront().then(function () {
                         away = putAway;
+                        // **The screen is asked for again here, and not only on
+                        // `visibilitychange`.** The browser drops the lock every
+                        // time the page is hidden and does not hand it back, and
+                        // whether that event fires for a standalone home-screen
+                        // app on iOS is written down in this file as an open
+                        // question that has never been measured. It is the last
+                        // thing that rode on the answer: the run itself resumes
+                        // on the poll behind `whenInFront`, so hanging the lock
+                        // on the same return is what makes the question stop
+                        // mattering. A no-op while the lock is held, which is
+                        // every tile but the first after a glance elsewhere.
+                        keepAwake();
                         return fetch(url, {cache: 'reload', mode: 'cors'});
                     }).then(function (answer) {
                         if (answer && answer.ok) { return answer; }

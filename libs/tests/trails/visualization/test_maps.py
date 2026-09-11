@@ -917,6 +917,35 @@ class TestOfflinePanel:
         # tab lives.
         assert "letSleep();" in html
 
+    def test_the_screen_is_asked_for_again_when_the_run_comes_back(self):
+        """Whether ``visibilitychange`` fires for a standalone home-screen app on
+        iOS has been an open question in this project since the offline side was
+        built, and a Playwright Firefox on Linux cannot answer it.
+
+        Two things rode on the answer and now neither does. The run itself
+        already resumed on the one-second poll behind ``whenInFront``; the wake
+        lock did not. The browser drops the lock every time the page is hidden
+        and does not hand it back, so on a device where that event never fires,
+        one glance at a message left the rest of a long download to a screen
+        free to sleep — and a sleeping screen parks the run, because nothing is
+        fetched while the app is away.
+
+        Asking for the screen again where the run resumes is what makes the
+        question stop mattering. A no-op while the lock is held, which is every
+        tile but the first after a glance elsewhere.
+
+        Settled on the device on 2026-09-11: the icon is the cairn, and the lock
+        is granted and stays held for the length of a download. What that does
+        not say is what happens across a switch to another app, which is exactly
+        what this removes the need to know."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "keepAwake();\n                        return fetch(url, {cache: 'reload', mode: 'cors'});" in html
+        # The poll behind the event, which is what the run already leaned on.
+        assert "var poll = window.setInterval(go, 1000);" in html
+
     def test_holding_the_screen_is_optional_in_every_branch(self):
         """The API is absent on older iOS and refused off a secure origin. A run
         without it wants babysitting; a run that threw on the way to asking for
