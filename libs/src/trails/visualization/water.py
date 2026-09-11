@@ -1,0 +1,165 @@
+"""Where the water is, as a grid of bits the page can ask in constant time.
+
+**Why a grid and not the outlines.** The page prices a straight walk by what it
+crosses, and it prices thousands of them in one search: every node of the
+graph is joined to each end of a leg by a straight connector, and a connector
+over a fjord has to cost more than one over ground or the way to a headland
+runs across the water in front of it. Outlines would answer that too, but a
+connector tested against the coast is a loop over every vertex of the sea, and
+the sea here has 47,000 of them at ten metres. A grid answers with one
+subtraction, one division and one bit, and a 1.2 km connector asks it
+forty-eight times.
+
+**What it costs.** Measured for the Lomsdal-Visten build, 81 by 90 km: at 25 m
+a cell, 3,230 by 3,589 cells, 1.45 MB of bits in memory and 146 kB gzipped into
+the page, three per cent of the page. Sea and lakes both, because a straight
+leg across a tarn is as much a fiction as one across a fjord. The outlines
+simplified to ten metres would have been 5.5 MB in memory and 0.94 MB in the
+page, and slower to ask.
+
+**What it is for and what it is not for.** The bits decide a *price*, and a
+price is allowed to be a cell out: a connector that touches one cell of sea
+because the shore is 25 m from where the reader tapped costs one cell's worth
+more than it should, and every connector from that point pays the same,
+so nothing between them is decided by it. Nothing is drawn from the grid. What
+a straight leg shows as water on the profile still comes from the height
+service, which classifies each sample by what it is standing on.
+
+The cells are laid out in degrees rather than metres, so that the page can ask
+about a longitude and a latitude without projecting either. A cell is
+``cell_m`` tall everywhere and ``cell_m`` wide at the middle latitude of the
+box, a shade wider at its southern edge and narrower at its northern one -- a
+per cent across a park, and a price does not notice.
+"""
+
+import base64
+import gzip
+import math
+from typing import Any
+
+import geopandas as gpd
+import numpy as np
+import shapely
+
+#: Metres in a degree of latitude, and of longitude at the equator. The same
+#: figure the page measures its snapping and matching reaches in.
+METRES_PER_DEGREE = 111_320.0
+
+#: Everything a mask entry in the header has to carry before the page may use
+#: it. ``west``, ``south``, ``dLon`` and ``dLat`` place the grid and size a
+#: cell; ``cols`` and ``rows`` bound it; ``cellM`` is the cell's height in
+#: metres, which is the step a connector is sampled at; ``bits`` is the grid,
+#: row-major from the south-west, eight cells to a byte with the westernmost
+#: in the high bit, gzipped and base64-encoded; and ``set`` is how many of the
+#: bits are on, which is what lets the page say it inflated the grid it was
+#: sent and not some of it.
+WATER_FIELDS = ("west", "south", "dLon", "dLat", "cols", "rows", "cellM", "bits", "set")
+
+#: The CRS the grid is laid out in, which is the one the page asks in.
+GRID_CRS = "EPSG:4326"
+
+
+def water_mask(water: gpd.GeoDataFrame, bounds: tuple[float, float, float, float], cell_m: float = 25.0) -> dict[str, Any]:
+    """Rasterise the water into the grid the page carries.
+
+    Args:
+        water: The sea and the lakes as outlines, in any CRS
+        bounds: ``(west, south, east, north)`` in degrees, the box to cover.
+            Ground outside it answers *not water*, so the box has to reach as
+            far as a leg may be laid.
+        cell_m: The cell's height in metres, and its width at the middle
+            latitude
+
+    Returns:
+        The header entry, with every field of :data:`WATER_FIELDS`
+
+    Raises:
+        ValueError: If the box is empty or the cell is not a positive size
+    """
+    west, south, east, north = (float(value) for value in bounds)
+    if not east > west or not north > south:
+        raise ValueError(f"the box ({west}, {south}, {east}, {north}) has no area to cover")
+    if not cell_m > 0:
+        raise ValueError(f"a cell has to be a positive size, not {cell_m} m")
+
+    d_lat = cell_m / METRES_PER_DEGREE
+    d_lon = cell_m / (METRES_PER_DEGREE * math.cos(math.radians((south + north) / 2)))
+    cols = _cells(east - west, d_lon)
+    rows = _cells(north - south, d_lat)
+    mask = np.zeros((rows, cols), dtype=bool)
+
+    # Each outline is asked only about the cells under its own box. The sea
+    # comes in pieces the size of a municipality and each piece asks about a
+    # few million cells; a tarn asks about a dozen. Cell centres, so that a
+    # cell is water when its middle is, which is the reading the page gives
+    # back for a position inside it.
+    for geometry in water.to_crs(GRID_CRS).geometry:
+        if geometry is None or geometry.is_empty:
+            continue
+        min_x, min_y, max_x, max_y = geometry.bounds
+        first_col, last_col = max(0, math.floor((min_x - west) / d_lon)), min(cols, math.ceil((max_x - west) / d_lon))
+        first_row, last_row = max(0, math.floor((min_y - south) / d_lat)), min(rows, math.ceil((max_y - south) / d_lat))
+        if last_col <= first_col or last_row <= first_row:
+            continue
+        xs = west + (np.arange(first_col, last_col) + 0.5) * d_lon
+        ys = south + (np.arange(first_row, last_row) + 0.5) * d_lat
+        grid_x, grid_y = np.meshgrid(xs, ys)
+        shapely.prepare(geometry)
+        inside = shapely.contains_xy(geometry, grid_x.ravel(), grid_y.ravel()).reshape(last_row - first_row, last_col - first_col)
+        mask[first_row:last_row, first_col:last_col] |= inside
+
+    packed = np.packbits(mask, axis=1).tobytes()
+    # A fixed timestamp, for the same reason the graph's stream has one: two
+    # builds of the same ground produce the same page.
+    encoded = base64.b64encode(gzip.compress(packed, compresslevel=9, mtime=0)).decode("ascii")
+    return {
+        "west": west,
+        "south": south,
+        "dLon": d_lon,
+        "dLat": d_lat,
+        "cols": cols,
+        "rows": rows,
+        "cellM": float(cell_m),
+        "bits": encoded,
+        "set": int(mask.sum()),
+    }
+
+
+def _cells(span: float, size: float) -> int:
+    """Count the cells a span needs, without a floating-point hair adding one.
+
+    Args:
+        span: Degrees to cover
+        size: Degrees per cell
+
+    Returns:
+        Enough cells to cover the span, and no more: a box that is exactly four
+        cells wide comes out at four, not five
+    """
+    return max(1, math.ceil(span / size - 1e-9))
+
+
+def check_water(mask: dict[str, Any]) -> dict[str, Any]:
+    """Refuse a mask entry the page could not use.
+
+    Args:
+        mask: What :func:`water_mask` produced, or what claims to be
+
+    Returns:
+        The entry, unchanged
+
+    Raises:
+        ValueError: If it is short of any of :data:`WATER_FIELDS`, or if its
+            bits are not the size its rows and columns say. Either would make
+            the page price every connector as ground, quietly, which is exactly
+            the answer this grid exists to stop.
+    """
+    missing = sorted(set(WATER_FIELDS) - set(mask))
+    if missing:
+        raise ValueError(f"the water mask is short of {', '.join(missing)}")
+    rows, cols = int(mask["rows"]), int(mask["cols"])
+    packed = gzip.decompress(base64.b64decode(mask["bits"]))
+    stride = (cols + 7) // 8
+    if len(packed) != rows * stride:
+        raise ValueError(f"the water mask says {rows} rows of {cols} cells, which is {rows * stride} bytes, and carries {len(packed)}")
+    return mask

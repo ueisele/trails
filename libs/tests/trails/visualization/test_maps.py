@@ -4160,6 +4160,10 @@ class TestPlanMode:
             # line carries, or a route would rather cross a bog than take a
             # surveyed line.
             "offPathFactor": 3.0,
+            # And what a metre of it costs where the graph's water grid says
+            # it is sea or lake: dear enough that a road round a sound beats
+            # a dotted line across it.
+            "waterFactor": 30.0,
             "crossingKind": "ferry",
             "connectorKind": "bridge",
             "touchedM": 100.0,
@@ -5823,8 +5827,12 @@ class TestPlanMode:
         park — it is the answer to a question nobody asked.
 
         The same comparison the connector layer makes and in the same metres, so
-        a leg here can never be more than ``offPathFactor`` times the line it
-        could have flown either.
+        a leg here can never be dearer than the straight line's price either --
+        ``offPathFactor`` times the line it could have flown, over ground.
+        **Priced by what it crosses**, like every connector: two waypoints on
+        paths either side of a sound would otherwise lose the road round it to
+        a dotted line over the water, because the road is more than three
+        times the line.
 
         **Except where there is nothing to draw instead.** A leg longer than
         ``maxStraightM`` cannot be drawn straight at all — it is refused for its
@@ -5834,10 +5842,10 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "if (found && worthRouting(from, to, found.cost)) {" in planning
-        assert "function worthRouting(from, to, cost) {" in planning
+        assert "if (found && worthRouting(graph, from, to, found.cost)) {" in planning
+        assert "function worthRouting(graph, from, to, cost) {" in planning
         assert "if (flown > PLAN.maxStraightM) { return true; }" in planning
-        assert "return cost <= flown * PLAN.offPathFactor;" in planning
+        assert "return cost <= priced(graph, from.lon, from.lat, to.lon, to.lat);" in planning
 
     def test_a_point_off_the_network_is_joined_to_it_not_moved_on_to_it(self):
         """Reported from the phone with a screenshot: with several stops set,
@@ -5884,11 +5892,13 @@ class TestPlanMode:
         assert "if (taken.cost >= plain) { break; }" in planning
         # The straight line as one more connector, and what everything else has
         # to beat.
-        assert "var plain = far(from.lon, from.lat, to.lon, to.lat) * off;" in planning
+        assert "var plain = priced(graph, from.lon, from.lat, to.lon, to.lat);" in planning
         assert "var head = -1, cheapest = plain;" in planning
-        assert "var whole = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];" in planning
-        # Bounded like every other loop over this graph.
-        assert "var pops = 0, mostPops = nodes + 2 * graph.header.edges + 1;" in planning
+        assert "var floor = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];" in planning
+        assert "var whole = priced(graph, from.lon, from.lat, graph.nodeLon[next.node], graph.nodeLat[next.node]) + best[next.node];" in planning
+        # Bounded like every other loop over this graph, with room for each
+        # seed to come back once at its true price.
+        assert "var pops = 0, mostPops = 2 * nodes + 2 * graph.header.edges + 1;" in planning
         # And the way out read off the same search, forwards.
         assert "function leavingAt(graph, head) {" in planning
         assert "while (work.viaEdge[walk] >= 0) {" in planning
@@ -5902,6 +5912,62 @@ class TestPlanMode:
         # And the two searches it replaced are gone, not left beside it.
         assert "nearestReached" not in planning
         assert "route(graph, tail, -1);" not in planning
+
+    def test_a_straight_walk_is_priced_by_what_it_crosses(self):
+        """Reported from the phone with a screenshot: a goal on the headland
+        across a 1.2 km sound from the end of the path was reached by a dotted
+        line over the water. A connector was priced by its length alone, so the
+        sound cost 3.6 km and the road round the head of it is longer.
+
+        **A metre over water costs ``waterFactor`` instead of ``offPathFactor``**,
+        read off the grid the graph carries, once per cell along the line. A
+        price and not a rule, so an island with no path still gets an answer:
+        every connector there crosses water and the one that crosses least
+        wins. And a page whose graph carries no grid prices every metre as
+        ground, which is what every page did before.
+
+        **Priced when it is asked for.** Every node is seeded with its price
+        over ground, which is a floor, and priced for real the first time it
+        comes out of the heap on that seed; dearer, it goes back in. That keeps
+        the grid from being asked about 117,000 connectors on every tick of a
+        drag, and the bound and the pruning need nothing more than a floor."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function priced(graph, aLon, aLat, bLon, bLat) {" in planning
+        assert "if (!grid || !(PLAN.waterFactor > PLAN.offPathFactor)) { return length * PLAN.offPathFactor; }" in planning
+        assert "var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0;" in planning
+        assert "if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }" in planning
+        assert "return (length - water) * PLAN.offPathFactor + water * PLAN.waterFactor;" in planning
+        # Lazily: a seed is priced for real when it is popped, and re-entered
+        # if that made it dearer.
+        assert "if (viaEdge[taken.node] < 0 && !exact[taken.node]) {" in planning
+        assert "var truly = priced(graph, graph.nodeLon[taken.node], graph.nodeLat[taken.node], to.lon, to.lat);" in planning
+        assert "if (truly > taken.cost) {" in planning
+        assert "heap.push(taken.node, truly);" in planning
+        # And the entry side walks its floors in order and stops at the first
+        # floor dearer than the best whole.
+        assert "var entries = new Heap();" in planning
+        assert "if (next.cost >= cheapest) { break; }" in planning
+
+    def test_the_water_grid_is_inflated_and_counted_before_anything_routes(self):
+        """The grid travels in the header as its own gzipped block and is
+        checked the way the stream is: the header says how many cells are
+        water, and a grid that inflated to a different number is refused
+        rather than used, because a grid that came out short would price
+        fjords as ground with nothing looking wrong. Both are inflated before
+        either is used, so no search runs in the gap between them."""
+        fmap, _ = self.drawn()
+        maps.add_routing_graph(fmap, {"nodes": 0, "edges": 0, "chains": 0, "water": None}, "")
+
+        page = fmap.get_root().render()
+        assert "function waterGrid(spec, packed) {" in page
+        assert "if (set !== spec.set) {" in page
+        assert "return (grid.bits[row * grid.stride + (col >> 3)] & (0x80 >> (col & 7))) !== 0;" in page
+        assert "if (col < 0 || row < 0 || col >= spec.cols || row >= spec.rows) { return false; }" in page
+        assert "graph.waterAt = function (lon, lat) { return waterAt(graph.water, lon, lat); };" in page
+        assert "graph.ready = Promise.all([inflate(bytesOf(encoded)), grid]).then(function (both) {" in page
 
     def test_the_part_that_was_never_a_path_is_said(self):
         """A line on a map is a promise, and a partly routed one is a promise
@@ -6096,7 +6162,7 @@ class TestRoutingGraphAreas:
         html = self.rendered([])
 
         assert "graph.areasAt = areasAt.bind(null, graph.protectedAreas)" in html
-        assert html.index("graph.areasAt = areasAt") < html.index("graph.ready = inflate")
+        assert html.index("graph.areasAt = areasAt") < html.index("graph.ready = Promise.all([inflate")
 
     def test_an_area_carries_its_outline_and_its_box(self):
         """The box settles thirty of thirty-one areas in four comparisons, and

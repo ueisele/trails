@@ -2489,6 +2489,7 @@ PLAN_SETTINGS = (
     "snapPx",
     "maxStraightM",
     "offPathFactor",
+    "waterFactor",
     "crossingKind",
     "connectorKind",
     "touchedM",
@@ -3980,7 +3981,56 @@ class _RoutingGraph(MacroElement):
             // it is not going to look at.
             graph.protectedAreas = header.protected || [];
             graph.areasAt = areasAt.bind(null, graph.protectedAreas);
-            graph.ready = inflate(bytesOf(encoded)).then(function (bytes) {
+
+            // **Where the water is, as bits.** A straight walk is priced by
+            // what it crosses, and the search that prices it asks about
+            // thousands of walks at once -- so the answer has to be one
+            // subtraction, one division and one bit, and it is: cells of
+            // `cellM` laid out in degrees from the south-west corner, eight to
+            // a byte with the westernmost in the high bit, row-major. Ground
+            // outside the grid answers *not water*, and so does a page whose
+            // header carries no grid; both price every walk as ground, which
+            // is what every page did before the grid existed.
+            var POPCOUNT = new Uint8Array(256);
+            for (var b = 1; b < 256; b += 1) { POPCOUNT[b] = POPCOUNT[b >> 1] + (b & 1); }
+
+            // Checked the way the stream is: the header says how many cells
+            // are water, and a grid that inflated to a different number is
+            // refused rather than used. A grid that came out short would
+            // price fjords as ground with nothing looking wrong.
+            function waterGrid(spec, packed) {
+                var stride = (spec.cols + 7) >> 3;
+                if (packed.length !== spec.rows * stride) {
+                    throw new Error('the water grid is ' + packed.length + ' bytes for ' + spec.rows + ' rows of ' + stride);
+                }
+                var set = 0;
+                for (var i = 0; i < packed.length; i += 1) { set += POPCOUNT[packed[i]]; }
+                if (set !== spec.set) {
+                    throw new Error('the water grid inflated to ' + set + ' cells of water and was written with ' + spec.set);
+                }
+                return {spec: spec, bits: packed, stride: stride, cellM: spec.cellM};
+            }
+
+            function waterAt(grid, lon, lat) {
+                if (!grid) { return false; }
+                var spec = grid.spec;
+                var col = Math.floor((lon - spec.west) / spec.dLon), row = Math.floor((lat - spec.south) / spec.dLat);
+                if (col < 0 || row < 0 || col >= spec.cols || row >= spec.rows) { return false; }
+                return (grid.bits[row * grid.stride + (col >> 3)] & (0x80 >> (col & 7))) !== 0;
+            }
+
+            graph.water = null;
+            graph.waterAt = function (lon, lat) { return waterAt(graph.water, lon, lat); };
+            var grid = header.water
+                ? inflate(bytesOf(header.water.bits)).then(function (packed) { return waterGrid(header.water, packed); })
+                : Promise.resolve(null);
+            // Both inflated before either is used, so that nothing can route
+            // over a graph whose water has not arrived: a search run in that
+            // gap would price every connector as ground and the answer would
+            // change under the reader when the grid landed.
+            graph.ready = Promise.all([inflate(bytesOf(encoded)), grid]).then(function (both) {
+                var bytes = both[0];
+                graph.water = both[1];
                 var inflated = performance.now();
                 var decoded = decode(bytes);
                 graph.inflateMs = inflated - began;
@@ -8951,7 +9001,10 @@ class _PlanMode(MacroElement):
                 // where node v + 1's begin, so afterwards node v owns
                 // arc[at[v] .. at[v + 1]).
                 routing = {length: length, cost: cost, at: at, arc: arc,
-                           best: new Float64Array(nodes), viaEdge: new Int32Array(nodes), viaNode: new Int32Array(nodes)};
+                           best: new Float64Array(nodes), viaEdge: new Int32Array(nodes), viaNode: new Int32Array(nodes),
+                           // Whether a node's own connector has been priced
+                           // by what it crosses yet: see `joinedRoute`.
+                           exact: new Uint8Array(nodes)};
                 return routing;
             }
 
@@ -9102,25 +9155,51 @@ class _PlanMode(MacroElement):
             // Which also puts a ceiling on an answer, and it is the one thing
             // the rule this replaced could not promise. A leg costs at least
             // its own metres, every factor here being at least one, and it may
-            // not cost more than the straight line times `offPathFactor` or the
-            // direct connector would have won -- so no leg can ever be more
-            // than that many times the line it could have flown. The 66 km
-            // answer to a 2.15 km question was not a near miss; it was a sum
-            // nobody was doing.
+            // not cost more than the direct connector or the direct connector
+            // would have won -- so no leg can ever be longer than the straight
+            // line's price. Over ground that is `offPathFactor` times the
+            // line it could have flown. The 66 km answer to a 2.15 km question
+            // was not a near miss; it was a sum nobody was doing.
+            //
+            // **And a connector is priced by what it crosses**, which is where
+            // the water comes in. Reported from the phone with a screenshot: a
+            // goal on the headland across a 1.2 km sound from the end of the
+            // path was reached by a dotted line over the water, because the
+            // road round the head of the sound is longer than 3.6 km and
+            // nothing priced the sound. A metre of a connector that the
+            // graph's water grid says is sea or lake costs `waterFactor`
+            // instead of `offPathFactor`, and the rest follows from the same
+            // comparison: the road wins where there is one, and where there is
+            // none -- an island with no path -- every connector crosses water
+            // and the one that crosses least wins. **A price, not a rule**, so
+            // the second case needs no case of its own.
+            //
+            // **Priced when it is asked for, not when it is seeded.** Every
+            // node is seeded with its connector's price over ground, which is
+            // a floor -- water only adds -- and the true price is worked out
+            // the first time the node comes out of the heap with that seed
+            // still standing. If it is dearer the node goes back in at the
+            // true price and the search carries on; it is the ordinary trick
+            // for an edge whose weight is dear to compute, and it is what
+            // keeps the grid from being asked about 117,000 connectors on
+            // every tick of a drag. The bound and the pruning are unchanged,
+            // because a floor is all either of them needs.
             function joinedRoute(graph, from, to) {
                 var nodes = graph.header.nodes;
                 if (!nodes) { return null; }
                 var far = panel().metresBetween;
                 var off = PLAN.offPathFactor;
                 var work = router(graph);
-                var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
-                viaEdge.fill(-1); viaNode.fill(-1);
+                var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode, exact = work.exact;
+                viaEdge.fill(-1); viaNode.fill(-1); exact.fill(0);
                 // The direct connector: the line the reader would walk if the
                 // network were not there at all. It is what every other answer
                 // has to beat, and it is why no case below needs a threshold --
                 // two sides of a triangle are never shorter than the third, so
-                // an entry that leads nowhere loses to it by itself.
-                var plain = far(from.lon, from.lat, to.lon, to.lat) * off;
+                // an entry that leads nowhere loses to it by itself. Priced by
+                // what it crosses, like every connector: over a sound it is
+                // dear, and that is what lets the road round beat it.
+                var plain = priced(graph, from.lon, from.lat, to.lon, to.lat);
                 var heap = new Heap(), i;
                 // **Seeded at every node at once, from the far end.** That is
                 // the connector layer itself and not a trick: `best[n]` starts
@@ -9136,7 +9215,8 @@ class _PlanMode(MacroElement):
                 // every node on an optimal way out is cheaper still than the one
                 // before it, so nothing that matters is pruned. Measured on
                 // one 13.6 km leg, routed and redrawn: 157 ms seeding and
-                // exhausting the whole graph, 64 ms bounded.
+                // exhausting the whole graph, 64 ms bounded. Seeded with the
+                // price over ground, which is a floor on the true one.
                 best.fill(Infinity);
                 for (i = 0; i < nodes; i += 1) {
                     var leave = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;
@@ -9149,7 +9229,9 @@ class _PlanMode(MacroElement):
                 // pushed by a relaxation, so the pops cannot exceed one per node
                 // plus one per arc. A defect that runs for ever in a page is
                 // indistinguishable from a page that has hung.
-                var pops = 0, mostPops = nodes + 2 * graph.header.edges + 1;
+                // One more push per node than before: a seed re-entered at
+                // its true price.
+                var pops = 0, mostPops = 2 * nodes + 2 * graph.header.edges + 1;
                 while (heap.node.length) {
                     pops += 1;
                     if (pops > mostPops) { throw new Error('the search took more than ' + mostPops + ' steps'); }
@@ -9159,6 +9241,19 @@ class _PlanMode(MacroElement):
                     // of the bound and not a heuristic.
                     if (taken.cost >= plain) { break; }
                     if (taken.cost > best[taken.node]) { continue; }
+                    // A node still standing on its own seed is priced for real
+                    // before anything is relaxed from it, so that everything
+                    // relaxed from a settled node is exact too. A node reached
+                    // over an edge instead was relaxed from one that was.
+                    if (viaEdge[taken.node] < 0 && !exact[taken.node]) {
+                        exact[taken.node] = 1;
+                        var truly = priced(graph, graph.nodeLon[taken.node], graph.nodeLat[taken.node], to.lon, to.lat);
+                        if (truly > taken.cost) {
+                            best[taken.node] = truly;
+                            heap.push(taken.node, truly);
+                            continue;
+                        }
+                    }
                     for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
                         var edge = work.arc[a];
                         var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
@@ -9169,14 +9264,47 @@ class _PlanMode(MacroElement):
                         }
                     }
                 }
-                var head = -1, cheapest = plain;
+                // The entry, chosen the same way: every settled node's cost-to-go
+                // is exact by now -- what the search left in the heap is dearer
+                // than `plain` and is never an answer -- and the walk in to it
+                // is priced for real only in the order its floor puts it,
+                // until the next floor is dearer than the best whole found.
+                var entries = new Heap();
                 for (i = 0; i < nodes; i += 1) {
                     if (!isFinite(best[i])) { continue; }
-                    var whole = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];
-                    if (whole < cheapest) { cheapest = whole; head = i; }
+                    var floor = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];
+                    if (floor < plain) { entries.push(i, floor); }
+                }
+                var head = -1, cheapest = plain;
+                while (entries.node.length) {
+                    var next = entries.pop();
+                    if (next.cost >= cheapest) { break; }
+                    var whole = priced(graph, from.lon, from.lat, graph.nodeLon[next.node], graph.nodeLat[next.node]) + best[next.node];
+                    if (whole < cheapest) { cheapest = whole; head = next.node; }
                 }
                 if (head < 0) { return null; }
                 return leavingAt(graph, head);
+            }
+
+            // **What a straight walk costs, by what it crosses.** Its metres at
+            // `offPathFactor`, except the ones the graph's water grid says are
+            // sea or lake, which cost `waterFactor` each. Sampled once per cell
+            // along the line, at the middle of each piece, so that a walk
+            // shorter than a cell asks once and a walk of 1.2 km asks
+            // forty-eight times -- and a page whose graph carries no grid
+            // prices every metre as ground, which is what every page did
+            // before the grid existed.
+            function priced(graph, aLon, aLat, bLon, bLat) {
+                var length = panel().metresBetween(aLon, aLat, bLon, bLat);
+                var grid = graph.water;
+                if (!grid || !(PLAN.waterFactor > PLAN.offPathFactor)) { return length * PLAN.offPathFactor; }
+                var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0;
+                for (var i = 0; i < pieces; i += 1) {
+                    var t = (i + 0.5) / pieces;
+                    if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }
+                }
+                var water = length * wet / pieces;
+                return (length - water) * PLAN.offPathFactor + water * PLAN.waterFactor;
             }
 
             // **The way out of an entry node, read off the search that settled
@@ -10226,7 +10354,7 @@ class _PlanMode(MacroElement):
                 }
                 if (from.node >= 0 && to.node >= 0) {
                     var found = route(graph, from.node, to.node);
-                    if (found && worthRouting(from, to, found.cost)) {
+                    if (found && worthRouting(graph, from, to, found.cost)) {
                         return Promise.resolve(routedParts(graph, found));
                     }
                 }
@@ -10272,17 +10400,21 @@ class _PlanMode(MacroElement):
             // an edge costs its length times its source's factor, so the
             // straight line priced at `offPathFactor` is the thing to beat.
             // Which also means a leg here can never be more than that many
-            // times the line it could have flown.
+            // times the line it could have flown. **Priced by what it crosses**,
+            // like every connector: two waypoints on paths either side of a
+            // sound, and the road round it, would otherwise be thrown away
+            // for a dotted line over the water because the road is more than
+            // three times the line.
             //
             // **Only where there is something to draw instead.** A leg longer
             // than `maxStraightM` cannot be drawn straight at all -- it is
             // refused for its sampling -- and refusing a long way round in
             // favour of nothing at all is the worse of the two answers. So past
             // that length the route stands, whatever it costs.
-            function worthRouting(from, to, cost) {
+            function worthRouting(graph, from, to, cost) {
                 var flown = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
                 if (flown > PLAN.maxStraightM) { return true; }
-                return cost <= flown * PLAN.offPathFactor;
+                return cost <= priced(graph, from.lon, from.lat, to.lon, to.lat);
             }
 
             // **The three pieces of a way that is only partly a path**: what the
@@ -14901,7 +15033,11 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
             is what a metre of open ground costs against a metre of path, in
             the same currency the edge costs are in, and it is what decides
             whether a way to somewhere off the network goes round by the paths
-            or straight across; ``crossingKind`` and
+            or straight across; ``waterFactor`` is the same for a metre of
+            open ground that the graph's water grid says is sea or lake,
+            which is what sends a way to a headland round by the road rather
+            than across the sound in front of it -- and a page whose graph
+            carries no grid prices every metre as ground; ``crossingKind`` and
             ``connectorKind`` are what the payload's header calls a crossing and
             an inferred connector, which the page tests every edge it routes over
             against — spelled in the page instead, a rename would leave it

@@ -4384,6 +4384,141 @@ def a_planned_leg_that_is_not_worth_routing(page: Any) -> Check:
     )
 
 
+def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
+    """Reported from the phone with a screenshot: a goal on the headland across
+    a 1.2 km sound from the end of the path at Bekkevoll was reached by a
+    dotted line straight over the water. A connector was priced by its length
+    alone, so the sound cost 3.6 km and the road round the head of it is
+    longer.
+
+    **A metre over water now costs ``waterFactor`` instead of
+    ``offPathFactor``**, read off the grid the graph carries, and the same
+    comparison then takes the road: both modes, because both price their
+    connectors by the one rule.
+
+    **And the headland is an island.** Measured on the grid the build wrote:
+    0.86 km2 of land with no path on it and water all round, so no answer
+    can reach it dry. What the price buys there is the next best thing, and
+    it is what the rule was asked for: the road round the head of the sound
+    as far as it goes, then the narrowest crossing -- 390 m of water where
+    the line across the sound would have been 960 m. So what is read here is
+    the shape of the answer and not the metres of any one road: that the
+    way is longer than the line, that it is on paths first, and that it
+    crosses less water than the line would have.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What a plan and a goal made of the same two points
+    """
+    # The end of the path on the north shore of the sound, and a spot on the
+    # headland across it -- both read off the water grid the build wrote, so
+    # the second is dry land 1.28 km from the first with 0.96 km of sea
+    # between.
+    shore = {"lat": 65.3320, "lng": 12.9368}
+    headland = {"lat": 65.3205, "lng": 12.9380}
+    line = metres_between((shore["lat"], shore["lng"]), (headland["lat"], headland["lng"]))
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.evaluate("() => { if (window.trailsGoal) { window.trailsGoal.clear(); } }")
+    grid = page.evaluate(
+        """() => { const g = window.trailsGraph; return !g || !g.water ? null
+        : {cells: g.water.spec.cols * g.water.spec.rows, set: g.water.spec.set, cellM: g.water.cellM}; }"""
+    )
+    # How much of the line across is water, asked of the same grid the page
+    # prices by: one sample per cell along it, as `priced` does.
+    wet = page.evaluate(
+        """(w) => { const g = window.trailsGraph, a = w[0], z = w[1], n = 64; let wet = 0;
+        for (let i = 0; i < n; i += 1) { const t = (i + 0.5) / n;
+          if (g.waterAt(a.lng + t * (z.lng - a.lng), a.lat + t * (z.lat - a.lat))) { wet += 1; } }
+        return wet / n; }""",
+        [shore, headland],
+    )
+    line_water = wet * line
+
+    # The plan: two points, and what its legs are made of.
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
+        page.evaluate("() => window.trailsPlan.remove(0)")
+        page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
+        page.wait_for_timeout(200)
+    page.evaluate(with_map("(w) => __MAP__.setView([w.lat, w.lng], 14, {animate: false})"), shore)
+    page.wait_for_timeout(500)
+    for where in (shore, headland):
+        page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", where)
+        page.wait_for_function("() => !window.trailsPlan.busy()", timeout=240_000)
+        page.wait_for_timeout(300)
+    planned = page.evaluate("() => window.trailsPlan.state()")
+    plan_straight = (planned["straight"] or 0) + (planned["crossed"] or 0)
+    on_paths = planned["walked"] - plan_straight
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(300)
+
+    # The goal: the reader standing at the end of the path, the headland set.
+    page.context.set_geolocation({"latitude": shore["lat"], "longitude": shore["lng"], "accuracy": 20})
+    page.evaluate("() => window.trailsChrome.here(true)")
+    page.wait_for_timeout(1200)
+    page.evaluate("() => window.trailsGoal.way('routed')")
+    page.evaluate("(w) => window.trailsGoal.set(w.lat, w.lng)", headland)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
+    page.wait_for_timeout(900)
+    goal = page.evaluate("() => window.trailsGoal.state()")
+    page.evaluate("() => { window.trailsGoal.clear(); window.trailsChrome.here(false); }")
+
+    return Check(
+        "a way across a sound goes round by land",
+        [
+            Reading("the graph carries a water grid", grid is not None and grid["set"] > 0, True, note=f"{grid}" if grid else "none"),
+            Reading("the line across is mostly water", wet > 0.5, True, note=f"{line_water / 1000:.2f} km of the {line / 1000:.2f} km line"),
+            Reading(
+                "the plan's way is longer than the line across the water",
+                planned["walked"] > line,
+                True,
+                note=f"{planned['walked'] / 1000:.2f} km walked against a {line / 1000:.2f} km line",
+            ),
+            Reading(
+                "and it is on paths first",
+                on_paths > 0,
+                True,
+                note=f"{on_paths / 1000:.2f} km on paths, {plan_straight / 1000:.2f} km straight",
+            ),
+            Reading(
+                "and it crosses less water than the line would have",
+                (planned["crossed"] or 0) < line_water,
+                True,
+                note=f"{(planned['crossed'] or 0) / 1000:.2f} km of water against {line_water / 1000:.2f}",
+            ),
+            Reading("the goal has a way there", bool(goal["line"]), True),
+            Reading(
+                "the goal's way is longer than the line across the water",
+                (goal["metres"] or 0) > line,
+                True,
+                note=f"{(goal['metres'] or 0) / 1000:.2f} km against {line / 1000:.2f}",
+            ),
+            Reading(
+                "and what it walks straight is shorter than that line",
+                (goal["straight"] or 0) < line,
+                True,
+                note=f"{(goal['straight'] or 0) / 1000:.2f} km straight",
+            ),
+            # Recorded, not required: how much of the plan's walk is on paths
+            # and how much water it still crosses. Both move when the network
+            # or the factors do, and they are what a reader would see change.
+            Reading(
+                "the plan walks this far on paths",
+                round(on_paths / 1000, 1),
+                1.6,
+                within=0.05,
+                holds=False,
+                note=f"{planned['walked'] / 1000:.2f} km in all",
+            ),
+            Reading("and crosses this much water", round((planned["crossed"] or 0) / 1000, 2), 0.39, within=0.005, holds=False),
+        ],
+    )
+
+
 def a_goal_the_reader_sets(page: Any) -> Check:
     """A point set while walking, read two ways, and what the mark makes of it.
 
@@ -7482,6 +7617,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_way_to_the_next_goal(page))
     if wanted(a_goal_the_reader_sets):
         checks.append(a_goal_the_reader_sets(page))
+    if wanted(a_way_across_a_sound_goes_round_by_land):
+        checks.append(a_way_across_a_sound_goes_round_by_land(page))
     if wanted(a_planned_leg_that_is_not_worth_routing):
         checks.append(a_planned_leg_that_is_not_worth_routing(page))
     if wanted(a_tap_beside_a_path_in_plan_mode):

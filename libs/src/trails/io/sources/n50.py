@@ -33,6 +33,17 @@ TRANSPORT_LAYER = "N50_Samferdsel_senterlinje"
 #: Layers holding buildings, as points and as outlines.
 BUILDING_LAYERS = ("N50_BygningerOgAnlegg_posisjon", "N50_BygningerOgAnlegg_omrade")
 
+#: Layer holding land cover as outlines: forest, bog, cultivated land, and the
+#: water between them.
+LAND_COVER_LAYER = "N50_Arealdekke_omrade"
+
+#: ``objtype`` values of the land-cover layer that are water a walker cannot
+#: cross: the sea, and lakes whether or not a dam regulates them. Rivers are
+#: left out on purpose. N50 draws the broad ones as outlines too, but a river
+#: has bridges and fords the way a lake does not, and the paths that cross it
+#: are in the network already.
+WATER_COVER_TYPES = ("Havflate", "Innsjø", "InnsjøRegulert")
+
 #: Matrikkel building-type codes for huts out in the terrain, mapped to a label.
 #: Wilderness huts often carry neither a name nor a service level in N50, so the
 #: type code is the only thing marking them as something a hiker can shelter in.
@@ -241,6 +252,26 @@ class Source:
             GeoDataFrame in EPSG:4326 with a ``kommune`` column added
         """
         return self.load_layers(kommune_codes, (TRANSPORT_LAYER,), force_download=force_download)
+
+    def load_water(self, kommune_codes: list[str], force_download: bool = False) -> gpd.GeoDataFrame:
+        """Load the sea and the lakes, as outlines.
+
+        The land-cover layer is read whole and cached whole, the way every
+        other layer here is, and the water is picked out of it afterwards: the
+        cache is keyed by layer, and a second key for a subset of the same file
+        would be a second copy of the download.
+
+        Args:
+            kommune_codes: Municipality numbers to load
+            force_download: Re-order and re-download even if cached
+
+        Returns:
+            GeoDataFrame in EPSG:4326 with Polygon geometries and the columns
+            ``objtype`` and ``kommune``, holding only :data:`WATER_COVER_TYPES`
+        """
+        cover = self.load_layers(kommune_codes, (LAND_COVER_LAYER,), force_download=force_download)
+        water = cover[cover["objtype"].isin(WATER_COVER_TYPES)]
+        return gpd.GeoDataFrame(water[["objtype", "kommune", "geometry"]].reset_index(drop=True), crs="EPSG:4326")
 
     def load_cabins(self, kommune_codes: list[str], force_download: bool = False) -> gpd.GeoDataFrame:
         """Load cabins, rest huts and lean-tos out in the terrain.

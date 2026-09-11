@@ -66,6 +66,13 @@ single cursor and never has to seek::
     coordinates   2V x zigzag varint  longitude and latitude, delta against the vertex before
     sampleCounts  N x varint          height samples per edge; none at all on a crossing
     heights       S x varint          0 where nothing was read, else zigzag(delta) + 1
+
+Beside the stream, and not in it, the header may carry ``water``: a grid of
+bits saying where the sea and the lakes are, laid out by
+:mod:`trails.visualization.water`. It travels in the header because the page
+prices a straight walk by it before the stream is needed, and it is its own
+gzipped block because it is a picture and not a list — a row of a thousand
+cells of sea is one run to gzip and would be a thousand varints here.
 """
 
 import base64
@@ -83,6 +90,7 @@ from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED
 from trails.routing.order import CHAIN_ORDER_COLUMNS
 from trails.routing.protection import PROTECTED_COLUMN
 from trails.routing.sources import FERRY
+from trails.visualization.water import check_water
 
 #: What the decoder in the page expects. Bump it when the layout changes, so a
 #: stale decoder says so rather than reading nonsense confidently.
@@ -342,6 +350,7 @@ def encode_graph(
     *,
     costs: dict[str, dict[str, Any]],
     areas: list[dict[str, Any]],
+    water: dict[str, Any] | None = None,
     coordinate_quantum: float = DEFAULT_COORDINATE_QUANTUM,
     elevation_quantum: float = DEFAULT_ELEVATION_QUANTUM,
 ) -> Payload:
@@ -369,6 +378,11 @@ def encode_graph(
             for that no edge covers — a leg drawn straight across open terrain —
             and one list is what keeps a code on an edge and a polygon on the
             screen from meaning two different areas.
+        water: Where the sea and the lakes are, as
+            :func:`trails.visualization.water.water_mask` lays them out, or None
+            for a page that prices every straight walk as ground. Checked over
+            here rather than trusted: a grid the page cannot read is a page
+            that quietly walks across fjords again.
         coordinate_quantum: Grid a coordinate is rounded onto, in degrees
         elevation_quantum: Grid a height is rounded onto, in metres
 
@@ -434,6 +448,7 @@ def encode_graph(
         "noPathBit": NO_PATH_BIT,
         "protected": area_table,
         "protectedShareQuantum": 1.0 / PROTECTED_SHARE_UNITS,
+        "water": check_water(water) if water is not None else None,
         # Not decoration: this is what lets a page say whether it decoded every
         # one of two million values correctly, having nothing to compare them
         # against.

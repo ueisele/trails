@@ -40,6 +40,7 @@ from typing import NamedTuple, Protocol
 
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry import box
 from trails.io.export.gpx import (
     AREA_ELEMENT,
     AREA_FORM_ATTR,
@@ -110,6 +111,7 @@ from trails.routing import (
 from trails.utils.geo import attach_nearest, compass_points, endpoint_bearings, thin_points
 from trails.visualization import maps
 from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
+from trails.visualization.water import water_mask
 
 PARK_NAME = "Lomsdal-Visten"
 
@@ -769,6 +771,43 @@ MAX_STRAIGHT_M = 20_000.0
 #: open ground than take a line somebody surveyed.
 OFF_PATH_FACTOR = 3.0
 
+#: What a metre of a straight walk that lies over water costs, in the same
+#: currency. Reported from the phone with a screenshot: a goal on the headland
+#: across a 1.2 km sound from the end of the path was reached by a dotted line
+#: over the water, because a connector was priced by its length alone and the
+#: road round the head of the sound is longer. A walker cannot take the line;
+#: the price has to say so.
+#:
+#: **A price and not a rule**, so that a goal on an island with no path to it
+#: still gets an answer: every connector there crosses water, and the one that
+#: crosses least wins. The headland in the screenshot turned out to be exactly
+#: that -- 0.86 km2 of land in N50 with no path on it -- so what the price
+#: buys there is the next best thing: the road round the head of the sound as
+#: far as it goes, then the narrowest crossing.
+#:
+#: What the figure decides is how far round a route will go by land to avoid
+#: a crossing. Swept at 10, 30, 100 and 300 against that leg, in a browser:
+#: at 10 the way went west instead and crossed 566 m of water for 327 m of
+#: path, which is a worse crossing bought cheaply; 30, 100 and 300 gave one
+#: answer, 2.0 km of road and 390 m of water where the line across would have
+#: been 960 m. The figure also bounds the search -- everything cheaper than
+#: the priced line is explored -- and the search took 65 ms at 30, 1.8 s at
+#: 100 and 5 s at 300 on the same leg. So thirty: the first figure that gives
+#: the road-and-narrowest answer, at a cost a drag can carry.
+#:
+#: Above ``OFF_PATH_FACTOR``, or water would be no dearer than ground and the
+#: page would be carrying the grid for nothing.
+WATER_FACTOR = 30.0
+
+#: How finely the page is told where the water is. A cell is priced as a whole,
+#: so this is how far off a shoreline a connector's price can be: a connector
+#: that touches one cell of sea because the reader tapped 25 m from the water
+#: costs one cell more than it should, and every connector from that point
+#: pays the same, so nothing between them is decided by it. Measured for this
+#: build: 3,230 by 3,589 cells, 146 kB gzipped into the page. At 15 m it would
+#: be 274 kB, at 50 m the sound in the screenshot would be a cell wide.
+WATER_CELL_M = 25.0
+
 #: How near a waypoint has to land to something the map draws by name before it
 #: is called after it. The same fifty metres ``--hut-name-m`` already joins N50's
 #: cabins to the place-name register by, and for the same reason: two registers
@@ -922,6 +961,7 @@ def plan_settings(params: Params, layers: list[TrailLayer]) -> dict[str, object]
         "snapPx": SNAP_PX,
         "maxStraightM": MAX_STRAIGHT_M,
         "offPathFactor": OFF_PATH_FACTOR,
+        "waterFactor": WATER_FACTOR,
         # What the payload's header calls a crossing and an inferred connector.
         # The page reads both off the header for every edge it routes over, and
         # renaming either here without telling it would leave it counting every
@@ -1411,7 +1451,15 @@ def summarize(name: str, gdf: gpd.GeoDataFrame) -> None:
     print(f"  {name}: {len(gdf):,} chains, {total_km:,.1f} km")
 
 
-def encode_for_the_page(network: Network, sources: list[NetworkSource], params: Params, order: pd.DataFrame, protected: gpd.GeoDataFrame) -> Payload:
+def encode_for_the_page(
+    network: Network,
+    sources: list[NetworkSource],
+    params: Params,
+    order: pd.DataFrame,
+    protected: gpd.GeoDataFrame,
+    water: gpd.GeoDataFrame,
+    bounds: maps.Bounds,
+) -> Payload:
     """Encode the routing graph and its heights into the page's second payload.
 
     Two representations of the same ground, and they must not be unified. What
@@ -1434,6 +1482,13 @@ def encode_for_the_page(network: Network, sources: list[NetworkSource], params: 
             into the page as well as their names: a leg drawn straight across
             ground no edge covers has to answer the same question, and only the
             polygons can answer it there.
+        water: The sea and the lakes as outlines. Rasterised here at
+            ``WATER_CELL_M`` and carried in the header, because a straight walk
+            is priced by what it crosses and the page prices thousands of them
+            in one search.
+        bounds: The box the grid covers, which is the zone: a leg laid outside
+            it is priced as ground, and there is no network outside it to lay
+            one to.
 
     Returns:
         The payload, and its size
@@ -1447,6 +1502,7 @@ def encode_for_the_page(network: Network, sources: list[NetworkSource], params: 
         order,
         costs=edge_costs(sources, params),
         areas=protected_table(protected),
+        water=water_mask(water, bounds, WATER_CELL_M),
     )
 
 
@@ -1610,6 +1666,14 @@ def main() -> int:
         cabins["navn"] = cabins["navn"].fillna(cabins["ssr_name"])
         print(f"  named from SSR: {int(cabins['navn'].notna().sum()) - before} cabin(s) that N50 leaves unnamed")
     print(f"  N50 cabins and wilderness huts: {len(cabins)} ({cabins['navn'].notna().sum() if len(cabins) else 0} named)")
+
+    print("\nLoading N50 water...")
+    # The sea and the lakes, for pricing a straight walk by what it crosses.
+    # Clipped to the zone's box and not to the zone: the box is what the page's
+    # grid covers, and a sound in its corner is water whether or not the zone's
+    # outline reaches it.
+    water = gpd.clip(n50_source.load_water(codes, force_download=args.force_download), box(*bounds_of(zone)))
+    print(f"  {len(water):,} outlines: {water['objtype'].value_counts().to_dict() if len(water) else {}}")
     if len(cabins):
         print(f"    {cabins['kind'].value_counts().to_dict()}")
 
@@ -1903,8 +1967,11 @@ def main() -> int:
     # takes the profile off it and phase 6 routes over it, and both of those live
     # in Python until it is in the page.
     print("\nEncoding the routing graph for the page...")
-    payload = encode_for_the_page(network, loaded.sources, params, order, loaded.protected)
+    payload = encode_for_the_page(network, loaded.sources, params, order, loaded.protected, water, bounds_of(zone))
     counted = payload.header
+    grid = counted["water"]
+    wet, weight = 100 * grid["set"] / (grid["cols"] * grid["rows"]), len(grid["bits"]) / 1e3
+    print(f"  water grid: {grid['cols']:,} x {grid['rows']:,} cells of {grid['cellM']:g} m, {wet:.1f} % water, {weight:.0f} kB in the page")
     print(f"  {counted['edges']:,} edges on {counted['nodes']:,} nodes, {counted['vertices']:,} vertices at full source precision")
     print(f"  {counted['samples']:,} height samples, quantised at {counted['coordinateQuantum']:g}° and {counted['elevationQuantum']:g} m")
     print(f"  {payload.raw_mb:.2f} MB encoded, {payload.size_mb:.2f} MB gzipped and base64 in the page")

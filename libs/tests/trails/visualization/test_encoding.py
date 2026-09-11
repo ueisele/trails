@@ -15,7 +15,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Polygon
 from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED
 from trails.routing.order import chain_order
 from trails.visualization.encoding import (
@@ -30,6 +30,7 @@ from trails.visualization.encoding import (
     varints,
     zigzag,
 )
+from trails.visualization.water import water_mask
 
 
 def _kind(source: str) -> str:
@@ -650,6 +651,37 @@ def test_the_areas_travel_in_the_header_with_their_outlines() -> None:
     assert [area["id"] for area in header["protected"]] == ["VV0001", "VV0002"]
     assert header["protected"][0]["rings"] == AREAS[0]["rings"]
     assert header["protectedShareQuantum"] == pytest.approx(1.0 / PROTECTED_SHARE_UNITS)
+
+
+def test_the_water_grid_travels_in_the_header_checked_over() -> None:
+    # Beside the stream and not in it: a picture, gzipped as one block.
+    line = LineString([(13.0, 65.6), (13.001, 65.601)])
+    water = water_mask(
+        gpd.GeoDataFrame(geometry=[Polygon([(13.0, 65.6), (13.001, 65.6), (13.001, 65.601), (13.0, 65.601)])], crs="EPSG:4326"),
+        (13.0, 65.6, 13.002, 65.602),
+        25.0,
+    )
+    header = encoded(chains((line, "a")), graph((line, "a", 0, 1, "FKB", [10.0, 11.0])), water=water).header
+
+    assert header["water"] == water
+    assert header["water"]["set"] > 0
+
+
+def test_a_page_without_a_water_grid_says_so() -> None:
+    # None and not a missing key, so a page can tell "no grid" from "an older
+    # header" -- and prices every walk as ground either way.
+    line = LineString([(13.0, 65.6), (13.001, 65.601)])
+    header = encoded(chains((line, "a")), graph((line, "a", 0, 1, "FKB", [10.0, 11.0]))).header
+
+    assert header["water"] is None
+
+
+def test_a_water_grid_short_of_a_field_the_page_needs_is_refused() -> None:
+    line = LineString([(13.0, 65.6), (13.001, 65.601)])
+    incomplete = {"west": 13.0, "south": 65.6, "cols": 1, "rows": 1}
+
+    with pytest.raises(ValueError, match="short of bits, cellM, dLat, dLon, set"):
+        encoded(chains((line, "a")), graph((line, "a", 0, 1, "FKB", [10.0, 11.0])), water=incomplete)
 
 
 def test_an_area_short_of_a_field_the_page_needs_is_refused() -> None:
