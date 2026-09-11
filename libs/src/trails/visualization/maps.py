@@ -6312,6 +6312,8 @@ class _ProfilePanel(MacroElement):
             // moved with it -- and a grip that governed one page of three. One
             // height means one control for it, and a page with more to say than
             // fits scrolls, which is what a page is for.
+            //: The strip's height as last drawn: rows of stations under the axis.
+            var stripNow = 0;
             function sizePages() {
                 if (!pages.length) { return; }
                 // **A selection with a curve is as tall as the curve; one
@@ -6321,7 +6323,7 @@ class _ProfilePanel(MacroElement):
                 // 110 px of empty panel over the map.
                 var curved = false;
                 pages.forEach(function (page) { if (page.kind === 'profile') { curved = true; } });
-                if (curved) { pagesBox.style.height = chartHeight + 'px'; return; }
+                if (curved) { pagesBox.style.height = (chartHeight + stripNow) + 'px'; return; }
                 // Measured with the box let go, because a page stretched to fill
                 // it reports the height it was given and never a smaller one.
                 pagesBox.style.height = 'auto';
@@ -6973,7 +6975,17 @@ class _ProfilePanel(MacroElement):
             // The waypoint pins' own ink. Plan mode names it ROUTE and draws
             // its pins with it; a station on this panel is the same point seen
             // from the side, and two colours for one point would be two points.
-            var STATION_R = 7;
+            var STATION_R = 6;
+            // **The stations stand under the axis, not on the curve.** They
+            // sat at their own height, which put the goal's ring over the end
+            // of the curve and stacked a plan's close points on top of each
+            // other -- reported from the phone, both. A strip of STRIP px per
+            // row under the axis holds them now, the kilometres move down by
+            // as much, and each station keeps a dashed rule up to its place on
+            // the curve. A station that would overlap one already in its row
+            // goes to the next row; the chart grows by the rows it needs and
+            // the page with it, so the curve keeps its height.
+            var STRIP = 16;
             // The waypoint marks on the curve: panel ink, not the route's own
             // black, which is drawn on the map and stays as it is.
             var STATION = '#111111', STATION_UNREAD = '#9e9e9e';
@@ -7342,6 +7354,28 @@ class _ProfilePanel(MacroElement):
                 var middleY = (box.top + box.bottom) / 2;
                 var x = function (value) { return box.left + (value - from) / metresPerPixel; };
                 var y = function (value) { return middleY - (value - view.centre) / metresPerY; };
+
+                // **Where each station goes in the strip, decided before the
+                // kilometres are drawn**, because the kilometres stand below
+                // the strip and the strip is as tall as its rows. Left to
+                // right; a station too close to one already in a row takes
+                // the next row down.
+                var laidStations = [], rows = 0;
+                (shape.stations || []).forEach(function (metres, index) {
+                    var here = x(metres);
+                    if (here < box.left - 1 || here > box.right + 1) { return; }
+                    var row = 0;
+                    while (laidStations.some(function (other) {
+                        return other.row === row && Math.abs(other.here - here) < 2 * STATION_R + 2;
+                    })) { row += 1; }
+                    rows = Math.max(rows, row + 1);
+                    laidStations.push({index: index, metres: metres, here: here, row: row});
+                });
+                var stripHeight = rows ? STRIP + (rows - 1) * (2 * STATION_R + 3) : 0;
+                if (stripHeight !== stripNow) { stripNow = stripHeight; sizePages(); }
+                chart.setAttribute('height', chartHeight + stripHeight);
+                chart.style.height = (chartHeight + stripHeight) + 'px';
+                chart.setAttribute('viewBox', '0 0 ' + width + ' ' + (chartHeight + stripHeight));
                 var plot = {left: box.left, right: box.left + shown / metresPerPixel,
                             top: Math.max(box.top, y(seenHigh)), bottom: Math.min(box.bottom, y(seenLow))};
                 plot.width = plot.right - plot.left;
@@ -7395,9 +7429,9 @@ class _ProfilePanel(MacroElement):
                 var alongs = Math.max(2, Math.min(6, Math.round(plot.width / 110)));
                 ticks(from, to, alongs).forEach(function (value) {
                     chart.appendChild(line(x(value), box.top, x(value), box.bottom, GRID));
-                    chart.appendChild(text(x(value), box.bottom + 14, (value / 1000).toFixed(decimals), 'middle'));
+                    chart.appendChild(text(x(value), box.bottom + stripHeight + 14, (value / 1000).toFixed(decimals), 'middle'));
                 });
-                chart.appendChild(text(plot.right, box.bottom + 14, 'km', 'end'));
+                chart.appendChild(text(plot.right, box.bottom + stripHeight + 14, 'km', 'end'));
                 chart.appendChild(line(plot.left, box.top, plot.left, box.bottom, AXIS));
                 chart.appendChild(line(plot.left, box.bottom, plot.right, box.bottom, AXIS));
 
@@ -7420,15 +7454,14 @@ class _ProfilePanel(MacroElement):
                     return group;
                 };
                 var inside = framed('trails-profile-frame-{{ this.get_name() }}', 0);
-                // **A second frame, roomier by a waypoint's own radius, in
-                // both directions.** The curve's has to end where the plot does —
-                // zoomed in, the run it is drawn from reaches a sample beyond
-                // each edge on purpose — but a waypoint sits *at* a distance and
-                // *at* a height, and a disc straddles both. Every route has a
-                // point at nought and one at its end, and any point at sea level
-                // sits on the floor: clipped to the plot, all of them came out
-                // as half discs.
-                var marks = framed('trails-profile-marks-{{ this.get_name() }}', STATION_R + 1);
+                // **Not framed.** The stations stand under the axis, outside
+                // the plot the curve is clipped to -- a second frame used to
+                // hold them, roomier by a radius, when they sat on the curve.
+                // Their rules run up into the plot from the curve's own height
+                // and need no clip either.
+                var marks = document.createElementNS(SVG, 'g');
+                marks.setAttribute('class', 'trails-profile-stations');
+                chart.appendChild(marks);
 
                 var slope = gradients(shape);
                 var strokes = drawCurve(shape, plot, x, y, slope, from, to);
@@ -7459,42 +7492,15 @@ class _ProfilePanel(MacroElement):
                 // same point seen from above and from the side, and a reader
                 // should not have to work that out. Clipped with the curve: at a
                 // zoom most of them are off the panel.
-                (shape.stations || []).forEach(function (metres, index) {
-                    var here = x(metres);
-                    if (here < box.left - 1 || here > box.right + 1) { return; }
-                    var sample = nearest(shape.distance, metres);
+                laidStations.forEach(function (station) {
+                    var here = station.here, index = station.index;
+                    var sample = nearest(shape.distance, station.metres);
                     var value = shape.height[sample];
                     var read = !isNaN(value);
-                    // **One the model has no reading for rests on the floor, not
-                    // the ceiling.** It was the ceiling first, which drew a
-                    // waypoint set on the water at the very top of the profile —
-                    // where a summit goes, and the one thing it must not be read
-                    // as. The floor is no claim either, because the box's lowest
-                    // line is the window's lowest reading and not sea level, so
-                    // this one is greyed and given no rule up to a curve it is
-                    // not on. Drawn all the same: a route with a hole in it is
-                    // exactly when a reader is looking for its points.
-                    var level = read ? y(value) : box.bottom - STATION_R - 1;
+                    // One the model has no reading for has no height to point
+                    // at; its rule is the axis itself.
+                    var level = read ? y(value) : box.bottom;
                     var ink = read ? STATION : STATION_UNREAD;
-                    if (read) {
-                        var rule = line(here, box.bottom, here, level, STATION);
-                        rule.setAttribute('stroke-dasharray', '2 2');
-                        marks.appendChild(rule);
-                    }
-                    // **A second ring where a stage changes hands**, the same
-                    // mark the pin on the map carries, because they are the same
-                    // point seen from above and from the side. Under the disc
-                    // rather than over it, so the number stays the clearest
-                    // thing on it.
-                    if (selected && selected.stages && selected.stages.indexOf(index) >= 0) {
-                        var ring = document.createElementNS(SVG, 'circle');
-                        ring.setAttribute('cx', here); ring.setAttribute('cy', level);
-                        ring.setAttribute('r', String(STATION_R + 2.5));
-                        ring.setAttribute('fill', 'none');
-                        ring.setAttribute('stroke', ink);
-                        ring.setAttribute('stroke-width', '1');
-                        marks.appendChild(ring);
-                    }
                     // **Drawn as the map draws the same place.** A plan's points
                     // are numbered from its first, and so were these -- which
                     // for the way to a goal put a 1 on where the reader stands,
@@ -7506,32 +7512,37 @@ class _ProfilePanel(MacroElement):
                     // gives them.
                     var mark = selected && selected.marks ? selected.marks[index] : null;
                     var kind = mark && mark.kind ? mark.kind : 'numbered';
+                    var radius = kind === 'start' ? STATION_R - 3 : STATION_R;
+                    var at = box.bottom + STRIP / 2 + 1 + station.row * (2 * STATION_R + 3);
+                    var rule = line(here, level, here, at - radius, ink);
+                    rule.setAttribute('stroke-dasharray', '2 2');
+                    marks.appendChild(rule);
                     if (kind === 'start') {
                         var dot = document.createElementNS(SVG, 'circle');
-                        dot.setAttribute('cx', here); dot.setAttribute('cy', level);
-                        dot.setAttribute('r', String(STATION_R - 3));
+                        dot.setAttribute('cx', here); dot.setAttribute('cy', at);
+                        dot.setAttribute('r', String(radius));
                         dot.setAttribute('fill', ink);
                         marks.appendChild(dot);
                         return;
                     }
+                    if (kind === 'goal' || (selected && selected.stages && selected.stages.indexOf(index) >= 0)) {
+                        var ring = document.createElementNS(SVG, 'circle');
+                        ring.setAttribute('cx', here); ring.setAttribute('cy', at);
+                        ring.setAttribute('r', String(STATION_R + 2.5));
+                        ring.setAttribute('fill', 'none');
+                        ring.setAttribute('stroke', ink);
+                        ring.setAttribute('stroke-width', kind === 'goal' ? '1.5' : '1');
+                        marks.appendChild(ring);
+                    }
                     var disc = document.createElementNS(SVG, 'circle');
-                    disc.setAttribute('cx', here); disc.setAttribute('cy', level);
+                    disc.setAttribute('cx', here); disc.setAttribute('cy', at);
                     disc.setAttribute('r', String(STATION_R));
                     disc.setAttribute('fill', PAPER);
                     disc.setAttribute('stroke', ink);
                     disc.setAttribute('stroke-width', kind === 'goal' ? '2.5' : '1.5');
                     marks.appendChild(disc);
-                    if (kind === 'goal') {
-                        var target = document.createElementNS(SVG, 'circle');
-                        target.setAttribute('cx', here); target.setAttribute('cy', level);
-                        target.setAttribute('r', String(STATION_R + 3));
-                        target.setAttribute('fill', 'none');
-                        target.setAttribute('stroke', ink);
-                        target.setAttribute('stroke-width', '1.5');
-                        marks.appendChild(target);
-                        return;
-                    }
-                    var number = text(here, level + 3, mark && mark.label ? mark.label : String(index + 1), 'middle');
+                    if (kind === 'goal') { return; }
+                    var number = text(here, at + 3, mark && mark.label ? mark.label : String(index + 1), 'middle');
                     number.setAttribute('font-size', '9');
                     number.setAttribute('font-weight', 'bold');
                     number.setAttribute('fill', ink);

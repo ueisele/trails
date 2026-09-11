@@ -3405,8 +3405,10 @@ class TestProfilePanel:
         # And the waypoint marks get a frame of their own, wider by their own
         # radius: every route has a point at nought and one at its end, and the
         # curve's frame would draw both as half discs.
-        assert "var marks = framed('trails-profile-marks-" in html
-        assert "STATION_R + 1);" in html
+        # The stations are not framed: they stand under the axis, outside
+        # the plot the curve is clipped to.
+        assert "var marks = framed(" not in html
+        assert "marks.setAttribute('class', 'trails-profile-stations');" in html
 
     def test_the_profile_marks_the_points_a_route_was_planned_with(self, group):
         """ "Where is the climb" is half an answer until the profile says which
@@ -3420,11 +3422,11 @@ class TestProfilePanel:
         html = fmap.get_root().render()
 
         assert "(shape.stations || []).forEach(function (metres, index) {" in html
-        assert "var sample = nearest(shape.distance, metres);" in html
+        assert "var sample = nearest(shape.distance, station.metres);" in html
         # A point on ground nothing was read along still happened, and it rests
         # on the floor of the box: at the ceiling it read as a summit, which a
         # waypoint set on the water is the one thing it must not.
-        assert "var level = read ? y(value) : box.bottom - STATION_R - 1;" in html
+        assert "var level = read ? y(value) : box.bottom;" in html
         assert "var ink = read ? STATION : STATION_UNREAD;" in html
 
     def test_the_heading_says_how_steep_the_ground_gets(self, group):
@@ -4155,11 +4157,36 @@ class TestProfilePanel:
         assert "marks: spec.marks || null," in html
         drawn = html.split("var mark = selected && selected.marks ? selected.marks[index] : null;")[1].split("});")[0]
         assert "if (kind === 'start') {" in drawn
-        assert "dot.setAttribute('r', String(STATION_R - 3));" in drawn
-        assert "target.setAttribute('r', String(STATION_R + 3));" in drawn
+        assert "var radius = kind === 'start' ? STATION_R - 3 : STATION_R;" in drawn
+        assert "ring.setAttribute('r', String(STATION_R + 2.5));" in drawn
+        assert "if (kind === 'goal') { return; }" in drawn
         assert "mark && mark.label ? mark.label : String(index + 1)" in drawn
         # Rendered, because this region of the template writes the character.
         assert "number.textContent = last ? '\u25ce' : String(at + 1);" in html
+
+    def test_the_stations_stand_in_a_strip_under_the_axis_and_the_chart_grows_for_it(self):
+        """They sat on the curve at their own height, which put the goal's ring
+        over the end of the curve and stacked a plan's close points on each
+        other -- reported from the phone, both. A strip under the axis holds
+        them now, one row per what fits, the kilometres below it; the chart and
+        the page grow by the rows, so the curve keeps its height. Laid out
+        before the kilometres are drawn, because they stand below the strip."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "var STATION_R = 6;" in html
+        assert "var STRIP = 16;" in html
+        laid = html.split("var laidStations = [], rows = 0;")[1].split("var decimals")[0]
+        assert "return other.row === row && Math.abs(other.here - here) < 2 * STATION_R + 2;" in laid
+        assert "var stripHeight = rows ? STRIP + (rows - 1) * (2 * STATION_R + 3) : 0;" in laid
+        assert "if (stripHeight !== stripNow) { stripNow = stripHeight; sizePages(); }" in laid
+        assert "chart.setAttribute('viewBox', '0 0 ' + width + ' ' + (chartHeight + stripHeight));" in laid
+        assert "box.bottom + stripHeight + 14, (value / 1000).toFixed(decimals), 'middle')" in html
+        assert "chart.appendChild(text(plot.right, box.bottom + stripHeight + 14, 'km', 'end'));" in html
+        assert "if (curved) { pagesBox.style.height = (chartHeight + stripNow) + 'px'; return; }" in html
+        assert "var at = box.bottom + STRIP / 2 + 1 + station.row * (2 * STATION_R + 3);" in html
+        assert "var rule = line(here, level, here, at - radius, ink);" in html
 
     def test_a_goal_has_figures_of_its_own(self):
         """Reported from the phone as *the info is from another way*, and it

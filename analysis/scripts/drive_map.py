@@ -2530,9 +2530,17 @@ def the_point_list_takes_the_room(page: Any) -> Check:
     # which is where the panel used to give the turn to the map.
     zoom = "() => window[Object.keys(window).find(k => k.startsWith('map_'))].getZoom()"
     before = page.evaluate(zoom)
+    # **The middle of the rows the reader can see**, not of the list: the
+    # list is ten rows tall and the page shows four or five of them, so the
+    # list's own middle is under the foot of the panel, over nothing that
+    # scrolls. Measured when the strip under the profile made the panel 16 px
+    # taller: the list's middle slid off the page and the wheel reached the
+    # map, which read as the defect this check was written for.
     where = page.evaluate(
-        """() => { const box = document.querySelector('.trails-plan-points').getBoundingClientRect();
-        return {x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2)}; }"""
+        """() => { const rows = document.querySelector('.trails-plan-points');
+        const box = rows.getBoundingClientRect(), seen = rows.closest('.trails-profile-page').getBoundingClientRect();
+        const top = Math.max(box.top, seen.top), bottom = Math.min(box.bottom, seen.bottom);
+        return {x: Math.round(box.left + box.width / 2), y: Math.round((top + bottom) / 2)}; }"""
     )
     page.mouse.move(where["x"], where["y"])
     page.mouse.wheel(0, 200)
@@ -4206,7 +4214,7 @@ THE_GOAL = """() => {
               const circles = [...chart.querySelectorAll('circle')].map(c => +c.getAttribute('r'));
               const bold = t => t.getAttribute('font-size') === '9' && t.getAttribute('font-weight') === 'bold';
               const numbers = [...chart.querySelectorAll('text')].filter(bold).map(t => t.textContent);
-              return {dots: circles.filter(r => r === 4).length, rings: circles.filter(r => r === 10).length, numbers: numbers}; })(),
+              return {dots: circles.filter(r => r === 3).length, rings: circles.filter(r => r === 8.5).length, numbers: numbers}; })(),
           // The switch on the goal's page, and the price it turns, read
           // from each side: the knob must say what the routing does.
           paths: (function () { const sw = document.querySelector('.trails-profile-goal-paths');
