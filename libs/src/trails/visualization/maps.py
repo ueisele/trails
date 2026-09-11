@@ -10209,7 +10209,9 @@ class _PlanMode(MacroElement):
                 }
                 if (from.node >= 0 && to.node >= 0) {
                     var found = route(graph, from.node, to.node);
-                    if (found) { return Promise.resolve(routedParts(graph, found)); }
+                    if (found && worthRouting(from, to, found.cost)) {
+                        return Promise.resolve(routedParts(graph, found));
+                    }
                 }
                 if (partly) {
                     // **Both ends, and neither of them need be on a path.** The
@@ -10234,6 +10236,33 @@ class _PlanMode(MacroElement):
                 var answering = heightsFor(from, to, mayAsk);
                 if (!answering) { return Promise.resolve(waitingParts(from, to)); }
                 return answering.then(function (answered) { return straightParts(graph, from, to, answered); });
+            }
+
+            // **A way round has to beat walking, and until this nothing asked.**
+            // A leg between two points that both sit on the network took
+            // whatever the router found, however long. Reported from the phone
+            // for a goal and measured again here for a plan, with the same
+            // three taps: 77.20 km for 10.00 km flown, one leg of it 66.73 km
+            // for a straight 2.15 km. Both points had been snapped, one of them
+            // on to a fragment of path in the next valley, and the way between
+            // those two nodes genuinely is a loop round half the park -- it is
+            // the answer to a question nobody asked.
+            //
+            // The same comparison `joinedRoute` makes and in the same metres:
+            // an edge costs its length times its source's factor, so the
+            // straight line priced at `offPathFactor` is the thing to beat.
+            // Which also means a leg here can never be more than that many
+            // times the line it could have flown.
+            //
+            // **Only where there is something to draw instead.** A leg longer
+            // than `maxStraightM` cannot be drawn straight at all -- it is
+            // refused for its sampling -- and refusing a long way round in
+            // favour of nothing at all is the worse of the two answers. So past
+            // that length the route stands, whatever it costs.
+            function worthRouting(from, to, cost) {
+                var flown = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
+                if (flown > PLAN.maxStraightM) { return true; }
+                return cost <= flown * PLAN.offPathFactor;
             }
 
             // **The three pieces of a way that is only partly a path**: what the

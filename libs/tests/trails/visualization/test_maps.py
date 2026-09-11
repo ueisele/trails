@@ -5613,6 +5613,33 @@ class TestPlanMode:
         # raw: a stop is a place the reader chose and nothing may move it.
         assert "return resolve(graph, {lat: head.lat, lon: head.lon, node: -1}," in planning
 
+    def test_a_way_round_has_to_beat_walking(self):
+        """A leg between two waypoints that both sit on the network used to take
+        whatever the router found, however long, because nothing compared it
+        with anything. Reported from the phone for a goal and measured again in
+        a browser for a plan, with the same three taps: 77.20 km for 10.00 km
+        flown, one leg of it 66.73 km for a straight 2.15 km. Both points had
+        been snapped, one of them on to a fragment of path in the next valley,
+        and the way between those two nodes genuinely is a loop round half the
+        park — it is the answer to a question nobody asked.
+
+        The same comparison the connector layer makes and in the same metres, so
+        a leg here can never be more than ``offPathFactor`` times the line it
+        could have flown either.
+
+        **Except where there is nothing to draw instead.** A leg longer than
+        ``maxStraightM`` cannot be drawn straight at all — it is refused for its
+        sampling — and refusing a long way round in favour of nothing is the
+        worse of the two answers, so past that length the route stands."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "if (found && worthRouting(from, to, found.cost)) {" in planning
+        assert "function worthRouting(from, to, cost) {" in planning
+        assert "if (flown > PLAN.maxStraightM) { return true; }" in planning
+        assert "return cost <= flown * PLAN.offPathFactor;" in planning
+
     def test_a_point_off_the_network_is_joined_to_it_not_moved_on_to_it(self):
         """Reported from the phone with a screenshot: with several stops set,
         one of them stood beside the way instead of on it, and the walk came out

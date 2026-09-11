@@ -4201,6 +4201,82 @@ THE_GOAL = """() => {
           again: row ? (row.querySelector('.trails-profile-goal-again') || {}).style.display : null}; }"""
 
 
+def a_planned_leg_that_is_not_worth_routing(page: Any) -> Check:
+    """The three taps from the report, planned rather than aimed at.
+
+    **The same defect lived in plan mode and was measured there.** A leg between
+    two waypoints that both sit on the network took whatever the router found,
+    however long, because nothing compared it with anything: these three taps
+    came to 77.20 km for 10.00 km flown, one leg of it 66.73 km for a straight
+    2.15 km. Both points had been snapped -- one of them on to a fragment of
+    path in the next valley -- and the way between those two nodes genuinely is
+    a loop round half the park.
+
+    Driven with the reported coordinates rather than with a place picked here,
+    because what is being checked is that one case and the rule that covers it.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the route came to, against the line it could have flown
+    """
+    # Where the reader stood, and the two stops whose nodes produced the loop.
+    taps = [
+        {"lat": 65.327587, "lng": 13.129687},
+        {"lat": 65.394585, "lng": 13.076827},
+        {"lat": 65.413008, "lng": 13.090708},
+    ]
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.evaluate("() => { if (window.trailsGoal) { window.trailsGoal.clear(); } }")
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+    # A plan of its own, from whatever the checks before left standing.
+    # **Bounded, and the bound is read first.** An edit is applied when the
+    # graph answers, a microtask or more after the call, so a loop that asks the
+    # page how many points are left and removes one is a loop that can ask
+    # before the last answer landed -- and a browser check that never finishes
+    # is worse than one that fails.
+    for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
+        page.evaluate("() => window.trailsPlan.remove(0)")
+        page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
+        page.wait_for_timeout(200)
+    for at in taps:
+        page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", at)
+        page.wait_for_function("() => !window.trailsPlan.busy()", timeout=240_000)
+        page.wait_for_timeout(300)
+    state = page.evaluate("() => window.trailsPlan.state()")
+    walked = (state["walked"] or 0) + (state["crossed"] or 0)
+    flown = sum(metres_between((a["lat"], a["lng"]), (b["lat"], b["lng"])) for a, b in zip(taps, taps[1:], strict=False))
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(300)
+
+    return Check(
+        "a planned leg that is not worth routing",
+        [
+            Reading("the three taps were placed", len(state["points"] or []), 3),
+            # The whole of the rule, and an arithmetic ceiling rather than a
+            # tolerance: a leg costs at least its own metres and may not cost
+            # more than the straight line times `offPathFactor`.
+            Reading(
+                "the plan is not a tour of the park",
+                walked <= 3.0 * flown,
+                True,
+                note=f"{walked / 1000:.2f} km walked against {flown / 1000:.2f} km flown -- it was 77.20 km before the rule",
+            ),
+            # And it is still a route and not three straight lines: the ceiling
+            # takes away the answers that are wrong, not the ones that are long.
+            Reading(
+                "and it is still walked on paths",
+                (state["straight"] or 0) < 0.5 * walked,
+                True,
+                note=f"{(state['straight'] or 0) / 1000:.2f} km of it drawn straight",
+            ),
+        ],
+    )
+
+
 def a_goal_the_reader_sets(page: Any) -> Check:
     """A point set while walking, read two ways, and what the mark makes of it.
 
@@ -7226,6 +7302,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_way_to_the_next_goal(page))
     if wanted(a_goal_the_reader_sets):
         checks.append(a_goal_the_reader_sets(page))
+    if wanted(a_planned_leg_that_is_not_worth_routing):
+        checks.append(a_planned_leg_that_is_not_worth_routing(page))
     if wanted(a_tap_that_could_have_meant_several_lines):
         checks.append(a_tap_that_could_have_meant_several_lines(page))
     if wanted(the_chosen_line_is_on_top):
