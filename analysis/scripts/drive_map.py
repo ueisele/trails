@@ -4201,6 +4201,113 @@ THE_GOAL = """() => {
           again: row ? (row.querySelector('.trails-profile-goal-again') || {}).style.display : null}; }"""
 
 
+def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
+    """What a tap means, and what it costs to be a finger's width out.
+
+    **Two taps 28 m apart, either side of the old 150 m reach.** Measured in
+    this browser before the change: the nearer one moved the waypoint 135.5 m
+    on to the network and gave 3.39 km of path; the further one left it where
+    it was and gave 2.27 km drawn straight across the mountain. Twenty-eight
+    millimetres of finger between two answers with nothing in common.
+
+    Both halves are driven here. A gesture snaps within a finger's width rather
+    than a fixed 150 m, so at this zoom neither tap is on a line and neither
+    waypoint moves; and a leg from a waypoint that did not snap reaches the
+    network by a short walk instead of being drawn straight end to end, so the
+    two taps now answer the same thing.
+
+    **And zoomed out the reach is still `snapM`.** A finger covers 191 m at
+    z12, which is where the fixed figure was about right, so the same tap that
+    stands alone at z15 is taken as the line at z12 — which is what *near
+    enough to tap* means when the map is showing a valley.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        Where each waypoint landed and what its leg came to
+    """
+    # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m from
+    # the nearest node to them, 28 m apart.
+    start = {"lat": 65.327587, "lng": 13.129687}
+    near = {"lat": 65.311875, "lng": 13.161214}
+    far_off = {"lat": 65.312125, "lng": 13.161214}
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.evaluate("() => { if (window.trailsGoal) { window.trailsGoal.clear(); } }")
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    page.wait_for_timeout(600)
+
+    def planned(at: dict[str, float], zoom: int) -> dict[str, Any]:
+        """Put the start and one tap down at a zoom, and read what came out."""
+        # Bounded, and the bound read first: an edit is applied when the graph
+        # answers, so a loop that asks the page how many are left can ask before
+        # the last answer landed.
+        for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
+            page.evaluate("() => window.trailsPlan.remove(0)")
+            page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
+            page.wait_for_timeout(200)
+        page.evaluate(with_map("(w) => __MAP__.setView([w.lat, w.lng], w.zoom, {animate: false})"), {**at, "zoom": zoom})
+        page.wait_for_timeout(500)
+        for where in (start, at):
+            page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", where)
+            page.wait_for_function("() => !window.trailsPlan.busy()", timeout=240_000)
+            page.wait_for_timeout(300)
+        state = page.evaluate("() => window.trailsPlan.state()")
+        last = state["points"][-1]
+        return {
+            "moved": metres_between((at["lat"], at["lng"]), (last["lat"], last["lon"])),
+            "walked": (state["walked"] or 0) + (state["crossed"] or 0),
+            "straight": state["straight"] or 0,
+        }
+
+    close_in = planned(near, 15)
+    beyond = planned(far_off, 15)
+    zoomed_out = planned(near, 12)
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(300)
+
+    return Check(
+        "a tap beside a path in plan mode",
+        [
+            # At z15 a finger is 24 m of ground, and 135 m is not a tap on
+            # anything. The waypoint used to be carried on to the network.
+            Reading(
+                "a tap 135 m off a line leaves the waypoint where it is",
+                close_in["moved"],
+                0.0,
+                within=1.0,
+                note=f"{close_in['moved']:.1f} m -- it was 135.5 m",
+            ),
+            # And it is still a route: the walk to the network is drawn as what
+            # it is and the rest is path. Before, this tap gave 3.39 km with the
+            # waypoint moved, and the one 28 m further out gave 2.27 km straight.
+            Reading(
+                "and its leg walks to the network rather than across the map",
+                (close_in["straight"] > 100, close_in["straight"] < 0.25 * close_in["walked"]),
+                (True, True),
+                note=f"{close_in['walked'] / 1000:.2f} km, {close_in['straight'] / 1000:.2f} km of it off the paths",
+            ),
+            # The cliff itself: 28 m of finger used to change everything.
+            Reading(
+                "a tap 28 m further out answers the same",
+                abs(beyond["walked"] - close_in["walked"]) < 0.05 * close_in["walked"],
+                True,
+                note=f"{close_in['walked'] / 1000:.2f} km against {beyond['walked'] / 1000:.2f} km -- it was 3.39 km against 2.27 km",
+            ),
+            # And zoomed out, where 150 m was about a finger's width, the same
+            # tap is taken as the line again.
+            Reading(
+                "zoomed out, the same tap is taken as the line",
+                zoomed_out["moved"],
+                135.5,
+                within=2.0,
+                note=f"{zoomed_out['moved']:.1f} m moved at z12",
+            ),
+        ],
+    )
+
+
 def a_planned_leg_that_is_not_worth_routing(page: Any) -> Check:
     """The three taps from the report, planned rather than aimed at.
 
@@ -5060,6 +5167,16 @@ def the_chosen_line_is_on_top(page: Any) -> Check:
     )
     # A route along that very chain, so that the two lines are on one piece of
     # ground and one of them has to be on top.
+    #
+    # **Laid down at a zoom of its own, because a waypoint snaps by what a
+    # finger covers.** This check is about which line is painted over which, and
+    # it was quietly leaning on the two points landing on the network: at a
+    # close zoom a finger is 12 m of ground, a point 30 % along a chain can be
+    # further than that from any node, and the route then reaches the chain by a
+    # short walk instead of running along it -- so the pixel this reads came
+    # back empty and the failure said nothing about panes.
+    page.evaluate(with_map("() => __MAP__.setZoom(12, {animate: false})"))
+    page.wait_for_timeout(400)
     page.evaluate("() => window.trailsPlan.toggle(true)")
     page.wait_for_timeout(600)
     page.evaluate(
@@ -7304,6 +7421,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_goal_the_reader_sets(page))
     if wanted(a_planned_leg_that_is_not_worth_routing):
         checks.append(a_planned_leg_that_is_not_worth_routing(page))
+    if wanted(a_tap_beside_a_path_in_plan_mode):
+        checks.append(a_tap_beside_a_path_in_plan_mode(page))
     if wanted(a_tap_that_could_have_meant_several_lines):
         checks.append(a_tap_that_could_have_meant_several_lines(page))
     if wanted(the_chosen_line_is_on_top):

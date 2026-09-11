@@ -722,6 +722,15 @@ PLAN_HEIGHTS_TIMEOUT_MS = 5_000
 
 SNAP_M = 150.0
 
+#: The same question asked of the screen: how near a gesture has to land, in
+#: pixels, to be taken as the line under it. A gesture snaps within whichever of
+#: the two is smaller, so pinching in makes a tap mean the path it is touching
+#: and not one a finger away; at 150 m alone the same tap meant the same thing
+#: at every zoom, which is right only at about z12 and progressively wrong
+#: below it. Taken from the halo every other line on this page is hit by, so
+#: that *near enough to tap* means one thing on this map and not two.
+SNAP_PX = maps.FINGER_PX
+
 #: How far a single leg may be drawn straight before the page refuses to sample
 #: it. A leg drawn straight is sampled at the build's own 5 m and fifty points
 #: to a request, so its cost to Kartverket's height service is its length: a
@@ -910,6 +919,7 @@ def plan_settings(params: Params, layers: list[TrailLayer]) -> dict[str, object]
         "sampleStepM": params.elevation_step_m,
         "ascentThresholdM": params.ascent_threshold_m,
         "snapM": SNAP_M,
+        "snapPx": SNAP_PX,
         "maxStraightM": MAX_STRAIGHT_M,
         "offPathFactor": OFF_PATH_FACTOR,
         # What the payload's header calls a crossing and an inferred connector.

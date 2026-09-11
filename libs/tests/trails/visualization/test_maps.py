@@ -4121,6 +4121,10 @@ class TestPlanMode:
             "sampleStepM": 5.0,
             "ascentThresholdM": 5.0,
             "snapM": 150.0,
+            # The same reach measured on the screen: a gesture snaps within
+            # whichever is smaller, so a tap means the line under it rather than
+            # one a finger away.
+            "snapPx": 12,
             "maxStraightM": 20000.0,
             # What a metre of open ground costs against a metre of path, in the
             # currency the edge costs are in. Above the dearest factor any drawn
@@ -5140,7 +5144,7 @@ class TestPlanMode:
             assert edit in planning, edit
         # And a waypoint that has moved is a new object, so a drag needs no
         # case of its own in the rule above.
-        assert "points[dragging.at] = snapped(held, where.lat, where.lng);" in planning
+        assert "points[dragging.at] = snapped(held, where.lat, where.lng, fingerReach(where.lat));" in planning
 
     def test_a_reply_about_ground_a_waypoint_has_left_is_dropped(self):
         """The whole of the cancellation, and it has to be: a drag settles eight
@@ -5613,6 +5617,71 @@ class TestPlanMode:
         # raw: a stop is a place the reader chose and nothing may move it.
         assert "return resolve(graph, {lat: head.lat, lon: head.lon, node: -1}," in planning
 
+    def test_a_tap_snaps_to_the_line_it_lands_on(self):
+        """At a fixed 150 m the same tap meant the same thing at every zoom.
+
+        Pinched right in, with two paths drawn a finger apart on the screen, a
+        waypoint put down on one of them could be taken as the other, and
+        nothing about that looked wrong — the pin simply appeared on the wrong
+        line. The further out the reader was the more nearly right the figure
+        became, which is why it survived: 150 m is about a finger's width at
+        z12 and a quarter of the screen at z16.
+
+        A gesture now snaps within whichever is smaller, ``snapM`` or the halo
+        every other line on this page is hit by, turned into metres at the zoom
+        the reader is looking at::
+
+            z12  191 m -> held at 150     z15   24 m
+            z13   96 m                    z16   12 m
+            z14   48 m                    z17    6 m
+
+        **And a waypoint read out of a file does not ask the screen.** Whether
+        a recorded point was on the network is a question about the ground and
+        has to answer the same whatever the map happens to be showing, so the
+        reach is handed in rather than looked up, and the file's callers leave
+        it out."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "function snapped(graph, lat, lon, within) {" in planning
+        assert "graph.nearestNode(lat, lon, within === undefined ? PLAN.snapM : within)" in planning
+        assert "function fingerReach(lat) {" in planning
+        assert "return Math.min(PLAN.snapM, across);" in planning
+        # Every gesture asks the screen.
+        assert "points.push(snapped(graph, lat, lon, fingerReach(lat)));" in planning
+        assert "points[dragging.at] = snapped(held, where.lat, where.lng, fingerReach(where.lat));" in planning
+        # And the file does not.
+        assert "anchored(graph, at) : snapped(graph, wp.lat, wp.lon)" in planning
+
+    def test_a_plan_reaches_the_network_rather_than_being_moved_on_to_it(self):
+        """The other half of what a point that did not snap used to mean.
+
+        A waypoint beyond the snap was kept raw and its leg was drawn straight
+        end to end — so 28 m of finger movement, either side of the reach, threw
+        the answer between *your point moved 135 m, and here is 3.39 km of
+        path* and *your point stands, and here is 2.27 km straight across the
+        mountain*. Measured in a browser at those two taps. With the reach cut
+        to a finger that cliff would be met far more often, not less.
+
+        A plan's legs now reach the network the way a goal's do, by a short walk
+        to it, so the two sides of the reach differ by the length of that walk
+        and nothing else.
+
+        **Except under a live drag**, and for the reason the height service is
+        already not asked there: the search is 64 ms on a long leg, a drag
+        settles every ``DRAG_EVERY_MS`` with two legs to redo, and the two
+        together are a route that cannot keep up with the finger holding it.
+        What the reader sees while dragging is the leg at its own straight
+        length saying it is still being worked out — which is what
+        ``waitingParts`` has always been for — and the search runs once, when
+        the finger lifts."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "return resolve(graph, from, to, mayAsk, mayAsk); }" in planning
+
     def test_a_way_round_has_to_beat_walking(self):
         """A leg between two waypoints that both sit on the network used to take
         whatever the router found, however long, because nothing compared it
@@ -5676,8 +5745,13 @@ class TestPlanMode:
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function joinedRoute(graph, from, to) {" in planning
         assert "var off = PLAN.offPathFactor;" in planning
-        # Every node seeded with the walk off the network at it.
-        assert "best[i] = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;" in planning
+        # Every node seeded with the walk off the network at it, except the
+        # ones already dearer than walking the whole way — an exact bound and
+        # not a heuristic. Measured on one 13.6 km leg, routed and redrawn:
+        # 157 ms unbounded against 64 ms bounded.
+        assert "var leave = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;" in planning
+        assert "if (leave >= plain) { continue; }" in planning
+        assert "if (taken.cost >= plain) { break; }" in planning
         # The straight line as one more connector, and what everything else has
         # to beat.
         assert "var plain = far(from.lon, from.lat, to.lon, to.lat) * off;" in planning
@@ -5690,9 +5764,11 @@ class TestPlanMode:
         assert "while (work.viaEdge[walk] >= 0) {" in planning
         assert "reversed.push(graph.fromNode[used] !== walk);" in planning
         assert "if (steps > graph.header.edges) { throw new Error('the way out is longer than the graph'); }" in planning
-        # The straight answer is drawn by the one path that cannot fail: a leg
-        # that throws is a gap in the way with a stop marooned in it.
-        assert "return walkTo(graph, from, to, mayAsk);\n                }" in planning
+        # And where the direct connector wins, the leg is drawn the way every
+        # other straight leg is — not by `walkTo`, which swallows a refusal from
+        # the height service. A plan has to say it could not get its heights;
+        # the goal takes the tolerant reading in `oneLeg`, where it belongs.
+        assert "// it belongs, in `oneLeg`." in planning
         # And the two searches it replaced are gone, not left beside it.
         assert "nearestReached" not in planning
         assert "route(graph, tail, -1);" not in planning
@@ -5826,7 +5902,11 @@ class TestPlanMode:
         # One refusal must not throw the chain away: a stop of five that cannot
         # be reached is a fact about that stop and not about the journey.
         assert "function oneLeg(graph, head, tail) {" in planning
-        assert "return {from: head, to: tail, parts: null, provisional: false," in planning
+        # A leg that could not be worked out is still ground the reader has to
+        # cross: drawn straight with nothing claimed about it, and still marked
+        # failed so the row says why. Handing back nothing left a hole in the
+        # way with a stop standing in the middle of it.
+        assert "return {from: head, to: tail, parts: plainParts(head, tail, length)," in planning
 
     def test_a_stop_goes_into_the_leg_it_is_nearest(self):
         """A reader putting a stop down means *and by way of here*, and where in
