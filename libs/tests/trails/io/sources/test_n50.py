@@ -261,6 +261,44 @@ class TestLoadWater:
         assert mock_load.call_args.args[1] == (n50.LAND_COVER_LAYER,)
 
 
+class TestLoadRivers:
+    """Tests for Source.load_rivers."""
+
+    @pytest.fixture
+    def cover(self) -> gpd.GeoDataFrame:
+        """A land-cover layer holding a lake, a named river, one N50 left
+        nameless, and a forest."""
+        square = Polygon([(13.0, 65.0), (13.01, 65.0), (13.01, 65.01), (13.0, 65.01)])
+        return gpd.GeoDataFrame(
+            {
+                "objtype": ["Innsjø", "Elv", "Elv", "Skog"],
+                "navn": ["Storvatnet", "Krutåga", None, None],
+                "kommune": ["1824"] * 4,
+                "layer": [n50.LAND_COVER_LAYER] * 4,
+                "geometry": [square] * 4,
+            },
+            crs="EPSG:4326",
+        )
+
+    def test_keeps_the_rivers_with_their_names_and_nothing_else(self, tmp_path, cover):
+        source = n50.Source(cache_dir=str(tmp_path))
+
+        with patch.object(source, "load_layers", return_value=cover):
+            rivers = source.load_rivers(["1824"])
+
+        assert list(rivers.columns) == ["name", "kommune", "geometry"]
+        assert list(rivers["name"]) == ["Krutåga", None]
+        assert rivers.crs.to_epsg() == 4326
+
+    def test_reads_the_same_land_cover_layer_the_water_does(self, tmp_path, cover):
+        source = n50.Source(cache_dir=str(tmp_path))
+
+        with patch.object(source, "load_layers", return_value=cover) as mock_load:
+            source.load_rivers(["1824"])
+
+        assert mock_load.call_args.args[1] == (n50.LAND_COVER_LAYER,)
+
+
 class TestLoadFerries:
     """Tests for Source.load_ferries."""
 

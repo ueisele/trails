@@ -30,7 +30,7 @@ from trails.visualization.encoding import (
     varints,
     zigzag,
 )
-from trails.visualization.water import water_mask
+from trails.visualization.water import river_table, water_mask
 
 
 def _kind(source: str) -> str:
@@ -651,6 +651,26 @@ def test_the_areas_travel_in_the_header_with_their_outlines() -> None:
     assert [area["id"] for area in header["protected"]] == ["VV0001", "VV0002"]
     assert header["protected"][0]["rings"] == AREAS[0]["rings"]
     assert header["protectedShareQuantum"] == pytest.approx(1.0 / PROTECTED_SHARE_UNITS)
+
+
+def test_the_rivers_travel_in_the_header_checked_over() -> None:
+    # Outlines and not bits, for a sentence and not a price: a page that has
+    # no river table says nothing about what a straight walk wades through.
+    line = LineString([(13.0, 65.6), (13.001, 65.601)])
+    rivers = river_table(
+        gpd.GeoDataFrame(
+            {"name": ["Krutåga"]}, geometry=[Polygon([(13.0, 65.6), (13.001, 65.6), (13.001, 65.6002), (13.0, 65.6002)])], crs="EPSG:4326"
+        ),
+        (13.0, 65.6, 13.002, 65.602),
+    )
+    header = encoded(chains((line, "a")), graph((line, "a", 0, 1, "FKB", [10.0, 11.0])), rivers=rivers).header
+
+    assert header["rivers"] == rivers
+    assert header["rivers"]["rivers"][0]["name"] == "Krutåga"
+    assert encoded(chains((line, "a")), graph((line, "a", 0, 1, "FKB", [10.0, 11.0]))).header["rivers"] is None
+
+    with pytest.raises(ValueError, match="quantum"):
+        encoded(chains((line, "a")), graph((line, "a", 0, 1, "FKB", [10.0, 11.0])), rivers={"quantum": 0, "rivers": []})
 
 
 def test_the_water_grid_travels_in_the_header_checked_over() -> None:

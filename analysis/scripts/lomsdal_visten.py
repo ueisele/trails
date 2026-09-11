@@ -111,7 +111,7 @@ from trails.routing import (
 from trails.utils.geo import attach_nearest, compass_points, endpoint_bearings, thin_points
 from trails.visualization import maps
 from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
-from trails.visualization.water import water_mask
+from trails.visualization.water import river_table, water_mask
 
 PARK_NAME = "Lomsdal-Visten"
 
@@ -808,6 +808,20 @@ WATER_FACTOR = 30.0
 #: be 274 kB, at 50 m the sound in the screenshot would be a cell wide.
 WATER_CELL_M = 25.0
 
+#: How far a river's outline may stray from N50's when it is simplified for the
+#: page, in metres. It decides one figure: how wide the water is where a straight
+#: line meets it. Measured over the box: at 3 m the outlines are 39,700 vertices
+#: and a third of a megabyte before gzip; at 0 m they are 133,000 and 2.5 MB;
+#: at 10 m a 19 m river can be said to be 9 or 29.
+RIVER_TOLERANCE_M = 3.0
+
+#: ``navneobjekttype`` of a river's name in the register, and how far from the
+#: outline the point carrying it may stand. The register puts a river's name on
+#: the water, so 60 m is generous; measured over this build's 589 outlines,
+#: 189 are named at 60 m and 198 at 100 m -- the rest have no point at all.
+RIVER_NAME_TYPE = "elv"
+RIVER_NAME_M = 60.0
+
 #: How near a waypoint has to land to something the map draws by name before it
 #: is called after it. The same fifty metres ``--hut-name-m`` already joins N50's
 #: cabins to the place-name register by, and for the same reason: two registers
@@ -1458,6 +1472,7 @@ def encode_for_the_page(
     order: pd.DataFrame,
     protected: gpd.GeoDataFrame,
     water: gpd.GeoDataFrame,
+    rivers: gpd.GeoDataFrame,
     bounds: maps.Bounds,
 ) -> Payload:
     """Encode the routing graph and its heights into the page's second payload.
@@ -1503,6 +1518,9 @@ def encode_for_the_page(
         costs=edge_costs(sources, params),
         areas=protected_table(protected),
         water=water_mask(water, bounds, WATER_CELL_M),
+        # Outlines and not bits, for a sentence and not a price: see
+        # ``RIVER_TOLERANCE_M``.
+        rivers=river_table(rivers, bounds, RIVER_TOLERANCE_M),
     )
 
 
@@ -1674,6 +1692,16 @@ def main() -> int:
     # outline reaches it.
     water = gpd.clip(n50_source.load_water(codes, force_download=args.force_download), box(*bounds_of(zone)))
     print(f"  {len(water):,} outlines: {water['objtype'].value_counts().to_dict() if len(water) else {}}")
+    # The rivers N50 draws as outlines, for what a straight walk wades through
+    # and how wide it is there. Not priced: see ``RIVER_COVER_TYPES``.
+    rivers = gpd.clip(n50_source.load_rivers(codes, force_download=args.force_download), box(*bounds_of(zone)))
+    # N50's own ``navn`` is empty for every river outline in this build
+    # (measured: 0 of 413), so the names come from the register, from the
+    # points it places on the water: one outline in three gets one within
+    # 60 m. The rest are said as *a river*, which is true.
+    river_names = all_names[all_names["kind"] == RIVER_NAME_TYPE]
+    rivers["name"] = attach_nearest(rivers.drop(columns=["name"]), river_names, {"name": "name"}, RIVER_NAME_M, metric_crs=METRIC_CRS)["name"]
+    print(f"  {len(rivers):,} rivers as outlines, {int(rivers['name'].notna().sum()):,} of them named from the register")
     if len(cabins):
         print(f"    {cabins['kind'].value_counts().to_dict()}")
 
@@ -1967,11 +1995,14 @@ def main() -> int:
     # takes the profile off it and phase 6 routes over it, and both of those live
     # in Python until it is in the page.
     print("\nEncoding the routing graph for the page...")
-    payload = encode_for_the_page(network, loaded.sources, params, order, loaded.protected, water, bounds_of(zone))
+    payload = encode_for_the_page(network, loaded.sources, params, order, loaded.protected, water, rivers, bounds_of(zone))
     counted = payload.header
     grid = counted["water"]
     wet, weight = 100 * grid["set"] / (grid["cols"] * grid["rows"]), len(grid["bits"]) / 1e3
     print(f"  water grid: {grid['cols']:,} x {grid['rows']:,} cells of {grid['cellM']:g} m, {wet:.1f} % water, {weight:.0f} kB in the page")
+    laid = counted["rivers"]["rivers"]
+    river_vertices = sum(len(ring) // 2 for river in laid for ring in river["rings"])
+    print(f"  {len(laid):,} rivers as outlines, {river_vertices:,} vertices at {RIVER_TOLERANCE_M:g} m")
     print(f"  {counted['edges']:,} edges on {counted['nodes']:,} nodes, {counted['vertices']:,} vertices at full source precision")
     print(f"  {counted['samples']:,} height samples, quantised at {counted['coordinateQuantum']:g}° and {counted['elevationQuantum']:g} m")
     print(f"  {payload.raw_mb:.2f} MB encoded, {payload.size_mb:.2f} MB gzipped and base64 in the page")

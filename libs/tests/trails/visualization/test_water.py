@@ -8,7 +8,16 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from shapely.geometry import Polygon
-from trails.visualization.water import METRES_PER_DEGREE, WATER_FIELDS, check_water, water_mask
+from trails.visualization.water import (
+    METRES_PER_DEGREE,
+    RIVER_FIELDS,
+    RIVER_QUANTUM,
+    WATER_FIELDS,
+    check_rivers,
+    check_water,
+    river_table,
+    water_mask,
+)
 
 
 def unpacked(mask: dict) -> np.ndarray:
@@ -82,3 +91,68 @@ def test_bits_that_do_not_fit_the_rows_are_refused() -> None:
 
     with pytest.raises(ValueError, match="rows of"):
         check_water(short)
+
+
+def unpacked_ring(steps: list[int]) -> list[tuple[float, float]]:
+    """Read a ring back the way the page does: the first pair absolute, every
+    pair after it a step from the one before."""
+    out, lon, lat = [], 0, 0
+    for i in range(0, len(steps), 2):
+        lon += steps[i]
+        lat += steps[i + 1]
+        out.append((lon * RIVER_QUANTUM, lat * RIVER_QUANTUM))
+    return out
+
+
+def a_river(west: float, south: float, east: float, north: float, name: str | None) -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame({"name": [name]}, geometry=[Polygon([(west, south), (east, south), (east, north), (west, north)])], crs="EPSG:4326")
+
+
+def test_a_river_travels_as_its_outline_named_and_packed() -> None:
+    # A 20 m band of river running east-west: four corners, one ring, and the
+    # width the page will measure across it is what the outline says.
+    d_lat = 20.0 / METRES_PER_DEGREE
+    table = river_table(a_river(13.0, 65.0, 13.01, 65.0 + d_lat, "Krutåga"), (12.9, 64.9, 13.1, 65.1), 3.0)
+
+    assert table["quantum"] == RIVER_QUANTUM
+    assert len(table["rivers"]) == 1
+    river = table["rivers"][0]
+    assert set(river) == set(RIVER_FIELDS)
+    assert river["name"] == "Krutåga"
+    assert [round(value, 5) for value in river["bounds"]] == [13.0, 65.0, 13.01, round(65.0 + d_lat, 5)]
+    ring = unpacked_ring(river["rings"][0])
+    assert len(ring) == 4
+    assert max(lat for _, lat in ring) - min(lat for _, lat in ring) == pytest.approx(d_lat, abs=RIVER_QUANTUM)
+
+
+def test_a_river_outside_the_box_is_left_out_and_one_across_its_edge_is_clipped() -> None:
+    table = river_table(
+        gpd.GeoDataFrame(
+            {"name": ["far", None]},
+            geometry=[
+                Polygon([(14.0, 66.0), (14.01, 66.0), (14.01, 66.001), (14.0, 66.001)]),
+                Polygon([(13.05, 65.0), (13.2, 65.0), (13.2, 65.001), (13.05, 65.001)]),
+            ],
+            crs="EPSG:4326",
+        ),
+        (13.0, 64.9, 13.1, 65.1),
+        0.0,
+    )
+
+    assert [river["name"] for river in table["rivers"]] == [None]
+    assert table["rivers"][0]["bounds"][2] == pytest.approx(13.1)
+
+
+def test_a_river_table_is_checked_over() -> None:
+    good = river_table(a_river(13.0, 65.0, 13.01, 65.001, None), (12.9, 64.9, 13.1, 65.1))
+    assert check_rivers(good) is good
+    assert check_rivers({"quantum": RIVER_QUANTUM, "rivers": []})["rivers"] == []
+
+    with pytest.raises(ValueError, match="quantum"):
+        check_rivers({"quantum": 0, "rivers": []})
+    with pytest.raises(ValueError, match="short of"):
+        check_rivers({"quantum": RIVER_QUANTUM, "rivers": [{"name": None, "rings": [[0, 0, 1, 0, 0, 1]]}]})
+    with pytest.raises(ValueError, match="three or more vertices"):
+        check_rivers({"quantum": RIVER_QUANTUM, "rivers": [{"name": None, "bounds": [0, 0, 1, 1], "rings": [[0, 0, 1, 0]]}]})
+    with pytest.raises(ValueError, match="has no area"):
+        river_table(a_river(13.0, 65.0, 13.01, 65.001, None), (13.0, 65.0, 13.0, 65.1))

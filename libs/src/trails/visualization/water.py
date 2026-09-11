@@ -125,6 +125,136 @@ def water_mask(water: gpd.GeoDataFrame, bounds: tuple[float, float, float, float
     }
 
 
+#: What every river entry carries. ``name`` is None where N50 has none, ``bounds``
+#: is the box a line is tested against before its rings are, ``rings`` are the
+#: outline's rings -- the outer first, then any islands -- each a flat list of
+#: integers in :data:`RIVER_QUANTUM` degrees, the first pair absolute and every
+#: pair after it a difference from the one before. Measured for the
+#: Lomsdal-Visten box at 3 m: 413 rivers, 39,700 vertices, which as rounded
+#: floats would be 770 kB of the page and as differences are a third of that.
+RIVER_FIELDS = ("name", "bounds", "rings")
+
+#: The grid a river vertex is written on, in degrees: a metre, which is finer
+#: than the outline was simplified to.
+RIVER_QUANTUM = 1e-5
+
+
+def river_table(rivers: gpd.GeoDataFrame, bounds: tuple[float, float, float, float], tolerance_m: float = 3.0) -> dict[str, Any]:
+    """Lay the rivers out as the outlines the page carries.
+
+    **Outlines and not a grid, because these decide a sentence and not a
+    price.** The water grid answers thousands of connectors in one search and
+    may be a cell out; a river is asked about once, of the straight parts a
+    leg ended up with, and what it answers is *this line meets the Krutåga,
+    and the water is 19 m wide there* -- a figure a reader weighs a crossing
+    by, which a 25 m cell could not give.
+
+    Args:
+        rivers: The rivers as outlines, carrying ``name``, in any CRS
+        bounds: ``(west, south, east, north)`` in degrees; a river wholly
+            outside it is left out, one across its edge is clipped to it
+        tolerance_m: How far a simplified outline may stray from the drawn one
+
+    Returns:
+        The header entry: ``quantum`` and ``rivers``, each river with every
+        field of :data:`RIVER_FIELDS`
+
+    Raises:
+        ValueError: If the box is empty or the tolerance is negative
+    """
+    west, south, east, north = (float(value) for value in bounds)
+    if not east > west or not north > south:
+        raise ValueError(f"the box ({west}, {south}, {east}, {north}) has no area to cover")
+    if tolerance_m < 0:
+        raise ValueError(f"a tolerance is a distance, not {tolerance_m} m")
+    entries: list[dict[str, Any]] = []
+    if len(rivers) == 0:
+        return {"quantum": RIVER_QUANTUM, "rivers": entries}
+    box = shapely.box(west, south, east, north)
+    clipped = rivers.to_crs(GRID_CRS)
+    clipped = clipped[clipped.geometry.intersects(box)].copy()
+    clipped["geometry"] = clipped.geometry.intersection(box)
+    # Simplified in metres, because a tolerance in degrees is a different
+    # distance north-south from east-west; then back, because the page asks
+    # in degrees.
+    metric = clipped.to_crs(clipped.estimate_utm_crs())
+    metric["geometry"] = metric.geometry.simplify(tolerance_m, preserve_topology=True) if tolerance_m > 0 else metric.geometry
+    for name, geometry in zip(clipped["name"], metric.to_crs(GRID_CRS).geometry, strict=True):
+        if geometry is None or geometry.is_empty:
+            continue
+        pieces = geometry.geoms if geometry.geom_type == "MultiPolygon" else [geometry]
+        for piece in pieces:
+            if piece.geom_type != "Polygon" or piece.is_empty:
+                continue
+            rings = [_deltas(ring.coords) for ring in [piece.exterior, *piece.interiors]]
+            rings = [ring for ring in rings if len(ring) >= 6]
+            if not rings:
+                continue
+            min_x, min_y, max_x, max_y = piece.bounds
+            entries.append(
+                {
+                    "name": None if name is None or (isinstance(name, float) and math.isnan(name)) else str(name),
+                    "bounds": [float(min_x), float(min_y), float(max_x), float(max_y)],
+                    "rings": rings,
+                }
+            )
+    return {"quantum": RIVER_QUANTUM, "rivers": entries}
+
+
+def _deltas(coords: Any) -> list[int]:
+    """Write a ring as quantised differences, the first vertex absolute.
+
+    The closing vertex a ring repeats is dropped: the page closes every ring
+    itself, and a repeated vertex is a zero-length edge to test a line against.
+
+    Args:
+        coords: The ring's coordinates in degrees
+
+    Returns:
+        A flat list, ``[lon, lat, dlon, dlat, dlon, dlat, ...]`` in
+        :data:`RIVER_QUANTUM` units
+    """
+    points = [(round(x / RIVER_QUANTUM), round(y / RIVER_QUANTUM)) for x, y in coords]
+    if len(points) > 1 and points[0] == points[-1]:
+        points = points[:-1]
+    out: list[int] = []
+    last = (0, 0)
+    for point in points:
+        out.extend((point[0] - last[0], point[1] - last[1]))
+        last = point
+    return out
+
+
+def check_rivers(entry: dict[str, Any]) -> dict[str, Any]:
+    """Refuse a river table the page could not read.
+
+    Args:
+        entry: What :func:`river_table` returned, or something claiming to be
+
+    Returns:
+        The same entry
+
+    Raises:
+        ValueError: If the quantum is not a positive number, or any river is
+            short of a field of :data:`RIVER_FIELDS`, or a ring has an odd
+            number of values or fewer than three vertices
+    """
+    quantum = entry.get("quantum") if isinstance(entry, dict) else None
+    if not isinstance(quantum, (int, float)) or not quantum > 0:
+        raise ValueError(f"a river quantum is a positive number of degrees, not {quantum!r}")
+    rivers = entry.get("rivers")
+    if not isinstance(rivers, list):
+        raise ValueError("the river table is a list of rivers")
+    for position, river in enumerate(rivers):
+        missing = sorted(set(RIVER_FIELDS) - set(river))
+        if missing:
+            raise ValueError(f"river {position} is short of {', '.join(missing)}")
+        for ring in river["rings"]:
+            if len(ring) % 2 or len(ring) < 6:
+                raise ValueError(f"river {position} has a ring of {len(ring)} values, which is not three or more vertices")
+    return entry
+
+
 def _cells(span: float, size: float) -> int:
     """Count the cells a span needs, without a floating-point hair adding one.
 

@@ -4199,6 +4199,7 @@ THE_GOAL = """() => {
               return (line && line.style.display !== 'none') ? line.textContent : null; })(),
           armed: window.trailsChrome.state().aiming,
           lamp: window.trailsChrome.state().goal,
+          paths: window.trailsChrome.state().paths,
           row: !!row && row.style.display !== 'none' && !!pageOf && pageOf.style.display !== 'none',
           // What the panel's own way out is at the moment: a x, or the struck
           // flag that drops the goal.
@@ -4970,6 +4971,35 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(700)
     dropped_alone = page.evaluate(THE_GOAL)
 
+    # **What a straight part wades through, and the reader's own price for
+    # open ground.** The case as it came from the phone, moved 200 m across
+    # the river: standing at the junction by Granlia with the goal on the far
+    # bank of Krutåga, the routed way ends at the junction and walks 940 m
+    # straight through the river, because a metre of open ground counts three
+    # of path and the road round, over the bridge, is 2.6 km. The page says
+    # the line meets a river and how wide the water is there -- 30 m by the
+    # outline, measured with shapely on the unsimplified one, and by the name
+    # the register puts on the water there, Storelva -- said, not priced: half
+    # this build's rivers are under 17 m across, which a walker fords or does
+    # not by depth and current. And *stay on paths* prices open
+    # ground at ten to one, after which the road and its bridge win.
+    page.context.set_geolocation({"latitude": 65.33219, "longitude": 12.977855, "accuracy": 20})
+    page.wait_for_timeout(2500)
+    page.evaluate("() => window.trailsGoal.way('routed')")
+    page.evaluate("() => window.trailsGoal.set(65.32371, 12.99122, 'Across Krutåga')")
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(1500)
+    krutaga = page.evaluate(THE_GOAL)
+    page.evaluate("() => window.trailsPlan.stayOnPaths(true)")
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(1500)
+    on_paths = page.evaluate(THE_GOAL)
+    # Off again from the rail's own button, which is where a reader turns it.
+    page.evaluate("() => document.querySelector('[data-tool=\"paths\"]').click()")
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(1500)
+    off_paths = page.evaluate(THE_GOAL)
+
     # **And a place is offered as one where the reader has just read what it
     # is.** Nearly every goal somebody sets is a named thing, and the popup is
     # the moment they are looking at its name.
@@ -5286,8 +5316,48 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 (alone["mine"], alone["hide"]["struck"], len(asked), dropped_alone["goal"]["at"], dropped_alone["lamp"]),
                 (True, True, 2, None, False),
             ),
-            Reading("and the button is a x again once nothing of the goal is shown",
-                    (other_shown["hide"]["title"], other_shown["hide"]["struck"]), ("Put this away", False)),
+            Reading(
+                "and the button is a x again once nothing of the goal is shown",
+                (other_shown["hide"]["title"], other_shown["hide"]["struck"]),
+                ("Put this away", False),
+            ),
+            Reading(
+                "a goal across Krutåga is walked straight at from the junction",
+                (krutaga["goal"]["line"], 700 < (krutaga["goal"]["straight"] or 0) < 1200),
+                (True, True),
+                note=f"{krutaga['goal']['straight'] or 0:.0f} m straight of {krutaga['goal']['metres'] or 0:.0f} m",
+            ),
+            Reading(
+                "and the page says which river the line wades through, and how wide",
+                any(line.startswith("crosses Storelva, ") and line.endswith(" m wide there") for line in krutaga["goal"]["rivers"]),
+                True,
+                note="; ".join(krutaga["goal"]["rivers"]) or "nothing crossed",
+            ),
+            Reading(
+                "and what width it says",
+                next((int(line.split(", ")[1].split(" m")[0]) for line in krutaga["goal"]["rivers"] if "m wide" in line), None),
+                30,
+                within=6,
+                holds=False,
+                note="shapely on the unsimplified outline: 29.9 m",
+            ),
+            Reading(
+                "and how steep the straight part gets",
+                krutaga["goal"]["steepest"] is not None and "on the straight part" in (krutaga["note"] or ""),
+                True,
+                note=f"steepest {krutaga['goal']['steepest']} %",
+            ),
+            Reading(
+                "stay on paths takes the road round instead",
+                (on_paths["paths"], (on_paths["goal"]["straight"] or 0) < 250, (on_paths["goal"]["metres"] or 0) > 2000),
+                (True, True, True),
+                note=f"{on_paths['goal']['straight'] or 0:.0f} m straight of {on_paths['goal']['metres'] or 0:.0f} m",
+            ),
+            Reading(
+                "and the rail's own button turns it off again",
+                (off_paths["paths"], 700 < (off_paths["goal"]["straight"] or 0) < 1200),
+                (False, True),
+            ),
             Reading("a place offers itself as a goal", from_place["offered"], "Set as goal"),
             Reading(
                 "and taking it up names the goal after the place",

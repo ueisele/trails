@@ -44,6 +44,15 @@ LAND_COVER_LAYER = "N50_Arealdekke_omrade"
 #: are in the network already.
 WATER_COVER_TYPES = ("Havflate", "Innsjø", "InnsjøRegulert")
 
+#: ``objtype`` values of the land-cover layer that are rivers drawn as outlines.
+#: **Not water a walker cannot cross, and not priced as such.** Measured over the
+#: eight municipalities of the Lomsdal-Visten build: 589 outlines, half of them
+#: under 17 m across, five in six under 30 m -- a breadth a walker fords or does
+#: not by depth and current, which no layer records. What the outline *can* say
+#: is where a straight line meets a river and how wide the water is there, and
+#: that is what the page says.
+RIVER_COVER_TYPES = ("Elv",)
+
 #: Matrikkel building-type codes for huts out in the terrain, mapped to a label.
 #: Wilderness huts often carry neither a name nor a service level in N50, so the
 #: type code is the only thing marking them as something a hiker can shelter in.
@@ -272,6 +281,30 @@ class Source:
         cover = self.load_layers(kommune_codes, (LAND_COVER_LAYER,), force_download=force_download)
         water = cover[cover["objtype"].isin(WATER_COVER_TYPES)]
         return gpd.GeoDataFrame(water[["objtype", "kommune", "geometry"]].reset_index(drop=True), crs="EPSG:4326")
+
+    def load_rivers(self, kommune_codes: list[str], force_download: bool = False) -> gpd.GeoDataFrame:
+        """Load the rivers N50 draws as outlines, with their names where it has one.
+
+        The same whole, cached land-cover layer :meth:`load_water` reads, for the
+        same reason: a second key for a subset of one file would be a second
+        copy of the download.
+
+        Args:
+            kommune_codes: Municipality numbers to load
+            force_download: Re-order and re-download even if cached
+
+        Returns:
+            GeoDataFrame in EPSG:4326 with Polygon geometries and the columns
+            ``name`` (None where N50 has none), ``kommune`` and ``geometry``,
+            holding only :data:`RIVER_COVER_TYPES`
+        """
+        cover = self.load_layers(kommune_codes, (LAND_COVER_LAYER,), force_download=force_download)
+        rivers = cover[cover["objtype"].isin(RIVER_COVER_TYPES)].copy()
+        # A list and not `where`, which writes NaN for what it leaves out: a
+        # river with no name has None, the one value JSON and the page agree on.
+        named = rivers["navn"] if "navn" in rivers.columns else pd.Series(None, index=rivers.index, dtype=object)
+        rivers["name"] = pd.Series([text if isinstance(text, str) and text.strip() else None for text in named], index=rivers.index, dtype=object)
+        return gpd.GeoDataFrame(rivers[["name", "kommune", "geometry"]].reset_index(drop=True), crs="EPSG:4326")
 
     def load_cabins(self, kommune_codes: list[str], force_download: bool = False) -> gpd.GeoDataFrame:
         """Load cabins, rest huts and lean-tos out in the terrain.

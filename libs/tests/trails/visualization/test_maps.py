@@ -3444,7 +3444,7 @@ class TestProfilePanel:
 
         html = fmap.get_root().render()
 
-        assert "function steepestOf(shape) {" in html
+        assert "function steepestOf(shape, freeOnly) {" in html
         assert "var slope = gradients(shape), worst = NaN;" in html
         # A route works it out; a chain is handed it.
         assert "var worst = steepestOf(shape);" in html
@@ -4094,8 +4094,12 @@ class TestProfilePanel:
         # fourth. A reader being shown a line has to know which part of it is
         # a promise and which a bearing.
         assert "goalNote.className = 'trails-profile-goal-note';" in html
-        assert "note = (goalNow.straight / 1000).toFixed(2) + ' km of it drawn straight, not a path';" in html
-        assert "} else if (!goalNow.line && routed) { note = 'No way there \\u2014 drawn straight'; }" in html
+        assert "notes.push((goalNow.straight / 1000).toFixed(2) + ' km of it drawn straight, not a path');" in html
+        # The lines the heading has no room for, one under the other: what the
+        # straight part wades through, and how steep it gets there.
+        assert "notes = notes.concat(goalNow.rivers || []);" in html
+        assert "notes.push('steepest ' + goalNow.steepest + ' % on the straight part');" in html
+        assert "} else if (!goalNow.line && routed) { notes.push('No way there \\u2014 drawn straight'); }" in html
         # Rid of by the panel's own button, drawn as a struck flag while the
         # way is what the panel shows -- and by nothing else. The line in the
         # goal's menu was asked for from the phone as *how do I leave this*.
@@ -5965,7 +5969,7 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function joinedRoute(graph, from, to) {" in planning
-        assert "var off = PLAN.offPathFactor;" in planning
+        assert "var off = offPath();" in planning
         # Every node seeded with the walk off the network at it, except the
         # ones already dearer than walking the whole way — an exact bound and
         # not a heuristic. Measured on one 13.6 km leg, routed and redrawn:
@@ -6027,10 +6031,10 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function priced(graph, aLon, aLat, bLon, bLat) {" in planning
-        assert "if (!grid || !(PLAN.waterFactor > PLAN.offPathFactor)) { return length * PLAN.offPathFactor; }" in planning
+        assert "if (!grid || !(PLAN.waterFactor > offPath())) { return length * offPath(); }" in planning
         assert "var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0;" in planning
         assert "if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }" in planning
-        assert "return (length - water) * PLAN.offPathFactor + water * PLAN.waterFactor;" in planning
+        assert "return (length - water) * offPath() + water * PLAN.waterFactor;" in planning
         # Lazily, and in a queue of its own: a floor is priced for real when
         # it is the cheaper top, and only an exact price is ever a label.
         assert "var floors = new Heap(), heap = new Heap(), i;" in planning
@@ -6076,7 +6080,7 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "straight: goalShape ? (goalShape.straight + goalShape.crossed) : null};" in planning
+        assert "straight: goalShape ? (goalShape.straight + goalShape.crossed) : null," in planning
 
     def test_a_stretch_too_long_to_sample_is_still_a_stretch_to_walk(self):
         """Reported from the phone, 112 km from the goal: the way *was* routed,
@@ -6224,6 +6228,65 @@ class TestPlanMode:
         # Leg i ends at stop i, which is what makes the mark name the next place
         # rather than the last one.
         assert "return {lat: stops[leg].lat, lon: stops[leg].lon, name: stopSaid(leg)};" in planning
+
+    def test_a_straight_part_says_which_river_it_wades_through(self):
+        """Measured over the eight municipalities of this build: 589 rivers as
+        outlines, half of them under 17 m across, five in six under 30 m. That
+        is a breadth a walker fords or does not by depth and current, which no
+        layer records -- so a river is never priced, and what the page can say
+        it says: which river the straight part meets and how wide the water is
+        there. The outlines travel packed as differences and are unpacked once."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        assert "graph.rivers = riversOf(header.rivers);" in html
+        assert "graph.riverAt = areasAt.bind(null, graph.rivers);" in html
+        unpacked = html.split("function riversOf(table) {")[1].split("function nearestNode(")[0]
+        assert "lon += steps[i]; lat += steps[i + 1];" in unpacked
+        assert "ring.push([lon * quantum, lat * quantum]);" in unpacked
+        planning = html.split("var PLAN =")[-1]
+        crossing = planning.split("function riverCrossings(graph, from, to) {")[1].split("function straightParts(")[0]
+        # Every cut of a ring, in order along the line; inside or out at the
+        # start settled by the same even-odd test the areas use; a run that
+        # ends in the water is counted too.
+        assert "var inside = graph.riverAt(from.lon, from.lat).indexOf(which) >= 0;" in crossing
+        assert "cuts.sort(function (a, b) { return a - b; });" in crossing
+        assert "if (began !== null) { found.push({name: river.name, width: (1 - began) * length, at: began * length}); }" in crossing
+        assert "rivers: riverCrossings(graph, head, tail)," in planning
+        # Composed in walking order, said wherever a route is described.
+        assert "if (part.rivers) { rivers = rivers.concat(part.rivers); }" in planning
+        assert "rivers: rivers};" in planning
+        assert "return 'crosses ' + (river.name || 'a river') + ', ' + Math.round(river.width) + ' m wide there';" in planning
+        told = planning.split("function told(shape) {")[1].split("function riverSaid(")[0]
+        assert "said.push(riverSaid(river));" in told
+        # And the goal's own page: the rivers, and the worst gradient on the
+        # straight part alone.
+        assert "rivers: goalShape ? goalShape.rivers.map(riverSaid) : []," in planning
+        assert "var worst = panel().steepestOf(goalShape, true);" in planning
+
+    def test_stay_on_paths_prices_open_ground_at_ten_to_one(self):
+        """The build's three is a judgement about ground nobody has looked at.
+        Measured at Krutåga: 740 m straight from the last junction to a goal 100
+        m off a road counted 2.2 km, and the road round, 2.6 km with a bridge,
+        lost to it. A switch and not a better number: which of the two a reader
+        wants depends on what they can see from where they stand. Everything
+        priced is priced again when it turns, and it is remembered."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        assert "var PATHS_FACTOR = 10;" in planning
+        assert "function offPath() { return staying() ? PATHS_FACTOR : PLAN.offPathFactor; }" in planning
+        # The one place the build's figure is read; every price goes through it.
+        assert planning.count("PLAN.offPathFactor") == 1
+        assert "var off = offPath();" in planning
+        assert "return (length - water) * offPath() + water * PLAN.waterFactor;" in planning
+        switching = planning.split("function stayOnPaths(want) {")[1].split("\n            }\n")[0]
+        assert "window.localStorage.setItem(keptKey() + '.paths', 'yes');" in switching
+        assert "withGraph(function (graph) { relink(graph, true); }, function () { refresh(); });" in switching
+        assert "if (goalAt) { goalToken = null; routeToGoal(goalHere()); }" in switching
+        assert "stayOnPaths: stayOnPaths," in planning
 
     def test_a_new_goal_is_a_new_journey(self):
         """The stops were put down on the way to somewhere. Kept across a change
@@ -7735,6 +7798,23 @@ class TestWhereTheReaderIs:
         # marked is still the goal: only where the head points has changed.
         assert "found.away = remains;" in html
         assert "found.at = {lat: goal.lat, lon: goal.lon};" in html
+
+    def test_stay_on_paths_is_a_switch_in_the_menu_with_a_lamp(self):
+        """A price the routing uses, on or off, and the rail's own lamp says
+        which -- a switch and not a panel, for the same reason the picker is
+        one. It turns the one closure that prices open ground and reads its
+        state back from there, so the lamp cannot disagree with the price."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "{key: 'paths', label: 'Stay on paths', width: 300, selector: null," in html
+        assert "return !!(window.trailsPlan && window.trailsPlan.stayOnPaths && window.trailsPlan.stayOnPaths());" in html
+        pressed = html.split("if (key === 'paths') {")[1].split("closeMenu();")[0]
+        assert "window.trailsPlan.stayOnPaths(!stayingOnPaths());" in pressed
+        assert "(tool.key === 'paths' && stayingOnPaths()) ||" in html
+        assert "paths: stayingOnPaths()," in html
+        assert "paths: '<path d=" in html
 
     def test_the_goal_switch_arms_one_tap_and_lets_go(self):
         """A switch that stayed on would make every later tap a goal, which is

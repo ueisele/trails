@@ -90,7 +90,7 @@ from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED
 from trails.routing.order import CHAIN_ORDER_COLUMNS
 from trails.routing.protection import PROTECTED_COLUMN
 from trails.routing.sources import FERRY
-from trails.visualization.water import check_water
+from trails.visualization.water import check_rivers, check_water
 
 #: What the decoder in the page expects. Bump it when the layout changes, so a
 #: stale decoder says so rather than reading nonsense confidently.
@@ -351,6 +351,7 @@ def encode_graph(
     costs: dict[str, dict[str, Any]],
     areas: list[dict[str, Any]],
     water: dict[str, Any] | None = None,
+    rivers: dict[str, Any] | None = None,
     coordinate_quantum: float = DEFAULT_COORDINATE_QUANTUM,
     elevation_quantum: float = DEFAULT_ELEVATION_QUANTUM,
 ) -> Payload:
@@ -383,6 +384,10 @@ def encode_graph(
             for a page that prices every straight walk as ground. Checked over
             here rather than trusted: a grid the page cannot read is a page
             that quietly walks across fjords again.
+        rivers: The rivers as outlines, as
+            :func:`trails.visualization.water.river_table` lays them out, or
+            None for a page that says nothing about what a straight walk
+            wades through. Not a price -- a sentence, with the width.
         coordinate_quantum: Grid a coordinate is rounded onto, in degrees
         elevation_quantum: Grid a height is rounded onto, in metres
 
@@ -449,6 +454,7 @@ def encode_graph(
         "protected": area_table,
         "protectedShareQuantum": 1.0 / PROTECTED_SHARE_UNITS,
         "water": check_water(water) if water is not None else None,
+        "rivers": check_rivers(rivers) if rivers is not None else None,
         # Not decoration: this is what lets a page say whether it decoded every
         # one of two million values correctly, having nothing to compare them
         # against.

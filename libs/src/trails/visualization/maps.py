@@ -3960,6 +3960,27 @@ class _RoutingGraph(MacroElement):
             // nodes is a few milliseconds, once per click. Anything cleverer
             // here would be a structure to keep in step with the geometry for no
             // gain a reader could perceive.
+            // The rivers as the page's own table: each ring a list of [lon, lat],
+            // unpacked from the differences the header carries them as (the
+            // first pair absolute, every pair after it a step from the one
+            // before, in `quantum` degrees). Unpacked once, here, because a
+            // line is tested against a ring's vertices and not its steps.
+            function riversOf(table) {
+                if (!table || !table.rivers) { return []; }
+                var quantum = table.quantum;
+                return table.rivers.map(function (river) {
+                    return {name: river.name || null, bounds: river.bounds,
+                            rings: river.rings.map(function (steps) {
+                                var ring = [], lon = 0, lat = 0;
+                                for (var i = 0; i + 1 < steps.length; i += 2) {
+                                    lon += steps[i]; lat += steps[i + 1];
+                                    ring.push([lon * quantum, lat * quantum]);
+                                }
+                                return ring;
+                            })};
+                });
+            }
+
             function nearestNode(nodeLon, nodeLat, lat, lon, withinM) {
                 var scale = Math.cos(lat * Math.PI / 180);
                 var limit = withinM === undefined ? Infinity : Math.pow(withinM / 111320, 2);
@@ -3981,6 +4002,13 @@ class _RoutingGraph(MacroElement):
             // it is not going to look at.
             graph.protectedAreas = header.protected || [];
             graph.areasAt = areasAt.bind(null, graph.protectedAreas);
+            // **And the rivers, as outlines.** Not priced -- see the water
+            // grid below for what is -- but asked, of the straight parts a leg
+            // ends up with: which river a line wades through and how wide the
+            // water is there. The same `bounds` and `rings` shape as an area,
+            // so the same even-odd test says whether a point is in one.
+            graph.rivers = riversOf(header.rivers);
+            graph.riverAt = areasAt.bind(null, graph.rivers);
 
             // **Where the water is, as bits.** A straight walk is priced by
             // what it crosses, and the search that prices it asks about
@@ -5440,7 +5468,7 @@ class _ProfilePanel(MacroElement):
             // way, where the reader is choosing how to read it.
             var goalNote = document.createElement('div');
             goalNote.className = 'trails-profile-goal-note';
-            goalNote.style.cssText = 'display:none;padding:0 3px 5px;font-size:11px;color:var(--trails-ink-3)';
+            goalNote.style.cssText = 'display:none;padding:0 3px 5px;font-size:11px;color:var(--trails-ink-3);white-space:pre-line';
 
             // ---- the places on the way, as a list -------------------------------
             // **Every place the journey goes by, in order, and what can be done
@@ -5594,15 +5622,25 @@ class _ProfilePanel(MacroElement):
                 // figures. One derivation, and the goal reads like every other
                 // route on this panel. What is left for this page is the one
                 // line the heading cannot fit.
-                var note = '';
-                if (goalNow.working) { note = 'Working out the way\\u2026'; }
+                var notes = [];
+                if (goalNow.working) { notes.push('Working out the way\\u2026'); }
                 else if (goalNow.line && goalNow.straight > 1) {
-                    note = (goalNow.straight / 1000).toFixed(2) + ' km of it drawn straight, not a path';
+                    notes.push((goalNow.straight / 1000).toFixed(2) + ' km of it drawn straight, not a path');
+                    // **And what that straight part does**, one line each:
+                    // the rivers it wades through with their width, and the
+                    // worst gradient on it. Both are what a reader decides a
+                    // straight line by, and neither is priced -- see the
+                    // river table for why.
+                    notes = notes.concat(goalNow.rivers || []);
+                    if (goalNow.steepest !== null && goalNow.steepest !== undefined) {
+                        notes.push('steepest ' + goalNow.steepest + ' % on the straight part');
+                    }
                 // **Said, and not silently fallen back on.** A routed goal off
                 // the network is drawn straight at, which is the right thing to
                 // draw and the wrong thing to leave unexplained: a reader would
                 // read the line as a way somebody had checked.
-                } else if (!goalNow.line && routed) { note = 'No way there \\u2014 drawn straight'; }
+                } else if (!goalNow.line && routed) { notes.push('No way there \\u2014 drawn straight'); }
+                var note = notes.join('\\n');
                 goalNote.textContent = note;
                 goalNote.style.display = note ? '' : 'none';
                 var arming = (window.trailsChrome && window.trailsChrome.aimingFor)
@@ -6944,10 +6982,14 @@ class _ProfilePanel(MacroElement):
             // read off the samples at arc length rather than off the chords this
             // page sums — the two differ by about one part in a thousand, and
             // one page showing both would be showing two answers.
-            function steepestOf(shape) {
+            // `freeOnly` reads the samples marked free -- the straight parts of a
+            // composed route -- and nothing else: what a line over open ground
+            // climbs is a question the path's own gradient does not answer.
+            function steepestOf(shape, freeOnly) {
                 var slope = gradients(shape), worst = NaN;
                 for (var i = 0; i < slope.length; i += 1) {
                     if (isNaN(slope[i])) { continue; }
+                    if (freeOnly && !(shape.free && shape.free[i])) { continue; }
                     var magnitude = Math.abs(slope[i]);
                     if (isNaN(worst) || magnitude > worst) { worst = magnitude; }
                 }
@@ -8457,6 +8499,7 @@ class _ProfilePanel(MacroElement):
             // itself and the figures already read off it; the bands, the
             // crosshair and the reduction all apply unchanged.
             window.trailsProfilePanel = {
+                steepestOf: steepestOf,
                 // **A popup, taken in as a page rather than shown over the
                 // map.** Every popup on this page used to dock into the chrome's
                 // full-screen sheet, which put the answer to *what did I just
@@ -9078,6 +9121,51 @@ class _PlanMode(MacroElement):
             var map = {{ this._parent.get_name() }};
             var PLAN = {{ this.plan_json }};
 
+            // **Stay on paths: the reader's own price for open ground.** The
+            // build prices a metre off the paths at `offPathFactor` metres of
+            // path -- three, here -- and that is a judgement about ground
+            // nobody has looked at. Measured at Krutåga: 740 m straight from
+            // the last junction to a goal 100 m off a road counted 2.2 km, and
+            // the road round, 2.6 km with a bridge, lost to it. At ten to one
+            // the road wins by three kilometres. A switch and not a better
+            // number, because there is no better number: which of the two a
+            // reader wants depends on what they can see from where they stand.
+            // Wherever no network reaches, a straight line stays the answer --
+            // this changes the trade, not what is possible.
+            var PATHS_FACTOR = 10;
+            // Read when first asked and not when this runs: the key is the
+            // panel's prefix, and the panel is not always there yet.
+            var stayingOnPaths = null;
+            function staying() {
+                if (stayingOnPaths === null) {
+                    try { stayingOnPaths = window.localStorage.getItem(keptKey() + '.paths') === 'yes'; }
+                    catch (blocked) { stayingOnPaths = false; }
+                }
+                return stayingOnPaths;
+            }
+            function offPath() { return staying() ? PATHS_FACTOR : PLAN.offPathFactor; }
+            function stayOnPaths(want) {
+                if (want === undefined) { return staying(); }
+                want = !!want;
+                if (want === staying()) { return stayingOnPaths; }
+                stayingOnPaths = want;
+                try {
+                    if (want) { window.localStorage.setItem(keptKey() + '.paths', 'yes'); }
+                    else { window.localStorage.removeItem(keptKey() + '.paths'); }
+                } catch (blocked) { /* remembered for this visit only */ }
+                // **Everything priced is priced again.** The legs follow from
+                // the points and are made afresh under the new price; the way
+                // to a goal is asked for from where the reader stands, as any
+                // fix would ask for it.
+                if (points.length > 1) {
+                    legs.forEach(function (leg) { if (leg) { undraw(leg.layers); } });
+                    legs = [];
+                    withGraph(function (graph) { relink(graph, true); }, function () { refresh(); });
+                }
+                if (goalAt) { goalToken = null; routeToGoal(goalHere()); }
+                return stayingOnPaths;
+            }
+
             // Everything named that the map draws at a position, as a table:
             // name, what it is and where. The markers themselves cannot answer
             // this — their names are inside popup HTML — and a route's file
@@ -9399,7 +9487,7 @@ class _PlanMode(MacroElement):
                 var nodes = graph.header.nodes;
                 if (!nodes) { return null; }
                 var far = panel().metresBetween;
-                var off = PLAN.offPathFactor;
+                var off = offPath();
                 var work = router(graph);
                 var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
                 viaEdge.fill(-1); viaNode.fill(-1);
@@ -9521,14 +9609,14 @@ class _PlanMode(MacroElement):
             function priced(graph, aLon, aLat, bLon, bLat) {
                 var length = panel().metresBetween(aLon, aLat, bLon, bLat);
                 var grid = graph.water;
-                if (!grid || !(PLAN.waterFactor > PLAN.offPathFactor)) { return length * PLAN.offPathFactor; }
+                if (!grid || !(PLAN.waterFactor > offPath())) { return length * offPath(); }
                 var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0;
                 for (var i = 0; i < pieces; i += 1) {
                     var t = (i + 0.5) / pieces;
                     if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }
                 }
                 var water = length * wet / pieces;
-                return (length - water) * PLAN.offPathFactor + water * PLAN.waterFactor;
+                return (length - water) * offPath() + water * PLAN.waterFactor;
             }
 
             // **The way out of an entry node, read off the search that settled
@@ -10474,6 +10562,56 @@ class _PlanMode(MacroElement):
             // where two neighbours disagree the shoreline lies between, and half
             // way between is as near as sampling every few metres can put it. No
             // coastline is consulted and none is needed.
+            // **Which rivers a straight line wades through, and how wide the
+            // water is there.** Every place the line cuts a ring of an outline,
+            // in order along the line; between one cut and the next the line is
+            // inside the water or out of it, and which is settled once, at the
+            // start, by the same even-odd test the protected areas use. The
+            // width is the length of the run inside. A line that starts or ends
+            // in the water has a run with only one cut, and that run is counted
+            // too: the reader is standing in it.
+            //
+            // A sentence and not a price. Measured over this build's rivers:
+            // half are under 17 m across and five in six under 30 m, which a
+            // walker fords or does not by depth and current, and no layer
+            // records either. The figure is what they weigh it by.
+            function riverCrossings(graph, from, to) {
+                var rivers = graph.rivers || [];
+                var length = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
+                if (!rivers.length || !(length > 0)) { return []; }
+                var west = Math.min(from.lon, to.lon), east = Math.max(from.lon, to.lon);
+                var south = Math.min(from.lat, to.lat), north = Math.max(from.lat, to.lat);
+                var dx = to.lon - from.lon, dy = to.lat - from.lat;
+                var found = [];
+                rivers.forEach(function (river, which) {
+                    var box = river.bounds;
+                    if (box[2] < west || box[0] > east || box[3] < south || box[1] > north) { return; }
+                    var cuts = [];
+                    river.rings.forEach(function (ring) {
+                        for (var i = 0, k = ring.length - 1; i < ring.length; k = i, i += 1) {
+                            var ax = ring[k][0], ay = ring[k][1], ex = ring[i][0] - ax, ey = ring[i][1] - ay;
+                            var den = dx * ey - dy * ex;
+                            if (den === 0) { continue; }
+                            var t = ((ax - from.lon) * ey - (ay - from.lat) * ex) / den;
+                            var u = ((ax - from.lon) * dy - (ay - from.lat) * dx) / den;
+                            if (t < 0 || t > 1 || u < 0 || u >= 1) { continue; }
+                            cuts.push(t);
+                        }
+                    });
+                    var inside = graph.riverAt(from.lon, from.lat).indexOf(which) >= 0;
+                    if (!cuts.length && !inside) { return; }
+                    cuts.sort(function (a, b) { return a - b; });
+                    var began = inside ? 0 : null;
+                    for (var c = 0; c < cuts.length; c += 1) {
+                        if (began === null) { began = cuts[c]; continue; }
+                        found.push({name: river.name, width: (cuts[c] - began) * length, at: began * length});
+                        began = null;
+                    }
+                    if (began !== null) { found.push({name: river.name, width: (1 - began) * length, at: began * length}); }
+                });
+                return found.sort(function (a, b) { return a.at - b.at; });
+            }
+
             function straightParts(graph, from, to, answered) {
                 var laid = answered.laid, points = answered.points, count = points.length;
                 // What each sample is standing in, worked out once: a leg is
@@ -10520,6 +10658,7 @@ class _PlanMode(MacroElement):
                     parts.push({kind: 'land', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
                                 along: [0, ended - began], length: ended - began,
                                 height: height, distance: distance, read: read,
+                                rivers: riverCrossings(graph, head, tail),
                                 tally: straightTally(graph, laid, standing, first, last, began, ended)});
                 }
                 return parts;
@@ -11613,6 +11752,7 @@ class _PlanMode(MacroElement):
                 var lon = [], lat = [], along = [], height = [], distance = [], free = [];
                 var stretches = [], stretch = null, tally = blankTally(), gaps = [];
                 var walked = 0, crossings = 0, crossed = 0, straight = 0, read = false, joined = false;
+                var rivers = [];
                 // **Where the heights came from, carried apart from whether
                 // there are any.** A routed part's are the build's DTM1 samples
                 // and a straight leg's come from the same service on demand; a
@@ -11676,7 +11816,10 @@ class _PlanMode(MacroElement):
                             gaps.push({before: stretches.length, lon: part.lon, lat: part.lat});
                             return;
                         }
-                        if (part.kind === 'land') { straight += part.length; }
+                        if (part.kind === 'land') {
+                            straight += part.length;
+                            if (part.rivers) { rivers = rivers.concat(part.rivers); }
+                        }
                         if (!stretch) { stretch = {from: lon.length, sampleFrom: height.length}; }
                         var mark = part.kind === 'land' ? 1 : 0, at;
                         for (at = (joined ? 1 : 0); at < part.lon.length; at += 1) {
@@ -11710,7 +11853,8 @@ class _PlanMode(MacroElement):
                         // markers the file carries. Three readings of one list,
                         // rather than three places applying one threshold.
                         protected: reportedAreas(tally),
-                        crossing: crossings > 0, crossings: crossings, crossed: crossed, straight: straight};
+                        crossing: crossings > 0, crossings: crossings, crossed: crossed, straight: straight,
+                        rivers: rivers};
             }
 
             // Which protected areas the route actually passes through, in the
@@ -11836,6 +11980,13 @@ class _PlanMode(MacroElement):
                 if (shape.straight > 0) {
                     said.push((shape.straight / 1000).toFixed(2) + ' km drawn straight, not a path');
                 }
+                // **What the straight parts wade through, by name and width.**
+                // Said and not priced: whether 19 m of river can be forded is
+                // depth and current, which nobody has data for. The name as N50
+                // gives it, without an article -- Krutåga carries its own.
+                (shape.rivers || []).forEach(function (river) {
+                    said.push(riverSaid(river));
+                });
                 // Said wherever it is true, because the climb above it was read
                 // under a different rule from every other climb on this map and
                 // the figure alone cannot say so.
@@ -11858,6 +12009,10 @@ class _PlanMode(MacroElement):
             // the reader sees and by the refusal that keeps the file from being
             // written: two counts of the same thing would eventually disagree
             // about whether a route is finished.
+            function riverSaid(river) {
+                return 'crosses ' + (river.name || 'a river') + ', ' + Math.round(river.width) + ' m wide there';
+            }
+
             function unsettled() {
                 return {
                     // A leg carried through a live drag without its heights
@@ -14915,7 +15070,16 @@ class _PlanMode(MacroElement):
                         // was never a way. A line on a map is a promise, and
                         // this one is a promise only for the part that came off
                         // the network.
-                        straight: goalShape ? (goalShape.straight + goalShape.crossed) : null};
+                        straight: goalShape ? (goalShape.straight + goalShape.crossed) : null,
+                        // What the straight parts wade through, and the worst
+                        // gradient on them alone: the path's own gradient is
+                        // known ground, the line's is the question.
+                        rivers: goalShape ? goalShape.rivers.map(riverSaid) : [],
+                        steepest: (function () {
+                            if (!goalShape || !panel()) { return null; }
+                            var worst = panel().steepestOf(goalShape, true);
+                            return isNaN(worst) ? null : Math.round(worst);
+                        })()};
             }
 
             // **Whether a tap could have meant the way to the goal**, at the
@@ -15056,6 +15220,9 @@ class _PlanMode(MacroElement):
             window.trailsPlan = {
                 place: place,
                 undo: undo,
+                // Read with no argument, set with one: the price of open
+                // ground, ten to one or the build's three.
+                stayOnPaths: stayOnPaths,
                 // **What the row at the foot offers, and how it knows whether to
                 // offer a choice.** The panel's own button writes the whole tour
                 // -- one writer, asked from three places, as `saveWhole` says --
@@ -17980,6 +18147,9 @@ class _Chrome(MacroElement):
                 // thing at the same size in the same column, and the one shape
                 // that reads as *somewhere to get to* without borrowing either.
                 goal: '<path d="M5 16.2V2.6"/><path d="M5 3.4h8.3l-2.1 3.1 2.1 3.1H5Z"/>',
+                // A path that bends, and a step onto it: the way keeps to it.
+                paths: '<path d="M2.8 15.2c3-4.6 4.6-4.6 7.2 0s4.4 4.2 5.2-2.4"/>' +
+                    '<path d="M11.2 3.6h4v4"/><path d="M15.2 3.6 12 6.8"/>',
                 // A disc with one half filled: the same drawing whichever way
                 // the page is turned, which is right for a control that is
                 // about the turning and not about either side of it.
@@ -18001,6 +18171,12 @@ class _Chrome(MacroElement):
                 return '<svg width="' + side + '" height="' + side + '" viewBox="0 0 18 18" fill="none" ' +
                     'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" ' +
                     'aria-hidden="true">' + ICONS[name] + '</svg>';
+            }
+
+            //: Whether open ground is priced at ten to one, asked of the one
+            //: closure that prices it.
+            function stayingOnPaths() {
+                return !!(window.trailsPlan && window.trailsPlan.stayOnPaths && window.trailsPlan.stayOnPaths());
             }
 
             function offlineOn() {
@@ -18052,6 +18228,13 @@ class _Chrome(MacroElement):
                 // looking, and not behind a tool they would have to open.
                 {key: 'goal', label: 'Set a goal', width: 300, selector: null, quick: true,
                  hint: 'Tap the map and the mark points the way there.'},
+                // **A switch and not a panel**, for the same reason the picker
+                // is one: a price the routing uses, on or off, and the lamp
+                // says which. Measured at Krutåga: at three to one a routed
+                // goal walked 740 m of open ground rather than 2.6 km of road;
+                // at ten to one it takes the road.
+                {key: 'paths', label: 'Stay on paths', width: 300, selector: null,
+                 hint: 'Open ground counts ten times a path, not three: the way keeps to the network wherever one reaches.'},
                 {key: 'offline', label: 'Offline', width: 330, selector: null,
                  hint: 'Keep the ground on this device, and walk with no signal.'},
                 {key: 'theme', label: 'Theme', width: 300, selector: null,
@@ -20298,6 +20481,7 @@ class _Chrome(MacroElement):
                         (tool.key === 'here' && hereWatch !== null) ||
                         (tool.key === 'pick' && picking) ||
                         (tool.key === 'goal' && (aiming || goalSet())) ||
+                        (tool.key === 'paths' && stayingOnPaths()) ||
                         (tool.key === 'offline' && offlineOn());
                     button.style.color = lit ? 'var(--trails-on-accent)' : (running ? 'var(--trails-accent)' : 'var(--trails-ink-3)');
                     button.setAttribute('aria-pressed', String(lit));
@@ -20350,6 +20534,14 @@ class _Chrome(MacroElement):
                 }
                 if (key === 'goal') {
                     pressGoal();
+                    closeMenu();
+                    return;
+                }
+                if (key === 'paths') {
+                    if (window.trailsPlan && window.trailsPlan.stayOnPaths) {
+                        window.trailsPlan.stayOnPaths(!stayingOnPaths());
+                    }
+                    paintRail();
                     closeMenu();
                     return;
                 }
@@ -20947,6 +21139,7 @@ class _Chrome(MacroElement):
                         aimingFor: aiming,
                         aimingAt: aiming === 'move' ? aimingAt : -1,
                         goal: goalSet(),
+                        paths: stayingOnPaths(),
                         here: hereWatch !== null,
                         planPoints: planState ? planState.points : 0,
                         // The row at the foot, which is the panel's own now:
