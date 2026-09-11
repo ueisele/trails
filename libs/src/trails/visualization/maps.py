@@ -5466,6 +5466,42 @@ class _ProfilePanel(MacroElement):
             // has to know which part of it is a promise and which a bearing
             // before they set off along it. Said here, on the page about the
             // way, where the reader is choosing how to read it.
+            // **Stay on paths, as a switch with its state on its face.** It
+            // was a tool in the menu with a lamp on the rail, and from the
+            // phone: *I cannot see whether it is on*. It belongs where the way
+            // it changes is read, under the Direct/Routed pair, and it is an
+            // on/off switch and not a button -- a reader glancing at the page
+            // sees the knob, not a colour they would have to remember. The
+            // price it sets is the plan's as well as the goal's; the plan
+            // reads it from the same closure.
+            var goalPaths = document.createElement('button');
+            goalPaths.type = 'button';
+            goalPaths.className = 'trails-profile-goal-paths';
+            goalPaths.setAttribute('role', 'switch');
+            goalPaths.setAttribute('aria-checked', 'false');
+            goalPaths.title = 'Open ground counts ten times a path, not three: the way keeps to the network wherever one reaches';
+            goalPaths.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;margin:0 0 6px;padding:2px 3px;' +
+                'border:0;background:none;font:inherit;font-size:11px;color:var(--trails-ink-2);cursor:pointer;text-align:left';
+            goalPaths.innerHTML = '<span class="trails-profile-goal-paths-said" style="flex:1 1 auto">Stay on paths' +
+                '<span style="display:block;font-size:10px;color:var(--trails-ink-3)">open ground counts ten times a path</span></span>' +
+                '<span class="trails-profile-goal-paths-track" style="flex:none;position:relative;width:34px;height:20px;' +
+                'border-radius:10px;background:var(--trails-rule);transition:background .15s">' +
+                '<span class="trails-profile-goal-paths-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;' +
+                'border-radius:50%;background:var(--trails-solid);box-shadow:0 1px 2px rgba(0,0,0,0.3);transition:transform .15s"></span></span>';
+            goalPaths.addEventListener('click', function (event) {
+                event.stopPropagation();
+                if (!window.trailsPlan || !window.trailsPlan.stayOnPaths) { return; }
+                window.trailsPlan.stayOnPaths(!window.trailsPlan.stayOnPaths());
+                paintGoal();
+            });
+            function paintPaths() {
+                var on = !!(window.trailsPlan && window.trailsPlan.stayOnPaths && window.trailsPlan.stayOnPaths());
+                goalPaths.setAttribute('aria-checked', String(on));
+                var track = goalPaths.querySelector('.trails-profile-goal-paths-track');
+                var knob = goalPaths.querySelector('.trails-profile-goal-paths-knob');
+                track.style.background = on ? 'var(--trails-accent)' : 'var(--trails-rule)';
+                knob.style.transform = on ? 'translateX(14px)' : 'none';
+            }
             var goalNote = document.createElement('div');
             goalNote.className = 'trails-profile-goal-note';
             goalNote.style.cssText = 'display:none;padding:0 3px 5px;font-size:11px;color:var(--trails-ink-3);white-space:pre-line';
@@ -5615,6 +5651,7 @@ class _ProfilePanel(MacroElement):
                 paintStopList();
                 if (!standing) { return; }
                 var routed = goalNow.way === 'routed';
+                paintPaths();
                 // What the row used to say here -- the name, how many places
                 // the way goes by, the kilometres, the climb -- the heading
                 // says now, from the series the goal control hands over: its
@@ -6224,6 +6261,7 @@ class _ProfilePanel(MacroElement):
             placesPage.className = 'trails-profile-places';
             placesPage.style.cssText = 'padding:0 0 6px';
             placesPage.appendChild(goalRow);
+            placesPage.appendChild(goalPaths);
             placesPage.appendChild(goalNote);
             placesPage.appendChild(goalList);
 
@@ -18147,9 +18185,6 @@ class _Chrome(MacroElement):
                 // thing at the same size in the same column, and the one shape
                 // that reads as *somewhere to get to* without borrowing either.
                 goal: '<path d="M5 16.2V2.6"/><path d="M5 3.4h8.3l-2.1 3.1 2.1 3.1H5Z"/>',
-                // A path that bends, and a step onto it: the way keeps to it.
-                paths: '<path d="M2.8 15.2c3-4.6 4.6-4.6 7.2 0s4.4 4.2 5.2-2.4"/>' +
-                    '<path d="M11.2 3.6h4v4"/><path d="M15.2 3.6 12 6.8"/>',
                 // A disc with one half filled: the same drawing whichever way
                 // the page is turned, which is right for a control that is
                 // about the turning and not about either side of it.
@@ -18171,12 +18206,6 @@ class _Chrome(MacroElement):
                 return '<svg width="' + side + '" height="' + side + '" viewBox="0 0 18 18" fill="none" ' +
                     'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" ' +
                     'aria-hidden="true">' + ICONS[name] + '</svg>';
-            }
-
-            //: Whether open ground is priced at ten to one, asked of the one
-            //: closure that prices it.
-            function stayingOnPaths() {
-                return !!(window.trailsPlan && window.trailsPlan.stayOnPaths && window.trailsPlan.stayOnPaths());
             }
 
             function offlineOn() {
@@ -18228,13 +18257,6 @@ class _Chrome(MacroElement):
                 // looking, and not behind a tool they would have to open.
                 {key: 'goal', label: 'Set a goal', width: 300, selector: null, quick: true,
                  hint: 'Tap the map and the mark points the way there.'},
-                // **A switch and not a panel**, for the same reason the picker
-                // is one: a price the routing uses, on or off, and the lamp
-                // says which. Measured at Krutåga: at three to one a routed
-                // goal walked 740 m of open ground rather than 2.6 km of road;
-                // at ten to one it takes the road.
-                {key: 'paths', label: 'Stay on paths', width: 300, selector: null,
-                 hint: 'Open ground counts ten times a path, not three: the way keeps to the network wherever one reaches.'},
                 {key: 'offline', label: 'Offline', width: 330, selector: null,
                  hint: 'Keep the ground on this device, and walk with no signal.'},
                 {key: 'theme', label: 'Theme', width: 300, selector: null,
@@ -20481,7 +20503,6 @@ class _Chrome(MacroElement):
                         (tool.key === 'here' && hereWatch !== null) ||
                         (tool.key === 'pick' && picking) ||
                         (tool.key === 'goal' && (aiming || goalSet())) ||
-                        (tool.key === 'paths' && stayingOnPaths()) ||
                         (tool.key === 'offline' && offlineOn());
                     button.style.color = lit ? 'var(--trails-on-accent)' : (running ? 'var(--trails-accent)' : 'var(--trails-ink-3)');
                     button.setAttribute('aria-pressed', String(lit));
@@ -20534,14 +20555,6 @@ class _Chrome(MacroElement):
                 }
                 if (key === 'goal') {
                     pressGoal();
-                    closeMenu();
-                    return;
-                }
-                if (key === 'paths') {
-                    if (window.trailsPlan && window.trailsPlan.stayOnPaths) {
-                        window.trailsPlan.stayOnPaths(!stayingOnPaths());
-                    }
-                    paintRail();
                     closeMenu();
                     return;
                 }
@@ -21139,7 +21152,6 @@ class _Chrome(MacroElement):
                         aimingFor: aiming,
                         aimingAt: aiming === 'move' ? aimingAt : -1,
                         goal: goalSet(),
-                        paths: stayingOnPaths(),
                         here: hereWatch !== null,
                         planPoints: planState ? planState.points : 0,
                         // The row at the foot, which is the panel's own now:

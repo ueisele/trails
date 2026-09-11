@@ -4121,6 +4121,27 @@ class TestProfilePanel:
         assert "hide.classList.toggle('trails-profile-hide-goal', goalShown);" in html
         assert '<path d="M5 3.4h8.3l-2.1 3.1 2.1 3.1H5Z"/>' in html.split("var GOAL_STRUCK = ")[1].split(";")[0]
 
+    def test_stay_on_paths_is_a_switch_on_the_goal_page_with_its_state_on_its_face(self):
+        """It was a tool in the menu with a lamp on the rail, and from the
+        phone: *I cannot see whether it is on*. It sits under Direct/Routed,
+        where the way it changes is read, as an on/off switch whose knob says
+        which -- and it turns the one closure that prices open ground, for
+        the plan as well as the goal, reading its state back from there."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "goalPaths.className = 'trails-profile-goal-paths';" in html
+        assert "goalPaths.setAttribute('role', 'switch');" in html
+        assert "window.trailsPlan.stayOnPaths(!window.trailsPlan.stayOnPaths());" in html
+        painted = html.split("function paintPaths() {")[1].split("var goalNote")[0]
+        assert "goalPaths.setAttribute('aria-checked', String(on));" in painted
+        assert "knob.style.transform = on ? 'translateX(14px)' : 'none';" in painted
+        row, switch, note = (html.index(f"placesPage.appendChild({each});") for each in ("goalRow", "goalPaths", "goalNote"))
+        assert row < switch < note
+        # And nowhere else: not a tool, not a lamp on the rail.
+        assert "key: 'paths'" not in html
+
     def test_a_goal_has_figures_of_its_own(self):
         """Reported from the phone as *the info is from another way*, and it
         was. The row under the drawing — the point count, the licences, the
@@ -7798,23 +7819,6 @@ class TestWhereTheReaderIs:
         # marked is still the goal: only where the head points has changed.
         assert "found.away = remains;" in html
         assert "found.at = {lat: goal.lat, lon: goal.lon};" in html
-
-    def test_stay_on_paths_is_a_switch_in_the_menu_with_a_lamp(self):
-        """A price the routing uses, on or off, and the rail's own lamp says
-        which -- a switch and not a panel, for the same reason the picker is
-        one. It turns the one closure that prices open ground and reads its
-        state back from there, so the lamp cannot disagree with the price."""
-        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
-        maps.add_chrome(fmap)
-
-        html = fmap.get_root().render()
-        assert "{key: 'paths', label: 'Stay on paths', width: 300, selector: null," in html
-        assert "return !!(window.trailsPlan && window.trailsPlan.stayOnPaths && window.trailsPlan.stayOnPaths());" in html
-        pressed = html.split("if (key === 'paths') {")[1].split("closeMenu();")[0]
-        assert "window.trailsPlan.stayOnPaths(!stayingOnPaths());" in pressed
-        assert "(tool.key === 'paths' && stayingOnPaths()) ||" in html
-        assert "paths: stayingOnPaths()," in html
-        assert "paths: '<path d=" in html
 
     def test_the_goal_switch_arms_one_tap_and_lets_go(self):
         """A switch that stayed on would make every later tap a goal, which is

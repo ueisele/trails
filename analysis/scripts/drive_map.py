@@ -4199,7 +4199,11 @@ THE_GOAL = """() => {
               return (line && line.style.display !== 'none') ? line.textContent : null; })(),
           armed: window.trailsChrome.state().aiming,
           lamp: window.trailsChrome.state().goal,
-          paths: window.trailsChrome.state().paths,
+          // The switch on the goal's page, and the price it turns, read
+          // from each side: the knob must say what the routing does.
+          paths: (function () { const sw = document.querySelector('.trails-profile-goal-paths');
+              return {on: !!(window.trailsPlan.stayOnPaths && window.trailsPlan.stayOnPaths()),
+                      said: sw ? sw.getAttribute('aria-checked') : null}; })(),
           row: !!row && row.style.display !== 'none' && !!pageOf && pageOf.style.display !== 'none',
           // What the panel's own way out is at the moment: a x, or the struck
           // flag that drops the goal.
@@ -4994,8 +4998,9 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
     page.wait_for_timeout(1500)
     on_paths = page.evaluate(THE_GOAL)
-    # Off again from the rail's own button, which is where a reader turns it.
-    page.evaluate("() => document.querySelector('[data-tool=\"paths\"]').click()")
+    # Off again from the switch on the goal's page, which is where a reader
+    # turns it -- and where they see whether it is on.
+    page.evaluate("() => document.querySelector('.trails-profile-goal-paths').click()")
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
     page.wait_for_timeout(1500)
     off_paths = page.evaluate(THE_GOAL)
@@ -5348,15 +5353,20 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 note=f"steepest {krutaga['goal']['steepest']} %",
             ),
             Reading(
-                "stay on paths takes the road round instead",
-                (on_paths["paths"], (on_paths["goal"]["straight"] or 0) < 250, (on_paths["goal"]["metres"] or 0) > 2000),
-                (True, True, True),
+                "stay on paths takes the road round instead, and the switch shows it",
+                (
+                    on_paths["paths"]["on"],
+                    on_paths["paths"]["said"],
+                    (on_paths["goal"]["straight"] or 0) < 250,
+                    (on_paths["goal"]["metres"] or 0) > 2000,
+                ),
+                (True, "true", True, True),
                 note=f"{on_paths['goal']['straight'] or 0:.0f} m straight of {on_paths['goal']['metres'] or 0:.0f} m",
             ),
             Reading(
-                "and the rail's own button turns it off again",
-                (off_paths["paths"], 700 < (off_paths["goal"]["straight"] or 0) < 1200),
-                (False, True),
+                "and the switch on the goal's page turns it off again",
+                (off_paths["paths"]["on"], off_paths["paths"]["said"], 700 < (off_paths["goal"]["straight"] or 0) < 1200),
+                (False, "false", True),
             ),
             Reading("a place offers itself as a goal", from_place["offered"], "Set as goal"),
             Reading(
