@@ -4118,6 +4118,50 @@ class TestProfilePanel:
         assert "if (stops > 0) { said += ' \\u00b7 by ' + stops + (stops === 1 ? ' stop' : ' stops'); }" in html
         assert "goalAgain.style.display = 'flex';" in html
 
+    def test_every_place_on_the_way_is_a_row_with_a_menu(self):
+        """Reported from the phone: with stops on the way the only edit left
+        was adding another. A stop could be taken away by a tap the hint used
+        to explain and nothing explains now; it could not be moved at all; and
+        the goal could not be moved without every stop going with it. The
+        marks on the map cannot carry any of that, so it is said here in
+        words, the way the plan's list says it about a route's points.
+
+        One row per place, stops first and the goal last, each with how far
+        into the way it comes; and a menu per row in the plan's shape — a
+        labelled line and not a glyph. A stop can be moved, stepped one place
+        either way and removed; the goal can only be moved, and moving it
+        keeps the stops. Moved by the next tap, which is the gesture that set
+        it: HTML5 dragging does not exist under a finger.
+
+        Drawn from what the goal control last said and edited through its
+        entry: the plan's list is one node lent between two owners, and a
+        second rendering of a sequence is how two of them come to disagree."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "goalList.className = 'trails-profile-stops';" in html
+        assert "var stops = (goalNow && goalNow.at && goalNow.stops) ? goalNow.stops : [];" in html
+        assert "row.className = 'trails-profile-stop';" in html
+        assert "far.textContent = typeof stop.into === 'number' ? (stop.into / 1000).toFixed(2) + ' km' : '';" in html
+        # The four lines of the menu, and which rows offer which.
+        assert "menu.className = 'trails-profile-stopmenu';" in html
+        assert "last ? '\u2316  Move the goal' : '\u2316  Move this stop'," in html
+        assert "function () { if (window.trailsChrome) { window.trailsChrome.aiming('move', at); } }));" in html
+        assert "'Walk to this stop one place earlier', !last && at > 0," in html
+        assert "'Walk to this stop one place later', !last && at + 2 < stops.length," in html
+        assert "'Take this stop out and walk straight on to the next', !last," in html
+        assert "function () { if (window.trailsGoal) { window.trailsGoal.dropStop(at); } });" in html
+        # Lit while the next tap moves it, the way the + lights while it adds.
+        assert "(at === moving ? 'background:color-mix(in srgb, var(--trails-accent) 14%, transparent)' : '');" in html
+        # An open menu outlives a repaint: the goal control repaints this on
+        # every position fix, and a menu that shut itself while a reader was
+        # reading it is a menu nobody can use while walking.
+        assert "var stopMenuAt = -1;" in html
+        assert "menu.style.cssText = 'display:' + (at === stopMenuAt ? 'block' : 'none') + ';width:100%;'" in html
+        # Under the row it lists and over the heading.
+        assert html.index("box.appendChild(goalRow);") < html.index("box.appendChild(goalList);") < html.index("box.appendChild(header);")
+
 
 class TestPlanMode:
     """Tests for clicking a route together over the graph in the page."""
@@ -6151,6 +6195,43 @@ class TestPlanMode:
         assert "via: goalVia.map(function (stop) {" in planning
         # Restored after the goal, because setting one is what clears them.
         assert "(said.via || []).forEach(function (stop) {" in planning
+        # **And the goal moved is not a new journey.** A reader who wants the
+        # end of the same journey a little further along the shore keeps the
+        # stops; only `set` clears them.
+        moving = planning.split("function moveGoal(lat, lon, name, tapped) {")[1].split("function metresInto() {")[0]
+        assert "goalAt = {lat: lat, lon: lon, name: name || null};" in moving
+        assert "goalVia = [];" not in moving
+        assert "move: moveGoal," in planning
+
+    def test_a_stop_moved_or_stepped_keeps_the_others_where_they_are(self):
+        """A stop put somewhere else is the same stop: it keeps its place in
+        the order, because the reader chose where it falls when they put it
+        down, and a stop nudged fifty metres has not changed which hut it is
+        walked to before. That is what tells it apart from dropping one and
+        adding one, where `legNearest` would decide the order afresh.
+
+        One place earlier or later is a swap with a neighbour, the plan's own
+        gesture: the smallest change to the order, and it composes into any.
+        Both go through the goal's entry, so the list at the foot holds no
+        order of its own."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        moved = planning.split("function moveStop(at, lat, lon, name, tapped) {")[1].split("function stepStop(at, step) {")[0]
+        assert "goalVia[at] = {lat: lat, lon: lon, name: name || null};" in moved
+        assert "legNearest" not in moved
+        stepped = planning.split("function stepStop(at, step) {")[1].split("function moveGoal(")[0]
+        assert "if (at < 0 || at >= goalVia.length || to < 0 || to >= goalVia.length) { return false; }" in stepped
+        assert "goalVia[to] = moved;" in stepped
+        assert "moveStop: moveStop," in planning
+        assert "stepStop: stepStop," in planning
+        # And each place says how far into the way it comes: leg i ends at
+        # stop i, so the figure is the legs up to and including its own, and
+        # null where one is not made yet -- a partial sum said as a distance
+        # is a distance nobody walked.
+        assert "into: at < into.length ? into[at] : null};" in planning
+        assert "if (walked === null || !parts) { walked = null; into.push(null); continue; }" in planning
 
 
 class TestRoutingGraphAreas:
@@ -7621,7 +7702,7 @@ class TestWhereTheReaderIs:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "function askAiming(want) {" in html
+        assert "function askAiming(want, at) {" in html
         assert "if (aiming && picking) { askPicking(false); }" in html
         assert "askAiming(false);" in html
         # **And it says nothing while it does it.** *Tap the map to set a goal*
@@ -7717,12 +7798,19 @@ class TestWhereTheReaderIs:
         assert "if (window.trailsPlan && window.trailsPlan.dress) { window.trailsPlan.dress(); }" in html
 
     def test_the_switch_knows_what_the_next_tap_will_do_and_says_nothing(self):
-        """A goal and a stop on the way to it are set by the same gesture and are
-        not the same act, so the switch carries which one it is armed for rather
-        than being a flag — and the row at the foot lights the button that
-        armed it. Nothing is said over the map: the stop's hint was the last
-        notice standing there, and it stood across the ground the tap was
-        meant for. Reported from the phone, and it went.
+        """A goal, a stop on the way to it and a place already set being put
+        somewhere else are all set by the same gesture and are not the same act,
+        so the switch carries which one it is armed for rather than being a
+        flag — and the row at the foot lights the button or the row that armed
+        it. Nothing is said over the map: the stop's hint was the last notice
+        standing there, and it stood across the ground the tap was meant for.
+        Reported from the phone, and it went.
+
+        **And a tap while armed for a stop adds one, and only that.** It used
+        to take a stop away as well when it landed on one, and the one thing
+        that said so was the hint. A gesture with two meanings and nothing to
+        say which is not a gesture; taking a stop away is in the list at the
+        foot now, in words.
 
         The stop's own button is in the row at the foot and not in the rail: the
         rail arms the one thing a reader does with nothing set, and a stop is
@@ -7731,15 +7819,28 @@ class TestWhereTheReaderIs:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "var wanted = want === 'stop' ? 'stop' :" in html
+        assert "var wanted = want === 'stop' ? 'stop' : want === 'move' ? 'move'" in html
         # No notice and nothing left that could raise one: the code that said
         # the hint is gone, not just the words.
         assert "'Tap the map to add a stop" not in html
         assert "sayAiming" not in html
         assert "aimNotice" not in html
         assert "if (aiming === 'stop') {" in html
-        assert "window.trailsGoal.dropStop(standing);" in html
+        assert "window.trailsGoal.dropStop(standing);" not in html
+        assert "window.trailsGoal.stopAt(" not in html
         assert "window.trailsGoal.addStop(called.lat, called.lon, called.name);" in html
+        # **A move is armed for one place, and the tap goes to that place.**
+        # The last of the goal's list is the goal and keeps its stops; any
+        # other is a stop and keeps its place in the order. Armed for a move
+        # with no place named is not armed at all.
+        assert "if (aiming === 'move') {" in html
+        assert "aimingAt = wanted === 'move' && typeof at === 'number' && at >= 0 ? at : -1;" in html
+        assert "if (wanted === 'move' && aimingAt < 0) { aiming = null; }" in html
+        assert "if (aimingAt + 1 >= moving.length) {" in html
+        assert "else { window.trailsGoal.move(where.lat, where.lng, null, true); }" in html
+        assert "window.trailsGoal.moveStop(aimingAt, where.lat, where.lng, null, true);" in html
         # And what it is armed for is readable, because the row at the foot
-        # lights the button that armed it.
+        # lights the button or the row that armed it.
         assert "aimingFor: function () { return aiming; }," in html
+        assert "aimingAt: function () { return aiming === 'move' ? aimingAt : -1; }," in html
+        assert "aimingAt: aiming === 'move' ? aimingAt : -1," in html

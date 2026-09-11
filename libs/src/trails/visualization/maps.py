@@ -5422,9 +5422,150 @@ class _ProfilePanel(MacroElement):
             goalRow.appendChild(goalAgain);
             goalRow.appendChild(goalDrop);
 
+            // ---- the places on the way, as a list -------------------------------
+            // **Every place the journey goes by, in order, and what can be done
+            // with each.** Reported from the phone: with stops on the way the
+            // only edit left was adding another. A stop could be taken away by
+            // a tap the hint used to explain and nothing explains now; it could
+            // not be moved at all; and the goal could not be moved without
+            // every stop going with it. The marks on the map cannot carry any
+            // of that -- a 16 px disc that took taps would take the taps meant
+            // for the ground under it -- so it is said here, in words, the way
+            // the plan's list says it about a route's points.
+            //
+            // The plan's rows and not the plan's list: that list is one node
+            // lent between two owners and reordered by dragging; this is drawn
+            // from what the goal control last said and edits through its
+            // entry, so the two never hold a copy of each other's order.
+            var goalList = document.createElement('div');
+            goalList.className = 'trails-profile-stops';
+            goalList.style.cssText = 'display:none;margin:-2px 0 5px;max-height:150px;overflow-y:auto;font-size:11px';
+            // The wheel is the map's except where this has somewhere left to
+            // scroll -- the plan's list strikes the same bargain.
+            goalList.addEventListener('wheel', function (event) {
+                var room = goalList.scrollHeight - goalList.clientHeight;
+                if (room <= 0) { return; }
+                if (event.deltaY < 0 ? goalList.scrollTop > 0 : goalList.scrollTop < room - 1) {
+                    event.stopPropagation();
+                }
+            }, {passive: true});
+            //: Which row's menu is open, or -1. Kept across a repaint, because
+            //: the goal control repaints this on every position fix and a menu
+            //: that shut itself while a reader was reading it is a menu nobody
+            //: can use while walking.
+            var stopMenuAt = -1;
+
+            //: One line of a row's menu, in the shape the plan's rows use: a
+            //: labelled button and not a glyph, because four marks is four
+            //: things to learn and a line says what it does.
+            function stopStep(className, label, explains, may, act) {
+                var made = document.createElement('button');
+                made.type = 'button';
+                made.className = className;
+                made.textContent = label;
+                made.title = explains;
+                made.style.cssText = 'display:' + (may ? 'block' : 'none') + ';width:100%;' +
+                    'text-align:left;font:inherit;font-size:12px;padding:7px 10px;border:0;' +
+                    'background:none;color:var(--trails-ink-2);cursor:pointer;white-space:nowrap';
+                made.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    stopMenuAt = -1;
+                    act();
+                });
+                return made;
+            }
+
+            function paintStopList() {
+                var stops = (goalNow && goalNow.at && goalNow.stops) ? goalNow.stops : [];
+                goalList.style.display = stops.length ? '' : 'none';
+                while (goalList.firstChild) { goalList.removeChild(goalList.firstChild); }
+                if (!stops.length) { stopMenuAt = -1; return; }
+                if (stopMenuAt >= stops.length) { stopMenuAt = -1; }
+                var chrome = window.trailsChrome;
+                var moving = chrome && chrome.aimingFor && chrome.aimingFor() === 'move' && chrome.aimingAt
+                    ? chrome.aimingAt() : -1;
+                stops.forEach(function (stop, at) {
+                    var last = at + 1 === stops.length;
+                    var row = document.createElement('div');
+                    row.className = 'trails-profile-stop';
+                    row.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px;' +
+                        'padding:2px 3px;border-radius:3px;' +
+                        // Lit while the next tap moves this one, the way the +
+                        // lights while it adds one: the crosshair says a tap is
+                        // armed and the row says what for.
+                        (at === moving ? 'background:color-mix(in srgb, var(--trails-accent) 14%, transparent)' : '');
+                    var number = document.createElement('span');
+                    number.textContent = String(at + 1);
+                    number.style.cssText = 'flex:none;min-width:14px;text-align:right;font-weight:600;color:#00a152';
+                    var says = document.createElement('span');
+                    says.className = 'trails-profile-stop-said';
+                    says.textContent = stop.name;
+                    says.title = stop.lat.toFixed(4) + ', ' + stop.lon.toFixed(4);
+                    says.style.cssText = 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;' +
+                        'white-space:nowrap;color:var(--trails-ink-2)';
+                    // How far into the way it comes, which the marks cannot say
+                    // and the row at the foot says only for the whole.
+                    var far = document.createElement('span');
+                    far.className = 'trails-profile-stop-far';
+                    far.style.cssText = 'flex:none;color:var(--trails-ink-4);font-variant-numeric:tabular-nums';
+                    far.textContent = typeof stop.into === 'number' ? (stop.into / 1000).toFixed(2) + ' km' : '';
+
+                    var menu = document.createElement('div');
+                    menu.className = 'trails-profile-stopmenu';
+                    // In the row and not over it, for the reason the plan's is:
+                    // floated, it was clipped by the scroller on every row near
+                    // the foot.
+                    menu.style.cssText = 'display:' + (at === stopMenuAt ? 'block' : 'none') + ';width:100%;' +
+                        'margin:4px 0 2px;background:var(--trails-sunk);border:1px solid var(--trails-rule);' +
+                        'border-radius:7px;padding:3px';
+                    // **Moved by the next tap, which is the gesture that set
+                    // it.** Not dragged: HTML5 dragging does not exist under a
+                    // finger and a 16 px disc on a map is no handle. Arming a
+                    // tap costs one press and works wherever setting one does.
+                    menu.appendChild(stopStep('trails-profile-stop-move',
+                        last ? '\u2316  Move the goal' : '\u2316  Move this stop',
+                        last ? 'The next tap on the map puts the goal there and keeps the stops'
+                             : 'The next tap on the map puts this stop there', true,
+                        function () { if (window.trailsChrome) { window.trailsChrome.aiming('move', at); } }));
+                    menu.appendChild(stopStep('trails-profile-stop-up', '\u2191  One place earlier',
+                        'Walk to this stop one place earlier', !last && at > 0,
+                        function () { if (window.trailsGoal) { window.trailsGoal.stepStop(at, -1); } }));
+                    menu.appendChild(stopStep('trails-profile-stop-down', '\u2193  One place later',
+                        'Walk to this stop one place later', !last && at + 2 < stops.length,
+                        function () { if (window.trailsGoal) { window.trailsGoal.stepStop(at, 1); } }));
+                    var out = stopStep('trails-profile-stop-out', 'Remove this stop',
+                        'Take this stop out and walk straight on to the next', !last,
+                        function () { if (window.trailsGoal) { window.trailsGoal.dropStop(at); } });
+                    out.style.color = 'var(--trails-extreme, #c62828)';
+                    menu.appendChild(out);
+
+                    var more = document.createElement('button');
+                    more.type = 'button';
+                    more.className = 'trails-profile-stop-more';
+                    more.textContent = '\u22ef';
+                    more.title = last ? 'What can be done with the goal' : 'What can be done with this stop';
+                    more.setAttribute('aria-label', more.title);
+                    more.setAttribute('aria-expanded', String(at === stopMenuAt));
+                    more.style.cssText = 'flex:none;font:inherit;font-size:15px;line-height:1;padding:0 5px;' +
+                        'border:0;background:none;color:var(--trails-ink-4);cursor:pointer';
+                    more.addEventListener('click', function (event) {
+                        event.stopPropagation();
+                        stopMenuAt = stopMenuAt === at ? -1 : at;
+                        paintStopList();
+                    });
+                    row.appendChild(number);
+                    row.appendChild(says);
+                    row.appendChild(far);
+                    row.appendChild(more);
+                    row.appendChild(menu);
+                    goalList.appendChild(row);
+                });
+            }
+
             function paintGoal() {
                 var standing = !!(goalNow && goalNow.at);
                 goalRow.style.display = standing ? 'flex' : 'none';
+                paintStopList();
                 if (!standing) { return; }
                 var routed = goalNow.way === 'routed';
                 var said = goalNow.name || 'Goal';
@@ -6433,6 +6574,9 @@ class _ProfilePanel(MacroElement):
                 // tap that just happened and this is about a thing that is still
                 // standing, so it sits nearer the name it is not part of.
                 box.appendChild(goalRow);
+                // Under the row it lists, and over the heading: the row says
+                // what the journey comes to and this says what it goes by.
+                box.appendChild(goalList);
                 box.appendChild(header);
                 // Clicking and dragging inside the panel must not reach the map;
                 // scrolling must, or the map freezes under an open panel.
@@ -14521,6 +14665,90 @@ class _PlanMode(MacroElement):
                 return true;
             }
 
+            // **A stop put somewhere else is the same stop.** It keeps its
+            // place in the order: the reader chose where it falls among the
+            // others when they put it down, and a stop nudged fifty metres to
+            // the far side of a stream has not changed which hut it is walked
+            // to before. Which is what tells this apart from dropping one and
+            // adding one, where `legNearest` would decide the order afresh.
+            function moveStop(at, lat, lon, name, tapped) {
+                if (at < 0 || at >= goalVia.length) { return false; }
+                if (tapped) {
+                    onTheLine(lat, lon, function (on, along) { moveStop(at, on, along, name); });
+                    return true;
+                }
+                goalVia[at] = {lat: lat, lon: lon, name: name || null};
+                goalToken = null;
+                paintStops();
+                routeToGoal(goalHere());
+                keepGoal();
+                refreshGoal();
+                return true;
+            }
+
+            // **One place earlier or later, the way the plan's list does it.**
+            // The order was worked out from the ground when the stop went
+            // down, and the ground is sometimes wrong about which of two huts
+            // a reader means to reach first. A swap with a neighbour is the
+            // smallest gesture that changes it and composes into any order.
+            function stepStop(at, step) {
+                var to = at + step;
+                if (at < 0 || at >= goalVia.length || to < 0 || to >= goalVia.length) { return false; }
+                var moved = goalVia[at];
+                goalVia[at] = goalVia[to];
+                goalVia[to] = moved;
+                goalToken = null;
+                paintStops();
+                routeToGoal(goalHere());
+                keepGoal();
+                refreshGoal();
+                return true;
+            }
+
+            // **The goal put somewhere else, and the stops stay.** `setGoal`
+            // is a new journey and clears them, which is right for a reader
+            // who has changed their mind about where they are going; this is
+            // for the one who has not, and wants the end of the same journey a
+            // little further along the shore. Reported from the phone: with
+            // stops on the way there was no way to nudge the goal without
+            // finding and putting every one of them down again.
+            function moveGoal(lat, lon, name, tapped) {
+                if (!goalAt) { return false; }
+                if (tapped) {
+                    onTheLine(lat, lon, function (at, on) { moveGoal(at, on, name); });
+                    return true;
+                }
+                goalAt = {lat: lat, lon: lon, name: name || null};
+                goalToken = null;
+                paintGoalMark();
+                paintStops();
+                routeToGoal(goalHere());
+                keepGoal();
+                refreshGoal();
+                return true;
+            }
+
+            //: How far into the way each place comes, in the metre this page
+            //: measures with: the sum of the legs up to it. Leg *i* ends at
+            //: stop *i*, so the figure for a stop is the legs before and
+            //: including its own. `null` where a leg is not made yet, because
+            //: a partial sum said as a distance is a distance nobody walked.
+            function metresInto() {
+                var into = [], walked = 0;
+                for (var at = 0; at < goalLegs.length; at += 1) {
+                    var parts = goalLegs[at].parts;
+                    if (walked === null || !parts) { walked = null; into.push(null); continue; }
+                    for (var p = 0; p < parts.length; p += 1) {
+                        var part = parts[p];
+                        for (var v = 0; v + 1 < part.lon.length; v += 1) {
+                            walked += panel().metresBetween(part.lon[v], part.lat[v], part.lon[v + 1], part.lat[v + 1]);
+                        }
+                    }
+                    into.push(walked);
+                }
+                return into;
+            }
+
             function clearGoal() {
                 goalAt = null;
                 goalVia = [];
@@ -14594,10 +14822,17 @@ class _PlanMode(MacroElement):
                         // Where the reader wants to be on the way, in order,
                         // with the goal last -- the same list the row at the
                         // foot counts and a check reads.
-                        stops: stopsOf().map(function (stop, at) {
-                            return {lat: stop.lat, lon: stop.lon, name: stopSaid(at),
-                                    goal: at + 1 === stopsOf().length};
-                        }),
+                        stops: (function () {
+                            var into = metresInto(), all = stopsOf();
+                            return all.map(function (stop, at) {
+                                return {lat: stop.lat, lon: stop.lon, name: stopSaid(at),
+                                        goal: at + 1 === all.length,
+                                        // How far into the way it comes, which
+                                        // is the one figure the list beside the
+                                        // marks can say and the marks cannot.
+                                        into: at < into.length ? into[at] : null};
+                            });
+                        })(),
                         // The first leg that could not be made, if any: one stop
                         // of five being unreachable is a fact about that stop
                         // and not about the journey.
@@ -14706,6 +14941,12 @@ class _PlanMode(MacroElement):
                 // taken away again, by where it stands.
                 addStop: addStop,
                 dropStop: dropStop,
+                // One put somewhere else, keeping its place in the order; one
+                // swapped with a neighbour; and the goal put somewhere else
+                // with the stops kept, which `set` deliberately does not do.
+                moveStop: moveStop,
+                stepStop: stepStop,
+                move: moveGoal,
                 stopAt: stopAt,
                 stops: function () {
                     return goalVia.map(function (stop) {
@@ -19664,17 +19905,24 @@ class _Chrome(MacroElement):
             // switch that stayed on would make every later tap a goal, which is
             // the mistake plan mode is allowed to make because planning is a
             // mode a reader is *in* and this is one thing they are doing.
-            // **Two things the next tap can mean, and it says which.** A goal
-            // and a stop on the way to it are set by the same gesture and are
-            // not the same act, so the switch carries which one it is armed for
-            // rather than being a flag -- and the row at the foot lights the
-            // button that armed it.
+            // **Three things the next tap can mean, and it says which.** A goal,
+            // a stop on the way to it and a place already set being put
+            // somewhere else are all set by the same gesture and are not the
+            // same act, so the switch carries which one it is armed for rather
+            // than being a flag -- and the row at the foot lights the button or
+            // the row that armed it.
             var aiming = null;
+            //: Which place the tap moves while it is armed for `'move'`: an
+            //: index into the goal's own list, stops first and the goal last.
+            //: Meaningless otherwise, and read as such.
+            var aimingAt = -1;
 
-            function askAiming(want) {
-                var wanted = want === 'stop' ? 'stop' : (want === undefined ? (aiming ? null : 'goal')
-                                                         : (want ? 'goal' : null));
+            function askAiming(want, at) {
+                var wanted = want === 'stop' ? 'stop' : want === 'move' ? 'move'
+                    : (want === undefined ? (aiming ? null : 'goal') : (want ? 'goal' : null));
                 aiming = wanted;
+                aimingAt = wanted === 'move' && typeof at === 'number' && at >= 0 ? at : -1;
+                if (wanted === 'move' && aimingAt < 0) { aiming = null; }
                 // Never both: the picker owns the next tap while it is on, and
                 // two crosshairs over one map is a page that cannot say what a
                 // tap will do.
@@ -19727,20 +19975,14 @@ class _Chrome(MacroElement):
             function setGoalHere(event) {
                 if (!window.trailsGoal) { return; }
                 var where = map.mouseEventToLatLng(event);
-                var reach = (window.trailsReach && window.trailsReach.finger) || 12;
                 if (aiming === 'stop') {
-                    // **A tap on a stop takes that stop away.** Putting one down
-                    // and taking it back are the same gesture at the same
-                    // moment, and the only place a reader would look for the
-                    // second is the mark itself -- which is unambiguous here in
-                    // a way it was not for the goal, because a stop is the thing
-                    // this switch is armed about.
-                    var standing = window.trailsGoal.stopAt(where.lat, where.lng, reach);
-                    if (standing >= 0) {
-                        window.trailsGoal.dropStop(standing);
-                        askAiming(false);
-                        return;
-                    }
+                    // **A tap adds a stop, and only that.** It used to take a
+                    // stop away as well, when it landed on one -- and the one
+                    // thing that said so was the hint over the map, which went
+                    // for standing across the ground the tap was meant for. A
+                    // gesture with two meanings and nothing to say which is not
+                    // a gesture; taking a stop away is in the list at the foot
+                    // now, in words, where a reader looks for it.
                     var called = (window.trailsPlan && window.trailsPlan.named)
                         ? window.trailsPlan.named(where.lat, where.lng) : null;
                     // Named where something is named within reach and
@@ -19749,6 +19991,25 @@ class _Chrome(MacroElement):
                     // a finger. A named thing does not snap: it is a place.
                     if (called) { window.trailsGoal.addStop(called.lat, called.lon, called.name); }
                     else { window.trailsGoal.addStop(where.lat, where.lng, null, true); }
+                    askAiming(false);
+                    return;
+                }
+                if (aiming === 'move') {
+                    // **The place the list armed this for, put where the tap
+                    // landed.** The last of the list is the goal and keeps its
+                    // stops; any other is a stop and keeps its place in the
+                    // order. Named and snapped by the same rule as setting one.
+                    var moving = window.trailsGoal.state().stops || [];
+                    var found = (window.trailsPlan && window.trailsPlan.named)
+                        ? window.trailsPlan.named(where.lat, where.lng) : null;
+                    if (aimingAt + 1 >= moving.length) {
+                        if (found) { window.trailsGoal.move(found.lat, found.lon, found.name); }
+                        else { window.trailsGoal.move(where.lat, where.lng, null, true); }
+                    } else if (found) {
+                        window.trailsGoal.moveStop(aimingAt, found.lat, found.lon, found.name);
+                    } else {
+                        window.trailsGoal.moveStop(aimingAt, where.lat, where.lng, null, true);
+                    }
                     askAiming(false);
                     return;
                 }
@@ -20575,10 +20836,12 @@ class _Chrome(MacroElement):
                     if (!hereAt || !hereRing) { return null; }
                     return {lat: hereAt.lat, lon: hereAt.lng, spread: hereRing.getRadius()};
                 },
-                aiming: function (want) { return askAiming(want); },
+                aiming: function (want, at) { return askAiming(want, at); },
                 // What the armed tap will do, for whoever draws a control that
-                // armed it: `'goal'`, `'stop'` or nothing.
+                // armed it: `'goal'`, `'stop'`, `'move'` or nothing -- and for
+                // a move, which place in the goal's list it moves.
                 aimingFor: function () { return aiming; },
+                aimingAt: function () { return aiming === 'move' ? aimingAt : -1; },
                 // **Where the mark says to walk, as it was worked out rather
                 // than as it is drawn.** A check cannot measure an angle off a
                 // canvas and should not have to read a path back to find one --
@@ -20608,6 +20871,7 @@ class _Chrome(MacroElement):
                         // either.
                         aiming: !!aiming,
                         aimingFor: aiming,
+                        aimingAt: aiming === 'move' ? aimingAt : -1,
                         goal: goalSet(),
                         here: hereWatch !== null,
                         planPoints: planState ? planState.points : 0,

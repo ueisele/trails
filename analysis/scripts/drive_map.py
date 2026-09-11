@@ -4201,6 +4201,20 @@ THE_GOAL = """() => {
           again: row ? (row.querySelector('.trails-profile-goal-again') || {}).style.display : null}; }"""
 
 
+THE_STOPS = """() => {
+  const rows = [...document.querySelectorAll('.trails-profile-stop')];
+  const list = document.querySelector('.trails-profile-stops');
+  return {shown: !!list && list.style.display !== 'none',
+          rows: rows.map(r => ({said: r.querySelector('.trails-profile-stop-said').textContent,
+                               far: r.querySelector('.trails-profile-stop-far').textContent,
+                               open: r.querySelector('.trails-profile-stopmenu').style.display !== 'none',
+                               lit: r.style.background !== '',
+                               offers: [...r.querySelectorAll('.trails-profile-stopmenu button')]
+                                   .filter(b => b.style.display !== 'none').map(b => b.className)})),
+          armed: window.trailsChrome.state().aimingFor,
+          at: window.trailsChrome.state().aimingAt}; }"""
+
+
 def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
     """What a tap means, and what it costs to be a finger's width out.
 
@@ -4656,10 +4670,42 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(900)
     stopped = page.evaluate(THE_GOAL)
 
-    # And the same tap on the stop itself takes it away again.
-    page.evaluate("() => window.trailsChrome.aiming('stop')")
-    page.wait_for_timeout(300)
-    tap_goal(aside)
+    # **Every place on the way is a row at the foot, with a menu.** Reported
+    # from the phone: with stops on the way the only edit left was adding
+    # another. A stop could be taken away by a tap the hint used to explain
+    # and nothing explains now; it could not be moved at all; and the goal
+    # could not be moved without every stop going with it. So each is a row
+    # in words now, the way the plan's points are, and every edit below is
+    # driven through the row's own buttons because that is the gesture.
+    listed = page.evaluate(THE_STOPS)
+
+    def press_row(at: int, className: str) -> None:
+        """Press one button of the row for the place at that index."""
+        page.evaluate(
+            """(want) => { const rows = document.querySelectorAll('.trails-profile-stop');
+            const one = rows[want.at] && rows[want.at].querySelector('.' + want.className);
+            if (one) { one.click(); } }""",
+            {"at": at, "className": className},
+        )
+        page.wait_for_timeout(300)
+
+    # The stop moved: its row's menu arms the next tap, the row lights, and
+    # the tap puts the stop where it landed -- one stop still, and in the
+    # same place in the order.
+    press_row(0, "trails-profile-stop-more")
+    stop_menu = page.evaluate(THE_STOPS)
+    press_row(0, "trails-profile-stop-move")
+    arming_move = page.evaluate(THE_STOPS)
+    aside_again = {"lat": aside["lat"] - 0.004, "lng": aside["lng"] + 0.015}
+    tap_goal(aside_again)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(900)
+    moved = page.evaluate(THE_GOAL)
+    moved_off = metres_between((moved["goal"]["stops"][0]["lat"], moved["goal"]["stops"][0]["lon"]), (aside_again["lat"], aside_again["lng"]))
+
+    # And taken away again through the same menu, in words.
+    press_row(0, "trails-profile-stop-more")
+    press_row(0, "trails-profile-stop-out")
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
     page.wait_for_timeout(900)
     unstopped = page.evaluate(THE_GOAL)
@@ -4712,6 +4758,33 @@ def a_goal_the_reader_sets(page: Any) -> Check:
         ),
         default=None,
     )
+    # **One place later, from the row's menu**, which is the plan's own
+    # gesture for a sequence under a finger: the first two stops change
+    # places and nothing else about them changes.
+    before_step = [(stop["lat"], stop["lon"]) for stop in stops_at]
+    press_row(0, "trails-profile-stop-more")
+    press_row(0, "trails-profile-stop-down")
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=240_000)
+    page.wait_for_timeout(600)
+    stepped = page.evaluate(THE_GOAL)
+    after_step = [(stop["lat"], stop["lon"]) for stop in stepped["goal"]["stops"]]
+
+    # **And the goal moved with its stops kept.** Setting a goal is a new
+    # journey and clears them, which is right for a reader who has changed
+    # their mind about where they are going; this is for the one who has
+    # not, and wants the end of the same journey a little further along.
+    last_row = len(after_step) - 1
+    press_row(last_row, "trails-profile-stop-more")
+    goal_menu = page.evaluate(THE_STOPS)
+    press_row(last_row, "trails-profile-stop-move")
+    arming_goal = page.evaluate(THE_STOPS)
+    there_again = {"lat": there["lat"] + 0.006, "lng": there["lng"] - 0.006}
+    tap_goal(there_again)
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=240_000)
+    page.wait_for_timeout(900)
+    goal_moved = page.evaluate(THE_GOAL)
+    goal_off = metres_between((goal_moved["goal"]["at"]["lat"], goal_moved["goal"]["at"]["lon"]), (there_again["lat"], there_again["lng"]))
+
     while page.evaluate("() => window.trailsGoal.stops().length"):
         page.evaluate("() => window.trailsGoal.dropStop(0)")
         page.wait_for_function("() => !window.trailsGoal.state().working", timeout=240_000)
@@ -4947,8 +5020,41 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 True,
                 note=stopped["says"],
             ),
+            # **The places on the way are rows at the foot, and the rows are
+            # where the edits live.** One per place, stops first and the goal
+            # last, each saying how far into the way it comes.
             Reading(
-                "and a tap on the stop takes it away",
+                "every place on the way is a row at the foot",
+                (listed["shown"], [row["said"] for row in listed["rows"]]),
+                (True, ["Stop 1", "the goal"]),
+            ),
+            Reading(
+                "and each says how far into the way it comes",
+                (listed["rows"][0]["far"].endswith(" km"), listed["rows"][-1]["far"]),
+                (True, f"{(stopped['goal']['metres'] or 0) / 1000:.2f} km"),
+                note=", ".join(row["far"] for row in listed["rows"]),
+            ),
+            # A stop offers a move, the two steps and its removal; the goal
+            # offers only a move, because the goal is not on the way to
+            # anything. With one stop there is nothing to step past.
+            Reading(
+                "a stop's menu offers what can be done with it",
+                (stop_menu["rows"][0]["open"], stop_menu["rows"][0]["offers"]),
+                (True, ["trails-profile-stop-move", "trails-profile-stop-out"]),
+            ),
+            Reading(
+                "moving arms the next tap for that place and lights its row",
+                (arming_move["armed"], arming_move["at"], arming_move["rows"][0]["lit"], arming_move["rows"][1]["lit"]),
+                ("move", 0, True, False),
+            ),
+            Reading(
+                "and the tap puts the stop there, one stop still",
+                (len(moved["goal"]["stops"] or []), moved["marks"], moved_off < 5.0, moved["armed"]),
+                (2, 1, True, False),
+                note=f"{moved_off:.1f} m from the tap",
+            ),
+            Reading(
+                "and removing it from the menu takes it away",
                 (len(unstopped["goal"]["stops"] or []), unstopped["marks"]),
                 (1, 0),
             ),
@@ -4980,6 +5086,34 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 wandered is not None and wandered <= 3.0,
                 True,
                 note=f"{(wandered or 0):.2f} times the straight line at the worst, and 3.0 is the ceiling",
+            ),
+            Reading(
+                "one place later from the menu swaps it with the next",
+                after_step[:2] == [before_step[1], before_step[0]] and after_step[2:] == before_step[2:],
+                True,
+                note=f"{len(before_step)} places, the first two exchanged",
+            ),
+            Reading(
+                "the goal's own row offers only a move",
+                (goal_menu["rows"][-1]["open"], goal_menu["rows"][-1]["offers"]),
+                (True, ["trails-profile-stop-move"]),
+            ),
+            Reading(
+                "which arms the tap for the goal",
+                (arming_goal["armed"], arming_goal["at"], arming_goal["rows"][-1]["lit"]),
+                ("move", last_row, True),
+            ),
+            # Not `set`, which is a new journey: the goal goes where the tap
+            # landed and every stop stays where it was.
+            Reading(
+                "and the goal moves with its stops kept",
+                (
+                    goal_off < 5.0,
+                    [(stop["lat"], stop["lon"]) for stop in goal_moved["goal"]["stops"]][:-1] == after_step[:-1],
+                    len(goal_moved["goal"]["stops"] or []),
+                ),
+                (True, True, len(after_step)),
+                note=f"{goal_off:.1f} m from the tap, {len(after_step) - 1} stops kept",
             ),
             Reading(
                 "a tap well away from it does not take the goal",
