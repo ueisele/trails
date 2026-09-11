@@ -5358,21 +5358,29 @@ class _ProfilePanel(MacroElement):
                 // sources will not fit on 390 px however short their names are.
                 'overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none';
 
-            // ---- the goal, at the foot ---------------------------------------
-            // **Where somebody walking is already looking.** The switch that
-            // *sets* a goal is in the rail, because arming the next tap is what
-            // the rail does; what there is to do with one once it is set --
-            // which way to read it, work it out again, be rid of it -- is here.
-            // Drawn only while there is a goal, so it costs a line of a 390 px
-            // panel exactly when it is answering something.
+            // ---- the goal, on a page of its own -----------------------------------
+            // **The way to a goal is a thing this panel shows, and it is drawn
+            // like one.** Its row of switches used to stand above the heading
+            // whenever a goal stood at all -- over every trail the reader tapped
+            // to read, with the list of places under it -- because it was keyed
+            // to *a goal stands* rather than to *the goal is what is showing*.
+            // Reported from the phone: the goal's controls over a day walk's
+            // figures. They are a page now, beside the profile, the way the
+            // plan's points are a page beside the plan's profile: there when
+            // the way to the goal is on the panel and gone with it. What the
+            // row used to say -- the name, how many places it goes by, the
+            // figures -- is the heading's, like every other route's.
+            //
+            // The switch that *sets* a goal stays in the rail, because arming
+            // the next tap is what the rail does; what there is to do with one
+            // once it is set -- which way to read it, add a stop, work it out
+            // again -- heads this page. Being rid of it is in the goal's own
+            // row of the list, behind its menu, where a reader looks for what
+            // can be done with a thing and cannot press by accident.
             var goalNow = null;
             var goalRow = document.createElement('div');
             goalRow.className = 'trails-profile-goal';
-            goalRow.style.cssText = 'display:none;gap:6px;align-items:center;padding:0 0 5px;font-size:11px';
-            var goalSaid = document.createElement('span');
-            goalSaid.className = 'trails-profile-goal-said';
-            goalSaid.style.cssText = 'flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;' +
-                'text-overflow:ellipsis;color:var(--trails-ink-2)';
+            goalRow.style.cssText = 'display:none;gap:6px;align-items:center;padding:0 0 6px;font-size:11px';
 
             function goalButton(className, text, title, act) {
                 var made = document.createElement('button');
@@ -5413,14 +5421,26 @@ class _ProfilePanel(MacroElement):
                                       function () {
                                           if (window.trailsChrome) { window.trailsChrome.aiming('stop'); }
                                       });
-            var goalDrop = goalButton('trails-profile-goal-clear', '\\u00d7', 'Drop this goal',
-                                      function () { if (window.trailsGoal) { window.trailsGoal.clear(); } });
-            goalRow.appendChild(goalSaid);
+            // The two readings first and the two acts after a gap: a switch
+            // between two states and a button that does something are not the
+            // same kind of control, and the row says so by keeping them apart.
+            var goalGap = document.createElement('span');
+            goalGap.style.cssText = 'flex:1 1 auto';
             goalRow.appendChild(goalStraight);
             goalRow.appendChild(goalRouted);
+            goalRow.appendChild(goalGap);
             goalRow.appendChild(goalStop);
             goalRow.appendChild(goalAgain);
-            goalRow.appendChild(goalDrop);
+            // **What the heading has no room for, said over the list.** The
+            // heading shows three lines of figures and a goal's are the length,
+            // the climb and the steepest; how much of the way was never a path
+            // came fourth and went unsaid -- and a reader being shown a line
+            // has to know which part of it is a promise and which a bearing
+            // before they set off along it. Said here, on the page about the
+            // way, where the reader is choosing how to read it.
+            var goalNote = document.createElement('div');
+            goalNote.className = 'trails-profile-goal-note';
+            goalNote.style.cssText = 'display:none;padding:0 3px 5px;font-size:11px;color:var(--trails-ink-3)';
 
             // ---- the places on the way, as a list -------------------------------
             // **Every place the journey goes by, in order, and what can be done
@@ -5439,16 +5459,10 @@ class _ProfilePanel(MacroElement):
             // entry, so the two never hold a copy of each other's order.
             var goalList = document.createElement('div');
             goalList.className = 'trails-profile-stops';
-            goalList.style.cssText = 'display:none;margin:-2px 0 5px;max-height:150px;overflow-y:auto;font-size:11px';
-            // The wheel is the map's except where this has somewhere left to
-            // scroll -- the plan's list strikes the same bargain.
-            goalList.addEventListener('wheel', function (event) {
-                var room = goalList.scrollHeight - goalList.clientHeight;
-                if (room <= 0) { return; }
-                if (event.deltaY < 0 ? goalList.scrollTop > 0 : goalList.scrollTop < room - 1) {
-                    event.stopPropagation();
-                }
-            }, {passive: true});
+            // No height and no scroller of its own: it is on a page, and a page
+            // is as tall as the drawing and scrolls, which is what a page is
+            // for.
+            goalList.style.cssText = 'display:none;font-size:11px';
             //: Which row's menu is open, or -1. Kept across a repaint, because
             //: the goal control repaints this on every position fix and a menu
             //: that shut itself while a reader was reading it is a menu nobody
@@ -5538,6 +5552,16 @@ class _ProfilePanel(MacroElement):
                         function () { if (window.trailsGoal) { window.trailsGoal.dropStop(at); } });
                     out.style.color = 'var(--trails-extreme, #c62828)';
                     menu.appendChild(out);
+                    // **Being rid of the goal, behind the goal's own menu.** It
+                    // was a × at the end of the row of switches, one thumb-width
+                    // from *add a stop*, and pressing the flag put the goal
+                    // away as well; both were a journey lost to a slip. It is a
+                    // line in a menu now, in words, and nothing else clears one.
+                    var drop = stopStep('trails-profile-stop-drop', 'Drop the goal',
+                        'Put the goal away, and every stop with it', last,
+                        function () { if (window.trailsGoal) { window.trailsGoal.clear(); } });
+                    drop.style.color = 'var(--trails-extreme, #c62828)';
+                    menu.appendChild(drop);
 
                     var more = document.createElement('button');
                     more.type = 'button';
@@ -5568,32 +5592,24 @@ class _ProfilePanel(MacroElement):
                 paintStopList();
                 if (!standing) { return; }
                 var routed = goalNow.way === 'routed';
-                var said = goalNow.name || 'Goal';
-                // **How many places it goes by, said before the figures.** Two
-                // stops turn a line into a journey, and a reader looking at
-                // 19 km has to know whether that is the way there or the way
-                // there by way of two huts.
-                var stops = (goalNow.stops || []).length - 1;
-                if (stops > 0) { said += ' \\u00b7 by ' + stops + (stops === 1 ? ' stop' : ' stops'); }
-                if (goalNow.working) { said += ' \\u00b7 working\\u2026'; }
-                else if (goalNow.line) {
-                    said += ' \\u00b7 ' + (goalNow.metres / 1000).toFixed(2) + ' km';
-                    if (goalNow.ascent !== null && !isNaN(goalNow.ascent)) {
-                        said += ' \\u00b7 \\u2191' + Math.round(goalNow.ascent) + ' m';
-                    }
-                    // Said whenever there is any of it, and not only where the
-                    // whole way is trackless: the reader is being shown a line,
-                    // and the part of it that is not a path is the part they
-                    // have to know about before they set off along it.
-                    if (goalNow.straight > 1) {
-                        said += ' \\u00b7 ' + (goalNow.straight / 1000).toFixed(2) + ' km off the paths';
-                    }
+                // What the row used to say here -- the name, how many places
+                // the way goes by, the kilometres, the climb -- the heading
+                // says now, from the series the goal control hands over: its
+                // label carries the name and the stops, its lines carry the
+                // figures. One derivation, and the goal reads like every other
+                // route on this panel. What is left for this page is the one
+                // line the heading cannot fit.
+                var note = '';
+                if (goalNow.working) { note = 'Working out the way\\u2026'; }
+                else if (goalNow.line && goalNow.straight > 1) {
+                    note = (goalNow.straight / 1000).toFixed(2) + ' km of it drawn straight, not a path';
                 // **Said, and not silently fallen back on.** A routed goal off
                 // the network is drawn straight at, which is the right thing to
                 // draw and the wrong thing to leave unexplained: a reader would
                 // read the line as a way somebody had checked.
-                } else if (routed) { said += ' \\u00b7 no way there \\u2014 straight'; }
-                goalSaid.textContent = said;
+                } else if (!goalNow.line && routed) { note = 'No way there \\u2014 drawn straight'; }
+                goalNote.textContent = note;
+                goalNote.style.display = note ? '' : 'none';
                 var arming = (window.trailsChrome && window.trailsChrome.aimingFor)
                     ? window.trailsChrome.aimingFor() : null;
                 goalStop.style.background = arming === 'stop' ? 'var(--trails-accent)' : 'var(--trails-solid)';
@@ -5650,6 +5666,11 @@ class _ProfilePanel(MacroElement):
                 // chosen* -- so it goes through the one entry both of them have.
                 if (planNow && window.trailsPlan) { window.trailsPlan.toggle(false); return; }
                 if (window.trailsHighlight) { window.trailsHighlight.clear(); }
+                // **And the goal's own note that this panel is drawing it.** A
+                // stale yes would let the next fix put the way back on a panel
+                // the reader just put away -- the goal stands, the flag stays
+                // lit, and the flag is what brings it back.
+                if (window.trailsGoal) { window.trailsGoal.letGo(); }
                 present(null);
             });
             header.appendChild(said);
@@ -6136,11 +6157,32 @@ class _ProfilePanel(MacroElement):
             undoRow.appendChild(undoOne);
             pointsPage.appendChild(undoRow);
 
+            // **The way to the goal's own page: the switches over the places.**
+            // Built here beside the plan's list page and put into the track
+            // with it; what is on it is drawn by `paintGoal`, from what the
+            // goal control last said, and the page is wanted exactly while the
+            // panel is showing the goal's series.
+            var placesPage = document.createElement('div');
+            placesPage.className = 'trails-profile-places';
+            placesPage.style.cssText = 'padding:0 0 6px';
+            placesPage.appendChild(goalRow);
+            placesPage.appendChild(goalNote);
+            placesPage.appendChild(goalList);
+
             function wantedPages() {
                 var made = [];
                 if (selected && (selected.shape || selected.missing)) {
                     made.push({key: 'profile', kind: 'profile', node: body,
                                label: 'Elevation profile'});
+                }
+                // **The way to a goal has its places where the plan has its
+                // points.** Wanted while the goal is what the panel shows and
+                // not while a goal merely stands: a reader who tapped a trail
+                // to read it is reading that trail, and the goal's controls
+                // over its figures were the defect reported from the phone.
+                if (selected && selected.goal) {
+                    made.push({key: 'places', kind: 'list', node: placesPage,
+                               label: 'Places on the way'});
                 }
                 // **And after plan mode has been left**, for a route still on
                 // the panel: the points and the stages are what that route *is*,
@@ -6195,7 +6237,7 @@ class _ProfilePanel(MacroElement):
             // Driven, a drag on the chart between two selections found no chart
             // at all: it was in a variable and not in the document, which is the
             // detached-DOM trap this suite has met one level up.
-            [body, detailBox, pointsPage].forEach(function (node) {
+            [body, detailBox, pointsPage, placesPage].forEach(function (node) {
                 node.classList.add('trails-profile-page');
                 node.style.flex = 'none';
                 node.style.overflowY = 'auto';
@@ -6212,7 +6254,7 @@ class _ProfilePanel(MacroElement):
                 pages = wantedPages();
                 if (pageAt >= pages.length) { pageAt = 0; }
                 var wanted = pages.map(function (page) { return page.node; });
-                [body, detailBox, pointsPage].forEach(function (node) {
+                [body, detailBox, pointsPage, placesPage].forEach(function (node) {
                     node.style.display = wanted.indexOf(node) >= 0 ? '' : 'none';
                 });
                 // **The track's order is the pages' order.** They were appended
@@ -6230,7 +6272,7 @@ class _ProfilePanel(MacroElement):
                     // first `.trails-profile-page` is the first page, and not
                     // whichever one happens to be put away.
                     wanted.forEach(function (node) { track.appendChild(node); });
-                    [body, detailBox, pointsPage].forEach(function (node) {
+                    [body, detailBox, pointsPage, placesPage].forEach(function (node) {
                         if (wanted.indexOf(node) < 0) { track.appendChild(node); }
                     });
                 }
@@ -6573,10 +6615,6 @@ class _ProfilePanel(MacroElement):
                 // Under the chips and over the heading: the chips are about the
                 // tap that just happened and this is about a thing that is still
                 // standing, so it sits nearer the name it is not part of.
-                box.appendChild(goalRow);
-                // Under the row it lists, and over the heading: the row says
-                // what the journey comes to and this says what it goes by.
-                box.appendChild(goalList);
                 box.appendChild(header);
                 // Clicking and dragging inside the panel must not reach the map;
                 // scrolling must, or the map freezes under an open panel.
@@ -14788,7 +14826,16 @@ class _PlanMode(MacroElement):
                 var showing = panel();
                 if (!showing || !goalShape) { return false; }
                 goalShowing = true;
-                showing.series({label: 'to the goal', figure: figuresOf(goalShape), shape: goalShape,
+                // **Named like a route, because it is drawn like one.** The
+                // row of switches used to say the name and how many places the
+                // way goes by; that row is a page now, and the heading is where
+                // every other route on this panel says what it is. Two stops
+                // turn a line into a journey, and a reader looking at 19 km
+                // has to know whether that is the way there or the way there
+                // by way of two huts.
+                var byStops = goalVia.length ? ' \\u00b7 by ' + goalVia.length + (goalVia.length === 1 ? ' stop' : ' stops') : '';
+                showing.series({label: 'To ' + (goalAt.name || 'the goal') + byStops,
+                                figure: figuresOf(goalShape), shape: goalShape,
                                 told: told(goalShape), goal: true});
                 return true;
             }
@@ -14974,6 +15021,9 @@ class _PlanMode(MacroElement):
                     return goalShape ? {lon: goalShape.lon, lat: goalShape.lat} : null;
                 },
                 show: showGoal,
+                // And opened at the curve, which is what pressing the flag
+                // with a goal standing does now.
+                showProfile: showGoalProfile,
                 showing: function () { return goalShowing; },
                 //: Let go of the panel without clearing the goal: another line
                 //: was chosen and this route is no longer what is drawn.
@@ -19950,23 +20000,25 @@ class _Chrome(MacroElement):
                 return aiming;
             }
 
-            // **The switch a lit lamp promises.** Reported from the phone:
-            // pressing the flag again did not take the goal away, it armed the
-            // next tap -- which is not what pressing a switch that is *on*
-            // means. Three states and one press:
+            // **The switch a lit lamp promises.** Three states and one press:
             //
             // * nothing set and not armed -- arm the next tap
             // * armed -- let go, and set nothing
-            // * a goal standing -- put it away
+            // * a goal standing -- show the way there on the panel
             //
-            // Which leaves moving one at two presses and a tap. That is the
-            // right trade: an accidental goal is exactly what arm-and-let-go
-            // exists to prevent, and a press that both cleared *and* armed
-            // would leave a crosshair over the map nobody asked for.
+            // The third used to put the goal away, on the argument that a
+            // switch that is *on* is switched off by pressing it. Reported
+            // from the phone, twice over: a goal with three stops on the way
+            // lost to one press meant for something else, and no way to bring
+            // the goal back on to the panel once another trail had been tapped
+            // -- the goal stood, the lamp was lit, and the only control that
+            // knew about it would destroy it. So the lit flag *shows*, and
+            // putting a goal away is a line in its own menu, in words, where
+            // a reader looks for what can be done with a thing.
             function pressGoal() {
                 if (aiming) { askAiming(false); return; }
                 if (goalSet() && window.trailsGoal) {
-                    window.trailsGoal.clear();
+                    if (!window.trailsGoal.showProfile()) { window.trailsGoal.show(); }
                     return;
                 }
                 askAiming(true);

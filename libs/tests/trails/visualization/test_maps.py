@@ -4053,32 +4053,57 @@ class TestProfilePanel:
         # takes the plan before a trail: it is the more particular instruction.
         assert "if (choices[at].mine === 'goal') { return choices[at]; }" in html
 
-    def test_a_goal_is_read_in_the_row_at_the_foot(self):
+    def test_a_goal_is_a_page_of_the_panel_and_not_a_row_over_it(self):
         """The switch that *sets* a goal is in the rail, because arming the next
-        tap is what the rail does. What there is to do with one once it is set —
-        which way to read it, work it out again, be rid of it — is at the foot,
-        where somebody walking is already looking, and it is drawn only while
-        there is a goal.
+        tap is what the rail does. What there is to do with one once it is set
+        — which way to read it, add a stop, work it out again — heads a page of
+        the panel beside the profile, the way the plan's points do.
 
-        Two readings of one point and not two goals: which of them a reader
-        wants changes on the ground, and having to set the goal again to say so
-        would be the page asking them to repeat themselves."""
+        **Wanted while the goal is what the panel shows, and not while a goal
+        merely stands.** The row used to stand over the heading whenever a goal
+        stood at all, with the list of places under it: over every trail the
+        reader tapped to read. Reported from the phone, and it is a page now,
+        there with the goal's series and gone with it.
+
+        What the row said — the name, how many places it goes by, the figures
+        — is the heading's now, from the series the goal control hands over,
+        like every other route on this panel. And being rid of a goal is a
+        line in its own menu, in words: the × stood one thumb-width from *add
+        a stop*."""
         fmap, layer = self.drawn()
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
         assert "goalRow.className = 'trails-profile-goal';" in html
-        assert "goalRow.style.display = standing ? 'flex' : 'none';" in html
+        assert "placesPage.className = 'trails-profile-places';" in html
+        assert "placesPage.appendChild(goalRow);" in html
+        assert "placesPage.appendChild(goalList);" in html
+        assert "if (selected && selected.goal) {" in html
+        assert "made.push({key: 'places', kind: 'list', node: placesPage," in html
+        assert html.count("[body, detailBox, pointsPage, placesPage]") == 3
+        assert "box.appendChild(goalRow);" not in html
+        assert "box.appendChild(goalList);" not in html
         assert "window.trailsGoal.way('direct')" in html
         assert "window.trailsGoal.way('routed')" in html
         assert "window.trailsGoal.again()" in html
-        assert "window.trailsGoal.clear()" in html
-        # A routed goal off the network is drawn straight at, which is the right
-        # thing to draw and the wrong thing to leave unexplained: a reader would
-        # read the line as a way somebody had checked.
-        assert "said += ' \\u00b7 no way there \\u2014 straight'; }" in html
-        # And how much of a partly routed way was never a path.
-        assert "said += ' \\u00b7 ' + (goalNow.straight / 1000).toFixed(2) + ' km off the paths';" in html
+        # Nothing said in the row: no name, no count, no figures.
+        assert "trails-profile-goal-said" not in html
+        assert "km off the paths" not in html
+        # Except the one line the heading has no room for: the heading shows
+        # three lines of figures and how much of the way was never a path came
+        # fourth. A reader being shown a line has to know which part of it is
+        # a promise and which a bearing.
+        assert "goalNote.className = 'trails-profile-goal-note';" in html
+        assert "note = (goalNow.straight / 1000).toFixed(2) + ' km of it drawn straight, not a path';" in html
+        assert "} else if (!goalNow.line && routed) { note = 'No way there \\u2014 drawn straight'; }" in html
+        # Rid of, in words, behind the goal's own menu -- and by nothing else.
+        assert "trails-profile-goal-clear" not in html
+        assert "var drop = stopStep('trails-profile-stop-drop', 'Drop the goal'," in html
+        assert "'Put the goal away, and every stop with it', last," in html
+        # And the panel's own × lets go of the goal's note that it is drawing
+        # it, or the next fix would put the way back on a panel just put away.
+        hide = html.split("hide.addEventListener('click', function (event) {")[1].split("});")[0]
+        assert "if (window.trailsGoal) { window.trailsGoal.letGo(); }" in hide
 
     def test_a_goal_has_figures_of_its_own(self):
         """Reported from the phone as *the info is from another way*, and it
@@ -4115,8 +4140,10 @@ class TestProfilePanel:
         html = fmap.get_root().render()
         assert "var goalStop = goalButton('trails-profile-goal-stop', '+', 'Add a stop on the way'," in html
         assert "window.trailsChrome.aiming('stop');" in html
-        assert "if (stops > 0) { said += ' \\u00b7 by ' + stops + (stops === 1 ? ' stop' : ' stops'); }" in html
         assert "goalAgain.style.display = 'flex';" in html
+        # How many places it goes by is said in the heading, by the label the
+        # goal control hands over with its series.
+        assert "if (stops > 0) { said += " not in html
 
     def test_every_place_on_the_way_is_a_row_with_a_menu(self):
         """Reported from the phone: with stops on the way the only edit left
@@ -4159,8 +4186,8 @@ class TestProfilePanel:
         # reading it is a menu nobody can use while walking.
         assert "var stopMenuAt = -1;" in html
         assert "menu.style.cssText = 'display:' + (at === stopMenuAt ? 'block' : 'none') + ';width:100%;'" in html
-        # Under the row it lists and over the heading.
-        assert html.index("box.appendChild(goalRow);") < html.index("box.appendChild(goalList);") < html.index("box.appendChild(header);")
+        # On the goal's page, under its row of switches.
+        assert html.index("placesPage.appendChild(goalRow);") < html.index("placesPage.appendChild(goalList);")
 
 
 class TestPlanMode:
@@ -6100,6 +6127,13 @@ class TestPlanMode:
         assert "if (goalShape && goalFresh) { goalFresh = false; showGoalProfile(); }" in planning
         assert "function showGoalProfile() {" in planning
         assert "return showing.page('profile') === 'profile';" in planning
+        # **Named like a route, because it is drawn like one.** The heading is
+        # where every route on the panel says what it is, and the goal's says
+        # the name and how many places the way goes by; the row of switches
+        # that used to say them is a page now.
+        assert "showing.series({label: 'To ' + (goalAt.name || 'the goal') + byStops," in planning
+        assert "var byStops = goalVia.length ? ' \\u00b7 by ' + goalVia.length + (goalVia.length === 1 ? ' stop' : ' stops') : '';" in planning
+        assert "showProfile: showGoalProfile," in planning
         # Set by setting a goal and by asking for it to be routed, and by
         # nothing else — least of all by the re-routing rule.
         # Set wherever the reader changed what the way *is* — a goal, a stop,
@@ -7717,15 +7751,18 @@ class TestWhereTheReaderIs:
         # A notice that stands is still one that takes no pointer — the trap
         # that hint fell into while it existed, and the rule that outlives it.
         assert "pickToast.style.pointerEvents = sticky === true ? 'auto' : 'none';" in html
-        # **And a lit lamp pressed puts the goal away.** Reported from the
-        # phone: pressing the flag again armed the next tap instead, which is
-        # not what pressing a switch that is *on* means. Three states, one
-        # press — arm, let go, put away — which leaves moving a goal at two
-        # presses and a tap, and that is the right trade: an accidental goal is
-        # what arm-and-let-go exists to prevent.
+        # **And a lit lamp pressed shows the goal.** It used to put the goal
+        # away, on the argument that a switch that is *on* is switched off by
+        # pressing it. Reported from the phone, twice over: a journey with
+        # three stops lost to one press meant for something else, and no way
+        # to bring the goal back on to the panel once another trail had been
+        # tapped. Three states, one press — arm, let go, show — and putting a
+        # goal away is a line in its own menu, in words.
         assert "function pressGoal() {" in html
         assert "if (aiming) { askAiming(false); return; }" in html
         assert "if (goalSet() && window.trailsGoal) {" in html
+        assert "if (!window.trailsGoal.showProfile()) { window.trailsGoal.show(); }" in html
+        assert "window.trailsGoal.clear();" not in html
         assert "quickMark('goal', 'Set a goal', function () { pressGoal(); });" in html
         # And it is the tap and nothing else: no waypoint, no selection, no
         # popup, which is what the capture phase is for.

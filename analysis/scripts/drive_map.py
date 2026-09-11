@@ -4175,8 +4175,12 @@ THE_JOINS = """() => {
 
 THE_GOAL = """() => {
   const row = document.querySelector('.trails-profile-goal');
-  const said = row ? row.querySelector('.trails-profile-goal-said') : null;
+  // The row of switches is on the goal's own page now, so it is showing only
+  // while that page is in the panel -- which is what the row used not to know.
+  const pageOf = row ? row.closest('.trails-profile-places') : null;
   const ways = row ? [...row.querySelectorAll('.trails-profile-goal-way')] : [];
+  const heading = document.querySelector('.trails-profile-name');
+  const figures = document.querySelector('.trails-profile-figures');
   const panel = window.trailsProfilePanel;
   return {goal: window.trailsGoal.state(), aim: window.trailsChrome.aim(),
           // What the panel is showing, because setting a goal is meant to put
@@ -4195,8 +4199,14 @@ THE_GOAL = """() => {
               return (line && line.style.display !== 'none') ? line.textContent : null; })(),
           armed: window.trailsChrome.state().aiming,
           lamp: window.trailsChrome.state().goal,
-          row: !!row && row.style.display !== 'none',
-          says: said ? said.textContent : null,
+          row: !!row && row.style.display !== 'none' && !!pageOf && pageOf.style.display !== 'none',
+          // The one line the heading has no room for, over the list.
+          note: (function () { const n = document.querySelector('.trails-profile-goal-note');
+              return (n && n.style.display !== 'none') ? n.textContent : null; })(),
+          // What the heading says about it: the name and the places on the
+          // way in the line above, the figures in the line below.
+          says: heading && window.trailsProfile && window.trailsProfile.goal
+              ? heading.textContent + ' \u00b7 ' + (figures ? figures.textContent : '') : null,
           way: ways.filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.textContent),
           again: row ? (row.querySelector('.trails-profile-goal-again') || {}).style.display : null}; }"""
 
@@ -4893,12 +4903,43 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(900)
     afar = page.evaluate(THE_GOAL)
 
-    # **The flag, pressed while it is lit, puts the goal away.** Reported from
-    # the phone: it armed the next tap instead, which is not what pressing a
-    # switch that is on means.
+    # **Another trail tapped takes the panel and not the goal.** The goal's
+    # switches and its list of places used to stand over whatever the reader
+    # tapped to read, because they were keyed to *a goal stands*. They are a
+    # page of the goal's own now: gone with it, and the goal still standing.
+    select(page, LONG_CHAIN)
+    page.wait_for_timeout(900)
+    other_shown = page.evaluate(THE_GOAL)
+
+    # **The flag, pressed while it is lit, brings the goal back.** It used to
+    # put the goal away, which lost a journey with three stops to one press
+    # meant for something else -- and once another trail had been tapped it
+    # was the only control that knew about the goal at all.
     page.evaluate("() => document.querySelector('.trails-quick-goal').click()")
+    page.wait_for_timeout(900)
+    pressed_back = page.evaluate(THE_GOAL)
+
+    # **And the panel's × puts the goal's page away without the goal.** The
+    # next fix must not put it back: the goal control's own note that the
+    # panel is drawing it has to go with the page.
+    page.evaluate("() => document.querySelector('.trails-profile-hide').click()")
+    page.wait_for_timeout(600)
+    put_away = page.evaluate(THE_GOAL)
+    page.evaluate("() => window.trailsGoal.again()")
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(900)
+    stayed_away = page.evaluate(THE_GOAL)
+
+    # **Being rid of it is a line in the goal's own menu**, in words, and the
+    # only thing that clears one.
+    page.evaluate("() => document.querySelector('.trails-quick-goal').click()")
+    page.wait_for_timeout(600)
+    goal_rows = page.evaluate("() => document.querySelectorAll('.trails-profile-stop').length")
+    press_row(goal_rows - 1, "trails-profile-stop-more")
+    drop_offered = page.evaluate(THE_STOPS)
+    press_row(goal_rows - 1, "trails-profile-stop-drop")
     page.wait_for_timeout(700)
-    pressed_off = page.evaluate(THE_GOAL)
+    dropped = page.evaluate(THE_GOAL)
 
     # **And a place is offered as one where the reader has just read what it
     # is.** Nearly every goal somebody sets is a named thing, and the popup is
@@ -4981,7 +5022,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             # two are not the same direction, and the one under the feet wins.
             Reading("and the head follows the route, not the goal", apart > 5, True, note=f"{apart:.0f} deg between the path and the goal"),
             Reading("the row at the foot says what it is", (routed["row"], routed["way"]), (True, ["Routed"]), note=routed["says"]),
-            Reading("setting it puts the way there on the panel", (routed["mine"], routed["shown"]), (True, "to the goal")),
+            Reading("setting it puts the way there on the panel", (routed["mine"], routed["shown"]), (True, "To the goal")),
             Reading("opened at the curve", routed["page"], "profile"),
             # Its own count of points and not the one the line read before it
             # left there: the row under the drawing used to return before it was
@@ -5015,7 +5056,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 "Stop 1",
             ),
             Reading(
-                "the row says how many places it goes by",
+                "the heading says how many places it goes by",
                 "by 1 stop" in (stopped["says"] or ""),
                 True,
                 note=stopped["says"],
@@ -5096,7 +5137,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             Reading(
                 "the goal's own row offers only a move",
                 (goal_menu["rows"][-1]["open"], goal_menu["rows"][-1]["offers"]),
-                (True, ["trails-profile-stop-move"]),
+                (True, ["trails-profile-stop-move", "trails-profile-stop-drop"]),
             ),
             Reading(
                 "which arms the tap for the goal",
@@ -5154,7 +5195,9 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 True,
                 note=f"{(partly['goal']['metres'] or 0) / 1000:.2f} km walked against {flown / 1000:.2f} km flown",
             ),
-            Reading("the row says which part was never a path", "off the paths" in (partly["says"] or ""), True, note=partly["says"]),
+            # The heading has room for three lines of figures and this came
+            # fourth, so it is said over the list on the goal's own page.
+            Reading("the page says which part was never a path", "drawn straight" in (partly["note"] or ""), True, note=partly["note"]),
             Reading(
                 "a reader off the mapped ground still gets the path part",
                 (
@@ -5165,9 +5208,45 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 note=f"{(afar['goal']['metres'] or 0) / 1000:.2f} km, {(afar['goal']['straight'] or 0) / 1000:.2f} km of it off the paths",
             ),
             Reading(
-                "the flag, pressed while lit, puts the goal away",
-                (pressed_off["goal"]["at"], pressed_off["armed"], pressed_off["lamp"]),
-                (None, False, False),
+                "another trail tapped takes the panel and not the goal",
+                (
+                    other_shown["mine"],
+                    other_shown["row"],
+                    "places" in other_shown["pages"],
+                    other_shown["goal"]["at"] is not None,
+                    other_shown["lamp"],
+                ),
+                (False, False, False, True, True),
+                note=str(other_shown["shown"]),
+            ),
+            Reading(
+                "the flag, pressed while lit, brings the goal back",
+                (
+                    pressed_back["mine"],
+                    pressed_back["row"],
+                    "places" in pressed_back["pages"],
+                    pressed_back["armed"],
+                    pressed_back["goal"]["at"] == afar["goal"]["at"],
+                ),
+                (True, True, True, False, True),
+                note=str(pressed_back["shown"]),
+            ),
+            Reading(
+                "the panel's x puts the page away and keeps the goal",
+                (put_away["mine"], put_away["row"], put_away["goal"]["at"] is not None, put_away["lamp"]),
+                (False, False, True, True),
+            ),
+            Reading("and the next routing does not put it back", (stayed_away["mine"], stayed_away["row"]), (False, False)),
+            Reading(
+                "the goal's own menu offers to drop it",
+                "trails-profile-stop-drop" in (drop_offered["rows"][-1]["offers"] if drop_offered["rows"] else []),
+                True,
+                note=str(drop_offered["rows"][-1]["offers"] if drop_offered["rows"] else None),
+            ),
+            Reading(
+                "and that line puts the goal away",
+                (dropped["goal"]["at"], dropped["marks"], dropped["lamp"], dropped["mine"]),
+                (None, 0, False, False),
             ),
             Reading("a place offers itself as a goal", from_place["offered"], "Set as goal"),
             Reading(
