@@ -557,7 +557,10 @@ this map is the reason.
    full z8–z17 run took 916 s. **And the upload**, also code since 2026-09-12: `deploy_map.py
    --tree tiles` mirrors the tree into the bucket by `aws s3 sync` (§4.5), which is `just deploy
    --tree tiles` from `home/trails-map`; run 2026-09-12 as the unit `abisko-tiles-upload` at
-   Uwe's word (60 objects/s). **`--park`, the provider blob and the companions per map are
+   Uwe's word: **118,967 objects, 700 MB, 3,400 s**, none failed, at 60 objects/s for the first
+   40,000 and 25–35/s after — R2's pace, not forge's (12 min CPU in 57). A z13 tile fetched
+   from the edge is byte-identical to the file, served `image/png` with the year-long header;
+   a second `--dry-run` finds nothing left to upload. **`--park`, the provider blob and the companions per map are
    done** the same day (§4.1, §4.2, §6.2), in the library, the build and the deploy; what
    remains of this step is the variant icon.
 4. **`network/sweden.py`** — Topografi 50 for the ground, Naturvårdsverket's trail register
@@ -586,7 +589,9 @@ settled, move it to §9 with the date and what settled it.
 (§3, §9.5), and so are the COG questions — overviews, nodata, water, the login — in §6.3.
 The packed z13 tile weighs 92.7 kB (§6.3). Still open: whether Geotorget offers the tile
 product cut to an area, and how often the FTP files are refreshed (dated 2026-06-22 to 24 when
-first seen).
+first seen). And one for step 4: Naturvårdsverket's two WFS endpoints (§5) answered **503,
+"ArcGIS Server Error"** to `GetCapabilities` on 2026-09-12 11:00 — a bad hour or a moved path;
+check before `network/sweden.py` leans on them.
 
 ### 8.2 `make drive` for a second page
 
@@ -640,6 +645,8 @@ box is an hour and a half, once.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the tiles are in the bucket: 118,967 objects, 700 MB, 57 minutes, verified
+  from the edge (§7 step 3). Naturvårdsverket's WFS answered 503 today; noted in §8.1.
 - **2026-09-12** — the height tiles are built (§6.3, §7 step 5): `markhojd.py`, `dem_tiles.py`,
   `utils/tiles.py`, `make dem`; 540 tiles, 49.3 MB, z13 at 92.7 kB, in 62 s from a cached 4 m
   mosaic. `rasterio` added. §8.1 loses the tile-weight question. Not uploaded.
