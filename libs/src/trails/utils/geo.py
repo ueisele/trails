@@ -4,6 +4,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
+from pyproj import Transformer
 from shapely.geometry import MultiLineString
 from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.ops import linemerge, unary_union
@@ -297,3 +298,25 @@ def compass_points(bearings: pd.Series) -> pd.Series:
         index=bearings.index,
         dtype="object",
     )
+
+
+def project_bounds(bounds: tuple[float, float, float, float], source_crs: str, target_crs: str) -> tuple[float, float, float, float]:
+    """Say what box encloses a box once it is reprojected.
+
+    All four corners are projected and the envelope taken, because a box's
+    corners do not stay its corners under a projection: at 68° N the northern
+    edge of a WGS 84 box bows several hundred metres in SWEREF 99 TM.
+
+    Args:
+        bounds: ``(min_x, min_y, max_x, max_y)`` in ``source_crs``
+        source_crs: What the box is stated in
+        target_crs: What the answer is wanted in
+
+    Returns:
+        ``(min_x, min_y, max_x, max_y)`` in ``target_crs``, enclosing every
+        corner
+    """
+    west, south, east, north = bounds
+    project = Transformer.from_crs(source_crs, target_crs, always_xy=True)
+    xs, ys = project.transform([west, east, east, west], [south, south, north, north])
+    return (float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys)))

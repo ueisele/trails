@@ -87,3 +87,47 @@ class TestMosaic:
         source = markhojd.Source(cache_dir=tmp_path, username="u", password="p", fetch=lambda url: {"features": [], "links": []})
         with pytest.raises(ValueError, match="overviews"):
             source.mosaic(ABISKO, posts_m=3.0)
+
+
+class TestSample:
+    """Reading heights off a mosaic at points."""
+
+    def _plane(self):
+        # Height = east + 2·north over posts 4 m apart, corner at (640000, 7582500).
+        transform = Affine(4.0, 0.0, 640000.0, 0.0, -4.0, 7582500.0)
+        cols, rows = np.meshgrid(np.arange(10), np.arange(10))
+        east = 640000.0 + (cols + 0.5) * 4.0
+        north = 7582500.0 - (rows + 0.5) * 4.0
+        return (east + 2 * north).astype(np.float32), transform
+
+    def test_a_point_between_posts_reads_the_plane(self):
+        heights, transform = self._plane()
+        points = np.array([[640010.0, 7582490.0], [640021.3, 7582477.7]])
+        read = markhojd.sample(heights, transform, points)
+        assert np.allclose(read, points[:, 0] + 2 * points[:, 1], atol=0.01)
+
+    def test_outside_the_mosaic_reads_nan(self):
+        heights, transform = self._plane()
+        read = markhojd.sample(heights, transform, np.array([[639000.0, 7582490.0], [640001.0, 7582499.0]]))
+        assert np.isnan(read[0])
+        # Inside the first cell but before its post: no post on that side to weigh.
+        assert np.isnan(read[1])
+
+    def test_a_post_the_model_lacks_makes_its_neighbourhood_nan(self):
+        heights, transform = self._plane()
+        heights[2, 2] = markhojd.NODATA
+        read = markhojd.sample(heights, transform, np.array([[640010.0, 7582490.0], [640030.0, 7582470.0]]))
+        assert np.isnan(read[0]) and not np.isnan(read[1])
+
+    def test_no_points_read_nothing(self):
+        heights, transform = self._plane()
+        assert len(markhojd.sample(heights, transform, np.empty((0, 2)))) == 0
+
+
+class TestHeightsOver:
+    def test_the_reader_answers_off_the_mosaic(self, squares, tmp_path):
+        page = {"features": [_item(east, 7580000.0, href) for east, href in squares], "links": []}
+        source = markhojd.Source(cache_dir=tmp_path / "cache", username="u", password="p", fetch=lambda url: page)
+        read = markhojd.heights_over(source, ABISKO, posts_m=8.0)
+        answered = read(np.array([[641000.0, 7581000.0], [643500.0, 7581000.0], [100.0, 100.0]]))
+        assert answered[0] == pytest.approx(100.0) and answered[1] == pytest.approx(200.0) and np.isnan(answered[2])

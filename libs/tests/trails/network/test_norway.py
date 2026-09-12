@@ -511,3 +511,20 @@ class TestProtectedTable:
         empty = gpd.GeoDataFrame({PROTECTED_ID: [], PROTECTED_NAME: [], PROTECTED_FORM: []}, geometry=[], crs="EPSG:4326")
 
         assert protected_table(empty) == []
+
+
+class TestFingerprintIsAContract:
+    """The key text is what every graph already in a cache was stored under."""
+
+    def test_the_keys_measured_before_the_shared_module_existed_still_hold(self):
+        """Test three keys recorded on 2026-09-12, before the build moved to graphs.py.
+
+        A different value here means every cached graph is orphaned; that is
+        allowed, but only on purpose, by changing GRAPH_LAYOUT and these three.
+        """
+        assert (
+            fingerprint([source(), source("N50 roads", "route_name", ("1", "2"))], masks(), params(), protected(("A", 100.0), ("B", 40.0)))
+            == "dfcad4870181be8d"
+        )
+        assert fingerprint([source()], masks(), params(), protected()) == "9bd89236b7ec0988"
+        assert fingerprint([source()], masks(), params(stroke_deg=30.0), protected(*AREAS)) == "d13a56b851afb315"

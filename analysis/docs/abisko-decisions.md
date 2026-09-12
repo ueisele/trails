@@ -274,13 +274,13 @@ meridian, closer than Bergen, for which `atlas` §6.1 measured +0.2 %. Swedish s
 |---|---|---|---|
 | base map | Kartverket cache, live | Lantmäteriet *Topografisk webbkarta Nedladdning, raster*, free with attribution, anonymous FTP, copied into our bucket at build time | z0–z17 XYZ pyramid, measured (§3) |
 | **the N50 role: paths, roads, water, land cover, cabins, names, contours, protected areas in one product** | N50 Kartdata, per kommune | Lantmäteriet **Topografi 50 Nedladdning, vektor** — GeoPackage, SWEREF99 TM, updated weekly, ordered for the whole country through Geotorget as a free *Abonnemang*, **CC0, no legal review**. Topografi 10 is the finer sibling and is **not orderable for Uwe**: its terms cover personal data (buildings with addresses), Geotorget puts a *juridisk prövning* in front of it, and that form wants a Swedish *personnummer* (seen 2026-09-12) | read 2026-09-12 off the product documentation, see below |
-| official marked trails with attributes | Turrutebasen | Naturvårdsverket *Leder och friluftsanordningar*: WFS `https://geodata.naturvardsverket.se/leder_friluftsliv/wfs?`, SWEREF99 TM | keyless; carries summer *and* winter trails, marking and manager — the attribute source, as Turrutebasen is (`atlas` §7.2) |
+| official marked trails with attributes | Turrutebasen | Naturvårdsverket *Leder och friluftsanordningar*, as the nightly files under `geodata.naturvardsverket.se/nedladdning/friluftsliv/` (`Leder_shp.zip`, `Anordningar_shp.zip`), SWEREF99 TM, CC0 — **not the WFS**, which was down a whole day (§9.6) | keyless; nationwide, not only in protected areas (34 of the 47 lines over the box lie outside one); `LKATEGORI` separates summer (*Barmarksled*) from winter (*Led på snö*), `STATLED` names the state trail (*Abisko - Abiskojaure (BD 21)*), `LMARKERING` the marking — the attribute source, as Turrutebasen is (`atlas` §7.2). Read by `io/sources/naturvardsregistret.py` |
 | paths nobody else draws | OSM | OSM, through Overpass, unchanged | the one source that is the same in both countries |
 | cabins, shelters, bridges | N50, UT.no | Topografi 10 `Byggnadspunkt` — `Raststuga` (*"alltid olåst"*), `Vindskydd`, `Kåta`; Naturvårdsverket `anordningar_friluftsliv/wfs`; OSM `alpine_hut` / `wilderness_hut` | STF's cabins are in all three |
-| protected areas, and the park lookup | Naturbase | Topografi 10 *Tema Naturvård*, or Naturvårdsverket's *naturvårdsregistret* WFS/REST | either replaces `find_one(PARK_NAME, …)` |
+| protected areas, and the park lookup | Naturbase | Naturvårdsverket's *naturvårdsregistret* as nightly files (`nedladdning/naturvardsregistret/NP.zip`, `NR.zip`, … one per form, same columns: `NVRID`, `NAMN`, `SKYDDSTYP`) — Topografi 50's `skyddadnatur` draws the outlines too but carries **no name** | `naturvardsregistret.Source.find_one("Abisko")` is the park lookup: NVRID 2001225, 7,710 ha; eight forms read, every one with its outline |
 | roads | N50 | Topografi 10 `Väglinje` (Trafikverket's roads, 15 classes) and `Övrig väg` | OSM as the check |
 | water | N50 Arealdekke | Topografi 10 *Tema Hydrografi* | Torneträsk and the lakes drive the straight-walk water cost |
-| place names | Stedsnavn | Topografi 10 *Tema Text* — Lantmäteriet's established names, Swedish and Sami | the search box reads this |
+| place names | Stedsnavn | Topografi 50 *Tema Text* is map lettering (291 labels over the box, sparse); the register is *Ortnamn*, in Lantmäteriet's keyless vector STAC (`api.lantmateriet.se/stac-vektor/v1`, collection `ortnamn`, CC BY 4.0) | the search box reads this; not wired yet (Swedish branch of the build) |
 | heights | Geonorge point API, live | Lantmäteriet *Markhöjdmodell Nedladdning*: 1 m COGs through a keyless STAC API, downloads behind the Geotorget login, CC BY 4.0, **RH 2000** | §6.3 |
 | land cover | not used | Topografi 10 *Tema Mark* (`sankmark`, `kalfjäll`, forest); NMD 10 m raster exists too | Tema Mark is enough if the water cost ever wants bog |
 
@@ -313,14 +313,26 @@ So the Swedish set is smaller than Norway's seven and not poorer: Topografi 50 c
 FKB, Naturbase and Stedsnavn carry between them, Naturvårdsverket's trail register is the
 Turrutebasen, and OSM is OSM. `network/sweden.py` is three loaders, not seven.
 
-Two things to settle at the first download, not now: which `Byggnad` classes name STF's larger
-huts (a `Raststuga` is the unlocked emergency kind, not a staffed *fjällstuga*), and how large
-the whole-Sweden GeoPackage is — ordered for the country rather than Kiruna kommun, so that
-`atlas` §3.2's cells read the same file, and the box is cut out with a bbox filter over the
-GeoPackage's spatial index.
+**The delivery, measured 2026-09-12.** Ordered for the country, it is fourteen zipped
+GeoPackages, 5.37 GB: `mark` 2.5 GB, `hojd` 2.0 GB, `kommunikation` 519 MB (1.36 GB unpacked),
+`hydrografi` 183 MB, `byggnadsverk` 116 MB, `text` 31 MB, the rest under 10 MB each. Produced
+2026-09-08, kept fourteen days, refreshed on request. The box is cut out of the country file with
+a bbox over the GeoPackage's R-tree in **under a second**, so the whole-country order costs
+nothing at build time. `atlas` §3.2's cells read the same file. How it is fetched is a
+documented API, *Geotorget Nedladdning* (§7.1); the loader is `io/sources/topografi50.py`, one
+directory per delivery under `.cache/topografi50/`.
 
-Exact layer names, attribute names and the winter/summer field are read off the services when
-the module is written, not guessed here.
+**What the box holds** (Topografi 50, bbox 18.15–19.00 E, 68.17–68.46 N): `Gångstig` 397 km,
+`Vandringsled` 168 km, `Vandrings- och vinterled` 52 km, `Vinterled` 134 km, `Traktorväg`,
+`Cykelväg` and `Elljusspår` under 4 km each; `Transportled fjäll`: `Lämplig färdväg` 56 km,
+`Svårorienterad gångstig` 5 km, `Skidspår` 10 km, `Trafikerad båtled` 6 km; roads 71 km, of
+which the E10 46 km; `ledintressepunkt_fjall`: 45 footbridges, **6 fords (`Vad`)**, 3 emergency
+telephones, 3 car parks; `byggnadspunkt`: 17 `Kåta`, 9 `Enslig stuga i fjällen`, 8 `Vindskydd`,
+6 `Raststuga`, 3 `Turiststuga/övernattningsstuga`, 2 `Fjällstation`, 1 `Naturum` — so the
+staffed huts are `Turiststuga/övernattningsstuga` and `Fjällstation`, and a `Raststuga` is the
+emergency kind. Naturvårdsverket's register over the same box: 47 lines, 365 km, 30 summer and
+17 winter, all 47 on a named state trail (BD 16–BD 92), and 24 facilities (10 bridges, 5
+privies, 4 rest shelters, 2 wind shelters).
 
 **Naturkartan is not a source** (asked by Uwe 2026-09-12, measured the same day). It is
 Outdoormap AB's platform, on which counties and municipalities publish their trails with text and
@@ -559,6 +571,20 @@ this map is the reason.
    records; the build reads them from the environment for the STAC downloads and the download
    API (Ortnamn Nedladdning, vektor is free and unreviewed too, should the names want it).
    No API key exists in this design any more.
+   **Both deliveries were there the same day** (measured 2026-09-12, 12:00): *Mitt konto –
+   Ärenden* shows both as *Lyckad*, the height model as a *Behörighet* (the login may read the
+   COGs, which §6.3 used), Topografi 50 as an *Abonnemang* with an order id and a delivery of
+   fourteen files, 5.37 GB, produced 2026-09-08, available fourteen days, new deliveries on
+   request. **The delivery is fetched through *Geotorget Nedladdning***, a documented API on
+   `api.lantmateriet.se/geotorget/nedladdning/v1/{order}` with basic auth for private persons:
+   read the order, read the latest delivery, list its files, download each by a signed path.
+   **It has to be ordered too**, as its own free product in Geotorget — without that the same
+   login answers `403 Scope validation failed` on every call (measured; `401` without the
+   login, so the login itself is right). Still to do, by Uwe: order *Geotorget Nedladdning*
+   under the same account, and put the order id in `home/trails-map`'s sops file as
+   `GEOTORGET_TOPOGRAFI50_ORDER` (the id *Ärenden* shows on the Topografi 50 order line — an
+   identifier, not a credential, but it names an account). Until then the loader reads the
+   delivery already on disk, which was fetched once through the browser session on 2026-09-12.
 2. **Infrastructure** — nothing. The bucket takes prefixes without a change (§6.2), and there
    is no Worker (§6.1).
 3. **`trails`, the plumbing** — `--park` (§4.1), the provider blob with `TOP` and `WEIGHT` per
@@ -578,7 +604,25 @@ this map is the reason.
    remains of this step is the variant icon.
 4. **`network/sweden.py`** — Topografi 50 for the ground, Naturvårdsverket's trail register
    for the attributes, OSM for what neither draws; winter trails and reindeer routes excluded
-   (§6.5).
+   (§6.5). **Done 2026-09-12.** What was shared with Norway moved into `network/graphs.py`
+   (parameters, fingerprint, derived fields, the protected-area table, the build) and
+   `norway.py` delegates to it with its cache keys byte-identical — three keys measured before
+   the move are pinned in a test. The Swedish module is five sources, not three: the register
+   (*Leder*, identity the state trail), **Topografi 50's marked trails as a source of their
+   own**, its paths, its roads, OSM, and the empty ferries. The split was forced by the
+   product: Topografi 50 draws the marked trail *and* the worn path under it as two objects on
+   one geometry — 148 km shared over the box in 6,570 collinear segments — and noded as one
+   source those cut each other at every vertex, where the identity rule, every arm carrying
+   the same trail name, ended a chain: 9,136 path chains at 69 m. As two sources, meeting only
+   in the merged graph as Turrutebasen and FKB do, the first build over the box reads:
+   Leder 30 lines → 16 chains (11.6 km mean), Topografi 50 trails 151 → 72, paths 404 → 197,
+   roads 170 → 69, OSM 850 → 459; **813 chains, 39,775 edges, 18,545 nodes, 457 bridged
+   connectors**; 34,117 edges read marked, 3,405 unmarked, 1,796 unknown; 17 edges run where
+   no source records a path. Heights: 317,417 samples off the cached 4 m mosaic, none outside
+   it, 342–1,730 m. **44 s in all**, OSM cached, against Lomsdal's quarter of an hour: the
+   ground is read off a file rather than asked of a service. The Swedish `measure` needs no
+   point store. Not yet driven by either script: `route_graph.py` reports Norwegian landmarks
+   and `lomsdal_visten.py` refuses `--park abisko` until the Swedish branch of the build.
 5. **Heights** — the tile build (§6.3). **Done 2026-09-12**: `command make dem` writes
    `analysis/output/dem/lantmateriet/1/` from the STAC COGs with the login, 540 tiles, 49 MB,
    in a minute; not uploaded. What remains here is the reader: the page's `heightsUrl` and the
@@ -602,17 +646,20 @@ settled, move it to §9 with the date and what settled it.
 (§3, §9.5), and so are the COG questions — overviews, nodata, water, the login — in §6.3.
 The packed z13 tile weighs 92.7 kB (§6.3). Still open: whether Geotorget offers the tile
 product cut to an area, and how often the FTP files are refreshed (dated 2026-06-22 to 24 when
-first seen). And one for step 4: Naturvårdsverket's two WFS endpoints (§5) answered **503,
-"ArcGIS Server Error"** to `GetCapabilities` on 2026-09-12 11:00, and so did
-`naturvardsregistret/wfs`, a path in wide use — so the whole WFS server was down, not our path.
-The paths are the ones Naturvårdsverket's own catalogue lists (geodatakatalogen record
-`af2e37d3-45b0-4623-bcf2-0765c8ca7ab5`, *Friluftsliv: Leder och anordningar i skyddade
-områden*). Two things to take from that record when the server is back: the dataset is trails
-**in protected areas**, so the box's ground outside the national park may not be covered and
-Topografi 50 plus OSM carry it; and the loader must treat a 503 as "try later", since the
-service does go away for hours.
+first seen). The WFS question of step 4 is settled (§9.6): the files replace it.
 
-### 8.2 `make drive` for a second page
+### 8.2 The Topografi 50 delivery through the API
+
+*Trigger: Uwe orders *Geotorget Nedladdning* (§7.1).* The loader's API path —
+`topografi50.Source.ask`, `.geopackage` — is written against the documentation and tested
+against a stand-in, and has not run against the real API, which answers 403 until the product
+is ordered. Once it is: `GEOTORGET_TOPOGRAFI50_ORDER` into sops, then
+`sops exec-env … 'command make graph'` with `--force-download` once, which fetches the newest
+delivery into a new dated directory beside the one on disk. The first real run says whether the
+signed paths survive a second `files` call and how long the 519 MB `kommunikation` archive takes
+from `api.lantmateriet.se`.
+
+### 8.3 `make drive` for a second page
 
 *Trigger: step 6.* The 278 readings assert Lomsdal-Visten's figures. Which are structural and
 hold for any page, and which are that park's numbers, is not yet separated.
@@ -660,10 +707,32 @@ box is an hour and a half, once.
 
 ---
 
+### 9.6 Whether Naturvårdsverket's WFS is needed — no, 2026-09-12
+
+The WFS answered 503 all day (§8.1 as it stood). It is not needed: the same data is published
+as nightly files under `geodata.naturvardsverket.se/nedladdning/` — `naturvardsregistret/` with
+one zipped shapefile per protection form (`NP.zip`, `NR.zip`, `NVO.zip`, `DVO.zip`, `KR.zip`,
+`NM.zip`, `LBSO.zip`, `OBO.zip`, all with `NVRID`, `NAMN`, `SKYDDSTYP`, rewritten 06:50 daily)
+and `friluftsliv/` with `Leder_shp.zip` and `Anordningar_shp.zip` (rewritten 06:26 daily). No
+login, no key, no server that goes away. `io/sources/naturvardsregistret.py` reads both, and the
+file's own date is its version. Two things the catalogue record had left open are answered by
+the file: the trail register is **nationwide** (34 of the 47 lines over the box lie outside any
+protected area), and it separates the seasons by `LKATEGORI` (*Barmarksled* / *Led på snö*), so
+§6.5 is a one-line filter.
+
+---
+
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — §7 step 4 done: `network/sweden.py` on a shared `network/graphs.py`, with
+  `io/sources/naturvardsregistret.py` (nightly files, not the WFS — §9.6), `io/sources/topografi50.py`
+  (the Geotorget delivery API, tested against a stand-in, 403 until the API product is ordered —
+  §7.1, §8.2) and a bilinear reader off the height mosaic in `markhojd.py`. The delivery was
+  found ready and fetched once through the browser (§7.1); §5 carries what the box holds; the
+  marked trails are a source of their own, for a measured reason (§7.4). First build over the
+  box: 813 chains, 39,775 edges, 44 s. §8.1 loses the WFS item; §8.2 is new; §8 renumbered.
 - **2026-09-12** — Naturkartan weighed as a source of curated tours and declined (§5): private-use
   terms, no GPX, API behind a token; the lines are the county's and come through the register.
 - **2026-09-12** — the tiles are in the bucket: 118,967 objects, 700 MB, 57 minutes, verified

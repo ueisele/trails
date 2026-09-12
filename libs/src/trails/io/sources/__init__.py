@@ -1,6 +1,21 @@
 """Trail data sources (Geonorge, Naturbase, OpenStreetMap, etc.)."""
 
-from . import geonorge, geonorge_order, hoydedata, kommuneinfo, lantmateriet, markhojd, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
+from . import (
+    geonorge,
+    geonorge_order,
+    hoydedata,
+    kommuneinfo,
+    lantmateriet,
+    markhojd,
+    n50,
+    naturbase,
+    naturvardsregistret,
+    overpass,
+    stedsnavn,
+    topografi50,
+    traktorvegsti,
+    ut,
+)
 from .base import CachedTrailDataSource, DatasetInfo, SourceMetadata, TrailDataSource
 
 __all__ = [
@@ -12,8 +27,10 @@ __all__ = [
     "markhojd",
     "n50",
     "naturbase",
+    "naturvardsregistret",
     "overpass",
     "stedsnavn",
+    "topografi50",
     "traktorvegsti",
     "ut",
     "TrailDataSource",

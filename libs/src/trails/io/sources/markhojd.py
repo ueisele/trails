@@ -245,3 +245,71 @@ class Source:
         if square.href.startswith(("http://", "https://")):
             return "/vsicurl/" + square.href
         return square.href
+
+
+def sample(heights: np.ndarray, transform: Affine, coordinates: np.ndarray, nodata: float = NODATA) -> np.ndarray:
+    """Read the ground height at points, bilinearly, off a mosaic.
+
+    The same rule the height tiles are resampled by (:mod:`trails.processing.dem_tiles`),
+    so a route's profile in the build and the page's reading of the tiles
+    describe the same surface. A post is the height at the centre of its cell,
+    and a point between four posts takes their weighted mean; a point outside
+    the mosaic, or beside a post the model has nothing for, reads NaN.
+
+    Args:
+        heights: The mosaic, ``(rows, cols)``, north up
+        transform: Its affine transform, cell corners to :data:`CRS`
+        coordinates: ``(n, 2)`` in :data:`CRS`
+        nodata: What the mosaic writes where the model has nothing
+
+    Returns:
+        One height per coordinate, NaN where none can be read
+    """
+    if not len(coordinates):
+        return np.empty(0, dtype=float)
+    east, north = np.asarray(coordinates, dtype=float).T
+    inverse = ~transform
+    cols = inverse.a * east + inverse.b * north + inverse.c
+    rows = inverse.d * east + inverse.e * north + inverse.f
+    # Post centres sit half a cell in from the corner the transform names.
+    x, y = cols - 0.5, rows - 0.5
+    i0, j0 = np.floor(x).astype(int), np.floor(y).astype(int)
+    fx, fy = x - i0, y - j0
+    tall, wide = heights.shape
+    inside = (i0 >= 0) & (i0 + 1 < wide) & (j0 >= 0) & (j0 + 1 < tall)
+
+    read = np.full(len(east), np.nan)
+    if not inside.any():
+        return read
+    i, j, fx, fy = i0[inside], j0[inside], fx[inside], fy[inside]
+    corners = np.stack([heights[j, i], heights[j, i + 1], heights[j + 1, i], heights[j + 1, i + 1]]).astype(float)
+    corners[corners == nodata] = np.nan
+    weights = np.stack([(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy])
+    read[inside] = (corners * weights).sum(axis=0)
+    return read
+
+
+def heights_over(source: Source, bounds: Bounds, posts_m: float = 4.0, force_download: bool = False) -> Callable[[np.ndarray], np.ndarray]:
+    """Make a reader of the ground height for a box, off the cached mosaic.
+
+    What :func:`trails.routing.with_elevation` is handed: one call with every
+    sample of every edge, in :data:`CRS`, which is the CRS the Swedish network
+    is built in. The mosaic is read once and held.
+
+    Args:
+        source: The model
+        bounds: The box, WGS 84
+        posts_m: Post spacing of the mosaic
+        force_download: Read the squares again rather than the cached mosaic
+
+    Returns:
+        The reader
+    """
+    heights, transform = source.mosaic(bounds, posts_m=posts_m, force_download=force_download)
+
+    def read(coordinates: np.ndarray) -> np.ndarray:
+        answered = sample(heights, transform, coordinates)
+        print(f"  {len(coordinates):,} samples read off the {posts_m:g} m mosaic, {int(np.isnan(answered).sum()):,} outside it")
+        return answered
+
+    return read

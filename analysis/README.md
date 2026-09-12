@@ -105,6 +105,16 @@ and therefore the same cache key, so whichever runs first pays and the second is
 instant. The parameters the map does not offer fall to that module's defaults
 rather than to the map's own, which is what keeps the two agreeing.
 
+**Sweden has its own module**, `trails.network.sweden`, built on the same shared
+core (`trails.network.graphs`: parameters, fingerprint, derived fields, the build)
+from three registers instead of seven: Lantmäteriet's *Topografi 50* delivery
+(`io/sources/topografi50.py`, fetched through the Geotorget download API with the
+login, read by box out of the country GeoPackage), Naturvårdsverket's nightly
+files — the protected areas and the trail register, `io/sources/naturvardsregistret.py`,
+no login — and OSM. Heights come off the cached 1 m model rather than a point
+service. Neither script drives it yet; `analysis/docs/abisko-decisions.md` §7
+says what is left.
+
 ### What the map does once it is open
 
 The legend at the bottom left **is** the layer control: every row switches its own
