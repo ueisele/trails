@@ -331,11 +331,15 @@ SCENES: dict[str, Scene] = {
         # page's edge costs. By the page's own prices over every node within
         # 1.5 km of the goal, the routed way wades (3 x 697 + 30 x 24 = 2.8 km
         # against 5.1) and *stay on paths* goes round (the cheapest wading
-        # departure costs 10 x 580 + 30 x 24 = 6.5 km). The register names the
-        # surface there in Sami, Ábeskoeatnu, the nearer of its two names.
+        # register has the river in two languages, and the page names it by
+        # both, Swedish first (decisions §9.12).
         # Measured on the cached graph and the river surfaces, 2026-09-12.
         river_goal=RiverGoal(
-            standing=(68.34103, 18.75284), goal=(68.34142, 18.77066), label="Across Abiskojåkka", river="Ábeskoeatnu", straight=(400, 900)
+            standing=(68.34103, 18.75284),
+            goal=(68.34142, 18.77066),
+            label="Across Abiskojåkka",
+            river="Abiskojåkka (Ábeskoeatnu)",
+            straight=(400, 900),
         ),
     ),
 }

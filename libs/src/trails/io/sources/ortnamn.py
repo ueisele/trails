@@ -24,9 +24,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import geopandas as gpd
+import pandas as pd
 import pyogrio
+from shapely.strtree import STRtree
 
 from trails.utils.geo import project_bounds
 from trails.utils.tiles import Bounds
@@ -89,6 +92,23 @@ LANGUAGES = {
 #: Seconds the download may take.
 TIMEOUT_S = 300
 
+#: How far apart the register puts two languages' points for one place. Measured
+#: over the Abisko box on 2026-09-12: the real pairs -- Abiskojåkka / Ábeskoeatnu
+#: 46 m, Torneträsk / Duortnosjávri 80–148 m, Lapporten / Čuonjávággi 87 m,
+#: Trollsjön / Geargejávri 240 m, Katterjåkk / Gátterjohka 249 m, Abisko /
+#: Ábeskovvu 412 m -- and the first pair that is two different places at 637 m.
+#: One real pair sits beyond it, Gorsajökeln / Gorsajiekŋa at 619 m, and stays
+#: two names rather than risk joining two lakes.
+PAIR_M = 500.0
+
+#: Which language names a place first where the register has several: Swedish,
+#: because it is what the trail signs and the sheets' larger lettering carry;
+#: the Sámi languages after it, as the file lists them.
+LANGUAGE_ORDER = tuple(LANGUAGES)
+
+#: Where two names are measured against each other.
+METRIC_CRS = "EPSG:3006"
+
 
 @dataclass(frozen=True)
 class SourceMetadata:
@@ -114,6 +134,85 @@ def type_label(value: object) -> str:
 def language_label(value: object) -> str:
     """Say which language a code is, in English; the code itself where none is known."""
     return LANGUAGES.get(str(value), str(value))
+
+
+def label(name: object, also: object) -> str:
+    """One place's names as a label: the first, and the others in brackets.
+
+    Args:
+        name: The name in the first language
+        also: The other languages' names, joined; empty or None for none
+
+    Returns:
+        ``Abiskojåkka (Ábeskoeatnu)``, or the name alone
+    """
+    return f"{name} ({also})" if isinstance(also, str) and also else str(name)
+
+
+def paired(names: gpd.GeoDataFrame, within_m: float = PAIR_M, metric_crs: str = METRIC_CRS) -> gpd.GeoDataFrame:
+    """One row per place, where the register has a place in several languages.
+
+    **The register carries each language as a point of its own**, and they do
+    not coincide: the Sámi name of a river sits 46 m from the Swedish one, a
+    lake's names up to a few hundred metres apart. Read as they are, a map
+    draws two labels a finger apart and names a river by whichever point lies
+    nearer. This joins them: a point of a later language (:data:`LANGUAGE_ORDER`)
+    within ``within_m`` of an earlier one **of the same type** becomes that
+    place's other name. Two points in the *same* language are never joined --
+    two lakes 300 m apart are two lakes -- and a name spelt the same in both
+    languages is one name.
+
+    Args:
+        names: What :meth:`Source.names` returned
+        within_m: How far apart one place's points may lie, see :data:`PAIR_M`
+        metric_crs: The projection the distance is measured in
+
+    Returns:
+        The rows kept, in the input's CRS and column set, with ``name`` the
+        first language's, ``also`` the others' joined by ``", "`` (empty for
+        none) and ``languages`` every language the place has, joined
+    """
+    if names.empty:
+        out = names.copy()
+        out["also"] = pd.Series(dtype="string")
+        out["languages"] = pd.Series(dtype="string")
+        return out
+    order = {code: rank for rank, code in enumerate(LANGUAGE_ORDER)}
+    metric = names.to_crs(metric_crs)
+    ranked = sorted(range(len(names)), key=lambda i: (order.get(str(names[LANGUAGE].iloc[i]), len(order)), i))
+    kept: list[int] = []
+    kept_geoms: list[Any] = []
+    also: dict[int, list[str]] = {}
+    languages: dict[int, list[str]] = {}
+    trees: dict[str, tuple[STRtree, list[int]]] = {}
+    for i in ranked:
+        kind, code, text = str(names[TYPE].iloc[i]), str(names[LANGUAGE].iloc[i]), str(names[NAME].iloc[i])
+        point = metric.geometry.iloc[i]
+        joined_to = None
+        if kind in trees:
+            tree, members = trees[kind]
+            for hit in tree.query(point.buffer(within_m)):
+                head = members[hit]
+                if code in languages[head] or kept_geoms[kept.index(head)].distance(point) > within_m:
+                    continue
+                joined_to = head
+                break
+        if joined_to is None:
+            kept.append(i)
+            kept_geoms.append(point)
+            also[i] = []
+            languages[i] = [code]
+            members = [k for k in kept if str(names[TYPE].iloc[k]) == kind]
+            trees[kind] = (STRtree([kept_geoms[kept.index(k)] for k in members]), members)
+            continue
+        languages[joined_to].append(code)
+        head_text = str(names[NAME].iloc[joined_to])
+        if text.casefold() != head_text.casefold() and text not in also[joined_to]:
+            also[joined_to].append(text)
+    out = names.iloc[kept].copy()
+    out["also"] = [", ".join(also[i]) for i in kept]
+    out["languages"] = [", ".join(language_label(code) for code in languages[i]) for i in kept]
+    return out.reset_index(drop=True)
 
 
 def _file_date(path: Path) -> str | None:

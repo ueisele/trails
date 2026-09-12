@@ -293,7 +293,7 @@ meridian, closer than Bergen, for which `atlas` §6.1 measured +0.2 %. Swedish s
 | protected areas, and the park lookup | Naturbase | Naturvårdsverket's *naturvårdsregistret* as nightly files (`nedladdning/naturvardsregistret/NP.zip`, `NR.zip`, … one per form, same columns: `NVRID`, `NAMN`, `SKYDDSTYP`) — Topografi 50's `skyddadnatur` draws the outlines too but carries **no name** | `naturvardsregistret.Source.find_one("Abisko")` is the park lookup: NVRID 2001225, 7,710 ha; eight forms read, every one with its outline |
 | roads | N50 | Topografi 50 `vaglinje` (five classes over the box, by width and surface — no public/private split as in N50; `vardvagnummer` is the identity, *E10*) and `ovrig_vag` | OSM as the check |
 | water | N50 Arealdekke | Topografi 50 *Tema Mark*: `mark` polygons of class `Sjö` (1,708 over the box) and `Vattendragsyta` (144) — the lakes and the rivers wide enough to draw as a surface; the narrower rivers are lines in `hydrolinje` (2,980) and carry no width. `mark_sverige.gpkg` is 5.8 GB unpacked and the box reads out of it in under a second | Torneträsk and the lakes drive the straight-walk water cost; the river surfaces are the page's river outlines, named from the lettering within 60 m (`topografi50.Source.water`, `.rivers`) |
-| place names | Stedsnavn | Lantmäteriet **Ortnamn Nedladdning, vektor** — one 58 MB GeoPackage for the country (989,302 names on 2026-09-12) at `dl1.lantmateriet.se/namnsatt-plats/ortnamn_se.zip`, the address off the keyless vector STAC (`api.lantmateriet.se/stac-vektor/v1`, item `ortnamn_se`), CC BY 4.0, rewritten nightly; **behind the Geotorget login once the product is ordered** (§9.9). A point per name with `detaljtyp` (thirteen types: terrain, lake, watercourse, part of a water, glacier, marsh, settlement, built-up area, tract, facility, cultural site, church, conservation object) and `sprak` (Swedish, four Sámi languages, Meänkieli, Finnish); no importance rank. Over the box 402 names, 242 of them North Sámi. The size a name is drawn at comes off Topografi 50's *Tema Text*, the map's own lettering (325 labels in seven size classes), joined by the same name within 500 m: 218 of 391 | `io/sources/ortnamn.py`; the name layers, the search box, the cabins' and the rivers' names read it |
+| place names | Stedsnavn | Lantmäteriet **Ortnamn Nedladdning, vektor** — one 58 MB GeoPackage for the country (989,302 names on 2026-09-12) at `dl1.lantmateriet.se/namnsatt-plats/ortnamn_se.zip`, the address off the keyless vector STAC (`api.lantmateriet.se/stac-vektor/v1`, item `ortnamn_se`), CC BY 4.0, rewritten nightly; **behind the Geotorget login once the product is ordered** (§9.9). A point per name with `detaljtyp` (thirteen types: terrain, lake, watercourse, part of a water, glacier, marsh, settlement, built-up area, tract, facility, cultural site, church, conservation object) and `sprak` (Swedish, four Sámi languages, Meänkieli, Finnish); no importance rank. Over the box 402 names, 242 of them North Sámi. The size a name is drawn at comes off Topografi 50's *Tema Text*, the map's own lettering (325 labels in seven size classes), joined by the same name within 500 m: 218 of 391. **Each language is a point of its own**, so the reader joins them into places (§9.12): 391 names over the box are 369 places, 8 with a second name, labelled *Abiskojåkka (Ábeskoeatnu)* | `io/sources/ortnamn.py`; the name layers, the search box, the cabins' and the rivers' names read it |
 | heights | Geonorge point API, live | Lantmäteriet *Markhöjdmodell Nedladdning*: 1 m COGs through a keyless STAC API, downloads behind the Geotorget login, CC BY 4.0, **RH 2000** | §6.3 |
 | land cover | not used | Topografi 10 *Tema Mark* (`sankmark`, `kalfjäll`, forest); NMD 10 m raster exists too | Tema Mark is enough if the water cost ever wants bog |
 
@@ -890,7 +890,37 @@ where the register has both is a decision not taken here; the check pins the nam
 today, so a change will be seen.
 
 With both in the scene the Abisko drive reads **589 readings, none broken, two skipped**
-(the two tap cases), and the Lomsdal-Visten page's scene is untouched.
+(the two tap cases), and the Lomsdal-Visten page's scene is untouched. The name question is
+settled in §9.12.
+
+### 9.12 A place with two names — both shown, Swedish first, 2026-09-12
+
+Uwe's decision on the question §9.11 raised: where the register has a place in two languages,
+show both, the Swedish name first because it is what the signs carry, the Sámi one clearly an
+alternative, in brackets — *Abiskojåkka (Ábeskoeatnu)*.
+
+**What the register does**, measured over the box: each language is a point of its own, and
+they do not coincide. The real pairs sit 46 m (Abiskojåkka / Ábeskoeatnu) to 412 m (Abisko /
+Ábeskovvu) apart, Torneträsk / Duortnosjávri four times over the lake at 80–148 m; the first
+nearest pair that is two different places is at 637 m, and one real pair, Gorsajökeln /
+Gorsajiekŋa, sits at 619 m. Fourteen names are the same string in both languages (the Swedish
+form *is* the Sámi one: Eahpárusluoppal, Geargejávri). And 42 of the 43 watercourse names are
+Sámi only — the register has the Swedish form for one river in the box, the Abiskojåkka.
+
+**The rule** (`ortnamn.paired`): within 500 m and of the same type, a point of a later language
+joins an earlier one's place — Swedish first, then the Sámi languages, Meänkieli and Finnish as
+the file lists them; two points of the *same* language are never joined, because two lakes
+300 m apart are two lakes; a name spelt the same in both languages is one name. 500 m keeps
+every real pair but one and crosses no wrong one; Gorsajökeln stays two names rather than risk
+joining two lakes. What it gives over the box: 391 names become 369 places, 8 of them with a
+second name (the Abiskojåkka, Lapporten, Abisko, Katterjåkk, and Torneträsk four times), 14
+one name in two languages, and Trollsjön stays beside Geargejávri because the register calls
+the lake Geargejávri in Swedish too — two Swedish names, which the rule leaves alone.
+
+**Where it shows**: the three name layers, the search box, the cabins' names and the rivers'
+names all read the joined places, so a goal across the river now says *crosses Abiskojåkka
+(Ábeskoeatnu), 22 m wide there*; the lettering match for a name's size is made on the first
+name. The drive's river scene expects the two-language name, so a regression reads as one.
 
 ---
 
@@ -898,6 +928,9 @@ With both in the scene the Abisko drive reads **589 readings, none broken, two s
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, last of all** — a place with two names shows both, Swedish first (§9.12):
+  `ortnamn.paired` joins the register's per-language points into places; 8 places over the box
+  carry a second name.
 - **2026-09-12, later still** — the two water checks driven on Abisko's ground (§9.11): a bay
   of Torneträsk for the sound, the Abiskojåkka for the river a goal wades to; the river's Sami
   name noted as a question.
@@ -1036,6 +1069,7 @@ A line per change to this document or to the decisions in it, newest first.
 | Swedish service URLs | Naturvårdsverket's *Leder och friluftsanordningar, beskrivning av öppna data* (PDF), Lantmäteriet's and Naturvårdsverket's product pages, read 2026-09-11 |
 | DEM tile counts and pixel sizes | WebMercator tile index over the box at z8–z13; 156,543 m · cos(68.3°) / 2^z |
 | Abisko's logotype and its terms | `sverigesnationalparker.se/park/abisko-nationalpark/` (the SVG `abisko-logotyp.svg`: the star as a clip path with a radial gold gradient, the name as outlined glyphs), Naturvårdsverket's *Sveriges nationalparker — bilaga logotyper* (PDF, v2.0 2011-06-01), pages 5, 16–18; the trademark register at PRV not consulted |
+| the register's two languages | every Swedish name over the box against the nearest name of another language and the same type, in SWEREF 99 TM: the distances quoted, and the whole ranked list, read on 2026-09-12 |
 | the water checks' ground | the cached Abisko graph as a `networkx` graph weighted by edge length, Topografi 50's lake polygons over 0.5 km² and the river surface nearest the name *Ábeskoeatnu*; node pairs 1.0–1.5 km apart with over 60 % of the line on a lake and a way round under 10 km; for the river, every vertex of every edge within 1.5 km of a far-bank node priced as the page prices a departure, one bounded Dijkstra per standing node |
 | the Abisko drive | `drive_map.py --page analysis/output/abisko.html --json` as a transient unit on forge, Playwright Firefox 1400 × 900, the page served from `analysis/output` by the suite's own server; four runs on 2026-09-12 to get from a crash in the second check to a clean report, the Lomsdal page driven in between to hold |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |

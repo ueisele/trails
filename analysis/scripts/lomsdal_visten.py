@@ -2616,9 +2616,17 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     country = topografi50.Source(cache_dir=args.cache_dir)
 
     print("\nLoading place names (Ortnamn)...")
-    names = ortnamn.Source(cache_dir=args.cache_dir).names(bounds, force_download=args.force_download)
-    print(f"  {len(names):,} names: {names['kind_label'].value_counts().to_dict()}")
-    print(f"    {names['language'].value_counts().to_dict()}")
+    register_names = ortnamn.Source(cache_dir=args.cache_dir).names(bounds, force_download=args.force_download)
+    print(f"  {len(register_names):,} names: {register_names['kind_label'].value_counts().to_dict()}")
+    print(f"    {register_names['language'].value_counts().to_dict()}")
+    # **One place, one label, Swedish first.** The register carries each
+    # language as a point of its own; joined, a place with two names reads
+    # *Abiskojåkka (Ábeskoeatnu)* -- the name on the signs first, the Sámi one
+    # in brackets -- and a river is named by the place and not by whichever
+    # point lies nearer (decisions §9.12).
+    names = ortnamn.paired(register_names)
+    with_another = names["also"].astype("string").str.len().gt(0)
+    print(f"  {len(names):,} places once the languages are joined within {ortnamn.PAIR_M:g} m; {int(with_another.sum())} carry a second name")
     # The map's own lettering, for the size: the register ranks nothing, and
     # the lettering is what says *Torneträsk* is written large and a tarn
     # small. Joined by the same name within reach, since the word sits beside
@@ -2629,6 +2637,8 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     same = names["lettered"].notna() & (names["lettered"].astype("string").str.casefold() == names["name"].astype("string").str.casefold())
     names["size"] = names["size"].where(same, 1).astype(int)
     print(f"  {int(same.sum()):,} of them lettered on the map within {LETTERING_M:g} m, and drawn at that size")
+    # Matched on the first name above; labelled with both from here on.
+    names["name"] = [ortnamn.label(name, also) for name, also in zip(names["name"], names["also"], strict=True)]
     names["rank"] = 8 - names["size"]
     names["color"] = names["kind"].map(ORTNAMN_COLORS).fillna(TERRAIN_NAME_DEFAULT_COLOR)
     names["symbol"] = names["kind"].map(ORTNAMN_SYMBOLS).fillna(TERRAIN_NAME_DEFAULT_SYMBOL)
