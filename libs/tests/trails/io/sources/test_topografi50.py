@@ -64,6 +64,17 @@ class TestDeliveryFrom:
 
 
 class TestOnDisk:
+    def test_the_geopackage_is_unpacked_through_a_part_file(self, tmp_path):
+        """A stop mid-extract used to leave a short file under the final name,
+        which every later run took for the GeoPackage."""
+        directory = _delivery_on_disk(tmp_path, unpacked=False)
+        source = t50.Source(cache_dir=tmp_path, order="", username="", password="")
+        gpkg = source.geopackage(t50.KOMMUNIKATION)
+        assert gpkg.exists()
+        assert not gpkg.with_name(gpkg.name + ".part").exists()
+        with zipfile.ZipFile(directory / t50.zip_name(t50.KOMMUNIKATION)) as archive:
+            assert gpkg.read_bytes() == archive.read(gpkg.name)
+
     def test_the_newest_delivery_is_read_and_names_the_version(self, tmp_path):
         _delivery_on_disk(tmp_path, "2026-09-01")
         _delivery_on_disk(tmp_path, "2026-09-08")

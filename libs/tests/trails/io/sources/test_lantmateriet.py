@@ -90,6 +90,27 @@ class TestCopyTiles:
         assert index["per_zoom"]["3"]["missing"] == 1
         assert index["per_zoom"]["3"]["bytes"] == 13 * len(_png(3, 4, 0)) + len(b"kept"), "the inventory counts what is on disk"
 
+    def test_refuses_to_fill_a_tree_from_another_stand_of_the_file(self, geopackage, tmp_path):
+        """The tree's index says which file it came from; a run against a
+        newer file must not fill gaps under the same immutable address."""
+        out = tmp_path / "tiles"
+        first = LocalReader(geopackage)
+        first.modified = "20260623110509"  # type: ignore[attr-defined]
+        lantmateriet.Source(reader=first).copy_tiles((0.0, 0.0, 90.0, 85.0), zooms=[3], out_dir=out)
+        assert json.loads((out / lantmateriet.INDEX_FILE).read_text())["source_modified"] == "20260623110509"
+        (out / "3" / "5" / "2.png").unlink()
+
+        later = LocalReader(geopackage)
+        later.modified = "20261001080000"  # type: ignore[attr-defined]
+        with pytest.raises(ValueError, match="new version directory"):
+            lantmateriet.Source(reader=later).copy_tiles((0.0, 0.0, 90.0, 85.0), zooms=[3], out_dir=out)
+        assert not (out / "3" / "5" / "2.png").exists(), "nothing was written from the newer file"
+
+        # The same stand resumes as before, and a reader that cannot say
+        # (a file on disk in a test) is not held to it.
+        lantmateriet.Source(reader=first).copy_tiles((0.0, 0.0, 90.0, 85.0), zooms=[3], out_dir=out)
+        lantmateriet.Source(reader=LocalReader(geopackage)).copy_tiles((0.0, 0.0, 90.0, 85.0), zooms=[3], out_dir=out)
+
     def test_refuses_a_zoom_the_file_lacks(self, geopackage, tmp_path):
         source = lantmateriet.Source(reader=LocalReader(geopackage))
         with pytest.raises(ValueError):

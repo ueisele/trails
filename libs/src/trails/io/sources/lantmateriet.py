@@ -108,7 +108,21 @@ class Source:
             if not 0 <= zoom <= MAX_ZOOM:
                 raise ValueError(f"zoom {zoom} is not in the file; it holds z0 to z{MAX_ZOOM}")
         out_dir.mkdir(parents=True, exist_ok=True)
-        modified = self.reader.modified if isinstance(self.reader, FtpFile) else None
+        modified = getattr(self.reader, "modified", None)
+        # **One stand of the file per tree.** The tree is published under an
+        # address every phone keeps for a year, and a run that fills a gap
+        # from a newer file would mix two stands under it without a word.
+        # The index records the file's modification time; a tree copied from
+        # another stand is refused, and a new stand goes into a new version
+        # directory (analysis/docs/abisko-decisions.md §6.1, §8.2).
+        index_path = out_dir / INDEX_FILE
+        if index_path.exists() and modified is not None:
+            was = json.loads(index_path.read_text(encoding="utf-8")).get("source_modified")
+            if was is not None and was != modified:
+                raise ValueError(
+                    f"{out_dir} was copied from the file of {was} and the file is now {modified}: "
+                    "a new stand goes into a new version directory, not over this one"
+                )
         per_zoom: dict[str, dict[str, int]] = {}
         started = time.time()
         total = tile_count(bounds, levels)

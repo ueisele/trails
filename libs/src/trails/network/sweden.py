@@ -52,6 +52,9 @@ METRIC_CRS = "EPSG:3006"
 LEDER = "Leder"
 T50_TRAILS = "Topografi 50 trails"
 T50_PATHS = "Topografi 50 paths"
+#: The winter lines off the same layer, drawn and never routed (§6.5); their
+#: own name, so a popup does not call a *Vinterled* a path.
+T50_WINTER = "Topografi 50 winter trails"
 T50_ROADS = "Topografi 50 roads"
 OSM = "OSM"
 FERRIES = "Ferries"
@@ -280,16 +283,22 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     print("\nLoading Topografi 50 trails, paths, roads and ferries...")
     country = topografi50.Source(cache_dir=params.cache_dir)
     ways = country.read(topografi50.KOMMUNIKATION, topografi50.LAYER_PATHS, bounds, force_download=download)
-    mountain = country.read(topografi50.KOMMUNIKATION, topografi50.LAYER_MOUNTAIN_WAYS, bounds)
+    mountain = country.read(topografi50.KOMMUNIKATION, topografi50.LAYER_MOUNTAIN_WAYS, bounds, force_download=download)
     trails = clip_lines(graphs.with_capture_date(_in_degrees(_classes(ways, TRAIL_CLASSES)), topografi50.CREATED), extent)
     walked = pd.concat([_classes(ways, PATH_CLASSES), _classes(mountain, MOUNTAIN_WALKED_CLASSES)], ignore_index=True)
     paths = clip_lines(graphs.with_capture_date(_in_degrees(walked), topografi50.CREATED), extent)
     winter_t50 = clip_lines(_in_degrees(_classes(ways, WINTER_CLASSES)), extent)
     roads = clip_lines(
-        graphs.with_capture_date(_in_degrees(country.read(topografi50.KOMMUNIKATION, topografi50.LAYER_ROADS, bounds)), topografi50.CREATED), extent
+        graphs.with_capture_date(
+            _in_degrees(country.read(topografi50.KOMMUNIKATION, topografi50.LAYER_ROADS, bounds, force_download=download)), topografi50.CREATED
+        ),
+        extent,
     )
     ferries = clip_lines(
-        graphs.with_capture_date(_in_degrees(country.read(topografi50.KOMMUNIKATION, topografi50.LAYER_FERRIES, bounds)), topografi50.CREATED), extent
+        graphs.with_capture_date(
+            _in_degrees(country.read(topografi50.KOMMUNIKATION, topografi50.LAYER_FERRIES, bounds, force_download=download)), topografi50.CREATED
+        ),
+        extent,
     )
     print(f"  delivery of {country.version}: {len(trails):,} marked trail lines, {len(paths):,} path lines, {len(roads):,} road fragments")
     print(f"  {len(ferries):,} ferry lines; {len(winter_t50):,} winter lines kept apart")
@@ -385,7 +394,7 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
                     }
                 ),
                 pd.DataFrame(
-                    {"source": T50_PATHS, "kind": winter_t50[topografi50.TYPE].to_numpy(), "name": None, "geometry": winter_t50.geometry.to_numpy()}
+                    {"source": T50_WINTER, "kind": winter_t50[topografi50.TYPE].to_numpy(), "name": None, "geometry": winter_t50.geometry.to_numpy()}
                 ),
             ],
             ignore_index=True,

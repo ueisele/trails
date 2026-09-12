@@ -69,6 +69,9 @@ KEY_SUFFIX = ".html"
 
 #: How a built map begins. Checked before uploading — see the module docstring.
 EXPECTED_PREFIX = b"<!DOCTYPE html>"
+#: And how it ends: a page cut off mid-write still begins like a page, and the
+#: first fifteen bytes could not tell (decisions §8.2).
+EXPECTED_SUFFIX = b"</html>"
 
 #: aws-cli 2.23 and newer send checksum headers R2 rejects. The same reason the OpenTofu backend
 #: in the infrastructure repo sets ``skip_s3_checksum = true``.
@@ -159,7 +162,7 @@ def check(source: Path) -> int:
         Its size in bytes.
 
     Raises:
-        SystemExit: If it is missing, empty, or does not start like the built page.
+        SystemExit: If it is missing, empty, or does not start or end like the built page.
     """
     if not source.exists():
         sys.exit(f"{source} does not exist — run `command make map` first.")
@@ -169,6 +172,9 @@ def check(source: Path) -> int:
     with source.open("rb") as handle:
         if not handle.read(len(EXPECTED_PREFIX)).startswith(EXPECTED_PREFIX):
             sys.exit(f"{source} does not begin with {EXPECTED_PREFIX.decode()} — build interrupted?")
+        handle.seek(max(0, size - 64))
+        if not handle.read().rstrip().endswith(EXPECTED_SUFFIX):
+            sys.exit(f"{source} does not end with {EXPECTED_SUFFIX.decode()} — build interrupted?")
     return size
 
 
@@ -519,15 +525,19 @@ def main() -> None:
 
     # The trees go up first: a page that names tiles which are not there yet would draw white ground
     # for as long as its worker held the misses.
+    # The page is looked at before the trees go up: listing the 118,967 tiles
+    # takes 100 s, and a page that was missing used to be reported after it.
+    if name is not None:
+        key = f"{name}{KEY_SUFFIX}"
+        source = output_dir / key
+        size = check(source)
     if trees:
         publish_trees(trees, output_dir, config, args.dry_run)
     if name is None:
-        print("✅ " + ", ".join(f"https://{host}/{tree}/" for tree in trees))
+        # A tree has no page to point at -- `/tiles/` answers 404 -- so what
+        # is said is what was done.
+        print("✅ " + ", ".join(f"{tree}/ synced to the bucket" for tree in trees))
         return
-
-    key = f"{name}{KEY_SUFFIX}"
-    source = output_dir / key
-    size = check(source)
     companions = Companions.of(name)
     riders = beside(companions)
 

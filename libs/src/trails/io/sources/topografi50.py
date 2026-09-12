@@ -29,6 +29,7 @@ the path of an ordinary build at all.
 import base64
 import json
 import os
+import shutil
 import urllib.parse
 import urllib.request
 import zipfile
@@ -252,6 +253,25 @@ def zip_name(theme: str) -> str:
     return f"{theme}_sverige.zip"
 
 
+def _unpack(opened: zipfile.ZipFile, member: str, target: Path) -> None:
+    """Extract one member to ``target`` through a part file, so a stop mid-way leaves nothing that looks finished.
+
+    ``ZipFile.extract`` writes the final name from the first byte, and the
+    5.8 GB GeoPackage takes long enough that a run is stopped inside it;
+    every later run then found the name it wanted and read a truncated file
+    (decisions §8.2). The download beside this already goes part-then-rename.
+
+    Args:
+        opened: The archive
+        member: The name inside it
+        target: Where the file goes
+    """
+    partial = target.with_name(target.name + ".part")
+    with opened.open(member) as source, partial.open("wb") as sink:
+        shutil.copyfileobj(source, sink, 16 * 1024 * 1024)
+    partial.replace(target)
+
+
 def geopackage_name(theme: str) -> str:
     """What a theme's GeoPackage is called, inside its archive."""
     return f"{theme}_sverige.gpkg"
@@ -376,7 +396,7 @@ class Source:
                 raise RuntimeError(f"{archive.name} came back {archive.stat().st_size} bytes long, the API said {file.length}")
         unpacked.parent.mkdir(exist_ok=True)
         with zipfile.ZipFile(archive) as opened:
-            opened.extract(geopackage_name(theme), unpacked.parent)
+            _unpack(opened, geopackage_name(theme), unpacked)
         return unpacked
 
     def read(self, theme: str, layer: str, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:

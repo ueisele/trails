@@ -21,6 +21,7 @@ Usage::
 """
 
 import argparse
+import dataclasses
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -602,7 +603,11 @@ def graph_sweden(which: Park, args: argparse.Namespace, country: Country) -> Gra
     """
     if which.bounds is None:
         raise ValueError(f"{which.name} declares no box")
-    params = sweden.Params.from_args(args)
+    # **The box takes no approach zone, so the fingerprint takes none either.**
+    # `approach_km` shapes the Norwegian band and nothing here; left in the
+    # key it forced a full rebuild, height pass and all, of an identical graph
+    # whenever the docstring's own `--approach-km 5` was typed (§8.2).
+    params = dataclasses.replace(sweden.Params.from_args(args), approach_km=0.0)
     register = naturvardsregistret.Source(cache_dir=params.cache_dir)
     park = register.find_one(which.name)
     zone = gpd.GeoDataFrame(geometry=[box(*which.bounds)], crs="EPSG:4326")
@@ -669,7 +674,9 @@ def main() -> int:
     # first run's twenty thousand requests, and not nothing either.
     parser.add_argument("--elevation-step-m", type=float, default=5.0, help="How far apart the height samples are laid along an edge (m)")
     parser.add_argument("--road-name-m", type=float, default=25.0, help="How far a road fragment may look for its name in the register (m)")
-    parser.add_argument("--trail-name-m", type=float, default=25.0, help="How far an FKB path may look for a Turrutebasen route name (m)")
+    parser.add_argument(
+        "--trail-name-m", type=float, default=25.0, help="How far a path may look for a marked trail's route name in the register (m)"
+    )
     parser.add_argument("--reach-m", type=float, default=150.0, help="How close a component must pass a quay or town to count as reaching it")
     parser.add_argument("--rebuild", action="store_true", help="Rebuild the graph even if a cached one matches")
     parser.add_argument("--force-download", action="store_true", help="Re-download source data instead of using the cache")
