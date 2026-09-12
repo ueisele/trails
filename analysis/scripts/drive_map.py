@@ -73,6 +73,10 @@ class RiverGoal:
     label: str
     #: What the register calls the water there, which the page has to say.
     river: str
+    #: How far the routed way walks straight at the goal, in metres, as a
+    #: range: the distance from the last path to the far bank, which is the
+    #: ground's and not the page's.
+    straight: tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -244,7 +248,9 @@ SCENES: dict[str, Scene] = {
         ),
         # The junction by Granlia, with the goal on the far bank of Krutåga,
         # which the register calls Storelva there.
-        river_goal=RiverGoal(standing=(65.33219, 12.977855), goal=(65.32371, 12.99122), label="Across Krutåga", river="Storelva"),
+        river_goal=RiverGoal(
+            standing=(65.33219, 12.977855), goal=(65.32371, 12.99122), label="Across Krutåga", river="Storelva", straight=(700, 1200)
+        ),
     ),
     "abisko": Scene(
         stem="abisko",
@@ -300,7 +306,37 @@ SCENES: dict[str, Scene] = {
             "what it weighs": 463,
             "and what writing it cost": 16,
             "and how long it took to come back": 20.7,
+            # The bay: the road round it, dry-shod, and from the Kungsleden
+            # 7 km off the same road after a connector.
+            "the plan walks this far on paths": 3.4,
+            "and crosses this much water": 0,
+            "from 10 km off, the way is on paths for": 6.3,
+            "and straight for": 0.9,
+            "crossing this much water": 0,
+            # The river where the goal's line wades it, off the outline.
+            "and what width it says": 22,
         },
+        # A bay of Torneträsk east of Abisko Östra: two nodes of the network
+        # 1.18 km apart with 95 % of the line over the lake, and the road round
+        # the bay 3.36 km; and a spot on the Kungsleden 7 km off. Measured on
+        # the graph and the lake polygons, 2026-09-12.
+        sound=(
+            {"lat": 68.35649, "lng": 18.86476},
+            {"lat": 68.35526, "lng": 18.83636},
+            {"lat": 68.32, "lng": 18.72},
+        ),
+        # The Abiskojåkka below the canyon: standing on the west-bank path, the
+        # goal a node of the Kungsleden across the river 721 m away with 24 m
+        # of river on the line, and the way round by the bridge 5.1 km at the
+        # page's edge costs. By the page's own prices over every node within
+        # 1.5 km of the goal, the routed way wades (3 x 697 + 30 x 24 = 2.8 km
+        # against 5.1) and *stay on paths* goes round (the cheapest wading
+        # departure costs 10 x 580 + 30 x 24 = 6.5 km). The register names the
+        # surface there in Sami, Ábeskoeatnu, the nearer of its two names.
+        # Measured on the cached graph and the river surfaces, 2026-09-12.
+        river_goal=RiverGoal(
+            standing=(68.34103, 18.75284), goal=(68.34142, 18.77066), label="Across Abiskojåkka", river="Ábeskoeatnu", straight=(400, 900)
+        ),
     ),
 }
 
@@ -5680,7 +5716,7 @@ def wading_to_a_goal(page: Any, river: RiverGoal) -> list[Reading]:
     return [
         Reading(
             f"a goal {river.label.lower()} is walked straight at from where the reader stands",
-            (waded["goal"]["line"], 700 < (waded["goal"]["straight"] or 0) < 1200),
+            (waded["goal"]["line"], river.straight[0] < (waded["goal"]["straight"] or 0) < river.straight[1]),
             (True, True),
             note=f"{waded['goal']['straight'] or 0:.0f} m straight of {waded['goal']['metres'] or 0:.0f} m",
         ),
@@ -5714,7 +5750,7 @@ def wading_to_a_goal(page: Any, river: RiverGoal) -> list[Reading]:
         ),
         Reading(
             "and the switch on the goal's page turns it off again",
-            (off_paths["paths"]["on"], off_paths["paths"]["said"], 700 < (off_paths["goal"]["straight"] or 0) < 1200),
+            (off_paths["paths"]["on"], off_paths["paths"]["said"], river.straight[0] < (off_paths["goal"]["straight"] or 0) < river.straight[1]),
             (False, "false", True),
         ),
     ]

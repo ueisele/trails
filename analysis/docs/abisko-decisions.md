@@ -851,12 +851,56 @@ itself for that scene, as the offline check always did for every page.
 Measured: the Abisko page, 570 readings, 0 broken, 22 recorded, 3 skipped, about ten
 minutes as a transient unit; the Lomsdal-Visten page after the same change, 596 readings, 0 broken, 0 moved, its figures now read out of its scene rather than out of the checks.
 
+### 9.11 The two water checks on Abisko's ground — measured, 2026-09-12
+
+Of the three checks the Abisko scene skipped (§9.10), the two about water were worth the
+ground, because they read Abisko's *data* and not only the page's code: 14 % of the box is
+water, the page carries 144 river surfaces, and the Kungsleden crosses the Abiskojåkka by
+bridges. The two about taps beside a path are page logic alone, green on Lomsdal-Visten, and
+stay skipped. Both cases were found by search over the cached graph and Topografi 50's water
+polygons rather than by eye, with the page's own prices (a metre of open ground 3, of water 30,
+of open ground with *stay on paths* 10) applied to every vertex of every edge within 1.5 km of
+the goal, because that is where the page lets a way leave the network.
+
+**The sound's stand-in is a bay of Torneträsk** east of Abisko Östra: two nodes of the network
+1.17 km apart with 1.10 km of lake on the line, the road round the bay 3.36 km. Driven: the plan
+walks the road, 3.36 km on paths and no water; the goal's way is the same road and walks nothing
+straight; from the Kungsleden 7 km off the way is 7.21 km, 6.3 on paths, 0.9 straight, dry.
+
+**The river is the Abiskojåkka below the canyon**: standing on the west-bank path, the goal a node of the Kungsleden
+across the river, 721 m off with 24 m of river on the line, the way round by the bridge 5.1 km at
+the page's edge costs. Driven: the routed way walks 387 m of path and then 481 m straight, wading
+the river, and the page says *crosses Ábeskoeatnu, 22 m wide there* and *steepest 45 % on the
+straight part*; *stay on paths* takes the bridge, 4.84 km and nothing straight, and the switch on
+the goal's page turns it off again. Three spots were tried before this one held, and each miss
+was a lesson about the page's rule rather than the ground: a departure may leave the network at
+any **node** (not at any point of an edge, and not at a vertex), the way round is priced at the
+**edge costs** (a road 1.3 to the metre, a marked trail 1.05), and the *stay on paths* price has
+to beat the cheapest wading departure, not the nearest one. So the search prices every node
+within 1.5 km of the goal both ways and keeps only cases with 2 km of margin on each side.
+
+**What the check surfaced about the names.** Of the 144 river surfaces only 11 carry a name,
+because a surface is named from the nearest watercourse name within 60 m (§5) and the register
+puts most names on the line, not the surface. And the Abiskojåkka's surface is named
+**Ábeskoeatnu**: the register carries the Sami and the Swedish name as two points, and the Sami
+one lies nearer. So a goal across it says *crosses Ábeskoeatnu, 49 m wide there* — which is
+correct, and is the name Lantmäteriet's own sheet prints beside it in the same size, but it is
+not the name the trail signs and the guidebooks use. Whether the Swedish name should be preferred
+where the register has both is a decision not taken here; the check pins the name the page says
+today, so a change will be seen.
+
+With both in the scene the Abisko drive reads **589 readings, none broken, two skipped**
+(the two tap cases), and the Lomsdal-Visten page's scene is untouched.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, later still** — the two water checks driven on Abisko's ground (§9.11): a bay
+  of Torneträsk for the sound, the Abiskojåkka for the river a goal wades to; the river's Sami
+  name noted as a question.
 - **2026-09-12, last** — `make abisko` (and `just abisko` from `home/trails-map`, which supplies
   the login): tiles → dem → graph and report → page in one run, every step resumable or
   cached; builds only, the deploy stays `just deploy --map abisko --tree tiles --tree dem`.
@@ -992,5 +1036,6 @@ A line per change to this document or to the decisions in it, newest first.
 | Swedish service URLs | Naturvårdsverket's *Leder och friluftsanordningar, beskrivning av öppna data* (PDF), Lantmäteriet's and Naturvårdsverket's product pages, read 2026-09-11 |
 | DEM tile counts and pixel sizes | WebMercator tile index over the box at z8–z13; 156,543 m · cos(68.3°) / 2^z |
 | Abisko's logotype and its terms | `sverigesnationalparker.se/park/abisko-nationalpark/` (the SVG `abisko-logotyp.svg`: the star as a clip path with a radial gold gradient, the name as outlined glyphs), Naturvårdsverket's *Sveriges nationalparker — bilaga logotyper* (PDF, v2.0 2011-06-01), pages 5, 16–18; the trademark register at PRV not consulted |
+| the water checks' ground | the cached Abisko graph as a `networkx` graph weighted by edge length, Topografi 50's lake polygons over 0.5 km² and the river surface nearest the name *Ábeskoeatnu*; node pairs 1.0–1.5 km apart with over 60 % of the line on a lake and a way round under 10 km; for the river, every vertex of every edge within 1.5 km of a far-bank node priced as the page prices a departure, one bounded Dijkstra per standing node |
 | the Abisko drive | `drive_map.py --page analysis/output/abisko.html --json` as a transient unit on forge, Playwright Firefox 1400 × 900, the page served from `analysis/output` by the suite's own server; four runs on 2026-09-12 to get from a crash in the second check to a clean report, the Lomsdal page driven in between to hold |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |
