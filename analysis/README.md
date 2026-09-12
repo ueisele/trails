@@ -208,19 +208,22 @@ command make drive                                          # the Lomsdal-Visten
 command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
-Drives the built map in a browser and reports **278 readings** — the counts the
+Drives the built map in a browser and reports **some 600 readings** (602 on the
+Lomsdal-Visten page, 595 on Abisko's, 2026-09-12) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,
 and that terrain the reader asked for is kept and drawn and can be deleted again.
-**About 400 seconds**, most of it loading the page — 15.6 MB of HTML, twice over
-for the offline check — and about two minutes of it fetching real tiles from
-Kartverket, which is what it costs to prove that a kept tile is terrain and not
-the worker's own blank.
+**About ten minutes a page** — 16.6 MB of HTML for Lomsdal-Visten and 3.3 for
+Abisko, loaded twice over for the offline check — and about two minutes of it
+fetching real tiles from Kartverket on the first page, which is what it costs to
+prove that a kept tile is terrain and not the worker's own blank. Run it as a
+transient unit (`systemd-run --user --unit=abisko-drive …`); its output is
+buffered until the unit ends.
 
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs. While one behaviour is being written,
-`ARGS="--only <word>"` is ten readings instead of 278. And **build before
+`ARGS="--only <word>"` is ten readings instead of six hundred. And **build before
 driving**: the run reads the page `command make map` last built.
 
 **The checks are the same for every page; what is a page's own is its `Scene`** in
@@ -230,8 +233,10 @@ come by, and the figures its last build recorded. A page whose sheets are addres
 root — Abisko's — is served from its directory rather than opened off the disk. A reading whose
 figure the scene has not recorded yet is reported as **new**, with what was read, so the first
 drive of a page is the run that fills its scene in. Checks that need ground a scene does not
-have — a measured pair of taps beside a path, an island across a sound, a river a goal wades to
-— say they were skipped.
+have — a measured pair of taps beside a path, a loop's taps — are named in the scene's `skips`
+and reported as skipped by it; **any other skip is reported as GONE and exits 1**, because a
+chain the page no longer holds takes every check past it along, and a short green run is the
+one failure nobody reads.
 
 **It does not overlap with `command make test`.** The tests assert on the page's
 source; this asks a running browser what the page actually does, which is the
@@ -251,9 +256,10 @@ It **does not build**. That separation is deliberate: a deploy that rebuilt firs
 "publish the thing I just looked at" impossible, and the thing you just looked at is the only one
 worth publishing.
 
-It puts up **three objects**: the compressed page, `sw.js` (uncompressed,
-`no-cache`, so an edge holding yesterday's worker cannot hold yesterday's map
-with it), and `manifest.webmanifest` (uncompressed, `application/manifest+json`).
+It puts up **the page and its companions**: the compressed page, the worker (`sw.js`, or
+`abisko-sw.js` for the second map; uncompressed, `no-cache`, so an edge holding yesterday's
+worker cannot hold yesterday's map with it), the manifest (`application/manifest+json`) and the
+four icons. `ARGS="--map abisko --tree tiles --tree dem"` mirrors the two trees first.
 Without the last of those the map cannot be added to a Home Screen — and without
 that, iOS deletes everything the map kept after seven days of not being opened.
 

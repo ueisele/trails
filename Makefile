@@ -44,8 +44,8 @@ help:
 	@echo "  make cache-clean-all Remove entire .cache directory"
 	@echo "  make notebook      Start JupyterLab"
 	@echo "  make notebook-clean Clear all notebook outputs"
-	@echo "  make map           Build the Lomsdal-Visten map into analysis/output/"
-	@echo "  make graph         Build the Lomsdal-Visten routing graph and report it"
+	@echo "  make map           Build a map into analysis/output/: Lomsdal-Visten, or Abisko with --park abisko"
+	@echo "  make graph         Build a park's routing graph and report it (--park likewise)"
 	@echo "                     both take ARGS=\"...\", e.g. make map ARGS=\"--approach-km 10\""
 	@echo "  make tiles         Copy the Abisko base-map tiles out of Lantmäteriet's open download"
 	@echo "  make dem           Build the Abisko height tiles from Lantmäteriet's height model (needs the Geotorget login)"
@@ -186,7 +186,7 @@ deploy:
 	@echo "🚀 Publishing the built map..."
 	uv run python analysis/scripts/deploy_map.py $(ARGS)
 
-# Reads a 156 GB GeoPackage over FTP by byte range and writes only the box's tiles — about an
+# Reads a 156 GB GeoPackage over FTP by byte range and writes only the box's tiles — about a
 # quarter of an hour for all of z8–z17, and it resumes, so stopping it costs nothing. Like `map` it
 # only builds; `make deploy ARGS="--tree tiles"` is what uploads. See analysis/docs/abisko-decisions.md §3.
 tiles:
@@ -218,7 +218,7 @@ abisko: tiles dem
 	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem (from home/trails-map)"
 
 drive:
-	@echo "🖱️  Driving the built map in a browser (about a minute; 25 s of it is the page loading)..."
+	@echo "🖱️  Driving the built map in a browser (about ten minutes a page; output is buffered under systemd)..."
 	uv run --with playwright python analysis/scripts/drive_map.py $(ARGS)
 
 cache-clean:

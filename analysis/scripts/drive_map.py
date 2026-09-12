@@ -24,16 +24,20 @@ Two kinds of reading, and the difference is the whole design:
 
 Run it with ``command make drive``, or ``command make drive ARGS="--page
 analysis/output/abisko.html"`` for the other map. It needs a built page and
-about a minute: loading 39.6 MB of HTML is 25 s of that, which is why everything
-runs in one browser session rather than one apiece.
+about ten minutes a page, which is why everything runs in one browser session
+rather than one apiece.
 
 **What is a page's own lives in its** ``Scene``: the long chain, the ground the
 checks stand on and look at, and the figures its build recorded. The checks
 themselves are the same for every page. A figure the scene has not recorded is
 reported as **new**, with what was read, and exits 2 like a moved one.
 
-The script exits **1** where an invariant broke and **2** where only a recorded
-figure moved. ``make`` turns any failed recipe into its own exit 2 and swallows
+A check that cannot run is a skip, and a skip is one of two things: the scene
+chose it, by name in its ``skips``, or the page forced it — reported as **GONE**,
+because a chain the page no longer holds takes every check past it along.
+
+The script exits **1** where an invariant broke or a check the scene did not
+choose to skip could not run, and **2** where only a recorded figure moved. ``make`` turns any failed recipe into its own exit 2 and swallows
 that distinction, so read it off the last line of the report rather than off the
 shell — or run the script directly.
 """
@@ -161,6 +165,17 @@ class Scene:
     #: round by land.
     sound: tuple[dict[str, float], dict[str, float], dict[str, float]] | None = None
     river_goal: RiverGoal | None = None
+    #: The checks this scene skips by choice, by name: ground nobody has
+    #: measured on its page. **Any other skip is a fault.** A check that could
+    #: not run for a reason the scene did not give -- a chain the page no
+    #: longer holds, a control the page no longer draws -- is reported as
+    #: GONE and exits 1, because a skip that looks like a choice is how five
+    #: hundred readings vanish under a green line.
+    skips: tuple[str, ...] = ()
+    #: How much longer than the flight a way on paths must be, as a factor:
+    #: half again over Lomsdal's fjords, a fifth along the Abisko valley, where
+    #: the path is straight. Per scene rather than loosened for both.
+    way_over_flight: float = 1.3
 
     @property
     def companions(self) -> maps.Companions:
@@ -334,6 +349,11 @@ SCENES: dict[str, Scene] = {
         # register has the river in two languages, and the page names it by
         # both, Swedish first (decisions §9.12).
         # Measured on the cached graph and the river surfaces, 2026-09-12.
+        # The two tap checks: nobody has measured a pair of taps beside a path
+        # or a loop's taps on this page (§9.11).
+        skips=("a tap beside a path in plan mode", "a planned leg that is not worth routing"),
+        # Measured 27 % over the flight at the first drive (§9.10).
+        way_over_flight=1.2,
         river_goal=RiverGoal(
             standing=(68.34103, 18.75284),
             goal=(68.34142, 18.77066),
@@ -380,6 +400,10 @@ class Reading:
     @property
     def passed(self) -> bool:
         """Whether the measurement matches what it was measured against."""
+        # A figure the scene has not recorded is new whatever it read: `None`
+        # against `None` and `False` against `bool(None)` both used to pass.
+        if self.want is None and not self.holds:
+            return False
         if isinstance(self.want, bool) or isinstance(self.got, bool):
             return bool(self.got) == bool(self.want)
         if isinstance(self.want, int | float) and isinstance(self.got, int | float):
@@ -1254,7 +1278,12 @@ def stations_and_list(page: Any, places: list[dict[str, float]]) -> Check:
     readings.append(Reading("a row for every point", page.evaluate(LIST_ROWS), len(state["points"])))
 
     before = page.evaluate("() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e6))")
-    if len(before) >= 4 and page.evaluate(DRAG_ROW, {"from": 3, "to": 1}):
+    # **A control that is not there is a reading, not a missing one.** Both
+    # helpers answer false when the row or its button cannot be found, and the
+    # readings behind them used to be left out rather than failed.
+    readings.append(Reading("there are rows enough to drag", len(before) >= 4, True, note=f"{len(before)} points"))
+    if len(before) >= 4:
+        readings.append(Reading("row 4 can be picked up", page.evaluate(DRAG_ROW, {"from": 3, "to": 1}), True))
         settled(page)
         after = page.evaluate("() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e6))")
         # A splice and not a swap: the dragged point is taken out and put back
@@ -1262,9 +1291,9 @@ def stations_and_list(page: Any, places: list[dict[str, float]]) -> Check:
         readings.append(Reading("dragging row 4 onto row 2 splices", after, [before[0], before[3], before[1], before[2]]))
 
     was = page.evaluate("() => window.trailsPlan.state().points.length")
-    if page.evaluate(REMOVE_ROW, 1):
-        settled(page)
-        readings.append(Reading("the row's own button takes it out", page.evaluate("() => window.trailsPlan.state().points.length"), was - 1))
+    readings.append(Reading("row 2 has its own button", page.evaluate(REMOVE_ROW, 1), True))
+    settled(page)
+    readings.append(Reading("the row's own button takes it out", page.evaluate("() => window.trailsPlan.state().points.length"), was - 1))
     return Check("a route's own points, on the profile and in the list", readings)
 
 
@@ -2747,6 +2776,10 @@ def a_leg_whose_heights_never_arrive(page: Any) -> Check:
             # The whole of it: the wait ends.
             Reading("the leg gives up rather than hanging", gave_up, True),
             Reading("and plan mode is not working any more", said["working"], False),
+            # Three attempts of five seconds and the backoff between them is
+            # 16.5 s; two would be 10.5 and one 5. The figure's band cannot
+            # tell them apart, so the invariant does.
+            Reading("and it tried three times before that", took > 12, True, note=f"{took} s; two attempts would be 10.5"),
             stands(
                 "seconds it took to give up",
                 took,
@@ -4853,6 +4886,11 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
                 True,
                 note=f"{on_paths / 1000:.2f} km on paths, {plan_straight / 1000:.2f} km straight",
             ),
+            # The figure has to be one before it can be small: a bay that is
+            # dry by construction reads 0, and so would a field the page no
+            # longer writes.
+            Reading("the plan says how much water it crosses", isinstance(planned["crossed"], int | float), True),
+            Reading("and so does the way from afar", isinstance(from_afar["crossed"], int | float), True),
             Reading(
                 "and it crosses less water than the line would have",
                 (planned["crossed"] or 0) < line_water,
@@ -5308,7 +5346,10 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     # this build's rivers are under 17 m across, which a walker fords or does
     # not by depth and current. And *stay on paths* prices open
     # ground at ten to one, after which the road and its bridge win.
-    wading = wading_to_a_goal(page, SCENE.river_goal) if SCENE.river_goal else []
+    # Every scene measures one: a page without the ground for it would lose
+    # the six river readings without a line saying so.
+    unmeasured = [Reading("a river a goal wades to is measured for this scene", False, True)]
+    wading = wading_to_a_goal(page, SCENE.river_goal) if SCENE.river_goal else unmeasured
 
     # **And a place is offered as one where the reader has just read what it
     # is.** Nearly every goal somebody sets is a named thing, and the popup is
@@ -5559,13 +5600,15 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 note=f"{(partly['goal']['metres'] or 0) / 1000:.2f} km, {(partly['goal']['straight'] or 0) / 1000:.2f} km of it off the paths",
             ),
             # A line across the map would be the flight itself, within a per
-            # cent; a way on paths is longer -- by half over Lomsdal's fjords,
-            # by a quarter along the Abisko valley, where the path is straight.
+            # cent; a way on paths is longer by the scene's factor -- by half
+            # over Lomsdal's fjords, by a fifth along the Abisko valley, where
+            # the path is straight. Five per cent, which was tried, would also
+            # pass a router that snaps to a node and draws one straight line.
             Reading(
                 "and it is a route and not a line across the map",
-                (partly["goal"]["metres"] or 0) > flown * 1.05,
+                (partly["goal"]["metres"] or 0) > flown * SCENE.way_over_flight,
                 True,
-                note=f"{(partly['goal']['metres'] or 0) / 1000:.2f} km walked against {flown / 1000:.2f} km flown",
+                note=f"{(partly['goal']['metres'] or 0) / 1000:.2f} km walked against {flown / 1000:.2f} km flown, {SCENE.way_over_flight:.1f} asked",
             ),
             # The heading has room for three lines of figures and this came
             # fourth, so it is said over the list on the goal's own page.
@@ -8249,7 +8292,10 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_finger_can_hit_a_line(page))
 
     if not select(page, SCENE.long_chain):
-        checks.append(Check("the profile panel", skipped=f"{SCENE.long_chain} is not in this page — see its scene"))
+        # Everything past this point stands on the long chain, so it goes with
+        # it: reported as GONE, which exits 1, and not as a quiet short run.
+        gone = f"{SCENE.long_chain} is not in this page, and every check past this one went with it — see its scene"
+        checks.append(Check("the profile panel", skipped=gone))
         return checks
 
     if wanted(sea_level):
@@ -8397,14 +8443,22 @@ def report(checks: list[Check]) -> int:
         checks: Every check that ran
 
     Returns:
-        0 where everything holds, 1 where an invariant broke, 2 where only a
-        recorded figure moved — which may be news rather than a fault
+        0 where everything holds, 1 where an invariant broke or a check the
+        scene did not choose to skip could not run, 2 where only a recorded
+        figure moved — which may be news rather than a fault
     """
-    broke, moved, new, skipped = 0, 0, 0, 0
+    chosen = set(SCENE.skips) if SCENE else set()
+    broke, moved, new, skipped, gone = 0, 0, 0, 0, 0
     for check in checks:
         if check.skipped:
-            skipped += 1
-            print(f"\n  ?  {check.name}\n     skipped: {check.skipped}")
+            # A skip the scene chose and a skip the page forced are two
+            # different things, and used to be one glyph and one count.
+            if check.name in chosen:
+                skipped += 1
+                print(f"\n  ?  {check.name}\n     skipped by the scene: {check.skipped}")
+            else:
+                gone += 1
+                print(f"\n GONE  {check.name}\n     could not run: {check.skipped}")
             continue
         print(f"\n     {check.name}")
         for reading in check.readings:
@@ -8429,8 +8483,13 @@ def report(checks: list[Check]) -> int:
         f"  {sum(len(c.readings) for c in checks)} readings, "
         f"{broke} broken invariant{'' if broke == 1 else 's'}, "
         f"{moved} recorded figure{'' if moved == 1 else 's'} moved, "
-        f"{new} not yet recorded, {skipped} skipped"
+        f"{new} not yet recorded, {skipped} skipped by the scene" + (f", {gone} could not run" if gone else "")
     )
+    if gone:
+        print(
+            "  A check that could not run is a fault of the page or the scene, not a choice: the\n"
+            "  scene lists the checks it skips, and this was not one of them."
+        )
     if moved and not broke:
         print(
             "  A moved figure is news, not necessarily a fault: the sources move and the\n"
@@ -8438,7 +8497,7 @@ def report(checks: list[Check]) -> int:
         )
     if new and not broke:
         print("  A figure not yet recorded is one to look at and then write into the page's scene.")
-    return 1 if broke else (2 if moved or new else 0)
+    return 1 if broke or gone else (2 if moved or new else 0)
 
 
 def main() -> int:
