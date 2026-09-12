@@ -136,8 +136,11 @@ alternative, if Geotorget's order-by-area exists for this product as one search 
 claimed, is a GeoPackage cut to the box; checked when the account is used.
 
 **Storage.** z8–z17 over the box is 118,967 tiles; at the 20 KB a z13 Swedish tile measured
-that is about 2.4 GB, at Kartverket's 50 KB about 6 GB, in the bucket, once, for each of the
-two sheets. R2 storage is cents a month and egress is free.
+that is about 2.4 GB, at Kartverket's 50 KB about 6 GB, in the bucket, once. **Colour only:**
+Uwe, 2026-09-12 — the grey sheet was never used on Lomsdal-Visten, so Abisko does not carry
+it; the copy and the storage halve, the base-map switch has one entry and can go for this map,
+and `Nedtonad_05m_mercator` is never read. If grey is ever wanted it is a second prefix and a
+second row in the provider table. R2 storage is cents a month and egress is free.
 
 ---
 
@@ -312,8 +315,7 @@ abisko.html                         served at /abisko
 abisko.webmanifest                  start_url ./abisko, id abisko, name "Abisko Atlas"
 abisko-sw.js                        scope /abisko, DB trails-abisko
 abisko-icon-32.png … abisko-icon-512.png   a variant of the cairn, so the two icons differ
-tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png            the map, colour sheet, §3 and §6.1
-tiles/lantmateriet/topowebb_nedtonad/1/{z}/{x}/{y}.png   the grey sheet
+tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png            the map, colour sheet only, §3 and §6.1
 dem/lantmateriet/1/{z}/{x}/{y}.png                       the height tiles, §6.3
 ```
 
@@ -493,6 +495,8 @@ attribution. All in §3, §5 and §6.3, with how each was read. The purchase Uwe
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, evening** — colour sheet only for Abisko; the grey sheet is dropped (Uwe: never
+  used on Lomsdal-Visten). §3 and the bucket layout in §6.2 follow.
 - **2026-09-12, evening** — §8.2 gains two checks for the first build: that the free file's
   cartography is the paid service's, and how often the file is refreshed. Asked by Uwe as
   "what does the free product lose": one zoom level (z18, upsampling at this latitude), the
