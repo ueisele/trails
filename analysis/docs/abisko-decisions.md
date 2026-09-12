@@ -580,11 +580,11 @@ this map is the reason.
    read the order, read the latest delivery, list its files, download each by a signed path.
    **It has to be ordered too**, as its own free product in Geotorget — without that the same
    login answers `403 Scope validation failed` on every call (measured; `401` without the
-   login, so the login itself is right). Still to do, by Uwe: order *Geotorget Nedladdning*
-   under the same account, and put the order id in `home/trails-map`'s sops file as
-   `GEOTORGET_TOPOGRAFI50_ORDER` (the id *Ärenden* shows on the Topografi 50 order line — an
-   identifier, not a credential, but it names an account). Until then the loader reads the
-   delivery already on disk, which was fetched once through the browser session on 2026-09-12.
+   login, so the login itself is right). **Ordered by Uwe the same afternoon**, and the order
+   id is in `home/trails-map`'s sops file as `GEOTORGET_TOPOGRAFI50_ORDER` (the id *Ärenden*
+   shows on the Topografi 50 order line — an identifier, not a credential, but it names an
+   account): the three calls answer 200, and the loader fetched a theme through the API (§9.7).
+   The delivery on disk was fetched once through the browser session earlier that day.
 2. **Infrastructure** — nothing. The bucket takes prefixes without a change (§6.2), and there
    is no Worker (§6.1).
 3. **`trails`, the plumbing** — `--park` (§4.1), the provider blob with `TOP` and `WEIGHT` per
@@ -648,18 +648,7 @@ The packed z13 tile weighs 92.7 kB (§6.3). Still open: whether Geotorget offers
 product cut to an area, and how often the FTP files are refreshed (dated 2026-06-22 to 24 when
 first seen). The WFS question of step 4 is settled (§9.6): the files replace it.
 
-### 8.2 The Topografi 50 delivery through the API
-
-*Trigger: Uwe orders *Geotorget Nedladdning* (§7.1).* The loader's API path —
-`topografi50.Source.ask`, `.geopackage` — is written against the documentation and tested
-against a stand-in, and has not run against the real API, which answers 403 until the product
-is ordered. Once it is: `GEOTORGET_TOPOGRAFI50_ORDER` into sops, then
-`sops exec-env … 'command make graph'` with `--force-download` once, which fetches the newest
-delivery into a new dated directory beside the one on disk. The first real run says whether the
-signed paths survive a second `files` call and how long the 519 MB `kommunikation` archive takes
-from `api.lantmateriet.se`.
-
-### 8.3 `make drive` for a second page
+### 8.2 `make drive` for a second page
 
 *Trigger: step 6.* The 278 readings assert Lomsdal-Visten's figures. Which are structural and
 hold for any page, and which are that park's numbers, is not yet separated.
@@ -722,10 +711,25 @@ protected area), and it separates the seasons by `LKATEGORI` (*Barmarksled* / *L
 
 ---
 
+### 9.7 Whether the delivery API works with a private login — yes, 2026-09-12
+
+Once *Geotorget Nedladdning* was ordered as its own product, the same login that had answered
+403 answers 200 on the order, the latest delivery and the file list. `topografi50.Source` run
+against it: `delivery(force_download=True)` finds the same 2026-09-08 delivery and its directory,
+a missing theme (`norrapolcirkeln`, 7 kB) is fetched by its signed path and unpacked in 1.3 s,
+and `byggnadsverk` (116 MB) into an empty cache in 64 s — **1.8 MB/s** from
+`api.lantmateriet.se`, so `kommunikation` is five minutes, `mark` twenty-five and the whole
+delivery about fifty. A build from an empty cache is therefore an hour of Lantmäteriet downloads
+on top of the fifteen minutes of tiles.
+
+---
+
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the download API ordered by Uwe and the order id in sops; the loader run
+  against the real API, 1.8 MB/s measured (§9.7). §8.2 settles into §9.7; §8 renumbered.
 - **2026-09-12** — §7 step 4 done: `network/sweden.py` on a shared `network/graphs.py`, with
   `io/sources/naturvardsregistret.py` (nightly files, not the WFS — §9.6), `io/sources/topografi50.py`
   (the Geotorget delivery API, tested against a stand-in, 403 until the API product is ordered —
