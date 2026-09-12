@@ -19,7 +19,7 @@ ifneq ($(MISE),)
 export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
 endif
 
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy tiles
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy tiles dem
 
 # Default target
 help:
@@ -48,6 +48,7 @@ help:
 	@echo "  make graph         Build the Lomsdal-Visten routing graph and report it"
 	@echo "                     both take ARGS=\"...\", e.g. make map ARGS=\"--approach-km 10\""
 	@echo "  make tiles         Copy the Abisko base-map tiles out of Lantmäteriet's open download"
+	@echo "  make dem           Build the Abisko height tiles from Lantmäteriet's height model (needs the Geotorget login)"
 	@echo "  make deploy        Publish the built map and purge the edge (needs .env)"
 	@echo "                     ARGS=\"--tree tiles\" mirrors a tile tree instead; --tree dem the heights"
 	@echo "  make fixtures      Generate/update test fixtures from real data"
@@ -191,6 +192,15 @@ tiles:
 	@echo "🧩 Copying Lantmäteriet's tiles for the Abisko box (resumable)..."
 	uv run python analysis/scripts/lantmateriet_tiles.py $(ARGS)
 	@echo "✅ analysis/output/tiles/lantmateriet/topowebb/1/"
+
+# Reads the 1 m height model's squares over the box by range request with the Geotorget login
+# (GEOTORGET_USERNAME/PASSWORD in the environment; run it under sops exec-env from home/trails-map),
+# caches the mosaic and cuts z8–z13 height tiles. Resumable; the deploy uploads with --tree dem.
+# See analysis/docs/abisko-decisions.md §6.3.
+dem:
+	@echo "⛰️  Building the Abisko height tiles (resumable)..."
+	uv run python analysis/scripts/dem_tiles.py $(ARGS)
+	@echo "✅ analysis/output/dem/lantmateriet/1/"
 
 drive:
 	@echo "🖱️  Driving the built map in a browser (about a minute; 25 s of it is the page loading)..."

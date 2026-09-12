@@ -24,12 +24,12 @@ already on disk is not read again.
 """
 
 import json
-import math
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ...utils.tiles import Bounds, tile_count, tile_range
 from ..remote_sqlite import FtpFile, RangeReader, RemoteDatabase
 
 #: Lantmäteriet's open-data FTP server; anonymous.
@@ -52,8 +52,7 @@ MIN_ZOOM = 8
 #: Where the copy records what it did, beside the tiles.
 INDEX_FILE = "index.json"
 
-Bounds = tuple[float, float, float, float]
-"""``(min_lon, min_lat, max_lon, max_lat)`` in WGS 84."""
+__all__ = ["Bounds", "tile_count", "tile_range", "Source", "SourceMetadata", "METADATA"]
 
 
 @dataclass(frozen=True)
@@ -69,46 +68,6 @@ class SourceMetadata:
 
 
 METADATA = SourceMetadata()
-
-
-def tile_range(bounds: Bounds, zoom: int) -> tuple[int, int, int, int]:
-    """The XYZ tiles a box touches at one zoom.
-
-    Args:
-        bounds: ``(min_lon, min_lat, max_lon, max_lat)``
-        zoom: Zoom level
-
-    Returns:
-        ``(x0, y0, x1, y1)``, inclusive; ``y`` counts from the top
-    """
-    min_lon, min_lat, max_lon, max_lat = bounds
-    n = 1 << zoom
-
-    def column(lon: float) -> int:
-        return math.floor((lon + 180.0) / 360.0 * n)
-
-    def row(lat: float) -> int:
-        phi = math.radians(lat)
-        return math.floor((1.0 - math.log(math.tan(phi) + 1.0 / math.cos(phi)) / math.pi) / 2.0 * n)
-
-    return column(min_lon), row(max_lat), column(max_lon), row(min_lat)
-
-
-def tile_count(bounds: Bounds, zooms: Iterable[int]) -> int:
-    """How many tiles a box holds over the given zooms.
-
-    Args:
-        bounds: The box
-        zooms: Zoom levels
-
-    Returns:
-        The count
-    """
-    total = 0
-    for zoom in zooms:
-        x0, y0, x1, y1 = tile_range(bounds, zoom)
-        total += (x1 - x0 + 1) * (y1 - y0 + 1)
-    return total
 
 
 class Source:

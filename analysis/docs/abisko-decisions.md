@@ -489,8 +489,31 @@ Shape, following `atlas` §3.6 where it has decided and choosing where it has no
   reads 341.85 m, the lake's level; a mountain square (`758_64_0000`, above Abiskojaure) is
   11.4 MB and spans 957–1,242 m. Neither holds a nodata cell, so the builder needs no water
   mask for the lakes and must not read a flat 341.85 as missing.
-- `rasterio` is not a dependency of the project yet; the probe ran with `uv run --with rasterio`.
-  The height-tile build adds it (or reads the COG with `tifffile`) when step 5 starts.
+- `rasterio` is a dependency since the build exists (below).
+
+**Built 2026-09-12** — `trails.io.sources.markhojd` (STAC search, the squares read at an overview
+by range with the login, the mosaic cached as a GeoTIFF under `.cache/elevation/`),
+`trails.processing.dem_tiles` (Terrarium packing, one bilinear warp per tile, resumable,
+`index.json`), `trails.utils.tiles` (the grid, shared with the map-tile copy),
+`analysis/scripts/dem_tiles.py`, `command make dem`. The first run, as the unit `abisko-dem`
+under `sops exec-env`:
+
+| | |
+|---|---|
+| squares read at 4 m posts | 212 in 45 s, into a 10,000 × 8,750 mosaic, cached as 175 MB |
+| tiles z8–z13 | 540 in 62 s, **49.3 MB** |
+| a z13 tile | **92.7 kB** mean (§8.1's open figure); a lake tile is 568 bytes |
+| peak memory | 1 GB |
+| checks | Abisko turiststation reads 385.9 m (385 m on the map), Torneträsk 341.85 m flat |
+
+4 m posts rather than 8, because the overviews are nearest-decimated and a z13 pixel is 7.1 m:
+reading the first level finer than the pixel means the bilinear tile never averages posts it
+does not have. The 1 GB is the float32 mosaic plus its copy in the warp; fine on forge, and a
+box four times the size would want the squares warped one at a time instead.
+
+Not uploaded: `deploy_map.py --tree dem` is ready, and a publish is Uwe's call. And nothing
+reads these tiles yet — the page and the build sample the Norwegian point service; teaching
+both to read Terrarium tiles is part of the Swedish branch (§7 step 4).
 
 ### 6.4 The box holds no Norway
 
@@ -540,7 +563,10 @@ this map is the reason.
 4. **`network/sweden.py`** — Topografi 50 for the ground, Naturvårdsverket's trail register
    for the attributes, OSM for what neither draws; winter trails and reindeer routes excluded
    (§6.5).
-5. **Heights** — the tile build (§6.3): WCS over the box, resample, pack, write `dem/`.
+5. **Heights** — the tile build (§6.3). **Done 2026-09-12**: `command make dem` writes
+   `analysis/output/dem/lantmateriet/1/` from the STAC COGs with the login, 540 tiles, 49 MB,
+   in a minute; not uploaded. What remains here is the reader: the page's `heightsUrl` and the
+   build's vertex sampling both point at Kartverket's point service today.
 6. **Acceptance and publish** — the structural readings of `make drive` against the Abisko page,
    then `command make map --park abisko`, then `deploy_map.py --map abisko --tree tiles --tree dem`,
    which mirrors the trees first and then uploads the page and its own companions.
@@ -558,9 +584,9 @@ settled, move it to §9 with the date and what settled it.
 
 *Trigger: step 3 and step 5.* The tile copy's cost and the cartography check are answered
 (§3, §9.5), and so are the COG questions — overviews, nodata, water, the login — in §6.3.
-Still open: whether Geotorget offers the tile product cut to an area, how often the FTP files
-are refreshed (dated 2026-06-22 to 24 when first seen), and the weight of a packed z13 height
-tile, which the first build measures.
+The packed z13 tile weighs 92.7 kB (§6.3). Still open: whether Geotorget offers the tile
+product cut to an area, and how often the FTP files are refreshed (dated 2026-06-22 to 24 when
+first seen).
 
 ### 8.2 `make drive` for a second page
 
@@ -614,6 +640,9 @@ box is an hour and a half, once.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the height tiles are built (§6.3, §7 step 5): `markhojd.py`, `dem_tiles.py`,
+  `utils/tiles.py`, `make dem`; 540 tiles, 49.3 MB, z13 at 92.7 kB, in 62 s from a cached 4 m
+  mosaic. `rasterio` added. §8.1 loses the tile-weight question. Not uploaded.
 - **2026-09-12** — the height COGs measured with the login (§6.3): 212 squares, EPSG:5845,
   512-px blocks, overviews 2/4/8, water flat at lake level rather than nodata, ~83 MB to read
   for z8–z13. §8.1 shrinks to the area cut, the FTP cadence and the packed tile's weight.

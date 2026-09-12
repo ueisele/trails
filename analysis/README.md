@@ -52,6 +52,14 @@ and Overpass and takes considerably longer. Re-fetch on purpose with
 `--force-download`; `command make cache-clean` throws the cache away entirely,
 which is rarely what you want.
 
+**The Abisko ground** is two more targets. `command make tiles` copies the base-map
+tiles for the box out of Lantmäteriet's open download over FTP (no login), and
+`command make dem` builds z8–z13 height tiles from the 1 m height model, which
+needs the Geotorget login in the environment — run it from `home/trails-map` as
+`sops exec-env secrets.sops.env 'cd ../../trails && command make dem'`. Both
+resume, both write under `analysis/output/`, and `make deploy ARGS="--tree …"`
+uploads what they wrote. `analysis/docs/abisko-decisions.md` carries every figure.
+
 Both targets pass `ARGS` through, so `command make map ARGS="--approach-km 10"`
 works; the script itself is `analysis/scripts/lomsdal_visten.py`. Which map is
 `--park` (default `lomsdal-visten`); the script's `PARKS` table says what a park
@@ -226,8 +234,9 @@ steps, in that order, because this one does not build.
 A map named `<name>` is uploaded as `<name>.html` and is then readable at `https://<host>/<name>`.
 Publishing a second map needs nothing but a second upload.
 
-**Tile trees** are the other thing it uploads — the base-map tiles `command make tiles` copied and,
-once built, the height tiles — and they go up by `aws s3 sync` rather than one `cp` each:
+**Tile trees** are the other thing it uploads — the base-map tiles `command make tiles` copied and
+the height tiles `command make dem` built — and they go up by `aws s3 sync` rather than one `cp`
+each:
 
 ```bash
 command make deploy ARGS="--tree tiles"              # analysis/output/tiles/ → s3://…/tiles/
