@@ -32,6 +32,8 @@ Each notebook is self-contained and downloads/caches its own data.
 - `docs/route-planning-review-notes.md` — how every figure in those two was
   arrived at, what this codebase does that will bite, and what to pick up next.
   Start here if you are coming back to this after a while.
+- `docs/abisko-decisions.md` — the second map, Abisko in Sweden: what was decided,
+  what is open, and a log of how each open point was settled
 
 ### Scripts
 
