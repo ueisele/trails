@@ -98,6 +98,7 @@ from trails.io.export.gpx import (
 from trails.io.sources import (
     geonorge,
     hoydedata,
+    lantmateriet,
     markhojd,
     n50,
     naturbase,
@@ -2881,6 +2882,19 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
     """
     network, layers = built.network, built.layers
     print("\nBuilding map...")
+    # **The page draws the newest complete tree.** A new stand of
+    # Lantmäteriet's file is copied into the next version directory by
+    # `make tiles`, and the page built after it names that one; a copy still
+    # under way has no index yet and the page keeps the version before it
+    # (decisions §9.20). Kartverket's tiles are a service and have no tree.
+    provider = maps.provider_of(which.base)
+    if provider is not None and provider.tiles.startswith("/"):
+        root = output_dir / provider.tiles.strip("/").rsplit("/", 1)[0]
+        version = lantmateriet.current_version(root)
+        if version is None:
+            raise SystemExit(f"no complete tile tree under {root} — run `command make tiles` first")
+        on_tree = maps.tile_tree_version(provider.key, version)
+        print(f"  the page draws tile tree version {version} ({on_tree.tiles})")
     # Fit to the full approach zone, not just the park, so trailhead towns are visible.
     fmap = maps.create_map(bounds=bounds_of(built.zone), base=which.base, extra_bases=which.extras, title=which.app_name, companions=which.companions)
 

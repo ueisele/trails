@@ -187,12 +187,13 @@ deploy:
 	uv run python analysis/scripts/deploy_map.py $(ARGS)
 
 # Reads a 156 GB GeoPackage over FTP by byte range and writes only the box's tiles — about a
-# quarter of an hour for all of z8–z17, and it resumes, so stopping it costs nothing. Like `map` it
-# only builds; `make deploy ARGS="--tree tiles"` is what uploads. See analysis/docs/abisko-decisions.md §3.
+# quarter of an hour for all of z8–z17, and it resumes, so stopping it costs nothing. A new stand of
+# the file on the server goes into the next version directory and the next `map` draws it; an
+# unchanged stand is a no-op. Like `map` it only builds; `make deploy ARGS="--tree tiles"` is what
+# uploads. See analysis/docs/abisko-decisions.md §3 and §9.20.
 tiles:
 	@echo "🧩 Copying Lantmäteriet's tiles for the Abisko box (resumable)..."
 	uv run python analysis/scripts/lantmateriet_tiles.py $(ARGS)
-	@echo "✅ analysis/output/tiles/lantmateriet/topowebb/1/"
 
 # Reads the 1 m height model's squares over the box by range request with the Geotorget login
 # (GEOTORGET_USERNAME/PASSWORD in the environment; run it under sops exec-env from home/trails-map),

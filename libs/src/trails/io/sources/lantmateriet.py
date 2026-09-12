@@ -52,7 +52,90 @@ MIN_ZOOM = 8
 #: Where the copy records what it did, beside the tiles.
 INDEX_FILE = "index.json"
 
-__all__ = ["Bounds", "tile_count", "tile_range", "Source", "SourceMetadata", "METADATA"]
+#: Where a copy under way records which stand of the file it is copying, so a
+#: stopped run resumes into the same version and a new stand gets a new one.
+STAND_FILE = "stand"
+
+__all__ = ["Bounds", "tile_count", "tile_range", "Source", "SourceMetadata", "METADATA", "versions", "version_for", "current_version"]
+
+
+def versions(root: Path) -> list[int]:
+    """The version directories under a tree's root, lowest first.
+
+    Args:
+        root: The tree's root, ``.../tiles/lantmateriet/topowebb``
+
+    Returns:
+        Every numeric child, as a number
+    """
+    if not root.is_dir():
+        return []
+    return sorted(int(child.name) for child in root.iterdir() if child.is_dir() and child.name.isdigit())
+
+
+def stand_of(directory: Path) -> str | None:
+    """Which stand of the file a version directory holds or is copying.
+
+    Args:
+        directory: A version directory
+
+    Returns:
+        The file's modification time as ``YYYYMMDDHHMMSS``, or None where
+        nothing says
+    """
+    stand = directory / STAND_FILE
+    if stand.exists():
+        return stand.read_text(encoding="utf-8").strip() or None
+    index = directory / INDEX_FILE
+    if index.exists():
+        recorded = json.loads(index.read_text(encoding="utf-8")).get("source_modified")
+        return str(recorded) if recorded else None
+    return None
+
+
+def version_for(root: Path, modified: str) -> tuple[int, bool]:
+    """Which version directory a copy of this stand of the file goes into.
+
+    **A new stand of the file is a new version, and the page follows it.**
+    The tree is published under an address every phone keeps for a year, so
+    a changed tile may never be written over an old one (§6.1 of the
+    decisions); what changes instead is the version segment. A directory
+    already holding or copying this stand is resumed; otherwise the next
+    number is taken and marked with the stand, so a run stopped halfway
+    resumes into it and not into a third.
+
+    Args:
+        root: The tree's root
+        modified: The file's modification time as the server gives it
+
+    Returns:
+        The version number, and whether it is a new directory
+    """
+    for version in reversed(versions(root)):
+        if stand_of(root / str(version)) == modified:
+            return version, False
+    version = (versions(root) or [0])[-1] + 1
+    directory = root / str(version)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / STAND_FILE).write_text(modified + "\n", encoding="utf-8")
+    return version, True
+
+
+def current_version(root: Path) -> int | None:
+    """The highest version whose copy is complete, which is the one a page should draw.
+
+    Complete means the index is written, which the copy does last; a version
+    still being copied has a stand file and no index, and a page built
+    meanwhile keeps drawing the one before.
+
+    Args:
+        root: The tree's root
+
+    Returns:
+        The version, or None where no complete tree exists
+    """
+    complete = [version for version in versions(root) if (root / str(version) / INDEX_FILE).exists()]
+    return complete[-1] if complete else None
 
 
 @dataclass(frozen=True)

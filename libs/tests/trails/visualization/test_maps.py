@@ -2018,6 +2018,26 @@ class TestTwoMapsOnOneOrigin:
         assert lantmateriet.extent == (18.15, 68.17, 19.00, 68.46)
         assert kartverket.extent is None
 
+    def test_a_tile_tree_version_reaches_the_provider_the_layer_and_the_page(self, tmp_path):
+        """A new stand of Lantmäteriet's file is a new version segment; the
+        build names it once and the page, its worker and the panel follow."""
+        try:
+            drawn = maps.tile_tree_version("lantmateriet", 2)
+            assert drawn.tiles == "/tiles/lantmateriet/topowebb/2/"
+            assert drawn.extent == (18.15, 68.17, 19.00, 68.46), "the rest of the provider is untouched"
+            assert maps.provider_of(maps.BaseMap.LANTMATERIET_TOPO) is drawn
+            page, companions = self.abisko(tmp_path)
+            html = page.read_text(encoding="utf-8")
+            assert "/tiles/lantmateriet/topowebb/2/{z}/{x}/{y}.png" in html
+            assert 'var TILE_PREFIX = new URL("/tiles/lantmateriet/topowebb/2/", location.href).href;' in html
+            worker = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
+            assert "/tiles/lantmateriet/topowebb/2/" in worker
+        finally:
+            maps.tile_tree_version("lantmateriet", 1)
+        assert maps.PROVIDERS["lantmateriet"].tiles == "/tiles/lantmateriet/topowebb/1/"
+        with pytest.raises(ValueError):
+            maps.tile_tree_version("kartverket", 2)
+
     def test_the_panel_hands_the_page_the_extent_of_its_tree(self, tmp_path):
         """The Swedish page carries the box as ``EXTENT``; the Norwegian one
         carries null, and both carry the clipping `padded` that reads it."""

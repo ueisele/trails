@@ -59,6 +59,39 @@ class TestTileRange:
         assert lantmateriet.tile_count(ABISKO, range(8, 18)) == 118_967
 
 
+class TestVersions:
+    """A stand of the file names a version directory; the page draws the newest complete one."""
+
+    def test_a_new_stand_is_a_new_version_and_the_same_stand_resumes(self, tmp_path):
+        root = tmp_path / "topowebb"
+        assert lantmateriet.versions(root) == []
+        assert lantmateriet.version_for(root, "20260623110509") == (1, True)
+        assert (root / "1" / lantmateriet.STAND_FILE).read_text().strip() == "20260623110509"
+        assert lantmateriet.version_for(root, "20260623110509") == (1, False), "a stopped copy resumes into its own directory"
+        assert lantmateriet.version_for(root, "20261001080000") == (2, True)
+        assert lantmateriet.version_for(root, "20260623110509") == (1, False), "the older stand still has its directory"
+        assert lantmateriet.versions(root) == [1, 2]
+
+    def test_a_tree_with_an_index_and_no_stand_file_is_known_by_its_index(self, tmp_path):
+        root = tmp_path / "topowebb"
+        (root / "1").mkdir(parents=True)
+        (root / "1" / lantmateriet.INDEX_FILE).write_text(json.dumps({"source_modified": "20260623110509"}))
+        assert lantmateriet.stand_of(root / "1") == "20260623110509"
+        assert lantmateriet.version_for(root, "20260623110509") == (1, False)
+
+    def test_the_page_draws_the_newest_complete_version(self, tmp_path):
+        root = tmp_path / "topowebb"
+        assert lantmateriet.current_version(root) is None
+        lantmateriet.version_for(root, "20260623110509")
+        assert lantmateriet.current_version(root) is None, "a copy under way is not complete"
+        (root / "1" / lantmateriet.INDEX_FILE).write_text(json.dumps({"source_modified": "20260623110509"}))
+        assert lantmateriet.current_version(root) == 1
+        lantmateriet.version_for(root, "20261001080000")
+        assert lantmateriet.current_version(root) == 1, "the new stand is still being copied"
+        (root / "2" / lantmateriet.INDEX_FILE).write_text(json.dumps({"source_modified": "20261001080000"}))
+        assert lantmateriet.current_version(root) == 2
+
+
 class TestCopyTiles:
     """Copying a box out of a local stand-in for the FTP file."""
 

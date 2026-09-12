@@ -714,12 +714,11 @@ settled, move it to §9 with the date and what settled it.
 
 ### 8.1 What the first builds measure
 
-*Trigger: a second box, or a stand of the FTP files newer than 2026-06-24.* The tile copy's
-cost and the cartography check are answered
+*Trigger: a second box.* The tile copy's cost and the cartography check are answered
 (§3, §9.5), and so are the COG questions — overviews, nodata, water, the login — in §6.3.
 The packed z13 tile weighs 92.7 kB (§6.3). Still open: whether Geotorget offers the tile
-product cut to an area, and how often the FTP files are refreshed (dated 2026-06-22 to 24 when
-first seen). The WFS question of step 4 is settled (§9.6): the files replace it.
+product cut to an area — worth asking only for a second box. How often the FTP files are
+refreshed no longer matters: a new stand is picked up by the next `make` (§9.20). The WFS question of step 4 is settled (§9.6): the files replace it.
 
 
 ### 8.2 The review of 2026-09-12
@@ -1102,12 +1101,33 @@ node 1.4 km along the first of them. Driven: 2.02 km walked against 1.83 km flow
 it straight; without the rule the plan would have walked 8.9 km. Both pages now drive with
 nothing skipped: the Abisko scene's `skips` is empty, and its drive reads 603 readings, none broken.
 
+### 9.20 A new stand of the tiles is a new version, and `make` does it — settled, 2026-09-12
+
+Uwe: *"I would expect that running make again loads new tiles when there are new ones."* So the
+refusal of §9.18 was only half an answer; the other half is that the copy chooses the version
+itself. `make tiles` asks the server when the file was modified (`MDTM`, the stand: 2026-06-23
+11:05 today, the same the tree was copied from), looks for a version directory holding or
+copying that stand and resumes it, and otherwise takes the next number and marks it with the
+stand (`stand` beside the tiles, written first; `index.json` written last). The page build
+draws the **newest complete** version — the highest with an index — through
+`maps.tile_tree_version`, which points the provider, the base layer, the worker's prefix and
+the offline panel at it; a copy under way has no index yet, so a page built meanwhile keeps
+the version before. Nothing is ever written over: the old tree stays in the bucket for the
+phones that kept it, the new page names the new one, and a reader's kept tiles are a new
+download under the new name. `make abisko` runs `tiles` first, so on a new stand the whole
+chain follows: copy (a quarter of an hour), page on the new version, `just deploy --map abisko
+--tree tiles` puts the new tree beside the old. What is not automatic: deleting an old version
+from the bucket, which is a decision (700 MB a stand) and a hand's work with `aws s3 rm`. §8.1's
+FTP-cadence question is closed by this: whenever the stand moves, the next `make` follows it.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, last of all** — a new stand of the tiles is a new version chosen by `make tiles`
+  itself, and the page draws the newest complete one (§9.20); §8.1 loses its cadence question.
 - **2026-09-12, last** — the two tap checks driven on Abisko's ground (§9.19): a tap beside the
   Kungsleden, a loop along the Torneträsk shore; nothing is skipped on either page now, and
   the z12 snap distance is a scene figure rather than a Lomsdal literal.

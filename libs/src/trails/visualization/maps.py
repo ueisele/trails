@@ -2194,6 +2194,35 @@ _BASE_LAYERS: dict[BaseMap, dict[str, str | None]] = {
 }
 
 
+def tile_tree_version(key: str, version: int) -> Provider:
+    """Point a provider, and every base layer drawn on it, at a version of its tree.
+
+    **A new stand of the tiles is a new version segment, never a changed
+    object** (decisions §6.1): the copy chooses the segment from the file's
+    date and the build asks which is complete, then calls this so the page,
+    its worker and the offline panel all name that one.
+
+    Args:
+        key: The provider, ``lantmateriet``
+        version: The version directory the page should draw
+
+    Returns:
+        The provider as it now stands in :data:`PROVIDERS`
+
+    Raises:
+        ValueError: If the provider's prefix carries no version segment
+    """
+    provider = PROVIDERS[key]
+    if not re.search(r"/\d+/$", provider.tiles):
+        raise ValueError(f"{key}'s tiles at {provider.tiles} carry no version segment to change")
+    prefix = re.sub(r"/\d+/$", f"/{version}/", provider.tiles)
+    PROVIDERS[key] = dataclasses.replace(provider, tiles=prefix)
+    for layer in _BASE_LAYERS.values():
+        if layer["provider"] == key:
+            layer["tiles"] = f"{prefix}{{z}}/{{x}}/{{y}}.png"
+    return PROVIDERS[key]
+
+
 def provider_of(base: BaseMap) -> Provider | None:
     """Whose tiles a base layer draws.
 

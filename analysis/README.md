@@ -287,7 +287,9 @@ command make deploy ARGS="--tree tiles --dry-run"    # lists the bucket, says wh
 command make deploy ARGS="--map abisko --tree dem"   # a page and a tree in one run
 ```
 
-A tree is a hundred thousand small PNGs under a versioned prefix (`tiles/lantmateriet/topowebb/1/…`),
+A tree is a hundred thousand small PNGs under a versioned prefix (`tiles/lantmateriet/topowebb/1/…`;
+`make tiles` opens the next number when Lantmäteriet's file changes, and `make map` draws the
+newest complete one),
 so every object is immutable and is sent with a year's `max-age`; `sync` compares size and
 modification time against the bucket's listing and uploads only what is new, deletes nothing and
 purges nothing. With `--tree` alone no page goes up; name `--map` too for both. The tree's
