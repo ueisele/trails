@@ -470,7 +470,27 @@ Shape, following `atlas` §3.6 where it has decided and choosing where it has no
   agree by construction, because they read the same tiles. The offline chooser keeps the whole
   box's height tiles with any scope — at z13 and below they are a few per cent of any pack.
 - **Caching** long `max-age` on the tiles, since the address carries the version; the deploy
-  uploads the directory with `aws s3 sync` and purges nothing for it.
+  uploads the directory with `aws s3 sync` and purges nothing for it — `deploy_map.py --tree
+  dem`, §4.5.
+
+**Measured 2026-09-12, with the login from sops** (the §8.1 questions about the COGs):
+
+- The STAC search over the box returns **212 items** (not the ~180 guessed), ids `756_63_5000`
+  to `759_66_7525`, `proj:code` **EPSG:5845** (SWEREF 99 TM with RH 2000 heights), each
+  2,500 × 2,500 float32 posts at 1 m, `nodata` −9999, deflate, tiled **512 × 512**, overviews
+  **2, 4, 8** with nearest resampling, `AREA_OR_POINT=Area`; `lagesosakerhethojd` 0.2 m,
+  `lagesosakerhetplan` 1.0 m; the squares over the box were flown 2022-12 and created 2025-01.
+- `dl1.lantmateriet.se` answers **401 without and 200 with** basic auth, and `Accept-Ranges:
+  bytes`. GDAL's `/vsicurl/` with `GDAL_HTTP_USERPWD` opens a square in 0.2–0.4 s, reads a
+  256 × 256 window in 0.1–0.3 s and the whole 1/8 overview in 0.1 s. Building z8–z13 from the
+  1/8 overviews (8 m posts against 7.1 m z13 pixels) reads about 212 × 312² × 4 B ≈ **83 MB**;
+  nothing is downloaded whole.
+- **Water is a flat surface, not nodata.** A square on Torneträsk is **81 kB** and every post
+  reads 341.85 m, the lake's level; a mountain square (`758_64_0000`, above Abiskojaure) is
+  11.4 MB and spans 957–1,242 m. Neither holds a nodata cell, so the builder needs no water
+  mask for the lakes and must not read a flat 341.85 as missing.
+- `rasterio` is not a dependency of the project yet; the probe ran with `uv run --with rasterio`.
+  The height-tile build adds it (or reads the COG with `tifffile`) when step 5 starts.
 
 ### 6.4 The box holds no Norway
 
@@ -537,11 +557,10 @@ settled, move it to §9 with the date and what settled it.
 ### 8.1 What the first builds measure
 
 *Trigger: step 3 and step 5.* The tile copy's cost and the cartography check are answered
-(§3, §9.5). Still open: whether Geotorget
-offers this product cut to an area, and how often the FTP files are refreshed (dated
-2026-06-22 to 24 when first seen). The heights: one COG opened with the login, its overview
-levels, nodata and water marking, and the weight of a packed z13 tile. All written back into
-§3 and §6.3.
+(§3, §9.5), and so are the COG questions — overviews, nodata, water, the login — in §6.3.
+Still open: whether Geotorget offers the tile product cut to an area, how often the FTP files
+are refreshed (dated 2026-06-22 to 24 when first seen), and the weight of a packed z13 height
+tile, which the first build measures.
 
 ### 8.2 `make drive` for a second page
 
@@ -595,6 +614,9 @@ box is an hour and a half, once.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the height COGs measured with the login (§6.3): 212 squares, EPSG:5845,
+  512-px blocks, overviews 2/4/8, water flat at lake level rather than nodata, ~83 MB to read
+  for z8–z13. §8.1 shrinks to the area cut, the FTP cadence and the packed tile's weight.
 - **2026-09-12** — the plumbing of §7 step 3: `maps.Provider`/`PROVIDERS` with `TOP` and
   `WEIGHT` per provider and `BaseMap.LANTMATERIET_TOPO` on our own bucket; `maps.Companions`
   naming worker, manifest, icons, database and caches per map with `ROOT` untouched; `--park`
