@@ -2031,6 +2031,29 @@ class TestTwoMapsOnOneOrigin:
         maps.save_map(fmap, norway)
         assert "var EXTENT = null;" in norway.read_text(encoding="utf-8")
 
+    def test_a_trailing_slash_is_dropped_before_the_companions_are_linked(self, tmp_path):
+        """`/abisko/` draws the map at the edge, but `abisko-sw.js` linked
+        relatively from there is `/abisko/abisko-sw.js`, which is 404. The
+        head's first script trims the slash, ahead of every link."""
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        trim = html.index("history.replaceState(history.state, '', path.slice(0, -1)")
+        assert trim < html.index('<link rel="apple-touch-icon"')
+        assert trim < html.index('<link rel="manifest"')
+        assert trim < html.index("navigator.serviceWorker.register(")
+        assert "path.length > 1 &&" in html, "the root itself is left alone"
+
+    def test_the_search_folds_the_sami_letters_too(self):
+        """ŋ, ŧ and đ have no decomposition, so NFD leaves them and *hongga*
+        could not find Hoŋggá; folded beside ø and æ, which are the same case."""
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46))
+        group = folium.FeatureGroup(name="Names")
+        group.add_to(fmap)
+        maps.add_search(fmap, [group])
+        html = fmap.get_root().render()
+        assert ".replace(/ø/g, 'o').replace(/æ/g, 'ae').replace(/å/g, 'a')" in html
+        assert ".replace(/ŋ/g, 'n').replace(/ŧ/g, 't').replace(/đ/g, 'd')" in html
+
     def test_the_swedish_page_names_no_host_and_no_norwegian_server(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")

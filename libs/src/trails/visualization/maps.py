@@ -1216,8 +1216,24 @@ class _Head(Element):
         """
         super().__init__()
         named = escape(title, quote=True)
+        # **The path is put right before the links below are read.** The edge
+        # draws this map for `/abisko/` as well as `/abisko` -- a copied link
+        # ends in a slash often enough that the rewrite rule exists for it --
+        # but every companion here is linked relatively, and under `/abisko/`
+        # the worker, the manifest and the icons resolve to addresses that hold
+        # nothing (decisions §8.2). Dropping the slash from the document's URL
+        # changes what the links resolve against and what the address bar
+        # shows, and nothing else; the root and a file on disk are left alone.
+        trimmed = (
+            "<script>(function () {\n"
+            "  var path = location.pathname;\n"
+            "  if (path.length > 1 && path.charAt(path.length - 1) === '/' && history.replaceState) {\n"
+            "    history.replaceState(history.state, '', path.slice(0, -1) + location.search + location.hash);\n"
+            "  }\n"
+            "})();</script>\n"
+        )
         self.body = (
-            f"<title>{named}</title>\n"
+            trimmed + f"<title>{named}</title>\n"
             '<meta name="apple-mobile-web-app-capable" content="yes">\n'
             '<meta name="mobile-web-app-capable" content="yes">\n'
             '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n'
@@ -3558,10 +3574,14 @@ class _NameSearch(MacroElement):
 
             // Norwegian names are unreachable from most keyboards otherwise, so
             // "tveravegen" has to find "Tveråvegen". Combining marks fall out by
-            // decomposition; ø and æ are letters in their own right and do not.
+            // decomposition; ø and æ are letters in their own right and do not
+            // -- and nor do the Sámi ŋ, ŧ and đ, which seven names on the
+            // Abisko page carry (Hoŋgá, Gorsajiekŋa, Iŋggájávri, ...), so
+            // "hongga" has to find Hoŋggá the same way.
             function fold(text) {
                 return (text || '').toLowerCase()
                     .replace(/ø/g, 'o').replace(/æ/g, 'ae').replace(/å/g, 'a')
+                    .replace(/ŋ/g, 'n').replace(/ŧ/g, 't').replace(/đ/g, 'd')
                     .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
             }
 
