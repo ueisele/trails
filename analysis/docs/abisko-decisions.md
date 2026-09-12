@@ -30,8 +30,8 @@ be done before departure and how much may follow.
 ## 2. The area
 
 Stated by Uwe, 2026-09-11, amended 2026-09-12: west to the Norwegian border, **and no Norwegian
-ground is needed**; south to and including Áhpparjávri; north to Kedketjårro, **and the E10 must
-be inside whole**; east to where Rautasjaure begins; Björkliden must be inside.
+ground is needed**; south to and including Áhpparjávri; north far enough that the E10 is inside
+whole; east to where Rautasjaure begins; Björkliden must be inside.
 
 Geocoded 2026-09-11 through Nominatim (OSM) and Lantmäteriet's own place-name search
 (`minkarta.lantmateriet.se/api/searchservice/searchinput?searchtext=…`, SWEREF99 TM, converted):
@@ -43,7 +43,6 @@ Geocoded 2026-09-11 through Nominatim (OSM) and Lantmäteriet's own place-name s
 | east | Rautasjaure (lake), its western tip | lake spans 68.074–68.169 N, **18.994**–19.378 E (OSM relation 1554525) | **19.00 E** |
 | inside | Paddus (peak) | 68.319 N, 18.865 E | the earlier east marker; now 6 km inside the edge |
 | north | the E10, whole | its northernmost point inside the box is **68.443 N**, 18.609 E, on the Torneträsk shore; west of the box it climbs to 68.509 N on the Norwegian side | **68.46 N**, 1.9 km of margin above the road |
-| north, still open | Kedketjårro | **not found** — see §8.1 | moves the edge north only if it lies above 68.46 N |
 | inside | Björkliden (station) | 68.407 N, 18.686 E | — |
 | inside | Abisko (village) | 68.350 N, 18.830 E | — |
 | inside | Abisko nationalpark | 68.327 N, 18.701 E | the park the build looks up by name |
@@ -56,10 +55,11 @@ about 1 km wide around 68.30 N, where the border sits at 18.12 E. **At 68.60 N t
 turned east to 18.41 E**, and the north-west corner of the box would be Norwegian ground, where
 Lantmäteriet paints opaque white (`atlas` §3.7). So a north edge at or below about 68.55 N is
 what lets Abisko skip the two-provider stacking of `atlas` §3.5 entirely; a north edge above it
-brings that mechanism back (§8.2), or costs a west edge moved east to keep Norway out.
+would bring that mechanism back (§9.2), or cost a west edge moved east to keep Norway out.
+With the north edge at 68.46 N this does not arise.
 
-Size, computed for the north edge the E10 sets and for two further north in case Kedketjårro
-asks for it, WebMercator tile counts over the box 18.15–19.00 E, 68.17 N to the north edge:
+Size, computed for the north edge the E10 sets, and for two further north to show what a
+larger box would cost, WebMercator tile counts over the box 18.15–19.00 E, 68.17 N to the north edge:
 
 | north edge | area | tiles z11 | z14 | **z16** | z18 |
 |---|---|---|---|---|---|
@@ -90,7 +90,7 @@ it drives decisions:
   Geotorget registration. Nothing is built on `minkarta`.
 - The product is *Topografisk webbkarta Visning, cache*, Lantmäteriet open data, **CC0**, key
   required. Unverified: whether the API terms say anything about bulk download, which an offline
-  pack at z16 is, and whether CORS is set. Both are checked at registration (§8.3).
+  pack at z16 is, and whether CORS is set. Both are checked at registration (§8.1).
 - A search result says *Topografisk webbkarta Visning, översiktlig* retires on 2026-12-31. That is
   the overview product, not this one — but check at registration which product the key rests on.
 
@@ -216,8 +216,8 @@ Uwe, 2026-09-12: no Norwegian ground is needed. With the west edge at 18.15 E an
 at or below 68.55 N (§2), the box is entirely Swedish, and Lantmäteriet draws all of it.
 **Decided:** no blank-tile classification in the downloader and no second provider for this map.
 Tiles that straddle the border at the west edge are drawn by Lantmäteriet with white beyond the
-line, which is the provider's own rendering of the frontier and reads as such. The trigger that
-reverses this is in §8.2.
+line, which is the provider's own rendering of the frontier and reads as such. What would reverse
+it is recorded in §9.2, and cannot arise with the box as it stands.
 
 ### 6.5 Winter trails are not routable
 
@@ -253,43 +253,23 @@ Naturvårdsverket services only, which are keyless; step 5 needs the key for the
 Triggers, not deadlines — the convention `atlas` §9 and `pipeline/TODO.md` use. When an item is
 settled, move it to §9 with the date and what settled it.
 
-### 8.1 Where Kedketjårro is
-
-Not in OSM (no `natural=peak` by that name in 68.38–68.75 N, 18.2–19.3 E; 51 named peaks
-listed), not in Lantmäteriet's place-name search under `Kedketjårro`, `Kädketjårro`, `Kedke`,
-nor under the North Sami form `Geađgečorru` (Sami *geađgi*, stone; *čorru*, ridge — the pattern
-that turns `Lullehačorru` into `Lullehatjårro`). The only `-tjårro` hit near Abisko is
-Adnjetjårro at 68.212 N, 18.655 E, which is south, not north. **Needs Uwe:** a coordinate, a
-neighbour, or the map it was read from. Since 2026-09-12 the north edge is set by the E10 at
-68.46 N (§2), so Kedketjårro only matters if it lies north of that; a peak on the Torneträsk
-shore between Björkliden and Abisko is already inside.
-
-### 8.2 Whether two providers must be stacked after all
-
-*Trigger: the north edge lands above about 68.55 N and the west edge is not moved east to keep
-the box Swedish.* Then the `atlas` §3.5/§3.7 mechanism is needed here: classify every
-downloaded tile, drop Lantmäteriet's white ones, and draw Kartverket beneath. The downloader
-today stores anything that answers 200 (`maps.py` ≈ line 16963), so white would be kept as
-terrain and reported as coverage; the classification is a byte-size threshold first and a decode
-second.
-
-### 8.3 What Lantmäteriet's terms say
+### 8.1 What Lantmäteriet's terms say
 
 *Trigger: the registration (§7.1).* Bulk download for an offline pack; CORS on the documented
 endpoint; the product's retirement date; whether the key is a header, a query parameter or
 both. The Worker of §6.1 absorbs the last of these whichever way it goes.
 
-### 8.4 The date of the trip
+### 8.2 The date of the trip
 
 Decides how much of §7 is before departure. Unknown as of 2026-09-12.
 
-### 8.5 Which height product, at which resolution
+### 8.3 Which height product, at which resolution
 
-*Trigger: step 5.* *Markhöjdmodell Nedladdning* is a 1 m WCS; the box at 1 m is 1.5 billion
+*Trigger: step 5.* *Markhöjdmodell Nedladdning* is a 1 m WCS; the box at 1 m is 1.1 billion
 cells, so the request resamples to 50 m or the build does. The older *grid 50+* product may or
 may not still be served. Measure what one WCS request over the box returns before choosing.
 
-### 8.6 `make drive` for a second page
+### 8.4 `make drive` for a second page
 
 *Trigger: step 6.* The 278 readings assert Lomsdal-Visten's figures. Which are structural and
 hold for any page, and which are that park's numbers, is not yet separated.
@@ -298,7 +278,24 @@ hold for any page, and which are that park's numbers, is not yet separated.
 
 ## 9. Settled
 
-*(empty — entries move here from §8 with the date and the measurement that settled them)*
+### 9.1 Where Kedketjårro is — dropped, 2026-09-12
+
+It was the north marker, and it was never found: not in OSM (no `natural=peak` by that name in
+68.38–68.75 N, 18.2–19.3 E; 51 named peaks listed), not in Lantmäteriet's place-name search
+under `Kedketjårro`, `Kädketjårro`, `Kedke`, nor under the North Sami form `Geađgečorru`
+(Sami *geađgi*, stone; *čorru*, ridge — the pattern that turns `Lullehačorru` into
+`Lullehatjårro`). The only `-tjårro` hit near Abisko is Adnjetjårro at 68.212 N, 18.655 E, which
+is south. **Settled by Uwe:** the E10 sets the north edge (§2), and Kedketjårro plays no part
+any more. Kept here so nobody searches for it again.
+
+### 9.2 Whether two providers must be stacked — not for this box, 2026-09-12
+
+The box holds no Norway (§6.4): west edge 18.15 E, north edge 68.46 N, well south of the
+68.55 N where the border turns east. If the box ever grows past that, the `atlas` §3.5/§3.7
+mechanism returns: classify every downloaded tile, drop Lantmäteriet's white ones, and draw
+Kartverket beneath. The downloader today stores anything that answers 200 (`maps.py` ≈ line
+16963), so white would be kept as terrain and reported as coverage; the classification is a
+byte-size threshold first and a decode second.
 
 ---
 
@@ -306,9 +303,11 @@ hold for any page, and which are that park's numbers, is not yet separated.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — Kedketjårro dropped as a marker (Uwe: the E10 makes it irrelevant); §8.1
+  and §8.2 move to §9 as settled, the rest of §8 renumbered.
 - **2026-09-12** — the north edge is set by the E10, which Uwe wants inside whole: its
   northernmost point in the box is 68.443 N, the edge is 68.46 N. Replaces the 68.55 N assumption;
-  Kedketjårro (§8.1) now only matters if it lies further north. Tile counts re-computed.
+  Kedketjårro now only matters if it lies further north. Tile counts re-computed.
 - **2026-09-12** — the area amended by Uwe: the east edge is the western tip of Rautasjaure,
   which lands on the same 19.00 E the Paddus-plus-a-few-km reading gave; and no Norwegian
   ground is needed, so the west edge moves from 18.10 E to 18.15 E and §6.4 changes from
