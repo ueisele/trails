@@ -693,6 +693,9 @@ this map is the reason.
    to the files. **https://atlas.cairn.zone/abisko**. The step is done; §7 is done.
 
 Step 3's tile copy needs no credential and can start now; steps 4 and 5 need the login in sops.
+**The whole chain is one target since 2026-09-12**: `command make abisko` runs tiles, dem, the
+graph with its report and the page in order, and `just abisko` from `home/trails-map` runs it with
+the login and the order id in the environment. Measured on a warm cache: the tile copy finds all 118,967 tiles there in 1.5 s, the height tiles all 540 in 0.0 s, the graph comes off the cache, the page builds in 12 s — **20 s from start to `abisko.html`**.
 
 ---
 
@@ -854,6 +857,9 @@ minutes as a transient unit; the Lomsdal-Visten page after the same change, 596 
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, last** — `make abisko` (and `just abisko` from `home/trails-map`, which supplies
+  the login): tiles → dem → graph and report → page in one run, every step resumable or
+  cached; builds only, the deploy stays `just deploy --map abisko --tree tiles --tree dem`.
 - **2026-09-12, later that night** — the variant icon (§6.2, §7 step 3): the cairn in Lapporten's gate,
   `Companions.mark`; the national parks' gold star looked at and not used. Republished the same
   hour at Uwe's word: page and companions, the trees untouched.

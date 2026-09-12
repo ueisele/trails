@@ -61,6 +61,12 @@ needs the Geotorget login in the environment — run it from `home/trails-map` a
 resume, both write under `analysis/output/`, and `make deploy ARGS="--tree …"`
 uploads what they wrote. `analysis/docs/abisko-decisions.md` carries every figure.
 
+**Or the whole chain at once**: `command make abisko` runs tiles, dem, the graph
+with its report and the page, in that order, and from `home/trails-map`
+`just abisko` is the same with the login supplied. Every step resumes or reads
+the cache, so a rerun costs a few minutes of checking and the page; it builds
+and does not publish.
+
 Both targets pass `ARGS` through, so `command make map ARGS="--approach-km 10"`
 works; the script itself is `analysis/scripts/lomsdal_visten.py`. Which map is
 `--park` (default `lomsdal-visten`); the script's `PARKS` table says what a park

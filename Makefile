@@ -19,7 +19,7 @@ ifneq ($(MISE),)
 export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
 endif
 
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy tiles dem
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy tiles dem abisko
 
 # Default target
 help:
@@ -49,6 +49,7 @@ help:
 	@echo "                     both take ARGS=\"...\", e.g. make map ARGS=\"--approach-km 10\""
 	@echo "  make tiles         Copy the Abisko base-map tiles out of Lantmäteriet's open download"
 	@echo "  make dem           Build the Abisko height tiles from Lantmäteriet's height model (needs the Geotorget login)"
+	@echo "  make abisko        The whole Abisko chain: tiles, dem, graph, map (needs the Geotorget login; resumable)"
 	@echo "  make deploy        Publish the built map and purge the edge (needs .env)"
 	@echo "                     ARGS=\"--tree tiles\" mirrors a tile tree instead; --tree dem the heights"
 	@echo "  make fixtures      Generate/update test fixtures from real data"
@@ -201,6 +202,20 @@ dem:
 	@echo "⛰️  Building the Abisko height tiles (resumable)..."
 	uv run python analysis/scripts/dem_tiles.py $(ARGS)
 	@echo "✅ analysis/output/dem/lantmateriet/1/"
+
+# The whole Abisko chain in one run, in the order the pieces depend on each other: the base-map
+# tiles off the FTP, the height mosaic and tiles with the login, then the graph (Topografi 50 through
+# the delivery API with the login and the order id, Naturvårdsverket's nightly files, OSM through
+# Overpass -- fetched once each and cached) and its report, then the page. Every step is resumable
+# or cached, so a second run is a few minutes of checking and a rebuild of the page. It builds and
+# does not publish: `just deploy --map abisko --tree tiles --tree dem` from home/trails-map is that,
+# and `just abisko` there is this target with the login supplied.
+abisko: tiles dem
+	@echo "🕸️  Building and reporting the Abisko routing graph..."
+	uv run python analysis/scripts/route_graph.py --park abisko
+	@echo "🗺️  Building the Abisko map..."
+	uv run python analysis/scripts/lomsdal_visten.py --park abisko
+	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem (from home/trails-map)"
 
 drive:
 	@echo "🖱️  Driving the built map in a browser (about a minute; 25 s of it is the page loading)..."
