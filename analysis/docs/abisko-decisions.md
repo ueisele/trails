@@ -130,10 +130,29 @@ about **0.64 s** including the connection (five 64 KB reads, 3.2 s). The whole f
 fit forge's disk. The build therefore reads the file as an SQLite database over FTP through a
 page-fetching VFS, walking the `(zoom_level, tile_column, tile_row)` index for the box's tile
 addresses and reading each tile's pages — with a persistent control connection and ranges
-sized to the rows that sit together, not one connection per page. The order of magnitude is
-hours for the ~119,000 tiles of z8–z17, and it is measured on the first build (§8.2). The
-alternative, if Geotorget's order-by-area exists for this product as one search result
-claimed, is a GeoPackage cut to the box; checked when the account is used.
+sized to the rows that sit together, not one connection per page.
+
+**Measured 2026-09-12 with a prototype of exactly that** — `apsw` VFS, 1 MB blocks, LRU of
+256 blocks, one persistent `ftplib` connection, `REST` + `RETR` per block:
+
+| | |
+|---|---|
+| one range read on an open connection | 0.19 s for 4 KB, 0.26 s for 64 KB, 0.40 s for 1 MB — the cost is the request, not the bytes |
+| the schema, from the first block | 1 read |
+| **all 380 z13 tiles of the box** | **18.3 s, 0.048 s a tile**, 44 reads, 46.1 MB fetched for 9.8 MB of tiles |
+| extrapolated to z8–z17, 118,967 tiles | about **95 minutes** and some 12 GB of transfer, once |
+
+The rows are stored in small spatial chunks (a few tile rows by a few columns, column-major
+inside a chunk), so a 1 MB block holds many neighbouring tiles and the box reads in runs. The
+5× transfer overhead is the price of 1 MB blocks and is not worth tuning for a one-off.
+
+**Orientation and cartography, both confirmed.** The uniform light-blue 103-byte tiles fall in
+the box's north-east corner, where Torneträsk is — so `tile_row` counts from the top, as XYZ
+does. The centre tile of the box at z13 against the same address from the public viewer (which
+proxies the paid `topowebb/v1.1` service): mean luminance difference **0.77** of 255 at zero
+shift, 7.6–10.5 at one pixel's shift — the same drawing to the pixel. What differs is the
+encoding: the file's tile is an indexed PNG with 190 colours, 26.6 KB; the service's is RGB
+with 2,684 colours, 60.5 KB. The file is the smaller of the two, with no visible cost.
 
 **Storage.** z8–z17 over the box is 118,967 tiles; at the 20 KB a z13 Swedish tile measured
 that is about 2.4 GB, at Kartverket's 50 KB about 6 GB, in the bucket, once. **Colour only:**
@@ -454,11 +473,9 @@ settled, move it to §9 with the date and what settled it.
 
 ### 8.1 What the first builds measure
 
-*Trigger: step 3 and step 5.* The tile copy: seconds per tile over FTP with a persistent
-connection, bytes per zoom for the `WEIGHT` table, and whether Geotorget offers this product
-cut to an area; and **whether the file's cartography is the service's**, one z13 tile from the
-file beside the same address from the public viewer — Lantmäteriet describes both as the same
-two sheets, and it has not been checked. Also how often the FTP files are refreshed (dated
+*Trigger: step 3 and step 5.* The tile copy's cost and the cartography check are answered
+(§3, §9.5). Still open: bytes per zoom for the `WEIGHT` table beyond z13, whether Geotorget
+offers this product cut to an area, and how often the FTP files are refreshed (dated
 2026-06-22 to 24 when first seen). The heights: one COG opened with the login, its overview
 levels, nodata and water marking, and the weight of a packed z13 tile. All written back into
 §3 and §6.3.
@@ -503,12 +520,21 @@ attribution. All in §3, §5 and §6.3, with how each was read. The purchase Uwe
 Uwe: no deadline, and no quality given up for one. Everything in §7 is done properly and in
 order.
 
+### 9.5 Whether the free file draws the same map as the paid service — yes, 2026-09-12
+
+Pixel-aligned and indistinguishable, measured on the box's centre tile at z13 (§3); the file's
+PNGs are indexed and less than half the size. And the copy costs 0.048 s a tile, so the whole
+box is an hour and a half, once.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the FTP reader prototyped and measured: 0.048 s a tile, ~95 min for the box;
+  orientation and cartography confirmed against the viewer. §3 carries the figures, §8.1 shrinks,
+  §9.5 settles the cartography question.
 - **2026-09-12** — the trip date is dropped as an input (§1, §9.4): no deadline, no shortcuts.
   §8 renumbered.
 - **2026-09-12** — both Geotorget orders placed, Topografi 50 (Abonnemang, Sverige) and
@@ -571,7 +597,9 @@ A line per change to this document or to the decisions in it, newest first.
 | Lantmäteriet's grid, layers, ceiling, and its white outside Sweden | `atlas/docs/decisions.md` §3.7, measured 2026-09-11 |
 | which Lantmäteriet products carry a fee | Geotorget product pages rendered in Playwright Firefox (the site is a single-page app): the `Avgift`, `Villkor`, `Åtkomst` fields of the cache, WMS, vector-tile, översiktlig, raster-download, Topografi 10 and Markhöjdmodell products |
 | the FTP GeoPackage's tile matrix | `curl -r 0-67108863` off the anonymous FTP, the SQLite page count at byte 28 patched to the truncated size, then `gpkg_tile_matrix_set` and `gpkg_tile_matrix` read with `sqlite3` |
-| FTP range-read cost | five 64 KB `curl -r` reads, 3.2 s in all |
+| FTP range-read cost | five 64 KB `curl -r` reads, 3.2 s in all; then `ftplib` on one connection, five reads each of 4 KB, 64 KB and 1 MB |
+| the tile copy's cost and the row order | an `apsw` VFS over `ftplib` with 1 MB blocks, reading every z13 tile of the box and rowid runs at 1 and 20,000,000 |
+| file against service | the z13 centre tile from the file and from `minkarta.lantmateriet.se/map/topowebbcache` (KVP GetTile), compared as luminance with Pillow and numpy at shifts of 0 and ±1 px |
 | the STAC height API | `GET /stac-hojd/v1`, `/collections`, `/search?bbox=` without credentials; one COG opened with rasterio over `/vsicurl/`, which answered 401 |
 | the översiktlig product's zoom range | its technical description PDF v1.0.3, text extracted |
 | Topografi 10's and 50's themes, feature types and delivery | Geotorget documentation GEODOK/51 and GEODOK/76, the *Kommunikation*, *Byggnadsverk* and *Åtkomst och leverans* pages, read 2026-09-12 |
