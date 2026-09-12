@@ -238,6 +238,7 @@ SCENES: dict[str, Scene] = {
             "what it weighs": 549,
             "and what writing it cost": 34,
             "and how long it took to come back": 21,
+            "and how far it moves on to it": 135.5,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -332,6 +333,7 @@ SCENES: dict[str, Scene] = {
             "crossing this much water": 0,
             # The river where the goal's line wades it, off the outline.
             "and what width it says": 22,
+            "and how far it moves on to it": 134.4,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -351,9 +353,22 @@ SCENES: dict[str, Scene] = {
         # register has the river in two languages, and the page names it by
         # both, Swedish first (decisions §9.12).
         # Measured on the cached graph and the river surfaces, 2026-09-12.
-        # The two tap checks: nobody has measured a pair of taps beside a path
-        # or a loop's taps on this page (§9.11).
-        skips=("a tap beside a path in plan mode", "a planned leg that is not worth routing"),
+        # On the Kungsleden in the Abiskojåkka valley: a node of the chain
+        # 2.1 km along from the two taps, which stand 134.4 m and 162.3 m off
+        # the line with nothing nearer and dry ground between (§9.19).
+        taps_beside=(
+            {"lat": 68.329748, "lng": 18.762078},
+            {"lat": 68.314736, "lng": 18.73573},
+            {"lat": 68.314488, "lng": 18.73583},
+        ),
+        # Two Topografi 50 trails along the Torneträsk shore 601 m apart whose
+        # way round is 7.5 km by cost, twelve times the line, dry; the first
+        # tap a node 1.4 km along the first of them (§9.19).
+        loop_taps=(
+            {"lat": 68.405871, "lng": 18.539538},
+            {"lat": 68.410287, "lng": 18.56714},
+            {"lat": 68.410615, "lng": 18.581741},
+        ),
         # Measured 27 % over the flight at the first drive (§9.10).
         way_over_flight=1.2,
         river_goal=RiverGoal(
@@ -4688,14 +4703,12 @@ def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
                 note=f"{close_in['walked'] / 1000:.2f} km against {beyond['walked'] / 1000:.2f} km -- it was 3.39 km against 2.27 km",
             ),
             # And zoomed out, where 150 m was about a finger's width, the same
-            # tap is taken as the line again.
+            # tap is taken as the line again: it moves on to it, by as far as
+            # it stood off -- a figure of the scene's ground, not of the rule.
             Reading(
-                "zoomed out, the same tap is taken as the line",
-                zoomed_out["moved"],
-                135.5,
-                within=2.0,
-                note=f"{zoomed_out['moved']:.1f} m moved at z12",
+                "zoomed out, the same tap is taken as the line", zoomed_out["moved"] > 50, True, note=f"{zoomed_out['moved']:.1f} m moved at z12"
             ),
+            stands("and how far it moves on to it", round(zoomed_out["moved"], 1), within=2.0, note="what the tap stood off the line"),
         ],
     )
 

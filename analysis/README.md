@@ -209,7 +209,7 @@ command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
 Drives the built map in a browser and reports **some 600 readings** (602 on the
-Lomsdal-Visten page, 595 on Abisko's, 2026-09-12) — the counts the
+Lomsdal-Visten page, 603 on Abisko's, 2026-09-12) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,
@@ -232,9 +232,9 @@ ground the position and offline checks stand on and look at, the request pattern
 come by, and the figures its last build recorded. A page whose sheets are addressed from the
 root — Abisko's — is served from its directory rather than opened off the disk. A reading whose
 figure the scene has not recorded yet is reported as **new**, with what was read, so the first
-drive of a page is the run that fills its scene in. Checks that need ground a scene does not
-have — a measured pair of taps beside a path, a loop's taps — are named in the scene's `skips`
-and reported as skipped by it; **any other skip is reported as GONE and exits 1**, because a
+drive of a page is the run that fills its scene in. A check that needs ground a scene does not
+have is named in the scene's `skips` and reported as skipped by it (both scenes have all their
+ground today); **any other skip is reported as GONE and exits 1**, because a
 chain the page no longer holds takes every check past it along, and a short green run is the
 one failure nobody reads.
 

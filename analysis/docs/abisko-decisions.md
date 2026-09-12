@@ -692,8 +692,8 @@ this map is the reason.
    read **570 readings, none broken** that evening, the 22 figures the page's build gives
    recorded in its scene, and three checks skipped for ground nobody had measured on this box;
    two of those got their ground the same night (§9.11) and the suite its skip rule after the
-   review (§9.14), so the drive reads **595 readings, none broken, two skipped by the scene**,
-   and the Lomsdal-Visten drive **602 and none moved**. **Published 2026-09-12 at Uwe's word**: the page
+   review (§9.14), and the last two their ground later that night (§9.19), so the drive reads
+   **603 readings, none skipped, none broken**, and the Lomsdal-Visten drive **602 and none moved**. **Published 2026-09-12 at Uwe's word**: the page
    rebuilt (12 s, byte-identical, 3.3 MB → 1.12 MB brotli), `just deploy --map abisko --tree tiles
    --tree dem` from `home/trails-map` — the tile sync found nothing to upload in 103 s, the 540
    height tiles (49.3 MB) went up in 11 s, then the page, its worker, manifest and four icons, and
@@ -1086,12 +1086,31 @@ deploy checks that the page ends in `</html>`, checks it before listing the tree
 the bucket rather than the 404 `/tiles/` when only trees went up; the index says *to load*
 beside the compressed size; the module's README says what the upload does.
 
+### 9.19 The two tap checks on Abisko's ground — measured, 2026-09-12
+
+The last two checks the Abisko scene skipped (§9.11, §9.14) have their ground, found over the
+cached graph the way the water checks' was (§11). **A tap beside a path**: a node of the
+Kungsleden chain in the Abiskojåkka valley as the start, and two taps 2.1 km along it that
+stand 134.4 m and 162.3 m off the line — nothing nearer within 200 m, dry ground between, the
+perpendicular off the chain's own direction. Driven: at z15 the waypoint stays where it fell
+(0.0 m), its leg is 2.20 km with 0.14 km walked to the network, the tap 28 m further out
+gives 2.23 km, and at z12 the same tap moves 134.4 m on to the line — now a figure of the
+scene (`and how far it moves on to it`; Lomsdal's 135.5 was a literal in the check until
+tonight). **A leg not worth routing**: two Topografi 50 trails along the Torneträsk shore,
+601 m apart, whose way round costs 7.46 km — twelve times the line — with the first tap a
+node 1.4 km along the first of them. Driven: 2.02 km walked against 1.83 km flown, 0.12 km of
+it straight; without the rule the plan would have walked 8.9 km. Both pages now drive with
+nothing skipped: the Abisko scene's `skips` is empty, and its drive reads 603 readings, none broken.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, last** — the two tap checks driven on Abisko's ground (§9.19): a tap beside the
+  Kungsleden, a loop along the Torneträsk shore; nothing is skipped on either page now, and
+  the z12 snap distance is a scene figure rather than a Lomsdal literal.
 - **2026-09-12, republished** — both pages and their companions at Uwe's word (`just deploy
   --map abisko`, `just deploy`; the trees untouched), read back from the edge byte for byte,
   page and worker; the trailing-slash fix measured live (§9.17), the whole map counts 2,343
@@ -1251,5 +1270,6 @@ A line per change to this document or to the decisions in it, newest first.
 | the register's two languages | every Swedish name over the box against the nearest name of another language and the same type, in SWEREF 99 TM: the distances quoted, and the whole ranked list, read on 2026-09-12 |
 | the water checks' ground | the cached Abisko graph as a `networkx` graph weighted by edge length, Topografi 50's lake polygons over 0.5 km² and the river surface nearest the name *Ábeskoeatnu*; node pairs 1.0–1.5 km apart with over 60 % of the line on a lake and a way round under 10 km; for the river, every vertex of every edge within 1.5 km of a far-bank node priced as the page prices a departure, one bounded Dijkstra per standing node |
 | the Abisko drive | `drive_map.py --page analysis/output/abisko.html --json` as a transient unit on forge, Playwright Firefox 1400 × 900, the page served from `analysis/output` by the suite's own server; four runs on 2026-09-12 to get from a crash in the second check to a clean report, the Lomsdal page driven in between to hold |
+| the tap checks' ground | the cached Abisko graph as a `networkx` graph weighted by edge cost; for the tap, every fifth node of the Kungsleden chain with the perpendicular to its two edges laid 135 m and 163 m out, kept where no edge is nearer than 100 m and the segment crosses no Topografi 50 water polygon, the start a chain node 1.9–2.1 km along; for the loop, every sixth marked-trail node in the park against every marked node 600–1,800 m off whose bounded Dijkstra cost is five times the line or more and whose line is dry, the first tap a marked node 1.5–2.5 lines along by cost that stands at least three quarters of that straight off |
 | the review of 2026-09-12 | five readers over the code, each verifying its own findings with `uv run` snippets, Playwright Firefox against the built tree served locally, and `curl` against the edge; the high and medium findings re-read or re-measured by hand (`curl -sI` on the ring tiles, the pairing and lettering code, `drive()` and `report()`) before §8.2 was written |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |
