@@ -422,8 +422,9 @@ this map is the reason.
 1. **Geotorget account** — done 2026-09-12 as a private person, `lantmateriet@uweeisele.eu`.
    What is ordered there, all free: *Markhöjdmodell Nedladdning* (§6.3) and *Topografi 50
    Nedladdning, vektor* (§5), the latter as *Abonnemang*, SWEREF 99 TM, GeoPackage, *Sverige*.
-   Not Topografi 10 — its legal review wants a personnummer. **Nothing with a fee**, and the
-   tiles need no order at all — they
+   Not Topografi 10 — its legal review wants a personnummer. **Both ordered 2026-09-12**, one
+   of them under Lantmäteriet's case number LM2026/139832; the deliveries are followed under
+   *Mitt konto – Ärenden*. **Nothing with a fee**, and the tiles need no order at all — they
    come off the anonymous FTP (§3). The login goes into `home/trails-map`'s sops file as
    `GEOTORGET_USERNAME` / `GEOTORGET_PASSWORD`, the names its `secrets.sops.env.example`
    records; the build reads them from the environment for the STAC downloads and the download
@@ -507,6 +508,8 @@ attribution. All in §3, §5 and §6.3, with how each was read. The purchase Uwe
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — both Geotorget orders placed, Topografi 50 (Abonnemang, Sverige) and
+  Markhöjdmodell Nedladdning. What is left of step 1 is the login in sops.
 - **2026-09-12, evening** — Topografi 10 gives way to Topografi 50. The order form for 10 ends in
   a *juridisk prövning* asking for a Swedish personnummer, because the product carries personal
   data; 50 is CC0, unreviewed, and keeps every mountain class 10 has (fords, emergency
