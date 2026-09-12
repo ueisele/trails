@@ -726,7 +726,7 @@ journal; §6.5 is enforced; every CRS is explicit; the tile tree matches its inv
 
 **High**
 
-1. **The whole-map download stalls on Abisko at once.** The offline panel's `padded()` lays a
+1. *Fixed, §9.13.* **The whole-map download stalls on Abisko at once.** The offline panel's `padded()` lays a
    ring of one tile round the box on every level; the tree is cut exactly to the box, so the
    ring is 404 on the bucket (measured live: `11/1126/485` 404, `11/1127/485` 200). Twelve
    refusals in a row read as *stalled*, and a stalled run switches offline **on** over some 34
@@ -994,12 +994,30 @@ names all read the joined places, so a goal across the river now says *crosses A
 (Ábeskoeatnu), 22 m wide there*; the lettering match for a name's size is made on the first
 name. The drive's river scene expects the two-language name, so a regression reads as one.
 
+### 9.13 The whole-map download stalled on the box's edge — fixed, 2026-09-12
+
+§8.2 item 1. The offline panel's `padded()` laid a ring of one tile round every scope on every
+level and the tree is cut exactly to the box, so on Abisko *the whole map* asked for a row of
+tiles that are not there, met twelve 404s in a row and read that as the connection giving
+out; a stalled run then switched offline on over the 34 tiles it had. Three changes in
+`maps.py`: `Provider` carries an `extent` (the Lantmäteriet tree's box, as `index.json`
+records it; Kartverket's is `None` because its cache answers everywhere), the page's `padded`
+clips what it adds to that extent and never the core, and a 404 from the source is now *not
+there* rather than *refused* — counted apart, not towards the stall, and not weighed as kept
+bytes, which a refused tile used to be. Measured on the rebuilt page over the tree served
+locally, Playwright Firefox: `needed()` for the whole map at z14 says 2,343 tiles (was 2,735;
+the tree plus its 380 height tiles is 2,343); *Keep* fetched 2,343, 0 refused, not stalled,
+6.8 s; every one of the 2,373 requests answered 200. The Lomsdal page is unchanged in
+behaviour: `EXTENT` is null there and the ring stays.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, first fix** — the whole-map download no longer stalls on the box's edge
+  (§9.13): the margin is clipped to the tree's extent and a 404 is not a refusal.
 - **2026-09-12, after the review** — the whole app reviewed (§8.2): fifteen findings, three of
   them high — the whole-map download stalls on the box's 404 ring, the drive exits 0 on a lost
   chain, and this document's own status lines — written down before any is fixed, and fixed in

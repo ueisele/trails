@@ -203,6 +203,18 @@ class Provider:
     #: Height tiles cut beside the map tiles, where the map has them. None
     #: for a map whose heights come from a point service.
     heights: HeightTiles | None = None
+    #: Where the tiles end, west, south, east, north in degrees -- the box a
+    #: tree in our own bucket was cut to. None for a source that answers the
+    #: whole world, which is what a third party's cache does.
+    #:
+    #: **The offline panel's margin stops here.** Every scope lays a ring of
+    #: tiles round what it keeps, and against a tree cut exactly to its box
+    #: that ring is a row of 404s: measured on the Abisko page, *the whole map*
+    #: met twelve refusals in a row inside its first sixty tiles, read that as
+    #: the connection giving out, and switched offline on over 34 tiles
+    #: (analysis/docs/abisko-decisions.md §8.2). Kartverket answers the ring,
+    #: so a source without an extent keeps it.
+    extent: tuple[float, float, float, float] | None = None
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -226,6 +238,10 @@ PROVIDERS: dict[str, Provider] = {
         # a box that is mountain and lake rather than sea, so the whole-box
         # mean is close to what a route crosses.
         weight={11: 31747, 12: 22166, 13: 25719, 14: 15290, 15: 13783, 16: 7958, 17: 4587},
+        # The box the tree was cut to, as `index.json` beside it records
+        # (§2 of the decisions): the copy holds every tile of the box at
+        # every zoom and not one outside it.
+        extent=(18.15, 68.17, 19.00, 68.46),
         # The 1 m height model as tiles (§6.3), z8 to z13; the weights are
         # the mean per zoom of the first build's 540 tiles, 2026-09-12.
         heights=HeightTiles(
@@ -16281,6 +16297,9 @@ class _OfflinePanel(MacroElement):
                 // third again on a band along a day's walk. `null` where the
                 // map carries none, and then nothing here changes.
                 var HEIGHTS = {{ this.heights_json }};
+                // Where the source's tiles end, or null for one that answers
+                // everywhere. A margin is clipped to it: see `padded`.
+                var EXTENT = {{ this.extent_json }};
 
                 // **Four scopes, and only one of them follows the paths.** In
                 // this park one walks off them, so a band along everything drawn
@@ -16601,15 +16620,30 @@ class _OfflinePanel(MacroElement):
                     };
                 }
 
-                function padded(core, pad) {
+                // **The margin ends where the tiles do.** A ring laid past the
+                // source's extent is a ring of tiles that are not there: against
+                // our own tree, cut exactly to its box, *the whole map* asked
+                // for the box plus one tile round it, met twelve 404s in a row
+                // in its first sixty tiles and gave up on a connection that was
+                // fine. The core is never clipped -- a box drawn past the tiles
+                // is the reader's to draw -- only what this function adds to it.
+                function edgeAt(z) {
+                    if (!EXTENT) { return null; }
+                    var a = fracTile(EXTENT.n, EXTENT.w, z), b = fracTile(EXTENT.s, EXTENT.e, z);
+                    return {x0: Math.floor(a.x), y0: Math.floor(a.y), x1: Math.floor(b.x), y1: Math.floor(b.y)};
+                }
+
+                function padded(core, pad, z) {
                     if (!pad) { return core; }
-                    var out = new Set();
+                    var out = new Set(), edge = edgeAt(z);
                     core.forEach(function (v) {
                         var cx = keyX(v), cy = keyY(v), dx, dy;
                         for (dx = -pad; dx <= pad; dx += 1) {
                             for (dy = -pad; dy <= pad; dy += 1) {
                                 var x = cx + dx, y = cy + dy;
-                                if (x >= 0 && y >= 0) { out.add(key(x, y)); }
+                                if (x < 0 || y < 0) { continue; }
+                                if (edge && (dx || dy) && (x < edge.x0 || x > edge.x1 || y < edge.y0 || y > edge.y1)) { continue; }
+                                out.add(key(x, y));
                             }
                         }
                     });
@@ -16629,13 +16663,13 @@ class _OfflinePanel(MacroElement):
                 // asked for -- which at z11 is 8 km a tile.
                 function levelsFor(coreAt, top, pad) {
                     var out = {}, below = coreAt(top), z;
-                    out[top] = padded(below, pad);
+                    out[top] = padded(below, pad, top);
                     for (z = top - 1; z >= BOTTOM; z -= 1) {
                         var up = new Set();
                         below.forEach(function (v) {
                             up.add(key(keyX(v) >> 1, keyY(v) >> 1));
                         });
-                        out[z] = padded(up, pad);
+                        out[z] = padded(up, pad, z);
                         below = up;
                     }
                     return out;
@@ -17499,7 +17533,11 @@ class _OfflinePanel(MacroElement):
                             });
                         }
                         var worth = !answer || answer.status === 429 || answer.status >= 500;
-                        if (!worth || attempt >= TRIES) { return null; }
+                        // `false` for a tile the source says is not there, `null`
+                        // for one it would not or could not give: the run below
+                        // counts the second towards the connection giving out
+                        // and not the first.
+                        if (!worth || attempt >= TRIES) { return answer && answer.status === 404 ? false : null; }
                         return later(400 * attempt).then(function () {
                             return fetchTile(url, attempt + 1, waited);
                         });
@@ -17554,7 +17592,7 @@ class _OfflinePanel(MacroElement):
                     // through what it already has rather than starting at the
                     // number: it is the same figure arriving a few seconds later,
                     // and it is not a re-download.
-                    var state = {total: walk.total, done: 0, counted: true, failed: 0,
+                    var state = {total: walk.total, done: 0, counted: true, failed: 0, absent: 0,
                                  held: 0, added: 0, bytes: 0, top: 0,
                                  stop: false, done_: null};
                     working = state;
@@ -17567,16 +17605,26 @@ class _OfflinePanel(MacroElement):
                             if (state.stop) { return Promise.resolve(); }
                             var next = walk.next();
                             if (!next) { return Promise.resolve(); }
+                            var kept = false;
                             return dbRead(KEPT, next.url).then(function (there) {
-                                if (there) { missed = 0; state.held += 1; return null; }
+                                if (there) { missed = 0; state.held += 1; kept = true; return null; }
                                 return fetchTile(next.url, 1, 0).then(function (answer) {
                                     if (answer) {
                                         missed = 0;
                                         state.added += 1;
+                                        kept = true;
                                         return answer.blob().then(function (body) {
                                             return dbWrite(KEPT, next.url, body);
                                         });
                                     }
+                                    // **Not there is not refused.** A 404 is the
+                                    // source's answer, given at once and the same
+                                    // tomorrow; it says nothing about the
+                                    // connection and does not count towards it
+                                    // giving out. The margin is clipped to the
+                                    // source's extent above, so this is the odd
+                                    // hole rather than a whole edge.
+                                    if (answer === false) { state.absent += 1; return null; }
                                     // Refused now means refused three times, so
                                     // the stall guard below still counts tiles
                                     // and not attempts.
@@ -17590,8 +17638,14 @@ class _OfflinePanel(MacroElement):
                                 });
                             }).then(function () {
                                 state.done += 1;
-                                if (next.z > state.top) { state.top = next.z; }
-                                state.bytes += next.ground ? heightWeight(next.z) : (WEIGHT[next.z] || 45000);
+                                // Only what is on the device weighs and counts
+                                // towards the depth kept: a refused tile charged
+                                // as a kept one made a stalled run's figure
+                                // overstate what it had.
+                                if (kept) {
+                                    if (next.z > state.top) { state.top = next.z; }
+                                    state.bytes += next.ground ? heightWeight(next.z) : (WEIGHT[next.z] || 45000);
+                                }
                                 // **Give up on the connection, not on the tile.**
                                 // One tile that will not come is a tile, and the
                                 // other hundred thousand are still worth having;
@@ -18433,6 +18487,8 @@ class _OfflinePanel(MacroElement):
         self.top = provider.top
         self.weight_json = _script_json({str(zoom): bytes_ for zoom, bytes_ in provider.weight.items()})
         self.heights_json = _script_json(provider.heights.as_settings() if provider.heights else None)
+        extent = provider.extent
+        self.extent_json = _script_json({"w": extent[0], "s": extent[1], "e": extent[2], "n": extent[3]} if extent else None)
         self.database = companions.database
         self.cache = companions.cache
 

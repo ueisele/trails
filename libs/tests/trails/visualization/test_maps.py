@@ -586,8 +586,8 @@ class TestOfflinePanel:
         panel = self.panel()
         levels = panel.split("function levelsFor(coreAt, top, pad) {")[1].split("\n                }")[0]
         assert "var out = {}, below = coreAt(top), z;" in levels
-        assert "out[top] = padded(below, pad);" in levels
-        assert "out[z] = padded(up, pad);" in levels
+        assert "out[top] = padded(below, pad, top);" in levels
+        assert "out[z] = padded(up, pad, z);" in levels
         assert "below = up;" in levels
         assert "below = padded" not in levels
         # z11 whatever the reader picked, because a map that cannot be zoomed out
@@ -995,7 +995,7 @@ class TestOfflinePanel:
         # the cache before it is asked of the network, so a stopped run costs
         # nothing to pick up.
         assert "return dbRead(KEPT, next.url).then(function (there) {" in html
-        assert "if (there) { missed = 0; state.held += 1; return null; }" in html
+        assert "if (there) { missed = 0; state.held += 1; kept = true; return null; }" in html
 
     def test_a_run_never_holds_more_than_one_tile(self):
         """The pre-scan that let a resumed run open at the figure it had reached
@@ -1440,7 +1440,7 @@ class TestATileIsAskedForMoreThanOnce:
         measured — and no amount of asking makes one."""
         html = self.rendered()
         assert "var worth = !answer || answer.status === 429 || answer.status >= 500;" in html
-        assert "if (!worth || attempt >= TRIES) { return null; }" in html
+        assert "if (!worth || attempt >= TRIES) { return answer && answer.status === 404 ? false : null; }" in html
 
     def test_the_stall_guard_still_counts_tiles(self):
         """Twelve in a row is the connection, not the tiles — and with retries a
@@ -2013,6 +2013,23 @@ class TestTwoMapsOnOneOrigin:
         assert lantmateriet.tiles.startswith("/tiles/lantmateriet/")
         assert "://" not in lantmateriet.tiles
         assert kartverket.tiles == "https://cache.kartverket.no/"
+        # Our tree ends at its box and the panel's margin must end there too;
+        # Kartverket answers everywhere, so it has no edge to clip to.
+        assert lantmateriet.extent == (18.15, 68.17, 19.00, 68.46)
+        assert kartverket.extent is None
+
+    def test_the_panel_hands_the_page_the_extent_of_its_tree(self, tmp_path):
+        """The Swedish page carries the box as ``EXTENT``; the Norwegian one
+        carries null, and both carry the clipping `padded` that reads it."""
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        assert 'var EXTENT = {"w": 18.15, "s": 68.17, "e": 19.0, "n": 68.46};' in html
+        assert "function padded(core, pad, z)" in html
+        norway = tmp_path / "lomsdal-visten.html"
+        fmap = maps.create_map(bounds=(12.0, 65.0, 13.0, 66.0), companions=maps.Companions.of("lomsdal-visten"))
+        maps.add_chrome(fmap)
+        maps.save_map(fmap, norway)
+        assert "var EXTENT = null;" in norway.read_text(encoding="utf-8")
 
     def test_the_swedish_page_names_no_host_and_no_norwegian_server(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
@@ -7690,7 +7707,6 @@ class TestWhereTheReaderIs:
         html = fmap.get_root().render()
         assert "outsideMap" not in html
         assert "Your position is outside the ground this map draws" not in html
-        assert "EXTENT" not in html
 
     def test_the_two_switches_are_not_in_the_menu(self):
         """They are the two marks at the foot on a narrow screen — which is the
