@@ -29,39 +29,42 @@ be done before departure and how much may follow.
 
 ## 2. The area
 
-Stated by Uwe, 2026-09-11: west to the Norwegian border; south to and including Áhpparjávri;
-north to Kedketjårro; east to the longitude of Paddus and a few kilometres beyond; Björkliden
-must be inside.
+Stated by Uwe, 2026-09-11, amended 2026-09-12: west to the Norwegian border, **and no Norwegian
+ground is needed**; south to and including Áhpparjávri; north to Kedketjårro; east to where
+Rautasjaure begins; Björkliden must be inside.
 
 Geocoded 2026-09-11 through Nominatim (OSM) and Lantmäteriet's own place-name search
 (`minkarta.lantmateriet.se/api/searchservice/searchinput?searchtext=…`, SWEREF99 TM, converted):
 
 | edge | place | coordinate | edge value |
 |---|---|---|---|
-| west | Norway–Sweden border | between 68.15 N and 68.55 N the border runs at **18.10–18.15 E**, nearly north–south | **18.10 E** |
+| west | Norway–Sweden border | between 68.15 N and 68.55 N the border runs at **18.10–18.15 E**, nearly north–south | **18.15 E**, the border's easternmost point in that range, so the box holds no Norway |
 | south | Áhpparjávri (lake) | 68.200 N, 18.612 E | **68.17 N**, so the lake is whole |
-| east | Paddus (peak) | 68.319 N, 18.865 E | **19.00 E**, a few km beyond |
+| east | Rautasjaure (lake), its western tip | lake spans 68.074–68.169 N, **18.994**–19.378 E (OSM relation 1554525) | **19.00 E** |
+| inside | Paddus (peak) | 68.319 N, 18.865 E | the earlier east marker; now 6 km inside the edge |
 | north | Kedketjårro | **not found** — see §8.1 | **68.55 N assumed** |
 | inside | Björkliden (station) | 68.407 N, 18.686 E | — |
 | inside | Abisko (village) | 68.350 N, 18.830 E | — |
 | inside | Abisko nationalpark | 68.327 N, 18.701 E | the park the build looks up by name |
 
 The border trace comes from OSM relation 2978650 (the Norway–Sweden boundary), read at 0.05°
-steps. It matters twice: it is the west edge, and it is where the north edge stops being free.
-**Up to about 68.55 N the border stays at 18.13 E**, so the box holds only a 1–2 km strip of
-Norway along its west edge. **At 68.60 N the border has turned east to 18.41 E**, and the
-north-west corner of the box is Norwegian ground, where Lantmäteriet paints opaque white
-(`atlas` §3.7). So a north edge at or below about 68.55 N is what lets Abisko skip the
-two-provider stacking of `atlas` §3.5 entirely; a north edge above it brings that mechanism back
-(§8.2).
+steps. It matters twice: it sets the west edge, and it is where the north edge stops being free.
+**Between 68.15 N and 68.55 N the border never goes east of 18.15 E**, so a west edge at 18.15 E
+puts the whole box in Sweden; what it costs is a sliver of Sweden west of that line, at most
+about 1 km wide around 68.30 N, where the border sits at 18.12 E. **At 68.60 N the border has
+turned east to 18.41 E**, and the north-west corner of the box would be Norwegian ground, where
+Lantmäteriet paints opaque white (`atlas` §3.7). So a north edge at or below about 68.55 N is
+what lets Abisko skip the two-provider stacking of `atlas` §3.5 entirely; a north edge above it
+brings that mechanism back (§8.2), or costs a west edge moved east to keep Norway out.
 
-Size, computed for the three candidate north edges, WebMercator tile counts over the box:
+Size, computed for the three candidate north edges, WebMercator tile counts over the box
+18.15–19.00 E, 68.17 N to the north edge:
 
 | north edge | area | tiles z11 | z14 | **z16** | z18 |
 |---|---|---|---|---|---|
-| 68.50 N | 1,356 km² | 42 | 1,764 | **26,732** | 427,712 |
-| **68.55 N** | 1,559 km² | 49 | 2,016 | **30,832** | 493,312 |
-| 68.60 N | 1,763 km² | 56 | 2,268 | **34,932** | 558,256 |
+| 68.50 N | 1,280 km² | 36 | 1,638 | **25,265** | 404,240 |
+| **68.55 N** | 1,473 km² | 42 | 1,872 | **29,140** | 466,240 |
+| 68.60 N | 1,665 km² | 48 | 2,106 | **33,015** | 527,620 |
 
 About a fifth of Lomsdal-Visten's box (131,033 tiles at z16, `atlas` §3.3). At Kartverket's
 measured weight of about 50 KB a tile the whole map at z16 would be roughly 1.5 GB; Lantmäteriet's
@@ -206,12 +209,14 @@ planned leg **available offline for the first time**, which the live query never
 samples the same grid for the graph vertices, so build and page agree by construction. The datum
 is asserted at import, as `atlas` §6.2 requires.
 
-### 6.4 White stays white at the west edge
+### 6.4 The box holds no Norway
 
-With the north edge at or below 68.55 N (§2), the Norwegian ground in the box is a 1–2 km strip
-along the west edge, and Lantmäteriet paints it white. **Decided:** no blank-tile classification
-in the downloader for this map. The strip is visible, honest and cheap — a white tile is 755 B.
-The trigger that reverses this is in §8.2.
+Uwe, 2026-09-12: no Norwegian ground is needed. With the west edge at 18.15 E and the north edge
+at or below 68.55 N (§2), the box is entirely Swedish, and Lantmäteriet draws all of it.
+**Decided:** no blank-tile classification in the downloader and no second provider for this map.
+Tiles that straddle the border at the west edge are drawn by Lantmäteriet with white beyond the
+line, which is the provider's own rendering of the frontier and reads as such. The trigger that
+reverses this is in §8.2.
 
 ### 6.5 Winter trails are not routable
 
@@ -259,8 +264,8 @@ neighbour, or the map it was read from. Until then the north edge is 68.55 N by 
 
 ### 8.2 Whether two providers must be stacked after all
 
-*Trigger: the north edge lands above about 68.55 N, or the white strip at the west edge turns out
-to matter on the ground.* Then the `atlas` §3.5/§3.7 mechanism is needed here: classify every
+*Trigger: the north edge lands above about 68.55 N and the west edge is not moved east to keep
+the box Swedish.* Then the `atlas` §3.5/§3.7 mechanism is needed here: classify every
 downloaded tile, drop Lantmäteriet's white ones, and draw Kartverket beneath. The downloader
 today stores anything that answers 200 (`maps.py` ≈ line 16963), so white would be kept as
 terrain and reported as coverage; the classification is a byte-size threshold first and a decode
@@ -299,6 +304,10 @@ hold for any page, and which are that park's numbers, is not yet separated.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the area amended by Uwe: the east edge is the western tip of Rautasjaure,
+  which lands on the same 19.00 E the Paddus-plus-a-few-km reading gave; and no Norwegian
+  ground is needed, so the west edge moves from 18.10 E to 18.15 E and §6.4 changes from
+  "white stays white" to "the box holds no Norway". Tile counts in §2 re-computed.
 - **2026-09-12** — written, from the conversation of 2026-09-11. Decisions §6.1–6.5 recorded;
   §8.1–8.6 open.
 
@@ -308,7 +317,7 @@ A line per change to this document or to the decisions in it, newest first.
 
 | figure | how |
 |---|---|
-| place coordinates | Nominatim (`nominatim.openstreetmap.org`, `countrycodes=se,no`) and `minkarta.lantmateriet.se/api/searchservice/searchinput?searchtext=`, the latter answering in SWEREF99 TM and converted with an inverse transverse Mercator on GRS80 |
+| place coordinates, and Rautasjaure's extent | Nominatim (`nominatim.openstreetmap.org`, `countrycodes=se,no`, the lake's bounding box from its OSM relation) and `minkarta.lantmateriet.se/api/searchservice/searchinput?searchtext=`, the latter answering in SWEREF99 TM and converted with an inverse transverse Mercator on GRS80 |
 | the border trace | Overpass, `rel(2978650)` clipped to 68.10–68.70 N, 17.6–19.3 E, `out geom`, binned at 0.05° |
 | named peaks north of Abisko | Overpass, `node["natural"="peak"]["name"]` over 68.38–68.75 N, 18.2–19.3 E |
 | area and tile counts | spherical area of the box; WebMercator tile index at each zoom from the box's corners |
