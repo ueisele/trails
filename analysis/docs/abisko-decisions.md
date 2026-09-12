@@ -1138,6 +1138,10 @@ leaves the flag on the old stand so the worker keeps answering from it. Measured
 page served locally, Firefox: 2,343 tiles kept at z14; every map tile moved to `/0/` and the
 flag set to it; the page reads the stand as stale; offline, a fetch of a `/1/` address answered
 26,042 bytes from the `/0/` entry; Keep again: 0 under `/0/`, 1,963 under `/1/`, flag on `/1/`.
+The drive stages the same on every page it drives, on the tiles its offline check kept: moved
+under a prefix the page does not name, the panel says so, a fetch offline answers from the old
+stand (31,220 bytes on Abisko), a Keep over a triangle by the reader's position replaces them
+(61 tiles) and leaves nothing of the old stand, and the flag is on the page's own prefix.
 
 The second: they need not. Once every device has loaded the new page, the old tree serves
 nobody; until then an installed page that has not refreshed still names it when browsing
