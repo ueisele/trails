@@ -345,8 +345,14 @@ this map is the reason.
 
 1. **Geotorget registration** — a person's agreement, Uwe's step, and the first one. Check at the
    same time: which product the key rests on, its retirement date, the terms on bulk download, and
-   CORS. The key goes into `home/trails-map`'s sops file. With it, the seam measurement of
-   `atlas` §9.2 becomes possible, and Abisko's north-west corner is the ideal test case.
+   CORS. The keys go into `home/trails-map`'s sops file under the names its
+   `secrets.sops.env.example` records since 2026-09-12: `LANTMATERIET_TILE_KEY` (the proxy
+   Worker's secret, §6.1), `LANTMATERIET_WCS_KEY` (the height-tile build, §6.3) and
+   `GEOTORGET_USERNAME` / `GEOTORGET_PASSWORD` (the download API for Topografi 10). Same names
+   on both sides of the deploy, because nothing else claims them. Registration as a private
+   person, e-mail as the username, no BankID: `https://geotorget.lantmateriet.se/konto-privatperson`.
+   With the keys, the seam measurement of `atlas` §9.2 becomes possible, and Abisko's
+   north-west corner is the ideal test case.
 2. **Infrastructure** — the tile proxy Worker (§6.1) only; the bucket needs nothing (§6.2).
 3. **`trails`, the plumbing** — `--park` (§4.1), the provider blob and `WEIGHT` for Lantmäteriet
    (§4.2), `drive_map.py` gains `--page`.
@@ -420,6 +426,8 @@ byte-size threshold first and a decode second.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — §7.1 names the sops entries for the Lantmäteriet credentials and the
+  registration link.
 - **2026-09-12** — §5 rewritten around Lantmäteriet's *Topografi 10 Nedladdning, vektor*, which
   Uwe asked about as the N50 of Sweden and which turns out to be that and more (fords, emergency
   telephones, the worn-path class); the Swedish module shrinks to three loaders. §7.4 follows.
