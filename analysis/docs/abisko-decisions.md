@@ -509,7 +509,9 @@ attribution. All in §3, §5 and §6.3, with how each was read. The purchase Uwe
 A line per change to this document or to the decisions in it, newest first.
 
 - **2026-09-12** — both Geotorget orders placed, Topografi 50 (Abonnemang, Sverige) and
-  Markhöjdmodell Nedladdning. What is left of step 1 is the login in sops.
+  Markhöjdmodell Nedladdning, and the login is in `home/trails-map`'s sops file — written from
+  forge over ssh with `sops set --value-stdin`, since forge can decrypt that module. Step 1 of §7
+  is done; what remains of it is waiting for the deliveries.
 - **2026-09-12, evening** — Topografi 10 gives way to Topografi 50. The order form for 10 ends in
   a *juridisk prövning* asking for a Swedish personnummer, because the product carries personal
   data; 50 is CC0, unreviewed, and keeps every mountain class 10 has (fords, emergency
