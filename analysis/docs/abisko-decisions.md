@@ -713,6 +713,78 @@ product cut to an area, and how often the FTP files are refreshed (dated 2026-06
 first seen). The WFS question of step 4 is settled (§9.6): the files replace it.
 
 
+### 8.2 The review of 2026-09-12
+
+*Trigger: now — fixed in this order, each moving to §9 as it lands.* The whole app was
+reviewed on 2026-09-12 evening at Uwe's word: five readers (sources and build, the page in the
+browser, deploy and operations, the drive suite, this document) plus the live site measured by
+hand; every high and medium finding checked against the code or the bucket before it was
+written here. What held: the two maps' worker scopes, databases, caches and manifests are
+separate under measurement; the height reader decodes exactly; the deploy never deletes, the
+tiles are immutable and byte-identical to the build; no credential reaches argv, a URL or the
+journal; §6.5 is enforced; every CRS is explicit; the tile tree matches its inventory.
+
+**High**
+
+1. **The whole-map download stalls on Abisko at once.** The offline panel's `padded()` lays a
+   ring of one tile round the box on every level; the tree is cut exactly to the box, so the
+   ring is 404 on the bucket (measured live: `11/1126/485` 404, `11/1127/485` 200). Twelve
+   refusals in a row read as *stalled*, and a stalled run switches offline **on** over some 34
+   tiles. Lomsdal is untouched because Kartverket answers the ring. The fix is to clip the ring
+   to the tree's extent and to stop counting the bucket's own 404 as a stall.
+2. **The drive can shrink silently.** A `long_chain` the page no longer holds returns after one
+   skip, some 520 readings vanish and the exit code is 0; skips never reach the exit code and a
+   skip by choice looks like a skip by failure. An unrecorded figure that reads `None` or
+   `False` passes instead of being NEW. Two readings in the stations check are not emitted at
+   all when their control is missing.
+3. **Status lines here contradict each other.** §6.3 and §7.5 still said *not uploaded*; §7.6
+   still said 570 readings; §5's counts were from before the loaders (8 fords not 6, 49 cabins
+   not 46, 128 river surfaces with 10 named, not 144/11 or 128/7) and its cabin and river names
+   were described as coming off the lettering, which stopped being so with Ortnamn (§9.9);
+   `make map --park abisko` is not a form `make` accepts.
+
+**Medium**
+
+4. `ortnamn.paired` joins a later-language point to the first same-type head the STRtree
+   returns within 500 m, not the nearest; today's 13 joins are all right, by GEOS order only.
+5. The lettering size takes the nearest label within 500 m and then asks for the same name; 7 of
+   210 lettered places lose their size — Kungsleden twice, Dag Hammarskjöldsleden twice,
+   Kårsajåkka (its own Sámi label *Gorsajohka* is nearer), Ábeskoeatnu, Skoabákti. Match on the
+   place's names, both of them.
+6. The search's `fold()` folds ø, æ, å and every combining mark, but ŋ, ŧ and đ decompose to
+   nothing; seven names on this page carry ŋ (Hoŋgá, Gorsajiekŋa, Iŋggájávri, …) and *hongga*
+   does not find Hoŋggá.
+7. `/abisko/` with a slash is a real address (the trailing-slash rewrite) that draws the map,
+   but the relative `abisko-sw.js`, manifest and icons resolve under `/abisko/` and answer 404;
+   the registered scope becomes `/abisko/abisko`. The same for `/lomsdal-visten/`.
+8. `copy_tiles` records the FTP file's modification time in `index.json` but never compares it
+   with the tree already on disk, so a republished file could be mixed under the immutable `/1/`.
+9. `just abisko` hands every value in the sops file to the build, the deploy key pair and the
+   purge token included; the build needs the three `GEOTORGET_*` values.
+10. Drive tolerances loosened for this page and weakened for both: the route bar from 30 % over
+    the flight to 5 %; the crossed-water figures recorded as 0 (a dry bay by construction), so
+    an `undefined` crossing passes here; the give-up timing at ±14 s cannot tell three attempts
+    from one.
+11. An interrupted `zipfile.extract` leaves a truncated GeoPackage at its final path that every
+    later run accepts (`topografi50`, `ortnamn`); the downloads themselves go part-then-rename.
+
+**Low**
+
+12. The Swedish branch draws 26 of 391 names outside the box, and cabins, facilities and trail
+    points are not clipped either; the Norwegian branch clips its names.
+13. `force_download` reaches only the `ovrig_vag` read in `sweden.py`; `approach_km` sits in the
+    graph fingerprint though the box build ignores it, so the docstring's own example rebuilds
+    an identical graph; Topografi 50 `Vinterled` lines are stamped *Topografi 50 paths*;
+    `--trail-name-m`'s help speaks of FKB.
+14. Deploy: `check()` reads the first 15 bytes and cannot see a truncated page; the tree-only
+    success line names `/tiles/`, which is 404; the index page shows the stored (brotli) size,
+    1.1 MB for a 3.3 MB page; `README.md` there still says *No offline / PWA support* and
+    *uploading `br` would break clients*, and links a heading that is not there.
+15. `analysis/README.md` and the Makefile quote 278 readings, 400 s and *three objects*; the
+    drive's docstring says a minute; §9.5's copy estimate predates the measured 916 s; §9.11
+    says 22 m and then 49 m for the same river width; §9.12 and `ortnamn.py`'s comment disagree
+    about Trollsjön/Geargejávri; §8.1's trigger names steps that are done.
+
 ---
 
 ## 9. Settled
@@ -928,6 +1000,10 @@ name. The drive's river scene expects the two-language name, so a regression rea
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, after the review** — the whole app reviewed (§8.2): fifteen findings, three of
+  them high — the whole-map download stalls on the box's 404 ring, the drive exits 0 on a lost
+  chain, and this document's own status lines — written down before any is fixed, and fixed in
+  that order.
 - **2026-09-12, last of all** — a place with two names shows both, Swedish first (§9.12):
   `ortnamn.paired` joins the register's per-language points into places; 8 places over the box
   carry a second name. Republished at Uwe's word, read back from the edge byte for byte.
@@ -1072,4 +1148,5 @@ A line per change to this document or to the decisions in it, newest first.
 | the register's two languages | every Swedish name over the box against the nearest name of another language and the same type, in SWEREF 99 TM: the distances quoted, and the whole ranked list, read on 2026-09-12 |
 | the water checks' ground | the cached Abisko graph as a `networkx` graph weighted by edge length, Topografi 50's lake polygons over 0.5 km² and the river surface nearest the name *Ábeskoeatnu*; node pairs 1.0–1.5 km apart with over 60 % of the line on a lake and a way round under 10 km; for the river, every vertex of every edge within 1.5 km of a far-bank node priced as the page prices a departure, one bounded Dijkstra per standing node |
 | the Abisko drive | `drive_map.py --page analysis/output/abisko.html --json` as a transient unit on forge, Playwright Firefox 1400 × 900, the page served from `analysis/output` by the suite's own server; four runs on 2026-09-12 to get from a crash in the second check to a clean report, the Lomsdal page driven in between to hold |
+| the review of 2026-09-12 | five readers over the code, each verifying its own findings with `uv run` snippets, Playwright Firefox against the built tree served locally, and `curl` against the edge; the high and medium findings re-read or re-measured by hand (`curl -sI` on the ring tiles, the pairing and lettering code, `drive()` and `report()`) before §8.2 was written |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |
