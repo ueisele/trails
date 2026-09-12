@@ -76,23 +76,68 @@ table has to be re-measured for the new provider anyway (§4.2).
 
 ## 3. What is known about Lantmäteriet's tiles
 
-Measured 2026-09-11 and recorded in `atlas/docs/decisions.md` §3.7; repeated here only as far as
-it drives decisions:
+Measured 2026-09-11 and 2026-09-12. The first day's findings are in `atlas/docs/decisions.md`
+§3.7; the second day's overturn one of them and settle where the tiles come from.
 
-- WebMercator tile matrix set `3857`, **z0 to z18**, layers `topowebb` and `topowebb_nedtonad`,
-  `image/png`, URL `…/{TileMatrixSet}/{TileMatrix}/{TileRow}/{TileCol}.png` — the same grid, the
-  same ceiling, the same `{z}/{y}/{x}` order and the same two sheets as Kartverket. `TOP = 18`
-  and `SPAN = 2^18` in the offline panel stay as they are.
-- **Outside Sweden the tile is opaque white** (755 B, one colour, alpha 0 nowhere), not
-  transparent as Kartverket's is outside Norway. This is what makes the north edge matter (§2).
-- **What answered without a credential is `minkarta`**, the public viewer's proxy, not a
-  published API. The documented endpoint at `maps.lantmateriet.se` answers **401** and wants a
-  Geotorget registration. Nothing is built on `minkarta`.
-- The product is *Topografisk webbkarta Visning, cache*, Lantmäteriet open data, **CC0**, key
-  required. Unverified: whether the API terms say anything about bulk download, which an offline
-  pack at z16 is, and whether CORS is set. Both are checked at registration (§8.1).
-- A search result says *Topografisk webbkarta Visning, översiktlig* retires on 2026-12-31. That is
-  the overview product, not this one — but check at registration which product the key rests on.
+**The grid is Kartverket's.** WebMercator tile matrix set `3857`, z0 upward, 256 px, layers
+`topowebb` (colour) and `topowebb_nedtonad` (grey), `image/png`, `{z}/{y}/{x}` order. Outside
+Sweden the tile is opaque white, not transparent.
+
+**The live tile services cost money — every one of them.** Read off Geotorget's product pages on
+2026-09-12, rendered in Firefox because the site is a single-page app:
+
+| product | Avgift | terms | access |
+|---|---|---|---|
+| *Topografisk webbkarta Visning, cache* (WMTS, the one measured on 2026-09-11) | **Ja** | Avtalsvillkor | key; Uwe's order form quoted **10,375 kr/år** for private non-commercial use |
+| *Topografisk webbkarta Visning* (WMS) | Ja | Avtalsvillkor | key |
+| *Topografi Visning, vector tiles* | Ja | Avtalsvillkor | key |
+| *Topografisk webbkarta Visning, översiktlig* (WMTS) | Nej | CC0 | key, and **3857 only to z14**; **retires 2026-12-31** |
+
+So the search result of 2026-09-11 that called the cache product CC0 was wrong: it described
+the *översiktlig* product, which is the one that retires. What answered keyless that day was
+`minkarta`, the viewer's own proxy. **Neither is a thing to build on, and the paid one is not
+bought.**
+
+**What is free is the same cartography as files.** *Topografisk webbkarta Nedladdning, raster*
+— Avgift **Nej**, terms *värdefulla datamängder* (attribution), format GeoPackage, delivered
+over **anonymous FTP** at `ftp://download-opendata.lantmateriet.se/Topografisk_webbkarta_raster/`.
+Four files, one per sheet and projection, whole of Sweden each:
+
+| file | bytes |
+|---|---|
+| `Farg_05m_mercator/1159000_7377433.gpkg` | 156,252,565,504 |
+| `Nedtonad_05m_mercator/1159000_7377433.gpkg` | 139,329,609,728 |
+| `Farg_05m_sweref/6104864_234624.gpkg` | 175,288,979,456 |
+| `Nedtonad_05m_sweref/6104864_234624.gpkg` | 157,673,115,648 |
+
+**And the Mercator file is a plain XYZ pyramid.** Read 2026-09-12 out of the first 64 MB of the
+colour file, fetched by FTP range request and opened after patching the SQLite page count:
+one tile table `topowebb`, `gpkg_tile_matrix_set` in EPSG 3857 over the full Mercator square,
+and `gpkg_tile_matrix` with **z0 to z17**, 256×256, pixel sizes 156,543.03 m down to 1.19 m —
+the standard Google/OSM matrix to the metre. A GeoPackage tile row is `(zoom_level,
+tile_column, tile_row)` with the origin top-left, which is `z/x/y` as Leaflet counts it. **No
+reprojection, no resampling, no key**: the box's tiles are copied out and served from our own
+bucket.
+
+**The ceiling is z17, not z18.** Kartverket's cache ends at z18; this pyramid ends at z17
+(nominal 1.19 m/px, 0.44 m/px at 68.3° N, far finer than anything a phone shows). So `TOP` is
+per provider after all — 18 for Kartverket, 17 for Lantmäteriet — and Leaflet's
+`maxNativeZoom` upsamples z17 where the chooser or the map asks for z18.
+
+**Getting the box out of a 156 GB file.** The server speaks FTP only (no HTTP, no HTTPS —
+probed 2026-09-12), FTP `REST` works so byte ranges can be read, and one range read costs
+about **0.64 s** including the connection (five 64 KB reads, 3.2 s). The whole file does not
+fit forge's disk. The build therefore reads the file as an SQLite database over FTP through a
+page-fetching VFS, walking the `(zoom_level, tile_column, tile_row)` index for the box's tile
+addresses and reading each tile's pages — with a persistent control connection and ranges
+sized to the rows that sit together, not one connection per page. The order of magnitude is
+hours for the ~119,000 tiles of z8–z17, and it is measured on the first build (§8.2). The
+alternative, if Geotorget's order-by-area exists for this product as one search result
+claimed, is a GeoPackage cut to the box; checked when the account is used.
+
+**Storage.** z8–z17 over the box is 118,967 tiles; at the 20 KB a z13 Swedish tile measured
+that is about 2.4 GB, at Kartverket's 50 KB about 6 GB, in the bucket, once, for each of the
+two sheets. R2 storage is cents a month and egress is free.
 
 ---
 
@@ -163,7 +208,7 @@ meridian, closer than Bergen, for which `atlas` §6.1 measured +0.2 %. Swedish s
 
 | role | Norway today | Sweden | standing |
 |---|---|---|---|
-| base map | Kartverket cache | Lantmäteriet *Topografisk webbkarta Visning, cache*, CC0, key via Geotorget | grid measured identical (§3) |
+| base map | Kartverket cache, live | Lantmäteriet *Topografisk webbkarta Nedladdning, raster*, free with attribution, anonymous FTP, copied into our bucket at build time | z0–z17 XYZ pyramid, measured (§3) |
 | **the N50 role: paths, roads, water, land cover, cabins, names, contours, protected areas in one product** | N50 Kartdata, per kommune | Lantmäteriet **Topografi 10 Nedladdning, vektor** — GeoPackage, SWEREF99 TM, RH 2000, updated weekly, ordered by country, län or kommun through Geotorget and its download API; free since 2025-02-03 under the *värdefulla datamängder* terms (attribution), a Geotorget account needed. **Topografi 50** is the generalised sibling, CC0, same themes | read 2026-09-12 off the product documentation, see below |
 | official marked trails with attributes | Turrutebasen | Naturvårdsverket *Leder och friluftsanordningar*: WFS `https://geodata.naturvardsverket.se/leder_friluftsliv/wfs?`, SWEREF99 TM | keyless; carries summer *and* winter trails, marking and manager — the attribute source, as Turrutebasen is (`atlas` §7.2) |
 | paths nobody else draws | OSM | OSM, through Overpass, unchanged | the one source that is the same in both countries |
@@ -172,7 +217,7 @@ meridian, closer than Bergen, for which `atlas` §6.1 measured +0.2 %. Swedish s
 | roads | N50 | Topografi 10 `Väglinje` (Trafikverket's roads, 15 classes) and `Övrig väg` | OSM as the check |
 | water | N50 Arealdekke | Topografi 10 *Tema Hydrografi* | Torneträsk and the lakes drive the straight-walk water cost |
 | place names | Stedsnavn | Topografi 10 *Tema Text* — Lantmäteriet's established names, Swedish and Sami | the search box reads this |
-| heights | Geonorge point API, live | Lantmäteriet *Markhöjdmodell Nedladdning*, WCS, CC0, **RH 2000** | §6.3 |
+| heights | Geonorge point API, live | Lantmäteriet *Markhöjdmodell Nedladdning*: 1 m COGs through a keyless STAC API, downloads behind the Geotorget login, CC BY 4.0, **RH 2000** | §6.3 |
 | land cover | not used | Topografi 10 *Tema Mark* (`sankmark`, `kalfjäll`, forest); NMD 10 m raster exists too | Tema Mark is enough if the water cost ever wants bog |
 
 **Topografi 10 is the N50 of Sweden, and in the mountains it is more.** Read 2026-09-12 off
@@ -204,20 +249,27 @@ kommun is the right grain, but the file has not been measured.
 Exact layer names, attribute names and the winter/summer field are read off the services when
 the module is written, not guessed here.
 
-Licences the credits will carry: Lantmäteriet CC0 for the tiles and the height model, Lantmäteriet's
-*värdefulla datamängder* terms with attribution for Topografi 10, Naturvårdsverket open data,
-OpenStreetMap ODbL. UT.no's CC BY-NC does not enter this map.
+Licences the credits will carry: Lantmäteriet's *värdefulla datamängder* terms with attribution for
+the tiles and Topografi 10, CC BY 4.0 for the height model, Naturvårdsverket open data,
+OpenStreetMap ODbL. Nothing CC0 is left in the Swedish set, and nothing NC. UT.no's CC BY-NC does not enter this map.
 
 ---
 
 ## 6. Decided
 
-### 6.1 The key stays out of the page
+### 6.1 No key online: the tiles are ours
 
-The page is public; a key in its HTML is a public key on Uwe's Geotorget account. **Decided:** a
-Cloudflare Worker in `home/trails-map`, on its own hostname, that adds the key as a header on the
-way to Lantmäteriet and caches at the edge. `TILE_HOST` becomes our own host, the key stays in
-sops, and a product change at Lantmäteriet is one line in the Worker. The Worker sets CORS itself.
+Written on 2026-09-12 in the morning as *"the key stays out of the page"* — a Cloudflare Worker
+proxying Lantmäteriet's WMTS with the key as a header. **Withdrawn the same day**, because the
+live services all carry a fee (§3) and the free product is the same tiles as files. The build
+copies the box's tiles into the bucket (§6.2), the page fetches them from our own host like any
+tile, and the offline downloader keeps them like any tile. There is no proxy, no key in
+Cloudflare, no dependency on a Lantmäteriet service at run time, and no product retirement
+that can take the map down. The attribution line is the whole obligation.
+
+What it costs instead: bucket storage of a few gigabytes (§3), and a build step that must not be
+re-run casually — the tiles carry a version segment in their address (§6.2), so a refresh is a
+new prefix, not an overwrite under kept tiles.
 
 ### 6.2 Two maps, one origin, one bucket — companions named per map
 
@@ -260,17 +312,20 @@ abisko.html                         served at /abisko
 abisko.webmanifest                  start_url ./abisko, id abisko, name "Abisko Atlas"
 abisko-sw.js                        scope /abisko, DB trails-abisko
 abisko-icon-32.png … abisko-icon-512.png   a variant of the cairn, so the two icons differ
-dem/lantmateriet/1/{z}/{x}/{y}.png  the height tiles, §6.3
+tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png            the map, colour sheet, §3 and §6.1
+tiles/lantmateriet/topowebb_nedtonad/1/{z}/{x}/{y}.png   the grey sheet
+dem/lantmateriet/1/{z}/{x}/{y}.png                       the height tiles, §6.3
 ```
 
 Checked against the hosting module, 2026-09-12: the rewrite rule leaves any path containing a
-dot alone, so `dem/…/{y}.png` is served as an object untouched; the index Worker lists with
-`delimiter: "/"` and keeps only keys ending in `.html`, so the `dem/` prefix never appears as a
-map. **No change in `home/trails-map` is needed.**
+dot alone, so `tiles/…/{y}.png` and `dem/…/{y}.png` are served as objects untouched; the index Worker lists with
+`delimiter: "/"` and keeps only keys ending in `.html`, so the `tiles/` and `dem/` prefixes never
+appear as maps. **No change in `home/trails-map` is needed.**
 
 What it costs in code: `write_manifest`, `write_service_worker`, `write_icons`, `_Head` and the
 `register('sw.js')` call take the map's name; `KEPT`/`SEEN` stay but the database name carries
-the map; `TILE_HOST` becomes a list, because the height tiles come from our own host;
+the map; `TILE_HOST` becomes our own host, since map and height tiles both come from it, and `TOP` is
+per provider (17 here, §3);
 `deploy_map.py`'s `BESIDE` table is keyed per map and gains the `dem/` directory. All of it is
 Python-side naming; the worker's logic does not change.
 
@@ -295,12 +350,22 @@ the document. Uwe, 2026-09-12: build them here and use them directly.
 
 Shape, following `atlas` §3.6 where it has decided and choosing where it has not:
 
-- **Source** Lantmäteriet *Markhöjdmodell Nedladdning* (WCS, CC0, RH 2000). The datum is
-  asserted at import, as `atlas` §6.2 requires; RH 2000 and NN2000 are both EVRS realisations.
+- **Source** Lantmäteriet *Markhöjdmodell Nedladdning*, Avgift Nej, CC BY 4.0, RH 2000 —
+  measured 2026-09-12: a keyless STAC API at `https://api.lantmateriet.se/stac-hojd/v1`
+  (search by bbox works without a login; the box returns items in collection `mhm-75_6`, 1 m
+  GeoTIFF/COG per 2.5 km square, about 20 MB each, roughly 180 squares over the box), and the
+  data URLs on `dl1.lantmateriet.se` answer **401** until authenticated with **HTTP basic auth
+  and the Geotorget username and password**, after the product has been ordered (free) in
+  Geotorget — that is Lantmäteriet's own guide, *Guide, Nedladdning av markhöjdmodell*, step 12.
+  COG means the build reads the overview levels by range request and never fetches the 1 m
+  data whole. Fallback if the login is a nuisance: *Markhöjdmodell Nedladdning, grid 50+* on the
+  same anonymous FTP (`Hojddata_grid_50_plus/`, dated 2015), 50 m posts, coarser than z13 wants.
+  The datum is asserted at import, as `atlas` §6.2 requires; RH 2000 and NN2000 are both EVRS
+  realisations.
 - **Ceiling z13.** At 68.3° N a z13 pixel is 7.1 m; `atlas` measured that z14 over a 10 m model
   is pure upsampling, and a 1 m model resampled to 7 m is still far finer than the 25 m window the
-  profile smooths by. The WCS request resamples to the tile's resolution, so the 1 m grid never
-  lands on forge whole.
+  profile smooths by. The COG overviews are read at the tile's resolution, so the 1 m grid
+  never lands on forge whole.
 - **Count** for the box, z8 to z13: 2 + 6 + 12 + 30 + 110 + 380 = **540 tiles**. At the
   100–200 KB a lossless 256×256 RGB elevation tile tends to weigh, that is 50–110 MB in the bucket
   — order of magnitude, to be measured on the first build.
@@ -343,19 +408,18 @@ this map is the reason.
 
 ## 7. The order of work
 
-1. **Geotorget registration** — a person's agreement, Uwe's step, and the first one. Check at the
-   same time: which product the key rests on, its retirement date, the terms on bulk download, and
-   CORS. The keys go into `home/trails-map`'s sops file under the names its
-   `secrets.sops.env.example` records since 2026-09-12: `LANTMATERIET_TILE_KEY` (the proxy
-   Worker's secret, §6.1), `LANTMATERIET_WCS_KEY` (the height-tile build, §6.3) and
-   `GEOTORGET_USERNAME` / `GEOTORGET_PASSWORD` (the download API for Topografi 10). Same names
-   on both sides of the deploy, because nothing else claims them. Registration as a private
-   person, e-mail as the username, no BankID: `https://geotorget.lantmateriet.se/konto-privatperson`.
-   With the keys, the seam measurement of `atlas` §9.2 becomes possible, and Abisko's
-   north-west corner is the ideal test case.
-2. **Infrastructure** — the tile proxy Worker (§6.1) only; the bucket needs nothing (§6.2).
-3. **`trails`, the plumbing** — `--park` (§4.1), the provider blob and `WEIGHT` for Lantmäteriet
-   (§4.2), `drive_map.py` gains `--page`.
+1. **Geotorget account** — done 2026-09-12 as a private person, `lantmateriet@uweeisele.eu`.
+   What is ordered there, all free: *Markhöjdmodell Nedladdning* (§6.3) and *Topografi 10
+   Nedladdning, vektor* (§5). **Nothing with a fee**, and the tiles need no order at all — they
+   come off the anonymous FTP (§3). The login goes into `home/trails-map`'s sops file as
+   `GEOTORGET_USERNAME` / `GEOTORGET_PASSWORD`, the names its `secrets.sops.env.example`
+   records; the build reads them from the environment for the STAC downloads and the download
+   API. No API key exists in this design any more.
+2. **Infrastructure** — nothing. The bucket takes prefixes without a change (§6.2), and there
+   is no Worker (§6.1).
+3. **`trails`, the plumbing** — `--park` (§4.1), the provider blob with `TOP` and `WEIGHT` per
+   provider (§4.2, §3), `drive_map.py` gains `--page`. And **the tile copy**: the box's tiles out
+   of the FTP GeoPackage into `tiles/` (§3), measured for time and bytes on the first run.
 4. **`network/sweden.py`** — Topografi 10 for the ground, Naturvårdsverket's trail register
    for the attributes, OSM for what neither draws; winter trails and reindeer routes excluded
    (§6.5).
@@ -364,8 +428,7 @@ this map is the reason.
    then `command make map --park abisko`, then `deploy_map.py --map abisko`, which uploads the
    page, its own companions and `dem/`.
 
-Steps 2 and 3 do not depend on step 1 and can start before the key exists; step 4 needs a
-Geotorget account for Topografi 10, so it follows step 1 as well; step 5 needs the key for the WCS.
+Step 3's tile copy needs no credential and can start now; steps 4 and 5 need the login in sops.
 
 ---
 
@@ -374,25 +437,18 @@ Geotorget account for Topografi 10, so it follows step 1 as well; step 5 needs t
 Triggers, not deadlines — the convention `atlas` §9 and `pipeline/TODO.md` use. When an item is
 settled, move it to §9 with the date and what settled it.
 
-### 8.1 What Lantmäteriet's terms say
-
-*Trigger: the registration (§7.1).* Bulk download for an offline pack; CORS on the documented
-endpoint; the product's retirement date; whether the key is a header, a query parameter or
-both. The Worker of §6.1 absorbs the last of these whichever way it goes.
-
-### 8.2 The date of the trip
+### 8.1 The date of the trip
 
 Decides how much of §7 is before departure. Unknown as of 2026-09-12.
 
-### 8.3 What one WCS request over the box returns
+### 8.2 What the first builds measure
 
-*Trigger: step 5.* *Markhöjdmodell Nedladdning* is a 1 m WCS; the box at 1 m is 1.1 billion
-cells, so the request must resample to z13's 7 m, or the build fetches coarser and resamples.
-Measure what one request returns — format, size, whether the server resamples, whether nodata
-and water are marked — before the tile build is written. The tile weight in §6.3 is measured on
-the first build and written back there.
+*Trigger: step 3 and step 5.* The tile copy: seconds per tile over FTP with a persistent
+connection, bytes per zoom for the `WEIGHT` table, and whether Geotorget offers this product
+cut to an area. The heights: one COG opened with the login, its overview levels, nodata and
+water marking, and the weight of a packed z13 tile. Both are written back into §3 and §6.3.
 
-### 8.4 `make drive` for a second page
+### 8.3 `make drive` for a second page
 
 *Trigger: step 6.* The 278 readings assert Lomsdal-Visten's figures. Which are structural and
 hold for any page, and which are that park's numbers, is not yet separated.
@@ -420,12 +476,26 @@ Kartverket beneath. The downloader today stores anything that answers 200 (`maps
 16963), so white would be kept as terrain and reported as coverage; the classification is a
 byte-size threshold first and a decode second.
 
+### 9.3 What Lantmäteriet's terms say — measured, 2026-09-12
+
+Every live tile service is paid; the free product is the tiles as files, with attribution; the
+height model is free under CC BY 4.0 behind the Geotorget login; Topografi 10 is free with
+attribution. All in §3, §5 and §6.3, with how each was read. The purchase Uwe was about to make
+— 10,375 kr/år for the cache service — is not needed.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, evening** — the tile source changes. Uwe's Geotorget order form showed the
+  cache service at 10,375 kr/år; measured on Geotorget, every live tile service is paid and the
+  free WMTS is z14 only and retires 2026-12-31. The free product is the same tiles as a
+  GeoPackage on anonymous FTP, a plain XYZ pyramid z0–z17 in 3857 (read from the file itself).
+  §3 rewritten; §6.1 withdraws the proxy Worker; §6.2 gains `tiles/`; §6.3's heights move
+  from WCS to the STAC COGs behind the Geotorget login; §7 and §8 follow; §8.1 (terms) settles
+  into §9.3. The two `LANTMATERIET_*_KEY` sops entries are dropped again.
 - **2026-09-12** — §7.1 names the sops entries for the Lantmäteriet credentials and the
   registration link.
 - **2026-09-12** — §5 rewritten around Lantmäteriet's *Topografi 10 Nedladdning, vektor*, which
@@ -462,6 +532,11 @@ A line per change to this document or to the decisions in it, newest first.
 | bytes per Kartverket tile | 6.76 GB over 131,033 tiles, both from the offline panel at load (`atlas` §3.3) |
 | what in the code is Norway | a read of `maps.py`, `lomsdal_visten.py`, `route_graph.py`, `deploy_map.py`, `drive_map.py` and `libs/src/trails/io/sources/` on 2026-09-11, with line numbers as they stood that day |
 | Lantmäteriet's grid, layers, ceiling, and its white outside Sweden | `atlas/docs/decisions.md` §3.7, measured 2026-09-11 |
+| which Lantmäteriet products carry a fee | Geotorget product pages rendered in Playwright Firefox (the site is a single-page app): the `Avgift`, `Villkor`, `Åtkomst` fields of the cache, WMS, vector-tile, översiktlig, raster-download, Topografi 10 and Markhöjdmodell products |
+| the FTP GeoPackage's tile matrix | `curl -r 0-67108863` off the anonymous FTP, the SQLite page count at byte 28 patched to the truncated size, then `gpkg_tile_matrix_set` and `gpkg_tile_matrix` read with `sqlite3` |
+| FTP range-read cost | five 64 KB `curl -r` reads, 3.2 s in all |
+| the STAC height API | `GET /stac-hojd/v1`, `/collections`, `/search?bbox=` without credentials; one COG opened with rasterio over `/vsicurl/`, which answered 401 |
+| the översiktlig product's zoom range | its technical description PDF v1.0.3, text extracted |
 | Topografi 10's themes, feature types and delivery | Geotorget documentation GEODOK/51, the *Kommunikation*, *Byggnadsverk* and *Åtkomst och leverans* pages, read 2026-09-12 |
 | Swedish service URLs | Naturvårdsverket's *Leder och friluftsanordningar, beskrivning av öppna data* (PDF), Lantmäteriet's and Naturvårdsverket's product pages, read 2026-09-11 |
 | DEM tile counts and pixel sizes | WebMercator tile index over the box at z8–z13; 156,543 m · cos(68.3°) / 2^z |
