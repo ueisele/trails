@@ -293,7 +293,7 @@ meridian, closer than Bergen, for which `atlas` §6.1 measured +0.2 %. Swedish s
 | protected areas, and the park lookup | Naturbase | Naturvårdsverket's *naturvårdsregistret* as nightly files (`nedladdning/naturvardsregistret/NP.zip`, `NR.zip`, … one per form, same columns: `NVRID`, `NAMN`, `SKYDDSTYP`) — Topografi 50's `skyddadnatur` draws the outlines too but carries **no name** | `naturvardsregistret.Source.find_one("Abisko")` is the park lookup: NVRID 2001225, 7,710 ha; eight forms read, every one with its outline |
 | roads | N50 | Topografi 50 `vaglinje` (five classes over the box, by width and surface — no public/private split as in N50; `vardvagnummer` is the identity, *E10*) and `ovrig_vag` | OSM as the check |
 | water | N50 Arealdekke | Topografi 50 *Tema Mark*: `mark` polygons of class `Sjö` (1,708 over the box) and `Vattendragsyta` (144) — the lakes and the rivers wide enough to draw as a surface; the narrower rivers are lines in `hydrolinje` (2,980) and carry no width. `mark_sverige.gpkg` is 5.8 GB unpacked and the box reads out of it in under a second | Torneträsk and the lakes drive the straight-walk water cost; the river surfaces are the page's river outlines, named from the lettering within 60 m (`topografi50.Source.water`, `.rivers`) |
-| place names | Stedsnavn | **Topografi 50 *Tema Text* for now**: the map's own lettering, 325 labels over the box in seven size classes — *Terrängnamn* 158, *Hydrografi* 99, *Bebyggelse* 29, the rest notices and cadastral marks. The register is *Ortnamn*, in Lantmäteriet's vector STAC (`api.lantmateriet.se/stac-vektor/v1`, collection `ortnamn`): one 58 MB GeoPackage for the country at `dl1.lantmateriet.se/namnsatt-plats/ortnamn_se.zip`, CC BY 4.0, and **403 with the login until *Ortnamn Nedladdning* is ordered** (measured 2026-09-12, as with the delivery API) | the search box and the name layers read the lettering (`topografi50.Source.labels`); Ortnamn is §8.3 |
+| place names | Stedsnavn | Lantmäteriet **Ortnamn Nedladdning, vektor** — one 58 MB GeoPackage for the country (989,302 names on 2026-09-12) at `dl1.lantmateriet.se/namnsatt-plats/ortnamn_se.zip`, the address off the keyless vector STAC (`api.lantmateriet.se/stac-vektor/v1`, item `ortnamn_se`), CC BY 4.0, rewritten nightly; **behind the Geotorget login once the product is ordered** (§9.9). A point per name with `detaljtyp` (thirteen types: terrain, lake, watercourse, part of a water, glacier, marsh, settlement, built-up area, tract, facility, cultural site, church, conservation object) and `sprak` (Swedish, four Sámi languages, Meänkieli, Finnish); no importance rank. Over the box 402 names, 242 of them North Sámi. The size a name is drawn at comes off Topografi 50's *Tema Text*, the map's own lettering (325 labels in seven size classes), joined by the same name within 500 m: 218 of 391 | `io/sources/ortnamn.py`; the name layers, the search box, the cabins' and the rivers' names read it |
 | heights | Geonorge point API, live | Lantmäteriet *Markhöjdmodell Nedladdning*: 1 m COGs through a keyless STAC API, downloads behind the Geotorget login, CC BY 4.0, **RH 2000** | §6.3 |
 | land cover | not used | Topografi 10 *Tema Mark* (`sankmark`, `kalfjäll`, forest); NMD 10 m raster exists too | Tema Mark is enough if the water cost ever wants bog |
 
@@ -644,7 +644,10 @@ this map is the reason.
    default, OSM / Topografi 50 paths / Topografi 50 marked trails / the register's state
    trails each split at the park boundary, cabins (49, 11 named — 8 off the lettering within
    150 m, 3 off OSM), the register's 24 facilities, 62 footbridges, fords and car parks, 35 OSM
-   shelters, and three name layers off the lettering (158 terrain, 99 water, 29 settlement).
+   shelters, and three name layers off the place-name register (§9.9): 391 names over the box,
+   334 drawn after thinning at 1 km — 171 terrain, 114 lakes, 43 watercourses, 30 settlements,
+   23 facilities, 5 glaciers — 218 of them at the size the map's lettering gives them, the
+   rest at the smallest; 13 cabins named, 7 off the register and 6 off OSM, 10 rivers named.
    The water grid is 1,399 × 1,292 cells, 14.1 % water, 32 kB; 128 river surfaces at 9,441
    vertices, 7 of them named; the graph payload 0.84 MB in a **3.3 MB page** (Lomsdal's is
    16.6). Five GPX files. `route_graph.py --park abisko` reports the same cached graph: the
@@ -689,15 +692,6 @@ first seen). The WFS question of step 4 is settled (§9.6): the files replace it
 *Trigger: step 6.* The 278 readings assert Lomsdal-Visten's figures. Which are structural and
 hold for any page, and which are that park's numbers, is not yet separated.
 
-### 8.3 Ortnamn is not ordered
-
-*Trigger: Uwe orders *Ortnamn Nedladdning, vektor* in Geotorget (free, unreviewed, like the
-delivery API).* The place-name register answers 403 with the login until then (§5), so the
-name layers, the search box and the cabins' names read the map's own lettering — 325 labels
-over the box against the register's every name, with a category but no feature type. Once
-ordered, `dl1.lantmateriet.se/namnsatt-plats/ortnamn_se.zip` (58 MB, the country, CC BY 4.0)
-is one loader in the shape of `markhojd`'s download, and the name legend can say peak, valley
-and lake apart as SSR's does.
 
 ---
 
@@ -780,12 +774,25 @@ resolving the built address against the page's own before it is used as a key. K
 addresses pass through the same resolution unchanged, so the first map's kept tiles keep their
 names.
 
+### 9.9 Ortnamn, behind an order — ordered and read, 2026-09-12
+
+The place-name file answered **403 with the login** in the afternoon, like the delivery API
+before its product was ordered. Uwe ordered *Ortnamn Nedladdning, vektor* at 16:05 (case
+LM2026/139881, type *Behörighet*, like the height model) and the same address answered **200**
+minutes later; the file was fetched in 8 s. Until then the name layers read the map's own
+lettering; since then they read the register, and the lettering is kept for the one thing the
+register lacks, the size a name is drawn at. `io/sources/ortnamn.py` fetches the file once with
+the login and reads the box out of it.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, later** — Ortnamn ordered by Uwe and read (§9.9): `io/sources/ortnamn.py`, the
+  name layers, the search, the cabins' and the rivers' names off the register, the lettering
+  kept for the size. §8.3 settles into §9.9.
 - **2026-09-12** — the Swedish branch of the build (§4.1, §4.4, §7 step 4): `build_sweden`
   beside `build_norway` and one `assemble` for both; `topografi50.Source` gains cabins, water,
   rivers, lettering and trail points; `maps.HeightTiles` on the provider, read by the page for
@@ -793,7 +800,7 @@ A line per change to this document or to the decisions in it, newest first.
   set rather than the whole box, for a measured reason (§6.3); `route_graph.py --park`. The
   first Abisko page built, driven in Firefox, its tile reading measured against the mosaic. On
   the way: the offline panel keyed kept tiles by a root-relative address the worker never asks
-  for (§9.8). Ortnamn answers 403 until ordered (§5, §8.3): the lettering stands in.
+  for (§9.8). Ortnamn answered 403 until ordered: the lettering stood in for an hour.
 - **2026-09-12** — the download API ordered by Uwe and the order id in sops; the loader run
   against the real API, 1.8 MB/s measured (§9.7). §8.2 settles into §9.7; §8 renumbered.
 - **2026-09-12** — §7 step 4 done: `network/sweden.py` on a shared `network/graphs.py`, with

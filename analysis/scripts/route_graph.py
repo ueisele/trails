@@ -32,7 +32,7 @@ import pandas as pd
 import shapely
 from lomsdal_visten import PARKS, Park
 from shapely.geometry import box
-from trails.io.sources import hoydedata, markhojd, naturbase, naturvardsregistret, stedsnavn, topografi50, ut
+from trails.io.sources import hoydedata, markhojd, naturbase, naturvardsregistret, ortnamn, stedsnavn, topografi50, ut
 from trails.network import graphs, norway, sweden
 from trails.routing import (
     DEFAULT_TOUCHED_M,
@@ -100,7 +100,7 @@ COUNTRIES = {
         check_route="BD 21",
         credits=(
             f"{naturvardsregistret.METADATA.name} ({naturvardsregistret.METADATA.license})",
-            f"{topografi50.METADATA.name} ({topografi50.METADATA.license})",
+            f"{topografi50.METADATA.name} ({topografi50.METADATA.license}) | {ortnamn.METADATA.name} ({ortnamn.METADATA.license})",
             f"{markhojd.METADATA.name} ({markhojd.METADATA.license}), all Lantmäteriet but the first",
             "OpenStreetMap (ODbL)",
         ),
@@ -142,7 +142,7 @@ def load_norwegian_landmarks(params: graphs.Params, codes: list[str], zone: gpd.
 
 
 def load_swedish_landmarks(params: graphs.Params, zone: gpd.GeoDataFrame, gateway: str) -> Landmarks:
-    """Load the places the main component is measured against, off Topografi 50's lettering.
+    """Load the places the main component is measured against, from Ortnamn.
 
     No quays: the box holds no coast and no boat, so the ferries' question
     is asked of nothing and answers *0 of 0*.
@@ -155,12 +155,12 @@ def load_swedish_landmarks(params: graphs.Params, zone: gpd.GeoDataFrame, gatewa
     Returns:
         The gateway and no quays
     """
-    print("\nLoading the map's own lettering (Topografi 50)...")
+    print("\nLoading place names (Ortnamn)...")
     west, south, east, north = (float(value) for value in zone.total_bounds)
-    labels = topografi50.Source(cache_dir=params.cache_dir).labels((west, south, east, north), force_download=params.force_download)
-    towns = labels[(labels["kind"] == topografi50.LABEL_SETTLEMENT) & (labels["name"] == gateway)]
+    names = ortnamn.Source(cache_dir=params.cache_dir).names((west, south, east, north), force_download=params.force_download)
+    towns = names[(names["kind"].isin(ortnamn.SETTLEMENT_TYPES)) & (names["name"] == gateway)]
     print(f"  {gateway}: {len(towns)} position(s)")
-    return Landmarks(town=towns, quays=labels.iloc[0:0])
+    return Landmarks(town=towns, quays=names.iloc[0:0])
 
 
 def reach_across(edges: gpd.GeoDataFrame, park: gpd.GeoDataFrame, metric_crs: str) -> float:

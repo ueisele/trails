@@ -120,7 +120,8 @@ from three registers instead of seven: Lantmäteriet's *Topografi 50* delivery
 login, read by box out of the country GeoPackage), Naturvårdsverket's nightly
 files — the protected areas and the trail register, `io/sources/naturvardsregistret.py`,
 no login — and OSM. Heights come off the cached 1 m model rather than a point
-service, and the page reads the same model off the height tiles `make dem` cut
+service; the place names are Lantmäteriet's *Ortnamn* (`io/sources/ortnamn.py`, the
+country file fetched once with the login); and the page reads the same model off the height tiles `make dem` cut
 (`maps.HeightTiles`, beside the provider's map tiles; the worker keeps them and
 the offline panel counts them). `analysis/docs/abisko-decisions.md` is the record.
 

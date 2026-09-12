@@ -29,7 +29,8 @@ For Abisko, five (``analysis/docs/abisko-decisions.md`` §5):
     their names, marking and description; also the park boundary, every
     protected area and the facilities along the trails
   * Topografi 50 (Lantmäteriet) - the marked trails, the worn paths, the roads,
-    the ferries, the cabins, the water, the map's own lettering
+    the ferries, the cabins, the water, and the size the map letters a name at
+  * Ortnamn (Lantmäteriet) - every place name, typed and in its language
   * OpenStreetMap via Overpass - community-mapped paths and shelters
   * Markhöjdmodell (Lantmäteriet) - the 1 m height model, read off a mosaic
     in the build and off the height tiles in the page
@@ -92,7 +93,20 @@ from trails.io.export.gpx import (
     WAYPOINT_STAGE_FIELD,
     export_to_gpx,
 )
-from trails.io.sources import geonorge, hoydedata, markhojd, n50, naturbase, naturvardsregistret, overpass, stedsnavn, topografi50, traktorvegsti, ut
+from trails.io.sources import (
+    geonorge,
+    hoydedata,
+    markhojd,
+    n50,
+    naturbase,
+    naturvardsregistret,
+    ortnamn,
+    overpass,
+    stedsnavn,
+    topografi50,
+    traktorvegsti,
+    ut,
+)
 from trails.network import graphs, norway, sweden
 from trails.network.norway import (
     FERRIES,
@@ -605,7 +619,7 @@ WINTER_POPUP_FIELDS = {
 }
 
 #: Topografi 50's cabins carry no name of their own; the name comes off the
-#: map's lettering or the register's facilities, and the row says which.
+#: place-name register or OSM, and the row says which.
 T50_CABIN_POPUP_FIELDS = {
     "name": "Name",
     "kind": "Type",
@@ -626,27 +640,52 @@ TRAIL_POINT_POPUP_FIELDS = {
     "kind": "Type",
 }
 
-#: The map's own lettering, read straight off Topografi 50's text layer.
-T50_LABEL_POPUP_FIELDS = {
-    "name": "Name",
-    "kind": "Category",
+#: Label colour per type of the place-name register, in the Norwegian
+#: palette: running water lighter than standing, terrain near-black, marsh
+#: green, ice navy, the built purple.
+ORTNAMN_COLORS = {
+    "TERRTX": "#263238",
+    "GLACIÄRTX": "#01579b",
+    "SANKTX": "#2e7d32",
+    "VATTTX": "#01579b",
+    "VATTDELTX": "#01579b",
+    "VATTDRTX": "#0288d1",
+    "BEBTX": "#7b1fa2",
+    "BEBTÄTTX": "#7b1fa2",
+    "ANLTX": "#7b1fa2",
 }
 
-#: Label colour and glyph per category of the map's lettering, and the legend
-#: rows they make. Three categories rather than SSR's fourteen types, because
-#: that is what the text layer distinguishes: a peak and a valley are both
-#: *Terrängnamn*. The names themselves say which -- *-čohkka* is a peak,
-#: *-vággi* a valley, *-jávri* a lake -- and a reader of this map learns that
-#: faster than a glyph could teach it.
-T50_NAME_STYLES = {
-    topografi50.LABEL_TERRAIN: ("terrain", "#263238", "▲"),
-    topografi50.LABEL_WATER: ("water", "#01579b", "≈"),
-    topografi50.LABEL_SETTLEMENT: ("settlements and cabins", "#7b1fa2", "⌂"),
+#: And the glyph. The register does not say whether a terrain name is a
+#: peak or a valley -- the name does, *-čohkka* a peak, *-vággi* a valley --
+#: so terrain gets one glyph where SSR's types get four.
+ORTNAMN_SYMBOLS = {
+    "TERRTX": "▲",
+    "GLACIÄRTX": "◇",
+    "SANKTX": "≋",
+    "VATTTX": "●",
+    "VATTDELTX": "●",
+    "VATTDRTX": "≈",
+    "BEBTX": "⌂",
+    "BEBTÄTTX": "⌂",
+    "ANLTX": "⌂",
 }
 
-#: The map's lettering comes in seven size classes, 1 the smallest. A pixel
-#: per class on top of the smallest size the Norwegian names are drawn at.
+#: Groups of types sharing a legend row, in the register's own order.
+ORTNAMN_LEGEND = (
+    ("terrain, glaciers and marsh", ortnamn.TERRAIN_TYPES),
+    ("lakes and rivers", ortnamn.WATER_TYPES),
+    ("settlements, cabins and facilities", ortnamn.SETTLEMENT_TYPES),
+)
+
+#: The register ranks nothing, so a name is drawn at the size the map's own
+#: lettering draws it, where the lettering has it (seven size classes, 1 the
+#: smallest; a pixel per class on top of the smallest size the Norwegian
+#: names are drawn at), and at the smallest size otherwise.
 T50_LABEL_BASE_PX = 9.0
+
+#: How far a register name may look for its lettering, by the same name. The
+#: lettering sits where the word is drawn rather than where the place is.
+LETTERING_M = 500.0
 
 #: How the register's facility types read.
 FACILITY_LABELS = {
@@ -2514,14 +2553,14 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
 
 # ---- Sweden ------------------------------------------------------------------
 
-#: How far a Topografi 50 cabin may look for its name on the map's own
-#: lettering. A label sits beside the building it names rather than on it --
-#: measured over Abisko, the register's *Abiskojaure* cabins lie 60-120 m from
-#: the word -- so this is wider than the 50 m a Norwegian cabin looks for a
-#: register point.
+#: How far a Topografi 50 cabin may look for its name in the place-name
+#: register. The register's point stands for the place and a cabin group is
+#: several buildings, so this is wider than the 50 m a Norwegian cabin looks
+#: for a register point.
 CABIN_LABEL_M = 150.0
 
-#: How far a river surface may look for its name among the map's water names.
+#: How far a river surface may look for its name among the register's
+#: watercourse names.
 T50_RIVER_NAME_M = 60.0
 
 
@@ -2576,16 +2615,27 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     bounds = bounds_of(zone)
     country = topografi50.Source(cache_dir=args.cache_dir)
 
-    print("\nLoading the map's own lettering (Topografi 50)...")
+    print("\nLoading place names (Ortnamn)...")
+    names = ortnamn.Source(cache_dir=args.cache_dir).names(bounds, force_download=args.force_download)
+    print(f"  {len(names):,} names: {names['kind_label'].value_counts().to_dict()}")
+    print(f"    {names['language'].value_counts().to_dict()}")
+    # The map's own lettering, for the size: the register ranks nothing, and
+    # the lettering is what says *Torneträsk* is written large and a tarn
+    # small. Joined by the same name within reach, since the word sits beside
+    # the place rather than on it.
     labels = country.labels(bounds, force_download=args.force_download)
-    labels["rank"] = 8 - labels["size"]
-    labels["color"] = labels["kind"].map({kind: color for kind, (_, color, _) in T50_NAME_STYLES.items()})
-    labels["symbol"] = labels["kind"].map({kind: symbol for kind, (_, _, symbol) in T50_NAME_STYLES.items()})
-    print(f"  {len(labels):,} labels: {labels['kind'].value_counts().to_dict()}")
-    highlighted = highlight(labels, args.highlight)
-    drawn_names = styled_names(labels, args.names_spacing_m, sweden.METRIC_CRS)
-    # The map's own size class, not a rank read off it: seven classes and a
-    # pixel per class, so *Torneträsk* is drawn at 16 px and a trail name at 10.
+    lettered = labels[["name", "size", "geometry"]].rename(columns={"name": "lettered"})
+    names = attach_nearest(names, lettered, {"lettered": "lettered", "size": "size"}, LETTERING_M, metric_crs=sweden.METRIC_CRS)
+    same = names["lettered"].notna() & (names["lettered"].astype("string").str.casefold() == names["name"].astype("string").str.casefold())
+    names["size"] = names["size"].where(same, 1).astype(int)
+    print(f"  {int(same.sum()):,} of them lettered on the map within {LETTERING_M:g} m, and drawn at that size")
+    names["rank"] = 8 - names["size"]
+    names["color"] = names["kind"].map(ORTNAMN_COLORS).fillna(TERRAIN_NAME_DEFAULT_COLOR)
+    names["symbol"] = names["kind"].map(ORTNAMN_SYMBOLS).fillna(TERRAIN_NAME_DEFAULT_SYMBOL)
+    highlighted = highlight(names, args.highlight)
+    drawn_names = styled_names(names, args.names_spacing_m, sweden.METRIC_CRS)
+    # A pixel per size class, so *Torneträsk* is drawn at 16 px and a name
+    # the map does not letter at 10.
     drawn_names["font_size"] = (T50_LABEL_BASE_PX + drawn_names["size"]).astype(float)
 
     print("\nLoading OpenStreetMap points...")
@@ -2599,16 +2649,16 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
 
     print("\nLoading Topografi 50 cabins...")
     cabins = country.cabins(bounds, force_download=args.force_download)
-    settlement_words = labels[labels["kind"] == topografi50.LABEL_SETTLEMENT]
-    if len(cabins) and len(settlement_words):
-        # The product draws the building and writes the name beside it as
-        # lettering, so the two are joined here by distance.
-        cabins = attach_nearest(cabins, settlement_words, {"name": "label_name"}, max_distance_m=CABIN_LABEL_M, metric_crs=sweden.METRIC_CRS)
-        cabins["name"] = cabins["label_name"]
-        cabins["named_from"] = cabins["name"].map(lambda value: "the map's lettering" if isinstance(value, str) else None)
-    from_lettering = int(cabins["name"].notna().sum()) if len(cabins) else 0
+    settlement_names = names[names["kind"].isin(ortnamn.SETTLEMENT_TYPES)]
+    if len(cabins) and len(settlement_names):
+        # The product draws the building and the register names the place,
+        # so the two are joined here by distance.
+        cabins = attach_nearest(cabins, settlement_names, {"name": "register_name"}, max_distance_m=CABIN_LABEL_M, metric_crs=sweden.METRIC_CRS)
+        cabins["name"] = cabins["register_name"]
+        cabins["named_from"] = cabins["name"].map(lambda value: "Ortnamn" if isinstance(value, str) else None)
+    from_register = int(cabins["name"].notna().sum()) if len(cabins) else 0
     if len(cabins) and len(shelters):
-        # And where the lettering says nothing, OSM: it names the STF huts and
+        # And where the register says nothing, OSM: it names the STF huts and
         # most shelters, and stands on the building rather than beside it.
         cabins = attach_nearest(
             cabins, shelters[shelters["name"].notna()], {"name": "osm_name"}, max_distance_m=args.hut_name_m, metric_crs=sweden.METRIC_CRS
@@ -2618,8 +2668,8 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         cabins.loc[from_osm, "named_from"] = "OpenStreetMap"
     named_cabins = int(cabins["name"].notna().sum()) if len(cabins) else 0
     print(
-        f"  {len(cabins):,} cabins and huts, {from_lettering} named from the lettering within {CABIN_LABEL_M:g} m, "
-        f"{named_cabins - from_lettering} more from OSM within {args.hut_name_m:g} m"
+        f"  {len(cabins):,} cabins and huts, {from_register} named from the register within {CABIN_LABEL_M:g} m, "
+        f"{named_cabins - from_register} more from OSM within {args.hut_name_m:g} m"
     )
     if len(cabins):
         print(f"    {cabins['kind'].value_counts().to_dict()}")
@@ -2643,14 +2693,14 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     water = gpd.clip(country.water(bounds, force_download=args.force_download), box(*bounds))
     print(f"  {len(water):,} outlines: {water[topografi50.TYPE].value_counts().to_dict() if len(water) else {}}")
     # The rivers drawn as a surface, for what a straight walk wades through
-    # and how wide it is there; named from the map's water lettering where
-    # a word lies within reach, said as *a river* otherwise.
+    # and how wide it is there; named from the register's watercourse names
+    # where one lies within reach, said as *a river* otherwise.
     rivers = gpd.clip(country.rivers(bounds, force_download=args.force_download), box(*bounds))
-    water_words = labels[labels["kind"] == topografi50.LABEL_WATER]
-    rivers["name"] = attach_nearest(rivers.drop(columns=["name"]), water_words, {"name": "name"}, T50_RIVER_NAME_M, metric_crs=sweden.METRIC_CRS)[
+    river_names = names[names["kind"] == "VATTDRTX"]
+    rivers["name"] = attach_nearest(rivers.drop(columns=["name"]), river_names, {"name": "name"}, T50_RIVER_NAME_M, metric_crs=sweden.METRIC_CRS)[
         "name"
     ]
-    print(f"  {len(rivers):,} rivers as outlines, {int(rivers['name'].notna().sum()):,} of them named from the lettering")
+    print(f"  {len(rivers):,} rivers as outlines, {int(rivers['name'].notna().sum()):,} of them named from the register")
 
     layers = [
         # Roads first and muted, as in Norway: how you get to the start.
@@ -2706,11 +2756,17 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         ),
         PointLayer(places, "Towns and villages [OSM]", "#37474f", PLACE_POPUP_FIELDS, "settlement", "OSM", pin=False, color="#37474f"),
     ]
-    names = [
-        NameLayer(drawn_names[drawn_names["kind"] == kind], f"Name {symbol} {label} — {kind} [Topografi 50]", color)
-        for kind, (label, color, symbol) in T50_NAME_STYLES.items()
-        if len(drawn_names) and (drawn_names["kind"] == kind).any()
-    ]
+    name_layers: list[NameLayer] = []
+    if len(drawn_names):
+        drawn_kinds = set(drawn_names["kind"])
+        for label, kinds in ORTNAMN_LEGEND:
+            present = [kind for kind in kinds if kind in drawn_kinds]
+            if not present:
+                continue
+            part = drawn_names[drawn_names["kind"].isin(present)]
+            glyphs = dict.fromkeys(ORTNAMN_SYMBOLS.get(kind, TERRAIN_NAME_DEFAULT_SYMBOL) for kind in present)
+            heading = f"Name {' '.join(glyphs)} {label} — {', '.join(ortnamn.type_label(kind) for kind in present)} [Ortnamn]"
+            name_layers.append(NameLayer(part, heading, ORTNAMN_COLORS[present[0]]))
 
     credits = Credits(
         sources=source_credits(loaded.versions, SWEDEN_SOURCE_TERMS, SWEDEN_SOURCE_METADATA),
@@ -2734,7 +2790,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         tracks=tracks,
         layers=layers,
         points=points,
-        names=names,
+        names=name_layers,
         highlighted=highlighted,
         water=water,
         rivers=rivers,
