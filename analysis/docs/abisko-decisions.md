@@ -22,8 +22,8 @@ written as its own country module, `network/sweden.py`, beside `network/norway.p
 exactly the half `atlas` §2 says is *carried as code*. What is thrown away later is the document
 build, and that already exists. Nothing written for Abisko is written twice.
 
-**The one input this decision waits on: the date of the trip.** It decides how much of §7 must
-be done before departure and how much may follow.
+**There is no deadline.** Uwe, 2026-09-12: the date of the trip plays no part, and the work is
+done without trading quality for time. §7 is the order, not a schedule.
 
 ---
 
@@ -452,11 +452,7 @@ Step 3's tile copy needs no credential and can start now; steps 4 and 5 need the
 Triggers, not deadlines — the convention `atlas` §9 and `pipeline/TODO.md` use. When an item is
 settled, move it to §9 with the date and what settled it.
 
-### 8.1 The date of the trip
-
-Decides how much of §7 is before departure. Unknown as of 2026-09-12.
-
-### 8.2 What the first builds measure
+### 8.1 What the first builds measure
 
 *Trigger: step 3 and step 5.* The tile copy: seconds per tile over FTP with a persistent
 connection, bytes per zoom for the `WEIGHT` table, and whether Geotorget offers this product
@@ -467,7 +463,7 @@ two sheets, and it has not been checked. Also how often the FTP files are refres
 levels, nodata and water marking, and the weight of a packed z13 tile. All written back into
 §3 and §6.3.
 
-### 8.3 `make drive` for a second page
+### 8.2 `make drive` for a second page
 
 *Trigger: step 6.* The 278 readings assert Lomsdal-Visten's figures. Which are structural and
 hold for any page, and which are that park's numbers, is not yet separated.
@@ -502,12 +498,19 @@ height model is free under CC BY 4.0 behind the Geotorget login; Topografi 10 is
 attribution. All in §3, §5 and §6.3, with how each was read. The purchase Uwe was about to make
 — 10,375 kr/år for the cache service — is not needed.
 
+### 9.4 The date of the trip — does not matter, 2026-09-12
+
+Uwe: no deadline, and no quality given up for one. Everything in §7 is done properly and in
+order.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the trip date is dropped as an input (§1, §9.4): no deadline, no shortcuts.
+  §8 renumbered.
 - **2026-09-12** — both Geotorget orders placed, Topografi 50 (Abonnemang, Sverige) and
   Markhöjdmodell Nedladdning, and the login is in `home/trails-map`'s sops file — written from
   forge over ssh with `sops set --value-stdin`, since forge can decrypt that module. Step 1 of §7
