@@ -466,6 +466,12 @@ var FLAGS = "flags";
 // the way in and report success.
 var KEPT = "tiles";
 var SEEN = "browse";
+//: Under which prefixes the kept tiles were fetched -- the panel writes it when
+//: a run completes. A new stand of a tree is a new version segment, so after
+//: an update the page asks under a prefix nothing was kept under yet; a miss
+//: there is looked up under the old one, and the map the reader kept goes on
+//: drawing with the old ground until Keep replaces it (decisions §9.21).
+var STAND = "stand";
 var opened = null;
 
 function base() {
@@ -913,9 +919,34 @@ function within(ms, work, fallback) {
     ]);
 }
 
+function prefixOf(plain) {
+    if (plain.indexOf(TILE_PREFIX) === 0) { return TILE_PREFIX; }
+    if (HEIGHT_PREFIX && plain.indexOf(HEIGHT_PREFIX) === 0) { return HEIGHT_PREFIX; }
+    return null;
+}
+
+// The prefix the kept tiles of this kind were fetched under, where it is not
+// the one the page names now.
+function olderPrefix(stand, now) {
+    if (!stand || !now) { return null; }
+    var was = now === TILE_PREFIX ? stand.tiles : stand.heights;
+    return was && was !== now ? was : null;
+}
+
+function keptFor(plain) {
+    return read(KEPT, plain).then(function (body) {
+        if (body) { return body; }
+        var now = prefixOf(plain);
+        return read(FLAGS, STAND).then(function (stand) {
+            var was = olderPrefix(stand, now);
+            return was ? read(KEPT, was + plain.slice(now.length)) : null;
+        });
+    });
+}
+
 function tileFor(request) {
     var plain = request.url.split("?")[0];
-    return within(4000, Promise.all([read(KEPT, plain), offlineNow()]), [null, false])
+    return within(4000, Promise.all([keptFor(plain), offlineNow()]), [null, false])
         .then(function (two) {
             if (two[0]) { tally("db"); return new Response(two[0]); }
             var off = two[1];
@@ -17126,6 +17157,11 @@ class _OfflinePanel(MacroElement):
                 // The two tile stores, named as the worker names them.
                 var KEPT = 'tiles';
                 var SEEN = 'browse';
+                // Under which prefixes the kept tiles were fetched; the worker
+                // reads it to answer a miss under a newer stand with the old
+                // tile of the same place (decisions §9.21).
+                var STAND = 'stand';
+                var TILE_PREFIX = new URL({{ this.tile_prefix_json }}, location.href).href;
 
                 function db() {
                     if (!window.indexedDB) { return Promise.reject(new Error('no database')); }
@@ -17192,6 +17228,53 @@ class _OfflinePanel(MacroElement):
                     }).catch(function () { return false; });
                 }
 
+                function dbDelete(store, key) {
+                    return db().then(function (open) {
+                        return new Promise(function (done) {
+                            var deal = open.transaction(store, 'readwrite');
+                            deal.objectStore(store).delete(key);
+                            deal.oncomplete = function () { done(true); };
+                            deal.onerror = function () { done(false); };
+                        });
+                    }).catch(function () { return false; });
+                }
+
+                // Every key under a prefix, gone: what is left of an older
+                // stand once a run has replaced the tiles it wanted.
+                function dbSweep(store, prefix) {
+                    if (!prefix) { return Promise.resolve(0); }
+                    return db().then(function (open) {
+                        return new Promise(function (done) {
+                            var gone = 0;
+                            var deal = open.transaction(store, 'readwrite');
+                            var walk = deal.objectStore(store).delete(IDBKeyRange.bound(prefix, prefix + '\uffff', false, true));
+                            walk.onsuccess = function () { gone = 1; };
+                            deal.oncomplete = function () { done(gone); };
+                            deal.onerror = function () { done(gone); };
+                        });
+                    }).catch(function () { return 0; });
+                }
+
+                // The prefixes the page names now, one per kind of tile.
+                function prefixes() {
+                    return {
+                        tiles: TILE_PREFIX,
+                        heights: HEIGHTS ? new URL(HEIGHTS.url.split('{z}')[0], location.href).href : null
+                    };
+                }
+
+                // Which kept prefixes are not the page's any more, or null.
+                function staleOf(stand) {
+                    if (!stand) { return null; }
+                    var now = prefixes(), out = null;
+                    if (stand.tiles && stand.tiles !== now.tiles) { out = {tiles: stand.tiles, heights: null}; }
+                    if (now.heights && stand.heights && stand.heights !== now.heights) {
+                        out = out || {tiles: null, heights: null};
+                        out.heights = stand.heights;
+                    }
+                    return out;
+                }
+
                 // **Written down, not counted out.** This was `cache.keys()` over
                 // the whole terrain cache -- one `Request` object per tile -- on
                 // every `refresh`: on load, on the switch, and every time the
@@ -17207,12 +17290,17 @@ class _OfflinePanel(MacroElement):
                 // the one wrong answer that costs bytes: it invites a reader with
                 // a full cache to download it again.
                 function kept() {
-                    var none = {tiles: 0, bytes: 0, top: 0, known: false};
+                    var none = {tiles: 0, bytes: 0, top: 0, known: false, stale: null};
                     if (!window.caches) { return Promise.resolve(none); }
-                    return dbRead('flags', HELD).then(function (held) {
+                    return Promise.all([dbRead('flags', HELD), dbRead('flags', STAND)]).then(function (both) {
+                        var held = both[0], stand = both[1];
                         if (!held) { return none; }
+                        // **Kept before stands were written down**: the tiles
+                        // are the page's own stand, which is written down now so
+                        // a later stand can tell them apart.
+                        if (!stand) { stand = prefixes(); dbWrite('flags', STAND, stand); }
                         return {tiles: held.tiles || 0, bytes: held.bytes || 0,
-                                top: held.top || 0, known: true};
+                                top: held.top || 0, known: true, stale: staleOf(stand)};
                     }).catch(function () { return none; });
                 }
 
@@ -17222,8 +17310,11 @@ class _OfflinePanel(MacroElement):
                 // a reader who kept two that do not overlap is undercounted until
                 // either is run again, which is the safe way to be wrong -- it
                 // never claims ground that is not there.
-                function note(tiles, bytes, top) {
+                function note(tiles, bytes, top, afresh) {
                     return dbRead('flags', HELD).then(function (was) {
+                        // A run that replaces an older stand is the whole
+                        // figure, not the larger of two stands.
+                        if (afresh) { was = null; }
                         return dbWrite('flags', HELD, {
                             tiles: Math.max((was && was.tiles) || 0, tiles),
                             bytes: Math.max((was && was.bytes) || 0, bytes),
@@ -17643,9 +17734,21 @@ class _OfflinePanel(MacroElement):
                     // and it is not a re-download.
                     var state = {total: walk.total, done: 0, counted: true, failed: 0, absent: 0,
                                  held: 0, added: 0, bytes: 0, top: 0,
-                                 stop: false, done_: null};
+                                 stop: false, done_: null, stale: null};
                     working = state;
-                    state.done_ = Promise.resolve().then(function () {
+                    // **An older stand is replaced tile by tile.** Every tile
+                    // this run fetches under the page's prefix takes the place
+                    // of the one kept under the old, so the store never holds
+                    // two stands of the same ground; what the run did not ask
+                    // for is swept once it has completed.
+                    function replacing(next) {
+                        var was = state.stale && (next.ground ? state.stale.heights : state.stale.tiles);
+                        if (!was) { return Promise.resolve(false); }
+                        var now = next.ground ? prefixes().heights : prefixes().tiles;
+                        return dbDelete(KEPT, was + next.url.slice(now.length));
+                    }
+                    state.done_ = kept().then(function (had) {
+                        state.stale = had.stale;
                         // How many have refused in a row. Shared by all six
                         // runners on purpose: it is the connection being
                         // measured, not any one of them.
@@ -17664,7 +17767,7 @@ class _OfflinePanel(MacroElement):
                                         kept = true;
                                         return answer.blob().then(function (body) {
                                             return dbWrite(KEPT, next.url, body);
-                                        });
+                                        }).then(function () { return replacing(next); });
                                     }
                                     // **Not there is not refused.** A 404 is the
                                     // source's answer, given at once and the same
@@ -17721,7 +17824,16 @@ class _OfflinePanel(MacroElement):
                         var runners = [], i;
                         for (i = 0; i < 6; i += 1) { runners.push(one()); }
                         return Promise.all(runners).then(function () {
-                            return note(state.held + state.added, state.bytes, state.top);
+                            return note(state.held + state.added, state.bytes, state.top, !!state.stale);
+                        }).then(function () {
+                            // Completed, not stopped: the kept tiles are the
+                            // page's stand now, and what the old stand still
+                            // holds beyond this selection goes with it. A run
+                            // that stopped leaves the old stand written down,
+                            // so the worker goes on answering from it.
+                            if (state.stop || !state.stale) { return null; }
+                            return Promise.all([dbSweep(KEPT, state.stale.tiles), dbSweep(KEPT, state.stale.heights)])
+                                .then(function () { return dbWrite('flags', STAND, prefixes()); });
                         });
                     }).then(function () {
                         working = null;
@@ -18346,6 +18458,12 @@ class _OfflinePanel(MacroElement):
                             ? 'Keeping ' + count(working.done) + ' of ' + count(working.total) +
                               (working.failed ? ' \\u00b7 ' + working.failed + ' refused' : '')
                             : 'Checking what is already kept\\u2026';
+                    } else if (have.kept && have.kept.stale) {
+                        // **Said before the figures, because the figures are of
+                        // the old stand.** The map still draws offline from it;
+                        // Keep is what brings the new ground in.
+                        said.figures.textContent = 'Kept from an older stand of the map \\u2014 it still draws offline, ' +
+                            'with the old ground. Keep loads the new tiles and drops the old as it goes.';
                     } else if (lastRun && lastRun.offline) {
                         said.figures.textContent = 'No connection \\u2014 nothing was tried, and nothing ' +
                             'was spent looking. Try again where there is signal.';
@@ -18515,7 +18633,10 @@ class _OfflinePanel(MacroElement):
                     toggle: toggle,
                     keep: keep,
                     stop: function () { if (working) { working.stop = true; } },
-                    forget: forget
+                    forget: forget,
+                    // The prefixes the page names, for a check that stages an
+                    // older stand of the kept tiles.
+                    prefixes: prefixes
                 };
 
                 window.setTimeout(refresh, 0);
@@ -18536,6 +18657,7 @@ class _OfflinePanel(MacroElement):
         self.top = provider.top
         self.weight_json = _script_json({str(zoom): bytes_ for zoom, bytes_ in provider.weight.items()})
         self.heights_json = _script_json(provider.heights.as_settings() if provider.heights else None)
+        self.tile_prefix_json = _script_json(provider.tiles)
         extent = provider.extent
         self.extent_json = _script_json({"w": extent[0], "s": extent[1], "e": extent[2], "n": extent[3]} if extent else None)
         self.database = companions.database

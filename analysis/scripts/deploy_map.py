@@ -449,6 +449,53 @@ def publish_trees(names: list[str], output_dir: Path, config: dict[str, str], dr
                 upload_index(index, prefix, config)
 
 
+def drop_tree(prefix: str, output_dir: Path, config: dict[str, str], dry_run: bool) -> None:
+    """Delete one version of a tree from the bucket.
+
+    **The one deletion the deploy knows, and it is a decision rather than a
+    step.** A new stand of the tiles goes up as a new version beside the old
+    (decisions §9.20); the old one stays for every phone that kept it and for
+    every installed page that still names it, and comes down when Uwe says
+    so -- 700 MB a stand. Two guards: the prefix must be a version directory
+    of a tree this script knows, and it may not be the version the tree on
+    disk says is current, which is the one the next page build draws.
+
+    Args:
+        prefix: The version directory's key prefix, ``tiles/<provider>/<sheet>/<n>``
+        output_dir: Where the trees are built, to read which version is current
+        config: The bucket and endpoint
+        dry_run: Say what would go and delete nothing
+
+    Raises:
+        SystemExit: If the prefix is not a version of a known tree, is the
+            current version, or the deletion fails
+    """
+    clean = prefix.strip("/")
+    parts = clean.split("/")
+    if parts[0] not in TREES or len(parts) < 3 or not parts[-1].isdigit():
+        sys.exit(f"{prefix} is not a version directory of a tree ({', '.join(TREES)}): expected <tree>/<provider>/.../<number>")
+    from trails.io.sources import lantmateriet
+
+    root = output_dir / Path(*parts[:-1])
+    current = lantmateriet.current_version(root)
+    if current is not None and int(parts[-1]) == current:
+        sys.exit(f"{clean} is the version the tree at {root} calls current, which the next page build draws — not deleted.")
+    bucket = config["TRAILS_MAP_BUCKET"]
+    if dry_run:
+        print(f"Would delete s3://{bucket}/{clean}/ recursively")
+        return
+    print(f"🗑️  Deleting s3://{bucket}/{clean}/ ...", flush=True)
+    try:
+        subprocess.run(
+            [*_aws(config), "rm", f"s3://{bucket}/{clean}/", "--recursive", "--only-show-errors"], check=True, env={**os.environ, **CHECKSUM_ENV}
+        )
+    except FileNotFoundError:
+        sys.exit("aws (the AWS CLI) is not installed — it is what talks to R2's S3 API.")
+    except subprocess.CalledProcessError as error:
+        sys.exit(f"aws s3 rm failed with exit status {error.returncode}.")
+    print(f"✅ {clean}/ is gone from the bucket; the directory {root / parts[-1]} on disk is yours to remove.")
+
+
 def purge(urls: list[str], config: dict[str, str]) -> None:
     """Drop the map from Cloudflare's edge cache.
 
@@ -505,6 +552,12 @@ def main() -> None:
         default=str(repo_root / "analysis" / "output"),
         help="Directory the built map and the trees are read from",
     )
+    parser.add_argument(
+        "--drop-tree",
+        default=None,
+        metavar="PREFIX",
+        help="Delete one version of a tree from the bucket, e.g. tiles/lantmateriet/topowebb/1; refused for the version the built page draws",
+    )
     parser.add_argument("--no-purge", action="store_true", help="Upload without purging the edge")
     parser.add_argument("--dry-run", action="store_true", help="Say what would happen and change nothing")
     parser.add_argument(
@@ -515,6 +568,12 @@ def main() -> None:
     args = parser.parse_args()
 
     trees = list(dict.fromkeys(args.tree))
+    if args.drop_tree is not None:
+        if trees or args.map is not None:
+            sys.exit("--drop-tree stands alone: it deletes, and nothing else should ride on the same command.")
+        load_env_file(Path(args.env_file))
+        drop_tree(args.drop_tree, Path(args.output_dir), settings(SETTINGS), args.dry_run)
+        return
     name = args.map if args.map is not None else (None if trees else "lomsdal-visten")
     purging = name is not None and not args.no_purge
 

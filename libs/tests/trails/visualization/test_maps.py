@@ -288,7 +288,7 @@ class TestOfflineWorker:
         # Looked at in that order: what was asked for answers before what was
         # seen, so a trimmed tile never shadows a kept one.
         tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
-        assert tile.index("read(KEPT, plain)") < tile.index("read(SEEN, plain)")
+        assert tile.index("keptFor(plain)") < tile.index("read(SEEN, plain)")
         # And the trim runs over the opportunistic store and only that one.
         trimming = maps.SERVICE_WORKER.split("function trim()")[1].split("\nfunction ")[0]
         assert "SEEN" in trimming and "KEPT" not in trimming
@@ -1574,7 +1574,7 @@ class TestNothingGrowsWithTheDownload:
         and answering *0 tiles kept* is the one wrong answer that costs bytes —
         it invites a reader with everything to download it again."""
         html = self.rendered()
-        assert "var none = {tiles: 0, bytes: 0, top: 0, known: false};" in html
+        assert "var none = {tiles: 0, bytes: 0, top: 0, known: false, stale: null};" in html
         assert "kept tiles not counted" in html
         # And the switch's guard asks for a tile rather than for a count, because
         # what it wants to know is whether there is anything at all.
@@ -1616,7 +1616,7 @@ class TestTheSheetCarriesAToken:
         ground still draws under its new address."""
         assert 'var plain = request.url.split("?")[0];' in maps.SERVICE_WORKER
         tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
-        assert "read(KEPT, plain)" in tile
+        assert "keptFor(plain)" in tile
         assert "read(SEEN, plain)" in tile
         # Stored without it too, or a second token would orphan what the first
         # one wrote.
@@ -2017,6 +2017,24 @@ class TestTwoMapsOnOneOrigin:
         # Kartverket answers everywhere, so it has no edge to clip to.
         assert lantmateriet.extent == (18.15, 68.17, 19.00, 68.46)
         assert kartverket.extent is None
+
+    def test_a_kept_tile_of_an_older_stand_answers_until_keep_replaces_it(self, tmp_path):
+        """A new stand is a new prefix; the panel writes down which prefixes
+        the kept tiles came from, the worker looks a miss up under the old
+        one, and a completed Keep sweeps the old stand and moves the flag."""
+        page, companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        worker = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
+        assert 'var STAND = "stand";' in worker
+        assert "return was ? read(KEPT, was + plain.slice(now.length)) : null;" in worker
+        assert "Promise.all([keptFor(plain), offlineNow()])" in worker
+        assert "var STAND = 'stand';" in html
+        assert 'var TILE_PREFIX = new URL("/tiles/lantmateriet/topowebb/1/", location.href).href;' in html
+        assert "if (!stand) { stand = prefixes(); dbWrite('flags', STAND, stand); }" in html, "a store from before is the page's own stand"
+        assert "}).then(function () { return replacing(next); });" in html, "a fetched tile takes the old one's place"
+        assert "if (state.stop || !state.stale) { return null; }" in html, "a stopped run leaves the old stand written down"
+        assert ".then(function () { return dbWrite('flags', STAND, prefixes()); });" in html
+        assert "Kept from an older stand of the map" in html
 
     def test_a_tile_tree_version_reaches_the_provider_the_layer_and_the_page(self, tmp_path):
         """A new stand of Lantmäteriet's file is a new version segment; the

@@ -512,6 +512,42 @@ DRAWN = """
   const chained = drawn.filter(l => (l.options.className || '').indexOf('trail-group-') === 0);
 """
 
+#: Move every kept map tile under a prefix the page does not name and point the
+#: stand flag at it -- what a page built on the next version of the tree finds.
+#: The keys sort before the page's own, so the cursor never meets what it put.
+STAGE_OLD_STAND = """async () => {
+  const prefix = window.trailsOffline.prefixes().tiles;
+  const old = prefix.slice(0, -1) + '-old/';
+  const db = await new Promise((done, fail) => {
+    const ask = indexedDB.open('__DB__', 2); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
+  return await new Promise((done) => {
+    const tx = db.transaction(['tiles', 'flags'], 'readwrite'); const store = tx.objectStore('tiles');
+    let moved = 0, sample = null;
+    const all = store.openCursor();
+    all.onsuccess = () => { const c = all.result; if (!c) { return; } const k = c.key;
+      if (k.indexOf(prefix) === 0) { store.put(c.value, old + k.slice(prefix.length)); store.delete(k); moved += 1; if (!sample) { sample = k; } }
+      c.continue(); };
+    tx.objectStore('flags').put({tiles: old, heights: window.trailsOffline.prefixes().heights}, 'stand');
+    tx.oncomplete = () => { db.close(); done({moved: moved, sample: sample, old: old, prefix: prefix}); };
+  });
+}"""
+
+#: How many kept tiles sit under the old prefix and under the page's, and the flag.
+COUNT_STANDS = """async (old) => {
+  const prefix = window.trailsOffline.prefixes().tiles;
+  const db = await new Promise((done, fail) => {
+    const ask = indexedDB.open('__DB__', 2); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
+  return await new Promise((done) => {
+    const tx = db.transaction(['tiles', 'flags']); const store = tx.objectStore('tiles'); const out = {old: 0, now: 0, stand: null};
+    const all = store.openKeyCursor();
+    all.onsuccess = () => { const c = all.result; if (!c) { return; }
+      if (c.key.indexOf(old) === 0) { out.old += 1; } else if (c.key.indexOf(prefix) === 0) { out.now += 1; }
+      c.continue(); };
+    const f = tx.objectStore('flags').get('stand'); f.onsuccess = () => { out.stand = f.result || null; };
+    tx.oncomplete = () => { db.close(); done(out); };
+  });
+}"""
+
 WHOLE_MAP = with_map(
     """() => {"""
     + DRAWN
@@ -8045,6 +8081,50 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             Reading("ground that was not kept comes back blank", unkept["blank"] > 0, True, note=f"{unkept['blank']} of {unkept['tiles']}")
         )
         terrain.append(Reading("and still threw nothing", len(thrown), 0, note="; ".join(thrown[:2])))
+
+        # **A new stand of the tiles is a new prefix, and what was kept under
+        # the old one goes on answering** (decisions §9.21). Staged here on
+        # the tiles this page kept: every kept map tile is moved under a prefix
+        # the page does not name and the stand flag set to it, as a page built
+        # on the next version would find them; the panel must say so, the
+        # worker must answer a miss under the page's prefix from the old
+        # stand while offline, and a Keep run must replace them and sweep.
+        staged = second.evaluate(in_db(STAGE_OLD_STAND))
+        second.reload(timeout=120_000)
+        second.wait_for_function(
+            "() => window.trailsOffline && window.trailsOffline.state().kept && window.trailsOffline.state().kept.known", timeout=60_000
+        )
+        stale = second.evaluate("() => window.trailsOffline.state().kept.stale")
+        answered = second.evaluate("(url) => fetch(url).then(r => r.blob()).then(b => b.size)", staged["sample"])
+        terrain.append(
+            Reading(
+                "kept under an older stand, the panel says so",
+                (stale or {}).get("tiles"),
+                staged["old"],
+                note=f"{staged['moved']} tiles moved under it",
+            )
+        )
+        terrain.append(Reading("and offline the old stand answers for the new address", answered > 1000, True, note=f"{answered} bytes"))
+        context.set_offline(False)
+        # A small selection -- a triangle two kilometres across where the
+        # reader stands, a few dozen tiles with the margin -- so the run
+        # that replaces the stand is not a valley's worth from Kartverket;
+        # what the old stand held beyond it is what the sweep is for. Drawn
+        # again, because the ring did not survive the reload, and the chooser
+        # floors every scope at z14.
+        lat, lng = SCENE.standing
+        second.evaluate(
+            "async (ring) => { await window.trailsOffline.area(ring); await window.trailsOffline.choose('draw', 14); }",
+            [[lat, lng], [lat + 0.02, lng], [lat, lng + 0.05]],
+        )
+        second.evaluate("() => { window.trailsOffline.keep(); }")
+        second.wait_for_timeout(1500)
+        second.wait_for_function("() => !window.trailsOffline.state().busy", timeout=240_000)
+        replaced = second.evaluate(in_db(COUNT_STANDS), staged["old"])
+        terrain.append(Reading("keep again leaves nothing of the older stand", replaced["old"], 0, note=f"{staged['moved']} were under it"))
+        terrain.append(Reading("and the page's stand holds the new selection", replaced["now"] > 0, True, note=f"{replaced['now']} tiles"))
+        terrain.append(Reading("and the stand is written down", (replaced["stand"] or {}).get("tiles"), staged["prefix"]))
+        context.set_offline(True)
         # And the reader can have the space back from inside the thing that took
         # it, which is the last of the four this panel is for.
         emptied = second.evaluate("async () => { var s = await window.trailsOffline.forget(); return {tiles: s.kept.tiles, on: s.on}; }")

@@ -1120,12 +1120,42 @@ chain follows: copy (a quarter of an hour), page on the new version, `just deplo
 from the bucket, which is a decision (700 MB a stand) and a hand's work with `aws s3 rm`. §8.1's
 FTP-cadence question is closed by this: whenever the stand moves, the next `make` follows it.
 
+### 9.21 Kept tiles across a new stand, and dropping an old one — settled, 2026-09-12
+
+Uwe's two questions after §9.20: *how do I update the tiles in the app when I have them
+offline, and why must they stay online if I have them offline?* The first found a gap the
+versioning had opened: the panel keeps tiles under their full address, so a page naming `/2/`
+found nothing under it, drew the worker's blank offline, and its kept figure still said
+everything was there. Now the panel writes down which prefixes the kept tiles came from
+(`flags/stand`; a store from before is taken as the page's own stand and written down on the
+first read), and **a miss under the page's prefix is answered by the worker with the tile of
+the same place under the old one**, so the map goes on drawing offline with the old ground.
+The panel says so — *kept from an older stand of the map; Keep loads the new tiles and drops
+the old as it goes* — and a Keep run replaces the tiles one by one (each fetched tile deletes
+its old counterpart, so the store never holds two stands of one place), sweeps what the old
+stand held beyond the selection when it completes, and moves the flag; a run that stopped
+leaves the flag on the old stand so the worker keeps answering from it. Measured on the built
+page served locally, Firefox: 2,343 tiles kept at z14; every map tile moved to `/0/` and the
+flag set to it; the page reads the stand as stale; offline, a fetch of a `/1/` address answered
+26,042 bytes from the `/0/` entry; Keep again: 0 under `/0/`, 1,963 under `/1/`, flag on `/1/`.
+
+The second: they need not. Once every device has loaded the new page, the old tree serves
+nobody; until then an installed page that has not refreshed still names it when browsing
+online. Dropping it is a decision, so it is an option and not a step: `command make deploy
+ARGS="--drop-tree tiles/lantmateriet/topowebb/1"` deletes that version from the bucket,
+refuses anything that is not a version directory of a known tree, and refuses the version the
+tree on disk calls current — the one the next page build draws. The directory on disk is left
+to be removed by hand.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, after that** — kept tiles survive a new stand (§9.21): the worker answers a
+  miss from the old stand, Keep replaces and sweeps; `deploy --drop-tree` deletes an old
+  version from the bucket, never the current one. Republish pending Uwe's word.
 - **2026-09-12, last of all** — a new stand of the tiles is a new version chosen by `make tiles`
   itself, and the page draws the newest complete one (§9.20); §8.1 loses its cadence question.
 - **2026-09-12, last** — the two tap checks driven on Abisko's ground (§9.19): a tap beside the
