@@ -30,8 +30,8 @@ be done before departure and how much may follow.
 ## 2. The area
 
 Stated by Uwe, 2026-09-11, amended 2026-09-12: west to the Norwegian border, **and no Norwegian
-ground is needed**; south to and including Áhpparjávri; north to Kedketjårro; east to where
-Rautasjaure begins; Björkliden must be inside.
+ground is needed**; south to and including Áhpparjávri; north to Kedketjårro, **and the E10 must
+be inside whole**; east to where Rautasjaure begins; Björkliden must be inside.
 
 Geocoded 2026-09-11 through Nominatim (OSM) and Lantmäteriet's own place-name search
 (`minkarta.lantmateriet.se/api/searchservice/searchinput?searchtext=…`, SWEREF99 TM, converted):
@@ -42,7 +42,8 @@ Geocoded 2026-09-11 through Nominatim (OSM) and Lantmäteriet's own place-name s
 | south | Áhpparjávri (lake) | 68.200 N, 18.612 E | **68.17 N**, so the lake is whole |
 | east | Rautasjaure (lake), its western tip | lake spans 68.074–68.169 N, **18.994**–19.378 E (OSM relation 1554525) | **19.00 E** |
 | inside | Paddus (peak) | 68.319 N, 18.865 E | the earlier east marker; now 6 km inside the edge |
-| north | Kedketjårro | **not found** — see §8.1 | **68.55 N assumed** |
+| north | the E10, whole | its northernmost point inside the box is **68.443 N**, 18.609 E, on the Torneträsk shore; west of the box it climbs to 68.509 N on the Norwegian side | **68.46 N**, 1.9 km of margin above the road |
+| north, still open | Kedketjårro | **not found** — see §8.1 | moves the edge north only if it lies above 68.46 N |
 | inside | Björkliden (station) | 68.407 N, 18.686 E | — |
 | inside | Abisko (village) | 68.350 N, 18.830 E | — |
 | inside | Abisko nationalpark | 68.327 N, 18.701 E | the park the build looks up by name |
@@ -57,16 +58,16 @@ Lantmäteriet paints opaque white (`atlas` §3.7). So a north edge at or below a
 what lets Abisko skip the two-provider stacking of `atlas` §3.5 entirely; a north edge above it
 brings that mechanism back (§8.2), or costs a west edge moved east to keep Norway out.
 
-Size, computed for the three candidate north edges, WebMercator tile counts over the box
-18.15–19.00 E, 68.17 N to the north edge:
+Size, computed for the north edge the E10 sets and for two further north in case Kedketjårro
+asks for it, WebMercator tile counts over the box 18.15–19.00 E, 68.17 N to the north edge:
 
 | north edge | area | tiles z11 | z14 | **z16** | z18 |
 |---|---|---|---|---|---|
+| **68.46 N** (the E10) | 1,126 km² | 30 | 1,443 | **22,320** | 355,260 |
 | 68.50 N | 1,280 km² | 36 | 1,638 | **25,265** | 404,240 |
-| **68.55 N** | 1,473 km² | 42 | 1,872 | **29,140** | 466,240 |
-| 68.60 N | 1,665 km² | 48 | 2,106 | **33,015** | 527,620 |
+| 68.55 N | 1,473 km² | 42 | 1,872 | **29,140** | 466,240 |
 
-About a fifth of Lomsdal-Visten's box (131,033 tiles at z16, `atlas` §3.3). At Kartverket's
+About a sixth of Lomsdal-Visten's box (131,033 tiles at z16, `atlas` §3.3). At Kartverket's
 measured weight of about 50 KB a tile the whole map at z16 would be roughly 1.5 GB; Lantmäteriet's
 PNGs measured smaller (20.7 KB inside Sweden at z13, `atlas` §3.7), so expect less. The `WEIGHT`
 table has to be re-measured for the new provider anyway (§4.2).
@@ -259,8 +260,9 @@ listed), not in Lantmäteriet's place-name search under `Kedketjårro`, `Kädket
 nor under the North Sami form `Geađgečorru` (Sami *geađgi*, stone; *čorru*, ridge — the pattern
 that turns `Lullehačorru` into `Lullehatjårro`). The only `-tjårro` hit near Abisko is
 Adnjetjårro at 68.212 N, 18.655 E, which is south, not north. **Needs Uwe:** a coordinate, a
-neighbour, or the map it was read from. Until then the north edge is 68.55 N by assumption, and
-§2 says what changes if it is further north.
+neighbour, or the map it was read from. Since 2026-09-12 the north edge is set by the E10 at
+68.46 N (§2), so Kedketjårro only matters if it lies north of that; a peak on the Torneträsk
+shore between Björkliden and Abisko is already inside.
 
 ### 8.2 Whether two providers must be stacked after all
 
@@ -304,6 +306,9 @@ hold for any page, and which are that park's numbers, is not yet separated.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the north edge is set by the E10, which Uwe wants inside whole: its
+  northernmost point in the box is 68.443 N, the edge is 68.46 N. Replaces the 68.55 N assumption;
+  Kedketjårro (§8.1) now only matters if it lies further north. Tile counts re-computed.
 - **2026-09-12** — the area amended by Uwe: the east edge is the western tip of Rautasjaure,
   which lands on the same 19.00 E the Paddus-plus-a-few-km reading gave; and no Norwegian
   ground is needed, so the west edge moves from 18.10 E to 18.15 E and §6.4 changes from
@@ -320,6 +325,7 @@ A line per change to this document or to the decisions in it, newest first.
 | place coordinates, and Rautasjaure's extent | Nominatim (`nominatim.openstreetmap.org`, `countrycodes=se,no`, the lake's bounding box from its OSM relation) and `minkarta.lantmateriet.se/api/searchservice/searchinput?searchtext=`, the latter answering in SWEREF99 TM and converted with an inverse transverse Mercator on GRS80 |
 | the border trace | Overpass, `rel(2978650)` clipped to 68.10–68.70 N, 17.6–19.3 E, `out geom`, binned at 0.05° |
 | named peaks north of Abisko | Overpass, `node["natural"="peak"]["name"]` over 68.38–68.75 N, 18.2–19.3 E |
+| the E10's northernmost point | Overpass, `way["highway"]["ref"~"E ?10"]` over 68.10–68.70 N, 18.05–19.10 E, `out geom`, 40 ways and 1,598 points, filtered to the box's longitudes |
 | area and tile counts | spherical area of the box; WebMercator tile index at each zoom from the box's corners |
 | bytes per Kartverket tile | 6.76 GB over 131,033 tiles, both from the offline panel at load (`atlas` §3.3) |
 | what in the code is Norway | a read of `maps.py`, `lomsdal_visten.py`, `route_graph.py`, `deploy_map.py`, `drive_map.py` and `libs/src/trails/io/sources/` on 2026-09-11, with line numbers as they stood that day |
