@@ -1630,7 +1630,12 @@ class TestTheSheetCarriesAToken:
         token never orphans a tile."""
         html = self.rendered()
         assert "layer.options.trailsUrl = layer._url.split('?')[0];" in html
-        assert "return plainUrl(layer).replace('{z}', z)" in html
+        assert "var made = plainUrl(layer).replace('{z}', z)" in html
+        # **And absolute.** The worker looks a tile up by the request's
+        # address, which is absolute; a sheet from our own bucket is
+        # addressed root-relative, and keyed as written every tile of it
+        # would be kept under a name the worker never asks for.
+        assert "return new URL(made, location.href).href;" in html
 
     def test_a_sheet_switched_in_gets_the_token_without_moving_it(self):
         """A base layer arrives with no token at all, and switching sheets is
@@ -2068,7 +2073,35 @@ class TestTwoMapsOnOneOrigin:
         assert 'var DB = "trails";' in script
         assert 'var TILES = "trails-tiles";' in script
         assert 'var TILE_PREFIX = new URL("https://cache.kartverket.no/", self.location.href).href;' in script
+        # Kartverket's map has no height tiles, so the worker matches none.
+        assert 'var HEIGHT_PREFIX = "" ? new URL("", self.location.href).href : null;' in script
         assert not re.search(r"__[A-Z_]+__", script)
+
+    def test_the_second_maps_worker_keeps_the_height_tiles_too(self, tmp_path):
+        """A straight leg planned offline reads its heights off the tiles, so
+        the worker has to answer them from what was kept, like the map tiles."""
+        page, companions = self.abisko(tmp_path)
+        script = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
+        assert 'var HEIGHT_PREFIX = "/dem/lantmateriet/1/" ? new URL("/dem/lantmateriet/1/", self.location.href).href : null;' in script
+        assert "(HEIGHT_PREFIX && request.url.indexOf(HEIGHT_PREFIX) === 0)" in script
+
+    def test_the_offline_panel_keeps_the_height_tiles_at_the_zoom_the_page_reads(self, tmp_path):
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        heights = html.split("var HEIGHTS = ")[1].split(";\n")[0]
+        assert '"url": "/dem/lantmateriet/1/{z}/{x}/{y}.png"' in heights
+        assert '"zoom": 13' in heights
+        assert '"13": 92693' in heights
+        # Over the same set the map is kept over, after the map tiles of it.
+        assert "if (HEIGHTS && !ground && z === HEIGHTS.zoom) {" in html
+        assert "state.bytes += next.ground ? heightWeight(next.z) : (WEIGHT[next.z] || 45000);" in html
+
+    def test_the_first_map_carries_no_height_tiles(self, tmp_path):
+        page = tmp_path / "lomsdal-visten.html"
+        fmap = maps.create_map(bounds=(12.0, 65.0, 13.0, 66.0), companions=maps.Companions.of("lomsdal-visten"))
+        maps.add_chrome(fmap)
+        maps.save_map(fmap, page)
+        assert "var HEIGHTS = null;" in page.read_text(encoding="utf-8")
 
     def test_the_manifest_and_the_icons_are_the_maps_own(self, tmp_path):
         page, companions = self.abisko(tmp_path)
@@ -2095,6 +2128,45 @@ class TestTwoMapsOnOneOrigin:
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), base=maps.BaseMap.OPENSTREETMAP, extra_bases=())
         with pytest.raises(KeyError, match="no tile provider"):
             maps.add_chrome(fmap)
+
+
+class TestHeightTiles:
+    """The height tiles beside a provider's map tiles, and what the page is told about them."""
+
+    def test_lantmateriet_has_them_and_kartverket_does_not(self):
+        assert maps.PROVIDERS["kartverket"].heights is None
+        tiles = maps.PROVIDERS["lantmateriet"].heights
+        assert tiles is not None
+        assert tiles.template == "/dem/lantmateriet/1/{z}/{x}/{y}.png"
+        assert tiles.top == 13
+
+    def test_the_settings_carry_the_packing_the_tiles_were_written_with(self):
+        """The page unpacks a pixel by the same two numbers `dem_tiles` packed
+        it with, handed over rather than spelled twice."""
+        from trails.processing import dem_tiles
+
+        settings = maps.HeightTiles(tiles="/dem/x/1/", top=12, weight={12: 100}).as_settings()
+        assert settings == {
+            "url": "/dem/x/1/{z}/{x}/{y}.png",
+            "zoom": 12,
+            "offset": dem_tiles.TERRARIUM_OFFSET,
+            "step": dem_tiles.TERRARIUM_STEP,
+            "weight": {"12": 100},
+        }
+
+    def test_a_plan_with_tiles_needs_no_service_and_one_with_neither_is_refused(self):
+        fmap, _ = TestPlanMode().drawn()
+        planned = TestPlanMode().planned(heightsUrl="", heightsTiles=maps.PROVIDERS["lantmateriet"].heights.as_settings())
+        maps.add_plan_mode(fmap, planned)
+        html = fmap.get_root().render()
+        assert '"heightsTiles": {"url": "/dem/lantmateriet/1/{z}/{x}/{y}.png"' in html
+        assert "if (PLAN.heightsTiles) {" in html
+        # The reader: bilinear between the four pixel centres, (0, 0, 0) as no height,
+        # and a 1 x 1 answer -- the worker's blank -- as a tile that is not there.
+        assert "r * 256 + g + b / tiles.step - tiles.offset" in html
+        assert "read.width === HEIGHT_TILE_PX && read.height === HEIGHT_TILE_PX ? read : null" in html
+        with pytest.raises(ValueError, match="heightsUrl or heightsTiles"):
+            maps.add_plan_mode(fmap, TestPlanMode().planned(heightsUrl=""))
 
 
 class TestPins:
@@ -4479,6 +4551,9 @@ class TestPlanMode:
             # ever, and plan mode saying *working…* with nothing left to finish
             # it. See `heightsTimeoutMs` in the build's own settings.
             "heightsTimeoutMs": 8000,
+            # No height tiles: this is the first map, whose heights are a
+            # service. The second map's are tested on their own below.
+            "heightsTiles": None,
             # As wide as the widest line this map draws, which is the build's
             # decision and not the page's: a route thinner than the line under
             # it reads as the lesser of the two.
@@ -4530,7 +4605,13 @@ class TestPlanMode:
             },
         }
         settings.update(changed)
-        return {name: value for name, value in settings.items() if value is not None}
+        kept = {name: value for name, value in settings.items() if value is not None}
+        # The one setting whose value *is* None on the first map: dropped it
+        # would read as missing, and it is not missing, it is a map without
+        # height tiles. Handed in explicitly to override.
+        if "heightsTiles" not in changed:
+            kept["heightsTiles"] = None
+        return kept
 
     def drawn(self) -> tuple[folium.Map, folium.FeatureGroup]:
         """A map carrying a chain, the graph and the panel, ready for plan mode."""
@@ -5325,7 +5406,10 @@ class TestPlanMode:
         # never fetched** — it is compared against, which is the whole reason
         # the reader addresses elements by it rather than by their prefix.
         assert planning.count("://") == bare + 2
-        assert planning.count("fetch(") == 1
+        # Two fetches, both asked when a reader draws a straight leg and never
+        # on load: the service, and the height tiles a map without a service
+        # reads instead -- through the worker, from our own bucket.
+        assert planning.count("fetch(") == 2
         assert "getElementsByTagNameNS(PLAN.gpx.namespace" in planning
 
     def test_the_cost_comes_out_of_the_header(self):

@@ -89,6 +89,50 @@ LAYER_LAND = "mark"
 #: The column every layer classifies itself by, and its stable id.
 TYPE, ID, CREATED = "objekttyp", "objektidentitet", "skapad"
 
+#: The two classes of ``mark`` that are water: the lakes, and the rivers wide
+#: enough to be drawn as a surface rather than a line. The narrower rivers are
+#: lines in :data:`LAYER_STREAMS` and have no width to report.
+LAKE_CLASS, RIVER_SURFACE_CLASS = "Sjö", "Vattendragsyta"
+WATER_CLASSES = (LAKE_CLASS, RIVER_SURFACE_CLASS)
+#: What a water surface carries: one id per body -- a lake cut across sheets
+#: shares it -- and the lake's level, as text.
+WATER_ID, WATER_LEVEL = "vattenytaid", "hojd_over_havet"
+
+#: The classes of ``byggnadspunkt`` a walker heads for, in the order a legend
+#: would rank them, and what each is in English. Everything else in the layer
+#: is a building by size class, which over Abisko is 400 houses in Björkliden
+#: and along the railway.
+CABIN_CLASSES = {
+    "Fjällstation": "mountain station",
+    "Turiststuga/övernattningsstuga": "tourist cabin",
+    "Raststuga": "rest hut",
+    "Vindskydd": "shelter",
+    "Kåta": "Sámi hut",
+    "Enslig stuga i fjällen": "lone mountain cabin",
+    "Naturum": "visitor centre",
+}
+
+#: What ``textpunkt`` carries: the text, the map's own category for it, and
+#: its size class, 1 the smallest and 7 the largest -- measured over Abisko,
+#: where the trail names are 1, the peaks 2 and 3, *Abisko* 5 and
+#: *Torneträsk* 7.
+LABEL_TEXT, LABEL_CATEGORY, LABEL_SIZE = "textstrang", "textkategori", "textstorleksklass"
+#: The three categories that name a place on the ground. The others are
+#: notices -- *Rengärde*, *Tält- och eldningsförbud* -- cadastral marks and the
+#: protected areas, which the register draws with an outline.
+LABEL_TERRAIN, LABEL_WATER, LABEL_SETTLEMENT = "Terrängnamn", "Hydrografi", "Bebyggelse"
+NAME_CATEGORIES = (LABEL_TERRAIN, LABEL_WATER, LABEL_SETTLEMENT)
+
+#: The classes of ``ledintressepunkt_fjall`` that matter on foot: a footbridge
+#: over a river, a ford, an emergency telephone and a car park at a trailhead.
+FOOTBRIDGE_CLASS, FORD_CLASS, PHONE_CLASS, PARKING_CLASS = "Gångbro, punkt", "Vad", "Hjälptelefon", "Parkering"
+TRAIL_POINT_CLASSES = {
+    FOOTBRIDGE_CLASS: "footbridge",
+    FORD_CLASS: "ford",
+    PHONE_CLASS: "emergency telephone",
+    PARKING_CLASS: "car park",
+}
+
 #: Seconds an API call may take.
 TIMEOUT_S = 120
 
@@ -98,6 +142,22 @@ UNPACKED = "gpkg"
 
 #: A delivery the API says can be downloaded.
 READY = "LYCKAD"
+
+
+@dataclass(frozen=True)
+class SourceMetadata:
+    """Provenance of the product."""
+
+    name: str = "Topografi 50 Nedladdning, vektor"
+    provider: str = "Lantmäteriet"
+    country: str = "SE"
+    url: str = "https://www.lantmateriet.se/sv/geodata/vara-produkter/produktlista/topografi-50-nedladdning-vektor/"
+    license: str = "CC0 1.0"
+    attribution: str = "© Lantmäteriet"
+    update_frequency: str = "weekly"
+
+
+METADATA = SourceMetadata()
 
 
 @dataclass(frozen=True)
@@ -335,3 +395,101 @@ class Source:
         box = project_bounds(bounds, "EPSG:4326", CRS)
         read: gpd.GeoDataFrame = pyogrio.read_dataframe(path, layer=layer, bbox=box)
         return read
+
+    def _placed(self, theme: str, layer: str, bounds: Bounds, classes: tuple[str, ...] | None, force_download: bool) -> gpd.GeoDataFrame:
+        """Read a layer over a box, keep some classes of it, and hand it on in WGS 84."""
+        read = self.read(theme, layer, bounds, force_download)
+        if classes is not None:
+            read = read[read[TYPE].isin(classes)]
+        placed: gpd.GeoDataFrame = gpd.GeoDataFrame(read, geometry="geometry", crs=CRS).to_crs("EPSG:4326").reset_index(drop=True)
+        return placed
+
+    def cabins(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
+        """The cabins, huts and shelters a walker heads for, over a box.
+
+        Topografi 50 draws them as points and names none of them: the names
+        are on the map's text layer and in the trail register, and a caller
+        joins them from there.
+
+        Args:
+            bounds: The box, WGS 84
+            force_download: Ask the API for the newest delivery first
+
+        Returns:
+            Points in WGS 84 with ``name`` (empty), ``kind`` (the class in
+            English) and :data:`TYPE` (the class as Lantmäteriet spells it)
+        """
+        found = self._placed(BYGGNADSVERK, LAYER_BUILDING_POINTS, bounds, tuple(CABIN_CLASSES), force_download)
+        found["name"] = None
+        found["kind"] = found[TYPE].map(CABIN_CLASSES)
+        return found
+
+    def water(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
+        """The lakes and the river surfaces over a box, as outlines.
+
+        Args:
+            bounds: The box, WGS 84
+            force_download: Ask the API for the newest delivery first
+
+        Returns:
+            Polygons in WGS 84 with :data:`TYPE`, :data:`WATER_ID` and
+            :data:`WATER_LEVEL`
+        """
+        return self._placed(MARK, LAYER_LAND, bounds, WATER_CLASSES, force_download)
+
+    def rivers(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
+        """The rivers drawn as a surface over a box, as outlines.
+
+        Only those: a river drawn as a line has no width to report, and a
+        width is what an outline is for.
+
+        Args:
+            bounds: The box, WGS 84
+            force_download: Ask the API for the newest delivery first
+
+        Returns:
+            Polygons in WGS 84 with ``name`` (empty) and :data:`WATER_ID`
+        """
+        found = self._placed(MARK, LAYER_LAND, bounds, (RIVER_SURFACE_CLASS,), force_download)
+        found["name"] = None
+        return found
+
+    def labels(self, bounds: Bounds, categories: tuple[str, ...] = NAME_CATEGORIES, force_download: bool = False) -> gpd.GeoDataFrame:
+        """The names the map itself writes over a box.
+
+        The text layer is where a printed sheet's lettering comes from: one
+        point per label, where the label sits rather than where the thing is,
+        so a lake's name lies on the water and a peak's beside the summit. It
+        is the one place in the product where a place has a name.
+
+        Args:
+            bounds: The box, WGS 84
+            categories: Which of the map's categories to keep, out of
+                :data:`NAME_CATEGORIES` and the rest
+            force_download: Ask the API for the newest delivery first
+
+        Returns:
+            Points in WGS 84 with ``name``, ``kind`` (the category) and
+            ``size`` (:data:`LABEL_SIZE`, as an integer)
+        """
+        read = self.read(TEXT, LAYER_TEXT_POINTS, bounds, force_download)
+        read = read[read[LABEL_CATEGORY].isin(categories)]
+        placed: gpd.GeoDataFrame = gpd.GeoDataFrame(read, geometry="geometry", crs=CRS).to_crs("EPSG:4326").reset_index(drop=True)
+        placed["name"] = placed[LABEL_TEXT]
+        placed["kind"] = placed[LABEL_CATEGORY]
+        placed["size"] = placed[LABEL_SIZE].astype(int)
+        return placed
+
+    def trail_points(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
+        """The footbridges, fords, telephones and car parks on the mountain trails over a box.
+
+        Args:
+            bounds: The box, WGS 84
+            force_download: Ask the API for the newest delivery first
+
+        Returns:
+            Points in WGS 84 with ``kind`` (the class in English) and :data:`TYPE`
+        """
+        found = self._placed(KOMMUNIKATION, LAYER_TRAIL_POINTS, bounds, tuple(TRAIL_POINT_CLASSES), force_download)
+        found["kind"] = found[TYPE].map(TRAIL_POINT_CLASSES)
+        return found

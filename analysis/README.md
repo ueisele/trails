@@ -38,12 +38,13 @@ Each notebook is self-contained and downloads/caches its own data.
 ### Scripts
 
 **The map** — builds `analysis/output/lomsdal-visten.html` from seven sources,
-plus one GPX per source beside it. Every line it draws is a chain out of the
-routing graph below, so a drawn line and a selectable track are the same object;
-the two scripts share one cached build:
+or `abisko.html` from five, plus one GPX per source beside it. Every line it
+draws is a chain out of the routing graph below, so a drawn line and a
+selectable track are the same object; the two scripts share one cached build:
 
 ```bash
 command make map
+command make map ARGS="--park abisko"
 ```
 
 Everything it downloads is cached, so a second run does not fetch again and takes
@@ -63,8 +64,14 @@ uploads what they wrote. `analysis/docs/abisko-decisions.md` carries every figur
 Both targets pass `ARGS` through, so `command make map ARGS="--approach-km 10"`
 works; the script itself is `analysis/scripts/lomsdal_visten.py`. Which map is
 `--park` (default `lomsdal-visten`); the script's `PARKS` table says what a park
-decides, and `abisko` is declared there but refused until its Swedish sources are
-wired in (`analysis/docs/abisko-decisions.md` §7).
+decides, and its `BUILDS` table which country's registers are read for it. The
+Swedish build is over the park's box rather than a band round the boundary, so
+`--approach-km` does nothing for it; it reads the Topografi 50 delivery, the
+register's files and the height mosaic off the cache, and needs the Geotorget
+login only when one of those is missing (`command make dem` is what puts the
+mosaic there). Everything a Swedish page differs in — which registers, what a
+popup says, what a file credits, where a straight leg's heights come from — is
+`build_sweden`; the page itself is assembled by one function for both.
 
 Worth knowing:
 
@@ -103,7 +110,8 @@ automatically. Force one with `--rebuild`. See `docs/route-planning-phases.md`.
 Both scripts build it through `trails.network.norway`, with the same parameters
 and therefore the same cache key, so whichever runs first pays and the second is
 instant. The parameters the map does not offer fall to that module's defaults
-rather than to the map's own, which is what keeps the two agreeing.
+rather than to the map's own, which is what keeps the two agreeing. It takes
+`--park` too, and reports Abisko's graph against its own landmarks.
 
 **Sweden has its own module**, `trails.network.sweden`, built on the same shared
 core (`trails.network.graphs`: parameters, fingerprint, derived fields, the build)
@@ -112,8 +120,9 @@ from three registers instead of seven: Lantmäteriet's *Topografi 50* delivery
 login, read by box out of the country GeoPackage), Naturvårdsverket's nightly
 files — the protected areas and the trail register, `io/sources/naturvardsregistret.py`,
 no login — and OSM. Heights come off the cached 1 m model rather than a point
-service. Neither script drives it yet; `analysis/docs/abisko-decisions.md` §7
-says what is left.
+service, and the page reads the same model off the height tiles `make dem` cut
+(`maps.HeightTiles`, beside the provider's map tiles; the worker keeps them and
+the offline panel counts them). `analysis/docs/abisko-decisions.md` is the record.
 
 ### What the map does once it is open
 

@@ -164,17 +164,17 @@ notebook-clean:
 	@find analysis/notebooks -name "*.ipynb" -exec uv run nbstripout {} \;
 	@echo "✅ Notebook outputs cleared"
 
-# The map script takes --park (lomsdal-visten by default; abisko is declared and
-# refused until its sources are wired in), so `make map ARGS="--park abisko"` is
-# the second map and no target is named for a park. route_graph.py is still
-# written for the one park.
+# Both scripts take --park (lomsdal-visten by default), so `make map ARGS="--park abisko"`
+# and `make graph ARGS="--park abisko"` are the second map and no target is named for a
+# park. The Swedish build reads the Topografi 50 delivery and the height mosaic off the
+# cache (`make dem` puts the mosaic there); only a cold cache needs the Geotorget login.
 map:
-	@echo "🗺️  Building the Lomsdal-Visten map (cached sources; a cold cache takes far longer)..."
+	@echo "🗺️  Building the map (cached sources; a cold cache takes far longer)..."
 	uv run python analysis/scripts/lomsdal_visten.py $(ARGS)
-	@echo "✅ analysis/output/lomsdal-visten.html"
+	@echo "✅ analysis/output/<park>.html"
 
 graph:
-	@echo "🕸️  Building the Lomsdal-Visten routing graph..."
+	@echo "🕸️  Building the routing graph..."
 	uv run python analysis/scripts/route_graph.py $(ARGS)
 
 # Publishes whatever `make map` last built — it does not build. That separation is deliberate: a

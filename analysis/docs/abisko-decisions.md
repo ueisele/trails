@@ -204,9 +204,14 @@ derives from it.
 
 **Done 2026-09-12:** `lomsdal_visten.py` has a `Park` table (`PARKS`) and `--park`; the name, the
 stem of every file, the legend word, the base sheet and its extras, the companion names and the
-UT catalogue all come off the entry. Abisko is declared with its box and refused at the argument
-parser with a message naming §7 step 4, because every loader below it is a Norwegian register.
-`route_graph.py` keeps its own `PARK_NAME` for now. `drive_map.py` already had `--page`.
+UT catalogue all come off the entry. **And, the same evening, the country branch**: a `BUILDS`
+table maps the park's country to `build_norway` or `build_sweden`, each of which reads its own
+registers and hands one `Built` bundle — the graph, the line layers, the point layers, the name
+layers, the water, the credits, where a straight leg's heights come from, the GPX exports — to
+one `assemble` that puts it on the page. `describe` keeps what is read off a chain and lets
+`describe_norway`/`describe_sweden` add what each register says. `route_graph.py` takes `--park`
+off the same table and reports Abisko against its own landmarks (*Abisko* off the lettering,
+no quays, the state trail *BD 21* as the check route). `drive_map.py` already had `--page`.
 
 ### 4.2 The provider, inside the JavaScript
 
@@ -242,6 +247,14 @@ The page calls `ws.geonorge.no/hoydedata/v1/punkt` **live** for the legs of a pl
 injected as `heightsUrl`; the build samples the same service for every graph vertex. Neither
 answers in Sweden. This is the largest single item (§6.3).
 
+**Done 2026-09-12:** `maps.HeightTiles` on the provider (`PROVIDERS["lantmateriet"].heights`,
+None for Kartverket); `heightsTiles` in the plan settings, and then the service is not asked at
+all — the page reads a straight leg's samples off the z13 tiles, bilinearly between the four
+pixel centres round each sample, unpacking Terrarium by the same two numbers `dem_tiles` packed
+with; the worker intercepts the `dem/` prefix beside the map tiles; the offline panel keeps the
+z13 height tiles over the same set the map tiles are kept over. The Norwegian page is untouched:
+its `heightsTiles` is null and every path it took before, it takes.
+
 ### 4.5 The deploy, and why two maps collide today
 
 `deploy_map.py` takes `--map` and uploads `<name>.html`; the rewrite in `home/trails-map` names no
@@ -276,11 +289,11 @@ meridian, closer than Bergen, for which `atlas` §6.1 measured +0.2 %. Swedish s
 | **the N50 role: paths, roads, water, land cover, cabins, names, contours, protected areas in one product** | N50 Kartdata, per kommune | Lantmäteriet **Topografi 50 Nedladdning, vektor** — GeoPackage, SWEREF99 TM, updated weekly, ordered for the whole country through Geotorget as a free *Abonnemang*, **CC0, no legal review**. Topografi 10 is the finer sibling and is **not orderable for Uwe**: its terms cover personal data (buildings with addresses), Geotorget puts a *juridisk prövning* in front of it, and that form wants a Swedish *personnummer* (seen 2026-09-12) | read 2026-09-12 off the product documentation, see below |
 | official marked trails with attributes | Turrutebasen | Naturvårdsverket *Leder och friluftsanordningar*, as the nightly files under `geodata.naturvardsverket.se/nedladdning/friluftsliv/` (`Leder_shp.zip`, `Anordningar_shp.zip`), SWEREF99 TM, CC0 — **not the WFS**, which was down a whole day (§9.6) | keyless; nationwide, not only in protected areas (34 of the 47 lines over the box lie outside one); `LKATEGORI` separates summer (*Barmarksled*) from winter (*Led på snö*), `STATLED` names the state trail (*Abisko - Abiskojaure (BD 21)*), `LMARKERING` the marking — the attribute source, as Turrutebasen is (`atlas` §7.2). Read by `io/sources/naturvardsregistret.py` |
 | paths nobody else draws | OSM | OSM, through Overpass, unchanged | the one source that is the same in both countries |
-| cabins, shelters, bridges | N50, UT.no | Topografi 10 `Byggnadspunkt` — `Raststuga` (*"alltid olåst"*), `Vindskydd`, `Kåta`; Naturvårdsverket `anordningar_friluftsliv/wfs`; OSM `alpine_hut` / `wilderness_hut` | STF's cabins are in all three |
+| cabins, shelters, bridges | N50, UT.no | Topografi 50 `byggnadspunkt` — `Fjällstation`, `Turiststuga/övernattningsstuga`, `Raststuga` (*"alltid olåst"*), `Vindskydd`, `Kåta`, `Enslig stuga i fjällen`, `Naturum`, none of them named in the product; the names come off the map's lettering (`textpunkt`, *Bebyggelse*) within 150 m. Naturvårdsverket's `Anordningar_shp.zip` for the bridges, privies and shelters along the state trails; Topografi 50 `ledintressepunkt_fjall` for the footbridges, fords and car parks; OSM `alpine_hut` / `wilderness_hut` | wired 2026-09-12 (`topografi50.Source.cabins`, `.trail_points`, `naturvardsregistret.Source.facilities`) |
 | protected areas, and the park lookup | Naturbase | Naturvårdsverket's *naturvårdsregistret* as nightly files (`nedladdning/naturvardsregistret/NP.zip`, `NR.zip`, … one per form, same columns: `NVRID`, `NAMN`, `SKYDDSTYP`) — Topografi 50's `skyddadnatur` draws the outlines too but carries **no name** | `naturvardsregistret.Source.find_one("Abisko")` is the park lookup: NVRID 2001225, 7,710 ha; eight forms read, every one with its outline |
-| roads | N50 | Topografi 10 `Väglinje` (Trafikverket's roads, 15 classes) and `Övrig väg` | OSM as the check |
-| water | N50 Arealdekke | Topografi 10 *Tema Hydrografi* | Torneträsk and the lakes drive the straight-walk water cost |
-| place names | Stedsnavn | Topografi 50 *Tema Text* is map lettering (291 labels over the box, sparse); the register is *Ortnamn*, in Lantmäteriet's keyless vector STAC (`api.lantmateriet.se/stac-vektor/v1`, collection `ortnamn`, CC BY 4.0) | the search box reads this; not wired yet (Swedish branch of the build) |
+| roads | N50 | Topografi 50 `vaglinje` (five classes over the box, by width and surface — no public/private split as in N50; `vardvagnummer` is the identity, *E10*) and `ovrig_vag` | OSM as the check |
+| water | N50 Arealdekke | Topografi 50 *Tema Mark*: `mark` polygons of class `Sjö` (1,708 over the box) and `Vattendragsyta` (144) — the lakes and the rivers wide enough to draw as a surface; the narrower rivers are lines in `hydrolinje` (2,980) and carry no width. `mark_sverige.gpkg` is 5.8 GB unpacked and the box reads out of it in under a second | Torneträsk and the lakes drive the straight-walk water cost; the river surfaces are the page's river outlines, named from the lettering within 60 m (`topografi50.Source.water`, `.rivers`) |
+| place names | Stedsnavn | **Topografi 50 *Tema Text* for now**: the map's own lettering, 325 labels over the box in seven size classes — *Terrängnamn* 158, *Hydrografi* 99, *Bebyggelse* 29, the rest notices and cadastral marks. The register is *Ortnamn*, in Lantmäteriet's vector STAC (`api.lantmateriet.se/stac-vektor/v1`, collection `ortnamn`): one 58 MB GeoPackage for the country at `dl1.lantmateriet.se/namnsatt-plats/ortnamn_se.zip`, CC BY 4.0, and **403 with the login until *Ortnamn Nedladdning* is ordered** (measured 2026-09-12, as with the delivery API) | the search box and the name layers read the lettering (`topografi50.Source.labels`); Ortnamn is §8.3 |
 | heights | Geonorge point API, live | Lantmäteriet *Markhöjdmodell Nedladdning*: 1 m COGs through a keyless STAC API, downloads behind the Geotorget login, CC BY 4.0, **RH 2000** | §6.3 |
 | land cover | not used | Topografi 10 *Tema Mark* (`sankmark`, `kalfjäll`, forest); NMD 10 m raster exists too | Tema Mark is enough if the water cost ever wants bog |
 
@@ -490,10 +503,15 @@ Shape, following `atlas` §3.6 where it has decided and choosing where it has no
   Loose objects rather than a PMTiles container: the page is Leaflet without a PMTiles reader,
   and the worker intercepts tile URLs. A PMTiles file for `atlas` is assembled from the same tiles
   when `atlas` wants one.
-- **Use** the build samples the tiles for every graph vertex; the page fetches them for the legs
-  of a planned route and reads them from the offline store when the switch is on. Build and page
-  agree by construction, because they read the same tiles. The offline chooser keeps the whole
-  box's height tiles with any scope — at z13 and below they are a few per cent of any pack.
+- **Use** the build samples the 4 m mosaic the tiles were cut from for every graph vertex; the
+  page fetches the z13 tiles for the legs of a planned route and reads them from the offline
+  store when the switch is on. Build and page describe one surface, read at posts and at pixels
+  that are 4 m and 7 m apart. **The offline chooser keeps the z13 height tiles over the same set
+  the map tiles are kept over**, not the whole box: measured 2026-09-12, the whole box at z13 is
+  380 tiles and 35 MB, which on a band along a day's walk is a third again on top of the map
+  tiles — not the few per cent this line assumed — while the band's own z13 set is a dozen tiles.
+  A straight leg planned offline over kept ground has its profile; one planned off it says it
+  has none, which is what the page says anywhere a tile is missing.
 - **Caching** long `max-age` on the tiles, since the address carries the version; the deploy
   uploads the directory with `aws s3 sync` and purges nothing for it — `deploy_map.py --tree
   dem`, §4.5.
@@ -536,9 +554,9 @@ reading the first level finer than the pixel means the bilinear tile never avera
 does not have. The 1 GB is the float32 mosaic plus its copy in the warp; fine on forge, and a
 box four times the size would want the squares warped one at a time instead.
 
-Not uploaded: `deploy_map.py --tree dem` is ready, and a publish is Uwe's call. And nothing
-reads these tiles yet — the page and the build sample the Norwegian point service; teaching
-both to read Terrarium tiles is part of the Swedish branch (§7 step 4).
+Not uploaded: `deploy_map.py --tree dem` is ready, and a publish is Uwe's call. The reader is
+done (§4.4): the Abisko page reads these tiles and the Swedish build reads the mosaic they
+were cut from.
 
 ### 6.4 The box holds no Norway
 
@@ -621,12 +639,30 @@ this map is the reason.
    no source records a path. Heights: 317,417 samples off the cached 4 m mosaic, none outside
    it, 342–1,730 m. **44 s in all**, OSM cached, against Lomsdal's quarter of an hour: the
    ground is read off a file rather than asked of a service. The Swedish `measure` needs no
-   point store. Not yet driven by either script: `route_graph.py` reports Norwegian landmarks
-   and `lomsdal_visten.py` refuses `--park abisko` until the Swedish branch of the build.
+   point store. **The page, the same evening**: `lomsdal_visten.py --park abisko` builds
+   `abisko.html` through `build_sweden` (§4.1) — 18 legend rows: roads, the winter lines off by
+   default, OSM / Topografi 50 paths / Topografi 50 marked trails / the register's state
+   trails each split at the park boundary, cabins (49, 11 named — 8 off the lettering within
+   150 m, 3 off OSM), the register's 24 facilities, 62 footbridges, fords and car parks, 35 OSM
+   shelters, and three name layers off the lettering (158 terrain, 99 water, 29 settlement).
+   The water grid is 1,399 × 1,292 cells, 14.1 % water, 32 kB; 128 river surfaces at 9,441
+   vertices, 7 of them named; the graph payload 0.84 MB in a **3.3 MB page** (Lomsdal's is
+   16.6). Five GPX files. `route_graph.py --park abisko` reports the same cached graph: the
+   state trail *BD 21* resolves to one register chain of 30.7 km (+612 / −498 m) and two
+   Topografi 50 chains named from it; the park shares a boundary with the research station's
+   reserve and overlaps nothing. **Measured in Firefox on the built page**: plan mode over open
+   fell south-west of Abiskojaure, a 3.65 km straight leg, 730 samples off five z13 tiles,
+   +303 / −197 m, high 1,250.2 low 1,048.9; the build's mosaic along the same line reads
+   +303 / −200, 1,250.5 / 1,048.4 — and over 2,000 random points of the box the page's tile
+   reading and the build's mosaic reading differ by 0.07 m at the median, 0.47 m at the 95th
+   percentile, 3.3 m at worst. No page errors. The graph itself: 22 components, the largest
+   1,367 km and 95 % of the network, reaching 99 % of the park's 14.2 km north to south, with
+   *Abisko* on it. Not driven by `make drive` (§8.2).
 5. **Heights** — the tile build (§6.3). **Done 2026-09-12**: `command make dem` writes
    `analysis/output/dem/lantmateriet/1/` from the STAC COGs with the login, 540 tiles, 49 MB,
-   in a minute; not uploaded. What remains here is the reader: the page's `heightsUrl` and the
-   build's vertex sampling both point at Kartverket's point service today.
+   in a minute; not uploaded. **The reader is done too** (§4.4): the page reads the tiles for
+   a straight leg and the build reads the mosaic they were cut from, measured against each
+   other in step 4.
 6. **Acceptance and publish** — the structural readings of `make drive` against the Abisko page,
    then `command make map --park abisko`, then `deploy_map.py --map abisko --tree tiles --tree dem`,
    which mirrors the trees first and then uploads the page and its own companions.
@@ -652,6 +688,16 @@ first seen). The WFS question of step 4 is settled (§9.6): the files replace it
 
 *Trigger: step 6.* The 278 readings assert Lomsdal-Visten's figures. Which are structural and
 hold for any page, and which are that park's numbers, is not yet separated.
+
+### 8.3 Ortnamn is not ordered
+
+*Trigger: Uwe orders *Ortnamn Nedladdning, vektor* in Geotorget (free, unreviewed, like the
+delivery API).* The place-name register answers 403 with the login until then (§5), so the
+name layers, the search box and the cabins' names read the map's own lettering — 325 labels
+over the box against the register's every name, with a category but no feature type. Once
+ordered, `dl1.lantmateriet.se/namnsatt-plats/ortnamn_se.zip` (58 MB, the country, CC BY 4.0)
+is one loader in the shape of `markhojd`'s download, and the name legend can say peak, valley
+and lake apart as SSR's does.
 
 ---
 
@@ -722,12 +768,32 @@ and `byggnadsverk` (116 MB) into an empty cache in 64 s — **1.8 MB/s** from
 delivery about fifty. A build from an empty cache is therefore an hour of Lantmäteriet downloads
 on top of the fifteen minutes of tiles.
 
+### 9.8 The offline panel's keys for a root-relative sheet — fixed, 2026-09-12
+
+The panel keeps a tile in IndexedDB under the address it built from the sheet's template, and
+the worker answers a request by looking up `request.url`, which a browser always makes
+absolute. For Kartverket the template is absolute and the two agree; for our own bucket the
+template is `/tiles/lantmateriet/…`, so every tile the Abisko panel kept would have been stored
+under a name the worker never asks for — a whole download that reads as kept and answers
+blank. Seen while wiring the height tiles (which have the same root-relative shape), fixed by
+resolving the built address against the page's own before it is used as a key. Kartverket's
+addresses pass through the same resolution unchanged, so the first map's kept tiles keep their
+names.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the Swedish branch of the build (§4.1, §4.4, §7 step 4): `build_sweden`
+  beside `build_norway` and one `assemble` for both; `topografi50.Source` gains cabins, water,
+  rivers, lettering and trail points; `maps.HeightTiles` on the provider, read by the page for
+  straight legs, kept by the worker and the offline panel — the panel keeps them over the kept
+  set rather than the whole box, for a measured reason (§6.3); `route_graph.py --park`. The
+  first Abisko page built, driven in Firefox, its tile reading measured against the mosaic. On
+  the way: the offline panel keyed kept tiles by a root-relative address the worker never asks
+  for (§9.8). Ortnamn answers 403 until ordered (§5, §8.3): the lettering stands in.
 - **2026-09-12** — the download API ordered by Uwe and the order id in sops; the loader run
   against the real API, 1.8 MB/s measured (§9.7). §8.2 settles into §9.7; §8 renumbered.
 - **2026-09-12** — §7 step 4 done: `network/sweden.py` on a shared `network/graphs.py`, with
@@ -827,6 +893,8 @@ A line per change to this document or to the decisions in it, newest first.
 | bytes per Kartverket tile | 6.76 GB over 131,033 tiles, both from the offline panel at load (`atlas` §3.3) |
 | what in the code is Norway | a read of `maps.py`, `lomsdal_visten.py`, `route_graph.py`, `deploy_map.py`, `drive_map.py` and `libs/src/trails/io/sources/` on 2026-09-11, with line numbers as they stood that day |
 | Lantmäteriet's grid, layers, ceiling, and its white outside Sweden | `atlas/docs/decisions.md` §3.7, measured 2026-09-11 |
+| the page's tile reading against the build's mosaic | the page's bilinear rule re-implemented in Python over the z13 tiles on disk, against `markhojd.sample` off the cached 4 m mosaic, at 2,000 uniform random points of the box and along the straight leg planned in Firefox |
+| the straight leg in Firefox | `analysis/output` served by `http.server`, `abisko.html` opened in Playwright Firefox, `window.trailsPlan.place()` twice over open fell, `state()` read back, the `dem/` requests counted |
 | which Lantmäteriet products carry a fee | Geotorget product pages rendered in Playwright Firefox (the site is a single-page app): the `Avgift`, `Villkor`, `Åtkomst` fields of the cache, WMS, vector-tile, översiktlig, raster-download, Topografi 10 and Markhöjdmodell products |
 | the FTP GeoPackage's tile matrix | `curl -r 0-67108863` off the anonymous FTP, the SQLite page count at byte 28 patched to the truncated size, then `gpkg_tile_matrix_set` and `gpkg_tile_matrix` read with `sqlite3` |
 | FTP range-read cost | five 64 KB `curl -r` reads, 3.2 s in all; then `ftplib` on one connection, five reads each of 4 KB, 64 KB and 1 MB |

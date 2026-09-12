@@ -1,13 +1,13 @@
-"""Build an interactive hiking map for Lomsdal-Visten national park.
+"""Build an interactive hiking map for a national park: Lomsdal-Visten, or Abisko.
 
 Every line on this map is a **chain** out of the routing graph
-(:mod:`trails.network.norway`), so a drawn line and a selectable track are the
-same object. Each source still draws its own layer in its own colour, and where
-several of them describe one valley their lines still lie over each other as
-separate objects — the merged graph stays underneath, with every edge naming the
-chain it lies on.
+(:mod:`trails.network.norway` or :mod:`trails.network.sweden`), so a drawn line
+and a selectable track are the same object. Each source still draws its own
+layer in its own colour, and where several of them describe one valley their
+lines still lie over each other as separate objects — the merged graph stays
+underneath, with every edge naming the chain it lies on.
 
-Combines seven sources:
+For Lomsdal-Visten it combines seven sources:
   * Turrutebasen (Kartverket/Geonorge) - official marked routes, with DNT-maintained
     segments highlighted separately
   * UT.no - hand-researched DNT route suggestions for this park, read from
@@ -24,14 +24,24 @@ Which sources go in is not a choice: a graph missing one is not smaller, it is
 wrong. The layer control does the visual job instead, per layer and without a
 rebuild.
 
+For Abisko, five (``analysis/docs/abisko-decisions.md`` §5):
+  * Naturvårdsverket's trail register (*Leder*) - the marked state trails with
+    their names, marking and description; also the park boundary, every
+    protected area and the facilities along the trails
+  * Topografi 50 (Lantmäteriet) - the marked trails, the worn paths, the roads,
+    the ferries, the cabins, the water, the map's own lettering
+  * OpenStreetMap via Overpass - community-mapped paths and shelters
+  * Markhöjdmodell (Lantmäteriet) - the 1 m height model, read off a mosaic
+    in the build and off the height tiles in the page
+
 Produces an HTML map and GPX exports under ``analysis/output/``.
 
 **Which park is an option, and the park decides the rest**: what the page and
 its files are called, whose tiles are drawn, which names its worker, manifest,
 icons and database go by (``--park lomsdal-visten`` keeps every name the first
-map has always had), and the box or the register lookup the ground comes from.
-See :data:`PARKS`. Abisko is declared there and refused here until the Swedish
-sources are wired in -- ``analysis/docs/abisko-decisions.md`` §7, step 4.
+map has always had), the box or the register lookup the ground comes from,
+and -- through the country -- which registers are read, what a popup says
+and what an exported file credits. See :data:`PARKS` and :data:`BUILDS`.
 
 Usage::
 
@@ -82,26 +92,19 @@ from trails.io.export.gpx import (
     WAYPOINT_STAGE_FIELD,
     export_to_gpx,
 )
-from trails.io.sources import geonorge, hoydedata, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
+from trails.io.sources import geonorge, hoydedata, markhojd, n50, naturbase, naturvardsregistret, overpass, stedsnavn, topografi50, traktorvegsti, ut
+from trails.network import graphs, norway, sweden
 from trails.network.norway import (
     FERRIES,
     FKB,
-    METRIC_CRS,
     N50_PATHS,
     N50_ROADS,
     OSM,
     PLACEHOLDER_IDENTITIES,
-    SOURCE_NAMES,
     TURRUTEBASEN,
     UT,
-    Params,
-    build,
-    edge_costs,
-    load_sources,
-    masks_from,
-    protected_table,
-    zone_around,
 )
+from trails.network.sweden import LEDER, T50_PATHS, T50_ROADS, T50_TRAILS
 from trails.routing import (
     BRIDGE,
     DEFAULT_GAP_M,
@@ -109,7 +112,6 @@ from trails.routing import (
     FERRY,
     IDENTITY_SEPARATOR,
     Network,
-    NetworkSource,
     chain_order,
     chain_tracks,
     elevation,
@@ -132,7 +134,8 @@ class Park:
     #: The page's object key without ``.html``, and the prefix of every file
     #: this script writes for it.
     stem: str
-    #: ISO 3166 country, which decides the source set (:mod:`trails.network.norway`).
+    #: ISO 3166 country, which decides the source set and everything read
+    #: off it: :data:`BUILDS`.
     country: str
     #: The word after the name in the legend's title: what the place is, in the
     #: language of the map it is drawn on.
@@ -165,8 +168,8 @@ class Park:
 
 
 #: The maps this script can be asked for. The first keeps every name it has
-#: always had; the second is declared with what is decided about it
-#: (analysis/docs/abisko-decisions.md §2, §6.2) and built once its sources are.
+#: always had; the second is what analysis/docs/abisko-decisions.md decided
+#: (§2 the box, §6.2 the names).
 PARKS: dict[str, Park] = {
     "lomsdal-visten": Park(
         name="Lomsdal-Visten",
@@ -189,14 +192,14 @@ PARKS: dict[str, Park] = {
         extras=(),
         companions=maps.Companions.of("abisko"),
         # West on the Norwegian border, south past Áhpparjávri, east at the
-        # western tip of Rautasjaure, north with the whole E10 inside.
+        # western tip of Rautasjaure, north with the whole E10 inside. **The
+        # box is the extent**, not a band round the park: it is what the
+        # tiles were copied for and the height mosaic was read over, and the
+        # graph, the water grid and the page all cover exactly it.
         bounds=(18.15, 68.17, 19.00, 68.46),
         ut_routes=None,
     ),
 }
-
-#: The one park this script's source set can build today.
-BUILDABLE_COUNTRY = "NO"
 
 #: Substrings identifying DNT (Den Norske Turistforening) as maintainer.
 DNT_PATTERN = "DNT|Turistforening"
@@ -473,6 +476,191 @@ SHELTER_POPUP_FIELDS = {
     "osm_id": "OSM ID",
 }
 
+# ---- Sweden --------------------------------------------------------------------
+# What the Swedish registers say, in a popup's words. The register's own
+# columns are its spelling of a trail; Topografi 50's classes are Lantmäteriet's
+# spelling of a path or a road, and are translated here, class by class, so a
+# popup reads *footpath* where the product says *Gångstig*.
+
+#: How Topografi 50's path and trail classes read. Every class the network
+#: takes is here; one it does not know passes through in Swedish.
+PATH_CLASS_LABELS = {
+    "Gångstig": "footpath",
+    "Vandringsled": "marked trail",
+    "Vandrings- och vinterled": "marked trail, summer and winter",
+    "Vinterled": "winter trail",
+    "Traktorväg": "tractor road",
+    "Cykelväg": "cycle path",
+    "Elljusspår": "lit track",
+    "Lämplig färdväg": "suitable route across the fell",
+    "Svårorienterad gångstig": "path hard to follow",
+}
+
+#: How its road classes read. The product grades roads by width and surface
+#: rather than by who may drive them, so there is no public/private split
+#: here as there is in N50.
+ROAD_CLASS_LABELS = {
+    "Motorväg": "motorway",
+    "Motortrafikled": "expressway",
+    "Landsväg": "main road",
+    "Landsväg liten": "minor main road",
+    "Småväg": "small road",
+    "Småväg enkel standard": "small road, simple standard",
+    "Lokalgata stor": "local street",
+    "Lokalgata liten": "local street, small",
+    "Gata": "street",
+}
+
+#: What ``vagutforande`` says about the ground a path runs over. *Normal* is
+#: the ground itself and says nothing worth a row.
+BRIDGE_LABELS = {"Bro": "a bridge", "Underfart": "an underpass", "Normal": ""}
+
+#: What ``skoterkorning_tillaten`` says. No information is no row.
+SNOWMOBILE_LABELS = {"Ja": "allowed", "Nej": "not allowed", "Påbjuden": "designated snowmobile route", "Ingen information": ""}
+
+#: What ``ruskmarkering`` says: brush marks, the winter marking of a trail.
+BRUSH_LABELS = {"Ja": "brush-marked", "Nej": "", "Ingen information": ""}
+
+#: The register's trails: what the register says about the trail, then the
+#: figures this map measured on the chain. ``whole_km`` is the state trail's
+#: whole length, because the state trail is the chain's identity.
+LEDER_POPUP_FIELDS = {
+    "trail_name": "Trail",
+    "route": "State trail",
+    "route_id": "Number",
+    "trail_type": "Type",
+    "marking": "Marking",
+    "description": "Description",
+    "protected_area": "Protected area",
+    "length_km": "This stretch (km)",
+    "whole_km": "State trail in total (km)",
+    "climb": "Ascent / descent",
+    "high_low": "High / low point",
+    "steepness": "Steepest",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
+}
+
+#: Topografi 50's marked trails: named from the register where they lie on a
+#: state trail, classed by Lantmäteriet, and dated by when Lantmäteriet last
+#: wrote the line.
+T50_TRAIL_POPUP_FIELDS = {
+    "route_name": "State trail",
+    "path_class": "Class",
+    "over": "Over",
+    "snowmobiles": "Snowmobiles",
+    "brush": "Winter marking",
+    "length_km": "This stretch (km)",
+    "whole_km": "Trail in total (km)",
+    "climb": "Ascent / descent",
+    "high_low": "High / low point",
+    "steepness": "Steepest",
+    "surveyed": "Written on",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
+}
+
+T50_PATH_POPUP_FIELDS = {
+    "path_class": "Class",
+    "over": "Over",
+    "snowmobiles": "Snowmobiles",
+    "brush": "Winter marking",
+    "length_km": "Length (km)",
+    "climb": "Ascent / descent",
+    "high_low": "High / low point",
+    "steepness": "Steepest",
+    "surveyed": "Written on",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
+}
+
+#: A road's identity is its number -- ``E10`` is one road across the box --
+#: so ``whole_km`` is the numbered road's whole length. Street names exist in
+#: the product and none of the 170 fragments over Abisko carries one.
+T50_ROAD_POPUP_FIELDS = {
+    "road_class": "Class",
+    "road_name": "Road",
+    "road_number": "Number",
+    "length_km": "This stretch (km)",
+    "whole_km": "Road in total (km)",
+    "climb": "Ascent / descent",
+    "high_low": "High / low point",
+    "steepness": "Steepest",
+    "surveyed": "Written on",
+    "marking_all": "Marking, all sources",
+    "unrecorded": "Unrecorded ground",
+}
+
+T50_FERRY_POPUP_FIELDS = {
+    "destination": "Destination",
+    "length_km": "Crossing (km)",
+    "surveyed": "Written on",
+}
+
+#: The winter-only lines, which are not chains and carry no figures: a legend
+#: row that is off by default (decisions §6.5) and says what the line is.
+WINTER_POPUP_FIELDS = {
+    "kind": "Type",
+    "name": "State trail",
+}
+
+#: Topografi 50's cabins carry no name of their own; the name comes off the
+#: map's lettering or the register's facilities, and the row says which.
+T50_CABIN_POPUP_FIELDS = {
+    "name": "Name",
+    "kind": "Type",
+    "named_from": "Name from",
+}
+
+#: The register's facilities: bridges, shelters, privies, fireplaces.
+FACILITY_POPUP_FIELDS = {
+    "name": "Name",
+    "kind": "Type",
+    "subtype": "Kind",
+    "description": "Description",
+    "route": "State trail",
+}
+
+#: Footbridges, fords, telephones and car parks off the mountain-trail layer.
+TRAIL_POINT_POPUP_FIELDS = {
+    "kind": "Type",
+}
+
+#: The map's own lettering, read straight off Topografi 50's text layer.
+T50_LABEL_POPUP_FIELDS = {
+    "name": "Name",
+    "kind": "Category",
+}
+
+#: Label colour and glyph per category of the map's lettering, and the legend
+#: rows they make. Three categories rather than SSR's fourteen types, because
+#: that is what the text layer distinguishes: a peak and a valley are both
+#: *Terrängnamn*. The names themselves say which -- *-čohkka* is a peak,
+#: *-vággi* a valley, *-jávri* a lake -- and a reader of this map learns that
+#: faster than a glyph could teach it.
+T50_NAME_STYLES = {
+    topografi50.LABEL_TERRAIN: ("terrain", "#263238", "▲"),
+    topografi50.LABEL_WATER: ("water", "#01579b", "≈"),
+    topografi50.LABEL_SETTLEMENT: ("settlements and cabins", "#7b1fa2", "⌂"),
+}
+
+#: The map's lettering comes in seven size classes, 1 the smallest. A pixel
+#: per class on top of the smallest size the Norwegian names are drawn at.
+T50_LABEL_BASE_PX = 9.0
+
+#: How the register's facility types read.
+FACILITY_LABELS = {
+    "Bro": "bridge",
+    "Hängbro": "suspension bridge",
+    "Dass": "privy",
+    "Rastskydd": "rest shelter",
+    "Vindskydd": "wind shelter",
+    "Eldstad": "fireplace",
+    "Ramp": "ramp",
+    "Information": "information",
+    "Karta": "map board",
+}
+
 #: Column identifying which chain a drawn line belongs to. A chain is linear by
 #: construction, so a click can never select a branching network.
 CHAIN_KEY = "chain_id"
@@ -529,7 +717,7 @@ SOURCE_IN_LABEL = re.compile(r"\[([^\]]+)\]\s*$")
 #: agree and the third is a default nobody set — but a licence is not a thing
 #: to settle by majority in passing. It is written down here, where an export
 #: reads it, and the disagreement is worth closing at the source.
-SOURCE_TERMS = {
+NORWAY_SOURCE_TERMS = {
     UT: ("CC BY-NC 4.0", "non-commercial", "downloaded"),
     TURRUTEBASEN: ("CC0", "", ""),
     FKB: ("CC BY 4.0", "", "read"),
@@ -537,6 +725,19 @@ SOURCE_TERMS = {
     N50_ROADS: ("CC BY 4.0", "", "ordered"),
     OSM: ("ODbL 1.0", "share-alike", "read"),
     FERRIES: ("CC BY 4.0", "", "ordered"),
+}
+
+#: The Swedish set, out of the decisions document's table (§5): the register
+#: and Topografi 50 are both CC0 and ask nothing; the register's date is the
+#: night its file was written and Topografi 50's the day Lantmäteriet produced
+#: the delivery.
+SWEDEN_SOURCE_TERMS = {
+    LEDER: ("CC0 1.0", "", "file of"),
+    T50_TRAILS: ("CC0 1.0", "", "delivery of"),
+    T50_PATHS: ("CC0 1.0", "", "delivery of"),
+    T50_ROADS: ("CC0 1.0", "", "delivery of"),
+    OSM: ("ODbL 1.0", "share-alike", "read"),
+    sweden.FERRIES: ("CC0 1.0", "", "delivery of"),
 }
 
 
@@ -565,16 +766,40 @@ class Described(Protocol):
         """Whom to credit."""
 
 
+class Dataset(NamedTuple):
+    """A dataset described here rather than by its module, in the same four words."""
+
+    name: str
+    url: str
+    license: str
+    attribution: str
+
+
 #: Where each dataset says what it is. Turrutebasen is the odd one: it arrives
 #: through the Geonorge order API, whose metadata object names a dataset rather
 #: than a service, so it is spelled out here instead of reached for.
-SOURCE_METADATA: dict[str, Described] = {
+NORWAY_SOURCE_METADATA: dict[str, Described] = {
     UT: ut.METADATA,
+    TURRUTEBASEN: Dataset(
+        geonorge.TURRUTEBASEN_METADATA.dataset_name,
+        geonorge.TURRUTEBASEN_METADATA.catalog_url,
+        NORWAY_SOURCE_TERMS[TURRUTEBASEN][0],
+        geonorge.TURRUTEBASEN_METADATA.attribution,
+    ),
     FKB: traktorvegsti.METADATA,
     N50_PATHS: n50.METADATA,
     N50_ROADS: n50.METADATA,
     OSM: overpass.METADATA,
     FERRIES: n50.METADATA,
+}
+
+SWEDEN_SOURCE_METADATA: dict[str, Described] = {
+    LEDER: naturvardsregistret.METADATA,
+    T50_TRAILS: topografi50.METADATA,
+    T50_PATHS: topografi50.METADATA,
+    T50_ROADS: topografi50.METADATA,
+    OSM: overpass.METADATA,
+    sweden.FERRIES: topografi50.METADATA,
 }
 
 #: What a chain's own name was taken from, per source. Named here only to say
@@ -635,6 +860,8 @@ class TrailLayer(NamedTuple):
             what a reader types is a name, and a road's identity is a register
             id because names repeat across the county.
         dash: SVG dash pattern, for connections that are not walked
+        chains: Whether the lines are chains of the graph
+        show: Whether the layer starts switched on
     """
 
     gdf: gpd.GeoDataFrame
@@ -648,6 +875,11 @@ class TrailLayer(NamedTuple):
     dash: str | None = None
     link_heading: str | None = None
     published_fields: dict[str, str] | None = None
+    #: Whether the lines are chains of the graph, with figures to show and a
+    #: chain to select. False for the winter lines, which are drawn and no more.
+    chains: bool = True
+    #: Whether the layer starts switched on.
+    show: bool = True
 
 
 def source_of(label: str) -> str | None:
@@ -689,12 +921,17 @@ def credit(name: str, licence: str, note: str, attribution: str, url: str, versi
     return {"name": name, "licence": licence, "note": note, "attribution": attribution, "url": url, "version": version or ""}
 
 
-def source_credits(versions: dict[str, str | None]) -> dict[str, list[dict[str, str]]]:
+def source_credits(
+    versions: dict[str, str | None], terms: dict[str, tuple[str, str, str]], metadata: dict[str, Described]
+) -> dict[str, list[dict[str, str]]]:
     """Say what a file drawn from each dataset has to name.
 
     Args:
-        versions: The version or the date read, per source, from
-            :func:`~trails.network.norway.load_sources`
+        versions: The version or the date read, per source, from the country
+            module's ``load_sources``
+        terms: The licence, the word and how to read the date, per source:
+            :data:`NORWAY_SOURCE_TERMS` or :data:`SWEDEN_SOURCE_TERMS`
+        metadata: Where each dataset says what it is
 
     Returns:
         The sources a chain of each dataset draws on, keyed by the value the
@@ -702,77 +939,66 @@ def source_credits(versions: dict[str, str | None]) -> dict[str, list[dict[str, 
         back and all the page has to go on
     """
     credits: dict[str, list[dict[str, str]]] = {}
-    for name, (licence, note, word) in SOURCE_TERMS.items():
-        metadata = SOURCE_METADATA.get(name)
-        described = metadata.name if metadata else geonorge.TURRUTEBASEN_METADATA.dataset_name
+    for name, (licence, note, word) in terms.items():
+        described = metadata[name]
         version = versions.get(name)
         credits[name] = [
             credit(
-                name if described == name else f"{name} ({described})",
+                name if described.name == name else f"{name} ({described.name})",
                 licence,
                 note,
-                metadata.attribution if metadata else geonorge.TURRUTEBASEN_METADATA.attribution,
-                metadata.url if metadata else geonorge.TURRUTEBASEN_METADATA.catalog_url,
+                described.attribution,
+                described.url,
                 f"{word} {version[:10]}".strip() if version and word else version,
             )
         ]
     return credits
 
 
-def height_credit() -> list[dict[str, str]]:
+def height_credit(model: Described) -> list[dict[str, str]]:
     """Say what the ``<ele>`` on every trackpoint came from.
 
     In every exported file that carries a height and in none that does not: a
     ferry crossing has no ground under it, and naming the height model in a file
     holding no height would be a claim about nothing.
 
+    Args:
+        model: The height model: Kartverket's point service, or Lantmäteriet's
+            downloaded model
+
     Returns:
         A single entry for the height model, and **it carries no version**. The
-        endpoint publishes none and is not ordered — it answers point by point,
-        and the answers reach a file through the graph rather than through a
-        dated download — so the field is left empty rather than filled with a
-        date that would describe something else. What a reader needs in order to
-        compare the ascent figure with another platform's is not a version but
-        the rule it was read under, and every track carries that in its own
-        ``ascentMethod``.
+        Norwegian endpoint publishes none and is not ordered — it answers point
+        by point, and the answers reach a file through the graph rather than
+        through a dated download; the Swedish model is read square by square
+        off a STAC search that names each square's own date and no edition —
+        so the field is left empty rather than filled with a date that would
+        describe something else. What a reader needs in order to compare the
+        ascent figure with another platform's is not a version but the rule it
+        was read under, and every track carries that in its own ``ascentMethod``.
     """
-    return [
-        credit(
-            hoydedata.METADATA.name,
-            hoydedata.METADATA.license,
-            "",
-            hoydedata.METADATA.attribution,
-            hoydedata.METADATA.url,
-            None,
-        )
-    ]
+    return [credit(model.name, model.license, "", model.attribution, model.url, None)]
 
 
-def protected_credit() -> list[dict[str, str]]:
+def protected_credit(register: Described) -> list[dict[str, str]]:
     """Say where a route's protected-area figures came from.
 
     In every file that states one and in none that does not, exactly as the
-    height model is named. The register publishes no version and is not ordered
-    — it is queried over an extent, and the answer reaches a file through the
-    graph — so the field is left empty rather than filled with a date that would
-    describe the download and not the data.
+    height model is named. Neither register publishes a version — one is
+    queried over an extent, the other rewritten every night — and the answer
+    reaches a file through the graph, so the field is left empty rather than
+    filled with a date that would describe the download and not the data.
+
+    Args:
+        register: Naturbase, or Naturvårdsregistret
 
     Returns:
-        A single entry for Naturbase
+        A single entry for the register
     """
-    return [
-        credit(
-            naturbase.METADATA.name,
-            naturbase.METADATA.license,
-            "",
-            naturbase.METADATA.attribution,
-            naturbase.METADATA.url,
-            None,
-        )
-    ]
+    return [credit(register.name, register.license, "", register.attribution, register.url, None)]
 
 
-def ascent_method(params: Params) -> str:
+def ascent_method(params: graphs.Params, model: str) -> str:
     """Say how the heights and the ascent figure were reached.
 
     The figure without it asserts nothing: the same route here reads anywhere
@@ -781,11 +1007,21 @@ def ascent_method(params: Params) -> str:
 
     Args:
         params: What decided the build
+        model: The model the ground was read off, in a word: ``DTM1`` for
+            Kartverket's service, the mosaic's posts for Lantmäteriet's
 
     Returns:
         The rule, in the words the popup and the panel use for it
     """
-    return f"DTM1, sampled every {params.elevation_step_m:g} m, gains under {params.ascent_threshold_m:g} m ignored"
+    return f"{model}, sampled every {params.elevation_step_m:g} m, gains under {params.ascent_threshold_m:g} m ignored"
+
+
+#: The word the Norwegian ascent rule opens with.
+NORWAY_HEIGHT_MODEL = "DTM1"
+
+#: And the Swedish: the 1 m model read at the mosaic's posts, which are the
+#: posts the height tiles were cut from (:data:`sweden.HEIGHT_POSTS_M`).
+SWEDEN_HEIGHT_MODEL = f"Markhöjdmodell 1 m at {sweden.HEIGHT_POSTS_M:g} m posts"
 
 
 #: How near a click has to land to be taken as a point on the network. The
@@ -997,7 +1233,53 @@ MATCH_MAX_TURN_DEG = 60.0
 MATCH_ANCHOR_M = 250.0
 
 
-def plan_settings(params: Params, layers: list[TrailLayer]) -> dict[str, object]:
+#: Where a straight leg's heights come from, per country. Norway asks
+#: Kartverket's point service, in degrees, at the service's own cap on points
+#: per request and the build's own concurrency -- somebody else's endpoint,
+#: and one number rather than two -- and reads each answer by the two rules
+#: the build reads it by. Sweden reads the height tiles the build cut
+#: (decisions §6.3) and asks no service at all; the service's settings are
+#: then handed over empty, because the page insists on the keys and reads
+#: none of them once it has tiles.
+NORWAY_PLAN_HEIGHTS: dict[str, object] = {
+    "heightsUrl": hoydedata.SERVICE_URL,
+    "heightsCrs": hoydedata.WGS84_COORDINATE_SYSTEM,
+    "heightsBatch": hoydedata.MAX_POINTS,
+    "heightsWorkers": hoydedata.DEFAULT_WORKERS,
+    "heightsTiles": None,
+    "terrainModel": hoydedata.TERRAIN_MODEL,
+    "seaTerrain": hoydedata.SEA_TERRAIN,
+}
+
+
+def sweden_plan_heights(base: maps.BaseMap) -> dict[str, object]:
+    """The Swedish page's height source: the tiles beside the sheet it draws.
+
+    Args:
+        base: The sheet, whose provider carries the height tiles
+
+    Returns:
+        The height entries of the ``plan`` argument
+
+    Raises:
+        ValueError: If the sheet's provider carries no height tiles, since the
+            page would then have nothing to read a straight leg's profile off
+    """
+    provider = maps.provider_of(base)
+    if provider is None or provider.heights is None:
+        raise ValueError(f"{base.value} carries no height tiles, and the page has no service to ask instead")
+    return {
+        "heightsUrl": None,
+        "heightsCrs": None,
+        "heightsBatch": None,
+        "heightsWorkers": None,
+        "heightsTiles": provider.heights.as_settings(),
+        "terrainModel": None,
+        "seaTerrain": None,
+    }
+
+
+def plan_settings(params: graphs.Params, layers: list[TrailLayer], heights: dict[str, object]) -> dict[str, object]:
     """Hand the page what it needs to plan a route over the graph it carries.
 
     Everything here is a fact the build already settled, and the page must not
@@ -1011,19 +1293,14 @@ def plan_settings(params: Params, layers: list[TrailLayer]) -> dict[str, object]
         params: What decided the build
         layers: The line layers this map draws, which is what the route's own
             width is measured against
+        heights: Where a straight leg's heights come from:
+            :data:`NORWAY_PLAN_HEIGHTS` or :func:`sweden_plan_heights`
 
     Returns:
         The ``plan`` argument of :func:`~trails.visualization.maps.add_plan_mode`
     """
     return {
-        "heightsUrl": hoydedata.SERVICE_URL,
-        # Degrees, not the metric grid the build asks in: the page holds
-        # longitude and latitude and the service takes either.
-        "heightsCrs": hoydedata.WGS84_COORDINATE_SYSTEM,
-        "heightsBatch": hoydedata.MAX_POINTS,
-        # The build's concurrency and for the build's reason: this is somebody
-        # else's endpoint, and one number rather than two.
-        "heightsWorkers": hoydedata.DEFAULT_WORKERS,
+        **heights,
         # **And a deadline, which the build does not need and a reader does.**
         # `fetch` has none of its own: a server that accepts a connection and
         # then says nothing leaves a leg outstanding for ever, and plan mode
@@ -1043,8 +1320,6 @@ def plan_settings(params: Params, layers: list[TrailLayer]) -> dict[str, object]
         # than written down again, so a layer drawn wider tomorrow takes the
         # route with it instead of quietly overtaking it.
         "routeWidth": max(layer.weight for layer in layers),
-        "terrainModel": hoydedata.TERRAIN_MODEL,
-        "seaTerrain": hoydedata.SEA_TERRAIN,
         "sampleStepM": params.elevation_step_m,
         "ascentThresholdM": params.ascent_threshold_m,
         "snapM": SNAP_M,
@@ -1100,7 +1375,7 @@ def plan_settings(params: Params, layers: list[TrailLayer]) -> dict[str, object]
     }
 
 
-def export_settings(versions: dict[str, str | None], params: Params, park: Park) -> dict[str, object]:
+def export_settings(credits: Credits, park: Park) -> dict[str, object]:
     """Hand the page everything it needs to write a GPX file.
 
     The browser writes that file, so every last thing in it has to be in the
@@ -1111,8 +1386,8 @@ def export_settings(versions: dict[str, str | None], params: Params, park: Park)
     and a browser cannot invent them.
 
     Args:
-        versions: The version or the date read, per source
-        params: What decided the build
+        credits: What every file names: the sources, the height model, the
+            protected-area register and the rule the ascent was read under
         park: Whose map wrote the file, for its name, its description and its prefix
 
     Returns:
@@ -1125,8 +1400,8 @@ def export_settings(versions: dict[str, str | None], params: Params, park: Park)
     """
     keys = {CHAIN_KEY: maps.FIGURE_ID_KEY, **CHAIN_FIGURE_FIELDS}
     return {
-        "credits": source_credits(versions),
-        "heights": height_credit(),
+        "credits": credits.sources,
+        "heights": credits.heights,
         # The one list, in the one order, that both writers work from: the
         # column the Python writer reads, the key the page carries it under, and
         # the name it is written down as.
@@ -1142,7 +1417,7 @@ def export_settings(versions: dict[str, str | None], params: Params, park: Park)
         "prefix": TRAILS_PREFIX,
         "creator": EXPORT_CREATOR,
         "description": EXPORT_DESCRIPTION.format(park=park.name),
-        "ascentMethod": ascent_method(params),
+        "ascentMethod": credits.ascent,
         "identitySeparator": IDENTITY_SEPARATOR,
         "filePrefix": park.stem,
         "sourceLength": SOURCE_LENGTH_FIELD,
@@ -1182,10 +1457,26 @@ def export_settings(versions: dict[str, str | None], params: Params, park: Park)
         },
         # Named wherever a file states how far the route runs inside a protected
         # area, and in no file that does not — the same rule the height model is
-        # credited by. That figure came from Naturbase, and a file that reports
-        # it without saying so names every party with a claim on it but one.
-        "protected": protected_credit(),
+        # credited by. That figure came from the register, and a file that
+        # reports it without saying so names every party with a claim on it but one.
+        "protected": credits.protected,
     }
+
+
+class Credits(NamedTuple):
+    """What every exported file names, worked out once per build.
+
+    Attributes:
+        sources: The sources a chain of each dataset draws on, by source name
+        heights: The height model, named in every file carrying a height
+        protected: The protected-area register, named in a route's file
+        ascent: The rule the ascent was read under, in the file's words
+    """
+
+    sources: dict[str, list[dict[str, str]]]
+    heights: list[dict[str, str]]
+    protected: list[dict[str, str]]
+    ascent: str
 
 
 def load_park_boundary(park: Park, cache_dir: str) -> gpd.GeoDataFrame:
@@ -1201,14 +1492,36 @@ def load_park_boundary(park: Park, cache_dir: str) -> gpd.GeoDataFrame:
     source = naturbase.Source(cache_dir=cache_dir)
     found = source.find_one(park.name, layer=naturbase.Layer.NATIONAL_PARK)
 
-    area_km2 = found.to_crs(METRIC_CRS).area.iloc[0] / 1e6
+    area_km2 = found.to_crs(norway.METRIC_CRS).area.iloc[0] / 1e6
     print(f"Park: {found['offisieltNavn'].iloc[0]}")
     print(f"  Area: {area_km2:,.0f} km2")
     print(f"  Municipalities: {found['kommune'].iloc[0]}")
     return found
 
 
-def only_the_wider_way(chains: gpd.GeoDataFrame) -> pd.Series:
+def load_swedish_boundary(park: Park, register: naturvardsregistret.Source) -> gpd.GeoDataFrame:
+    """Load a national park's boundary from Naturvårdsregistret, by name.
+
+    Args:
+        park: Which park
+        register: The register, open
+
+    Returns:
+        Single-row GeoDataFrame in EPSG:4326
+    """
+    found = register.find_one(park.name)
+    area_km2 = found.to_crs(sweden.METRIC_CRS).area.iloc[0] / 1e6
+    print(f"Park: {found[naturvardsregistret.AREA_NAME].iloc[0]} ({naturvardsregistret.form_label(found[naturvardsregistret.AREA_FORM].iloc[0])})")
+    print(f"  Area: {area_km2:,.0f} km2 (the register says {float(found['AREA_HA'].iloc[0]) / 100:,.0f})")
+    print(f"  County and municipality: {found['LAN'].iloc[0]}, {found['KOMMUN'].iloc[0]}")
+    # The three columns the page and the report read, and not the decision
+    # date beside them: a timestamp does not serialise into the boundary's
+    # GeoJSON, and nothing downstream asks for it.
+    kept: gpd.GeoDataFrame = found[[naturvardsregistret.AREA_ID, naturvardsregistret.AREA_NAME, naturvardsregistret.AREA_FORM, "geometry"]]
+    return kept
+
+
+def only_the_wider_way(chains: gpd.GeoDataFrame, placeholders: frozenset[str]) -> pd.Series:
     """Say how long the whole named way is, where that is more than the chain.
 
     :func:`whole_way_length` answers for every chain that has an identity, and
@@ -1218,6 +1531,8 @@ def only_the_wider_way(chains: gpd.GeoDataFrame) -> pd.Series:
 
     Args:
         chains: Chains carrying ``source``, ``identity`` and ``length_m``
+        placeholders: Identities that are a register's word for *no name*,
+            which must not be summed as though they named one way
 
     Returns:
         Kilometres, empty where the chain is the whole way, has no identity, or
@@ -1225,7 +1540,7 @@ def only_the_wider_way(chains: gpd.GeoDataFrame) -> pd.Series:
         otherwise report the total of every other stretch the register also had
         no name for
     """
-    whole = whole_way_length(chains, ignore=PLACEHOLDER_IDENTITIES)
+    whole = whole_way_length(chains, ignore=placeholders)
     # A metre of slack: the same lengths summed in a different order need not
     # come out bit for bit equal.
     return (whole / 1000).round(2).where(whole > chains["length_m"] + 1.0)
@@ -1241,7 +1556,7 @@ def share_inside(chains: gpd.GeoDataFrame, area: gpd.GeoDataFrame) -> pd.Series:
     Returns:
         Share of each chain's length inside it, between 0 and 1
     """
-    inside = chains.geometry.intersection(area.to_crs(METRIC_CRS).union_all()).length
+    inside = chains.geometry.intersection(area.to_crs(str(chains.crs)).union_all()).length
     return inside / chains["length_m"]
 
 
@@ -1395,26 +1710,35 @@ def describe_unrecorded(chains: gpd.GeoDataFrame) -> pd.Series:
     )
 
 
-def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.GeoDataFrame]:
+def describe(
+    chains: gpd.GeoDataFrame,
+    park: gpd.GeoDataFrame,
+    sources: tuple[str, ...],
+    placeholders: frozenset[str] = frozenset(),
+) -> dict[str, gpd.GeoDataFrame]:
     """Give every chain the columns a popup, a search box and a layer need.
 
     Everything here is read off what the chain already carries. Nothing is
     joined, looked up or clipped: the graph is the only place the geometry and
     the attributes come from, so the map cannot disagree with the router about
-    what a line is.
+    what a line is. What one country's registers say beyond this is added by
+    :func:`describe_norway` and :func:`describe_sweden`.
 
     Args:
-        chains: Every chain of the network, in a metric CRS
+        chains: Every chain of the network, in the country's metric CRS
         park: Park boundary
+        sources: Every source of the network, in draw order
+        placeholders: Identities that are a register's word for no name
 
     Returns:
         One frame per source, keyed by source name. Every source has an entry,
         empty where a small extent left it with no chains at all: a layer with
         nothing in it is drawn as nothing, and a missing key is a crash.
     """
+    metric_crs = str(chains.crs)
     described = chains.copy()
     described["length_km"] = (described["length_m"] / 1000).round(2)
-    described["whole_km"] = only_the_wider_way(described)
+    described["whole_km"] = only_the_wider_way(described, placeholders)
     described["in_park"] = share_inside(described, park) >= IN_PARK_SHARE
     described["marking_all"] = describe_marking(described)
     described["unrecorded"] = describe_unrecorded(described)
@@ -1424,7 +1748,7 @@ def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.
     # the eight points. Every chain here comes out running eastward — never W,
     # SW or NW — because a chain is canonicalised by coordinate order. That looks
     # like a bug and is not.
-    described["bearing_deg"] = endpoint_bearings(described, metric_crs=METRIC_CRS)
+    described["bearing_deg"] = endpoint_bearings(described, metric_crs=metric_crs)
     # Named once, here, and carried. The panel must not name it a second time
     # from the degrees: 241 chains lie within half a degree of a boundary
     # between two points, and two roundings that disagree by a hair would put
@@ -1436,8 +1760,9 @@ def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.
     # an exported file asks the same question of all of them. It is the chain's
     # identity everywhere but the roads, where the identity is the register id
     # that reunites two fragments of one road and the *name* is a separate
-    # column — a road id is not a thing to write into a <trk><name>.
-    described["track_name"] = described["identity"].where(described["source"] != N50_ROADS, described["road_name"])
+    # column — a road id is not a thing to write into a <trk><name> — and each
+    # country's own description says which column that is.
+    described["track_name"] = described["identity"]
     # **The two ends of the climb on one line, under it.** They are one fact
     # about a walk -- how high it gets and how low -- and read as two rows two
     # rows apart, with the low one arriving from a different place entirely. The
@@ -1452,8 +1777,18 @@ def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.
         dtype="string",
     )
 
-    frames = {name: gpd.GeoDataFrame(described[described["source"] == name].copy(), geometry="geometry", crs=described.crs) for name in SOURCE_NAMES}
+    return {name: gpd.GeoDataFrame(described[described["source"] == name].copy(), geometry="geometry", crs=described.crs) for name in sources}
 
+
+def describe_norway(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDataFrame]:
+    """Add what the Norwegian registers say about their own chains.
+
+    Args:
+        frames: One frame per source, from :func:`describe`
+
+    Returns:
+        The same frames, with the per-source columns the popups read
+    """
     routes = frames[UT]
     routes["name"] = routes["identity"]
     routes["category_label"] = translate_joined(routes["category"], UT_CATEGORY_LABELS)
@@ -1480,12 +1815,57 @@ def describe(chains: gpd.GeoDataFrame, park: gpd.GeoDataFrame) -> dict[str, gpd.
     # it, and a road that is public for half its run is not a private road. The
     # popup's category line names both wherever a chain spans the two.
     roads["is_private"] = roads["vegkategori"] == n50.PRIVATE_ROAD_CATEGORY
+    # The name SSR gave the road, not the register id the chain is built on.
+    roads["track_name"] = roads["road_name"]
 
     frames[OSM]["name"] = frames[OSM]["identity"]
 
     ferries = frames[FERRIES]
     ferries["survey_method"] = translate_joined(ferries["malemetode"], SURVEY_METHOD_LABELS)
 
+    return frames
+
+
+def describe_sweden(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDataFrame]:
+    """Add what the Swedish registers say about their own chains.
+
+    Args:
+        frames: One frame per source, from :func:`describe`
+
+    Returns:
+        The same frames, with the per-source columns the popups read
+    """
+    leder = frames[LEDER]
+    # The identity is the state trail; the name is the register's name for
+    # the trail where it has one -- 37 of 47 segments over Abisko -- and the
+    # state trail otherwise, so a track is never written nameless where the
+    # register knows which trail it is.
+    leder["route"] = leder["identity"]
+    leder["route_id"] = leder[naturvardsregistret.TRAIL_ROUTE_ID]
+    leder["trail_name"] = leder[naturvardsregistret.TRAIL_NAME].fillna(leder["identity"])
+    leder["track_name"] = leder["trail_name"]
+    leder["trail_type"] = leder[naturvardsregistret.TRAIL_TYPE]
+    leder["marking"] = leder[naturvardsregistret.TRAIL_MARKING]
+    leder["description"] = leder[naturvardsregistret.TRAIL_DESCRIPTION]
+    leder["protected_area"] = leder[naturvardsregistret.TRAIL_PROTECTED]
+
+    for name in (T50_TRAILS, T50_PATHS):
+        frame = frames[name]
+        frame["path_class"] = translate_joined(frame[topografi50.TYPE], PATH_CLASS_LABELS)
+        frame["over"] = translate_joined(frame["vagutforande"], BRIDGE_LABELS)
+        frame["snowmobiles"] = translate_joined(frame["skoterkorning_tillaten"], SNOWMOBILE_LABELS)
+        frame["brush"] = translate_joined(frame["ruskmarkering"], BRUSH_LABELS)
+    frames[T50_TRAILS]["route_name"] = frames[T50_TRAILS]["identity"]
+
+    roads = frames[T50_ROADS]
+    roads["road_class"] = translate_joined(roads[topografi50.TYPE], ROAD_CLASS_LABELS)
+    roads["road_number"] = roads["identity"]
+    # A street name where the product has one, the number otherwise: the
+    # track is written under whichever the road is known by.
+    roads["road_name"] = roads["gatunamn"].where(roads["gatunamn"].notna(), roads["identity"])
+    roads["track_name"] = roads["road_name"]
+
+    frames[OSM]["name"] = frames[OSM]["identity"]
     return frames
 
 
@@ -1511,7 +1891,10 @@ def simplify_for_display(gdf: gpd.GeoDataFrame, tolerance_m: float) -> gpd.GeoDa
     if not len(gdf) or tolerance_m <= 0:
         return gdf
 
-    simplified = gdf.to_crs(METRIC_CRS)
+    # In the metres the lines are already in -- a chain frame arrives in the
+    # country's metric CRS -- and in the nearest UTM zone for a frame that
+    # arrives in degrees, which the winter lines do.
+    simplified = gdf.to_crs(gdf.estimate_utm_crs()) if gdf.crs is not None and gdf.crs.is_geographic else gdf.copy()
     simplified["geometry"] = simplified.geometry.simplify(tolerance_m, preserve_topology=True)
     return simplified.to_crs("EPSG:4326")
 
@@ -1545,10 +1928,9 @@ def summarize(name: str, gdf: gpd.GeoDataFrame) -> None:
 
 def encode_for_the_page(
     network: Network,
-    sources: list[NetworkSource],
-    params: Params,
     order: pd.DataFrame,
-    protected: gpd.GeoDataFrame,
+    costs: dict[str, dict[str, float]],
+    areas: list[dict[str, object]],
     water: gpd.GeoDataFrame,
     rivers: gpd.GeoDataFrame,
     bounds: maps.Bounds,
@@ -1564,21 +1946,23 @@ def encode_for_the_page(
     or the render budget.
 
     Args:
-        network: The finished graph, in :data:`METRIC_CRS`
-        sources: The datasets it was built from, which say what a route costs
-        params: What decided the build
+        network: The finished graph, in the country's metric CRS
         order: Which of a chain's edges comes first and which way round each of
             them runs. Handed in rather than rebuilt here, because the exported
             tracks are laid out of the same walk and the two writers of a GPX
             file agree only for as long as they compose from one order.
-        protected: The areas every edge was measured against, whose outlines go
-            into the page as well as their names: a leg drawn straight across
-            ground no edge covers has to answer the same question, and only the
-            polygons can answer it there.
+        costs: What a metre on each dataset costs a route, from the country
+            module's ``edge_costs``
+        areas: The protected areas every edge was measured against, whose
+            outlines go into the page as well as their names: a leg drawn
+            straight across ground no edge covers has to answer the same
+            question, and only the polygons can answer it there. From the
+            country module's ``protected_table``.
         water: The sea and the lakes as outlines. Rasterised here at
             ``WATER_CELL_M`` and carried in the header, because a straight walk
             is priced by what it crosses and the page prices thousands of them
             in one search.
+        rivers: The rivers as outlines, carrying ``name``
         bounds: The box the grid covers, which is the zone: a leg laid outside
             it is priced as ground, and there is no network outside it to lay
             one to.
@@ -1593,8 +1977,8 @@ def encode_for_the_page(
         # chain in five does not even join up in it — and the browser has no
         # chain geometry to project them onto, so it has to be told.
         order,
-        costs=edge_costs(sources, params),
-        areas=protected_table(protected),
+        costs=costs,
+        areas=areas,
         water=water_mask(water, bounds, WATER_CELL_M),
         # Outlines and not bits, for a sentence and not a price: see
         # ``RIVER_TOLERANCE_M``.
@@ -1602,73 +1986,238 @@ def encode_for_the_page(
     )
 
 
-def main() -> int:
-    """Build the map and GPX exports.
+class PointLayer(NamedTuple):
+    """One point layer of the map, and its row in the legend.
+
+    Attributes:
+        gdf: Points to draw
+        label: Layer name in the control and legend, ending in its source
+        legend_color: The colour its legend row is keyed with -- a pin carries
+            an icon colour by name, so the row needs a value of its own
+        popup_fields: Mapping of column name to popup label
+        point_type: What a waypoint set beside one of these is called after
+        source: Dataset the points came from
+        pin: True for a pin with an icon, False for a labelled dot
+        color: The pin's colour, one of the names awesome-markers knows, or the
+            dot's CSS colour
+        icon: The pin's glyph
+        radius: The dot's radius
+        label_field: Column the pin's hover label reads
+        show: Whether the layer starts switched on
+    """
+
+    gdf: gpd.GeoDataFrame
+    label: str
+    legend_color: str
+    popup_fields: dict[str, str]
+    point_type: str
+    source: str
+    pin: bool = True
+    color: str = "darkred"
+    icon: str = "house-chimney"
+    radius: float = 6.0
+    label_field: str | None = "name"
+    show: bool = True
+
+
+class NameLayer(NamedTuple):
+    """One layer of names drawn as text, and its row in the legend.
+
+    Attributes:
+        gdf: Labels carrying ``name``, ``font_size``, ``color`` and ``symbol``
+        heading: Layer name, which the legend row also carries
+        color: The colour the legend row is keyed with
+    """
+
+    gdf: gpd.GeoDataFrame
+    heading: str
+    color: str
+
+
+class Export(NamedTuple):
+    """One GPX file of one source's chains.
+
+    Attributes:
+        filename: What the file is called, after the map's own prefix
+        source: Whose chains it holds
+        chains: The chains, described
+        name_field: Column a track is named from
+        desc_fields: Columns written into a track's description
+    """
+
+    filename: str
+    source: str
+    chains: gpd.GeoDataFrame
+    name_field: str
+    desc_fields: list[str]
+
+
+class Built(NamedTuple):
+    """Everything one country's registers put on the map, ready to be assembled.
+
+    What :func:`assemble` needs and nothing about where it came from: the
+    graph, what is drawn over it, what the page is told, and what the files
+    say about themselves.
+
+    Attributes:
+        park: The park boundary, in EPSG:4326
+        zone: The ground the graph covers, in EPSG:4326
+        params: What decided the build
+        network: The finished graph, in the country's metric CRS
+        order: Which of a chain's edges comes first, and which way round
+        tracks: The dense, height-carrying line of every chain, for the files
+        layers: The line layers, back to front
+        points: The point layers, in the order they are added
+        names: The name layers, drawn as text and off by default
+        highlighted: Positions of a name asked for with ``--highlight``
+        water: The sea and the lakes as outlines, over the zone's box
+        rivers: The rivers as outlines, carrying ``name``
+        costs: What a metre on each dataset costs a route
+        areas: The protected areas, for the page
+        credits: What every exported file names
+        heights: Where a straight leg's heights come from, for plan mode
+        boundary_label: What the boundary's legend row says
+        exports: The GPX files to write
+    """
+
+    park: gpd.GeoDataFrame
+    zone: gpd.GeoDataFrame
+    params: graphs.Params
+    network: Network
+    order: pd.DataFrame
+    tracks: gpd.GeoSeries
+    layers: list[TrailLayer]
+    points: list[PointLayer]
+    names: list[NameLayer]
+    highlighted: gpd.GeoDataFrame
+    water: gpd.GeoDataFrame
+    rivers: gpd.GeoDataFrame
+    costs: dict[str, dict[str, float]]
+    areas: list[dict[str, object]]
+    credits: Credits
+    heights: dict[str, object]
+    boundary_label: str
+    exports: list[Export]
+
+
+def laid_out(network: Network) -> tuple[pd.DataFrame, gpd.GeoSeries]:
+    """Lay every chain out as the line an export writes.
+
+    A third thing beside the one the map draws and the one a route is found
+    over: every vertex, a point wherever two are more than 5 m apart, and a
+    height on each. Laid out once, off the same edge order the page's payload
+    is encoded from — the browser writes the same file, and the two agree only
+    because they walk the same walk.
+
+    Args:
+        network: The finished graph
 
     Returns:
-        Process exit code
+        The edge order, and the track of every chain
     """
-    repo_root = Path(__file__).resolve().parents[2]
-
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--park", default="lomsdal-visten", choices=sorted(PARKS), help="Which map to build; see PARKS")
-    parser.add_argument("--cache-dir", default=str(repo_root / ".cache"), help="Cache directory for downloaded data")
-    parser.add_argument("--output-dir", default=str(repo_root / "analysis" / "output"), help="Directory for the map and GPX files")
-    # 15 km reaches every realistic trailhead town: Tosbotn 2.6 km, Trofors 5.5 km,
-    # Mosjøen 9.8 km, Vevelstad 10.3 km, Brønnøysund 11.2 km from the boundary.
-    parser.add_argument("--approach-km", type=float, default=15.0, help="Width of the approach zone around the park (km)")
-    parser.add_argument("--trailhead-km", type=float, default=2.0, help="Band around the park in which farms and sæters are shown as trailheads (km)")
-    parser.add_argument("--names-km", type=float, default=2.0, help="Band around the park covered by the terrain-name layer (valleys, passes, peaks)")
-    parser.add_argument(
-        "--ut-routes",
-        default=None,
-        help="Catalogue of UT.no routes to draw, one GPX downloaded per entry; the park's own by default",
-    )
-    parser.add_argument("--highlight", help="Mark every position of this place name in red, numbered, for checking what the register holds")
-    parser.add_argument(
-        "--names-spacing-m", type=float, default=1000.0, help="Minimum distance between two labels of the same name; closer copies are dropped"
-    )
-    parser.add_argument("--simplify-m", type=float, default=8.0, help="Vertex tolerance for map rendering in metres; GPX keeps full detail")
-    parser.add_argument("--hut-name-m", type=float, default=50.0, help="How far an N50 cabin may look for its name in the place-name register (m)")
-    parser.add_argument("--force-download", action="store_true", help="Re-download source data instead of using the cache")
-    args = parser.parse_args()
-
-    which = PARKS[args.park]
-    if which.country != BUILDABLE_COUNTRY:
-        # Declared, not buildable: every loader below is a Norwegian register.
-        # The Swedish set is analysis/docs/abisko-decisions.md §5, wired in at
-        # §7 step 4; until then saying so beats seven loaders failing in turn.
-        parser.exit(2, f"{which.name} is declared but not yet buildable: its sources ({which.country}) are not wired in — decisions doc §7.\n")
-    if args.ut_routes is None:
-        args.ut_routes = str(repo_root / "analysis" / "routes" / which.ut_routes) if which.ut_routes else ""
-
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    print("=" * 70)
-    print(f"{which.name.upper()} TRAIL MAP")
-    print("=" * 70)
-
-    park = load_park_boundary(which, args.cache_dir)
-    params = Params.from_args(args)
-    # Park and approach zone as one polygon. Nothing here is split at the
-    # boundary; where a layer is, it is decided per chain further down.
-    zone = zone_around(park, params.approach_km)
-
-    loaded = load_sources(params, zone)
-    network, _ = build(loaded.sources, masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
-    by_source = describe(network.chains, park)
-
-    # The line an export writes, which is a third thing beside the one the map
-    # draws and the one a route is found over: every vertex, a point wherever
-    # two are more than 5 m apart, and a height on each. Laid out once, off the
-    # same edge order the page's payload is encoded from — the browser writes
-    # the same file, and the two agree only because they walk the same walk.
     order = chain_order(network.chains, network.edges)
     tracks = chain_tracks(network.chains, network.edges, order)
     print(f"\nExport tracks: {int(tracks.count_coordinates().sum()):,} points over {int(network.chains['length_m'].sum() / 1000):,} km")
-
     print(f"\nChains from the graph: {len(network.chains):,} drawn, over {len(network.edges):,} routing edges")
+    return order, tracks
+
+
+def split_at_the_boundary(by_source: dict[str, gpd.GeoDataFrame], sources: tuple[tuple[str, str], ...]) -> dict[str, gpd.GeoDataFrame]:
+    """Put each source's chains into a park layer and an approach layer, and say how many.
+
+    Args:
+        by_source: One frame per source, described
+        sources: Each source with the word its labels use for it
+
+    Returns:
+        The frames keyed ``{source}/park`` and ``{source}/approach``
+    """
+    layer_of: dict[str, gpd.GeoDataFrame] = {}
+    for source, word in sources:
+        frame = by_source[source]
+        layer_of[f"{source}/park"] = frame[frame["in_park"]]
+        layer_of[f"{source}/approach"] = frame[~frame["in_park"]]
+        summarize(f"{word} inside park", layer_of[f"{source}/park"])
+        summarize(f"{word} in approach zone", layer_of[f"{source}/approach"])
+    return layer_of
+
+
+def styled_names(names: gpd.GeoDataFrame, spacing_m: float, metric_crs: str) -> gpd.GeoDataFrame:
+    """Thin a set of names and give each the size, colour and glyph it is drawn with.
+
+    Args:
+        names: Names carrying ``name``, ``rank`` (lower is more prominent),
+            ``color`` and ``symbol``
+        spacing_m: Minimum distance between two labels of the same name
+        metric_crs: The CRS the spacing is measured in
+
+    Returns:
+        The names kept, with ``font_size``
+    """
+    if not len(names):
+        return names
+    # A name repeated along a feature only reads as a repetition when the
+    # copies are far enough apart; closer than this they collide.
+    before = len(names)
+    thinned = thin_points(names, spacing_m, group_by="name", priority="rank", metric_crs=metric_crs).copy()
+    # The register ranks importance itself; use it for label size rather
+    # than drawing every name at the same weight.
+    thinned["font_size"] = (15.0 - thinned["rank"] * 0.5).clip(lower=10.0).round(1)
+    repeated = int(thinned["name"].duplicated(keep=False).sum())
+    print(f"  names: {len(thinned)} labels ({before - len(thinned)} thinned out)")
+    print(f"    {repeated} of them are repeats of an extended feature")
+    print(f"    {thinned['kind'].value_counts().head(6).to_dict()}")
+    return thinned
+
+
+def highlight(names: gpd.GeoDataFrame, wanted: str | None) -> gpd.GeoDataFrame:
+    """Pick out every position the register holds for one name, numbered.
+
+    Args:
+        names: Names carrying ``name`` and ``kind``
+        wanted: The name asked for, or None
+
+    Returns:
+        Its positions with a ``marker_label``, empty where nothing was asked for
+    """
+    if not wanted:
+        return gpd.GeoDataFrame()
+    found = names[names["name"].str.casefold() == wanted.casefold()].copy()
+    print(f"  highlighting '{wanted}': {len(found)} position(s) before thinning")
+    for number, (_, row) in enumerate(found.iterrows(), start=1):
+        print(f"    {number}: {row.geometry.y:.5f} / {row.geometry.x:.5f}  kind={row['kind']}")
+    found["marker_label"] = [f"{i}. {n}" for i, n in enumerate(found["name"], start=1)]
+    return found
+
+
+# ---- Norway ------------------------------------------------------------------
+
+
+def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Built:
+    """Read the Norwegian registers and put everything they say on the map.
+
+    Args:
+        which: The park
+        args: The command line
+        repo_root: The checkout, for the UT.no catalogue
+
+    Returns:
+        What :func:`assemble` needs
+    """
+    if args.ut_routes is None:
+        args.ut_routes = str(repo_root / "analysis" / "routes" / which.ut_routes) if which.ut_routes else ""
+
+    park = load_park_boundary(which, args.cache_dir)
+    params = norway.Params.from_args(args)
+    # Park and approach zone as one polygon. Nothing here is split at the
+    # boundary; where a layer is, it is decided per chain further down.
+    zone = norway.zone_around(park, params.approach_km)
+
+    loaded = norway.load_sources(params, zone)
+    network, _ = norway.build(loaded.sources, norway.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
+    by_source = describe_norway(describe(network.chains, park, norway.SOURCE_NAMES, PLACEHOLDER_IDENTITIES))
+    order, tracks = laid_out(network)
+
     routes = by_source[UT]
     ut_core = routes[routes["category"] == "core"]
     ut_access = routes[routes["category"] == "access"]
@@ -1676,17 +2225,7 @@ def main() -> int:
     roads = by_source[N50_ROADS]
     ferries = by_source[FERRIES]
 
-    layer_of: dict[str, gpd.GeoDataFrame] = {}
-    for source, in_park_label, approach_label in (
-        (FKB, "FKB paths inside park", "FKB paths in approach zone"),
-        (N50_PATHS, "N50 paths inside park", "N50 paths in approach zone"),
-        (OSM, "OSM paths inside park", "OSM paths in approach zone"),
-    ):
-        frame = by_source[source]
-        layer_of[f"{source}/park"] = frame[frame["in_park"]]
-        layer_of[f"{source}/approach"] = frame[~frame["in_park"]]
-        summarize(in_park_label, layer_of[f"{source}/park"])
-        summarize(approach_label, layer_of[f"{source}/approach"])
+    layer_of = split_at_the_boundary(by_source, ((FKB, "FKB paths"), (N50_PATHS, "N50 paths"), (OSM, "OSM paths")))
 
     in_park, in_approach = trails[trails["in_park"]], trails[~trails["in_park"]]
     summarize("Turrutebasen inside park", in_park)
@@ -1725,7 +2264,7 @@ def main() -> int:
         """Names of certain feature types, clipped to an area."""
         return gpd.clip(all_names[all_names["kind"].isin(types)], where)
 
-    terrain_names = of_kind(stedsnavn.TERRAIN_NAME_TYPES, zone_around(park, args.names_km))
+    terrain_names = of_kind(stedsnavn.TERRAIN_NAME_TYPES, norway.zone_around(park, args.names_km))
     settlements = of_kind(stedsnavn.SETTLEMENT_NAME_TYPES, zone)
     farms = of_kind(stedsnavn.FARM_NAME_TYPES, zone)
     ssr_huts = of_kind(stedsnavn.HUT_NAME_TYPES, zone)
@@ -1734,30 +2273,14 @@ def main() -> int:
     print(f"  settlements: {len(settlements)} | farms and holdings: {len(farms)}")
     print(f"  named huts: {len(ssr_huts)} | quays: {len(ssr_quays)}")
 
-    highlighted = gpd.GeoDataFrame()
-    if args.highlight:
-        highlighted = terrain_names[terrain_names["name"].str.casefold() == args.highlight.casefold()].copy()
-        print(f"  highlighting '{args.highlight}': {len(highlighted)} position(s) before thinning")
-        for number, (_, row) in enumerate(highlighted.iterrows(), start=1):
-            print(f"    {number}: {row.geometry.y:.5f} / {row.geometry.x:.5f}  kind={row['kind']} importance={row['importance']}")
-        highlighted["marker_label"] = [f"{i}. {n}" for i, n in enumerate(highlighted["name"], start=1)]
+    highlighted = highlight(terrain_names, args.highlight)
 
     if len(terrain_names):
-        # A name repeated along a feature only reads as a repetition when the
-        # copies are far enough apart; closer than this they collide.
-        before = len(terrain_names)
-        terrain_names = thin_points(terrain_names, args.names_spacing_m, group_by="name", priority="rank")
-
-        # The register ranks importance itself; use it for label size rather
-        # than drawing every name at the same weight.
         terrain_names = terrain_names.copy()
-        terrain_names["font_size"] = (15.0 - terrain_names["rank"] * 0.5).clip(lower=10.0).round(1)
         terrain_names["color"] = terrain_names["kind"].map(TERRAIN_NAME_COLORS).fillna(TERRAIN_NAME_DEFAULT_COLOR)
         terrain_names["symbol"] = terrain_names["kind"].map(TERRAIN_NAME_SYMBOLS).fillna(TERRAIN_NAME_DEFAULT_SYMBOL)
-        repeated = int(terrain_names["name"].duplicated(keep=False).sum())
-        print(f"  terrain names (<{args.names_km:g} km): {len(terrain_names)} labels ({before - len(terrain_names)} thinned out)")
-        print(f"    {repeated} of them are repeats of an extended feature")
-        print(f"    {terrain_names['kind'].value_counts().head(6).to_dict()}")
+        print(f"  terrain names (<{args.names_km:g} km):", end="")
+        terrain_names = styled_names(terrain_names, args.names_spacing_m, norway.METRIC_CRS)
 
     print("\nLoading N50 cabins...")
     n50_source = n50.Source(cache_dir=args.cache_dir)
@@ -1768,7 +2291,7 @@ def main() -> int:
         # huts but is missing some as buildings. Joined, Sæterskaret skogstue —
         # the hut from the park brochure — finally carries its name.
         before = int(cabins["navn"].notna().sum())
-        cabins = attach_nearest(cabins, hut_names, {"name": "ssr_name"}, max_distance_m=args.hut_name_m, metric_crs=METRIC_CRS)
+        cabins = attach_nearest(cabins, hut_names, {"name": "ssr_name"}, max_distance_m=args.hut_name_m, metric_crs=norway.METRIC_CRS)
         cabins["navn"] = cabins["navn"].fillna(cabins["ssr_name"])
         print(f"  named from SSR: {int(cabins['navn'].notna().sum()) - before} cabin(s) that N50 leaves unnamed")
     print(f"  N50 cabins and wilderness huts: {len(cabins)} ({cabins['navn'].notna().sum() if len(cabins) else 0} named)")
@@ -1788,7 +2311,7 @@ def main() -> int:
     # points it places on the water: one outline in three gets one within
     # 60 m. The rest are said as *a river*, which is true.
     river_names = all_names[all_names["kind"] == RIVER_NAME_TYPE]
-    rivers["name"] = attach_nearest(rivers.drop(columns=["name"]), river_names, {"name": "name"}, RIVER_NAME_M, metric_crs=METRIC_CRS)["name"]
+    rivers["name"] = attach_nearest(rivers.drop(columns=["name"]), river_names, {"name": "name"}, RIVER_NAME_M, metric_crs=norway.METRIC_CRS)["name"]
     print(f"  {len(rivers):,} rivers as outlines, {int(rivers['name'].notna().sum()):,} of them named from the register")
     if len(cabins):
         print(f"    {cabins['kind'].value_counts().to_dict()}")
@@ -1806,18 +2329,14 @@ def main() -> int:
     # limited to a narrow band around the boundary.
     trailheads = gpd.clip(
         osm_source.fetch_places(search_bounds, place_types=TRAILHEAD_PLACE_TYPES, force_download=args.force_download),
-        zone_around(park, args.trailhead_km),
+        norway.zone_around(park, args.trailhead_km),
     )
     print(f"  Shelters and huts: {len(shelters)}")
     print(f"  Settlements: {len(places)}")
     print(f"  Trailheads (<{args.trailhead_km:g} km from boundary): {len(trailheads)}")
     print(f"  Ferry and express-boat quays: {len(terminals)}")
 
-    print("\nBuilding map...")
     approach_label = f"≤{args.approach_km:g} km"
-    # Fit to the full approach zone, not just the park, so trailhead towns are visible.
-    fmap = maps.create_map(bounds=bounds_of(zone), base=which.base, extra_bases=which.extras, title=which.app_name, companions=which.companions)
-
     # Layers are added back-to-front so official routes draw on top of OSM,
     # and only non-empty ones appear in the control and legend. Everything is on
     # by default except the terrain names, which the topo backdrop already draws.
@@ -1889,6 +2408,366 @@ def main() -> int:
         ),
     ]
 
+    # Point layers, in the order they are added. Each carries the colour its
+    # legend row is keyed with, since a pin carries an icon colour by name.
+    points = [
+        PointLayer(terminals, "Ferry quays [OSM]", "#5f9ea0", TERMINAL_POPUP_FIELDS, "ferry quay", "OSM", color="cadetblue", icon="ship"),
+        PointLayer(cabins, "Cabins and wilderness huts [N50]", "#8b0000", CABIN_POPUP_FIELDS, "cabin", "N50", label_field="navn"),
+    ]
+    # **One layer per kind of name rather than one for all of them.** They are
+    # different questions — where the water runs, where the passes are — and a
+    # planner usually wants one of them and not the other five. Split after the
+    # thinning above, so each keeps the labels that survived it.
+    names: list[NameLayer] = []
+    if len(terrain_names):
+        drawn_kinds = set(terrain_names["kind"])
+        for label, kinds in TERRAIN_NAME_LEGEND:
+            present = sorted(kinds & drawn_kinds)
+            if not present:
+                continue
+            part = terrain_names[terrain_names["kind"].isin(present)]
+            # Types can share a colour but differ in glyph (fjell vs li), so
+            # show every glyph the group actually draws.
+            glyphs = dict.fromkeys(TERRAIN_NAME_SYMBOLS.get(kind, TERRAIN_NAME_DEFAULT_SYMBOL) for kind in present)
+            names.append(NameLayer(part, f"Name {' '.join(glyphs)} {label} — {', '.join(present)} [SSR]", TERRAIN_NAME_COLORS[present[0]]))
+    points.extend(
+        [
+            # Two of these have no N50 building at all, so the join above cannot
+            # reach them; as their own layer none of the register's huts is lost.
+            PointLayer(ssr_huts, "Named huts [SSR]", "#800080", SSR_POINT_POPUP_FIELDS, "hut", "SSR", color="purple"),
+            PointLayer(ssr_quays, "Quays [SSR]", "#0000cd", SSR_POINT_POPUP_FIELDS, "quay", "SSR", color="blue", icon="anchor"),
+            PointLayer(shelters, "Huts and shelters [OSM]", "#00008b", SHELTER_POPUP_FIELDS, "shelter", "OSM", color="darkblue", icon="campground"),
+            PointLayer(
+                trailheads,
+                "Trailheads, farms and sæters [OSM]",
+                "#6d4c41",
+                PLACE_POPUP_FIELDS,
+                "trailhead",
+                "OSM",
+                pin=False,
+                color="#6d4c41",
+                radius=5.5,
+            ),
+            # Names appear on hover only, like every other point layer. Drawing
+            # 165 settlement names permanently competes with the topo backdrop,
+            # which already labels them.
+            PointLayer(places, "Towns and villages [OSM]", "#37474f", PLACE_POPUP_FIELDS, "settlement", "OSM", pin=False, color="#37474f"),
+            PointLayer(settlements, "Towns and villages [SSR]", "#263238", SSR_POINT_POPUP_FIELDS, "settlement", "SSR", pin=False, color="#263238"),
+            # Over a thousand of them: drawn they would bury the map, so the
+            # layer starts off. The search switches it on by itself when a name
+            # matches, which is the point of carrying them at all.
+            PointLayer(
+                farms,
+                "Farms and holdings [SSR]",
+                "#8d6e63",
+                SSR_POINT_POPUP_FIELDS,
+                "farm",
+                "SSR",
+                pin=False,
+                color="#8d6e63",
+                radius=4.5,
+                show=False,
+            ),
+        ]
+    )
+
+    credits = Credits(
+        sources=source_credits(loaded.versions, NORWAY_SOURCE_TERMS, NORWAY_SOURCE_METADATA),
+        heights=height_credit(hoydedata.METADATA),
+        protected=protected_credit(naturbase.METADATA),
+        ascent=ascent_method(params, NORWAY_HEIGHT_MODEL),
+    )
+    exports = [
+        Export(
+            f"{which.stem}-turrutebasen.gpx", TURRUTEBASEN, trails, "trail_name", ["maintenance_responsible", "difficulty", "marking", "length_km"]
+        ),
+        Export(f"{which.stem}-fkb.gpx", FKB, by_source[FKB], "typeveg", ["typeveg", "length_km"]),
+        Export(f"{which.stem}-n50.gpx", N50_PATHS, by_source[N50_PATHS], "typeveg", ["typeveg", "rutemerking", "length_km"]),
+        Export(f"{which.stem}-osm.gpx", OSM, by_source[OSM], "name", ["highway", "surface", "sac_scale", "length_km"]),
+        # One file with all catalogued routes, named, instead of 35 downloads.
+        Export(f"{which.stem}-ut.gpx", UT, routes, "name", ["category_label", "length_km", "ut_url"]),
+        # The chain's own length, not the whole road's: a track in this file
+        # *is* one chain, and a figure about other tracks would not describe it.
+        Export(f"{which.stem}-roads.gpx", N50_ROADS, roads, "road_name", ["road_category", "length_km"]),
+    ]
+    return Built(
+        park=park,
+        zone=zone,
+        params=params,
+        network=network,
+        order=order,
+        tracks=tracks,
+        layers=layers,
+        points=points,
+        names=names,
+        highlighted=highlighted,
+        water=water,
+        rivers=rivers,
+        costs=norway.edge_costs(loaded.sources, params),
+        areas=norway.protected_table(loaded.protected),
+        credits=credits,
+        heights=NORWAY_PLAN_HEIGHTS,
+        boundary_label="National park boundary [Naturbase]",
+        exports=exports,
+    )
+
+
+# ---- Sweden ------------------------------------------------------------------
+
+#: How far a Topografi 50 cabin may look for its name on the map's own
+#: lettering. A label sits beside the building it names rather than on it --
+#: measured over Abisko, the register's *Abiskojaure* cabins lie 60-120 m from
+#: the word -- so this is wider than the 50 m a Norwegian cabin looks for a
+#: register point.
+CABIN_LABEL_M = 150.0
+
+#: How far a river surface may look for its name among the map's water names.
+T50_RIVER_NAME_M = 60.0
+
+
+def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Built:
+    """Read the Swedish registers and put everything they say on the map.
+
+    Args:
+        which: The park
+        args: The command line
+        repo_root: The checkout; unused here, and in the signature so the two
+            builds are one shape
+
+    Returns:
+        What :func:`assemble` needs
+    """
+    del repo_root
+    if which.bounds is None:
+        raise ValueError(f"{which.name} declares no box, and the Swedish build is over a box (decisions §2)")
+
+    register = naturvardsregistret.Source(cache_dir=args.cache_dir)
+    park = load_swedish_boundary(which, register)
+    params = sweden.Params.from_args(args)
+    # **The box, not a band round the park.** The tiles were copied for it and
+    # the height mosaic was read over it, and the mosaic's cache is named by
+    # the bounds it was read over, so the graph is cut to exactly the box or
+    # the mosaic is read again. What --approach-km would widen is not here.
+    zone = gpd.GeoDataFrame(geometry=[box(*which.bounds)], crs="EPSG:4326")
+    width_km = zone.to_crs(sweden.METRIC_CRS).geometry.iloc[0].bounds
+    print(f"  Box: {which.bounds}, {(width_km[2] - width_km[0]) / 1000:,.0f} x {(width_km[3] - width_km[1]) / 1000:,.0f} km")
+
+    loaded = sweden.load_sources(params, zone)
+    network, _ = sweden.build(loaded.sources, sweden.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
+    by_source = describe_sweden(describe(network.chains, park, sweden.SOURCE_NAMES))
+    order, tracks = laid_out(network)
+
+    leder = by_source[LEDER]
+    roads = by_source[T50_ROADS]
+    ferries = by_source[sweden.FERRIES]
+    layer_of = split_at_the_boundary(
+        by_source, ((LEDER, "State trails"), (T50_TRAILS, "Topografi 50 marked trails"), (T50_PATHS, "Topografi 50 paths"), (OSM, "OSM paths"))
+    )
+    named = leder[naturvardsregistret.TRAIL_NAME].notna()
+    print(f"  state trails named by the register: {int(named.sum()):,} of {len(leder):,} chains")
+    print(f"    {leder['route'].value_counts().head(8).to_dict()}")
+    summarize("Roads", roads)
+    print(f"    {roads['road_class'].value_counts().head(6).to_dict()}")
+    print(f"    numbered: {int(roads['road_number'].notna().sum()):,} of {len(roads):,} chains ({roads['road_number'].dropna().unique().tolist()})")
+    summarize("Ferry crossings", ferries)
+    winter = loaded.winter
+    print(f"  winter-only lines kept apart: {len(winter):,} ({winter['kind'].value_counts().to_dict()})")
+
+    bounds = bounds_of(zone)
+    country = topografi50.Source(cache_dir=args.cache_dir)
+
+    print("\nLoading the map's own lettering (Topografi 50)...")
+    labels = country.labels(bounds, force_download=args.force_download)
+    labels["rank"] = 8 - labels["size"]
+    labels["color"] = labels["kind"].map({kind: color for kind, (_, color, _) in T50_NAME_STYLES.items()})
+    labels["symbol"] = labels["kind"].map({kind: symbol for kind, (_, _, symbol) in T50_NAME_STYLES.items()})
+    print(f"  {len(labels):,} labels: {labels['kind'].value_counts().to_dict()}")
+    highlighted = highlight(labels, args.highlight)
+    drawn_names = styled_names(labels, args.names_spacing_m, sweden.METRIC_CRS)
+    # The map's own size class, not a rank read off it: seven classes and a
+    # pixel per class, so *Torneträsk* is drawn at 16 px and a trail name at 10.
+    drawn_names["font_size"] = (T50_LABEL_BASE_PX + drawn_names["size"]).astype(float)
+
+    print("\nLoading OpenStreetMap points...")
+    osm_source = overpass.Source(cache_dir=args.cache_dir)
+    shelters = gpd.clip(osm_source.fetch_shelters(bounds, force_download=args.force_download), zone)
+    places = gpd.clip(osm_source.fetch_places(bounds, force_download=args.force_download), zone)
+    terminals = gpd.clip(osm_source.fetch_ferry_terminals(bounds, force_download=args.force_download), zone)
+    print(f"  Shelters and huts: {len(shelters)}")
+    print(f"  Settlements: {len(places)}")
+    print(f"  Ferry and express-boat quays: {len(terminals)}")
+
+    print("\nLoading Topografi 50 cabins...")
+    cabins = country.cabins(bounds, force_download=args.force_download)
+    settlement_words = labels[labels["kind"] == topografi50.LABEL_SETTLEMENT]
+    if len(cabins) and len(settlement_words):
+        # The product draws the building and writes the name beside it as
+        # lettering, so the two are joined here by distance.
+        cabins = attach_nearest(cabins, settlement_words, {"name": "label_name"}, max_distance_m=CABIN_LABEL_M, metric_crs=sweden.METRIC_CRS)
+        cabins["name"] = cabins["label_name"]
+        cabins["named_from"] = cabins["name"].map(lambda value: "the map's lettering" if isinstance(value, str) else None)
+    from_lettering = int(cabins["name"].notna().sum()) if len(cabins) else 0
+    if len(cabins) and len(shelters):
+        # And where the lettering says nothing, OSM: it names the STF huts and
+        # most shelters, and stands on the building rather than beside it.
+        cabins = attach_nearest(
+            cabins, shelters[shelters["name"].notna()], {"name": "osm_name"}, max_distance_m=args.hut_name_m, metric_crs=sweden.METRIC_CRS
+        )
+        from_osm = cabins["name"].isna() & cabins["osm_name"].notna()
+        cabins.loc[from_osm, "name"] = cabins.loc[from_osm, "osm_name"]
+        cabins.loc[from_osm, "named_from"] = "OpenStreetMap"
+    named_cabins = int(cabins["name"].notna().sum()) if len(cabins) else 0
+    print(
+        f"  {len(cabins):,} cabins and huts, {from_lettering} named from the lettering within {CABIN_LABEL_M:g} m, "
+        f"{named_cabins - from_lettering} more from OSM within {args.hut_name_m:g} m"
+    )
+    if len(cabins):
+        print(f"    {cabins['kind'].value_counts().to_dict()}")
+
+    print("\nLoading the register's facilities (Leder)...")
+    facilities = register.facilities(bounds, force_download=args.force_download)
+    facilities["name"] = facilities[naturvardsregistret.FACILITY_NAME]
+    facilities["kind"] = translate_joined(facilities[naturvardsregistret.FACILITY_TYPE], FACILITY_LABELS)
+    facilities["subtype"] = translate_joined(facilities[naturvardsregistret.FACILITY_SUBTYPE], FACILITY_LABELS)
+    facilities["description"] = facilities[naturvardsregistret.TRAIL_DESCRIPTION]
+    facilities["route"] = facilities[naturvardsregistret.TRAIL_ROUTE]
+    print(f"  {len(facilities):,} facilities: {facilities['kind'].value_counts().to_dict()}")
+
+    print("\nLoading Topografi 50 trail points...")
+    trail_points = country.trail_points(bounds, force_download=args.force_download)
+    print(f"  {len(trail_points):,}: {trail_points['kind'].value_counts().to_dict()}")
+
+    print("\nLoading Topografi 50 water...")
+    # The lakes and the river surfaces, for pricing a straight walk by what it
+    # crosses; over the box, which is the zone here.
+    water = gpd.clip(country.water(bounds, force_download=args.force_download), box(*bounds))
+    print(f"  {len(water):,} outlines: {water[topografi50.TYPE].value_counts().to_dict() if len(water) else {}}")
+    # The rivers drawn as a surface, for what a straight walk wades through
+    # and how wide it is there; named from the map's water lettering where
+    # a word lies within reach, said as *a river* otherwise.
+    rivers = gpd.clip(country.rivers(bounds, force_download=args.force_download), box(*bounds))
+    water_words = labels[labels["kind"] == topografi50.LABEL_WATER]
+    rivers["name"] = attach_nearest(rivers.drop(columns=["name"]), water_words, {"name": "name"}, T50_RIVER_NAME_M, metric_crs=sweden.METRIC_CRS)[
+        "name"
+    ]
+    print(f"  {len(rivers):,} rivers as outlines, {int(rivers['name'].notna().sum()):,} of them named from the lettering")
+
+    layers = [
+        # Roads first and muted, as in Norway: how you get to the start.
+        TrailLayer(roads, "Roads [Topografi 50]", "#b0bec5", 2.0, T50_ROAD_POPUP_FIELDS, search_field="road_name"),
+        TrailLayer(ferries, "Ferry crossings [Topografi 50]", "#0277bd", 2.5, T50_FERRY_POPUP_FIELDS, dash="10,7"),
+        # The winter lines: not chains, off by default, and never routed over
+        # (decisions §6.5). Drawn dashed and pale, so switched on they read as
+        # what they are, a line over a frozen lake.
+        TrailLayer(
+            winter, "Winter trails, not routable [Leder+Topografi 50]", "#90caf9", 2.0, WINTER_POPUP_FIELDS, dash="6,6", chains=False, show=False
+        ),
+        TrailLayer(layer_of[f"{OSM}/approach"], "Paths, outside park [OSM]", "#ce93d8", 1.5, OSM_POPUP_FIELDS, search_field="name"),
+        TrailLayer(layer_of[f"{T50_PATHS}/approach"], "Paths, outside park [Topografi 50]", "#80cbc4", 1.5, T50_PATH_POPUP_FIELDS),
+        TrailLayer(
+            layer_of[f"{T50_TRAILS}/approach"],
+            "Marked trails, outside park [Topografi 50]",
+            "#f9a825",
+            2.5,
+            T50_TRAIL_POPUP_FIELDS,
+            search_field="route_name",
+        ),
+        TrailLayer(
+            layer_of[f"{LEDER}/approach"], "State trails, outside park [Leder]", "#ef6c00", 3.5, LEDER_POPUP_FIELDS, search_field="trail_name"
+        ),
+        TrailLayer(layer_of[f"{OSM}/park"], "Paths in park [OSM]", "#8e24aa", 2.5, OSM_POPUP_FIELDS, search_field="name"),
+        TrailLayer(layer_of[f"{T50_PATHS}/park"], "Paths in park [Topografi 50]", "#00796b", 2.5, T50_PATH_POPUP_FIELDS),
+        TrailLayer(
+            layer_of[f"{T50_TRAILS}/park"], "Marked trails in park [Topografi 50]", "#1b5e20", 3.5, T50_TRAIL_POPUP_FIELDS, search_field="route_name"
+        ),
+        # The register's state trails last and on top: the one source that
+        # describes a trail rather than draws it, and the identity the marked
+        # trails under it were named from.
+        TrailLayer(layer_of[f"{LEDER}/park"], "State trails in park [Leder]", "#c62828", 4.0, LEDER_POPUP_FIELDS, search_field="trail_name"),
+    ]
+    points = [
+        PointLayer(terminals, "Ferry quays [OSM]", "#5f9ea0", TERMINAL_POPUP_FIELDS, "ferry quay", "OSM", color="cadetblue", icon="ship"),
+        PointLayer(cabins, "Cabins and huts [Topografi 50]", "#8b0000", T50_CABIN_POPUP_FIELDS, "cabin", "Topografi 50"),
+        PointLayer(shelters, "Huts and shelters [OSM]", "#00008b", SHELTER_POPUP_FIELDS, "shelter", "OSM", color="darkblue", icon="campground"),
+        PointLayer(
+            facilities, "Bridges, shelters and privies [Leder]", "#6d4c41", FACILITY_POPUP_FIELDS, "facility", "Leder", pin=False, color="#6d4c41"
+        ),
+        PointLayer(
+            trail_points,
+            "Footbridges, fords and car parks [Topografi 50]",
+            "#0277bd",
+            TRAIL_POINT_POPUP_FIELDS,
+            "trail point",
+            "Topografi 50",
+            pin=False,
+            color="#0277bd",
+            radius=4.5,
+            label_field="kind",
+        ),
+        PointLayer(places, "Towns and villages [OSM]", "#37474f", PLACE_POPUP_FIELDS, "settlement", "OSM", pin=False, color="#37474f"),
+    ]
+    names = [
+        NameLayer(drawn_names[drawn_names["kind"] == kind], f"Name {symbol} {label} — {kind} [Topografi 50]", color)
+        for kind, (label, color, symbol) in T50_NAME_STYLES.items()
+        if len(drawn_names) and (drawn_names["kind"] == kind).any()
+    ]
+
+    credits = Credits(
+        sources=source_credits(loaded.versions, SWEDEN_SOURCE_TERMS, SWEDEN_SOURCE_METADATA),
+        heights=height_credit(markhojd.METADATA),
+        protected=protected_credit(naturvardsregistret.METADATA),
+        ascent=ascent_method(params, SWEDEN_HEIGHT_MODEL),
+    )
+    exports = [
+        Export(f"{which.stem}-leder.gpx", LEDER, leder, "trail_name", ["route", "trail_type", "marking", "length_km"]),
+        Export(f"{which.stem}-topografi50-trails.gpx", T50_TRAILS, by_source[T50_TRAILS], "route_name", ["path_class", "length_km"]),
+        Export(f"{which.stem}-topografi50-paths.gpx", T50_PATHS, by_source[T50_PATHS], "path_class", ["path_class", "length_km"]),
+        Export(f"{which.stem}-osm.gpx", OSM, by_source[OSM], "name", ["highway", "surface", "sac_scale", "length_km"]),
+        Export(f"{which.stem}-roads.gpx", T50_ROADS, roads, "road_name", ["road_class", "length_km"]),
+    ]
+    return Built(
+        park=park,
+        zone=zone,
+        params=params,
+        network=network,
+        order=order,
+        tracks=tracks,
+        layers=layers,
+        points=points,
+        names=names,
+        highlighted=highlighted,
+        water=water,
+        rivers=rivers,
+        costs=sweden.edge_costs(loaded.sources, params),
+        areas=sweden.protected_table(loaded.protected),
+        credits=credits,
+        heights=sweden_plan_heights(which.base),
+        boundary_label="National park boundary [Naturvårdsregistret]",
+        exports=exports,
+    )
+
+
+#: How each country's map is built, by ISO 3166 code.
+BUILDS = {"NO": build_norway, "SE": build_sweden}
+
+
+# ---- the page, for either --------------------------------------------------------
+
+
+def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Path) -> None:
+    """Put what a country's build produced onto the page, and write it and its files.
+
+    Args:
+        built: What the registers said
+        which: The park
+        args: The command line
+        output_dir: Where the page, its companions and the GPX files go
+    """
+    network, layers = built.network, built.layers
+    print("\nBuilding map...")
+    # Fit to the full approach zone, not just the park, so trailhead towns are visible.
+    fmap = maps.create_map(bounds=bounds_of(built.zone), base=which.base, extra_bases=which.extras, title=which.app_name, companions=which.companions)
+
     # **The legend is the layer control now**, so a row carries the layer it
     # switches and not only the colour it explains. A row that cannot reach its
     # layer would draw and switch nothing, which is worse than the two panels it
@@ -1910,12 +2789,16 @@ def main() -> int:
             link_heading=layer.link_heading,
             tooltip_field=layer.tooltip_field,
             dash_array=layer.dash,
-            group_field=CHAIN_KEY,
+            group_field=CHAIN_KEY if layer.chains else None,
             search_field=layer.search_field,
-            figure_fields=CHAIN_FIGURE_FIELDS,
+            figure_fields=CHAIN_FIGURE_FIELDS if layer.chains else None,
             source=source_of(layer.label),
+            show=layer.show,
         )
-        highlightable.append(group)
+        # A layer that is not chains -- the winter lines -- has no figures to
+        # show and no chain to select, so it is drawn and listed and no more.
+        if layer.chains:
+            highlightable.append(group)
         legend.append(maps.LegendRow(f"{layer.label} ({len(layer.gdf)})", layer.color, group))
 
     # Six sources through the same handful of valleys are impossible to follow by
@@ -1924,166 +2807,66 @@ def main() -> int:
 
     # Everything a name can be typed at, lines and points alike.
     searchable = list(highlightable)
-    if len(terminals):
-        searchable.append(
-            maps.add_points(
+    point_rows: list[tuple[str, int, str]] = []
+    for point in built.points:
+        if not len(point.gdf):
+            continue
+        if point.pin:
+            group = maps.add_points(
                 fmap,
-                terminals,
-                name="Ferry quays [OSM]",
-                color="cadetblue",
-                icon="ship",
-                popup_fields=TERMINAL_POPUP_FIELDS,
-                source="OSM",
-                point_type="ferry quay",
+                point.gdf,
+                name=point.label,
+                color=point.color,
+                icon=point.icon,
+                popup_fields=point.popup_fields,
+                label_field=point.label_field,
+                source=point.source,
+                point_type=point.point_type,
+                show=point.show,
             )
-        )
-    if len(cabins):
-        searchable.append(
-            maps.add_points(
+        else:
+            group = maps.add_labelled_points(
                 fmap,
-                cabins,
-                name="Cabins and wilderness huts [N50]",
-                color="darkred",
-                icon="house-chimney",
-                popup_fields=CABIN_POPUP_FIELDS,
-                label_field="navn",
-                source="N50",
-                point_type="cabin",
+                point.gdf,
+                name=point.label,
+                color=point.color,
+                radius=point.radius,
+                popup_fields=point.popup_fields,
+                source=point.source,
+                point_type=point.point_type,
+                show=point.show,
             )
-        )
-    # **One layer per kind of name rather than one for all of them.** They are
-    # different questions — where the water runs, where the passes are — and a
-    # planner usually wants one of them and not the other five. Split after the
-    # thinning above, so each keeps the labels that survived it.
+        searchable.append(group)
+        point_rows.append((point.label, len(point.gdf), point.legend_color))
     name_rows: list[maps.LegendRow] = []
-    if len(terrain_names):
-        drawn_kinds = set(terrain_names["kind"])
-        for label, kinds in TERRAIN_NAME_LEGEND:
-            present = sorted(kinds & drawn_kinds)
-            if not present:
-                continue
-            part = terrain_names[terrain_names["kind"].isin(present)]
-            # Types can share a colour but differ in glyph (fjell vs li), so
-            # show every glyph the group actually draws.
-            glyphs = dict.fromkeys(TERRAIN_NAME_SYMBOLS.get(kind, TERRAIN_NAME_DEFAULT_SYMBOL) for kind in present)
-            heading = f"Name {' '.join(glyphs)} {label} — {', '.join(present)} [SSR]"
-            group = maps.add_text_labels(
-                fmap,
-                part,
-                name=heading,
-                label_field="name",
-                size_field="font_size",
-                color_field="color",
-                symbol_field="symbol",
-                show=False,
-            )
-            searchable.append(group)
-            name_rows.append(maps.LegendRow(f"{heading} ({len(part)})", TERRAIN_NAME_COLORS[present[0]], group))
-    if len(ssr_huts):
-        # Two of these have no N50 building at all, so the join above cannot reach
-        # them; as their own layer none of the register's huts is lost.
-        searchable.append(
-            maps.add_points(
-                fmap,
-                ssr_huts,
-                name="Named huts [SSR]",
-                color="purple",
-                icon="house-chimney",
-                popup_fields=SSR_POINT_POPUP_FIELDS,
-                source="SSR",
-                point_type="hut",
-            )
+    for named in built.names:
+        if not len(named.gdf):
+            continue
+        group = maps.add_text_labels(
+            fmap,
+            named.gdf,
+            name=named.heading,
+            label_field="name",
+            size_field="font_size",
+            color_field="color",
+            symbol_field="symbol",
+            show=False,
         )
-    if len(ssr_quays):
-        searchable.append(
-            maps.add_points(
-                fmap,
-                ssr_quays,
-                name="Quays [SSR]",
-                color="blue",
-                icon="anchor",
-                popup_fields=SSR_POINT_POPUP_FIELDS,
-                source="SSR",
-                point_type="quay",
-            )
-        )
-    if len(shelters):
-        searchable.append(
-            maps.add_points(
-                fmap,
-                shelters,
-                name="Huts and shelters [OSM]",
-                color="darkblue",
-                icon="campground",
-                popup_fields=SHELTER_POPUP_FIELDS,
-                source="OSM",
-                point_type="shelter",
-            )
-        )
-    if len(trailheads):
-        searchable.append(
-            maps.add_labelled_points(
-                fmap,
-                trailheads,
-                name="Trailheads, farms and sæters [OSM]",
-                color="#6d4c41",
-                radius=5.5,
-                popup_fields=PLACE_POPUP_FIELDS,
-                source="OSM",
-                point_type="trailhead",
-            )
-        )
-    if len(places):
-        # Names appear on hover only, like every other point layer. Drawing 165
-        # settlement names permanently competes with the topo backdrop, which
-        # already labels them.
-        searchable.append(
-            maps.add_labelled_points(
-                fmap, places, name="Towns and villages [OSM]", popup_fields=PLACE_POPUP_FIELDS, source="OSM", point_type="settlement"
-            )
-        )
-    if len(settlements):
-        searchable.append(
-            maps.add_labelled_points(
-                fmap,
-                settlements,
-                name="Towns and villages [SSR]",
-                color="#263238",
-                popup_fields=SSR_POINT_POPUP_FIELDS,
-                source="SSR",
-                point_type="settlement",
-            )
-        )
-    if len(farms):
-        # Over a thousand of them: drawn they would bury the map, so the layer
-        # starts off. The search switches it on by itself when a name matches,
-        # which is the point of carrying them at all.
-        searchable.append(
-            maps.add_labelled_points(
-                fmap,
-                farms,
-                name="Farms and holdings [SSR]",
-                color="#8d6e63",
-                radius=4.5,
-                popup_fields=SSR_POINT_POPUP_FIELDS,
-                source="SSR",
-                point_type="farm",
-                show=False,
-            )
-        )
+        searchable.append(group)
+        name_rows.append(maps.LegendRow(f"{named.heading} ({len(named.gdf)})", named.color, group))
 
     # One box over every named thing on the map: a brochure names a place, and
     # this is what turns that name into a position.
     maps.add_search(fmap, searchable)
 
     # Added last so the boundary outline stays legible on top of every trail layer.
-    boundary = maps.add_boundary(fmap, park, name="National park boundary [Naturbase]", weight=3.5)
+    boundary = maps.add_boundary(fmap, built.park, name=built.boundary_label, weight=3.5)
 
     # And the graph itself, which nothing draws and nothing yet reads: phase 4
     # takes the profile off it and phase 6 routes over it, and both of those live
     # in Python until it is in the page.
     print("\nEncoding the routing graph for the page...")
-    payload = encode_for_the_page(network, loaded.sources, params, order, loaded.protected, water, rivers, bounds_of(zone))
+    payload = encode_for_the_page(network, built.order, built.costs, built.areas, built.water, built.rivers, bounds_of(built.zone))
     counted = payload.header
     grid = counted["water"]
     wet, weight = 100 * grid["set"] / (grid["cols"] * grid["rows"]), len(grid["bits"]) / 1e3
@@ -2097,18 +2880,18 @@ def main() -> int:
     print(f"    before compression: {' · '.join(f'{name} {size / 1e6:.2f}' for name, size in payload.sections.items())}")
     maps.add_routing_graph(fmap, payload.header, payload.data)
 
-    if len(highlighted):
+    if len(built.highlighted):
         # Diagnostic layer: a ring plus a numbered label at every position the
         # register holds for one name, so it is obvious which ones actually draw.
-        maps.add_labelled_points(fmap, highlighted, name=f"HIGHLIGHT: {args.highlight}", color="#e00000", radius=14)
+        maps.add_labelled_points(fmap, built.highlighted, name=f"HIGHLIGHT: {args.highlight}", color="#e00000", radius=14)
         maps.add_text_labels(
-            fmap, highlighted, name=f"HIGHLIGHT labels: {args.highlight}", label_field="marker_label", default_size=20, color="#e00000"
+            fmap, built.highlighted, name=f"HIGHLIGHT labels: {args.highlight}", label_field="marker_label", default_size=20, color="#e00000"
         )
 
     # It carried two names in one page until the legend and the layer control
     # became one panel — "Park boundary" here and "National park boundary" in the
     # control — which nothing noticed because nothing ever compared them.
-    legend.append(maps.LegendRow("National park boundary [Naturbase]", "#0d47a1", boundary))
+    legend.append(maps.LegendRow(built.boundary_label, "#0d47a1", boundary))
 
     # Name colours are only decodable with a key, and each kind now switches.
     legend.extend(name_rows)
@@ -2138,19 +2921,8 @@ def main() -> int:
 
     # Point layers carry an icon rather than a line colour, so they are listed
     # here only to record their source alongside everything else.
-    for label, count, color in (
-        ("Quays [SSR]", len(ssr_quays), "#0000cd"),
-        ("Ferry quays [OSM]", len(terminals), "#5f9ea0"),
-        ("Named huts [SSR]", len(ssr_huts), "#800080"),
-        ("Cabins and wilderness huts [N50]", len(cabins), "#8b0000"),
-        ("Huts and shelters [OSM]", len(shelters), "#00008b"),
-        ("Trailheads, farms and sæters [OSM]", len(trailheads), "#6d4c41"),
-        ("Farms and holdings [SSR]", len(farms), "#8d6e63"),
-        ("Towns and villages [OSM]", len(places), "#37474f"),
-        ("Towns and villages [SSR]", len(settlements), "#263238"),
-    ):
-        if count:
-            legend.append(maps.LegendRow(f"{label} ({count})", color, switched(f"{label} ({count})")))
+    for label, count, color in point_rows:
+        legend.append(maps.LegendRow(f"{label} ({count})", color, switched(f"{label} ({count})")))
 
     maps.add_legend(fmap, f"{which.name} {which.kind}", legend)
 
@@ -2163,7 +2935,7 @@ def main() -> int:
     # about itself travels with it: the browser is what produces that file, and
     # a licence, a version or a field name it was not given is one it would have
     # to invent.
-    maps.add_profile_panel(fmap, highlightable, export=export_settings(loaded.versions, params, which))
+    maps.add_profile_panel(fmap, highlightable, export=export_settings(built.credits, which))
 
     # And a route can now be clicked together over the graph, leg by leg, with
     # its profile drawn in the same panel. After the panel, whose walk it lays
@@ -2172,14 +2944,14 @@ def main() -> int:
     # beside a hut comes back called after the hut. The line layers go in too
     # and carry nothing: only a layer given a point_type has a table, and a
     # place name drawn as text asserts no single position to be named after.
-    maps.add_plan_mode(fmap, plan_settings(params, layers), searchable)
+    maps.add_plan_mode(fmap, plan_settings(built.params, [layer for layer in layers if layer.chains], built.heights), searchable)
 
     # And the one way into all of it, which is why it goes last: it adopts the
     # search, the legend, the base-map picker and the plan control, so every one
     # of them has to exist by the time it runs. What it buys is a map that opens
     # showing a map — measured on the built page, the legend alone left 23 % of
     # a 390 px screen and 74 % of a desktop one before anything was clicked.
-    maps.add_chrome(fmap, credits=source_credits(loaded.versions))
+    maps.add_chrome(fmap, credits=built.credits.sources)
 
     map_path = output_dir / f"{which.stem}.html"
     # Not `fmap.save`: that renders and writes in one step, and the page is
@@ -2203,7 +2975,7 @@ def main() -> int:
 
     # **The mark, as files.** The page links to `icon-180.png` rather than
     # carrying the drawing inline, because iOS reads `apple-touch-icon` off the
-    # document and will not fetch a `data:` URI for it — inline, the link is
+    # document and will not fetch a `data:` URI for it -- inline, the link is
     # well-formed and dead, and the home screen falls back to a screenshot.
     icons = maps.write_icons(map_path, which.companions)
     print(f"  Icons: {', '.join(icon.name for icon in icons)}")
@@ -2212,39 +2984,27 @@ def main() -> int:
     # the map, the exports and the router. At full source precision: the
     # simplified copy above is the drawn one and goes nowhere near this.
     print("\nExporting GPX...")
-    exports = [
-        (f"{which.stem}-turrutebasen.gpx", TURRUTEBASEN, trails, "trail_name", ["maintenance_responsible", "difficulty", "marking", "length_km"]),
-        (f"{which.stem}-fkb.gpx", FKB, by_source[FKB], "typeveg", ["typeveg", "length_km"]),
-        (f"{which.stem}-n50.gpx", N50_PATHS, by_source[N50_PATHS], "typeveg", ["typeveg", "rutemerking", "length_km"]),
-        (f"{which.stem}-osm.gpx", OSM, by_source[OSM], "name", ["highway", "surface", "sac_scale", "length_km"]),
-        # One file with all catalogued routes, named, instead of 35 downloads.
-        (f"{which.stem}-ut.gpx", UT, routes, "name", ["category_label", "length_km", "ut_url"]),
-        # The chain's own length, not the whole road's: a track in this file
-        # *is* one chain, and a figure about other tracks would not describe it.
-        (f"{which.stem}-roads.gpx", N50_ROADS, roads, "road_name", ["road_category", "length_km"]),
-    ]
-    credits_of = source_credits(loaded.versions)
-    heights = height_credit()
-    for filename, source, chains, name_field, desc_fields in exports:
-        if not len(chains):
+    credits_of, heights = built.credits.sources, built.credits.heights
+    for export in built.exports:
+        if not len(export.chains):
             continue
         path, stats = export_to_gpx(
             # The dense, height-carrying line rather than the chain's own: the
             # heights were sampled along the edges and not at the vertices, and
             # the geometry a file is written from is the one the two were laid
             # against each other on.
-            chains.assign(track=tracks),
-            output_dir / filename,
-            name_field=name_field,
-            desc_fields=desc_fields,
-            title=f"{which.name}: {source}",
-            description=f"Every {source} chain of the {which.name} routing network",
+            export.chains.assign(track=built.tracks),
+            output_dir / export.filename,
+            name_field=export.name_field,
+            desc_fields=export.desc_fields,
+            title=f"{which.name}: {export.source}",
+            description=f"Every {export.source} chain of the {which.name} routing network",
             # The height model only where the file actually carries a height,
             # which is the rule the page follows chain by chain. A file of
             # crossings would name a source it never read a value from.
-            sources=credits_of[source] + (heights if bool(chains["ascent"].notna().any()) else []),
+            sources=credits_of[export.source] + (heights if bool(export.chains["ascent"].notna().any()) else []),
             extension_fields=DEFAULT_EXTENSION_FIELDS,
-            ascent_method=ascent_method(params),
+            ascent_method=built.credits.ascent,
             track_field="track",
         )
         print(f"  {path.name}: {stats['total_trails']} tracks, {stats['total_points']:,} points, {stats['file_size_mb']:.2f} MB")
@@ -2255,13 +3015,59 @@ def main() -> int:
     for entries in credits_of.values():
         for entry in entries:
             print(f"Source: {entry['name']} — {entry['licence']}{', ' + entry['note'] if entry['note'] else ''} — {entry['version'] or 'no version'}")
-    print(f"Heights: {heights[0]['name']} — {heights[0]['licence']} — {ascent_method(params)}")
-    entry = protected_credit()[0]
-    # It is in a route's file and in none of the six above: a route states how
+    print(f"Heights: {heights[0]['name']} — {heights[0]['licence']} — {built.credits.ascent}")
+    entry = built.credits.protected[0]
+    # It is in a route's file and in none of the chain files: a route states how
     # far it runs inside each protected area and a chain states nothing of the
     # kind, so the register has a claim on one and not the other.
     print(f"Protected: {entry['name']} — {entry['licence']} — in a planned route's file, in no chain's, and in the boundary drawn")
     print("=" * 70)
+
+
+def main() -> int:
+    """Build the map and GPX exports.
+
+    Returns:
+        Process exit code
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--park", default="lomsdal-visten", choices=sorted(PARKS), help="Which map to build; see PARKS")
+    parser.add_argument("--cache-dir", default=str(repo_root / ".cache"), help="Cache directory for downloaded data")
+    parser.add_argument("--output-dir", default=str(repo_root / "analysis" / "output"), help="Directory for the map and GPX files")
+    # 15 km reaches every realistic trailhead town: Tosbotn 2.6 km, Trofors 5.5 km,
+    # Mosjøen 9.8 km, Vevelstad 10.3 km, Brønnøysund 11.2 km from the boundary.
+    # A park declared with a box (Abisko) is built over the box and ignores this.
+    parser.add_argument(
+        "--approach-km", type=float, default=15.0, help="Width of the approach zone around the park (km); not for a park built over a box"
+    )
+    parser.add_argument("--trailhead-km", type=float, default=2.0, help="Band around the park in which farms and sæters are shown as trailheads (km)")
+    parser.add_argument("--names-km", type=float, default=2.0, help="Band around the park covered by the terrain-name layer (valleys, passes, peaks)")
+    parser.add_argument(
+        "--ut-routes",
+        default=None,
+        help="Catalogue of UT.no routes to draw, one GPX downloaded per entry; the park's own by default",
+    )
+    parser.add_argument("--highlight", help="Mark every position of this place name in red, numbered, for checking what the register holds")
+    parser.add_argument(
+        "--names-spacing-m", type=float, default=1000.0, help="Minimum distance between two labels of the same name; closer copies are dropped"
+    )
+    parser.add_argument("--simplify-m", type=float, default=8.0, help="Vertex tolerance for map rendering in metres; GPX keeps full detail")
+    parser.add_argument("--hut-name-m", type=float, default=50.0, help="How far a cabin may look for its name in a point register (m)")
+    parser.add_argument("--force-download", action="store_true", help="Re-download source data instead of using the cache")
+    args = parser.parse_args()
+
+    which = PARKS[args.park]
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print("=" * 70)
+    print(f"{which.name.upper()} TRAIL MAP")
+    print("=" * 70)
+
+    built = BUILDS[which.country](which, args, repo_root)
+    assemble(built, which, args, output_dir)
     return 0
 
 

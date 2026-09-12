@@ -5,7 +5,8 @@ import zipfile
 
 import geopandas as gpd
 import pytest
-from shapely.geometry import LineString
+from shapely.affinity import translate
+from shapely.geometry import LineString, Point, Polygon
 from trails.io.sources import topografi50 as t50
 
 ABISKO = (18.15, 68.17, 19.00, 68.46)
@@ -146,3 +147,78 @@ class TestApi:
         directory = source.delivery()
         assert directory.name == "2026-09-08"
         assert "secret" not in (directory / t50.DELIVERY_FILE).read_text()
+
+
+def _themed(root, theme, layer, frame, day="2026-09-08"):
+    """Put one more layer into the delivery on disk, in its theme's GeoPackage."""
+    directory = root / "topografi50" / day
+    gpkg = directory / t50.UNPACKED / t50.geopackage_name(theme)
+    frame.to_file(gpkg, layer=layer, driver="GPKG", mode="a" if gpkg.exists() else "w")
+    return directory
+
+
+class TestReaders:
+    """The readers a page needs beyond the network: what each keeps and what it hands on."""
+
+    def test_cabins_are_the_classes_a_walker_heads_for_named_in_english(self, tmp_path):
+        _delivery_on_disk(tmp_path)
+        buildings = gpd.GeoDataFrame(
+            {"objektidentitet": ["h", "c", "s"], "objekttyp": ["Byggnad, storleksklass 1", "Fjällstation", "Vindskydd"]},
+            geometry=[Point(650000, 7580000), Point(650100, 7580000), Point(650200, 7580000)],
+            crs=t50.CRS,
+        )
+        _themed(tmp_path, t50.BYGGNADSVERK, t50.LAYER_BUILDING_POINTS, buildings)
+        source = t50.Source(cache_dir=tmp_path, order="", username="", password="")
+        cabins = source.cabins(ABISKO)
+        assert cabins["kind"].tolist() == ["mountain station", "shelter"]
+        assert cabins["name"].isna().all()
+        assert cabins.crs.to_epsg() == 4326
+
+    def test_water_is_the_lakes_and_the_river_surfaces_and_rivers_only_the_latter(self, tmp_path):
+        _delivery_on_disk(tmp_path)
+        square = Polygon([(650000, 7580000), (650100, 7580000), (650100, 7580100), (650000, 7580100)])
+        land = gpd.GeoDataFrame(
+            {
+                "objektidentitet": ["l", "r", "f"],
+                "objekttyp": [t50.LAKE_CLASS, t50.RIVER_SURFACE_CLASS, "Kalfjäll"],
+                t50.WATER_ID: ["a", "b", None],
+                t50.WATER_LEVEL: ["342", None, None],
+            },
+            geometry=[square, translate(square, 200), translate(square, 400)],
+            crs=t50.CRS,
+        )
+        _themed(tmp_path, t50.MARK, t50.LAYER_LAND, land)
+        source = t50.Source(cache_dir=tmp_path, order="", username="", password="")
+        assert source.water(ABISKO)[t50.TYPE].tolist() == [t50.LAKE_CLASS, t50.RIVER_SURFACE_CLASS]
+        rivers = source.rivers(ABISKO)
+        assert rivers[t50.WATER_ID].tolist() == ["b"]
+        assert rivers["name"].isna().all()
+
+    def test_labels_are_the_named_places_with_their_size_as_a_number(self, tmp_path):
+        _delivery_on_disk(tmp_path)
+        text = gpd.GeoDataFrame(
+            {
+                t50.LABEL_TEXT: ["Lapporten", "Torneträsk", "Rengärde", "Abisko"],
+                t50.LABEL_CATEGORY: [t50.LABEL_TERRAIN, t50.LABEL_WATER, "Upplysningstext", t50.LABEL_SETTLEMENT],
+                t50.LABEL_SIZE: ["3", "7", "2", "5"],
+            },
+            geometry=[Point(650000 + 100 * i, 7580000) for i in range(4)],
+            crs=t50.CRS,
+        )
+        _themed(tmp_path, t50.TEXT, t50.LAYER_TEXT_POINTS, text)
+        source = t50.Source(cache_dir=tmp_path, order="", username="", password="")
+        labels = source.labels(ABISKO)
+        assert labels["name"].tolist() == ["Lapporten", "Torneträsk", "Abisko"]
+        assert labels["size"].tolist() == [3, 7, 5]
+        assert labels["kind"].tolist() == [t50.LABEL_TERRAIN, t50.LABEL_WATER, t50.LABEL_SETTLEMENT]
+
+    def test_trail_points_are_bridges_fords_telephones_and_car_parks(self, tmp_path):
+        _delivery_on_disk(tmp_path)
+        points = gpd.GeoDataFrame(
+            {"objektidentitet": ["b", "v", "s"], "objekttyp": [t50.FOOTBRIDGE_CLASS, t50.FORD_CLASS, "Påbjuden färdväg vid skoteråkning"]},
+            geometry=[Point(650000, 7580000), Point(650100, 7580000), Point(650200, 7580000)],
+            crs=t50.CRS,
+        )
+        _themed(tmp_path, t50.KOMMUNIKATION, t50.LAYER_TRAIL_POINTS, points)
+        source = t50.Source(cache_dir=tmp_path, order="", username="", password="")
+        assert source.trail_points(ABISKO)["kind"].tolist() == ["footbridge", "ford"]

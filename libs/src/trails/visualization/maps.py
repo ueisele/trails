@@ -26,6 +26,7 @@ import pandas as pd
 from branca.element import Element, Figure, MacroElement
 from jinja2 import Template
 
+from trails.processing.dem_tiles import TERRARIUM_OFFSET, TERRARIUM_STEP
 from trails.routing import elevation
 
 #: Bounding box as (min_lon, min_lat, max_lon, max_lat), matching GeoPandas.
@@ -129,6 +130,49 @@ FIRST_MAP = "lomsdal-visten"
 
 
 @dataclasses.dataclass(frozen=True)
+class HeightTiles:
+    """Height tiles beside a provider's map tiles: where they are, how deep they go, what they weigh.
+
+    Terrarium-packed PNGs cut by :mod:`trails.processing.dem_tiles`
+    (analysis/docs/abisko-decisions.md §6.3), addressed like the map tiles and
+    kept like them. The page reads them for the legs of a planned route the
+    network cannot carry, where a map without them asks a point service; the
+    worker keeps them beside the map tiles, under the same switch, so a leg
+    planned offline over kept ground has a profile.
+    """
+
+    #: What every height tile's address starts with, root-relative.
+    tiles: str
+    #: The finest zoom cut, which is the one the page reads: a tile there is
+    #: the model at the tile's own resolution, and the coarser levels are the
+    #: same numbers averaged.
+    top: int
+    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    weight: dict[int, int]
+
+    @property
+    def template(self) -> str:
+        """The address of a tile, with ``{z}``, ``{x}`` and ``{y}`` to fill."""
+        return f"{self.tiles}{{z}}/{{x}}/{{y}}.png"
+
+    def as_settings(self) -> dict[str, object]:
+        """What the page is handed: where the tiles are, which zoom to read, and how a pixel unpacks.
+
+        Returns:
+            ``url``, ``zoom``, ``offset`` and ``step`` -- the last two the
+            Terrarium packing, so the page and :func:`dem_tiles.unpack` read
+            one formula -- and ``weight`` per zoom for the offline panel.
+        """
+        return {
+            "url": self.template,
+            "zoom": self.top,
+            "offset": TERRARIUM_OFFSET,
+            "step": TERRARIUM_STEP,
+            "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()},
+        }
+
+
+@dataclasses.dataclass(frozen=True)
 class Provider:
     """Whose tiles a map draws, and the three things the page needs to know about them.
 
@@ -150,6 +194,9 @@ class Provider:
     top: int
     #: Bytes a kept tile weighs, per zoom, for every size estimate on the panel.
     weight: dict[int, int]
+    #: Height tiles cut beside the map tiles, where the map has them. None
+    #: for a map whose heights come from a point service.
+    heights: HeightTiles | None = None
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -173,6 +220,13 @@ PROVIDERS: dict[str, Provider] = {
         # a box that is mountain and lake rather than sea, so the whole-box
         # mean is close to what a route crosses.
         weight={11: 31747, 12: 22166, 13: 25719, 14: 15290, 15: 13783, 16: 7958, 17: 4587},
+        # The 1 m height model as tiles (§6.3), z8 to z13; the weights are
+        # the mean per zoom of the first build's 540 tiles, 2026-09-12.
+        heights=HeightTiles(
+            tiles="/dem/lantmateriet/1/",
+            top=13,
+            weight={8: 29019, 9: 35677, 10: 65806, 11: 93498, 12: 93117, 13: 92693},
+        ),
     ),
 }
 
@@ -483,6 +537,11 @@ var TILE_CAP = 500;
 // What a tile's address starts with -- the provider's server, or our own
 // bucket's prefix resolved against this worker's origin. Injected per map.
 var TILE_PREFIX = new URL("__TILE_PREFIX__", self.location.href).href;
+// And what a height tile's starts with, where the map has them: Lantmäteriet's
+// map does, Kartverket's does not. Kept beside the map tiles, under the same
+// switch, because a route planned offline reads its straight legs off them.
+// Empty where there are none, and then nothing here matches.
+var HEIGHT_PREFIX = "__HEIGHT_PREFIX__" ? new URL("__HEIGHT_PREFIX__", self.location.href).href : null;
 
 // **Where the offline switch is kept, and why it is kept at all.** A service
 // worker is not a process that stays alive: the browser starts it for a fetch
@@ -900,7 +959,7 @@ self.addEventListener("fetch", function (event) {
     // would be written into the terrain cache as terrain. The reader would be
     // told their park was kept, and it would be white.
     if (request.cache === "reload") { return; }
-    if (request.url.indexOf(TILE_PREFIX) === 0) {
+    if (request.url.indexOf(TILE_PREFIX) === 0 || (HEIGHT_PREFIX && request.url.indexOf(HEIGHT_PREFIX) === 0)) {
         event.respondWith(tileFor(request));
     }
 });
@@ -965,6 +1024,7 @@ def write_service_worker(beside: pathlib.Path, provider: Provider = PROVIDERS["k
     script = (
         SERVICE_WORKER.replace("__VERSION__", stamp)
         .replace("__TILE_PREFIX__", provider.tiles)
+        .replace("__HEIGHT_PREFIX__", provider.heights.tiles if provider.heights else "")
         .replace("__DB__", companions.database)
         .replace("__CACHE__", companions.cache)
     )
@@ -2727,6 +2787,9 @@ PLAN_SETTINGS = (
     "heightsBatch",
     "heightsWorkers",
     "heightsTimeoutMs",
+    # The height tiles, where the map carries them (:class:`HeightTiles`),
+    # and then the service above is not asked; None where it is.
+    "heightsTiles",
     "routeWidth",
     "terrainModel",
     "seaTerrain",
@@ -10831,6 +10894,161 @@ class _PlanMode(MacroElement):
                 return {laid: {lon: lon, lat: lat, along: along, length: laid.length}, points: points};
             }
 
+            // ---- heights off the tiles, where the map carries them ----------
+            // Lantmäteriet's map has no point service to ask. What it has is
+            // the height tiles the build cut (decisions §6.3): Terrarium-packed
+            // PNGs at `PLAN.heightsTiles.url`, addressed like the map tiles and
+            // kept like them by the worker, so a straight leg planned offline
+            // over kept ground reads the same surface the build read. Each
+            // sample is read bilinearly between the four pixel centres round
+            // it, at the finest zoom cut -- the rule the build reads its own
+            // mosaic by -- and a tile that is not there is ground the model
+            // does not cover, which every sample on it says with NaN.
+            var HEIGHT_TILE_PX = 256;
+            // Decoded tiles, bounded: a z13 tile is 256 kB of floats, and a
+            // reader working between two ends comes back to the same few.
+            var decoded = Object.create(null), decodedKeys = [];
+            var DECODED_MOST = 24;
+
+            function heightTileUrl(x, y, z) {
+                return PLAN.heightsTiles.url.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+            }
+
+            // The pixels of one tile as heights, through a canvas: the browser
+            // decodes the PNG, the canvas hands the bytes back, and the three
+            // channels unpack the way `dem_tiles.unpack` does. Asked for
+            // without colour management, because a byte that has been through
+            // a colour profile is no longer a height.
+            function heightsOf(blob) {
+                function into(image, width, height) {
+                    var canvas = document.createElement('canvas');
+                    canvas.width = width; canvas.height = height;
+                    var context = canvas.getContext('2d', {willReadFrequently: true});
+                    context.drawImage(image, 0, 0);
+                    var bytes = context.getImageData(0, 0, width, height).data;
+                    var out = new Float32Array(width * height), tiles = PLAN.heightsTiles;
+                    for (var i = 0, k = 0; i < out.length; i += 1, k += 4) {
+                        var r = bytes[k], g = bytes[k + 1], b = bytes[k + 2];
+                        // (0, 0, 0) is the tile's own word for no height.
+                        out[i] = (r === 0 && g === 0 && b === 0) ? NaN : r * 256 + g + b / tiles.step - tiles.offset;
+                    }
+                    return {width: width, height: height, heights: out};
+                }
+                if (window.createImageBitmap) {
+                    return createImageBitmap(blob, {colorSpaceConversion: 'none', premultiplyAlpha: 'none'}).then(function (bitmap) {
+                        var read = into(bitmap, bitmap.width, bitmap.height);
+                        if (bitmap.close) { bitmap.close(); }
+                        return read;
+                    });
+                }
+                return new Promise(function (resolve, reject) {
+                    var url = URL.createObjectURL(blob), image = new Image();
+                    image.onload = function () {
+                        URL.revokeObjectURL(url);
+                        resolve(into(image, image.naturalWidth, image.naturalHeight));
+                    };
+                    image.onerror = function () {
+                        URL.revokeObjectURL(url);
+                        reject(new Error('a height tile could not be decoded'));
+                    };
+                    image.src = url;
+                });
+            }
+
+            // One tile, fetched and decoded once, with the same deadline the
+            // service gets: through the worker, so the switch on answers it
+            // from what was kept -- or with the worker's blank tile, which is
+            // 1 x 1 and is read here as a tile that is not there.
+            function fetchHeightTile(x, y, z) {
+                var key = z + '/' + x + '/' + y;
+                if (decoded[key]) { return decoded[key]; }
+                var stop = window.AbortController ? new AbortController() : null;
+                var giveUp = stop
+                    ? window.setTimeout(function () { stop.abort(); }, PLAN.heightsTimeoutMs)
+                    : null;
+                function letGo() { if (giveUp !== null) { window.clearTimeout(giveUp); giveUp = null; } }
+                var fetching = fetch(heightTileUrl(x, y, z), stop ? {signal: stop.signal} : undefined)
+                    .then(function (response) {
+                        // Off the edge of what was cut: ground the model does
+                        // not cover, and not a failure to retry.
+                        if (response.status === 404) { return null; }
+                        if (!response.ok) { throw new Error('the height tiles answered ' + response.status); }
+                        return response.blob().then(heightsOf);
+                    })
+                    .then(function (read) {
+                        letGo();
+                        return read && read.width === HEIGHT_TILE_PX && read.height === HEIGHT_TILE_PX ? read : null;
+                    }, function (failure) {
+                        letGo();
+                        if (stop && stop.signal.aborted) {
+                            throw new Error('a height tile did not arrive within ' +
+                                            Math.round(PLAN.heightsTimeoutMs / 1000) + ' s');
+                        }
+                        throw failure;
+                    });
+                decoded[key] = fetching;
+                decodedKeys.push(key);
+                while (decodedKeys.length > DECODED_MOST) { delete decoded[decodedKeys.shift()]; }
+                fetching.then(null, function () { if (decoded[key] === fetching) { delete decoded[key]; } });
+                return fetching;
+            }
+
+            function heightTile(x, y, z, attempt) {
+                return fetchHeightTile(x, y, z).catch(function (failure) {
+                    if (attempt >= ATTEMPTS) { throw failure; }
+                    return new Promise(function (resolve) { setTimeout(resolve, 500 * attempt); })
+                        .then(function () { return heightTile(x, y, z, attempt + 1); });
+                });
+            }
+
+            // Web Mercator pixel coordinates at the tiles' zoom, fractional.
+            function pixelAt(lon, lat, z) {
+                var n = Math.pow(2, z) * HEIGHT_TILE_PX;
+                var s = Math.sin(lat * Math.PI / 180);
+                return {x: (lon + 180) / 360 * n, y: (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n};
+            }
+
+            function tileHeights(laid) {
+                var z = PLAN.heightsTiles.zoom, count = laid.lon.length;
+                // A pixel's centre is half a pixel in from its corner, so a
+                // position less a half names the centre to its north-west and
+                // the fraction left over is the weight of the one beyond it.
+                var px = new Array(count), py = new Array(count), wanted = Object.create(null);
+                for (var i = 0; i < count; i += 1) {
+                    var at = pixelAt(laid.lon[i], laid.lat[i], z);
+                    px[i] = at.x - 0.5; py[i] = at.y - 0.5;
+                    var x0 = Math.floor(px[i]), y0 = Math.floor(py[i]);
+                    [[x0, y0], [x0 + 1, y0], [x0, y0 + 1], [x0 + 1, y0 + 1]].forEach(function (corner) {
+                        var tx = Math.floor(corner[0] / HEIGHT_TILE_PX), ty = Math.floor(corner[1] / HEIGHT_TILE_PX);
+                        wanted[tx + ',' + ty] = [tx, ty];
+                    });
+                }
+                var keys = Object.keys(wanted);
+                return Promise.all(keys.map(function (k) { return heightTile(wanted[k][0], wanted[k][1], z, 1); }))
+                    .then(function (tiles) {
+                        var held = Object.create(null);
+                        keys.forEach(function (k, n) { held[k] = tiles[n]; });
+                        function at(gx, gy) {
+                            var tx = Math.floor(gx / HEIGHT_TILE_PX), ty = Math.floor(gy / HEIGHT_TILE_PX);
+                            var tile = held[tx + ',' + ty];
+                            if (!tile) { return NaN; }
+                            return tile.heights[(gy - ty * HEIGHT_TILE_PX) * tile.width + (gx - tx * HEIGHT_TILE_PX)];
+                        }
+                        var points = [];
+                        for (var i = 0; i < count; i += 1) {
+                            var x0 = Math.floor(px[i]), y0 = Math.floor(py[i]), fx = px[i] - x0, fy = py[i] - y0;
+                            var h00 = at(x0, y0), h10 = at(x0 + 1, y0), h01 = at(x0, y0 + 1), h11 = at(x0 + 1, y0 + 1);
+                            // A missing corner makes the sample missing: the
+                            // arithmetic carries NaN through on its own.
+                            var height = (h00 * (1 - fx) + h10 * fx) * (1 - fy) + (h01 * (1 - fx) + h11 * fx) * fy;
+                            // No sea in a model of the ground: a lake is a flat
+                            // reading at its level, walked as the build walks it.
+                            points.push({height: height, sea: false});
+                        }
+                        return points;
+                    });
+            }
+
             function beginHeights(from, to) {
                 var laid;
                 // A leg refused for its length is a leg with no heights, which
@@ -10840,6 +11058,9 @@ class _PlanMode(MacroElement):
                     laid = straightSamples(from, to);
                 } catch (refused) {
                     return Promise.reject(refused);
+                }
+                if (PLAN.heightsTiles) {
+                    return tileHeights(laid).then(function (points) { return {laid: laid, points: points}; });
                 }
                 var batches = [];
                 for (var i = 0; i < laid.lon.length; i += PLAN.heightsBatch) {
@@ -15854,7 +16075,10 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
             ``heightsUrl``, ``heightsCrs``, ``heightsBatch`` and
             ``heightsWorkers`` are the height service, the coordinates it is
             asked in, its own cap on points per request and the concurrency the
-            build settled on; ``terrainModel`` and ``seaTerrain`` are the two
+            build settled on; ``heightsTiles`` is :meth:`HeightTiles.as_settings`
+            where the map carries height tiles instead, and then the service
+            is not asked at all -- one of the two has to be there;
+            ``terrainModel`` and ``seaTerrain`` are the two
             answers that classify a sample — what makes it a ground height, and
             what makes it sea rather than ground; ``sampleStepM`` and
             ``ascentThresholdM`` are the build's own sampling step and ascent
@@ -15898,6 +16122,8 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
     missing = sorted(set(PLAN_SETTINGS) - set(plan))
     if missing:
         raise ValueError(f"the page cannot plan a route without {', '.join(missing)}")
+    if plan["heightsTiles"] is None and not plan["heightsUrl"]:
+        raise ValueError("the page cannot sample a straight leg without either heightsUrl or heightsTiles")
     absent = sorted(set(PLAN_GPX_SETTINGS) - set(plan.get("gpx") or {}))
     if absent:
         raise ValueError(f"the page cannot read a GPX back without gpx.{', gpx.'.join(absent)}")
@@ -16036,6 +16262,15 @@ class _OfflinePanel(MacroElement):
                 // What a kept tile weighs, per zoom, measured on the provider's
                 // own tiles -- see `PROVIDERS` for how each table was taken.
                 var WEIGHT = {{ this.weight_json }};
+                // The height tiles beside the map's, where the map has them
+                // (see `HeightTiles` in Python). Kept at the one zoom the page
+                // reads them at, over the same set of tiles the map is kept
+                // over, so a straight leg planned offline over kept ground has
+                // heights and one planned off it says it has none. Not the
+                // whole box: measured, that is 380 tiles and 35 MB at z13, a
+                // third again on a band along a day's walk. `null` where the
+                // map carries none, and then nothing here changes.
+                var HEIGHTS = {{ this.heights_json }};
 
                 // **Four scopes, and only one of them follows the paths.** In
                 // this park one walks off them, so a band along everything drawn
@@ -16403,7 +16638,15 @@ class _OfflinePanel(MacroElement):
                         tiles += n;
                         bytes += n * (WEIGHT[z] || 45000);
                     });
+                    if (HEIGHTS && levels[HEIGHTS.zoom]) {
+                        tiles += levels[HEIGHTS.zoom].size;
+                        bytes += levels[HEIGHTS.zoom].size * heightWeight(HEIGHTS.zoom);
+                    }
                     return {tiles: tiles, bytes: bytes};
+                }
+
+                function heightWeight(z) {
+                    return (HEIGHTS && HEIGHTS.weight[z]) || 90000;
                 }
 
                 // **Buffered, because the zoom row prices every level it draws.**
@@ -16535,16 +16778,27 @@ class _OfflinePanel(MacroElement):
 
                 // Built by hand rather than through `getTileUrl`, which takes
                 // its zoom from the map rather than from the tile it is given.
+                // **And absolute**, because the worker looks a tile up by the
+                // address of the request, which is always absolute, and a
+                // sheet served from our own bucket is addressed root-relative:
+                // keyed as written, every tile of it would be kept under a
+                // name the worker never asks for. Kartverket's addresses are
+                // absolute already and come back unchanged.
                 function urlFor(layer, x, y, z) {
-                    return plainUrl(layer).replace('{z}', z).replace('{y}', y).replace('{x}', x)
+                    var made = plainUrl(layer).replace('{z}', z).replace('{y}', y).replace('{x}', x)
                         .replace('{s}', (layer.options.subdomains || 'abc')[0])
                         .replace('{r}', '');
+                    return new URL(made, location.href).href;
+                }
+
+                function heightUrlFor(x, y, z) {
+                    return new URL(HEIGHTS.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
                 }
 
                 function walker(picked) {
                     picked = picked || recount();
                     var layer = base();
-                    var z = BOTTOM, it = null;
+                    var z = BOTTOM, it = null, ground = false;
                     return {
                         total: layer ? picked.tiles : 0,
                         bytes: picked.bytes,
@@ -16557,12 +16811,27 @@ class _OfflinePanel(MacroElement):
                                     it = set.values();
                                 }
                                 var step = it.next();
-                                if (step.done) { it = null; z += 1; continue; }
+                                if (step.done) {
+                                    it = null;
+                                    // The height tiles of this level, after the
+                                    // map tiles of it and over the same set.
+                                    if (HEIGHTS && !ground && z === HEIGHTS.zoom) {
+                                        ground = true;
+                                        it = picked.levels[z].values();
+                                        continue;
+                                    }
+                                    ground = false;
+                                    z += 1;
+                                    continue;
+                                }
                                 // The level travels with the address because the
                                 // run weighs what it keeps, and parsing it back
                                 // out of the URL would be the third time this
                                 // page had written that particular guess down.
-                                return {url: urlFor(layer, keyX(step.value), keyY(step.value), z), z: z};
+                                if (ground) {
+                                    return {url: heightUrlFor(keyX(step.value), keyY(step.value), z), z: z, ground: true};
+                                }
+                                return {url: urlFor(layer, keyX(step.value), keyY(step.value), z), z: z, ground: false};
                             }
                             return null;
                         }
@@ -17312,7 +17581,7 @@ class _OfflinePanel(MacroElement):
                             }).then(function () {
                                 state.done += 1;
                                 if (next.z > state.top) { state.top = next.z; }
-                                state.bytes += WEIGHT[next.z] || 45000;
+                                state.bytes += next.ground ? heightWeight(next.z) : (WEIGHT[next.z] || 45000);
                                 // **Give up on the connection, not on the tile.**
                                 // One tile that will not come is a tile, and the
                                 // other hundred thousand are still worth having;
@@ -18153,6 +18422,7 @@ class _OfflinePanel(MacroElement):
         self._name = "OfflinePanel"
         self.top = provider.top
         self.weight_json = _script_json({str(zoom): bytes_ for zoom, bytes_ in provider.weight.items()})
+        self.heights_json = _script_json(provider.heights.as_settings() if provider.heights else None)
         self.database = companions.database
         self.cache = companions.cache
 
