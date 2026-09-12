@@ -445,8 +445,12 @@ Decides how much of §7 is before departure. Unknown as of 2026-09-12.
 
 *Trigger: step 3 and step 5.* The tile copy: seconds per tile over FTP with a persistent
 connection, bytes per zoom for the `WEIGHT` table, and whether Geotorget offers this product
-cut to an area. The heights: one COG opened with the login, its overview levels, nodata and
-water marking, and the weight of a packed z13 tile. Both are written back into §3 and §6.3.
+cut to an area; and **whether the file's cartography is the service's**, one z13 tile from the
+file beside the same address from the public viewer — Lantmäteriet describes both as the same
+two sheets, and it has not been checked. Also how often the FTP files are refreshed (dated
+2026-06-22 to 24 when first seen). The heights: one COG opened with the login, its overview
+levels, nodata and water marking, and the weight of a packed z13 tile. All written back into
+§3 and §6.3.
 
 ### 8.3 `make drive` for a second page
 
@@ -489,6 +493,10 @@ attribution. All in §3, §5 and §6.3, with how each was read. The purchase Uwe
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, evening** — §8.2 gains two checks for the first build: that the free file's
+  cartography is the paid service's, and how often the file is refreshed. Asked by Uwe as
+  "what does the free product lose": one zoom level (z18, upsampling at this latitude), the
+  live freshness, and the build effort; it gains independence and terms that fit redistribution.
 - **2026-09-12, evening** — the tile source changes. Uwe's Geotorget order form showed the
   cache service at 10,375 kr/år; measured on Geotorget, every live tile service is paid and the
   free WMTS is z14 only and retires 2026-12-31. The free product is the same tiles as a
