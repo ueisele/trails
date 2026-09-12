@@ -190,25 +190,109 @@ Cloudflare Worker in `home/trails-map`, on its own hostname, that adds the key a
 way to Lantmäteriet and caches at the edge. `TILE_HOST` becomes our own host, the key stays in
 sops, and a product change at Lantmäteriet is one line in the Worker. The Worker sets CORS itself.
 
-### 6.2 Two maps, two origins
+### 6.2 Two maps, one origin, one bucket — companions named per map
 
-**Decided:** a second instance of the `home/trails-map` module — its own bucket, its own hostname
-(`abisko.cairn.zone` is the shape). Service worker, IndexedDB, storage quota and iOS's seven-day
-eviction are all per origin, so every collision in §4.5 is avoided with **no code change**. The
-alternative — a prefix per map in one bucket, a worker scope per map, a database name per map —
-is what the module's *"more than one map from the start"* meant, and it is the better design; it
-costs a rework of the service worker and the offline panel that a trip does not have time for.
-Recorded so it can be picked up if a third map ever comes.
+Uwe, 2026-09-12: the same domain and bucket if it can be done; installing from the Abisko page
+must install Abisko; Abisko is its own app with its own IndexedDB; and the Lomsdal-Visten
+install's kept ground must survive. Both maps are interim — the `atlas` app replaces them — so
+the cheapest arrangement that meets all four is the right one.
 
-### 6.3 The heights ride in the document
+**What happens today.** There is one `manifest.webmanifest` at the root with
+`start_url: ./lomsdal-visten`, and every page links it; iOS installs what the open page's manifest
+says. So adding `/abisko` to the Home Screen today would install an app that opens
+Lomsdal-Visten. The service worker, by contrast, is already map-agnostic: it keeps whichever page
+is open, keyed by the page's own URL. What it does not separate is the database (`DB = "trails"`),
+the offline switch, the kept-record and the *Delete* button, all of which act on that one
+database, and it intercepts one tile host only.
+
+**What iOS separates on its own.** Each Home Screen web app has its own storage, apart from
+Safari's and from other installs of the same origin. The evidence is the measurement of
+2026-09-02 recorded in the memory note on WebKit's Cache Storage: after re-adding the app its
+store was empty although Safari held the tiles. So a second install gets its own IndexedDB on the
+phone regardless. The separation in code is still needed, for Safari itself and for a desktop,
+where one origin is one store.
+
+**Decided:** same origin, same bucket, flat root, and every companion file named for its map.
+Lomsdal-Visten keeps `sw.js`, `manifest.webmanifest`, the four `icon-*.png` and the database
+`trails` — **nothing it has is renamed, so nothing the installed app holds is touched, and
+`/sw.js` never answers 404**, which is the one thing a browser may punish by dropping the
+registration. Abisko gets its own manifest with `start_url: ./abisko` and an `id`, its own
+worker registered at scope `/abisko`, and its own database. Opening `/abisko` and adding it to
+the Home Screen then installs Abisko.
+
+The bucket, served at `atlas.cairn.zone`:
+
+```
+/                                   the index Worker, lists every *.html object as a map
+lomsdal-visten.html                 served at /lomsdal-visten     unchanged
+sw.js  manifest.webmanifest         Lomsdal-Visten's              unchanged
+icon-32.png … icon-512.png          Lomsdal-Visten's              unchanged
+abisko.html                         served at /abisko
+abisko.webmanifest                  start_url ./abisko, id abisko, name "Abisko Atlas"
+abisko-sw.js                        scope /abisko, DB trails-abisko
+abisko-icon-32.png … abisko-icon-512.png   a variant of the cairn, so the two icons differ
+dem/lantmateriet/1/{z}/{x}/{y}.png  the height tiles, §6.3
+```
+
+Checked against the hosting module, 2026-09-12: the rewrite rule leaves any path containing a
+dot alone, so `dem/…/{y}.png` is served as an object untouched; the index Worker lists with
+`delimiter: "/"` and keeps only keys ending in `.html`, so the `dem/` prefix never appears as a
+map. **No change in `home/trails-map` is needed.**
+
+What it costs in code: `write_manifest`, `write_service_worker`, `write_icons`, `_Head` and the
+`register('sw.js')` call take the map's name; `KEPT`/`SEEN` stay but the database name carries
+the map; `TILE_HOST` becomes a list, because the height tiles come from our own host;
+`deploy_map.py`'s `BESIDE` table is keyed per map and gains the `dem/` directory. All of it is
+Python-side naming; the worker's logic does not change.
+
+Two things easily overlooked: **two identical icons** on a Home Screen, hence the variant mark;
+and, in Safari on the same origin, Lomsdal's root-scope worker also matches `/abisko` until
+Abisko's own is registered — the first visit is answered by the root worker and cached in
+`trails`, the second by the more specific scope. Harmless, and on iOS installs it does not arise.
+
+Recorded as the alternatives: a directory per map (`/abisko/`) needs the rewrite and the index
+Worker to understand prefixes and gains nothing over the flat root; a second origin per map
+(`abisko.cairn.zone`, a second module instance) is full isolation with no code, and stays the
+fallback if the flat root hits something unforeseen.
+
+### 6.3 The heights are tiles in the bucket, built here
 
 Three ways were weighed: a Worker in front of Lantmäteriet's WCS that imitates the live point
-query; a coarse height grid for the box inside the document; DEM tiles on R2, which is the `atlas`
-§3.5 design. **Decided: the grid in the document.** At 50 m the box is about 600,000 cells,
-estimated under 1 MB compressed — small against a 15.9 MB page — and it makes the heights of a
-planned leg **available offline for the first time**, which the live query never was. The build
-samples the same grid for the graph vertices, so build and page agree by construction. The datum
-is asserted at import, as `atlas` §6.2 requires.
+query; a coarse height grid for the box inside the document; and height tiles addressed `z/x/y`
+like the map tiles, which is what `atlas` §3.6 decided for the offline pack. **Decided: the
+tiles**, because they are the one of the three that `atlas` reuses as they are — same grid, same
+addressing, same encoding, same bucket — while a grid inside the document is thrown away with
+the document. Uwe, 2026-09-12: build them here and use them directly.
+
+Shape, following `atlas` §3.6 where it has decided and choosing where it has not:
+
+- **Source** Lantmäteriet *Markhöjdmodell Nedladdning* (WCS, CC0, RH 2000). The datum is
+  asserted at import, as `atlas` §6.2 requires; RH 2000 and NN2000 are both EVRS realisations.
+- **Ceiling z13.** At 68.3° N a z13 pixel is 7.1 m; `atlas` measured that z14 over a 10 m model
+  is pure upsampling, and a 1 m model resampled to 7 m is still far finer than the 25 m window the
+  profile smooths by. The WCS request resamples to the tile's resolution, so the 1 m grid never
+  lands on forge whole.
+- **Count** for the box, z8 to z13: 2 + 6 + 12 + 30 + 110 + 380 = **540 tiles**. At the
+  100–200 KB a lossless 256×256 RGB elevation tile tends to weigh, that is 50–110 MB in the bucket
+  — order of magnitude, to be measured on the first build.
+- **Encoding** elevation packed into RGB, **PNG, lossless** — `atlas` §3.6's trap: a later
+  "optimise the tiles" pass with lossy WebP or JPEG would leave the images looking identical and
+  the heights ruined. The packing formula is the build's to choose; Terrarium's
+  `(R·256 + G + B/256) − 32768` is the obvious one and gives 1/256 m. (What `atlas` rejected was
+  Terrarium's *source*, not its packing.)
+- **Address** `dem/lantmateriet/1/{z}/{x}/{y}.png` — a directory per source, because a second
+  source (Kartverket DTM10 for Norway) is stacked, not mixed, exactly as the imagery is; and a
+  version segment, because the offline store keys tiles by URL, so a rebuild that changes the
+  resampling must change the address or kept tiles on a phone would silently mix two builds.
+  Loose objects rather than a PMTiles container: the page is Leaflet without a PMTiles reader,
+  and the worker intercepts tile URLs. A PMTiles file for `atlas` is assembled from the same tiles
+  when `atlas` wants one.
+- **Use** the build samples the tiles for every graph vertex; the page fetches them for the legs
+  of a planned route and reads them from the offline store when the switch is on. Build and page
+  agree by construction, because they read the same tiles. The offline chooser keeps the whole
+  box's height tiles with any scope — at z13 and below they are a few per cent of any pack.
+- **Caching** long `max-age` on the tiles, since the address carries the version; the deploy
+  uploads the directory with `aws s3 sync` and purges nothing for it.
 
 ### 6.4 The box holds no Norway
 
@@ -234,14 +318,15 @@ this map is the reason.
    same time: which product the key rests on, its retirement date, the terms on bulk download, and
    CORS. The key goes into `home/trails-map`'s sops file. With it, the seam measurement of
    `atlas` §9.2 becomes possible, and Abisko's north-west corner is the ideal test case.
-2. **Infrastructure** — the second module instance (§6.2) and the tile proxy Worker (§6.1).
+2. **Infrastructure** — the tile proxy Worker (§6.1) only; the bucket needs nothing (§6.2).
 3. **`trails`, the plumbing** — `--park` (§4.1), the provider blob and `WEIGHT` for Lantmäteriet
    (§4.2), `drive_map.py` gains `--page`.
 4. **`network/sweden.py`** — OSM, Naturvårdsverket trails and facilities, protected areas, water,
    names; winter trails excluded (§6.5).
-5. **Heights** — the grid in the document (§6.3).
+5. **Heights** — the tile build (§6.3): WCS over the box, resample, pack, write `dem/`.
 6. **Acceptance and publish** — the structural readings of `make drive` against the Abisko page,
-   then `command make map --park abisko`, then the deploy through the new module instance.
+   then `command make map --park abisko`, then `deploy_map.py --map abisko`, which uploads the
+   page, its own companions and `dem/`.
 
 Steps 2 and 3 do not depend on step 1 and can start before the key exists; step 4 needs the
 Naturvårdsverket services only, which are keyless; step 5 needs the key for the WCS.
@@ -263,11 +348,13 @@ both. The Worker of §6.1 absorbs the last of these whichever way it goes.
 
 Decides how much of §7 is before departure. Unknown as of 2026-09-12.
 
-### 8.3 Which height product, at which resolution
+### 8.3 What one WCS request over the box returns
 
 *Trigger: step 5.* *Markhöjdmodell Nedladdning* is a 1 m WCS; the box at 1 m is 1.1 billion
-cells, so the request resamples to 50 m or the build does. The older *grid 50+* product may or
-may not still be served. Measure what one WCS request over the box returns before choosing.
+cells, so the request must resample to z13's 7 m, or the build fetches coarser and resamples.
+Measure what one request returns — format, size, whether the server resamples, whether nodata
+and water are marked — before the tile build is written. The tile weight in §6.3 is measured on
+the first build and written back there.
 
 ### 8.4 `make drive` for a second page
 
@@ -303,6 +390,11 @@ byte-size threshold first and a decode second.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — §6.2 changes from two origins to one origin, one bucket, companions named per
+  map, after Uwe asked for the same domain and bucket and accepted that both maps are interim;
+  the bucket layout is written down and checked against the hosting module. §6.3 changes from a
+  grid in the document to height tiles in the bucket, built here and reused by `atlas`.
+  §7 and §8.3 follow.
 - **2026-09-12** — Kedketjårro dropped as a marker (Uwe: the E10 makes it irrelevant); §8.1
   and §8.2 move to §9 as settled, the rest of §8 renumbered.
 - **2026-09-12** — the north edge is set by the E10, which Uwe wants inside whole: its
@@ -330,4 +422,5 @@ A line per change to this document or to the decisions in it, newest first.
 | what in the code is Norway | a read of `maps.py`, `lomsdal_visten.py`, `route_graph.py`, `deploy_map.py`, `drive_map.py` and `libs/src/trails/io/sources/` on 2026-09-11, with line numbers as they stood that day |
 | Lantmäteriet's grid, layers, ceiling, and its white outside Sweden | `atlas/docs/decisions.md` §3.7, measured 2026-09-11 |
 | Swedish service URLs | Naturvårdsverket's *Leder och friluftsanordningar, beskrivning av öppna data* (PDF), Lantmäteriet's and Naturvårdsverket's product pages, read 2026-09-11 |
+| DEM tile counts and pixel sizes | WebMercator tile index over the box at z8–z13; 156,543 m · cos(68.3°) / 2^z |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |
