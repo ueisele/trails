@@ -452,8 +452,12 @@ this map is the reason.
 2. **Infrastructure** — nothing. The bucket takes prefixes without a change (§6.2), and there
    is no Worker (§6.1).
 3. **`trails`, the plumbing** — `--park` (§4.1), the provider blob with `TOP` and `WEIGHT` per
-   provider (§4.2, §3), `drive_map.py` gains `--page`. And **the tile copy**: the box's tiles out
-   of the FTP GeoPackage into `tiles/` (§3), measured for time and bytes on the first run.
+   provider (§4.2, §3), `drive_map.py` gains `--page`. And **the tile copy**, which is done as
+   code since 2026-09-12: `trails.io.remote_sqlite` opens the FTP GeoPackage as an SQLite
+   database through an `apsw` VFS with 1 MB blocks, `trails.io.sources.lantmateriet` copies the
+   box column by column into `analysis/output/tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png`,
+   resumable, with an `index.json` beside the tiles; `command make tiles` drives it, and the
+   full z8–z17 run was started the same day as a transient unit, `abisko-tiles`.
 4. **`network/sweden.py`** — Topografi 50 for the ground, Naturvårdsverket's trail register
    for the attributes, OSM for what neither draws; winter trails and reindeer routes excluded
    (§6.5).
@@ -532,6 +536,9 @@ box is an hour and a half, once.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the tile copy is code: `remote_sqlite.py`, `sources/lantmateriet.py`,
+  `lantmateriet_tiles.py`, `make tiles`, with tests against a local stand-in for the file. A
+  z8–z12 run took 18 s for 160 tiles; the full run is under way as the unit `abisko-tiles`.
 - **2026-09-12** — the FTP reader prototyped and measured: 0.048 s a tile, ~95 min for the box;
   orientation and cartography confirmed against the viewer. §3 carries the figures, §8.1 shrinks,
   §9.5 settles the cartography question.
