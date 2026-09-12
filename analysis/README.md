@@ -223,6 +223,22 @@ steps, in that order, because this one does not build.
 A map named `<name>` is uploaded as `<name>.html` and is then readable at `https://<host>/<name>`.
 Publishing a second map needs nothing but a second upload.
 
+**Tile trees** are the other thing it uploads — the base-map tiles `command make tiles` copied and,
+once built, the height tiles — and they go up by `aws s3 sync` rather than one `cp` each:
+
+```bash
+command make deploy ARGS="--tree tiles"              # analysis/output/tiles/ → s3://…/tiles/
+command make deploy ARGS="--tree tiles --dry-run"    # lists the bucket, says what is missing there
+command make deploy ARGS="--map abisko --tree dem"   # a page and a tree in one run
+```
+
+A tree is a hundred thousand small PNGs under a versioned prefix (`tiles/lantmateriet/topowebb/1/…`),
+so every object is immutable and is sent with a year's `max-age`; `sync` compares size and
+modification time against the bucket's listing and uploads only what is new, deletes nothing and
+purges nothing. With `--tree` alone no page goes up; name `--map` too for both. The tree's
+`index.json` — the copy's inventory, the one file in it that changes — goes up on its own with a
+short lifetime.
+
 
 ## Structure
 

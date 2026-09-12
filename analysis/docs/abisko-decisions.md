@@ -235,6 +235,13 @@ overwrites the first's. And the worker registers at scope `./` — one worker fo
 IndexedDB (`DB = "trails"`), one terrain store whose tile keys are `z/x/y` without a provider, and
 a `sweepOldCaches` that would treat the other map's caches as cast-offs. See §6.2.
 
+Since 2026-09-12 the script also mirrors the two tile trees: `deploy_map.py --tree tiles` (or
+`--tree dem`) runs `aws s3 sync` from `analysis/output/<tree>/` to the same prefix in the bucket
+with a year's `max-age` — the `/1/` version segment makes every object immutable — uploads only
+what the listing lacks, deletes nothing and purges nothing; with `--tree` alone no page goes up.
+Measured against the bucket with `--dry-run`, which lists it: 118,967 objects, 696 MB, found
+missing in 27 s. The companions are still unparametrised; that is the `--park` step.
+
 ### 4.6 The projection is not a problem
 
 `EPSG:25833` is hard-coded in five places. **It stays.** SWEREF99 TM (EPSG:3006) is a transverse
@@ -375,8 +382,8 @@ What it costs in code: `write_manifest`, `write_service_worker`, `write_icons`, 
 `register('sw.js')` call take the map's name; `KEPT`/`SEEN` stay but the database name carries
 the map; `TILE_HOST` becomes our own host, since map and height tiles both come from it, and `TOP` is
 per provider (17 here, §3);
-`deploy_map.py`'s `BESIDE` table is keyed per map and gains the `dem/` directory. All of it is
-Python-side naming; the worker's logic does not change.
+`deploy_map.py`'s `BESIDE` table is keyed per map; the `tiles/` and `dem/` trees it already
+mirrors with `--tree` (§4.5). All of it is Python-side naming; the worker's logic does not change.
 
 Two things easily overlooked: **two identical icons** on a Home Screen, hence the variant mark;
 and, in Safari on the same origin, Lomsdal's root-scope worker also matches `/abisko` until
@@ -476,14 +483,17 @@ this map is the reason.
    database through an `apsw` VFS with 1 MB blocks, `trails.io.sources.lantmateriet` copies the
    box column by column into `analysis/output/tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png`,
    resumable, with an `index.json` beside the tiles; `command make tiles` drives it, and the
-   full z8–z17 run was started the same day as a transient unit, `abisko-tiles`.
+   full z8–z17 run took 916 s. **And the upload**, also code since 2026-09-12: `deploy_map.py
+   --tree tiles` mirrors the tree into the bucket by `aws s3 sync` (§4.5), which is `just deploy
+   --tree tiles` from `home/trails-map`. Not run yet: putting the tiles up is a publish, and Uwe
+   decides publishes.
 4. **`network/sweden.py`** — Topografi 50 for the ground, Naturvårdsverket's trail register
    for the attributes, OSM for what neither draws; winter trails and reindeer routes excluded
    (§6.5).
 5. **Heights** — the tile build (§6.3): WCS over the box, resample, pack, write `dem/`.
 6. **Acceptance and publish** — the structural readings of `make drive` against the Abisko page,
-   then `command make map --park abisko`, then `deploy_map.py --map abisko`, which uploads the
-   page, its own companions and `dem/`.
+   then `command make map --park abisko`, then `deploy_map.py --map abisko --tree tiles --tree dem`,
+   which mirrors the trees first and then uploads the page and its own companions.
 
 Step 3's tile copy needs no credential and can start now; steps 4 and 5 need the login in sops.
 
@@ -555,6 +565,11 @@ box is an hour and a half, once.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the tile upload is code: `deploy_map.py --tree tiles|dem` mirrors a tree by
+  `aws s3 sync` with a year's `max-age`, the inventory apart with a short one; `--tree` alone
+  publishes no page; the purge settings are demanded only when a page is purged, which
+  `.env.example` had promised and the script had not kept. Dry-run against the bucket: 118,967
+  objects found missing in 27 s. §4.5, §6.2 and §7 follow. Nothing uploaded.
 - **2026-09-12** — the full copy is done: 118,967 tiles, 696 MB, 916 s, none missing; the
   per-zoom weights are in §3 for the `WEIGHT` table; the 95-minute estimate is corrected.
 - **2026-09-12** — the tile copy is code: `remote_sqlite.py`, `sources/lantmateriet.py`,

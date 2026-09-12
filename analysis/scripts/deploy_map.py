@@ -23,11 +23,26 @@ Two things this deliberately does rather than assumes:
   permission with ``403 request is not authorized`` and names neither the permission nor the token,
   which reads like a broken credential rather than one that is short by a single entry.
 
+**Tile trees go up by ``sync``, not by ``cp``.** The base-map tiles and the height tiles are
+directories of a hundred thousand small PNGs (118,967 for Abisko, 696 MB) whose addresses carry a
+version segment — ``tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png`` — so an object never changes
+under its name and can be held for a year, and a second run has to upload only what is new. ``aws
+s3 sync`` compares size and modification time against the bucket's listing and skips the rest;
+nothing is ever deleted, and nothing is purged, because a versioned address has nothing stale to
+purge. The tree's ``index.json`` is the one file in it that does change, so it goes up on its own
+with a short lifetime.
+
 Usage::
 
     command make deploy
     command make deploy ARGS="--dry-run"
     command make deploy ARGS="--map oberstdorf-allgaeu"
+    command make deploy ARGS="--tree tiles"                 # the tile tree alone, no page
+    command make deploy ARGS="--map abisko --tree dem"      # a page and a tree in one run
+
+With ``--tree`` alone only the trees go up; name ``--map`` as well to publish a page in the same
+run. A ``--dry-run`` with ``--tree`` does list the bucket, because what it reports is what
+``sync`` would find missing there.
 """
 
 import argparse
@@ -35,6 +50,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -53,16 +69,41 @@ EXPECTED_PREFIX = b"<!DOCTYPE html>"
 #: in the infrastructure repo sets ``skip_s3_checksum = true``.
 CHECKSUM_ENV = {"AWS_REQUEST_CHECKSUM_CALCULATION": "when_required"}
 
-#: Read from the environment. The first four say where to put the map, the last three how.
+#: Read from the environment: where the objects go and what may write them. Every run needs these.
 SETTINGS = (
     "TRAILS_MAP_BUCKET",
     "TRAILS_MAP_S3_ENDPOINT",
     "TRAILS_MAP_HOSTNAME",
-    "TRAILS_MAP_ZONE_ID",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
+)
+
+#: What the purge needs on top. Only a page is purged, so a run without one -- or with
+#: ``--no-purge`` -- does not ask for them, which is what ``.env.example`` promises.
+PURGE_SETTINGS = (
+    "TRAILS_MAP_ZONE_ID",
     "CLOUDFLARE_API_TOKEN",
 )
+
+#: The directory trees under ``analysis/output`` that are mirrored into the bucket under the same
+#: prefix, and what each is. Both hold versioned addresses -- a ``/1/`` segment below the provider
+#: -- so every object in them is immutable and an edge may keep it for a year. A new version is a
+#: new prefix, never a changed object.
+TREES = {
+    "tiles": "the base-map tiles, tiles/<provider>/<sheet>/<version>/{z}/{x}/{y}.png",
+    "dem": "the height tiles, dem/<provider>/<version>/{z}/{x}/{y}.png",
+}
+
+#: How long an edge may hold an object of a tree. A year is the ceiling browsers honour.
+TREE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+#: The copy's inventory, written beside the tiles. It is the one file in a tree that changes -- a
+#: resumed copy rewrites it -- so it goes up on its own with the same short lifetime as the manifest.
+TREE_INDEX = "index.json"
+
+#: How often the sync reports progress, in uploaded objects. A tree is a hundred thousand of them
+#: and a line per object is a journal nobody reads.
+PROGRESS_EVERY = 5_000
 
 
 def load_env_file(path: Path) -> None:
@@ -236,6 +277,156 @@ def upload(source: Path, key: str, config: dict[str, str]) -> None:
         sys.exit(f"Upload failed (exit {error.returncode}).")
 
 
+def _aws(config: dict[str, str]) -> list[str]:
+    """The start of every aws call: the S3 subcommand's endpoint and region."""
+    return ["aws", "s3", "--endpoint-url", config["TRAILS_MAP_S3_ENDPOINT"], "--region", "auto"]
+
+
+def sync_tree(source: Path, prefix: str, config: dict[str, str], dry_run: bool = False) -> tuple[int, int]:
+    """Mirror a directory tree into the bucket, uploading only what is not there yet.
+
+    ``aws s3 sync`` lists the prefix and uploads a file whose size differs from the object's or
+    whose modification time is newer; a tile copied before the last upload is skipped. Partial
+    files the copy left behind are excluded, and so is the inventory, which :func:`upload_index`
+    puts up separately. Nothing is deleted: a tree only ever grows. The exclude patterns are
+    matched against the path below ``source``, and ``*`` crosses slashes there -- measured: a bare
+    ``index.json`` excluded nothing, ``*/index.json`` excludes the one file.
+
+    Args:
+        source: The tree on disk.
+        prefix: Where it goes, relative to the bucket root -- the tree's own name.
+        config: The settings from :func:`settings`.
+        dry_run: Ask ``sync`` what it would upload and upload nothing. The listing still happens.
+
+    Returns:
+        How many objects were uploaded (or would be) and how many bytes they hold.
+
+    Raises:
+        SystemExit: If the aws CLI is absent or the sync fails.
+    """
+    command = [
+        *_aws(config), "sync", str(source), f"s3://{config['TRAILS_MAP_BUCKET']}/{prefix}",
+        "--exclude", "*.part",
+        "--exclude", f"*/{TREE_INDEX}",
+        "--cache-control", TREE_CACHE_CONTROL,
+        "--no-progress",
+    ]  # fmt: skip
+    if dry_run:
+        command.append("--dryrun")
+    started = time.time()
+    uploaded = 0
+    size = 0
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, text=True, env={**os.environ, **CHECKSUM_ENV})
+    except FileNotFoundError:
+        sys.exit("aws (the AWS CLI) is not installed — it is what talks to R2's S3 API.")
+    assert process.stdout is not None
+    # One line per object -- "upload: <local> to s3://<bucket>/<key>", "(dryrun) " in front when
+    # asked -- and nothing else with --no-progress. The local path is what says how big it was.
+    for line in process.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        verb, _, rest = line.removeprefix("(dryrun) ").partition(": ")
+        if verb != "upload":
+            print(f"   {line}")
+            continue
+        local, _, _target = rest.rpartition(" to s3://")
+        uploaded += 1
+        try:
+            size += Path(local).stat().st_size
+        except OSError:
+            pass
+        if uploaded % PROGRESS_EVERY == 0:
+            elapsed = time.time() - started
+            print(f"   {uploaded:,} objects, {size / 1e6:,.1f} MB, {elapsed:,.0f} s, {uploaded / elapsed:,.0f}/s", flush=True)
+    if process.wait() != 0:
+        sys.exit(f"Syncing {source} failed (exit {process.returncode}).")
+    return uploaded, size
+
+
+def upload_index(source: Path, prefix: str, config: dict[str, str]) -> None:
+    """Put a tree's inventory up beside its tiles, held only briefly.
+
+    Args:
+        source: The ``index.json`` the copy wrote.
+        prefix: The tree's prefix in the bucket.
+        config: The settings from :func:`settings`.
+
+    Raises:
+        SystemExit: If the copy fails.
+    """
+    command = [
+        *_aws(config), "cp", str(source), f"s3://{config['TRAILS_MAP_BUCKET']}/{prefix}/{source.name}",
+        "--content-type", "application/json",
+        "--cache-control", "max-age=300",
+        "--no-progress",
+    ]  # fmt: skip
+    try:
+        subprocess.run(command, check=True, env={**os.environ, **CHECKSUM_ENV})
+    except subprocess.CalledProcessError as error:
+        sys.exit(f"Uploading {prefix}/{source.name} failed (exit {error.returncode}).")
+
+
+def check_tree(root: Path, name: str) -> tuple[list[Path], int]:
+    """Refuse a tree that is not there or holds nothing to upload.
+
+    Args:
+        root: The directory to mirror.
+        name: Its key in :data:`TREES`, for the message.
+
+    Returns:
+        The inventories found below it -- one per copied version -- and how many files it holds
+        apart from them.
+
+    Raises:
+        SystemExit: If it is missing or empty.
+    """
+    if not root.is_dir():
+        sys.exit(f"{root} is not a directory — {TREES[name]} — nothing has built it yet.")
+    files = 0
+    indexes: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.name == TREE_INDEX:
+            indexes.append(path)
+        elif path.suffix != ".part":
+            files += 1
+    if files == 0:
+        sys.exit(f"{root} is empty.")
+    return sorted(indexes), files
+
+
+def publish_trees(names: list[str], output_dir: Path, config: dict[str, str], dry_run: bool) -> None:
+    """Sync every named tree, then its inventories.
+
+    Args:
+        names: Keys of :data:`TREES`.
+        output_dir: Where the trees are, one directory each.
+        config: The settings from :func:`settings`.
+        dry_run: Report what ``sync`` would do and change nothing.
+    """
+    bucket = config["TRAILS_MAP_BUCKET"]
+    for name in names:
+        root = output_dir / name
+        indexes, files = check_tree(root, name)
+        verb = "Would sync" if dry_run else "Syncing"
+        print(f"🔁 {verb} {root} ({files:,} files) → s3://{bucket}/{name}/, {TREE_CACHE_CONTROL}", flush=True)
+        started = time.time()
+        uploaded, size = sync_tree(root, name, config, dry_run)
+        elapsed = time.time() - started
+        done = "would upload" if dry_run else "uploaded"
+        print(f"   {done} {uploaded:,} of {files:,} objects, {size / 1e6:,.1f} MB, in {elapsed:,.0f} s")
+        for index in indexes:
+            prefix = f"{name}/{index.parent.relative_to(root).as_posix()}"
+            if dry_run:
+                print(f"   would upload {prefix}/{index.name}, max-age=300")
+            else:
+                print(f"⬆️  {prefix}/{index.name} → s3://{bucket}/{prefix}/{index.name}, max-age=300")
+                upload_index(index, prefix, config)
+
+
 def purge(urls: list[str], config: dict[str, str]) -> None:
     """Drop the map from Cloudflare's edge cache.
 
@@ -271,15 +462,26 @@ def purge(urls: list[str], config: dict[str, str]) -> None:
 
 
 def main() -> None:
-    """Upload one built map and purge the addresses it is served at."""
+    """Upload the trees named, then the page and its companions, then purge the page's addresses."""
     repo_root = Path(__file__).resolve().parents[2]
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--map", default="lomsdal-visten", help="Map name, without the suffix")
+    parser.add_argument(
+        "--map",
+        default=None,
+        help="Map name, without the suffix. Default lomsdal-visten; with --tree, no page unless named",
+    )
+    parser.add_argument(
+        "--tree",
+        action="append",
+        default=[],
+        choices=sorted(TREES),
+        help="Mirror this tree from the output directory into the bucket; may be repeated",
+    )
     parser.add_argument(
         "--output-dir",
         default=str(repo_root / "analysis" / "output"),
-        help="Directory the built map is read from",
+        help="Directory the built map and the trees are read from",
     )
     parser.add_argument("--no-purge", action="store_true", help="Upload without purging the edge")
     parser.add_argument("--dry-run", action="store_true", help="Say what would happen and change nothing")
@@ -290,23 +492,36 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    load_env_file(Path(args.env_file))
-    config = settings(SETTINGS)
+    trees = list(dict.fromkeys(args.tree))
+    name = args.map if args.map is not None else (None if trees else "lomsdal-visten")
+    purging = name is not None and not args.no_purge
 
-    key = f"{args.map}{KEY_SUFFIX}"
-    source = Path(args.output_dir) / key
-    size = check(source)
+    load_env_file(Path(args.env_file))
+    config = settings(SETTINGS + PURGE_SETTINGS if purging else SETTINGS)
+    output_dir = Path(args.output_dir)
     host = config["TRAILS_MAP_HOSTNAME"]
+
+    # The trees go up first: a page that names tiles which are not there yet would draw white ground
+    # for as long as its worker held the misses.
+    if trees:
+        publish_trees(trees, output_dir, config, args.dry_run)
+    if name is None:
+        print("✅ " + ", ".join(f"https://{host}/{tree}/" for tree in trees))
+        return
+
+    key = f"{name}{KEY_SUFFIX}"
+    source = output_dir / key
+    size = check(source)
 
     # Every address the same object answers at, because each is its own cache entry: the clean one
     # the rewrite rule serves, the one a trailing slash produces, and the object's own name.
-    urls = [f"https://{host}/{args.map}", f"https://{host}/{args.map}/", f"https://{host}/{key}"]
-    urls += [f"https://{host}/{name}" for name in BESIDE]
+    urls = [f"https://{host}/{name}", f"https://{host}/{name}/", f"https://{host}/{key}"]
+    urls += [f"https://{host}/{beside}" for beside in BESIDE]
 
     if args.dry_run:
         print(f"Would compress {source} ({size / 1e6:.1f} MB) at brotli 11")
-        for name, (kind, held) in BESIDE.items():
-            print(f"      upload {name} uncompressed, {kind}, {held}")
+        for beside, (kind, held) in BESIDE.items():
+            print(f"      upload {beside} uncompressed, {kind}, {held}")
         print(f"      upload it to s3://{config['TRAILS_MAP_BUCKET']}/{key} as {CONTENT_TYPE}, Content-Encoding: br")
         print("      purge " + ("nothing (--no-purge)" if args.no_purge else ", ".join(urls)))
         return
@@ -319,18 +534,18 @@ def main() -> None:
     # **The worker goes up after the map and never before it.** It is what makes
     # a reader's next visit serve the copy they already have, so a worker that
     # arrived first would hand out the old map while announcing the new one.
-    for name, (_kind, held) in BESIDE.items():
-        companion = source.with_name(name)
+    for companion_name, (_kind, held) in BESIDE.items():
+        companion = source.with_name(companion_name)
         if companion.exists():
             weight = companion.stat().st_size / 1e3
-            print(f"⬆️  {name} ({weight:.1f} kB) → s3://{config['TRAILS_MAP_BUCKET']}/{name}, {held}")
+            print(f"⬆️  {companion_name} ({weight:.1f} kB) → s3://{config['TRAILS_MAP_BUCKET']}/{companion_name}, {held}")
             upload_beside(companion, config)
-        elif name == "sw.js":
+        elif companion_name == "sw.js":
             print("⚠️  No sw.js beside the map — readers get no offline copy. Was this built by `make map`?")
-        elif name.startswith("icon-"):
-            print(f"⚠️  No {name} beside the map — the page links to it, so a home screen gets a screenshot instead.")
+        elif companion_name.startswith("icon-"):
+            print(f"⚠️  No {companion_name} beside the map — the page links to it, so a home screen gets a screenshot instead.")
         else:
-            print(f"⚠️  No {name} beside the map — it cannot be installed, so iOS will sweep what it keeps.")
+            print(f"⚠️  No {companion_name} beside the map — it cannot be installed, so iOS will sweep what it keeps.")
 
     if args.no_purge:
         print("↩️  Edge cache left alone (--no-purge); it holds the old map for up to 5 minutes.")
@@ -338,7 +553,7 @@ def main() -> None:
         purge(urls, config)
         print("🧹 Edge cache purged")
 
-    print(f"✅ https://{host}/{args.map}")
+    print(f"✅ https://{host}/{name}")
 
 
 if __name__ == "__main__":

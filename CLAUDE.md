@@ -216,6 +216,7 @@ command make graph                # Build the routing graph and report its numbe
 command make drive                # Drive the built page in a real browser (278 readings, ~400 s)
 command make drive ARGS="--only the_plan_bar"   # ...or one check while working on it
 command make deploy               # Publish the map make map last built, and purge the edge cache
+command make deploy ARGS="--tree tiles"   # Mirror a tile tree (tiles/ or dem/) into the bucket by sync
 # map/graph/drive/deploy all take ARGS="...", e.g. make deploy ARGS="--dry-run".
 #
 # DRIVE ONCE AND READ THE FILE. `make drive` is 400 seconds; running it twice to
