@@ -930,7 +930,7 @@ A line per change to this document or to the decisions in it, newest first.
 
 - **2026-09-12, last of all** — a place with two names shows both, Swedish first (§9.12):
   `ortnamn.paired` joins the register's per-language points into places; 8 places over the box
-  carry a second name.
+  carry a second name. Republished at Uwe's word, read back from the edge byte for byte.
 - **2026-09-12, later still** — the two water checks driven on Abisko's ground (§9.11): a bay
   of Torneträsk for the sound, the Abiskojåkka for the river a goal wades to; the river's Sami
   name noted as a question.
