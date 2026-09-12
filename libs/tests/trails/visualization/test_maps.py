@@ -300,9 +300,25 @@ class TestOfflineWorker:
         has been answered: `caches.keys()` is the call measured at 23 seconds
         on a phone with the ground kept, and it must not happen in front of
         anybody."""
-        assert "var CAST_OFF = /^trails-(page-|state$|terrain$|tiles$)/;" in maps.SERVICE_WORKER
+        assert 'var CAST_OFF = new RegExp("^__CACHE__-(page-|state$|terrain$|tiles$)");' in maps.SERVICE_WORKER
         sweep = maps.SERVICE_WORKER.split("function sweepOldCaches()")[1].split("\nfunction ")[0]
         assert "CAST_OFF.test(name) ? caches.delete(name) : null" in sweep
+
+    def test_the_sweep_is_scoped_to_its_own_map(self, tmp_path):
+        """Two maps on one origin share Cache Storage. The first map's sweep
+        must not take the second's kept ground for a cast-off, nor the other way
+        round -- so the pattern carries the map's own cache prefix, and the
+        alternatives after it start with what a sibling's never does."""
+        page = tmp_path / "lomsdal-visten.html"
+        page.write_text("<html></html>", encoding="utf-8")
+        first = maps.write_service_worker(page).read_text(encoding="utf-8")
+        assert 'var CAST_OFF = new RegExp("^trails-(page-|state$|terrain$|tiles$)");' in first
+        second = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], maps.Companions.named("abisko")).read_text(encoding="utf-8")
+        assert 'var CAST_OFF = new RegExp("^trails-abisko-(page-|state$|terrain$|tiles$)");' in second
+        pattern = re.compile("^trails-(page-|state$|terrain$|tiles$)")
+        assert pattern.match("trails-tiles") and not pattern.match("trails-abisko-tiles")
+        pattern = re.compile("^trails-abisko-(page-|state$|terrain$|tiles$)")
+        assert pattern.match("trails-abisko-tiles") and not pattern.match("trails-tiles")
 
     def test_nothing_on_the_way_to_a_tile_touches_a_cache(self):
         """A cache read anywhere in this path brings back the cost the whole
@@ -592,10 +608,16 @@ class TestOfflinePanel:
         assert "Math.abs(dx), Math.abs(dy)) * 2" in panel
 
     def test_the_zooms_offered_stop_where_the_source_does(self):
-        """Kartverket's topo cache ends at z18: z19 and z20 answer 400."""
-        panel = self.panel()
-        assert "var TOP = 18;" in panel
-        assert "var FLOOR = 14;" in panel
+        """Kartverket's topo cache ends at z18: z19 and z20 answer 400. The
+        ceiling is the provider's, injected -- Lantmäteriet's file ends at z17."""
+        assert "var TOP = {{ this.top }};" in self.panel()
+        assert "var FLOOR = 14;" in self.panel()
+        norwegian = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(norwegian)
+        assert "var TOP = 18;" in norwegian.get_root().render()
+        swedish = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
+        maps.add_chrome(swedish)
+        assert "var TOP = 17;" in swedish.get_root().render()
 
     def test_the_budget_is_measured_at_load_rather_than_written_down(self):
         """It is what the whole map costs at the zoom that scope is capped at --
@@ -1911,6 +1933,168 @@ class TestManifest:
         a map; a head is something a published page asks for."""
         html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
         assert "<title>" not in html
+
+
+class TestTwoMapsOnOneOrigin:
+    """A second map beside the first, on the same origin and in the same bucket,
+    as its own app: its own worker, manifest, icons, database and caches, and
+    another provider's tiles. The first map keeps every name it has -- installed
+    copies hold them, and a worker whose address starts answering 404 is a
+    registration the browser may drop."""
+
+    @staticmethod
+    def abisko(tmp_path):
+        companions = maps.Companions.named("abisko")
+        fmap = maps.create_map(
+            bounds=(18.15, 68.17, 19.0, 68.46),
+            base=maps.BaseMap.LANTMATERIET_TOPO,
+            extra_bases=(),
+            title="Abisko Atlas",
+            companions=companions,
+        )
+        maps.add_chrome(fmap)
+        page = tmp_path / "abisko.html"
+        page.write_text(fmap.get_root().render(), encoding="utf-8")
+        return page, companions
+
+    def test_the_first_map_keeps_its_names(self):
+        assert maps.ROOT == maps.Companions()
+        assert maps.ROOT.worker == "sw.js"
+        assert maps.ROOT.manifest == "manifest.webmanifest"
+        assert maps.ROOT.icon_named(180) == "icon-180.png"
+        assert maps.ROOT.database == "trails"
+        assert maps.ROOT.cache == "trails"
+        assert maps.ROOT.scope == "./"
+
+    def test_a_later_map_carries_its_stem_in_every_name(self):
+        named = maps.Companions.named("abisko")
+        assert named.worker == "abisko-sw.js"
+        assert named.manifest == "abisko.webmanifest"
+        assert named.icon_named(32) == "abisko-icon-32.png"
+        assert named.database == "trails-abisko"
+        assert named.cache == "trails-abisko"
+        # A prefix the browser matches: the page itself, and nothing beside it.
+        assert named.scope == "./abisko"
+
+    def test_the_stem_alone_decides_the_set(self):
+        """One rule, kept in the library so the build and the deploy cannot
+        disagree: the first map keeps the root names its installed copies hold,
+        every other map carries its stem."""
+        assert maps.Companions.of("lomsdal-visten") is maps.ROOT
+        assert maps.Companions.of("abisko") == maps.Companions.named("abisko")
+        assert maps.FIRST_MAP == "lomsdal-visten"
+
+    def test_every_object_beside_the_page_is_listed(self):
+        assert maps.ROOT.files() == ("sw.js", "manifest.webmanifest", "icon-32.png", "icon-180.png", "icon-192.png", "icon-512.png")
+        named = maps.Companions.of("abisko").files()
+        assert named[:2] == ("abisko-sw.js", "abisko.webmanifest")
+        assert named[2:] == tuple(f"abisko-icon-{side}.png" for side in maps.ICON_SIZES)
+        assert not set(named) & set(maps.ROOT.files()), "a shared name is the other map's object overwritten"
+
+    def test_the_providers_end_where_their_sources_do(self):
+        """Kartverket's cache answers z18 and 400 at z19; Lantmäteriet's file
+        holds z0 to z17. The weights are what a kept tile costs, per zoom, and
+        every level the panel can offer has one."""
+        kartverket, lantmateriet = maps.PROVIDERS["kartverket"], maps.PROVIDERS["lantmateriet"]
+        assert kartverket.top == 18 and lantmateriet.top == 17
+        assert set(kartverket.weight) == set(range(11, 19))
+        assert set(lantmateriet.weight) == set(range(11, 18))
+        assert lantmateriet.weight[13] == 25719
+        # Our own bucket, root-relative: no host in the page, and the same page
+        # served locally over the same tree draws the same tiles.
+        assert lantmateriet.tiles.startswith("/tiles/lantmateriet/")
+        assert "://" not in lantmateriet.tiles
+        assert kartverket.tiles == "https://cache.kartverket.no/"
+
+    def test_the_swedish_page_names_no_host_and_no_norwegian_server(self, tmp_path):
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        assert "/tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png" in html
+        # The comments still tell Kartverket's story; no address or literal does.
+        assert "cache.kartverket.no" not in html
+        assert "'kartverket'" not in html
+        assert "Lantmäteriet" in html
+        assert "hint: 'Which Lantmäteriet sheet is drawn underneath.'" in html
+        assert 'var TILE_PREFIX = new URL("/tiles/lantmateriet/topowebb/1/", location.href).href;' in html
+
+    def test_the_swedish_sheet_is_held_to_its_finest_level(self, tmp_path):
+        """Leaflet asks for the real tile at every zoom up to `maxNativeZoom`
+        and magnifies past it; a sheet ending at z17 is drawn scaled at z18
+        rather than requested and answered 404."""
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
+        layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
+        assert [(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in layers] == [(17, 17)]
+        norwegian = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        layers = [child for child in norwegian._children.values() if isinstance(child, folium.TileLayer)]
+        assert {(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in layers} == {(18, 18)}
+
+    def test_the_page_registers_its_own_worker_at_its_own_scope(self, tmp_path):
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        assert "navigator.serviceWorker.register('abisko-sw.js', {scope: './abisko'})" in html
+        assert "register('sw.js')" not in html
+        # The first map registers as it always has, at the script's own scope.
+        first = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "navigator.serviceWorker.register('sw.js').then" in first
+
+    def test_the_page_opens_its_own_database_and_caches(self, tmp_path):
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        assert "window.indexedDB.open('trails-abisko', 2)" in html
+        assert "var TERRAIN = 'trails-abisko-terrain';" in html
+        assert "var TILES = 'trails-abisko-tiles';" in html
+        assert "var KEY = 'trails-abisko-offline';" in html
+        assert "var TOP = 17;" in html
+        assert '"17": 4587' in html and '"18"' not in html.split("var WEIGHT = ")[1].split(";")[0]
+
+    def test_the_worker_matches_the_page(self, tmp_path):
+        """The two are separate scripts and share nothing but what the build
+        wrote into both; a worker naming another map's database would open it."""
+        page, companions = self.abisko(tmp_path)
+        worker = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions)
+        assert worker.name == "abisko-sw.js"
+        script = worker.read_text(encoding="utf-8")
+        assert 'var DB = "trails-abisko";' in script
+        assert 'var TILES = "trails-abisko-tiles";' in script
+        assert 'var TERRAIN = "trails-abisko-terrain";' in script
+        assert 'var TILE_PREFIX = new URL("/tiles/lantmateriet/topowebb/1/", self.location.href).href;' in script
+        assert "request.url.indexOf(TILE_PREFIX) === 0" in script
+        assert not re.search(r"__[A-Z_]+__", script), "a placeholder the build did not fill"
+
+    def test_the_first_maps_worker_still_intercepts_kartverket(self, tmp_path):
+        page = tmp_path / "lomsdal-visten.html"
+        page.write_text("<html></html>", encoding="utf-8")
+        script = maps.write_service_worker(page).read_text(encoding="utf-8")
+        assert 'var DB = "trails";' in script
+        assert 'var TILES = "trails-tiles";' in script
+        assert 'var TILE_PREFIX = new URL("https://cache.kartverket.no/", self.location.href).href;' in script
+        assert not re.search(r"__[A-Z_]+__", script)
+
+    def test_the_manifest_and_the_icons_are_the_maps_own(self, tmp_path):
+        page, companions = self.abisko(tmp_path)
+        manifest = maps.write_manifest(page, "Abisko Atlas", companions)
+        assert manifest.name == "abisko.webmanifest"
+        said = json.loads(manifest.read_text(encoding="utf-8"))
+        assert said["id"] == "./abisko"
+        assert said["start_url"] == "./abisko"
+        assert said["scope"] == "./abisko"
+        assert [icon["src"] for icon in said["icons"]] == ["./abisko-icon-192.png", "./abisko-icon-512.png"]
+        icons = maps.write_icons(page, companions)
+        assert [icon.name for icon in icons] == [f"abisko-icon-{side}.png" for side in maps.ICON_SIZES]
+        html = page.read_text(encoding="utf-8")
+        assert '<link rel="manifest" href="abisko.webmanifest">' in html
+        assert '<link rel="apple-touch-icon" href="abisko-icon-180.png">' in html
+        assert '<link rel="icon" type="image/png" sizes="32x32" href="abisko-icon-32.png">' in html
+        # And none of the first map's names, which would be its files overwritten.
+        assert not (tmp_path / "sw.js").exists() and not (tmp_path / "manifest.webmanifest").exists()
+        assert not (tmp_path / "icon-180.png").exists()
+
+    def test_a_base_without_a_provider_draws_but_cannot_keep(self):
+        """OpenStreetMap's tiles are nobody's to copy into a bucket, so a map
+        on them gets no offline panel -- said at `add_chrome`, not in a browser."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), base=maps.BaseMap.OPENSTREETMAP, extra_bases=())
+        with pytest.raises(KeyError, match="no tile provider"):
+            maps.add_chrome(fmap)
 
 
 class TestPins:

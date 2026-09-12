@@ -53,7 +53,10 @@ and Overpass and takes considerably longer. Re-fetch on purpose with
 which is rarely what you want.
 
 Both targets pass `ARGS` through, so `command make map ARGS="--approach-km 10"`
-works; the script itself is `analysis/scripts/lomsdal_visten.py`.
+works; the script itself is `analysis/scripts/lomsdal_visten.py`. Which map is
+`--park` (default `lomsdal-visten`); the script's `PARKS` table says what a park
+decides, and `abisko` is declared there but refused until its Swedish sources are
+wired in (`analysis/docs/abisko-decisions.md` §7).
 
 Worth knowing:
 

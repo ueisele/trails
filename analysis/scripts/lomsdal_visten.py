@@ -26,15 +26,24 @@ rebuild.
 
 Produces an HTML map and GPX exports under ``analysis/output/``.
 
+**Which park is an option, and the park decides the rest**: what the page and
+its files are called, whose tiles are drawn, which names its worker, manifest,
+icons and database go by (``--park lomsdal-visten`` keeps every name the first
+map has always had), and the box or the register lookup the ground comes from.
+See :data:`PARKS`. Abisko is declared there and refused here until the Swedish
+sources are wired in -- ``analysis/docs/abisko-decisions.md`` §7, step 4.
+
 Usage::
 
     uv run python analysis/scripts/lomsdal_visten.py
     uv run python analysis/scripts/lomsdal_visten.py --approach-km 10
+    uv run python analysis/scripts/lomsdal_visten.py --park abisko
 """
 
 import argparse
 import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
@@ -113,15 +122,81 @@ from trails.visualization import maps
 from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
 from trails.visualization.water import river_table, water_mask
 
-PARK_NAME = "Lomsdal-Visten"
 
-#: What the map is called as a thing rather than as a place: the page's title,
-#: the label under a home-screen icon, and both names in the manifest.
-#:
-#: **Separate from `PARK_NAME` on purpose.** That one is the park, and it is
-#: written into legends, exported files and the titles of the other pages this
-#: script builds, where "Atlas" would be wrong. This one names the application.
-APP_NAME = f"{PARK_NAME} Atlas"
+@dataclass(frozen=True)
+class Park:
+    """One map: what it is called, where it is, and whose ground it draws."""
+
+    #: The park, as written into legends, exported files and their titles.
+    name: str
+    #: The page's object key without ``.html``, and the prefix of every file
+    #: this script writes for it.
+    stem: str
+    #: ISO 3166 country, which decides the source set (:mod:`trails.network.norway`).
+    country: str
+    #: The word after the name in the legend's title: what the place is, in the
+    #: language of the map it is drawn on.
+    kind: str
+    #: The sheet drawn underneath, and with it the tile provider.
+    base: maps.BaseMap
+    #: Sheets offered beside it in the picker.
+    extras: tuple[maps.BaseMap, ...]
+    #: The names of the worker, the manifest, the icons, the database and the
+    #: caches. :data:`maps.ROOT` for the first map, never renamed; a named set
+    #: for every other map on the same origin.
+    companions: maps.Companions
+    #: The ground, as (min_lon, min_lat, max_lon, max_lat) -- or None, and the
+    #: boundary is looked up by name in the country's protected-area register.
+    bounds: maps.Bounds | None
+    #: The catalogue of UT.no routes under ``analysis/routes``, if there is one.
+    ut_routes: str | None
+
+    @property
+    def app_name(self) -> str:
+        """What the map is called as a thing rather than as a place: the page's
+        title, the label under a home-screen icon, and both names in the manifest.
+
+        **Separate from the park's name on purpose.** That one is the park, and it
+        is written into legends, exported files and the titles of the other pages
+        this script builds, where "Atlas" would be wrong. This one names the
+        application.
+        """
+        return f"{self.name} Atlas"
+
+
+#: The maps this script can be asked for. The first keeps every name it has
+#: always had; the second is declared with what is decided about it
+#: (analysis/docs/abisko-decisions.md §2, §6.2) and built once its sources are.
+PARKS: dict[str, Park] = {
+    "lomsdal-visten": Park(
+        name="Lomsdal-Visten",
+        stem="lomsdal-visten",
+        country="NO",
+        kind="nasjonalpark",
+        base=maps.BaseMap.KARTVERKET_TOPO,
+        extras=(maps.BaseMap.KARTVERKET_GRAYSCALE,),
+        companions=maps.Companions.of("lomsdal-visten"),
+        bounds=None,
+        ut_routes="lomsdal-visten-ut-routes.toml",
+    ),
+    "abisko": Park(
+        name="Abisko",
+        stem="abisko",
+        country="SE",
+        kind="nationalpark",
+        base=maps.BaseMap.LANTMATERIET_TOPO,
+        # The colour sheet only: the grey one was never used on the first map.
+        extras=(),
+        companions=maps.Companions.of("abisko"),
+        # West on the Norwegian border, south past Áhpparjávri, east at the
+        # western tip of Rautasjaure, north with the whole E10 inside.
+        bounds=(18.15, 68.17, 19.00, 68.46),
+        ut_routes=None,
+    ),
+}
+
+#: The one park this script's source set can build today.
+BUILDABLE_COUNTRY = "NO"
 
 #: Substrings identifying DNT (Den Norske Turistforening) as maintainer.
 DNT_PATTERN = "DNT|Turistforening"
@@ -516,16 +591,17 @@ EXPORT_CREATOR = "trails-analysis"
 
 #: The line an exported file opens its description with, before it lists what it
 #: draws on. It says which map wrote the file, because that is what makes the
-#: chain id in the track's extensions mean anything at all.
-EXPORT_DESCRIPTION = f"One chain of the {PARK_NAME} routing network"
+#: chain id in the track's extensions mean anything at all. ``{park}`` is the
+#: park's name; these three are filled in by :func:`export_settings`.
+EXPORT_DESCRIPTION = "One chain of the {park} routing network"
 
 #: What a planned route's file calls itself, in ``<metadata>`` and on its track.
-ROUTE_NAME = f"Planned route in {PARK_NAME}"
+ROUTE_NAME = "Planned route in {park}"
 
 #: The line a planned route's file opens its description with. It names the map
 #: rather than the route, for the same reason a chain's does: what the legs and
 #: the waypoints in its extensions mean is a property of the map that wrote them.
-ROUTE_DESCRIPTION = f"A route planned on the {PARK_NAME} map"
+ROUTE_DESCRIPTION = "A route planned on the {park} map"
 
 #: What a planned route's file is called, after the map's own prefix. Not a
 #: chain id, because a plan has none — a plan is coordinates and nothing else,
@@ -1024,7 +1100,7 @@ def plan_settings(params: Params, layers: list[TrailLayer]) -> dict[str, object]
     }
 
 
-def export_settings(versions: dict[str, str | None], params: Params) -> dict[str, object]:
+def export_settings(versions: dict[str, str | None], params: Params, park: Park) -> dict[str, object]:
     """Hand the page everything it needs to write a GPX file.
 
     The browser writes that file, so every last thing in it has to be in the
@@ -1037,6 +1113,7 @@ def export_settings(versions: dict[str, str | None], params: Params) -> dict[str
     Args:
         versions: The version or the date read, per source
         params: What decided the build
+        park: Whose map wrote the file, for its name, its description and its prefix
 
     Returns:
         The ``export`` argument of :func:`~trails.visualization.maps.add_profile_panel`
@@ -1064,10 +1141,10 @@ def export_settings(versions: dict[str, str | None], params: Params) -> dict[str
         "namespace": TRAILS_NAMESPACE,
         "prefix": TRAILS_PREFIX,
         "creator": EXPORT_CREATOR,
-        "description": EXPORT_DESCRIPTION,
+        "description": EXPORT_DESCRIPTION.format(park=park.name),
         "ascentMethod": ascent_method(params),
         "identitySeparator": IDENTITY_SEPARATOR,
-        "filePrefix": PARK_NAME.lower(),
+        "filePrefix": park.stem,
         "sourceLength": SOURCE_LENGTH_FIELD,
         # What a planned route's file is made of, and every name in it comes
         # from the writer's own module rather than being spelled in the page:
@@ -1075,8 +1152,8 @@ def export_settings(versions: dict[str, str | None], params: Params) -> dict[str
         # the constants travelling through this dict are the whole of what keeps
         # the two files' vocabularies from drifting apart.
         "route": {
-            "name": ROUTE_NAME,
-            "description": ROUTE_DESCRIPTION,
+            "name": ROUTE_NAME.format(park=park.name),
+            "description": ROUTE_DESCRIPTION.format(park=park.name),
             "fileStem": ROUTE_FILE_STEM,
             "kindField": ROUTE_KIND_FIELD,
             "kind": ROUTE_KIND,
@@ -1111,23 +1188,24 @@ def export_settings(versions: dict[str, str | None], params: Params) -> dict[str
     }
 
 
-def load_park_boundary(cache_dir: str) -> gpd.GeoDataFrame:
-    """Load the Lomsdal-Visten national park boundary.
+def load_park_boundary(park: Park, cache_dir: str) -> gpd.GeoDataFrame:
+    """Load a national park's boundary from Naturbase, by name.
 
     Args:
+        park: Which park
         cache_dir: Root cache directory
 
     Returns:
         Single-row GeoDataFrame in EPSG:4326
     """
     source = naturbase.Source(cache_dir=cache_dir)
-    park = source.find_one(PARK_NAME, layer=naturbase.Layer.NATIONAL_PARK)
+    found = source.find_one(park.name, layer=naturbase.Layer.NATIONAL_PARK)
 
-    area_km2 = park.to_crs(METRIC_CRS).area.iloc[0] / 1e6
-    print(f"Park: {park['offisieltNavn'].iloc[0]}")
+    area_km2 = found.to_crs(METRIC_CRS).area.iloc[0] / 1e6
+    print(f"Park: {found['offisieltNavn'].iloc[0]}")
     print(f"  Area: {area_km2:,.0f} km2")
-    print(f"  Municipalities: {park['kommune'].iloc[0]}")
-    return park
+    print(f"  Municipalities: {found['kommune'].iloc[0]}")
+    return found
 
 
 def only_the_wider_way(chains: gpd.GeoDataFrame) -> pd.Series:
@@ -1533,6 +1611,7 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--park", default="lomsdal-visten", choices=sorted(PARKS), help="Which map to build; see PARKS")
     parser.add_argument("--cache-dir", default=str(repo_root / ".cache"), help="Cache directory for downloaded data")
     parser.add_argument("--output-dir", default=str(repo_root / "analysis" / "output"), help="Directory for the map and GPX files")
     # 15 km reaches every realistic trailhead town: Tosbotn 2.6 km, Trofors 5.5 km,
@@ -1542,8 +1621,8 @@ def main() -> int:
     parser.add_argument("--names-km", type=float, default=2.0, help="Band around the park covered by the terrain-name layer (valleys, passes, peaks)")
     parser.add_argument(
         "--ut-routes",
-        default=str(repo_root / "analysis" / "routes" / "lomsdal-visten-ut-routes.toml"),
-        help="Catalogue of UT.no routes to draw; one GPX is downloaded per entry",
+        default=None,
+        help="Catalogue of UT.no routes to draw, one GPX downloaded per entry; the park's own by default",
     )
     parser.add_argument("--highlight", help="Mark every position of this place name in red, numbered, for checking what the register holds")
     parser.add_argument(
@@ -1554,21 +1633,30 @@ def main() -> int:
     parser.add_argument("--force-download", action="store_true", help="Re-download source data instead of using the cache")
     args = parser.parse_args()
 
+    which = PARKS[args.park]
+    if which.country != BUILDABLE_COUNTRY:
+        # Declared, not buildable: every loader below is a Norwegian register.
+        # The Swedish set is analysis/docs/abisko-decisions.md §5, wired in at
+        # §7 step 4; until then saying so beats seven loaders failing in turn.
+        parser.exit(2, f"{which.name} is declared but not yet buildable: its sources ({which.country}) are not wired in — decisions doc §7.\n")
+    if args.ut_routes is None:
+        args.ut_routes = str(repo_root / "analysis" / "routes" / which.ut_routes) if which.ut_routes else ""
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
-    print("LOMSDAL-VISTEN TRAIL MAP")
+    print(f"{which.name.upper()} TRAIL MAP")
     print("=" * 70)
 
-    park = load_park_boundary(args.cache_dir)
+    park = load_park_boundary(which, args.cache_dir)
     params = Params.from_args(args)
     # Park and approach zone as one polygon. Nothing here is split at the
     # boundary; where a layer is, it is decided per chain further down.
     zone = zone_around(park, params.approach_km)
 
     loaded = load_sources(params, zone)
-    network, _ = build(loaded.sources, masks_from(loaded.sources), zone, params, name=PARK_NAME.lower(), protected=loaded.protected)
+    network, _ = build(loaded.sources, masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
     by_source = describe(network.chains, park)
 
     # The line an export writes, which is a third thing beside the one the map
@@ -1728,7 +1816,7 @@ def main() -> int:
     print("\nBuilding map...")
     approach_label = f"≤{args.approach_km:g} km"
     # Fit to the full approach zone, not just the park, so trailhead towns are visible.
-    fmap = maps.create_map(bounds=bounds_of(zone), base=maps.BaseMap.KARTVERKET_TOPO, title=APP_NAME)
+    fmap = maps.create_map(bounds=bounds_of(zone), base=which.base, extra_bases=which.extras, title=which.app_name, companions=which.companions)
 
     # Layers are added back-to-front so official routes draw on top of OSM,
     # and only non-empty ones appear in the control and legend. Everything is on
@@ -2064,7 +2152,7 @@ def main() -> int:
         if count:
             legend.append(maps.LegendRow(f"{label} ({count})", color, switched(f"{label} ({count})")))
 
-    maps.add_legend(fmap, f"{PARK_NAME} nasjonalpark", legend)
+    maps.add_legend(fmap, f"{which.name} {which.kind}", legend)
 
     # It shares the bottom left with the legend and the scale bar, and puts
     # itself under both: the panel takes the width, the legend keeps its corner
@@ -2075,7 +2163,7 @@ def main() -> int:
     # about itself travels with it: the browser is what produces that file, and
     # a licence, a version or a field name it was not given is one it would have
     # to invent.
-    maps.add_profile_panel(fmap, highlightable, export=export_settings(loaded.versions, params))
+    maps.add_profile_panel(fmap, highlightable, export=export_settings(loaded.versions, params, which))
 
     # And a route can now be clicked together over the graph, leg by leg, with
     # its profile drawn in the same panel. After the panel, whose walk it lays
@@ -2093,7 +2181,7 @@ def main() -> int:
     # a 390 px screen and 74 % of a desktop one before anything was clicked.
     maps.add_chrome(fmap, credits=source_credits(loaded.versions))
 
-    map_path = output_dir / "lomsdal-visten.html"
+    map_path = output_dir / f"{which.stem}.html"
     # Not `fmap.save`: that renders and writes in one step, and the page is
     # written without the indentation folium's templates render with.
     maps.save_map(fmap, map_path)
@@ -2103,21 +2191,21 @@ def main() -> int:
     # worker only when its bytes change, so the stamp is the page's own digest:
     # a deploy that changes the map changes the worker and drops the old copy,
     # and a rebuild that changes nothing changes nothing.
-    worker = maps.write_service_worker(map_path)
+    worker = maps.write_service_worker(map_path, maps.provider_of_map(fmap), which.companions)
     print(f"  Worker: {worker} ({worker.stat().st_size / 1e3:.1f} kB)")
 
     # **What makes an offline copy survive being left alone.** WebKit deletes
     # storage a script created once an origin has gone seven days without a
     # visit -- exactly the walk somebody keeps the terrain for a fortnight
     # before -- and a home-screen install is one of the two exemptions.
-    manifest = maps.write_manifest(map_path, APP_NAME)
+    manifest = maps.write_manifest(map_path, which.app_name, which.companions)
     print(f"  Manifest: {manifest} ({manifest.stat().st_size / 1e3:.1f} kB)")
 
     # **The mark, as files.** The page links to `icon-180.png` rather than
     # carrying the drawing inline, because iOS reads `apple-touch-icon` off the
     # document and will not fetch a `data:` URI for it — inline, the link is
     # well-formed and dead, and the home screen falls back to a screenshot.
-    icons = maps.write_icons(map_path)
+    icons = maps.write_icons(map_path, which.companions)
     print(f"  Icons: {', '.join(icon.name for icon in icons)}")
 
     # Built from the chains, not from the raw sources, so one geometry serves
@@ -2125,15 +2213,15 @@ def main() -> int:
     # simplified copy above is the drawn one and goes nowhere near this.
     print("\nExporting GPX...")
     exports = [
-        ("lomsdal-visten-turrutebasen.gpx", TURRUTEBASEN, trails, "trail_name", ["maintenance_responsible", "difficulty", "marking", "length_km"]),
-        ("lomsdal-visten-fkb.gpx", FKB, by_source[FKB], "typeveg", ["typeveg", "length_km"]),
-        ("lomsdal-visten-n50.gpx", N50_PATHS, by_source[N50_PATHS], "typeveg", ["typeveg", "rutemerking", "length_km"]),
-        ("lomsdal-visten-osm.gpx", OSM, by_source[OSM], "name", ["highway", "surface", "sac_scale", "length_km"]),
+        (f"{which.stem}-turrutebasen.gpx", TURRUTEBASEN, trails, "trail_name", ["maintenance_responsible", "difficulty", "marking", "length_km"]),
+        (f"{which.stem}-fkb.gpx", FKB, by_source[FKB], "typeveg", ["typeveg", "length_km"]),
+        (f"{which.stem}-n50.gpx", N50_PATHS, by_source[N50_PATHS], "typeveg", ["typeveg", "rutemerking", "length_km"]),
+        (f"{which.stem}-osm.gpx", OSM, by_source[OSM], "name", ["highway", "surface", "sac_scale", "length_km"]),
         # One file with all catalogued routes, named, instead of 35 downloads.
-        ("lomsdal-visten-ut.gpx", UT, routes, "name", ["category_label", "length_km", "ut_url"]),
+        (f"{which.stem}-ut.gpx", UT, routes, "name", ["category_label", "length_km", "ut_url"]),
         # The chain's own length, not the whole road's: a track in this file
         # *is* one chain, and a figure about other tracks would not describe it.
-        ("lomsdal-visten-roads.gpx", N50_ROADS, roads, "road_name", ["road_category", "length_km"]),
+        (f"{which.stem}-roads.gpx", N50_ROADS, roads, "road_name", ["road_category", "length_km"]),
     ]
     credits_of = source_credits(loaded.versions)
     heights = height_credit()
@@ -2149,8 +2237,8 @@ def main() -> int:
             output_dir / filename,
             name_field=name_field,
             desc_fields=desc_fields,
-            title=f"{PARK_NAME}: {source}",
-            description=f"Every {source} chain of the {PARK_NAME} routing network",
+            title=f"{which.name}: {source}",
+            description=f"Every {source} chain of the {which.name} routing network",
             # The height model only where the file actually carries a height,
             # which is the rule the page follows chain by chain. A file of
             # crossings would name a source it never read a value from.

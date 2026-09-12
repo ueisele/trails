@@ -10,6 +10,7 @@ visually::
     save_map(fmap, pathlib.Path("map.html"))
 """
 
+import dataclasses
 import hashlib
 import json
 import pathlib
@@ -36,6 +37,144 @@ Bounds = tuple[float, float, float, float]
 #: object, carried on the object, rather than a second argument every caller
 #: would have to repeat.
 MAP_BOUNDS_ATTR = "_trails_bounds"
+
+#: Where :func:`create_map` records the names this map's companion files,
+#: database and caches go by (:class:`Companions`), for the panels added later.
+MAP_COMPANIONS_ATTR = "_trails_companions"
+
+#: Where :func:`create_map` records whose tiles the primary base layer draws
+#: (:class:`Provider`), for the offline panel and the chrome added later.
+MAP_PROVIDER_ATTR = "_trails_provider"
+
+
+@dataclasses.dataclass(frozen=True)
+class Companions:
+    """The names one map's files, database and caches go by.
+
+    **Two maps on one origin must not share any of these.** The service worker,
+    the manifest and the icons are objects beside the page; the database and the
+    caches are per origin, so a second map with the same names would install
+    over the first's worker, open the first's database and sweep the first's
+    kept ground as cast-offs. Named per map, each is its own app.
+
+    :data:`ROOT` is the first map's set -- ``sw.js``, ``manifest.webmanifest``,
+    ``icon-*.png``, the database ``trails`` -- and is never renamed: installed
+    copies hold those names, and a worker whose address starts answering 404 is
+    a registration the browser may drop. Every later map takes :meth:`named`.
+    """
+
+    worker: str = "sw.js"
+    manifest: str = "manifest.webmanifest"
+    #: With ``{side}`` for the pixel size.
+    icon: str = "icon-{side}.png"
+    #: The IndexedDB database the worker and the page share.
+    database: str = "trails"
+    #: What the cache names and the offline switch's storage key start with.
+    cache: str = "trails"
+    #: The worker's and the manifest's scope, relative to the page.
+    scope: str = "./"
+
+    @classmethod
+    def named(cls, stem: str) -> Companions:
+        """The set for a map whose page is ``<stem>.html``, served at ``/<stem>``.
+
+        Args:
+            stem: The map's name, as in its object key.
+
+        Returns:
+            Names that carry the stem: ``<stem>-sw.js``, ``<stem>.webmanifest``,
+            ``<stem>-icon-*.png``, the database and caches ``trails-<stem>``, and
+            the scope ``./<stem>`` -- which the browser matches as a prefix, so it
+            covers the page and nothing beside it.
+        """
+        return cls(
+            worker=f"{stem}-sw.js",
+            manifest=f"{stem}.webmanifest",
+            icon=f"{stem}-icon-{{side}}.png",
+            database=f"trails-{stem}",
+            cache=f"trails-{stem}",
+            scope=f"./{stem}",
+        )
+
+    @classmethod
+    def of(cls, stem: str) -> Companions:
+        """The set a map goes by, decided by its stem alone.
+
+        The one rule, kept here so the build and the deploy cannot disagree:
+        :data:`FIRST_MAP` keeps :data:`ROOT`, every other map is :meth:`named`.
+
+        Args:
+            stem: The map's name, as in its object key.
+
+        Returns:
+            The set.
+        """
+        return ROOT if stem == FIRST_MAP else cls.named(stem)
+
+    def icon_named(self, side: int) -> str:
+        """The icon file for one size."""
+        return self.icon.format(side=side)
+
+    def files(self) -> tuple[str, ...]:
+        """Every object beside the page: the worker, the manifest, the icons."""
+        return (self.worker, self.manifest, *(self.icon_named(side) for side in ICON_SIZES))
+
+
+#: The first map's names. See :class:`Companions`.
+ROOT = Companions()
+
+#: The map whose companions are :data:`ROOT`. Installed copies of it hold those
+#: names, which is why it is the stem and not a flag that decides.
+FIRST_MAP = "lomsdal-visten"
+
+
+@dataclasses.dataclass(frozen=True)
+class Provider:
+    """Whose tiles a map draws, and the three things the page needs to know about them.
+
+    Everything on the offline panel that is about the source rather than the
+    reader -- which addresses are tiles, how deep the pyramid goes, what a tile
+    weighs -- comes from here, one entry per provider, injected into the page
+    and the worker rather than written into their JavaScript.
+    """
+
+    key: str
+    #: How the picker's hint names the sheets: "Which Kartverket sheet ...".
+    label: str
+    #: What every tile address starts with. Absolute for a third party's
+    #: server; root-relative for our own bucket, so the page carries no host
+    #: and the same page works served locally over the same tree.
+    tiles: str
+    #: The finest zoom the source answers. Kartverket's cache ends at z18 (z19
+    #: answers 400); Lantmäteriet's file ends at z17.
+    top: int
+    #: Bytes a kept tile weighs, per zoom, for every size estimate on the panel.
+    weight: dict[int, int]
+
+
+PROVIDERS: dict[str, Provider] = {
+    "kartverket": Provider(
+        key="kartverket",
+        label="Kartverket",
+        tiles="https://cache.kartverket.no/",
+        top=18,
+        # Twelve samples per zoom taken on the trail network rather than over
+        # the park: the sea tiles a bounding box is full of are a fraction of
+        # the size and would make every estimate optimistic.
+        weight={11: 73914, 12: 73914, 13: 73914, 14: 70170, 15: 45898, 16: 51295, 17: 28637, 18: 37037},
+    ),
+    "lantmateriet": Provider(
+        key="lantmateriet",
+        label="Lantmäteriet",
+        tiles="/tiles/lantmateriet/topowebb/1/",
+        top=17,
+        # The mean over every tile of the Abisko box, read off the copy of
+        # 2026-09-12 (analysis/docs/abisko-decisions.md §3): indexed PNG, and
+        # a box that is mountain and lake rather than sea, so the whole-box
+        # mean is close to what a route crosses.
+        weight={11: 31747, 12: 22166, 13: 25719, 14: 15290, 15: 13783, 16: 7958, 17: 4587},
+    ),
+}
 
 
 #: The four glyphs the markers ask for, as Font Awesome's own outlines.
@@ -233,7 +372,7 @@ var VERSION = "__VERSION__";
 //
 // The digest still names the worker, which is what makes a deploy install one --
 // it is no longer a cache name, and `sweepOldCaches` takes the caches that were.
-var DB = "trails";
+var DB = "__DB__";
 // **One number, and the page carries the same one written out.** They are two
 // scripts and cannot share a constant; what they must not do is disagree. A
 // connection held at an older version blocks an upgrade, and with no `onblocked`
@@ -334,14 +473,16 @@ function headerOf(row, name) {
 // `TILE_CAP`. `TERRAIN` is what they *asked* to keep, and is never trimmed: a
 // deliberate nine-hundred-tile download into an LRU of five hundred would evict
 // itself on the way in, and the reader would be told it had worked.
-var TILES = "trails-tiles";
-var TERRAIN = "trails-terrain";
+var TILES = "__CACHE__-tiles";
+var TERRAIN = "__CACHE__-terrain";
 
 // About 18 MB of terrain at the 37 kB a Kartverket tile measures. The browser's
 // own cache already keeps them five days -- `max-age=432000`, measured -- so
 // this is for the walk somebody plans a fortnight out, not for the next minute.
 var TILE_CAP = 500;
-var TILE_HOST = "cache.kartverket.no";
+// What a tile's address starts with -- the provider's server, or our own
+// bucket's prefix resolved against this worker's origin. Injected per map.
+var TILE_PREFIX = new URL("__TILE_PREFIX__", self.location.href).href;
 
 // **Where the offline switch is kept, and why it is kept at all.** A service
 // worker is not a process that stays alive: the browser starts it for a fetch
@@ -404,7 +545,7 @@ self.addEventListener("activate", function (event) {
 // **Swept on activation, which is after the navigation has been answered.** The
 // one thing this must not do is happen in front of somebody: `caches.keys()` is
 // the call measured at 23 seconds on a phone with the ground kept.
-var CAST_OFF = /^trails-(page-|state$|terrain$|tiles$)/;
+var CAST_OFF = new RegExp("^__CACHE__-(page-|state$|terrain$|tiles$)");
 function sweepOldCaches() {
     return caches.keys().then(function (names) {
         return Promise.all(names.map(function (name) {
@@ -759,7 +900,7 @@ self.addEventListener("fetch", function (event) {
     // would be written into the terrain cache as terrain. The reader would be
     // told their park was kept, and it would be white.
     if (request.cache === "reload") { return; }
-    if (new URL(request.url).hostname === TILE_HOST) {
+    if (request.url.indexOf(TILE_PREFIX) === 0) {
         event.respondWith(tileFor(request));
     }
 });
@@ -802,7 +943,7 @@ def vendored(url: str) -> str:
     return kept.read_text(encoding="utf-8")
 
 
-def write_service_worker(beside: pathlib.Path) -> pathlib.Path:
+def write_service_worker(beside: pathlib.Path, provider: Provider = PROVIDERS["kartverket"], companions: Companions = ROOT) -> pathlib.Path:
     """Write the map's service worker next to the page it belongs to.
 
     **Stamped with the page's own digest**, because a browser installs a worker
@@ -812,13 +953,22 @@ def write_service_worker(beside: pathlib.Path) -> pathlib.Path:
 
     Args:
         beside: The built page.
+        provider: Whose tiles the worker intercepts and keeps.
+        companions: The names the worker, its database and its caches go by --
+            the same set the page was built with.
 
     Returns:
         Where the worker was written.
     """
     stamp = hashlib.sha256(beside.read_bytes()).hexdigest()[:16]
-    written = beside.with_name("sw.js")
-    written.write_text(SERVICE_WORKER.replace("__VERSION__", stamp), encoding="utf-8")
+    written = beside.with_name(companions.worker)
+    script = (
+        SERVICE_WORKER.replace("__VERSION__", stamp)
+        .replace("__TILE_PREFIX__", provider.tiles)
+        .replace("__DB__", companions.database)
+        .replace("__CACHE__", companions.cache)
+    )
+    written.write_text(script, encoding="utf-8")
     return written
 
 
@@ -854,7 +1004,7 @@ ICON_DIR = pathlib.Path(__file__).parent / "icons"
 ICON_SIZES = (32, 180, 192, 512)
 
 
-def write_icons(beside: pathlib.Path) -> list[pathlib.Path]:
+def write_icons(beside: pathlib.Path, companions: Companions = ROOT) -> list[pathlib.Path]:
     """Write the mark beside the built page, one file per size.
 
     **Files, because a ``data:`` URI does not work for the one link that
@@ -869,6 +1019,7 @@ def write_icons(beside: pathlib.Path) -> list[pathlib.Path]:
 
     Args:
         beside: The built page. The icons are written into its directory.
+        companions: The names the files take; the page links to the same.
 
     Returns:
         The files written, in the order of :data:`ICON_SIZES`.
@@ -881,14 +1032,14 @@ def write_icons(beside: pathlib.Path) -> list[pathlib.Path]:
     for side in ICON_SIZES:
         source = ICON_DIR / f"atlas-{side}.png"
         if not source.is_file():
-            raise FileNotFoundError(f"no icon at {source} — the page links to icon-{side}.png")
-        target = beside.with_name(f"icon-{side}.png")
+            raise FileNotFoundError(f"no icon at {source} — the page links to {companions.icon_named(side)}")
+        target = beside.with_name(companions.icon_named(side))
         target.write_bytes(source.read_bytes())
         written.append(target)
     return written
 
 
-def write_manifest(beside: pathlib.Path, name: str) -> pathlib.Path:
+def write_manifest(beside: pathlib.Path, name: str, companions: Companions = ROOT) -> pathlib.Path:
     """Write the manifest that makes the map installable.
 
     **Which is not decoration: it is what makes an offline map survive.** WebKit
@@ -907,28 +1058,34 @@ def write_manifest(beside: pathlib.Path, name: str) -> pathlib.Path:
     well inside it, so a launcher may crop it to a circle, a squircle or a
     rounded square without cutting a stone off.
 
+    ``id`` is the page's own address, which is what a browser takes for it when
+    none is given; said out loud, two maps on one origin are two apps and not
+    one app that changed its start page.
+
     Args:
         beside: The built page, whose name is the address the app opens at.
         name: What the installed map is called.
+        companions: The names the manifest and the icons go by, and the scope.
 
     Returns:
         Where the manifest was written.
     """
     manifest = {
+        "id": "./" + beside.stem,
         "name": name,
         "short_name": name,
         "start_url": "./" + beside.stem,
-        "scope": "./",
+        "scope": companions.scope,
         "display": "standalone",
         "orientation": "any",
         "background_color": "#1d282c",
         "theme_color": "#1d282c",
         "icons": [
-            {"src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
-            {"src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+            {"src": "./" + companions.icon_named(192), "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "./" + companions.icon_named(512), "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
         ],
     }
-    written = beside.with_name("manifest.webmanifest")
+    written = beside.with_name(companions.manifest)
     written.write_text(json.dumps(manifest, separators=(",", ":")), encoding="utf-8")
     return written
 
@@ -964,11 +1121,12 @@ class _Head(Element):
 
     _template = Template("""{{ this.body }}""")
 
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, companions: Companions = ROOT) -> None:
         """Hold the head.
 
         Args:
             title: What the page and an installed copy of it are called.
+            companions: The names the icons and the manifest are linked by.
         """
         super().__init__()
         named = escape(title, quote=True)
@@ -978,9 +1136,9 @@ class _Head(Element):
             '<meta name="mobile-web-app-capable" content="yes">\n'
             '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n'
             f'<meta name="apple-mobile-web-app-title" content="{named}">\n'
-            '<link rel="apple-touch-icon" href="icon-180.png">\n'
-            '<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">\n'
-            '<link rel="manifest" href="manifest.webmanifest">'
+            f'<link rel="apple-touch-icon" href="{companions.icon_named(180)}">\n'
+            f'<link rel="icon" type="image/png" sizes="32x32" href="{companions.icon_named(32)}">\n'
+            f'<link rel="manifest" href="{companions.manifest}">'
         )
 
 
@@ -1314,7 +1472,7 @@ class _ServiceWorker(MacroElement):
                     window.trailsWorker.why = 'no worker in this browser';
                     return;
                 }
-                navigator.serviceWorker.register('sw.js').then(function () {
+                navigator.serviceWorker.register('{{ this.worker }}'{{ this.scope_arg }}).then(function () {
                     window.trailsWorker.kept = true;
                 }, function (failure) {
                     window.trailsWorker.why = String(failure);
@@ -1490,10 +1648,19 @@ class _ServiceWorker(MacroElement):
         {% endmacro %}
     """)
 
-    def __init__(self) -> None:
-        """Initialize the registration."""
+    def __init__(self, companions: Companions = ROOT) -> None:
+        """Hold the names.
+
+        Args:
+            companions: Which worker to register, and at what scope. The first
+                map's worker registers at the default scope, which is the
+                script's own directory; a later map's asks for its own page as
+                the scope, so the two do not answer for each other.
+        """
         super().__init__()
         self._name = "ServiceWorker"
+        self.worker = companions.worker
+        self.scope_arg = "" if companions.scope == "./" else f", {{scope: '{companions.scope}'}}"
 
 
 class _Inlined(Element):
@@ -1884,28 +2051,92 @@ class BaseMap(Enum):
 
     KARTVERKET_TOPO = "kartverket_topo"
     KARTVERKET_GRAYSCALE = "kartverket_grayscale"
+    #: Lantmäteriet's *Topografisk webbkarta*, the colour sheet, copied out of
+    #: its open download into our own bucket (analysis/docs/abisko-decisions.md
+    #: §3, §6.1). Root-relative, so the page names no host.
+    LANTMATERIET_TOPO = "lantmateriet_topo"
     OPENSTREETMAP = "openstreetmap"
 
 
 _KARTVERKET_ATTRIBUTION = '&copy; <a href="https://www.kartverket.no/">Kartverket</a>'
 
-_BASE_LAYERS: dict[BaseMap, dict[str, str]] = {
+_LANTMATERIET_ATTRIBUTION = '&copy; <a href="https://www.lantmateriet.se/">Lantmäteriet</a>'
+
+#: Each base layer's tiles, credit and name, and the :data:`PROVIDERS` key its
+#: tiles come from -- ``None`` for one the offline panel does not keep.
+_BASE_LAYERS: dict[BaseMap, dict[str, str | None]] = {
     BaseMap.KARTVERKET_TOPO: {
         "tiles": "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png",
         "attr": _KARTVERKET_ATTRIBUTION,
         "name": "Kartverket Topo",
+        "provider": "kartverket",
     },
     BaseMap.KARTVERKET_GRAYSCALE: {
         "tiles": "https://cache.kartverket.no/v1/wmts/1.0.0/topograatone/default/webmercator/{z}/{y}/{x}.png",
         "attr": _KARTVERKET_ATTRIBUTION,
         "name": "Kartverket Grayscale",
+        "provider": "kartverket",
+    },
+    BaseMap.LANTMATERIET_TOPO: {
+        "tiles": "/tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png",
+        "attr": _LANTMATERIET_ATTRIBUTION,
+        "name": "Lantmäteriet Topo",
+        "provider": "lantmateriet",
     },
     BaseMap.OPENSTREETMAP: {
         "tiles": "OpenStreetMap",
         "attr": "&copy; OpenStreetMap contributors",
         "name": "OpenStreetMap",
+        "provider": None,
     },
 }
+
+
+def provider_of(base: BaseMap) -> Provider | None:
+    """Whose tiles a base layer draws.
+
+    Args:
+        base: The layer.
+
+    Returns:
+        The provider, or None for a layer no provider table describes.
+    """
+    key = _BASE_LAYERS[base]["provider"]
+    return None if key is None else PROVIDERS[key]
+
+
+def provider_of_map(fmap: folium.Map) -> Provider:
+    """The provider :func:`create_map` built a map on.
+
+    Args:
+        fmap: The map.
+
+    Returns:
+        The provider of its primary base layer.
+
+    Raises:
+        KeyError: If the map was not made by :func:`create_map`, or its base
+            layer has no provider entry.
+    """
+    provider = getattr(fmap, MAP_PROVIDER_ATTR, None)
+    if provider is None:
+        raise KeyError("the map records no tile provider — its base layer is one the offline panel cannot keep tiles from")
+    assert isinstance(provider, Provider)
+    return provider
+
+
+def companions_of_map(fmap: folium.Map) -> Companions:
+    """The names :func:`create_map` gave a map's companions.
+
+    Args:
+        fmap: The map.
+
+    Returns:
+        The set, :data:`ROOT` for a map made without one.
+    """
+    companions = getattr(fmap, MAP_COMPANIONS_ATTR, ROOT)
+    assert isinstance(companions, Companions)
+    return companions
 
 
 #: How far from a line's paint a finger may land and still count as having hit
@@ -2124,6 +2355,7 @@ def create_map(
     base: BaseMap = BaseMap.KARTVERKET_TOPO,
     extra_bases: tuple[BaseMap, ...] = (BaseMap.KARTVERKET_GRAYSCALE,),
     title: str | None = None,
+    companions: Companions = ROOT,
 ) -> folium.Map:
     """Create a Folium map focused on an area.
 
@@ -2138,6 +2370,9 @@ def create_map(
         title: What the page and an installed copy of it are called. Folium
             writes no title at all, so without one the tab and a home-screen
             icon are both labelled with the URL.
+        companions: The names this map's worker, manifest, icons, database and
+            caches go by. :data:`ROOT` for the first map; :meth:`Companions.named`
+            for any other on the same origin.
 
     Returns:
         Folium map with base layers attached; call :func:`add_legend` when done
@@ -2148,6 +2383,9 @@ def create_map(
     """
     if bounds is None and center is None:
         raise ValueError("Either bounds or center must be provided")
+    # None for a base no provider table describes (OpenStreetMap); such a map
+    # can be drawn but not given the offline panel, which `add_chrome` says.
+    provider = provider_of(base)
 
     if center is None:
         assert bounds is not None
@@ -2221,17 +2459,24 @@ def create_map(
     for name, url in remote_css:
         header.add_child(_Inlined(vendored(url), css=True, name=name), name=name)
     if title is not None:
-        header.add_child(_Head(title), name="head")
+        header.add_child(_Head(title, companions), name="head")
 
     for index, source in enumerate((base, *(extra for extra in extra_bases if extra is not base))):
         layer = _BASE_LAYERS[source]
+        own = provider_of(source)
         folium.TileLayer(
-            tiles=layer["tiles"],
-            attr=layer["attr"],
-            name=layer["name"],
+            tiles=layer["tiles"] or "",
+            attr=layer["attr"] or "",
+            name=layer["name"] or "",
             overlay=False,
             control=True,
             show=index == 0,
+            # **Held to the source's finest level.** Leaflet asks for the real
+            # tile at every zoom up to `maxNativeZoom` and scales past it, so a
+            # sheet that ends at z17 is drawn magnified at z18 rather than
+            # requested and answered 404.
+            max_zoom=provider.top if provider is not None else None,
+            max_native_zoom=own.top if own is not None else None,
             # **Asked for across origins, so a cache can hold them plainly.**
             # An `<img>` without this fetches no-cors and the answer is opaque:
             # storable, unreadable, and charged against the origin's quota at a
@@ -2246,7 +2491,9 @@ def create_map(
     _Theme().add_to(fmap)
     _PinSize().add_to(fmap)
     _ScaleZoom().add_to(fmap)
-    _ServiceWorker().add_to(fmap)
+    _ServiceWorker(companions).add_to(fmap)
+    setattr(fmap, MAP_PROVIDER_ATTR, provider)
+    setattr(fmap, MAP_COMPANIONS_ATTR, companions)
     # Before any layer for a second reason, said where `_TouchReach` is written:
     # Leaflet pads a path's bounding box with the reach that was in force when
     # the path was projected.
@@ -15769,11 +16016,12 @@ class _OfflinePanel(MacroElement):
                 // Where a deliberate download goes. The worker reads this one
                 // first and never trims it; `trails-tiles` beside it is what
                 // panning happened to leave behind and is capped at 500.
-                var TERRAIN = 'trails-terrain';
-                var TILES = 'trails-tiles';
-                var KEY = 'trails-offline';
-                // Kartverket's topo cache ends here: z19 and z20 answer 400.
-                var TOP = 18;
+                var TERRAIN = '{{ this.cache }}-terrain';
+                var TILES = '{{ this.cache }}-tiles';
+                var KEY = '{{ this.cache }}-offline';
+                // The finest level the source answers -- Kartverket's cache ends
+                // at z18, where z19 answers 400; Lantmäteriet's file at z17.
+                var TOP = {{ this.top }};
                 // The coarsest zoom a reader may *pick*.
                 var FLOOR = 14;
                 // **And the floor of the pyramid, which is a different number.**
@@ -15785,12 +16033,9 @@ class _OfflinePanel(MacroElement):
                 // Where the whole map stops being a download and starts being an
                 // archive -- and with it the budget every other scope is held to.
                 var CAP_ZOOM = 16;
-                // What a kept tile weighs, from twelve samples per zoom taken on
-                // the trail network rather than over the park: the sea tiles a
-                // bounding box is full of are a fraction of the size and would
-                // make every estimate here optimistic.
-                var WEIGHT = {11: 73914, 12: 73914, 13: 73914, 14: 70170,
-                              15: 45898, 16: 51295, 17: 28637, 18: 37037};
+                // What a kept tile weighs, per zoom, measured on the provider's
+                // own tiles -- see `PROVIDERS` for how each table was taken.
+                var WEIGHT = {{ this.weight_json }};
 
                 // **Four scopes, and only one of them follows the paths.** In
                 // this park one walks off them, so a band along everything drawn
@@ -16531,7 +16776,7 @@ class _OfflinePanel(MacroElement):
                             // the wait never ends. Measured here -- the page held
                             // 1 while the worker asked for 2, and the map stopped
                             // opening altogether.
-                            var ask = window.indexedDB.open('trails', 2);
+                            var ask = window.indexedDB.open('{{ this.database }}', 2);
                             ask.onblocked = function () { fail(new Error('blocked')); };
                             ask.onupgradeneeded = function () {
                                 var made = ask.result;
@@ -17896,10 +18141,20 @@ class _OfflinePanel(MacroElement):
         {% endmacro %}
     """)
 
-    def __init__(self) -> None:
-        """Initialize the panel."""
+    def __init__(self, provider: Provider = PROVIDERS["kartverket"], companions: Companions = ROOT) -> None:
+        """Initialize the panel.
+
+        Args:
+            provider: Whose tiles are kept: how deep they go and what they weigh.
+            companions: The database and the cache names, which are the
+                worker's too.
+        """
         super().__init__()
         self._name = "OfflinePanel"
+        self.top = provider.top
+        self.weight_json = _script_json({str(zoom): bytes_ for zoom, bytes_ in provider.weight.items()})
+        self.database = companions.database
+        self.cache = companions.cache
 
 
 class _Legend(MacroElement):
@@ -18179,6 +18434,9 @@ class _Chrome(MacroElement):
             // here can refuse anything.
             var DRAWN = {{ this.extent_json }};
             var CREDITS = {{ this.credits_json }};
+            // What a tile's address starts with, resolved against the page --
+            // a third party's server, or our own bucket's prefix.
+            var TILE_PREFIX = new URL({{ this.tile_prefix_json }}, location.href).href;
             var container = map.getContainer();
 
             // **The screen is measured, never remembered.** Every decision below
@@ -18282,7 +18540,7 @@ class _Chrome(MacroElement):
                 {key: 'layers', label: 'Layers', width: 344, selector: '.trails-legend',
                  hint: 'Every line and point drawn here, and what each one is.'},
                 {key: 'base', label: 'Base map', width: 250, selector: '.trails-basemap',
-                 hint: 'Which Kartverket sheet is drawn underneath.'},
+                 hint: 'Which {{ this.provider_label }} sheet is drawn underneath.'},
                 {key: 'plan', label: 'Plan a route', width: 330, selector: '.trails-plan-control',
                  hint: 'Set points, route between them, cut it into stages.'},
                 {key: 'profile', label: 'Elevation profile', width: 320, selector: null,
@@ -18667,7 +18925,7 @@ class _Chrome(MacroElement):
                 // exactly why it only happens with tiles kept.
                 var tiles = [], others = [], worst = 0, spent = 0;
                 (performance.getEntriesByType('resource') || []).forEach(function (each) {
-                    if (each.name.indexOf('kartverket') === -1) { others.push(each); return; }
+                    if (each.name.indexOf(TILE_PREFIX) !== 0) { others.push(each); return; }
                     tiles.push(each);
                     spent += each.duration || 0;
                     if ((each.duration || 0) > worst) { worst = each.duration; }
@@ -21230,6 +21488,7 @@ class _Chrome(MacroElement):
         self,
         credits: dict[str, list[dict[str, str]]] | None,
         extent: Bounds | None = None,
+        provider: Provider = PROVIDERS["kartverket"],
     ) -> None:
         """Initialize the chrome.
 
@@ -21242,10 +21501,14 @@ class _Chrome(MacroElement):
                 max_lat), or None where the caller did not say. A reader whose
                 own position falls outside it is told so rather than shown a dot
                 on a blank.
+            provider: Whose sheets the base-map picker offers, for its hint, and
+                what a tile's address starts with, for the timing readout.
         """
         super().__init__()
         self._name = "Chrome"
         self.narrow_px = NARROW_PX
+        self.provider_label = provider.label
+        self.tile_prefix_json = _script_json(provider.tiles)
         self.credits_json = _script_json(credits or {})
         # What this map draws, so the page can tell a reader standing outside it
         # that there is nothing here to show them. `null` where nobody said.
@@ -21267,5 +21530,6 @@ def add_chrome(fmap: folium.Map, credits: dict[str, list[dict[str, str]]] | None
     """
     # Before the dock, because the dock reads `window.trailsOffline.holder`:
     # folium renders a map's children in the order they were added.
-    _OfflinePanel().add_to(fmap)
-    _Chrome(credits, getattr(fmap, MAP_BOUNDS_ATTR, None)).add_to(fmap)
+    provider = provider_of_map(fmap)
+    _OfflinePanel(provider, companions_of_map(fmap)).add_to(fmap)
+    _Chrome(credits, getattr(fmap, MAP_BOUNDS_ATTR, None), provider).add_to(fmap)

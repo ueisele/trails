@@ -202,6 +202,12 @@ which is the one Norway-specific part of how the extent is derived.
 park is a name, a box or a lookup, a country module and a base-map choice; everything above
 derives from it.
 
+**Done 2026-09-12:** `lomsdal_visten.py` has a `Park` table (`PARKS`) and `--park`; the name, the
+stem of every file, the legend word, the base sheet and its extras, the companion names and the
+UT catalogue all come off the entry. Abisko is declared with its box and refused at the argument
+parser with a message naming §7 step 4, because every loader below it is a Norwegian register.
+`route_graph.py` keeps its own `PARK_NAME` for now. `drive_map.py` already had `--page`.
+
 ### 4.2 The provider, inside the JavaScript
 
 Hard-coded where a JSON blob should be: `TILE_HOST = "cache.kartverket.no"` in the service worker
@@ -211,8 +217,18 @@ per zoom that every size estimate on the offline panel rests on — measured on 
 the trail network.
 
 **Decided:** hoist these into a provider blob injected from Python, one entry per base map, and
-measure `WEIGHT` for Lantmäteriet the same way it was measured for Kartverket. `TOP` and `SPAN`
-stay global because both providers end at z18 (§3).
+measure `WEIGHT` for Lantmäteriet the same way it was measured for Kartverket. `SPAN` stays global;
+`TOP` is per provider since the file ends at z17 (§3).
+
+**Done 2026-09-12:** `maps.Provider` and `maps.PROVIDERS` (`kartverket`, `lantmateriet`), each
+with a tile prefix, `top` and the `WEIGHT` table; `_BASE_LAYERS` names its provider and gains
+`BaseMap.LANTMATERIET_TOPO` at the root-relative `/tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png`,
+so the page carries no host and the same page served locally over the same tree draws the same
+tiles. The worker's `TILE_HOST` became `TILE_PREFIX`, resolved against the worker's own address
+and matched as a prefix; the timing readout and the picker's hint take the provider's label and
+prefix; the tile layer is held to `top` as `maxNativeZoom`, so z18 is drawn magnified rather than
+requested. Lantmäteriet's `WEIGHT` is the whole-box mean of §3 rather than a trail-side sample —
+the box is mountain and lake, not sea, so the two are close.
 
 ### 4.3 The sources
 
@@ -385,6 +401,18 @@ per provider (17 here, §3);
 `deploy_map.py`'s `BESIDE` table is keyed per map; the `tiles/` and `dem/` trees it already
 mirrors with `--tree` (§4.5). All of it is Python-side naming; the worker's logic does not change.
 
+**Done 2026-09-12, the library side:** `maps.Companions` — `ROOT` is the first map's set and is
+never renamed; `Companions.named("abisko")` gives `abisko-sw.js`, `abisko.webmanifest`,
+`abisko-icon-*.png`, database and cache prefix `trails-abisko`, scope `./abisko`. `create_map`
+takes it and records it on the map; the head, the registration (`register('abisko-sw.js',
+{scope: './abisko'})`), the offline panel (database, caches, the switch's storage key) and the
+written worker all read it. The worker's `sweepOldCaches` pattern carries the prefix, so neither
+map's sweep matches the other's caches — tested both ways. The manifest gains `id`, the page's own
+address, which is what a browser takes for it anyway. `Companions.of(stem)` is the one rule —
+`lomsdal-visten` keeps `ROOT`, anything else is named — and `deploy_map.py` uploads a map's
+companions by it, so a second map's deploy never overwrites the first's. Still open here: the
+variant icon, which is a drawing (`docs/draw.ts`) and not a rename.
+
 Two things easily overlooked: **two identical icons** on a Home Screen, hence the variant mark;
 and, in Safari on the same origin, Lomsdal's root-scope worker also matches `/abisko` until
 Abisko's own is registered — the first visit is answered by the root worker and cached in
@@ -485,8 +513,10 @@ this map is the reason.
    resumable, with an `index.json` beside the tiles; `command make tiles` drives it, and the
    full z8–z17 run took 916 s. **And the upload**, also code since 2026-09-12: `deploy_map.py
    --tree tiles` mirrors the tree into the bucket by `aws s3 sync` (§4.5), which is `just deploy
-   --tree tiles` from `home/trails-map`. Not run yet: putting the tiles up is a publish, and Uwe
-   decides publishes.
+   --tree tiles` from `home/trails-map`; run 2026-09-12 as the unit `abisko-tiles-upload` at
+   Uwe's word (60 objects/s). **`--park`, the provider blob and the companions per map are
+   done** the same day (§4.1, §4.2, §6.2), in the library, the build and the deploy; what
+   remains of this step is the variant icon.
 4. **`network/sweden.py`** — Topografi 50 for the ground, Naturvårdsverket's trail register
    for the attributes, OSM for what neither draws; winter trails and reindeer routes excluded
    (§6.5).
@@ -565,6 +595,13 @@ box is an hour and a half, once.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the plumbing of §7 step 3: `maps.Provider`/`PROVIDERS` with `TOP` and
+  `WEIGHT` per provider and `BaseMap.LANTMATERIET_TOPO` on our own bucket; `maps.Companions`
+  naming worker, manifest, icons, database and caches per map with `ROOT` untouched; `--park`
+  and the `Park` table in `lomsdal_visten.py`, Abisko declared and refused until step 4;
+  `deploy_map.py` uploads companions by `Companions.of`. The Lomsdal page rebuilt with the same
+  names and the same ceilings. §4.1, §4.2, §6.2, §7 follow.
+  And the tile upload was run — Uwe asked for it — as `abisko-tiles-upload`.
 - **2026-09-12** — the tile upload is code: `deploy_map.py --tree tiles|dem` mirrors a tree by
   `aws s3 sync` with a year's `max-age`, the inventory apart with a short one; `--tree` alone
   publishes no page; the purge settings are demanded only when a page is purged, which

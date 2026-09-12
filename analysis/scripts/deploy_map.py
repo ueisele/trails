@@ -13,7 +13,10 @@ anyone who clones this.
 A map named ``<name>`` is uploaded as ``<name>.html`` and is then readable at
 ``https://<host>/<name>``: a rewrite rule adds the suffix back. The object keeps the extension
 because every upload tool derives ``Content-Type`` from it, and an object served as
-``application/octet-stream`` makes the browser download the map instead of opening it.
+``application/octet-stream`` makes the browser download the map instead of opening it. Its
+companions -- worker, manifest, icons -- go up under the names the build gave them, which
+:meth:`trails.visualization.maps.Companions.of` decides from the map's name alone, so a second
+map's deploy never overwrites the first's.
 
 Two things this deliberately does rather than assumes:
 
@@ -54,6 +57,8 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from trails.visualization.maps import Companions
 
 #: What the object is served as. Without it R2 answers with the S3 default and the map downloads.
 CONTENT_TYPE = "text/html; charset=utf-8"
@@ -196,18 +201,31 @@ def squeezed(source: Path) -> tuple[Path, int]:
     return squeezed_file, squeezed_file.stat().st_size
 
 
-#: The small objects that ride beside the map, with what each is and how long an
-#: edge may hold it. All uncompressed: they are kilobytes, so compressing them
-#: saves nothing worth a decompression — and a PNG is already compressed.
-BESIDE = {
-    # The one object whose whole job is to be noticed when it changes -- an edge
-    # holding yesterday's worker would hold yesterday's map with it, for as long
-    # as the header said to.
-    "sw.js": ("text/javascript; charset=utf-8", "no-cache"),
-    # What makes the map installable, and an installed map is what survives
-    # WebKit's seven-day sweep of storage a script created. It changes only when
-    # the map is renamed, so an edge may hold it as long as it holds the page.
-    "manifest.webmanifest": ("application/manifest+json", "max-age=300"),
+def beside(companions: Companions) -> dict[str, tuple[str, str]]:
+    """The small objects that ride beside one map, with what each is and how long an edge may hold it.
+
+    All uncompressed: they are kilobytes, so compressing them saves nothing worth
+    a decompression — and a PNG is already compressed. **Named per map**, by the
+    one rule in :meth:`Companions.of`: the first map's files keep the names its
+    installed copies hold, a later map's carry its stem, and neither deploy
+    touches the other's.
+
+    Args:
+        companions: The map's set of names.
+
+    Returns:
+        Object name to ``(content type, Cache-Control)``.
+    """
+    table = {
+        # The one object whose whole job is to be noticed when it changes -- an edge
+        # holding yesterday's worker would hold yesterday's map with it, for as long
+        # as the header said to.
+        companions.worker: ("text/javascript; charset=utf-8", "no-cache"),
+        # What makes the map installable, and an installed map is what survives
+        # WebKit's seven-day sweep of storage a script created. It changes only when
+        # the map is renamed, so an edge may hold it as long as it holds the page.
+        companions.manifest: ("application/manifest+json", "max-age=300"),
+    }
     # **The mark, as four files rather than as a data: URI inside the page.**
     # iOS reads `apple-touch-icon` off the document and will not fetch a data:
     # URI for it, so an inline mark is a link that resolves to nothing and the
@@ -215,25 +233,23 @@ BESIDE = {
     # takes; 32 is the tab; 192 and 512 are what the manifest offers a launcher.
     # Held as briefly as the manifest: the name never changes, so a redesign
     # would otherwise sit behind a long TTL with nothing to purge it.
-    "icon-32.png": ("image/png", "max-age=300"),
-    "icon-180.png": ("image/png", "max-age=300"),
-    "icon-192.png": ("image/png", "max-age=300"),
-    "icon-512.png": ("image/png", "max-age=300"),
-}
+    for name in companions.files()[2:]:
+        table[name] = ("image/png", "max-age=300")
+    return table
 
 
-def upload_beside(source: Path, config: dict[str, str]) -> None:
+def upload_beside(source: Path, headers: tuple[str, str], config: dict[str, str]) -> None:
     """Copy one of the map's small companions up, uncompressed.
 
     Args:
-        source: The file, written beside the map by the build. Its name decides
-            its content type and cache header, from :data:`BESIDE`.
+        source: The file, written beside the map by the build.
+        headers: Its content type and cache header, from :func:`beside`.
         config: The settings from :func:`settings`.
 
     Raises:
         SystemExit: If the aws CLI is absent or the copy fails.
     """
-    content_type, cache_control = BESIDE[source.name]
+    content_type, cache_control = headers
     command = [
         "aws", "s3", "cp", str(source), f"s3://{config['TRAILS_MAP_BUCKET']}/{source.name}",
         "--endpoint-url", config["TRAILS_MAP_S3_ENDPOINT"],
@@ -512,16 +528,18 @@ def main() -> None:
     key = f"{name}{KEY_SUFFIX}"
     source = output_dir / key
     size = check(source)
+    companions = Companions.of(name)
+    riders = beside(companions)
 
     # Every address the same object answers at, because each is its own cache entry: the clean one
     # the rewrite rule serves, the one a trailing slash produces, and the object's own name.
     urls = [f"https://{host}/{name}", f"https://{host}/{name}/", f"https://{host}/{key}"]
-    urls += [f"https://{host}/{beside}" for beside in BESIDE]
+    urls += [f"https://{host}/{rider}" for rider in riders]
 
     if args.dry_run:
         print(f"Would compress {source} ({size / 1e6:.1f} MB) at brotli 11")
-        for beside, (kind, held) in BESIDE.items():
-            print(f"      upload {beside} uncompressed, {kind}, {held}")
+        for rider, (kind, held) in riders.items():
+            print(f"      upload {rider} uncompressed, {kind}, {held}")
         print(f"      upload it to s3://{config['TRAILS_MAP_BUCKET']}/{key} as {CONTENT_TYPE}, Content-Encoding: br")
         print("      purge " + ("nothing (--no-purge)" if args.no_purge else ", ".join(urls)))
         return
@@ -534,18 +552,18 @@ def main() -> None:
     # **The worker goes up after the map and never before it.** It is what makes
     # a reader's next visit serve the copy they already have, so a worker that
     # arrived first would hand out the old map while announcing the new one.
-    for companion_name, (_kind, held) in BESIDE.items():
+    for companion_name, headers in riders.items():
         companion = source.with_name(companion_name)
         if companion.exists():
             weight = companion.stat().st_size / 1e3
-            print(f"⬆️  {companion_name} ({weight:.1f} kB) → s3://{config['TRAILS_MAP_BUCKET']}/{companion_name}, {held}")
-            upload_beside(companion, config)
-        elif companion_name == "sw.js":
-            print("⚠️  No sw.js beside the map — readers get no offline copy. Was this built by `make map`?")
-        elif companion_name.startswith("icon-"):
-            print(f"⚠️  No {companion_name} beside the map — the page links to it, so a home screen gets a screenshot instead.")
-        else:
+            print(f"⬆️  {companion_name} ({weight:.1f} kB) → s3://{config['TRAILS_MAP_BUCKET']}/{companion_name}, {headers[1]}")
+            upload_beside(companion, headers, config)
+        elif companion_name == companions.worker:
+            print(f"⚠️  No {companion_name} beside the map — readers get no offline copy. Was this built by `make map`?")
+        elif companion_name == companions.manifest:
             print(f"⚠️  No {companion_name} beside the map — it cannot be installed, so iOS will sweep what it keeps.")
+        else:
+            print(f"⚠️  No {companion_name} beside the map — the page links to it, so a home screen gets a screenshot instead.")
 
     if args.no_purge:
         print("↩️  Edge cache left alone (--no-purge); it holds the old map for up to 5 minutes.")

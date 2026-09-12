@@ -163,10 +163,10 @@ notebook-clean:
 	@find analysis/notebooks -name "*.ipynb" -exec uv run nbstripout {} \;
 	@echo "✅ Notebook outputs cleared"
 
-# Both scripts are written for one park, which is why these targets need no
-# argument to say which. If a second one is ever added, the scripts grow a --park
-# option first and these follow it; naming them for the park before that would be
-# noise on every invocation.
+# The map script takes --park (lomsdal-visten by default; abisko is declared and
+# refused until its sources are wired in), so `make map ARGS="--park abisko"` is
+# the second map and no target is named for a park. route_graph.py is still
+# written for the one park.
 map:
 	@echo "🗺️  Building the Lomsdal-Visten map (cached sources; a cold cache takes far longer)..."
 	uv run python analysis/scripts/lomsdal_visten.py $(ARGS)
