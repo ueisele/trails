@@ -164,20 +164,49 @@ meridian, closer than Bergen, for which `atlas` §6.1 measured +0.2 %. Swedish s
 | role | Norway today | Sweden | standing |
 |---|---|---|---|
 | base map | Kartverket cache | Lantmäteriet *Topografisk webbkarta Visning, cache*, CC0, key via Geotorget | grid measured identical (§3) |
-| paths | OSM, Turrutebasen, N50, FKB | OSM, plus Naturvårdsverket *Leder och friluftsanordningar*: WFS `https://geodata.naturvardsverket.se/leder_friluftsliv/wfs?`, SWEREF99 TM | carries summer *and* winter trails and marking; winter-only trails must leave the summer network |
-| cabins, shelters, bridges | N50, UT.no | the same service, `https://geodata.naturvardsverket.se/anordningar_friluftsliv/wfs?`, plus OSM `alpine_hut` / `wilderness_hut` | STF's cabins are in both |
-| protected areas, and the park lookup | Naturbase | Naturvårdsverket's *naturvårdsregistret*, open WMS/WFS/REST | replaces `find_one(PARK_NAME, …)` |
-| roads | N50 | OSM (E10, Rallarvägen, Björkliden's roads) | enough here; NVDB exists if it is not |
-| water | N50 Arealdekke | OSM polygons, or Lantmäteriet Hydrografi (open) | Torneträsk and the lakes drive the straight-walk water cost |
-| place names | Stedsnavn | Lantmäteriet Ortnamn (open, via Geotorget) or OSM | Swedish and Sami names; the search box reads this |
-| heights | Geonorge point API, live | Lantmäteriet *Markhöjdmodell Nedladdning*, WCS, CC0, **RH 2000** — orthometric, so no datum jump (`atlas` §6.2) | §6.3 |
-| land cover | not used | Naturvårdsverket NMD, 10 m raster, open | not needed; listed so nobody looks for AR50 |
+| **the N50 role: paths, roads, water, land cover, cabins, names, contours, protected areas in one product** | N50 Kartdata, per kommune | Lantmäteriet **Topografi 10 Nedladdning, vektor** — GeoPackage, SWEREF99 TM, RH 2000, updated weekly, ordered by country, län or kommun through Geotorget and its download API; free since 2025-02-03 under the *värdefulla datamängder* terms (attribution), a Geotorget account needed. **Topografi 50** is the generalised sibling, CC0, same themes | read 2026-09-12 off the product documentation, see below |
+| official marked trails with attributes | Turrutebasen | Naturvårdsverket *Leder och friluftsanordningar*: WFS `https://geodata.naturvardsverket.se/leder_friluftsliv/wfs?`, SWEREF99 TM | keyless; carries summer *and* winter trails, marking and manager — the attribute source, as Turrutebasen is (`atlas` §7.2) |
+| paths nobody else draws | OSM | OSM, through Overpass, unchanged | the one source that is the same in both countries |
+| cabins, shelters, bridges | N50, UT.no | Topografi 10 `Byggnadspunkt` — `Raststuga` (*"alltid olåst"*), `Vindskydd`, `Kåta`; Naturvårdsverket `anordningar_friluftsliv/wfs`; OSM `alpine_hut` / `wilderness_hut` | STF's cabins are in all three |
+| protected areas, and the park lookup | Naturbase | Topografi 10 *Tema Naturvård*, or Naturvårdsverket's *naturvårdsregistret* WFS/REST | either replaces `find_one(PARK_NAME, …)` |
+| roads | N50 | Topografi 10 `Väglinje` (Trafikverket's roads, 15 classes) and `Övrig väg` | OSM as the check |
+| water | N50 Arealdekke | Topografi 10 *Tema Hydrografi* | Torneträsk and the lakes drive the straight-walk water cost |
+| place names | Stedsnavn | Topografi 10 *Tema Text* — Lantmäteriet's established names, Swedish and Sami | the search box reads this |
+| heights | Geonorge point API, live | Lantmäteriet *Markhöjdmodell Nedladdning*, WCS, CC0, **RH 2000** | §6.3 |
+| land cover | not used | Topografi 10 *Tema Mark* (`sankmark`, `kalfjäll`, forest); NMD 10 m raster exists too | Tema Mark is enough if the water cost ever wants bog |
+
+**Topografi 10 is the N50 of Sweden, and in the mountains it is more.** Read 2026-09-12 off
+Geotorget's documentation (GEODOK/51), *Tema Kommunikation*, `Övrig väg`:
+
+- `Gångstig` — *"tydlig väl upptrampad stig"*, the worn path, which is the FKB-like detail N50
+  lacks and Norway gets from a second source;
+- `Vandringsled` — *"markerad led längs stig eller väg avsedd för vandring"*, the marked summer
+  trail;
+- `Vandrings- och vinterled` — the trail marked with red crosses for walking, skiing and
+  snowmobiles, which is Kungsleden's kind; the attribute `skoterkorning_tillaten`
+  (`Ja`/`Nej`/`Påbjuden`/`Ingen information`) is one of the fields that tells winter from summer
+  (§6.5), together with Naturvårdsverket's season field;
+- `Transportled fjäll` — reindeer-herding routes and boat passages inside Lantmäteriet's
+  mountain area, **not walking routes**, and to be kept out of the graph;
+- `Ledintressepunkt fjäll` — **fords (`vad`), emergency telephones, parking, navigation aids.**
+  A ford is exactly what the straight-walk water cost of the predecessor wants to know about,
+  and no Norwegian source names them.
+
+So the Swedish set is smaller than Norway's seven and not poorer: Topografi 10 carries what N50,
+FKB, Naturbase and Stedsnavn carry between them, Naturvårdsverket's trail register is the
+Turrutebasen, and OSM is OSM. `network/sweden.py` is three loaders, not seven.
+
+Two things to settle at the first download, not now: which of Topografi 10's `Byggnad` purposes
+name STF's larger huts (a `Raststuga` is the unlocked emergency kind, not a staffed *fjällstuga*),
+and how large the Kiruna kommun GeoPackage is — the kommun is about 19,000 km², so ordering by
+kommun is the right grain, but the file has not been measured.
 
 Exact layer names, attribute names and the winter/summer field are read off the services when
 the module is written, not guessed here.
 
-Licences the credits will carry: Lantmäteriet CC0, Naturvårdsverket open data, OpenStreetMap
-ODbL. UT.no's CC BY-NC does not enter this map.
+Licences the credits will carry: Lantmäteriet CC0 for the tiles and the height model, Lantmäteriet's
+*värdefulla datamängder* terms with attribution for Topografi 10, Naturvårdsverket open data,
+OpenStreetMap ODbL. UT.no's CC BY-NC does not enter this map.
 
 ---
 
@@ -321,15 +350,16 @@ this map is the reason.
 2. **Infrastructure** — the tile proxy Worker (§6.1) only; the bucket needs nothing (§6.2).
 3. **`trails`, the plumbing** — `--park` (§4.1), the provider blob and `WEIGHT` for Lantmäteriet
    (§4.2), `drive_map.py` gains `--page`.
-4. **`network/sweden.py`** — OSM, Naturvårdsverket trails and facilities, protected areas, water,
-   names; winter trails excluded (§6.5).
+4. **`network/sweden.py`** — Topografi 10 for the ground, Naturvårdsverket's trail register
+   for the attributes, OSM for what neither draws; winter trails and reindeer routes excluded
+   (§6.5).
 5. **Heights** — the tile build (§6.3): WCS over the box, resample, pack, write `dem/`.
 6. **Acceptance and publish** — the structural readings of `make drive` against the Abisko page,
    then `command make map --park abisko`, then `deploy_map.py --map abisko`, which uploads the
    page, its own companions and `dem/`.
 
-Steps 2 and 3 do not depend on step 1 and can start before the key exists; step 4 needs the
-Naturvårdsverket services only, which are keyless; step 5 needs the key for the WCS.
+Steps 2 and 3 do not depend on step 1 and can start before the key exists; step 4 needs a
+Geotorget account for Topografi 10, so it follows step 1 as well; step 5 needs the key for the WCS.
 
 ---
 
@@ -390,6 +420,9 @@ byte-size threshold first and a decode second.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — §5 rewritten around Lantmäteriet's *Topografi 10 Nedladdning, vektor*, which
+  Uwe asked about as the N50 of Sweden and which turns out to be that and more (fords, emergency
+  telephones, the worn-path class); the Swedish module shrinks to three loaders. §7.4 follows.
 - **2026-09-12** — §6.2 changes from two origins to one origin, one bucket, companions named per
   map, after Uwe asked for the same domain and bucket and accepted that both maps are interim;
   the bucket layout is written down and checked against the hosting module. §6.3 changes from a
@@ -421,6 +454,7 @@ A line per change to this document or to the decisions in it, newest first.
 | bytes per Kartverket tile | 6.76 GB over 131,033 tiles, both from the offline panel at load (`atlas` §3.3) |
 | what in the code is Norway | a read of `maps.py`, `lomsdal_visten.py`, `route_graph.py`, `deploy_map.py`, `drive_map.py` and `libs/src/trails/io/sources/` on 2026-09-11, with line numbers as they stood that day |
 | Lantmäteriet's grid, layers, ceiling, and its white outside Sweden | `atlas/docs/decisions.md` §3.7, measured 2026-09-11 |
+| Topografi 10's themes, feature types and delivery | Geotorget documentation GEODOK/51, the *Kommunikation*, *Byggnadsverk* and *Åtkomst och leverans* pages, read 2026-09-12 |
 | Swedish service URLs | Naturvårdsverket's *Leder och friluftsanordningar, beskrivning av öppna data* (PDF), Lantmäteriet's and Naturvårdsverket's product pages, read 2026-09-11 |
 | DEM tile counts and pixel sizes | WebMercator tile index over the box at z8–z13; 156,543 m · cos(68.3°) / 2^z |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |
