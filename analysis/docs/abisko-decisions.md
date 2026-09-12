@@ -448,8 +448,20 @@ written worker all read it. The worker's `sweepOldCaches` pattern carries the pr
 map's sweep matches the other's caches — tested both ways. The manifest gains `id`, the page's own
 address, which is what a browser takes for it anyway. `Companions.of(stem)` is the one rule —
 `lomsdal-visten` keeps `ROOT`, anything else is named — and `deploy_map.py` uploads a map's
-companions by it, so a second map's deploy never overwrites the first's. Still open here: the
-variant icon, which is a drawing (`docs/draw.ts`) and not a rename.
+companions by it, so a second map's deploy never overwrites the first's. **The variant icon is
+drawn, 2026-09-12**: the same cairn on the same moss path, standing in the U-shaped gate of
+Lapporten in a deep blue-grey — `atlas-abisko-*.png` beside `atlas-*.png` in
+`visualization/icons/`, drawn by the same `docs/draw.ts`, and `Companions.mark` names which
+drawing a map's icons are copied from (`atlas` for the first map, `atlas-<stem>` for any other,
+so a third map without a drawing of its own refuses to build rather than wearing the first's).
+Chosen by Uwe from four candidates on the mockup host, the gate in blue over the gate in stone
+grey because it still reads at 60 px. **Not the national parks' gold star**: what
+sverigesnationalparker.se serves as *Abisko nationalpark logotyp* is Naturvårdsverket's shared
+six-pointed gold star with the park's name as wordmark — every park wears the same star — and
+the brand's own manual (*Logotyper*, v2.0, 2011) forbids own versions, reshaping, recolouring and
+effects, with a special version for outside organisations. An app icon of it would be exactly
+that, and it would dress a private map as an official one; Lomsdal-Visten does not wear Norway's
+park mark for the same reason.
 
 Two things easily overlooked: **two identical icons** on a Home Screen, hence the variant mark;
 and, in Safari on the same origin, Lomsdal's root-scope worker also matches `/abisko` until
@@ -619,7 +631,7 @@ this map is the reason.
    from the edge is byte-identical to the file, served `image/png` with the year-long header;
    a second `--dry-run` finds nothing left to upload. **`--park`, the provider blob and the companions per map are
    done** the same day (§4.1, §4.2, §6.2), in the library, the build and the deploy; what
-   remains of this step is the variant icon.
+   remains of this step is the variant icon — **drawn 2026-09-12** (§6.2); the step is done.
 4. **`network/sweden.py`** — Topografi 50 for the ground, Naturvårdsverket's trail register
    for the attributes, OSM for what neither draws; winter trails and reindeer routes excluded
    (§6.5). **Done 2026-09-12.** What was shared with Norway moved into `network/graphs.py`
@@ -842,6 +854,8 @@ minutes as a transient unit; the Lomsdal-Visten page after the same change, 596 
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, later that night** — the variant icon (§6.2, §7 step 3): the cairn in Lapporten's gate,
+  `Companions.mark`; the national parks' gold star looked at and not used.
 - **2026-09-12, night** — **the Abisko map is published** (§7 step 6): page, companions and the
   height tiles in the bucket, the tiles were there already; verified from the edge byte for byte.
 - **2026-09-12, evening** — `make drive` drives both pages (§9.10, §7 step 6): a `Scene`
@@ -970,5 +984,6 @@ A line per change to this document or to the decisions in it, newest first.
 | which products face a legal review | the `Juridisk prövning` field on the Geotorget product pages, rendered in Firefox: Topografi 10 *Ja*, Hydrografi Nedladdning *Ja*, Topografi 50 / Ortnamn / Markhöjdmodell *Nej*; and the *Sökande* form Uwe reached on 2026-09-12, which asks for a personnummer |
 | Swedish service URLs | Naturvårdsverket's *Leder och friluftsanordningar, beskrivning av öppna data* (PDF), Lantmäteriet's and Naturvårdsverket's product pages, read 2026-09-11 |
 | DEM tile counts and pixel sizes | WebMercator tile index over the box at z8–z13; 156,543 m · cos(68.3°) / 2^z |
+| Abisko's logotype and its terms | `sverigesnationalparker.se/park/abisko-nationalpark/` (the SVG `abisko-logotyp.svg`: the star as a clip path with a radial gold gradient, the name as outlined glyphs), Naturvårdsverket's *Sveriges nationalparker — bilaga logotyper* (PDF, v2.0 2011-06-01), pages 5, 16–18; the trademark register at PRV not consulted |
 | the Abisko drive | `drive_map.py --page analysis/output/abisko.html --json` as a transient unit on forge, Playwright Firefox 1400 × 900, the page served from `analysis/output` by the suite's own server; four runs on 2026-09-12 to get from a crash in the second check to a clean report, the Lomsdal page driven in between to hold |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |

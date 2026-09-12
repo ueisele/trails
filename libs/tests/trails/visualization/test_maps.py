@@ -1849,12 +1849,13 @@ class TestManifest:
         screen showing a screenshot. Every size in `ICON_SIZES` is a link
         somewhere — the document, the manifest — so a missing one is a broken
         reference and this raises rather than shipping it."""
-        for side in maps.ICON_SIZES:
-            source = maps.ICON_DIR / f"atlas-{side}.png"
-            assert source.is_file(), f"no source icon for {side}"
-            raw = source.read_bytes()
-            assert raw.startswith(b"\x89PNG\r\n\x1a\n")
-            assert struct.unpack(">II", raw[16:24]) == (side, side)
+        for mark in (maps.ROOT.mark, maps.Companions.of("abisko").mark):
+            for side in maps.ICON_SIZES:
+                source = maps.ICON_DIR / f"{mark}-{side}.png"
+                assert source.is_file(), f"no source icon for {mark} at {side}"
+                raw = source.read_bytes()
+                assert raw.startswith(b"\x89PNG\r\n\x1a\n")
+                assert struct.unpack(">II", raw[16:24]) == (side, side)
 
     def test_the_icons_are_written_beside_the_page(self, tmp_path):
         """Named for the page and not for the source: the document links to
@@ -1976,6 +1977,8 @@ class TestTwoMapsOnOneOrigin:
         assert named.worker == "abisko-sw.js"
         assert named.manifest == "abisko.webmanifest"
         assert named.icon_named(32) == "abisko-icon-32.png"
+        # And a drawing of its own to copy them from: two maps, two marks.
+        assert named.mark == "atlas-abisko"
         assert named.database == "trails-abisko"
         assert named.cache == "trails-abisko"
         # A prefix the browser matches: the page itself, and nothing beside it.
@@ -2114,6 +2117,10 @@ class TestTwoMapsOnOneOrigin:
         assert [icon["src"] for icon in said["icons"]] == ["./abisko-icon-192.png", "./abisko-icon-512.png"]
         icons = maps.write_icons(page, companions)
         assert [icon.name for icon in icons] == [f"abisko-icon-{side}.png" for side in maps.ICON_SIZES]
+        # A variant of the mark, not a copy of it: the two would sit side by side
+        # on a Home Screen.
+        for icon, side in zip(icons, maps.ICON_SIZES, strict=True):
+            assert icon.read_bytes() != (maps.ICON_DIR / f"atlas-{side}.png").read_bytes()
         html = page.read_text(encoding="utf-8")
         assert '<link rel="manifest" href="abisko.webmanifest">' in html
         assert '<link rel="apple-touch-icon" href="abisko-icon-180.png">' in html

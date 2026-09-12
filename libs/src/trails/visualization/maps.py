@@ -68,6 +68,10 @@ class Companions:
     manifest: str = "manifest.webmanifest"
     #: With ``{side}`` for the pixel size.
     icon: str = "icon-{side}.png"
+    #: Which drawing in :data:`ICON_DIR` the icons are copies of. **A map of
+    #: its own wears a mark of its own**: two maps with one icon are two tiles
+    #: on a Home Screen nobody can tell apart.
+    mark: str = "atlas"
     #: The IndexedDB database the worker and the page share.
     database: str = "trails"
     #: What the cache names and the offline switch's storage key start with.
@@ -84,14 +88,16 @@ class Companions:
 
         Returns:
             Names that carry the stem: ``<stem>-sw.js``, ``<stem>.webmanifest``,
-            ``<stem>-icon-*.png``, the database and caches ``trails-<stem>``, and
-            the scope ``./<stem>`` -- which the browser matches as a prefix, so it
-            covers the page and nothing beside it.
+            ``<stem>-icon-*.png`` copied from the drawing ``atlas-<stem>``, the
+            database and caches ``trails-<stem>``, and the scope ``./<stem>`` --
+            which the browser matches as a prefix, so it covers the page and
+            nothing beside it.
         """
         return cls(
             worker=f"{stem}-sw.js",
             manifest=f"{stem}.webmanifest",
             icon=f"{stem}-icon-{{side}}.png",
+            mark=f"atlas-{stem}",
             database=f"trails-{stem}",
             cache=f"trails-{stem}",
             scope=f"./{stem}",
@@ -1053,7 +1059,11 @@ _ICON_BASE = 0.80
 #: rather than rounded rectangles, because rounded rectangles stack into a set of
 #: teacups with a seam at every corner, and they are unequal and set off one
 #: another, because evenly centred a cairn reads as a wedding cake. The drawing
-#: script is in ``docs/draw.ts``.
+#: script is in ``docs/draw.ts``. **A second map is a variant of the same
+#: mark**: ``atlas-abisko`` is the cairn on the same path, standing in the
+#: U-shaped gate of Lapporten, which is what tells Abisko from anywhere else --
+#: not the national parks' gold star, which is Naturvårdsverket's own mark and
+#: not ours to redraw. Each :class:`Companions` names the drawing it copies.
 ICON_DIR = pathlib.Path(__file__).parent / "icons"
 
 #: The sizes written beside the page, and what each is for. 180 is the one iOS
@@ -1074,8 +1084,8 @@ def write_icons(beside: pathlib.Path, companions: Companions = ROOT) -> list[pat
     falls back to a screenshot of the page.
 
     The names are the page's, not the source's: ``icon-180.png`` beside the map,
-    whatever the file in :data:`ICON_DIR` is called. The deploy uploads whatever
-    this wrote.
+    copied from the drawing the companions name in :data:`ICON_DIR`. The deploy
+    uploads whatever this wrote.
 
     Args:
         beside: The built page. The icons are written into its directory.
@@ -1090,9 +1100,9 @@ def write_icons(beside: pathlib.Path, companions: Companions = ROOT) -> list[pat
     """
     written = []
     for side in ICON_SIZES:
-        source = ICON_DIR / f"atlas-{side}.png"
+        source = ICON_DIR / f"{companions.mark}-{side}.png"
         if not source.is_file():
-            raise FileNotFoundError(f"no icon at {source} — the page links to {companions.icon_named(side)}")
+            raise FileNotFoundError(f"no icon at {source} — the page links to {companions.icon_named(side)}; draw it with docs/draw.ts")
         target = beside.with_name(companions.icon_named(side))
         target.write_bytes(source.read_bytes())
         written.append(target)

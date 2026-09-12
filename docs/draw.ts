@@ -8,6 +8,27 @@ const STONE2: Rgb = [150, 163, 176]
 const WARM: Rgb = [217, 89, 38]
 const COOL: Rgb = [57, 135, 229]
 const MOSS: Rgb = [58, 158, 112]
+/** The gate behind the Abisko cairn: a deep blue-grey, dark enough to stay behind the stones and
+ *  cool enough to read at 60 px, which the stone-grey version did not. */
+const RIDGE: Rgb = [33, 66, 104]
+
+const smooth = (t: number) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t) }
+
+/** Lapporten, the U-shaped gate that is Abisko's landmark: two flat shoulders and the broad valley
+ *  between them, and the cairn stands in the gate. A skyline as a filled band per column, like a
+ *  stone, because that is the one primitive here that draws a smooth edge. */
+function gate(c: any, size: number, tone: Rgb) {
+  const shoulder = 0.34, floor = 0.60, halfWidth = 0.40
+  const points: [number, number, number][] = []
+  const base = size * 0.80
+  for (let x = 0; x <= size; x++) {
+    const d = Math.abs(x / size - 0.5)
+    // Inside the gate the wall climbs from the floor to the shoulder over 0.16 of the side.
+    const k = smooth((d - (halfWidth - 0.16)) / 0.16)
+    points.push([x, size * (floor - (floor - shoulder) * k), base])
+  }
+  c.band(points, tone, 1)
+}
 
 /** A flattened stone. `band` takes a vertical span per column, which is what makes a smooth
  *  organic outline possible at all with this rasteriser — a rounded rect leaves visible seams. */
@@ -44,15 +65,18 @@ function cairn(c: any, s: number, cx: number, base: number, height: number, tone
   return y
 }
 
-function icon(kind: "almanac" | "atlas", size: number, style: number) {
+function icon(kind: "almanac" | "atlas" | "abisko", size: number, style: number) {
   const c = new Canvas(size, size, GROUND)
   const cx = size * 0.5
-  const base = size * (kind === "atlas" ? 0.80 : 0.855)
+  const base = size * (kind === "almanac" ? 0.855 : 0.80)
   const height = size * 0.88
 
   // **The pair is an arc above and a path below.** Same weight, same stroke, opposite side of the
-  // same cairn: one site is what the sky is doing, the other is where the ground goes.
-  if (kind === "atlas") {
+  // same cairn: one site is what the sky is doing, the other is where the ground goes. **And the
+  // second map is the same cairn on the same path, standing in Lapporten's gate**: two maps on a
+  // Home Screen must not wear one icon, and what tells Abisko from anywhere else is the gate.
+  if (kind === "abisko") gate(c, size, RIDGE)
+  if (kind === "atlas" || kind === "abisko") {
     const stroke = Math.max(1.8, size * 0.045)
     let prev: [number, number] | undefined
     for (let step = 0; step <= 100; step++) {
@@ -78,8 +102,10 @@ function icon(kind: "almanac" | "atlas", size: number, style: number) {
 }
 
 for (const [name, kind, style] of [
-  ["almanac", "almanac", 0], ["atlas", "atlas", 0],
+  ["almanac", "almanac", 0], ["atlas", "atlas", 0], ["atlas-abisko", "abisko", 0],
 ] as const) {
+  // 32 is not drawn: this rasteriser has no antialiasing to speak of at that size, so the tab icon
+  // is the 512 scaled down — `magick atlas-abisko-512.png -filter Lanczos -resize 32x32 …`.
   for (const size of [512, 192, 180]) {
     await Bun.write(`/tmp/icons/${name}-${size}.png`, icon(kind, size, style))
   }
