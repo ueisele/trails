@@ -140,7 +140,26 @@ sized to the rows that sit together, not one connection per page.
 | one range read on an open connection | 0.19 s for 4 KB, 0.26 s for 64 KB, 0.40 s for 1 MB — the cost is the request, not the bytes |
 | the schema, from the first block | 1 read |
 | **all 380 z13 tiles of the box** | **18.3 s, 0.048 s a tile**, 44 reads, 46.1 MB fetched for 9.8 MB of tiles |
-| extrapolated to z8–z17, 118,967 tiles | about **95 minutes** and some 12 GB of transfer, once |
+| **the whole box, z8–z17, 118,967 tiles — the real run** | **916 s**, 2,170 reads, 2,275 MB fetched for **696 MB** of tiles, none missing, 1.2 GB peak memory; z16 at 107 tiles/s, z17 at 159 tiles/s, because the finer the level the more neighbours a 1 MB block holds |
+
+The estimate above it — 95 minutes — was made from the z13 rate and was six times too
+pessimistic. Measured 2026-09-12 as the unit `abisko-tiles`; the file's own modification
+time, as the FTP server reports it, is **2026-06-23 11:05:09**, which is the stand the map
+carries until a rebuild under a new version prefix.
+
+**Bytes per tile, for the `WEIGHT` table of §4.2** — the means over every tile of the box,
+read from the copy's `index.json`:
+
+| z11 | z12 | z13 | z14 | z15 | z16 | z17 |
+|---|---|---|---|---|---|---|
+| 31,747 | 22,166 | 25,719 | 15,290 | 13,783 | 7,958 | 4,587 |
+
+Against Kartverket's measured 73,914 at z11–z13, 51,295 at z16 and 37,037 at z18: Sweden's
+tiles are a quarter to a half the weight, so every offline estimate on the panel would be
+two to four times too high with Kartverket's numbers.
+
+A sample of 600 of the written files, opened and verified with Pillow: every one a valid
+256×256 PNG.
 
 The rows are stored in small spatial chunks (a few tile rows by a few columns, column-major
 inside a chunk), so a 1 MB block holds many neighbouring tiles and the box reads in runs. The
@@ -478,7 +497,7 @@ settled, move it to §9 with the date and what settled it.
 ### 8.1 What the first builds measure
 
 *Trigger: step 3 and step 5.* The tile copy's cost and the cartography check are answered
-(§3, §9.5). Still open: bytes per zoom for the `WEIGHT` table beyond z13, whether Geotorget
+(§3, §9.5). Still open: whether Geotorget
 offers this product cut to an area, and how often the FTP files are refreshed (dated
 2026-06-22 to 24 when first seen). The heights: one COG opened with the login, its overview
 levels, nodata and water marking, and the weight of a packed z13 tile. All written back into
@@ -536,6 +555,8 @@ box is an hour and a half, once.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — the full copy is done: 118,967 tiles, 696 MB, 916 s, none missing; the
+  per-zoom weights are in §3 for the `WEIGHT` table; the 95-minute estimate is corrected.
 - **2026-09-12** — the tile copy is code: `remote_sqlite.py`, `sources/lantmateriet.py`,
   `lantmateriet_tiles.py`, `make tiles`, with tests against a local stand-in for the file. A
   z8–z12 run took 18 s for 160 tiles; the full run is under way as the unit `abisko-tiles`.

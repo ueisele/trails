@@ -88,6 +88,7 @@ class TestCopyTiles:
         assert index["per_zoom"]["3"]["skipped"] == 14
         assert index["per_zoom"]["3"]["written"] == 0
         assert index["per_zoom"]["3"]["missing"] == 1
+        assert index["per_zoom"]["3"]["bytes"] == 13 * len(_png(3, 4, 0)) + len(b"kept"), "the inventory counts what is on disk"
 
     def test_refuses_a_zoom_the_file_lacks(self, geopackage, tmp_path):
         source = lantmateriet.Source(reader=LocalReader(geopackage))

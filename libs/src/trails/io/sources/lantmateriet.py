@@ -137,7 +137,8 @@ class Source:
             out_dir: Root of the tile tree
 
         Returns:
-            The index that was written: bounds, zooms, per-zoom counts and bytes,
+            The index that was written: bounds, zooms, per-zoom counts, the bytes
+            on disk for every tile of the box whether written now or earlier,
             and the source file's modification time
 
         Raises:
@@ -166,9 +167,16 @@ class Source:
                 for x in range(x0, x1 + 1):
                     column_dir = out_dir / str(zoom) / str(x)
                     column_dir.mkdir(parents=True, exist_ok=True)
-                    present = {int(p.stem) for p in column_dir.glob("*.png") if p.stat().st_size > 0}
+                    present: dict[int, int] = {}
+                    for kept in column_dir.glob("*.png"):
+                        held = kept.stat().st_size
+                        if held > 0:
+                            present[int(kept.stem)] = held
                     ys = [y for y in range(y0, y1 + 1) if y not in present]
-                    skipped += (y1 - y0 + 1) - len(ys)
+                    for y in range(y0, y1 + 1):
+                        if y in present:
+                            skipped += 1
+                            size += present[y]  # the index is an inventory of the tree, not of one run
                     if not ys:
                         continue
                     found: dict[int, bytes] = {}
