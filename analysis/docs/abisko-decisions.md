@@ -174,7 +174,8 @@ encoding: the file's tile is an indexed PNG with 190 colours, 26.6 KB; the servi
 with 2,684 colours, 60.5 KB. The file is the smaller of the two, with no visible cost.
 
 **Storage.** z8–z17 over the box is 118,967 tiles; at the 20 KB a z13 Swedish tile measured
-that is about 2.4 GB, at Kartverket's 50 KB about 6 GB, in the bucket, once. **Colour only:**
+that was estimated at 2.4 GB before the copy and measured at 700 MB after it (§3), in the
+bucket, once. **Colour only:**
 Uwe, 2026-09-12 — the grey sheet was never used on Lomsdal-Visten, so Abisko does not carry
 it; the copy and the storage halve, the base-map switch has one entry and can go for this map,
 and `Nedtonad_05m_mercator` is never read. If grey is ever wanted it is a second prefix and a
@@ -198,7 +199,7 @@ descriptions, the graph cache name, and the legend title with the Norwegian word
 in it. `drive_map.py` has the page path as a constant. The park is found **by name in Naturbase**,
 which is the one Norway-specific part of how the extent is derived.
 
-**Decided:** this becomes the `--park` option the Makefile comment at `Makefile:164` promises. A
+**Decided:** this becomes the `--park` option the Makefile's comment above `map` describes. A
 park is a name, a box or a lookup, a country module and a base-map choice; everything above
 derives from it.
 
@@ -231,14 +232,15 @@ with a tile prefix, `top` and the `WEIGHT` table; `_BASE_LAYERS` names its provi
 so the page carries no host and the same page served locally over the same tree draws the same
 tiles. The worker's `TILE_HOST` became `TILE_PREFIX`, resolved against the worker's own address
 and matched as a prefix; the timing readout and the picker's hint take the provider's label and
-prefix; the tile layer is held to `top` as `maxNativeZoom`, so z18 is drawn magnified rather than
+prefix; the tile layer is held to `top`, which caps the map itself: the Abisko map goes no
+deeper than z17 (`map.getMaxZoom()` reads 17), rather than
 requested. Lantmäteriet's `WEIGHT` is the whole-box mean of §3 rather than a trail-side sample —
 the box is mountain and lake, not sea, so the two are close.
 
 ### 4.3 The sources
 
 Six of seven are Norwegian endpoints with no shared abstraction (`TrailDataSource` exists and
-nothing subclasses it). `network/norway.py` is honest about it: free of the park, not of the
+nothing outside `base.py` subclasses it). `network/norway.py` is honest about it: free of the park, not of the
 country. Only OSM through Overpass is portable, and it is bbox-based, not extract-based.
 
 ### 4.4 The heights
@@ -307,8 +309,9 @@ from), *Tema Kommunikation*, `Övrig väg` — every class below is in Topografi
   trail; in Topografi 50 kept from 10 km, *with exceptions in mountain areas*;
 - `Vandrings- och vinterled` — the trail marked with red crosses for walking, skiing and
   snowmobiles, which is Kungsleden's kind; the attribute `skoterkorning_tillaten`
-  (`Ja`/`Nej`/`Påbjuden`/`Ingen information`) is one of the fields that tells winter from summer
-  (§6.5), together with Naturvårdsverket's season field;
+  (`Ja`/`Nej`/`Påbjuden`/`Ingen information`) is carried into the popup and decides nothing:
+  what tells winter from summer (§6.5) is the class `Vinterled` and Naturvårdsverket's season
+  field;
 - `Transportled fjäll` — `Rennäringsled`, `Roddled`, `Båtdrag`, `Skidspår` and the like inside
   Lantmäteriet's mountain area, **not walking routes** and kept out of the graph — except
   `Svårorienterad gångstig` and `Lämplig färdväg`, which are ways on foot and go in, marked;
@@ -339,13 +342,15 @@ directory per delivery under `.cache/topografi50/`.
 `Vandringsled` 168 km, `Vandrings- och vinterled` 52 km, `Vinterled` 134 km, `Traktorväg`,
 `Cykelväg` and `Elljusspår` under 4 km each; `Transportled fjäll`: `Lämplig färdväg` 56 km,
 `Svårorienterad gångstig` 5 km, `Skidspår` 10 km, `Trafikerad båtled` 6 km; roads 71 km, of
-which the E10 46 km; `ledintressepunkt_fjall`: 45 footbridges, **6 fords (`Vad`)**, 3 emergency
-telephones, 3 car parks; `byggnadspunkt`: 17 `Kåta`, 9 `Enslig stuga i fjällen`, 8 `Vindskydd`,
-6 `Raststuga`, 3 `Turiststuga/övernattningsstuga`, 2 `Fjällstation`, 1 `Naturum` — so the
+which the E10 46 km; `ledintressepunkt_fjall`: 48 footbridges, **8 fords (`Vad`)**, 3 emergency
+telephones, 3 car parks (62, as the loaders read them); `byggnadspunkt`: 17 `Kåta`, 10 `Enslig
+stuga i fjällen`, 9 `Vindskydd`, 6 `Raststuga`, 4 `Turiststuga/övernattningsstuga`, 2
+`Fjällstation`, 1 `Naturum` (49) — so the
 staffed huts are `Turiststuga/övernattningsstuga` and `Fjällstation`, and a `Raststuga` is the
-emergency kind. Naturvårdsverket's register over the same box: 47 lines, 365 km, 30 summer and
-17 winter, all 47 on a named state trail (BD 16–BD 92), and 24 facilities (10 bridges, 5
-privies, 4 rest shelters, 2 wind shelters).
+emergency kind. Naturvårdsverket's register over the same box, as first read on 2026-09-12:
+47 lines, 365 km, 30 summer and 17 winter, all 47 on a named state trail (BD 16–BD 92), and 24
+facilities (10 bridges, 5 privies, 4 rest shelters, 2 wind shelters); the nightly file moves
+under this (48 lines, 30 and 18, by the evening's copy).
 
 **Naturkartan is not a source** (asked by Uwe 2026-09-12, measured the same day). It is
 Outdoormap AB's platform, on which counties and municipalities publish their trails with text and
@@ -420,8 +425,8 @@ lomsdal-visten.html                 served at /lomsdal-visten     unchanged
 sw.js  manifest.webmanifest         Lomsdal-Visten's              unchanged
 icon-32.png … icon-512.png          Lomsdal-Visten's              unchanged
 abisko.html                         served at /abisko
-abisko.webmanifest                  start_url ./abisko, id abisko, name "Abisko Atlas"
-abisko-sw.js                        scope /abisko, DB trails-abisko
+abisko.webmanifest                  start_url ./abisko, id ./abisko, name "Abisko Atlas"
+abisko-sw.js                        scope ./abisko (resolves to /abisko), DB trails-abisko
 abisko-icon-32.png … abisko-icon-512.png   a variant of the cairn, so the two icons differ
 tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png            the map, colour sheet only, §3 and §6.1
 dem/lantmateriet/1/{z}/{x}/{y}.png                       the height tiles, §6.3
@@ -566,8 +571,8 @@ reading the first level finer than the pixel means the bilinear tile never avera
 does not have. The 1 GB is the float32 mosaic plus its copy in the warp; fine on forge, and a
 box four times the size would want the squares warped one at a time instead.
 
-Not uploaded: `deploy_map.py --tree dem` is ready, and a publish is Uwe's call. The reader is
-done (§4.4): the Abisko page reads these tiles and the Swedish build reads the mosaic they
+Uploaded 2026-09-12 with the publish (§7 step 6): `deploy_map.py --tree dem` put the 540 tiles
+up in 11 s. The reader is done (§4.4): the Abisko page reads these tiles and the Swedish build reads the mosaic they
 were cut from.
 
 ### 6.4 The box holds no Norway
@@ -615,9 +620,9 @@ this map is the reason.
    shows on the Topografi 50 order line — an identifier, not a credential, but it names an
    account): the three calls answer 200, and the loader fetched a theme through the API (§9.7).
    The delivery on disk was fetched once through the browser session earlier that day.
-2. **Infrastructure** — nothing. The bucket takes prefixes without a change (§6.2), and there
+2. *Fixed, §9.14.* **Infrastructure** — nothing. The bucket takes prefixes without a change (§6.2), and there
    is no Worker (§6.1).
-3. **`trails`, the plumbing** — `--park` (§4.1), the provider blob with `TOP` and `WEIGHT` per
+3. *Fixed, §9.16.* **`trails`, the plumbing** — `--park` (§4.1), the provider blob with `TOP` and `WEIGHT` per
    provider (§4.2, §3), `drive_map.py` gains `--page`. And **the tile copy**, which is done as
    code since 2026-09-12: `trails.io.remote_sqlite` opens the FTP GeoPackage as an SQLite
    database through an `apsw` VFS with 1 MB blocks, `trails.io.sources.lantmateriet` copies the
@@ -632,7 +637,7 @@ this map is the reason.
    a second `--dry-run` finds nothing left to upload. **`--park`, the provider blob and the companions per map are
    done** the same day (§4.1, §4.2, §6.2), in the library, the build and the deploy; what
    remains of this step is the variant icon — **drawn 2026-09-12** (§6.2); the step is done.
-4. **`network/sweden.py`** — Topografi 50 for the ground, Naturvårdsverket's trail register
+4. *Fixed, §9.15.* **`network/sweden.py`** — Topografi 50 for the ground, Naturvårdsverket's trail register
    for the attributes, OSM for what neither draws; winter trails and reindeer routes excluded
    (§6.5). **Done 2026-09-12.** What was shared with Norway moved into `network/graphs.py`
    (parameters, fingerprint, derived fields, the protected-area table, the build) and
@@ -652,16 +657,18 @@ this map is the reason.
    it, 342–1,730 m. **44 s in all**, OSM cached, against Lomsdal's quarter of an hour: the
    ground is read off a file rather than asked of a service. The Swedish `measure` needs no
    point store. **The page, the same evening**: `lomsdal_visten.py --park abisko` builds
-   `abisko.html` through `build_sweden` (§4.1) — 18 legend rows: roads, the winter lines off by
+   `abisko.html` through `build_sweden` (§4.1) — 19 legend rows: roads, the winter lines off by
    default, OSM / Topografi 50 paths / Topografi 50 marked trails / the register's state
-   trails each split at the park boundary, cabins (49, 11 named — 8 off the lettering within
-   150 m, 3 off OSM), the register's 24 facilities, 62 footbridges, fords and car parks, 35 OSM
+   trails each split at the park boundary, cabins (49, 13 named — 7 off the register's
+   settlement names within 150 m, 6 off OSM), the register's 24 facilities, 62 footbridges,
+   fords and car parks, 35 OSM
    shelters, and three name layers off the place-name register (§9.9): 391 names over the box,
    334 drawn after thinning at 1 km — 171 terrain, 114 lakes, 43 watercourses, 30 settlements,
    23 facilities, 5 glaciers — 218 of them at the size the map's lettering gives them, the
-   rest at the smallest; 13 cabins named, 7 off the register and 6 off OSM, 10 rivers named.
+   rest at the smallest (210 of 369 places once the languages are paired and the lettering is
+   matched on either name, §9.15); 10 rivers named off the register within 60 m.
    The water grid is 1,399 × 1,292 cells, 14.1 % water, 32 kB; 128 river surfaces at 9,441
-   vertices, 7 of them named; the graph payload 0.84 MB in a **3.3 MB page** (Lomsdal's is
+   vertices once clipped to the box (144 over the envelope), 10 of them named; the graph payload 0.84 MB in a **3.3 MB page** (Lomsdal's is
    16.6). Five GPX files. `route_graph.py --park abisko` reports the same cached graph: the
    state trail *BD 21* resolves to one register chain of 30.7 km (+612 / −498 m) and two
    Topografi 50 chains named from it; the park shares a boundary with the research station's
@@ -673,19 +680,20 @@ this map is the reason.
    percentile, 3.3 m at worst. No page errors. The graph itself: 22 components, the largest
    1,367 km and 95 % of the network, reaching 99 % of the park's 14.2 km north to south, with
    *Abisko* on it. **Driven by `make drive` the same evening** (§9.10).
-5. **Heights** — the tile build (§6.3). **Done 2026-09-12**: `command make dem` writes
+5. *Fixed, §9.15.* **Heights** — the tile build (§6.3). **Done 2026-09-12**: `command make dem` writes
    `analysis/output/dem/lantmateriet/1/` from the STAC COGs with the login, 540 tiles, 49 MB,
-   in a minute; not uploaded. **The reader is done too** (§4.4): the page reads the tiles for
+   in a minute; uploaded with the publish in step 6. **The reader is done too** (§4.4): the page reads the tiles for
    a straight leg and the build reads the mosaic they were cut from, measured against each
    other in step 4.
-6. **Acceptance and publish** — the structural readings of `make drive` against the Abisko page,
-   then `command make map --park abisko`, then `deploy_map.py --map abisko --tree tiles --tree dem`,
+6. *Fixed, §9.15.* **Acceptance and publish** — the structural readings of `make drive` against the Abisko page,
+   then `command make map ARGS="--park abisko"`, then `deploy_map.py --map abisko --tree tiles --tree dem`,
    which mirrors the trees first and then uploads the page and its own companions. **The drive
    is done, 2026-09-12** (§9.10): `command make drive ARGS="--page analysis/output/abisko.html"`
-   reads **570 readings, none broken**, the 22 figures the page's build gives recorded in its
-   scene, and three checks skipped for ground nobody has measured on this box (a pair of taps
-   beside a path, an island across a sound, a river a goal wades to). The Lomsdal-Visten drive
-   reads as before, 596 readings and none moved. **Published 2026-09-12 at Uwe's word**: the page
+   read **570 readings, none broken** that evening, the 22 figures the page's build gives
+   recorded in its scene, and three checks skipped for ground nobody had measured on this box;
+   two of those got their ground the same night (§9.11) and the suite its skip rule after the
+   review (§9.14), so the drive reads **595 readings, none broken, two skipped by the scene**,
+   and the Lomsdal-Visten drive **602 and none moved**. **Published 2026-09-12 at Uwe's word**: the page
    rebuilt (12 s, byte-identical, 3.3 MB → 1.12 MB brotli), `just deploy --map abisko --tree tiles
    --tree dem` from `home/trails-map` — the tile sync found nothing to upload in 103 s, the 540
    height tiles (49.3 MB) went up in 11 s, then the page, its worker, manifest and four icons, and
@@ -706,7 +714,8 @@ settled, move it to §9 with the date and what settled it.
 
 ### 8.1 What the first builds measure
 
-*Trigger: step 3 and step 5.* The tile copy's cost and the cartography check are answered
+*Trigger: a second box, or a stand of the FTP files newer than 2026-06-24.* The tile copy's
+cost and the cartography check are answered
 (§3, §9.5), and so are the COG questions — overviews, nodata, water, the login — in §6.3.
 The packed z13 tile weighs 92.7 kB (§6.3). Still open: whether Geotorget offers the tile
 product cut to an area, and how often the FTP files are refreshed (dated 2026-06-22 to 24 when
@@ -754,33 +763,33 @@ journal; §6.5 is enforced; every CRS is explicit; the tile tree matches its inv
 6. The search's `fold()` folds ø, æ, å and every combining mark, but ŋ, ŧ and đ decompose to
    nothing; seven names on this page carry ŋ (Hoŋgá, Gorsajiekŋa, Iŋggájávri, …) and *hongga*
    does not find Hoŋggá.
-7. `/abisko/` with a slash is a real address (the trailing-slash rewrite) that draws the map,
+7. *Fixed, §9.17.* `/abisko/` with a slash is a real address (the trailing-slash rewrite) that draws the map,
    but the relative `abisko-sw.js`, manifest and icons resolve under `/abisko/` and answer 404;
    the registered scope becomes `/abisko/abisko`. The same for `/lomsdal-visten/`.
-8. `copy_tiles` records the FTP file's modification time in `index.json` but never compares it
+8. *Fixed, §9.18.* `copy_tiles` records the FTP file's modification time in `index.json` but never compares it
    with the tree already on disk, so a republished file could be mixed under the immutable `/1/`.
-9. `just abisko` hands every value in the sops file to the build, the deploy key pair and the
+9. *Fixed, §9.18.* `just abisko` hands every value in the sops file to the build, the deploy key pair and the
    purge token included; the build needs the three `GEOTORGET_*` values.
-10. Drive tolerances loosened for this page and weakened for both: the route bar from 30 % over
+10. *Fixed, §9.14.* Drive tolerances loosened for this page and weakened for both: the route bar from 30 % over
     the flight to 5 %; the crossed-water figures recorded as 0 (a dry bay by construction), so
     an `undefined` crossing passes here; the give-up timing at ±14 s cannot tell three attempts
     from one.
-11. An interrupted `zipfile.extract` leaves a truncated GeoPackage at its final path that every
+11. *Fixed, §9.18.* An interrupted `zipfile.extract` leaves a truncated GeoPackage at its final path that every
     later run accepts (`topografi50`, `ortnamn`); the downloads themselves go part-then-rename.
 
 **Low**
 
-12. The Swedish branch draws 26 of 391 names outside the box, and cabins, facilities and trail
+12. *Fixed, §9.15.* The Swedish branch draws 26 of 391 names outside the box, and cabins, facilities and trail
     points are not clipped either; the Norwegian branch clips its names.
-13. `force_download` reaches only the `ovrig_vag` read in `sweden.py`; `approach_km` sits in the
+13. *Fixed, §9.18.* `force_download` reaches only the `ovrig_vag` read in `sweden.py`; `approach_km` sits in the
     graph fingerprint though the box build ignores it, so the docstring's own example rebuilds
     an identical graph; Topografi 50 `Vinterled` lines are stamped *Topografi 50 paths*;
     `--trail-name-m`'s help speaks of FKB.
-14. Deploy: `check()` reads the first 15 bytes and cannot see a truncated page; the tree-only
+14. *Fixed, §9.18.* Deploy: `check()` reads the first 15 bytes and cannot see a truncated page; the tree-only
     success line names `/tiles/`, which is 404; the index page shows the stored (brotli) size,
     1.1 MB for a 3.3 MB page; `README.md` there still says *No offline / PWA support* and
     *uploading `br` would break clients*, and links a heading that is not there.
-15. `analysis/README.md` and the Makefile quote 278 readings, 400 s and *three objects*; the
+15. *Fixed, §9.16.* `analysis/README.md` and the Makefile quote 278 readings, 400 s and *three objects*; the
     drive's docstring says a minute; §9.5's copy estimate predates the measured 916 s; §9.11
     says 22 m and then 49 m for the same river width; §9.12 and `ortnamn.py`'s comment disagree
     about Trollsjön/Geargejávri; §8.1's trigger names steps that are done.
@@ -823,8 +832,8 @@ order.
 ### 9.5 Whether the free file draws the same map as the paid service — yes, 2026-09-12
 
 Pixel-aligned and indistinguishable, measured on the box's centre tile at z13 (§3); the file's
-PNGs are indexed and less than half the size. And the copy costs 0.048 s a tile, so the whole
-box is an hour and a half, once.
+PNGs are indexed and less than half the size. And the copy was estimated at 0.048 s a tile
+and measured at 916 s for the whole box (§3), once.
 
 ---
 
@@ -955,7 +964,7 @@ within 1.5 km of the goal both ways and keeps only cases with 2 km of margin on 
 because a surface is named from the nearest watercourse name within 60 m (§5) and the register
 puts most names on the line, not the surface. And the Abiskojåkka's surface is named
 **Ábeskoeatnu**: the register carries the Sami and the Swedish name as two points, and the Sami
-one lies nearer. So a goal across it says *crosses Ábeskoeatnu, 49 m wide there* — which is
+one lies nearer. So a goal across it says *crosses Ábeskoeatnu, 22 m wide there* — which is
 correct, and is the name Lantmäteriet's own sheet prints beside it in the same size, but it is
 not the name the trail signs and the guidebooks use. Whether the Swedish name should be preferred
 where the register has both is a decision not taken here; the check pins the name the page says
@@ -1010,12 +1019,75 @@ the tree plus its 380 height tiles is 2,343); *Keep* fetched 2,343, 0 refused, n
 6.8 s; every one of the 2,373 requests answered 200. The Lomsdal page is unchanged in
 behaviour: `EXTENT` is null there and the ring stays.
 
+### 9.14 The drive names what it skips — fixed, 2026-09-12
+
+§8.2 items 2 and 10. A `Scene` now lists the checks it skips by choice in `skips`; a skip the
+page forces — a chain the page no longer holds, a control it no longer draws — is reported as
+**GONE** and exits 1, and the long-chain skip says that every check past it went with it.
+`Reading.passed` is false for an unrecorded figure whatever it read, so `None` and `False` are
+NEW rather than ok. The stations check emits a failing reading where a row or its button
+cannot be found instead of leaving the reading out. The route bar is a scene figure again,
+`way_over_flight`: 1.3 for Lomsdal-Visten as it was, 1.2 for Abisko (27 % measured), instead of
+5 % for both, which would pass a router that snaps to a node and draws one straight line. Two
+invariants say the crossed-water figure *is* a number before the figure says it is 0, and one
+says the give-up took more than 12 s, which two attempts cannot. Driven: Abisko 595 readings,
+none broken, two skipped by the scene; Lomsdal-Visten 602, none broken, none skipped.
+
+### 9.15 The names: nearest head, either name for the lettering, the box, the search — fixed, 2026-09-12
+
+§8.2 items 4, 5, 6 and 12. `ortnamn.paired` measures every same-type head within 500 m that
+lacks the point's language and joins the nearest (tested with three lakes 400 m apart and two
+Sámi names; the old code joined the wrong one). The lettering size is the nearest label within
+500 m that carries one of the place's names, first or `also` (`lettered_size` in
+`lomsdal_visten.py`): 210 places lettered instead of 203, Kungsleden and Kårsajåkka back at
+their size. The register's names, the cabins, the facilities and the trail points are clipped to
+the box like the water; the names still read over the SWEREF envelope, 26 of them stood on
+ground with no tiles. The search's `fold()` maps ŋ, ŧ and đ to n, t and d beside ø, æ and å;
+seven names on the page carry ŋ.
+
+### 9.16 This document's status lines — fixed, 2026-09-12
+
+§8.2 items 3 and 15. §5's counts are the loaders' (8 fords, 49 cabins, 128 river surfaces with
+10 named), its cabin and river names come off the register as §9.9 says, §6.3 and §7.5 say
+*uploaded*, §7.6 carries the current drive, §7.4 one answer per question, §9.5 the measured copy
+time, §9.11 one river width, §8.1 a trigger that can fire, and `make map ARGS="--park abisko"`
+is written the way `make` takes it. The two READMEs and the Makefile help say what the scripts
+do today: some 600 readings and ten minutes a page, the page and its companions, `--park`.
+
+### 9.17 A trailing slash — fixed in the page, 2026-09-12
+
+§8.2 item 7. The edge draws the map at `/abisko/` and a redirect would be a third rule phase
+(`home/trails-map/known-issues.md`), so the page puts its own path right: the first script in
+its head drops a trailing slash from `location.pathname` with `history.replaceState`, before
+the icon, manifest and worker links are read, so they resolve against `/abisko` wherever the
+page was opened. The root and a file on disk are left alone. Tested on the built page (the
+script precedes every link); measured at the edge after the next publish.
+
+### 9.18 The tree's stand, the part files, the build's keys, and the small ones — fixed, 2026-09-12
+
+§8.2 items 8, 9, 11, 13 and 14. `copy_tiles` reads the tree's own `index.json` first and refuses
+a file whose modification time differs from the one the tree was copied from — a new stand goes
+into a new version directory (tested). Both GeoPackages are unpacked through a `.part` file and
+renamed, like the downloads (tested for Topografi 50). `just abisko` unsets the deploy key
+pair, the provider token and the purge token before `make abisko`; the build sees the three
+`GEOTORGET_*` values. `force_download` reaches all four Topografi 50 reads; `approach_km` is
+pinned to 0 in the Swedish params so the fingerprint ignores what the box ignores; the winter
+lines are stamped *Topografi 50 winter trails*; `--trail-name-m` speaks of the register. The
+deploy checks that the page ends in `</html>`, checks it before listing the trees, and names
+the bucket rather than the 404 `/tiles/` when only trees went up; the index says *to load*
+beside the compressed size; the module's README says what the upload does.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, the rest of the review** — §8.2 items 2–15 fixed (§9.14–§9.18): the drive names
+  its skips and exits 1 on any other; the names join the nearest head and letter on either
+  name; the page drops a trailing slash itself; the tree refuses another stand of the file; the
+  build sees only its own keys; this document's status lines and the READMEs brought current.
+  Both pages rebuilt and driven clean; a republish is Uwe's call.
 - **2026-09-12, first fix** — the whole-map download no longer stalls on the box's edge
   (§9.13): the margin is clipped to the tree's extent and a 404 is not a refusal.
 - **2026-09-12, after the review** — the whole app reviewed (§8.2): fifteen findings, three of
@@ -1028,7 +1100,7 @@ A line per change to this document or to the decisions in it, newest first.
 - **2026-09-12, later still** — the two water checks driven on Abisko's ground (§9.11): a bay
   of Torneträsk for the sound, the Abiskojåkka for the river a goal wades to; the river's Sami
   name noted as a question.
-- **2026-09-12, last** — `make abisko` (and `just abisko` from `home/trails-map`, which supplies
+- **2026-09-12, later** — `make abisko` (and `just abisko` from `home/trails-map`, which supplies
   the login): tiles → dem → graph and report → page in one run, every step resumable or
   cached; builds only, the deploy stays `just deploy --map abisko --tree tiles --tree dem`.
 - **2026-09-12, later that night** — the variant icon (§6.2, §7 step 3): the cairn in Lapporten's gate,
