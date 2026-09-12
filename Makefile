@@ -19,7 +19,7 @@ ifneq ($(MISE),)
 export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
 endif
 
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy tiles
 
 # Default target
 help:
@@ -47,6 +47,7 @@ help:
 	@echo "  make map           Build the Lomsdal-Visten map into analysis/output/"
 	@echo "  make graph         Build the Lomsdal-Visten routing graph and report it"
 	@echo "                     both take ARGS=\"...\", e.g. make map ARGS=\"--approach-km 10\""
+	@echo "  make tiles         Copy the Abisko base-map tiles out of Lantmäteriet's open download"
 	@echo "  make deploy        Publish the built map and purge the edge (needs .env)"
 	@echo "  make fixtures      Generate/update test fixtures from real data"
 	@echo "  make fixtures-info Show information about test fixtures"
@@ -181,6 +182,14 @@ graph:
 deploy:
 	@echo "🚀 Publishing the built map..."
 	uv run python analysis/scripts/deploy_map.py $(ARGS)
+
+# Reads a 156 GB GeoPackage over FTP by byte range and writes only the box's tiles — about an
+# hour and a half for all of z8–z17, and it resumes, so stopping it costs nothing. Like `map` it
+# only builds; the deploy is what uploads. See analysis/docs/abisko-decisions.md §3.
+tiles:
+	@echo "🧩 Copying Lantmäteriet's tiles for the Abisko box (resumable)..."
+	uv run python analysis/scripts/lantmateriet_tiles.py $(ARGS)
+	@echo "✅ analysis/output/tiles/lantmateriet/topowebb/1/"
 
 drive:
 	@echo "🖱️  Driving the built map in a browser (about a minute; 25 s of it is the page loading)..."

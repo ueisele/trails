@@ -21,6 +21,8 @@ dependencies = [
     "lxml>=6.1.1",
     "tqdm>=4.70.0",
     "requests>=2.34.2",
+    # SQLite with its VFS interface exposed: how a 156 GB GeoPackage is read over FTP by byte range (trails.io.remote_sqlite).
+    "apsw>=3.53.4.0",
 ]
 
 [dependency-groups]
