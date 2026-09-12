@@ -855,7 +855,8 @@ minutes as a transient unit; the Lomsdal-Visten page after the same change, 596 
 A line per change to this document or to the decisions in it, newest first.
 
 - **2026-09-12, later that night** — the variant icon (§6.2, §7 step 3): the cairn in Lapporten's gate,
-  `Companions.mark`; the national parks' gold star looked at and not used.
+  `Companions.mark`; the national parks' gold star looked at and not used. Republished the same
+  hour at Uwe's word: page and companions, the trees untouched.
 - **2026-09-12, night** — **the Abisko map is published** (§7 step 6): page, companions and the
   height tiles in the bucket, the tiles were there already; verified from the edge byte for byte.
 - **2026-09-12, evening** — `make drive` drives both pages (§9.10, §7 step 6): a `Scene`
