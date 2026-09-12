@@ -52,6 +52,7 @@ Usage::
 """
 
 import argparse
+import dataclasses
 import math
 import re
 from dataclasses import dataclass
@@ -60,6 +61,7 @@ from typing import NamedTuple, Protocol
 
 import geopandas as gpd
 import pandas as pd
+import shapely
 from shapely.geometry import box
 from trails.io.export.gpx import (
     AREA_ELEMENT,
@@ -2564,6 +2566,43 @@ CABIN_LABEL_M = 150.0
 T50_RIVER_NAME_M = 60.0
 
 
+def lettered_size(names: gpd.GeoDataFrame, lettered: gpd.GeoDataFrame, within_m: float, metric_crs: str) -> pd.Series:
+    """The map's lettering size for each place: the nearest label within reach that carries one of the place's names.
+
+    **One of its names, and the nearest of those -- not the nearest label,
+    which then had to carry the name.** Asked the second way, a place whose own
+    label is 300 m off lost its size to a tarn's label 100 m off, and a river
+    whose Sámi name the map letters nearer than its Swedish one lost it to
+    itself: 7 of 210 lettered places over Abisko, Kungsleden and Kårsajåkka
+    among them (decisions §8.2). A place's names are its first and every
+    ``also`` the pairing gave it.
+
+    Args:
+        names: Places with ``name`` and ``also`` (comma-joined) columns
+        lettered: Labels with ``lettered`` and ``size`` columns
+        within_m: How far a label may stand from its place
+        metric_crs: Where metres are metres
+
+    Returns:
+        The size per place, aligned to ``names``, NaN where no label of its name is in reach
+    """
+    places = names.to_crs(metric_crs)
+    labels = lettered.to_crs(metric_crs).reset_index(drop=True)
+    reach = gpd.GeoDataFrame({"place": places.index}, geometry=places.geometry.buffer(within_m).to_numpy(), crs=metric_crs)
+    hits = gpd.sjoin(reach, labels, how="inner", predicate="intersects")
+    if hits.empty:
+        return pd.Series(float("nan"), index=names.index, dtype=float)
+    called = {
+        at: {str(name).casefold(), *(each.strip().casefold() for each in str(also).split(",") if each.strip())}
+        for at, name, also in zip(names.index, names["name"], names["also"], strict=True)
+    }
+    hits = hits[[str(text).casefold() in called[at] for at, text in zip(hits["place"], hits["lettered"], strict=True)]].copy()
+    at_place = places.index.get_indexer(pd.Index(hits["place"]))
+    hits["away"] = shapely.distance(places.geometry.to_numpy()[at_place], labels.geometry.to_numpy()[hits["index_right"].to_numpy()])
+    hits = hits.sort_values("away").drop_duplicates("place")
+    return pd.Series(hits["size"].to_numpy(), index=hits["place"]).reindex(names.index).astype(float)
+
+
 def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Built:
     """Read the Swedish registers and put everything they say on the map.
 
@@ -2582,7 +2621,11 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
 
     register = naturvardsregistret.Source(cache_dir=args.cache_dir)
     park = load_swedish_boundary(which, register)
-    params = sweden.Params.from_args(args)
+    # **The box takes no approach zone, so the fingerprint takes none either.**
+    # `approach_km` shapes the Norwegian band and nothing here; left in the
+    # key it forced a full rebuild, height pass and all, of an identical graph
+    # whenever the docstring's own `--approach-km 5` was typed (§8.2).
+    params = dataclasses.replace(sweden.Params.from_args(args), approach_km=0.0)
     # **The box, not a band round the park.** The tiles were copied for it and
     # the height mosaic was read over it, and the mosaic's cache is named by
     # the bounds it was read over, so the graph is cut to exactly the box or
@@ -2616,7 +2659,15 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     country = topografi50.Source(cache_dir=args.cache_dir)
 
     print("\nLoading place names (Ortnamn)...")
-    register_names = ortnamn.Source(cache_dir=args.cache_dir).names(bounds, force_download=args.force_download)
+    # **Clipped to the box, as every point layer below is.** The register is
+    # read over the SWEREF envelope of the box, which bows 60 m past its
+    # north and south edges; 26 of 391 names stood on ground the map has no
+    # tiles for (decisions §8.2), and the cabins, facilities and trail points
+    # went the same way.
+    inside = box(*bounds)
+    register_names = gpd.clip(ortnamn.Source(cache_dir=args.cache_dir).names(bounds, force_download=args.force_download), inside).reset_index(
+        drop=True
+    )
     print(f"  {len(register_names):,} names: {register_names['kind_label'].value_counts().to_dict()}")
     print(f"    {register_names['language'].value_counts().to_dict()}")
     # **One place, one label, Swedish first.** The register carries each
@@ -2633,10 +2684,9 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     # the place rather than on it.
     labels = country.labels(bounds, force_download=args.force_download)
     lettered = labels[["name", "size", "geometry"]].rename(columns={"name": "lettered"})
-    names = attach_nearest(names, lettered, {"lettered": "lettered", "size": "size"}, LETTERING_M, metric_crs=sweden.METRIC_CRS)
-    same = names["lettered"].notna() & (names["lettered"].astype("string").str.casefold() == names["name"].astype("string").str.casefold())
-    names["size"] = names["size"].where(same, 1).astype(int)
-    print(f"  {int(same.sum()):,} of them lettered on the map within {LETTERING_M:g} m, and drawn at that size")
+    sizes = lettered_size(names, lettered, LETTERING_M, sweden.METRIC_CRS)
+    names["size"] = sizes.fillna(1).astype(int)
+    print(f"  {int(sizes.notna().sum()):,} of them lettered on the map within {LETTERING_M:g} m, and drawn at that size")
     # Matched on the first name above; labelled with both from here on.
     names["name"] = [ortnamn.label(name, also) for name, also in zip(names["name"], names["also"], strict=True)]
     names["rank"] = 8 - names["size"]
@@ -2658,7 +2708,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     print(f"  Ferry and express-boat quays: {len(terminals)}")
 
     print("\nLoading Topografi 50 cabins...")
-    cabins = country.cabins(bounds, force_download=args.force_download)
+    cabins = gpd.clip(country.cabins(bounds, force_download=args.force_download), inside).reset_index(drop=True)
     settlement_names = names[names["kind"].isin(ortnamn.SETTLEMENT_TYPES)]
     if len(cabins) and len(settlement_names):
         # The product draws the building and the register names the place,
@@ -2685,7 +2735,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         print(f"    {cabins['kind'].value_counts().to_dict()}")
 
     print("\nLoading the register's facilities (Leder)...")
-    facilities = register.facilities(bounds, force_download=args.force_download)
+    facilities = gpd.clip(register.facilities(bounds, force_download=args.force_download), inside).reset_index(drop=True)
     facilities["name"] = facilities[naturvardsregistret.FACILITY_NAME]
     facilities["kind"] = translate_joined(facilities[naturvardsregistret.FACILITY_TYPE], FACILITY_LABELS)
     facilities["subtype"] = translate_joined(facilities[naturvardsregistret.FACILITY_SUBTYPE], FACILITY_LABELS)
@@ -2694,7 +2744,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     print(f"  {len(facilities):,} facilities: {facilities['kind'].value_counts().to_dict()}")
 
     print("\nLoading Topografi 50 trail points...")
-    trail_points = country.trail_points(bounds, force_download=args.force_download)
+    trail_points = gpd.clip(country.trail_points(bounds, force_download=args.force_download), inside).reset_index(drop=True)
     print(f"  {len(trail_points):,}: {trail_points['kind'].value_counts().to_dict()}")
 
     print("\nLoading Topografi 50 water...")

@@ -114,6 +114,24 @@ class TestPairing:
         # The Swedish point is the one kept, so the label stands where that name did.
         assert one.geometry.iloc[0].equals(names.geometry.iloc[1])
 
+    def test_a_point_within_reach_of_two_heads_joins_the_nearer(self):
+        """Three Swedish lakes 400 m apart and a Sámi name 50 m west of the
+        first: it belongs to the first, though the tree may list the second
+        before it. Measured before the fix: it joined whichever GEOS returned
+        first, and did so wrongly on this very layout."""
+        names = _placed(
+            [
+                ("Bajip Jávri", "VATTTX", "NS", 649950, 7580000),
+                ("Trollsjön", "VATTTX", "SV", 650000, 7580000),
+                ("Mellansjön", "VATTTX", "SV", 650400, 7580000),
+                ("Sydsjön", "VATTTX", "SV", 650800, 7580000),
+                ("Vuolip Jávri", "VATTTX", "NS", 650850, 7580000),
+            ]
+        )
+        out = ortnamn.paired(names)
+        assert list(out["name"]) == ["Trollsjön", "Mellansjön", "Sydsjön"]
+        assert list(out["also"]) == ["Bajip Jávri", "", "Vuolip Jávri"]
+
     def test_the_same_language_is_never_joined(self):
         """Two lakes 300 m apart, both named in Sámi only, are two lakes."""
         names = _placed([("Bajip Jávri", "VATTTX", "NS", 650000, 7580000), ("Vuolip Jávri", "VATTTX", "NS", 650300, 7580000)])

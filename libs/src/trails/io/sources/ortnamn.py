@@ -19,6 +19,7 @@ GeoPackage's index.
 """
 
 import os
+import shutil
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -95,8 +96,10 @@ TIMEOUT_S = 300
 #: How far apart the register puts two languages' points for one place. Measured
 #: over the Abisko box on 2026-09-12: the real pairs -- Abiskojåkka / Ábeskoeatnu
 #: 46 m, Torneträsk / Duortnosjávri 80–148 m, Lapporten / Čuonjávággi 87 m,
-#: Trollsjön / Geargejávri 240 m, Katterjåkk / Gátterjohka 249 m, Abisko /
-#: Ábeskovvu 412 m -- and the first pair that is two different places at 637 m.
+#: Trollsjön / Geargejávri 240 m (though the register calls that lake Geargejávri
+#: in Swedish too, so the two stay two names -- same language, never joined),
+#: Katterjåkk / Gátterjohka 249 m, Abisko / Ábeskovvu 412 m -- and the first pair
+#: that is two different places at 637 m.
 #: One real pair sits beyond it, Gorsajökeln / Gorsajiekŋa at 619 m, and stays
 #: two names rather than risk joining two lakes.
 PAIR_M = 500.0
@@ -190,13 +193,21 @@ def paired(names: gpd.GeoDataFrame, within_m: float = PAIR_M, metric_crs: str = 
         point = metric.geometry.iloc[i]
         joined_to = None
         if kind in trees:
+            # **The nearest head, not the first the tree returns.** A query
+            # answers in the tree's own order, which has nothing to do with
+            # distance; a point within reach of two heads used to join
+            # whichever GEOS listed first. Every candidate is measured and the
+            # closest taken -- a head that already carries this language is
+            # not a candidate at all.
             tree, members = trees[kind]
+            nearest = None
             for hit in tree.query(point.buffer(within_m)):
                 head = members[hit]
-                if code in languages[head] or kept_geoms[kept.index(head)].distance(point) > within_m:
+                if code in languages[head]:
                     continue
-                joined_to = head
-                break
+                away = kept_geoms[kept.index(head)].distance(point)
+                if away <= within_m and (nearest is None or away < nearest):
+                    joined_to, nearest = head, away
         if joined_to is None:
             kept.append(i)
             kept_geoms.append(point)
@@ -289,7 +300,13 @@ class Source:
             inner = next(name for name in opened.namelist() if name.endswith(".gpkg"))
             target = self.cache_dir / inner
             if not target.exists() or force_download:
-                opened.extract(inner, self.cache_dir)
+                # Through a part file, as the delivery reader does: a stop
+                # mid-extract must not leave the final name on a short file.
+                target.parent.mkdir(parents=True, exist_ok=True)
+                partial = target.with_name(target.name + ".part")
+                with opened.open(inner) as source, partial.open("wb") as sink:
+                    shutil.copyfileobj(source, sink, 16 * 1024 * 1024)
+                partial.replace(target)
         return target
 
     def names(self, bounds: Bounds, types: tuple[str, ...] | None = NAME_TYPES, force_download: bool = False) -> gpd.GeoDataFrame:
