@@ -999,7 +999,9 @@ times), 14 one name in two languages, and Trollsjön stayed beside Geargejávri 
 register calls the lake Geargejávri in Swedish too. *Since the review (§9.15)*: the Sámi point
 joins the nearest head, which for Geargejávri is Trollsjön at 240 m rather than the Swedish
 Geargejávri, so the map says *Trollsjön (Geargejávri)* and the Swedish Geargejávri stands on
-its own; clipped to the box, 365 names become 345 places, 9 with a second name.
+its own; clipped to the box, 365 names become 345 places, 9 with a second name. **Uwe,
+2026-09-12: kept that way** — the bracketed name is what a reader wants beside the one on the
+signs; the alternative, preferring a head of the same spelling, was offered and not taken.
 
 **Where it shows**: the three name layers, the search box, the cabins' names and the rivers'
 names all read the joined places, so a goal across the river now says *crosses Abiskojåkka
