@@ -590,8 +590,14 @@ settled, move it to §9 with the date and what settled it.
 The packed z13 tile weighs 92.7 kB (§6.3). Still open: whether Geotorget offers the tile
 product cut to an area, and how often the FTP files are refreshed (dated 2026-06-22 to 24 when
 first seen). And one for step 4: Naturvårdsverket's two WFS endpoints (§5) answered **503,
-"ArcGIS Server Error"** to `GetCapabilities` on 2026-09-12 11:00 — a bad hour or a moved path;
-check before `network/sweden.py` leans on them.
+"ArcGIS Server Error"** to `GetCapabilities` on 2026-09-12 11:00, and so did
+`naturvardsregistret/wfs`, a path in wide use — so the whole WFS server was down, not our path.
+The paths are the ones Naturvårdsverket's own catalogue lists (geodatakatalogen record
+`af2e37d3-45b0-4623-bcf2-0765c8ca7ab5`, *Friluftsliv: Leder och anordningar i skyddade
+områden*). Two things to take from that record when the server is back: the dataset is trails
+**in protected areas**, so the box's ground outside the national park may not be covered and
+Topografi 50 plus OSM carry it; and the loader must treat a 503 as "try later", since the
+service does go away for hours.
 
 ### 8.2 `make drive` for a second page
 
