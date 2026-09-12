@@ -22,9 +22,15 @@ Two kinds of reading, and the difference is the whole design:
     is *news*, and the answer may be to update the number here rather than the
     code — but only after looking at why.
 
-Run it with ``command make drive``. It needs a built page and about a minute:
-loading 39.6 MB of HTML is 25 s of that, which is why everything runs in one
-browser session rather than one apiece.
+Run it with ``command make drive``, or ``command make drive ARGS="--page
+analysis/output/abisko.html"`` for the other map. It needs a built page and
+about a minute: loading 39.6 MB of HTML is 25 s of that, which is why everything
+runs in one browser session rather than one apiece.
+
+**What is a page's own lives in its** ``Scene``: the long chain, the ground the
+checks stand on and look at, and the figures its build recorded. The checks
+themselves are the same for every page. A figure the scene has not recorded is
+reported as **new**, with what was read, and exits 2 like a moved one.
 
 The script exits **1** where an invariant broke and **2** where only a recorded
 figure moved. ``make`` turns any failed recipe into its own exit 2 and swallows
@@ -49,15 +55,269 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
-#: The page this drives. Built by ``command make map``.
+from trails.visualization import maps
+
+#: The page this drives when none is named. Built by ``command make map``.
 PAGE = pathlib.Path("analysis/output/lomsdal-visten.html")
 
-#: A chain long enough that the panel draws it coarser than its own samples, so
-#: there is something to zoom into. **A chain id is not a durable reference** —
-#: the notes say so about checksums and names alike — so it lives here, once,
-#: and the checks that need it say they were skipped rather than passing when it
-#: is gone. Any chain over about 20 km will do.
-LONG_CHAIN = "trail-group-ut-no-414306-7244296-42442"
+
+@dataclass(frozen=True)
+class RiverGoal:
+    """A goal a straight leg wades to, and the river the page has to name."""
+
+    #: Where the reader stands, on the network, with the river between them and
+    #: the goal.
+    standing: tuple[float, float]
+    #: The goal, on the far bank, closer straight across than round by any path.
+    goal: tuple[float, float]
+    label: str
+    #: What the register calls the water there, which the page has to say.
+    river: str
+
+
+@dataclass(frozen=True)
+class Scene:
+    """What one page has that the checks need and the checks cannot find alone.
+
+    **A check is structural or it is a figure, and neither is a park.** The
+    invariants below hold on any page this project builds; what a check needs
+    from a page to drive them -- a long chain, a spot on open water, a place to
+    stand -- is that page's ground, and the numbers it recorded are that page's
+    build. Both used to be written into the checks, which made the suite the
+    Lomsdal-Visten page's and no other's. They are here now, one scene per
+    page, chosen by the page's stem.
+
+    Every position is ``(lat, lon)``. The checks that need ground a scene does
+    not have -- a measured pair of taps, an island, a river a goal wades to --
+    say they were skipped rather than pretending to have driven it.
+    """
+
+    #: The page's stem, which is also the map's name in the bucket.
+    stem: str
+    #: A chain long enough that the panel draws it coarser than its own samples,
+    #: so there is something to zoom into. **A chain id is not a durable
+    #: reference** -- the notes say so about checksums and names alike -- so it
+    #: lives here, once, and the checks that need it say they were skipped rather
+    #: than passing when it is gone. Any chain over about 20 km will do.
+    long_chain: str
+    #: The reader's own position, granted to the browser: somewhere inside the
+    #: drawn park, so a check can ask whether the map moved to it.
+    position: tuple[float, float]
+    #: Where the position check looks first, at z11, before any fix arrives.
+    view: tuple[float, float]
+    #: A fix outside the long chain's bounds, so the map has to open for both.
+    off_route: tuple[float, float]
+    #: Ground with no path within a hundred metres, looked at from z12.
+    nowhere: tuple[float, float]
+    #: Two points on open water a few hundred metres apart: nothing to snap to,
+    #: so the leg between them is drawn straight and its heights asked for.
+    open_water: tuple[tuple[float, float], tuple[float, float]]
+    #: Where the walk in ``which_way_the_reader_faces`` starts, and the two
+    #: steps it takes: north-east, far enough apart that the bearing between
+    #: them is a walk and not the noise on one place seen twice.
+    walk: tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
+    #: The spot the accuracy check stands on, a step off it, and a walk away
+    #: from it -- 200 m, which no vaguer fix can explain away.
+    standing: tuple[float, float]
+    a_step: tuple[float, float]
+    a_walk: tuple[float, float]
+    #: The piece of ground the offline check keeps, about 5 x 9 km round the
+    #: position, as the ring a reader would draw. Small enough to be a check and
+    #: not a bulk fetch, and wide enough to cover the 1400 x 900 viewport the
+    #: offline visit looks at, so that *the kept ground draws* is asking about
+    #: coverage rather than about luck.
+    kept_area: tuple[tuple[float, float], ...]
+    #: Ground the offline check never kept, looked at from z12.
+    unkept: tuple[float, float]
+    #: A fix a hundred kilometres off the mapped ground altogether.
+    far_off_the_map: tuple[float, float]
+    #: What the request for a straight leg's heights has in its address, which
+    #: one check holds open and never answers: at the browser for a service
+    #: elsewhere, at the server for tiles served beside the page.
+    heights_path: str
+    #: How many base maps the legend offers.
+    base_maps: int
+    #: A name the search finds on this page.
+    search_for: str
+    #: Whether the page has to be served rather than opened off the disk: a sheet
+    #: or a height tile addressed from the root resolves to nothing under
+    #: ``file://``.
+    over_http: bool
+    #: The figures recorded from a build of this page, by the reading's name.
+    #: A reading whose figure is not here is reported as new, and the answer
+    #: is to record it here once it has been looked at.
+    figures: dict[str, Any]
+    #: A waypoint on the network and two taps either side of the old 150 m
+    #: reach, 28 m apart, as ``{"lat", "lng"}``. None where nobody measured one.
+    taps_beside: tuple[dict[str, float], dict[str, float], dict[str, float]] | None = None
+    #: Three taps whose snapped nodes once produced a route round half the park.
+    loop_taps: tuple[dict[str, float], ...] | None = None
+    #: The end of a path on one shore, a spot on an island across the water,
+    #: and a place 10 km off, for the check that a way across a sound goes
+    #: round by land.
+    sound: tuple[dict[str, float], dict[str, float], dict[str, float]] | None = None
+    river_goal: RiverGoal | None = None
+
+    @property
+    def companions(self) -> maps.Companions:
+        """The files beside the page and the database it keeps, by the stem."""
+        return maps.Companions.of(self.stem)
+
+
+SCENES: dict[str, Scene] = {
+    "lomsdal-visten": Scene(
+        stem="lomsdal-visten",
+        long_chain="trail-group-ut-no-414306-7244296-42442",
+        position=(65.55, 13.05),
+        view=(65.60, 13.20),
+        off_route=(66.10, 12.40),
+        nowhere=(65.75, 12.10),
+        open_water=((65.905, 12.180), (65.907, 12.183)),
+        walk=((65.4279, 13.0335), (65.4288, 13.0355), (65.4297, 13.0375)),
+        standing=(65.4400, 13.0400),
+        a_step=(65.44002, 13.04002),
+        a_walk=(65.4418, 13.0400),
+        # 176 tiles at z14 and 416 at z15.
+        kept_area=((65.528, 12.955), (65.572, 12.955), (65.572, 13.145), (65.528, 13.145)),
+        unkept=(65.30, 12.40),
+        far_off_the_map=(66.3128, 14.1428),
+        heights_path="hoydedata",
+        base_maps=2,
+        search_for="Gåsvatnet",
+        over_http=False,
+        figures={
+            # Re-recorded 2026-09-01, from 11,589 and 11,290: the source cache
+            # was cleared and the map regenerated, so Turrutebasen was fetched
+            # again and came back with twelve more chains. This is the movement
+            # a recorded figure is for -- looked at, understood, written down.
+            "paths in the overlay pane": 11601,
+            "of them chains drawn as lines": 11302,
+            "and chains drawn as circle markers": 298,
+            "things in the marker pane": 198,
+            "checkboxes in the legend": 30,
+            "of them switched off": 7,
+            "zoom before": 9,
+            "zoom after": 11,
+            "desktop: map free with nothing asked for": 96,
+            "upright: map free with nothing asked for": 96,
+            "sideways: map free with nothing asked for": 96,
+            "and the legend is what is in it": 30,
+            "px of map left above it": 565,
+            "sideways: px the drawing takes": 109,
+            "sideways: px the panel is": 186,
+            "seconds it took to give up": 18,
+            "and it still finds a name": 3,
+            "m shown by a quarter-width drag": 11188,
+            "the plan walks this far on paths": 1.6,
+            "and crosses this much water": 0.39,
+            "from 10 km off, the way is on paths for": 8.5,
+            "and straight for": 4.0,
+            "crossing this much water": 0.39,
+            # Shapely on the unsimplified outline: 29.9 m.
+            "and what width it says": 30,
+            "readable in the light set": 15.1,
+            "what it weighs": 549,
+            "and what writing it cost": 34,
+            "and how long it took to come back": 21,
+        },
+        # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
+        # from the nearest node to them, 28 m apart.
+        taps_beside=(
+            {"lat": 65.327587, "lng": 13.129687},
+            {"lat": 65.311875, "lng": 13.161214},
+            {"lat": 65.312125, "lng": 13.161214},
+        ),
+        # Where the reader stood, and the two stops whose nodes produced the loop.
+        loop_taps=(
+            {"lat": 65.327587, "lng": 13.129687},
+            {"lat": 65.394585, "lng": 13.076827},
+            {"lat": 65.413008, "lng": 13.090708},
+        ),
+        # The end of the path on the north shore of the sound at Bekkevoll, and
+        # a spot on the headland across it -- both read off the water grid the
+        # build wrote, so the second is dry land 1.28 km from the first with
+        # 0.96 km of sea between -- and a place 10 km off.
+        sound=(
+            {"lat": 65.3320, "lng": 12.9368},
+            {"lat": 65.3205, "lng": 12.9380},
+            {"lat": 65.4000, "lng": 13.0500},
+        ),
+        # The junction by Granlia, with the goal on the far bank of Krutåga,
+        # which the register calls Storelva there.
+        river_goal=RiverGoal(standing=(65.33219, 12.977855), goal=(65.32371, 12.99122), label="Across Krutåga", river="Storelva"),
+    ),
+    "abisko": Scene(
+        stem="abisko",
+        # Kungsleden from Abisko to Abiskojaure and Rallarvägen on to Tornehamn,
+        # one register chain of 30.7 km.
+        long_chain="trail-group-leder-647291-7598453-30741",
+        # On the Kungsleden in the middle of the park.
+        position=(68.32, 18.72),
+        view=(68.37, 18.87),
+        # South-east of Torneträsk, off the long chain's bounds.
+        off_route=(68.20, 18.95),
+        # Torneträsk, 4.5 km from the nearest edge of the network.
+        nowhere=(68.40, 18.85),
+        open_water=((68.400, 18.850), (68.402, 18.853)),
+        walk=((68.3000, 18.7000), (68.3009, 18.7020), (68.3018, 18.7040)),
+        standing=(68.3100, 18.7100),
+        a_step=(68.31002, 18.71002),
+        a_walk=(68.3118, 18.7100),
+        kept_area=((68.298, 18.615), (68.342, 18.615), (68.342, 18.825), (68.298, 18.825)),
+        # The box's south-west corner: no tile the suite browses at z12 round
+        # the position reaches into a 1400 x 900 view here, and a browsed tile
+        # is served with the switch on, by design.
+        unkept=(68.19, 18.18),
+        far_off_the_map=(67.50, 20.00),
+        # The z13 Terrarium tiles under `dem/`, read for a straight leg.
+        heights_path="/dem/",
+        base_maps=1,
+        search_for="Abiskojaure",
+        # Lantmäteriet's sheets and the height tiles are addressed from the root.
+        over_http=True,
+        # Recorded 2026-09-12 from the first build of the page: 813 chains,
+        # 19 legend rows, one base map.
+        figures={
+            "paths in the overlay pane": 830,
+            "of them chains drawn as lines": 813,
+            "and chains drawn as circle markers": 16,
+            "things in the marker pane": 84,
+            "checkboxes in the legend": 19,
+            "of them switched off": 4,
+            "zoom before": 10,
+            "zoom after": 12,
+            "desktop: map free with nothing asked for": 97.7,
+            "upright: map free with nothing asked for": 97.8,
+            "sideways: map free with nothing asked for": 97.7,
+            "and the legend is what is in it": 19,
+            "px of map left above it": 562,
+            "sideways: px the drawing takes": 109,
+            "sideways: px the panel is": 189,
+            "seconds it took to give up": 16.9,
+            "and it still finds a name": 15,
+            "m shown by a quarter-width drag": 8114,
+            "readable in the light set": 15.1,
+            "what it weighs": 463,
+            "and what writing it cost": 16,
+            "and how long it took to come back": 20.7,
+        },
+    ),
+}
+
+#: The scene of the page being driven. Set once in ``main``, from the page's
+#: stem, before any check runs.
+SCENE: Scene = SCENES["lomsdal-visten"]
+
+
+def located(where: tuple[float, float], accuracy: float) -> dict[str, float]:
+    """A position as the browser's geolocation takes it."""
+    return {"latitude": where[0], "longitude": where[1], "accuracy": accuracy}
+
+
+def in_db(js: str) -> str:
+    """The page's own database named in a script that opens it."""
+    return js.replace("__DB__", SCENE.companions.database)
+
 
 #: How long to wait after ``goto`` before believing anything. The page decodes a
 #: 4.93 MB payload into a graph on load.
@@ -94,6 +354,22 @@ class Check:
     name: str
     readings: list[Reading] = field(default_factory=list)
     skipped: str = ""
+
+
+def stands(what: str, got: Any, within: float = 0.0, note: str = "") -> Reading:
+    """A figure recorded from a build of this scene's page, against what it reads now.
+
+    Args:
+        what: The reading's name, which is its key in the scene's figures
+        got: What the page reads now
+        within: How far the figure may move before it is reported
+        note: What to print beside it
+
+    Returns:
+        A reading that is news rather than a fault when it moves -- and one that
+        is reported as new, with what it read, when the scene has no figure yet
+    """
+    return Reading(what, got, SCENE.figures.get(what), within, holds=False, note=note)
 
 
 # ---------------------------------------------------------------------------
@@ -570,13 +846,11 @@ def furniture(page: Any) -> Check:
     return Check(
         "the page's furniture",
         [
-            # Re-recorded 2026-09-01, from 11,589 and 11,290: the source cache
-            # was cleared and the map regenerated, so Turrutebasen was fetched
-            # again and came back with twelve more chains. This is the movement
-            # a `stands` reading is for -- looked at, understood, written down.
-            Reading("paths in the overlay pane", seen["paths"], 11601, holds=False),
-            Reading("of them chains drawn as lines", seen["lines"], 11302, holds=False),
-            Reading("and chains drawn as circle markers", seen["circles"], 298, holds=False),
+            # What the last build drew, recorded in the scene: a figure that
+            # moves when the sources move, looked at and written down.
+            stands("paths in the overlay pane", seen["paths"]),
+            stands("of them chains drawn as lines", seen["lines"]),
+            stands("and chains drawn as circle markers", seen["circles"]),
             # **The decomposition has to add up.** The count above moves when the
             # sources move; this does not, and it is what catches something drawn
             # into a pane it has no business being in — a planned route carries no
@@ -591,10 +865,10 @@ def furniture(page: Any) -> Check:
             # of pointer events so clicks reach the trails under its fill. A
             # second one means something else stopped answering clicks.
             Reading("paths deaf to the pointer", seen["deaf"], 1),
-            Reading("things in the marker pane", seen["markers"], 198, holds=False),
-            Reading("checkboxes in the legend", seen["boxes"], 30, holds=False),
-            Reading("of them switched off", seen["off"], 7, holds=False),
-            Reading("base maps offered", seen["radios"], 2),
+            stands("things in the marker pane", seen["markers"]),
+            stands("checkboxes in the legend", seen["boxes"]),
+            stands("of them switched off", seen["off"]),
+            Reading("base maps offered", seen["radios"], SCENE.base_maps),
             # Folium hands every base layer to the map; the legend takes the
             # unwanted ones off again, and nothing else will.
             Reading("tile layers actually on the map", seen["tiles"], 1),
@@ -603,7 +877,7 @@ def furniture(page: Any) -> Check:
             # and imperial, one above the other, and with the zoom line under
             # them that corner reads as the same control drawn twice.
             Reading("bars in the scale control", seen["scaleBars"], 1),
-            Reading("the touch icon is a file, not a data: URI", seen["touchIcon"], "icon-180.png"),
+            Reading("the touch icon is a file, not a data: URI", seen["touchIcon"], SCENE.companions.icon_named(180)),
             Reading("and the figures drawn once, not twice", seen["scaleShadow"], "none"),
             Reading("strokes in the offline tool's drawing", seen["offlineStrokes"] > 0, True, note=f"{seen['offlineStrokes']} paths"),
             # **The rail takes the right and Leaflet keeps the left.** It stood
@@ -633,9 +907,9 @@ def the_icons_are_there(page: Any) -> Check:
         What each icon answered, and what it turned out to be
     """
     got = page.evaluate(
-        """async () => {
+        """async (names) => {
             const out = {};
-            for (const name of ['icon-32.png', 'icon-180.png', 'icon-192.png', 'icon-512.png']) {
+            for (const name of names) {
                 try {
                     const answer = await fetch(name);
                     const bytes = new Uint8Array(await answer.arrayBuffer());
@@ -645,7 +919,8 @@ def the_icons_are_there(page: Any) -> Check:
                 } catch (missing) { out[name] = {ok: false, png: false, bytes: 0}; }
             }
             return out;
-        }"""
+        }""",
+        [SCENE.companions.icon_named(side) for side in maps.ICON_SIZES],
     )
     readings = []
     for name, answer in got.items():
@@ -668,13 +943,13 @@ def map_wheel(page: Any) -> Check:
     page.mouse.wheel(0, -240)
     page.wait_for_timeout(900)
     after = page.evaluate(f"() => {MAP_OBJECT}.getZoom()")
-    page.evaluate(f"(z) => {MAP_OBJECT}.setZoom(z)", zoom)
+    page.evaluate(f"(z) => {{ {MAP_OBJECT}.setZoom(z); }}", zoom)
     page.wait_for_timeout(600)
     return Check(
         "a wheel over open map",
         [
-            Reading("zoom before", zoom, 9, holds=False),
-            Reading("zoom after", after, 11, holds=False),
+            stands("zoom before", zoom),
+            stands("zoom after", after),
         ],
     )
 
@@ -867,7 +1142,7 @@ def popup_click(page: Any) -> Check:
         map.eachLayer(walk);
         if (found) { const at = found.getLatLngs()[Math.floor(found.getLatLngs().length / 2)];
           map.setView(at, 12); found.openPopup(at); } }"""),
-        LONG_CHAIN,
+        SCENE.long_chain,
     )
     page.wait_for_timeout(1200)
     where = page.evaluate(
@@ -1128,7 +1403,7 @@ def chrome_layout(page: Any) -> Check:
         # check carrying its own copy of the rule is a check that can agree with
         # itself while disagreeing with the map.
         narrow = width < seen["state"]["threshold"] or height < seen["state"]["column"]
-        readings.append(Reading(f"{label}: map free with nothing asked for", seen["free"], 96, within=4, holds=False))
+        readings.append(stands(f"{label}: map free with nothing asked for", seen["free"], within=4))
         readings.append(Reading(f"{label}: the rail stands", seen["rail"], not narrow))
         readings.append(Reading(f"{label}: the burger stands", seen["burger"], narrow))
 
@@ -1143,7 +1418,7 @@ def chrome_layout(page: Any) -> Check:
     page.evaluate("() => window.trailsChrome.open('layers')")
     page.wait_for_timeout(400)
     readings.append(Reading("a rail button docks its panel", opened, "layers"))
-    readings.append(Reading("and the legend is what is in it", boxes, 30, holds=False))
+    readings.append(stands("and the legend is what is in it", boxes))
     readings.append(Reading("and the same button puts it away", page.evaluate("() => window.trailsChrome.state().tool"), None))
     return Check("one layout, decided by the room the map has", readings)
 
@@ -1346,9 +1621,9 @@ def a_place_takes_the_panel(page: Any) -> Check:
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(700)
     page.evaluate("() => window.trailsChrome.close()")
-    if not select(page, LONG_CHAIN):
+    if not select(page, SCENE.long_chain):
         page.set_viewport_size({"width": 1400, "height": 900})
-        return Check("a place takes the panel", skipped=f"{LONG_CHAIN} is not in this page")
+        return Check("a place takes the panel", skipped=f"{SCENE.long_chain} is not in this page")
     page.wait_for_timeout(800)
 
     seen = """() => { const panel = document.querySelector('.trails-profile-panel');
@@ -1381,7 +1656,7 @@ def a_place_takes_the_panel(page: Any) -> Check:
     page.wait_for_timeout(1000)
     place = page.evaluate(seen)
 
-    select(page, LONG_CHAIN)
+    select(page, SCENE.long_chain)
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(700)
 
@@ -1429,7 +1704,7 @@ def the_theme_switch(page: Any) -> Check:
     # The curve is only drawn while something is on it, and a check that quietly
     # reports *not showing* for the one thing it was written for is a check that
     # passes by not looking.
-    select(page, LONG_CHAIN)
+    select(page, SCENE.long_chain)
     page.wait_for_timeout(700)
     page.evaluate(SHOW_TOOL, "theme")
     page.wait_for_timeout(300)
@@ -1457,7 +1732,7 @@ def the_theme_switch(page: Any) -> Check:
             )
         )
     else:
-        readings.append(Reading("the curve is drawn at all", False, True, note=f"no labels found for {LONG_CHAIN}"))
+        readings.append(Reading("the curve is drawn at all", False, True, note=f"no labels found for {SCENE.long_chain}"))
     # **Left as it was found.** On a narrow screen an open tool covers the map,
     # and the checks after this one click into it. The choice is already back on
     # auto with nothing kept; this puts the panel away too.
@@ -1488,9 +1763,9 @@ def the_sources_are_a_page(page: Any) -> Check:
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(900)
     page.evaluate("() => window.trailsChrome.close()")
-    if not select(page, LONG_CHAIN):
+    if not select(page, SCENE.long_chain):
         page.set_viewport_size({"width": 1400, "height": 900})
-        return Check("the sources are a page", skipped=f"{LONG_CHAIN} is not in this page")
+        return Check("the sources are a page", skipped=f"{SCENE.long_chain} is not in this page")
     page.wait_for_timeout(900)
 
     # `getClientRects()` and not `offsetParent`: the second is the probe this
@@ -1570,7 +1845,7 @@ def the_sources_are_a_page(page: Any) -> Check:
             # The page is the drawing's own height, so the panel costs the map
             # the same whichever page is showing -- and it is the reader's, so
             # what it costs is theirs to set.
-            Reading("px of map left above it", read["top"], 565, within=30, holds=False),
+            stands("px of map left above it", read["top"], within=30),
             Reading("and the page never takes more than half", read["high"] < 844 * 0.55, True, note=f"{read['high']} px"),
             Reading("a second press folds the pages", folded["pages"]["open"], False),
             Reading("and the row stays", folded["top"] is not None and folded["high"] < 90, True, note=f"{folded['high']} px"),
@@ -1634,13 +1909,11 @@ def room_on_a_short_screen(page: Any) -> Check:
             Reading("sideways: the page is the drawing", sideways["pages"], sideways["chart"], within=2),
             Reading("sideways: and the row stands under it", sideways["under"], True),
             Reading("sideways: reachable by scrolling the page", sideways["scrolls"] > 0, True, note=f"{sideways['scrolls']} px below the fold"),
-            Reading("sideways: px the drawing takes", sideways["chart"], 109, within=10, holds=False),
-            Reading(
+            stands("sideways: px the drawing takes", sideways["chart"], within=10),
+            stands(
                 "sideways: px the panel is",
                 sideways["panel"],
-                186,
                 within=14,
-                holds=False,
                 note="of 390: the drawing, and the row that says what it is",
             ),
             Reading("desktop: the row is under the drawing too", desk["under"], True),
@@ -2249,13 +2522,13 @@ def copying_a_position(page: Any) -> Check:
                     copied: window.trailsChrome.copied()}; }"""
         )
     # And where there is no path within a hundred metres, nothing is claimed.
-    page.evaluate(with_map("() => __MAP__.setView([65.75, 12.10], 12, {animate: false})"))
+    page.evaluate(with_map("(at) => { __MAP__.setView(at, 12, {animate: false}); }"), list(SCENE.nowhere))
     page.wait_for_timeout(900)
     at = page.evaluate(middle)
     page.mouse.click(at["x"], at["y"])
     page.wait_for_timeout(800)
     at_sea = page.evaluate("() => document.querySelector('.trails-pick-said').textContent")
-    page.evaluate(with_map("(v) => __MAP__.setView([v[0], v[1]], v[2], {animate: false})"), seen)
+    page.evaluate(with_map("(v) => { __MAP__.setView([v[0], v[1]], v[2], {animate: false}); }"), seen)
     page.wait_for_timeout(700)
 
     # 2. disarmed: the tap is plan mode's again.
@@ -2268,7 +2541,7 @@ def copying_a_position(page: Any) -> Check:
     page.evaluate("() => window.trailsChrome.picking(false)")
     page.wait_for_timeout(400)
     if on_track:
-        page.evaluate(with_map("(w) => __MAP__.setView([w.lat, w.lon], 15, {animate: false})"), on_track)
+        page.evaluate(with_map("(w) => { __MAP__.setView([w.lat, w.lon], 15, {animate: false}); }"), on_track)
         page.wait_for_timeout(700)
         near = page.evaluate(middle)
         page.mouse.click(near["x"], near["y"])
@@ -2373,9 +2646,15 @@ def a_leg_whose_heights_never_arrive(page: Any) -> Check:
     page.wait_for_timeout(500)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.picking(false); }")
     # Accepted and never answered. `route` with a handler that does nothing at
-    # all leaves the request in flight, which is the case in question.
+    # all leaves the request in flight, which is the case in question. **Held
+    # at the server where the page is served**: a request the page's own
+    # worker makes for it never passes the browser's routing, so the server
+    # this suite runs is what takes the connection and says nothing.
     held: list[Any] = []
-    page.route("**/hoydedata/**", lambda route: held.append(route))
+    if SCENE.over_http:
+        _Quiet.hold = SCENE.heights_path
+    else:
+        page.route(f"**{SCENE.heights_path}**", lambda route: held.append(route))
 
     page.evaluate("() => { if (!window.trailsPlan.state().on) { window.trailsPlan.toggle(true); } }")
     page.wait_for_timeout(400)
@@ -2388,10 +2667,10 @@ def a_leg_whose_heights_never_arrive(page: Any) -> Check:
     # **Two points on open water**, which is the shortest way to a leg the
     # network cannot answer: nothing is within snapping distance, so the leg is
     # drawn straight and its heights have to be asked for.
-    page.evaluate("() => window.trailsPlan.place(65.905, 12.180)")
+    page.evaluate("(at) => window.trailsPlan.place(at[0], at[1])", list(SCENE.open_water[0]))
     settled(page)
     began = time.monotonic()
-    page.evaluate("() => window.trailsPlan.place(65.907, 12.183)")
+    page.evaluate("(at) => window.trailsPlan.place(at[0], at[1])", list(SCENE.open_water[1]))
     # Three attempts of five seconds and the backoff between them is about
     # eighteen; this waits twice that before calling it a hang.
     gave_up = settled(page, 40_000)
@@ -2405,7 +2684,10 @@ def a_leg_whose_heights_never_arrive(page: Any) -> Check:
                 why: (legs.find(l => l && l.failed) || {}).failed || ''}; }"""
     )
 
-    page.unroute("**/hoydedata/**")
+    if SCENE.over_http:
+        _Quiet.hold = None
+    else:
+        page.unroute(f"**{SCENE.heights_path}**")
     for route in held:
         try:
             route.abort()
@@ -2425,12 +2707,10 @@ def a_leg_whose_heights_never_arrive(page: Any) -> Check:
             # The whole of it: the wait ends.
             Reading("the leg gives up rather than hanging", gave_up, True),
             Reading("and plan mode is not working any more", said["working"], False),
-            Reading(
+            stands(
                 "seconds it took to give up",
                 took,
-                18,
                 within=14,
-                holds=False,
                 note=f"{took} s: three attempts of five and the backoff between them",
             ),
             # And what it becomes is a leg with no heights, which the route
@@ -2467,8 +2747,8 @@ def the_point_list_takes_the_room(page: Any) -> Check:
     page.wait_for_timeout(600)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
     page.wait_for_timeout(500)
-    if not select(page, LONG_CHAIN):
-        return Check("the point list takes the room", skipped=f"{LONG_CHAIN} is not in this page")
+    if not select(page, SCENE.long_chain):
+        return Check("the point list takes the room", skipped=f"{SCENE.long_chain} is not in this page")
     places = page.evaluate(
         """() => { const shape = window.trailsProfile.shape;
         return [0.05, 0.14, 0.23, 0.32, 0.41, 0.5, 0.59, 0.68, 0.77, 0.86]
@@ -2628,9 +2908,9 @@ def files_from_the_page(page: Any) -> Check:
     # a check that only runs in one order is a check that can stop running.
     page.evaluate("() => window.trailsPlan.toggle(false)")
     page.wait_for_timeout(500)
-    if not select(page, LONG_CHAIN):
+    if not select(page, SCENE.long_chain):
         page.set_viewport_size({"width": 1400, "height": 900})
-        return Check("files written and read back", skipped=f"{LONG_CHAIN} is not in this page")
+        return Check("files written and read back", skipped=f"{SCENE.long_chain} is not in this page")
 
     places = page.evaluate(
         """() => { const shape = window.trailsProfile.shape;
@@ -2922,7 +3202,7 @@ def the_search_on_a_narrow_panel(page: Any) -> Check:
     mouse = page.evaluate(read)
 
     # And it finds what it always found.
-    page.fill(".trails-search-field", "Gåsvatnet")
+    page.fill(".trails-search-field", SCENE.search_for)
     page.wait_for_timeout(1200)
     found = page.evaluate(
         """() => { const box = document.querySelector('.trails-search');
@@ -2942,7 +3222,7 @@ def the_search_on_a_narrow_panel(page: Any) -> Check:
             # The width is the dock's business and not the pointer's: it is the
             # same field either way, in the same panel.
             Reading("either way, per cent of the panel it takes", finger["share"] if finger else 0, 92, within=5, note="54 before"),
-            Reading("and it still finds a name", int(found), 3, holds=False),
+            stands("and it still finds a name", int(found)),
         ],
     )
 
@@ -2986,7 +3266,7 @@ def the_profile_tool(page: Any) -> Check:
     opened = page.evaluate(shown)
     titled = page.evaluate("() => document.querySelector('.trails-dock .trails-chrome-title').textContent")
 
-    told = select(page, LONG_CHAIN)
+    told = select(page, SCENE.long_chain)
     page.wait_for_timeout(900)
     after = page.evaluate("() => ({tool: window.trailsChrome.state().tool, profile: window.trailsChrome.state().profile})")
     lit = page.evaluate(button)
@@ -3004,7 +3284,7 @@ def the_profile_tool(page: Any) -> Check:
 
     # And it hands the page back the way it found it, or the check after this
     # one selects the same chain and deselects it instead.
-    page.evaluate(SELECT_CHAIN, LONG_CHAIN)
+    page.evaluate(SELECT_CHAIN, SCENE.long_chain)
     page.wait_for_timeout(900)
 
     return Check(
@@ -3121,7 +3401,7 @@ def brushing_the_curve(page: Any) -> Check:
             Reading("and moves the window", shifted["at"] != clicked["at"], True),
             Reading("a double click puts the whole chain back", round(back["zoom"], 3), 1.0),
             # A recorded figure: it moves when the chain or the panel does.
-            Reading("m shown by a quarter-width drag", round(picked["shown"]), 11188, within=60, holds=False),
+            stands("m shown by a quarter-width drag", round(picked["shown"]), within=60),
         ],
     )
 
@@ -3162,8 +3442,8 @@ def undo_undoes_the_last_change(page: Any) -> Check:
     # a chain with it on selects nothing and every reading after that skips.
     page.evaluate("() => window.trailsPlan.toggle(false)")
     page.wait_for_timeout(500)
-    if not select(page, LONG_CHAIN):
-        return Check("undo undoes the last change", skipped=f"{LONG_CHAIN} is not in this page")
+    if not select(page, SCENE.long_chain):
+        return Check("undo undoes the last change", skipped=f"{SCENE.long_chain} is not in this page")
     places = page.evaluate(
         """() => { const shape = window.trailsProfile.shape;
         return [0.05, 0.3, 0.55, 0.8].map(f => Math.floor(f * (shape.lon.length - 1)))
@@ -3432,11 +3712,11 @@ def where_the_reader_is(page: Any) -> Check:
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(500)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
-    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.context.set_geolocation(located(SCENE.position, 24))
     # **It lays its own view down**, like the file check lays its own route. The
     # checks before this leave the map wherever they were looking, and every
     # question here is answered against a scale.
-    page.evaluate(f"() => {MAP_OBJECT}.setView([65.60, 13.20], 11)")
+    page.evaluate(with_map("(at) => { __MAP__.setView(at, 11); }"), list(SCENE.view))
     page.wait_for_timeout(700)
 
     seen = """() => {
@@ -3513,7 +3793,7 @@ def where_the_reader_is(page: Any) -> Check:
     # so, which is how it was found.
     page.evaluate("() => window.trailsPlan.toggle(false)")
     page.wait_for_timeout(500)
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     page.wait_for_timeout(600)
     on_track = page.evaluate(
         """() => { const s = window.trailsProfile && window.trailsProfile.shape;
@@ -3525,7 +3805,7 @@ def where_the_reader_is(page: Any) -> Check:
     if on_track:
         page.context.set_geolocation({"latitude": on_track["lat"], "longitude": on_track["lon"], "accuracy": 18})
         page.evaluate(
-            with_map("(w) => __MAP__.setView([w.lat + 0.01, w.lon + 0.01], 13, {animate: false})"),
+            with_map("(w) => { __MAP__.setView([w.lat + 0.01, w.lon + 0.01], 13, {animate: false}); }"),
             on_track,
         )
         page.wait_for_timeout(600)
@@ -3538,28 +3818,29 @@ def where_the_reader_is(page: Any) -> Check:
         page.wait_for_timeout(400)
 
         # And outside them the map opens far enough to hold both.
-        page.context.set_geolocation({"latitude": 66.10, "longitude": 12.40, "accuracy": 30})
+        page.context.set_geolocation(located(SCENE.off_route, 30))
         page.evaluate("() => window.trailsChrome.here(true)")
         watched()
         away = page.evaluate(
             with_map(
-                """() => { const box = __MAP__.getBounds();
+                """(off) => { const box = __MAP__.getBounds();
                 const s = window.trailsProfile.shape;
                 let whole = true;
                 for (let i = 0; i < s.lat.length; i += 50) {
                   if (!box.contains([s.lat[i], s.lon[i]])) { whole = false; break; } }
-                return {route: whole, fix: box.contains([66.10, 12.40]),
+                return {route: whole, fix: box.contains(off),
                         zoom: __MAP__.getZoom()}; }"""
-            )
+            ),
+            list(SCENE.off_route),
         )
         page.evaluate("() => window.trailsChrome.here(false)")
         page.wait_for_timeout(400)
 
-    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.context.set_geolocation(located(SCENE.position, 24))
     page.evaluate("() => window.trailsChrome.close()")
     page.wait_for_timeout(400)
 
-    moved = round(((after["centre"]["lat"] - 65.55) ** 2 + (after["centre"]["lng"] - 13.05) ** 2) ** 0.5, 4)
+    moved = round(((after["centre"]["lat"] - SCENE.position[0]) ** 2 + (after["centre"]["lng"] - SCENE.position[1]) ** 2) ** 0.5, 4)
     panned = (
         round(((inside["centre"]["lat"] - on_track["lat"]) ** 2 + (inside["centre"]["lng"] - on_track["lon"]) ** 2) ** 0.5, 4) if inside else None
     )
@@ -3599,18 +3880,12 @@ def where_the_reader_is(page: Any) -> Check:
             Reading("and says so", stopped["watching"], False),
             # A route on the panel: the reader's scale, and only the middle moves.
             Reading("with a route on the panel, the zoom is kept", inside["zoom"] if inside else None, inside["held"] if inside else None),
-            Reading("and the map goes to the fix", (panned or 1) < 0.02, True, note=str(panned)),
+            Reading("and the map goes to the fix", (panned if panned is not None else 1) < 0.02, True, note=str(panned)),
             # Outside its bounds, both have to fit.
             Reading("a fix off the route opens the map", away["route"] if away else None, True),
             Reading("far enough to hold the fix too", away["fix"] if away else None, True, note=f"zoom {away['zoom']}" if away else ""),
         ],
     )
-
-
-#: Where the walk in ``which_way_the_reader_faces`` starts, and the two steps it
-#: takes: north-east, far enough apart that the bearing between them is a walk
-#: and not the noise on one place seen twice.
-WALK = [(65.4279, 13.0335), (65.4288, 13.0355), (65.4297, 13.0375)]
 
 
 def bearing_between(start: tuple[float, float], end: tuple[float, float]) -> float:
@@ -3698,8 +3973,8 @@ def which_way_the_reader_faces(page: Any) -> Check:
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(400)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
-    page.context.set_geolocation({"latitude": WALK[0][0], "longitude": WALK[0][1], "accuracy": 24})
-    page.evaluate(f"() => {MAP_OBJECT}.setView([{WALK[0][0]}, {WALK[0][1]}], 14)")
+    page.context.set_geolocation({"latitude": SCENE.walk[0][0], "longitude": SCENE.walk[0][1], "accuracy": 24})
+    page.evaluate(with_map("(at) => { __MAP__.setView(at, 14); }"), list(SCENE.walk[0]))
     page.wait_for_timeout(600)
 
     def stepped(where: tuple[float, float]) -> Any:
@@ -3719,11 +3994,11 @@ def which_way_the_reader_faces(page: Any) -> Check:
     )
     page.wait_for_timeout(600)
     first = page.evaluate(HERE_MARKS)
-    walking = stepped(WALK[1])
-    stepped(WALK[2])
+    walking = stepped(SCENE.walk[1])
+    stepped(SCENE.walk[2])
     # A metre and a half on, which is a fix standing still: under the ten metres
     # a bearing needs, so the last one stands and only the paint changes.
-    standing = stepped((WALK[2][0] + 0.00001, WALK[2][1] + 0.00001))
+    standing = stepped((SCENE.walk[2][0] + 0.00001, SCENE.walk[2][1] + 0.00001))
 
     # **The compass, fired by hand and under the name this browser has.** The
     # newer event is the one the page listens for where it exists, and a probe
@@ -3741,7 +4016,7 @@ def which_way_the_reader_faces(page: Any) -> Check:
     page.evaluate("() => window.trailsChrome.here(false)")
     page.wait_for_timeout(500)
     off = page.evaluate(HERE_MARKS)
-    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.context.set_geolocation(located(SCENE.position, 24))
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(400)
 
@@ -3761,9 +4036,9 @@ def which_way_the_reader_faces(page: Any) -> Check:
             Reading(
                 "turned the way the step went",
                 walking["bearing"],
-                round(bearing_between(WALK[0], WALK[1])),
+                round(bearing_between(SCENE.walk[0], SCENE.walk[1])),
                 within=3,
-                note=f"{walking['bearing']}\u00b0 drawn, {bearing_between(WALK[0], WALK[1]):.0f}\u00b0 walked",
+                note=f"{walking['bearing']}\u00b0 drawn, {bearing_between(SCENE.walk[0], SCENE.walk[1]):.0f}\u00b0 walked",
             ),
             Reading("painted as a walk", walking["strength"], 0.62, within=0.01),
             # Standing still keeps the angle and fades it. It used to be the
@@ -3778,12 +4053,6 @@ def which_way_the_reader_faces(page: Any) -> Check:
         ],
     )
 
-
-#: The spot the accuracy check stands on, a step off it, and a walk away from
-#: it -- 200 m, which no vaguer fix can explain away.
-STANDING = (65.4400, 13.0400)
-A_STEP = (65.44002, 13.04002)
-A_WALK = (65.4418, 13.0400)
 
 #: What the ring claims: where it is and how far it reaches, in metres, which
 #: is the question here -- ``where_the_reader_is`` asks the other one, how wide
@@ -3822,7 +4091,7 @@ def the_accuracy_only_gets_better(page: Any) -> Check:
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(400)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
-    reading = HERE_RING.replace("STANDING_LAT", str(STANDING[0])).replace("STANDING_LON", str(STANDING[1]))
+    reading = HERE_RING.replace("STANDING_LAT", str(SCENE.standing[0])).replace("STANDING_LON", str(SCENE.standing[1]))
 
     def fix(where: tuple[float, float], spread: int) -> Any:
         """Hand the page one fix and wait for it to have been drawn."""
@@ -3830,8 +4099,8 @@ def the_accuracy_only_gets_better(page: Any) -> Check:
         page.wait_for_timeout(2500)
         return page.evaluate(reading)
 
-    page.context.set_geolocation({"latitude": STANDING[0], "longitude": STANDING[1], "accuracy": 20})
-    page.evaluate(f"() => {MAP_OBJECT}.setView([{STANDING[0]}, {STANDING[1]}], 14)")
+    page.context.set_geolocation({"latitude": SCENE.standing[0], "longitude": SCENE.standing[1], "accuracy": 20})
+    page.evaluate(with_map("(at) => { __MAP__.setView(at, 14); }"), list(SCENE.standing))
     page.wait_for_timeout(500)
     page.evaluate("() => window.trailsChrome.here(true)")
     page.wait_for_function(
@@ -3846,14 +4115,14 @@ def the_accuracy_only_gets_better(page: Any) -> Check:
     sharp = page.evaluate(reading)
     # A step off the spot with four times the radius: the old claim is wholly
     # inside the new one, so nothing was learnt and nothing changes.
-    vague = fix(A_STEP, 80)
+    vague = fix(SCENE.a_step, 80)
     # Sharper again, and it is taken at once -- the hold is one-way.
-    again = fix(A_STEP, 12)
+    again = fix(SCENE.a_step, 12)
     # And a walk no vaguer fix can explain away.
-    walked = fix(A_WALK, 80)
+    walked = fix(SCENE.a_walk, 80)
     page.evaluate("() => window.trailsChrome.here(false)")
     page.wait_for_timeout(400)
-    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.context.set_geolocation(located(SCENE.position, 24))
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(400)
 
@@ -3919,7 +4188,7 @@ def the_position_is_over_the_plan(page: Any) -> Check:
     # **A route actually drawn**, so the pane it is compared against is a pane
     # with something in it: a stacking order argued about empty boxes is not the
     # thing the reader reported.
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     # Read off the chain **before** plan mode is asked for: switching it on
     # clears the selection, and the ground the route is laid on goes with it.
     places = page.evaluate(
@@ -3940,7 +4209,7 @@ def the_position_is_over_the_plan(page: Any) -> Check:
         settled(page)
 
     # The fix goes on the route, which is where a reader walking one has it.
-    on_route = places[0] if places else {"lat": 65.55, "lon": 13.05}
+    on_route = places[0] if places else {"lat": SCENE.position[0], "lon": SCENE.position[1]}
     page.context.set_geolocation({"latitude": on_route["lat"], "longitude": on_route["lon"], "accuracy": 20})
     page.evaluate("() => window.trailsChrome.here(true)")
     page.wait_for_function(
@@ -4026,7 +4295,7 @@ def the_way_to_the_next_goal(page: Any) -> Check:
     page.wait_for_timeout(500)
     # The ground to lay a route on, read off a chain before plan mode is asked
     # for: switching it on clears the selection and the chain goes with it.
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     places = page.evaluate(
         """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
         if (!shape) { return null; }
@@ -4104,13 +4373,13 @@ def the_way_to_the_next_goal(page: Any) -> Check:
     # is the line the reader is now reading.
     page.evaluate("() => window.trailsPlan.toggle(false)")
     page.wait_for_timeout(500)
-    chosen = select(page, LONG_CHAIN)
+    chosen = select(page, SCENE.long_chain)
     page.wait_for_timeout(900)
     mine = page.evaluate(THE_AIM)
 
     page.evaluate("() => { window.trailsChrome.here(false); window.trailsPlan.toggle(false); }")
     page.wait_for_timeout(400)
-    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.context.set_geolocation(located(SCENE.position, 24))
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(400)
 
@@ -4277,11 +4546,9 @@ def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
     Returns:
         Where each waypoint landed and what its leg came to
     """
-    # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m from
-    # the nearest node to them, 28 m apart.
-    start = {"lat": 65.327587, "lng": 13.129687}
-    near = {"lat": 65.311875, "lng": 13.161214}
-    far_off = {"lat": 65.312125, "lng": 13.161214}
+    if SCENE.taps_beside is None:
+        return Check("a tap beside a path in plan mode", skipped="this scene has no measured pair of taps beside a path")
+    start, near, far_off = SCENE.taps_beside
     page.set_viewport_size({"width": 390, "height": 844})
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
     page.evaluate("() => { if (window.trailsGoal) { window.trailsGoal.clear(); } }")
@@ -4297,7 +4564,7 @@ def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
             page.evaluate("() => window.trailsPlan.remove(0)")
             page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
             page.wait_for_timeout(200)
-        page.evaluate(with_map("(w) => __MAP__.setView([w.lat, w.lng], w.zoom, {animate: false})"), {**at, "zoom": zoom})
+        page.evaluate(with_map("(w) => { __MAP__.setView([w.lat, w.lng], w.zoom, {animate: false}); }"), {**at, "zoom": zoom})
         page.wait_for_timeout(500)
         for where in (start, at):
             page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", where)
@@ -4378,12 +4645,9 @@ def a_planned_leg_that_is_not_worth_routing(page: Any) -> Check:
     Returns:
         What the route came to, against the line it could have flown
     """
-    # Where the reader stood, and the two stops whose nodes produced the loop.
-    taps = [
-        {"lat": 65.327587, "lng": 13.129687},
-        {"lat": 65.394585, "lng": 13.076827},
-        {"lat": 65.413008, "lng": 13.090708},
-    ]
+    if SCENE.loop_taps is None:
+        return Check("a planned leg that is not worth routing", skipped="this scene has no taps whose nodes produced a loop")
+    taps = list(SCENE.loop_taps)
     page.set_viewport_size({"width": 390, "height": 844})
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
     page.evaluate("() => { if (window.trailsGoal) { window.trailsGoal.clear(); } }")
@@ -4462,12 +4726,9 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
     Returns:
         What a plan and a goal made of the same two points
     """
-    # The end of the path on the north shore of the sound, and a spot on the
-    # headland across it -- both read off the water grid the build wrote, so
-    # the second is dry land 1.28 km from the first with 0.96 km of sea
-    # between.
-    shore = {"lat": 65.3320, "lng": 12.9368}
-    headland = {"lat": 65.3205, "lng": 12.9380}
+    if SCENE.sound is None:
+        return Check("a way across a sound goes round by land", skipped="this scene has no sound with an island across it")
+    shore, headland, far_off = SCENE.sound
     line = metres_between((shore["lat"], shore["lng"]), (headland["lat"], headland["lng"]))
     page.set_viewport_size({"width": 390, "height": 844})
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
@@ -4494,7 +4755,7 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
         page.evaluate("() => window.trailsPlan.remove(0)")
         page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
         page.wait_for_timeout(200)
-    page.evaluate(with_map("(w) => __MAP__.setView([w.lat, w.lng], 14, {animate: false})"), shore)
+    page.evaluate(with_map("(w) => { __MAP__.setView([w.lat, w.lng], 14, {animate: false}); }"), shore)
     page.wait_for_timeout(500)
     for where in (shore, headland):
         page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", where)
@@ -4511,7 +4772,6 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
     # answers the same: 8.5 km on paths, 4.0 km straight of which 390 m are
     # water -- recorded, so that a search that loses an offer again moves a
     # figure rather than passing.
-    far_off = {"lat": 65.4000, "lng": 13.0500}
     for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
         page.evaluate("() => window.trailsPlan.remove(0)")
         page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
@@ -4575,25 +4835,21 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
             # Recorded, not required: how much of the plan's walk is on paths
             # and how much water it still crosses. Both move when the network
             # or the factors do, and they are what a reader would see change.
-            Reading(
+            stands(
                 "the plan walks this far on paths",
                 round(on_paths / 1000, 1),
-                1.6,
                 within=0.05,
-                holds=False,
                 note=f"{planned['walked'] / 1000:.2f} km in all",
             ),
-            Reading("and crosses this much water", round((planned["crossed"] or 0) / 1000, 2), 0.39, within=0.005, holds=False),
-            Reading(
+            stands("and crosses this much water", round((planned["crossed"] or 0) / 1000, 2), within=0.005),
+            stands(
                 "from 10 km off, the way is on paths for",
                 round((from_afar["walked"] - afar_straight) / 1000, 1),
-                8.5,
                 within=0.05,
-                holds=False,
                 note=f"{from_afar['walked'] / 1000:.2f} km in all",
             ),
-            Reading("and straight for", round(afar_straight / 1000, 1), 4.0, within=0.05, holds=False),
-            Reading("crossing this much water", round((from_afar["crossed"] or 0) / 1000, 2), 0.39, within=0.005, holds=False),
+            stands("and straight for", round(afar_straight / 1000, 1), within=0.05),
+            stands("crossing this much water", round((from_afar["crossed"] or 0) / 1000, 2), within=0.005),
         ],
     )
 
@@ -4626,7 +4882,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
     page.evaluate("() => { if (window.trailsGoal) { window.trailsGoal.clear(); } }")
     page.wait_for_timeout(500)
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     spots = page.evaluate(
         """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
         if (!shape) { return null; }
@@ -4654,7 +4910,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
         at z18, and both the line it snaps to and the place it is named after
         are found within that.
         """
-        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], at.zoom, {animate: false})"), {**where, "zoom": zoom})
+        page.evaluate(with_map("(at) => { __MAP__.setView([at.lat, at.lng], at.zoom, {animate: false}); }"), {**where, "zoom": zoom})
         page.wait_for_timeout(700)
         spot = page.evaluate(
             with_map(
@@ -4831,9 +5087,9 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     # the only way to it -- and the row's rule is that a line the reader made
     # takes the tap. Offered unconditionally it took *every* tap on the map.
     away = {"lat": here["lat"] + 0.05, "lng": here["lng"] + 0.05}
-    page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 13, {animate: false})"), away)
+    page.evaluate(with_map("(at) => { __MAP__.setView([at.lat, at.lng], 13, {animate: false}); }"), away)
     page.wait_for_timeout(600)
-    page.evaluate(with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"), away)
+    page.evaluate(with_map("(at) => { __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)}); }"), away)
     page.wait_for_timeout(1200)
     elsewhere = page.evaluate(THE_GOAL)
 
@@ -4862,9 +5118,9 @@ def a_goal_the_reader_sets(page: Any) -> Check:
         const at = Math.floor(0.5 * (shape.lon.length - 1));
         return {lat: shape.lat[at], lng: shape.lon[at]}; }"""
     )
-    page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 14, {animate: false})"), on_route)
+    page.evaluate(with_map("(at) => { __MAP__.setView([at.lat, at.lng], 14, {animate: false}); }"), on_route)
     page.wait_for_timeout(600)
-    page.evaluate(with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"), on_route)
+    page.evaluate(with_map("(at) => { __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)}); }"), on_route)
     page.wait_for_timeout(1200)
     chips = page.evaluate(THE_CHOICES)
     pressed = press_chip("To the goal")
@@ -4922,7 +5178,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     # straight stretch may be *sampled*, which used to sink the whole answer and
     # report *no way there* with a route in hand. A refusal by the height
     # service is a fact about sampling and not about the ground.
-    page.context.set_geolocation({"latitude": 66.3128, "longitude": 14.1428, "accuracy": 20})
+    page.context.set_geolocation(located(SCENE.far_off_the_map, 20))
     page.wait_for_timeout(2500)
     page.evaluate("(at) => window.trailsGoal.set(at.lat, at.lng, 'Far off the map')", here)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
@@ -4933,7 +5189,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     # switches and its list of places used to stand over whatever the reader
     # tapped to read, because they were keyed to *a goal stands*. They are a
     # page of the goal's own now: gone with it, and the goal still standing.
-    select(page, LONG_CHAIN)
+    select(page, SCENE.long_chain)
     page.wait_for_timeout(900)
     other_shown = page.evaluate(THE_GOAL)
 
@@ -4952,7 +5208,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     # goal control's own note that the panel is drawing it has to go with the
     # page. Fired as the map's event, because a tap that lands on a line is a
     # selection and the ground here is thick with them.
-    page.evaluate(with_map("() => __MAP__.fire('click', {latlng: __MAP__.getCenter()})"))
+    page.evaluate(with_map("() => { __MAP__.fire('click', {latlng: __MAP__.getCenter()}); }"))
     page.wait_for_timeout(600)
     put_away = page.evaluate(THE_GOAL)
     page.evaluate("() => window.trailsGoal.again()")
@@ -5012,23 +5268,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     # this build's rivers are under 17 m across, which a walker fords or does
     # not by depth and current. And *stay on paths* prices open
     # ground at ten to one, after which the road and its bridge win.
-    page.context.set_geolocation({"latitude": 65.33219, "longitude": 12.977855, "accuracy": 20})
-    page.wait_for_timeout(2500)
-    page.evaluate("() => window.trailsGoal.way('routed')")
-    page.evaluate("() => window.trailsGoal.set(65.32371, 12.99122, 'Across Krutåga')")
-    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(1500)
-    krutaga = page.evaluate(THE_GOAL)
-    page.evaluate("() => window.trailsPlan.stayOnPaths(true)")
-    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(1500)
-    on_paths = page.evaluate(THE_GOAL)
-    # Off again from the switch on the goal's page, which is where a reader
-    # turns it -- and where they see whether it is on.
-    page.evaluate("() => document.querySelector('.trails-profile-goal-paths').click()")
-    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(1500)
-    off_paths = page.evaluate(THE_GOAL)
+    wading = wading_to_a_goal(page, SCENE.river_goal) if SCENE.river_goal else []
 
     # **And a place is offered as one where the reader has just read what it
     # is.** Nearly every goal somebody sets is a named thing, and the popup is
@@ -5058,7 +5298,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
 
     page.evaluate("() => { window.trailsGoal.clear(); window.trailsChrome.here(false); window.trailsChrome.aiming(false); }")
     page.wait_for_timeout(400)
-    page.context.set_geolocation({"latitude": 65.55, "longitude": 13.05, "accuracy": 24})
+    page.context.set_geolocation(located(SCENE.position, 24))
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(400)
 
@@ -5278,9 +5518,12 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 (True, True),
                 note=f"{(partly['goal']['metres'] or 0) / 1000:.2f} km, {(partly['goal']['straight'] or 0) / 1000:.2f} km of it off the paths",
             ),
+            # A line across the map would be the flight itself, within a per
+            # cent; a way on paths is longer -- by half over Lomsdal's fjords,
+            # by a quarter along the Abisko valley, where the path is straight.
             Reading(
                 "and it is a route and not a line across the map",
-                (partly["goal"]["metres"] or 0) > flown * 1.3,
+                (partly["goal"]["metres"] or 0) > flown * 1.05,
                 True,
                 note=f"{(partly['goal']['metres'] or 0) / 1000:.2f} km walked against {flown / 1000:.2f} km flown",
             ),
@@ -5362,48 +5605,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
                 (other_shown["hide"]["title"], other_shown["hide"]["struck"]),
                 ("Put this away", False),
             ),
-            Reading(
-                "a goal across Krutåga is walked straight at from the junction",
-                (krutaga["goal"]["line"], 700 < (krutaga["goal"]["straight"] or 0) < 1200),
-                (True, True),
-                note=f"{krutaga['goal']['straight'] or 0:.0f} m straight of {krutaga['goal']['metres'] or 0:.0f} m",
-            ),
-            Reading(
-                "and the page says which river the line wades through, and how wide",
-                any(line.startswith("crosses Storelva, ") and line.endswith(" m wide there") for line in krutaga["goal"]["rivers"]),
-                True,
-                note="; ".join(krutaga["goal"]["rivers"]) or "nothing crossed",
-            ),
-            Reading(
-                "and what width it says",
-                next((int(line.split(", ")[1].split(" m")[0]) for line in krutaga["goal"]["rivers"] if "m wide" in line), None),
-                30,
-                within=6,
-                holds=False,
-                note="shapely on the unsimplified outline: 29.9 m",
-            ),
-            Reading(
-                "and how steep the straight part gets",
-                krutaga["goal"]["steepest"] is not None and "on the straight part" in (krutaga["note"] or ""),
-                True,
-                note=f"steepest {krutaga['goal']['steepest']} %",
-            ),
-            Reading(
-                "stay on paths takes the road round instead, and the switch shows it",
-                (
-                    on_paths["paths"]["on"],
-                    on_paths["paths"]["said"],
-                    (on_paths["goal"]["straight"] or 0) < 250,
-                    (on_paths["goal"]["metres"] or 0) > 2000,
-                ),
-                (True, "true", True, True),
-                note=f"{on_paths['goal']['straight'] or 0:.0f} m straight of {on_paths['goal']['metres'] or 0:.0f} m",
-            ),
-            Reading(
-                "and the switch on the goal's page turns it off again",
-                (off_paths["paths"]["on"], off_paths["paths"]["said"], 700 < (off_paths["goal"]["straight"] or 0) < 1200),
-                (False, "false", True),
-            ),
+            *wading,
             Reading("a place offers itself as a goal", from_place["offered"], "Set as goal"),
             Reading(
                 "and taking it up names the goal after the place",
@@ -5433,6 +5635,89 @@ THE_CHOICES = """() => { const row = document.querySelector('.trails-profile-pic
           // report that nothing had changed when the whole selection had.
           chosen: window.trailsProfile ? (window.trailsProfile.className || null) : null,
           name: (document.querySelector('.trails-profile-name') || {}).textContent || ''}; }"""
+
+
+def wading_to_a_goal(page: Any, river: RiverGoal) -> list[Reading]:
+    """A goal on the far bank, and what the page says about the water between.
+
+    **What a straight part wades through, and the reader's own price for open
+    ground.** The case as it came from the phone, moved 200 m across the river:
+    standing at the junction by Granlia with the goal on the far bank of
+    Krutåga, the routed way ends at the junction and walks 940 m straight
+    through the river, because a metre of open ground counts three of path and
+    the road round, over the bridge, is 2.6 km. The page says the line meets a
+    river and how wide the water is there -- 30 m by the outline, measured with
+    shapely on the unsimplified one, and by the name the register puts on the
+    water there, Storelva -- said, not priced: half that build's rivers are
+    under 17 m across, which a walker fords or does not by depth and current.
+    And *stay on paths* prices open ground at ten to one, after which the road
+    and its bridge win.
+
+    Args:
+        page: The driven page, with the goal tool up
+        river: Where to stand, where to aim, and what the water is called
+
+    Returns:
+        The readings, to go in the goal check's own
+    """
+    page.context.set_geolocation(located(river.standing, 20))
+    page.wait_for_timeout(2500)
+    page.evaluate("() => window.trailsGoal.way('routed')")
+    page.evaluate("(at) => window.trailsGoal.set(at.lat, at.lng, at.label)", {"lat": river.goal[0], "lng": river.goal[1], "label": river.label})
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(1500)
+    waded = page.evaluate(THE_GOAL)
+    page.evaluate("() => window.trailsPlan.stayOnPaths(true)")
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(1500)
+    on_paths = page.evaluate(THE_GOAL)
+    # Off again from the switch on the goal's page, which is where a reader
+    # turns it -- and where they see whether it is on.
+    page.evaluate("() => document.querySelector('.trails-profile-goal-paths').click()")
+    page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
+    page.wait_for_timeout(1500)
+    off_paths = page.evaluate(THE_GOAL)
+    return [
+        Reading(
+            f"a goal {river.label.lower()} is walked straight at from where the reader stands",
+            (waded["goal"]["line"], 700 < (waded["goal"]["straight"] or 0) < 1200),
+            (True, True),
+            note=f"{waded['goal']['straight'] or 0:.0f} m straight of {waded['goal']['metres'] or 0:.0f} m",
+        ),
+        Reading(
+            "and the page says which river the line wades through, and how wide",
+            any(line.startswith(f"crosses {river.river}, ") and line.endswith(" m wide there") for line in waded["goal"]["rivers"]),
+            True,
+            note="; ".join(waded["goal"]["rivers"]) or "nothing crossed",
+        ),
+        stands(
+            "and what width it says",
+            next((int(line.split(", ")[1].split(" m")[0]) for line in waded["goal"]["rivers"] if "m wide" in line), None),
+            within=6,
+        ),
+        Reading(
+            "and how steep the straight part gets",
+            waded["goal"]["steepest"] is not None and "on the straight part" in (waded["note"] or ""),
+            True,
+            note=f"steepest {waded['goal']['steepest']} %",
+        ),
+        Reading(
+            "stay on paths takes the road round instead, and the switch shows it",
+            (
+                on_paths["paths"]["on"],
+                on_paths["paths"]["said"],
+                (on_paths["goal"]["straight"] or 0) < 250,
+                (on_paths["goal"]["metres"] or 0) > 2000,
+            ),
+            (True, "true", True, True),
+            note=f"{on_paths['goal']['straight'] or 0:.0f} m straight of {on_paths['goal']['metres'] or 0:.0f} m",
+        ),
+        Reading(
+            "and the switch on the goal's page turns it off again",
+            (off_paths["paths"]["on"], off_paths["paths"]["said"], 700 < (off_paths["goal"]["straight"] or 0) < 1200),
+            (False, "false", True),
+        ),
+    ]
 
 
 def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
@@ -5477,7 +5762,7 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
 
     def tap_at(where: dict[str, float], zoom: int = 15) -> None:
         """Tap the map where a latitude and longitude say, not where a pixel does."""
-        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], at.zoom, {animate: false})"), {**where, "zoom": zoom})
+        page.evaluate(with_map("(at) => { __MAP__.setView([at.lat, at.lng], at.zoom, {animate: false}); }"), {**where, "zoom": zoom})
         page.wait_for_timeout(700)
         spot = page.evaluate(
             with_map(
@@ -5545,7 +5830,7 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
     # is asked for, because switching it on clears the selection.
     page.evaluate("() => window.trailsPlan.toggle(false)")
     page.wait_for_timeout(500)
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     places = page.evaluate(
         """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
         if (!shape) { return null; }
@@ -5614,7 +5899,7 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
         page.wait_for_timeout(500)
         emptied = page.evaluate(THE_CHOICES)
         page.evaluate(
-            with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"),
+            with_map("(at) => { __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)}); }"),
             on_route,
         )
         page.wait_for_timeout(1200)
@@ -5747,7 +6032,7 @@ def the_chosen_line_is_on_top(page: Any) -> Check:
     page.wait_for_timeout(400)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
     page.wait_for_timeout(500)
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     places = page.evaluate(
         """() => { const shape = window.trailsProfile && window.trailsProfile.shape;
         if (!shape) { return null; }
@@ -5764,7 +6049,7 @@ def the_chosen_line_is_on_top(page: Any) -> Check:
     # further than that from any node, and the route then reaches the chain by a
     # short walk instead of running along it -- so the pixel this reads came
     # back empty and the failure said nothing about panes.
-    page.evaluate(with_map("() => __MAP__.setZoom(12, {animate: false})"))
+    page.evaluate(with_map("() => { __MAP__.setZoom(12, {animate: false}); }"))
     page.wait_for_timeout(400)
     page.evaluate("() => window.trailsPlan.toggle(true)")
     page.wait_for_timeout(600)
@@ -5793,16 +6078,16 @@ def the_chosen_line_is_on_top(page: Any) -> Check:
         # before the click is a view the click throws away -- measured, the point
         # this reads was 1,725 px off the left of a 390 px screen and every pixel
         # came back empty.
-        select(page, LONG_CHAIN)
+        select(page, SCENE.long_chain)
         page.wait_for_timeout(900)
-        page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 16, {animate: false})"), shared)
+        page.evaluate(with_map("(at) => { __MAP__.setView([at.lat, at.lng], 16, {animate: false}); }"), shared)
         page.wait_for_timeout(900)
-        drawn = page.evaluate(THE_PAINT, {**shared, "chain": LONG_CHAIN})
+        drawn = page.evaluate(THE_PAINT, {**shared, "chain": SCENE.long_chain})
         # And given up again: a widened line nothing still claims is a line
         # pointing at a selection that is over.
         page.evaluate("() => window.trailsHighlight.clear()")
         page.wait_for_timeout(600)
-        gone = page.evaluate(THE_PAINT, {**shared, "chain": LONG_CHAIN})
+        gone = page.evaluate(THE_PAINT, {**shared, "chain": SCENE.long_chain})
 
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(400)
@@ -5869,13 +6154,13 @@ def a_line_is_named_at_the_foot_and_not_on_the_ground(page: Any) -> Check:
     page.wait_for_timeout(400)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
     page.wait_for_timeout(400)
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     page.wait_for_timeout(800)
     said = page.evaluate(
         """() => ({
           labels: [...document.querySelectorAll('.leaflet-tooltip')].map(n => n.textContent.trim()),
           banner: (document.querySelector('.trails-profile-name') || {}).textContent || '',
-          carried: window.trailsProfilePanel.nameOf('LONG_CHAIN')}); """.replace("LONG_CHAIN", LONG_CHAIN)
+          carried: window.trailsProfilePanel.nameOf('LONG_CHAIN')}); """.replace("LONG_CHAIN", SCENE.long_chain)
     )
     # **The popup still docks, and still under the name.** This is the half that
     # had to be got right: the chrome titled a docked popup by reading the line's
@@ -5984,7 +6269,7 @@ def a_route_read_after_planning(page: Any) -> Check:
     page.wait_for_timeout(400)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
     page.wait_for_timeout(500)
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     page.evaluate("() => window.trailsProfilePanel.page('details')")
     page.wait_for_timeout(700)
     line = page.evaluate(THE_ROUTE_PAGES)
@@ -6032,7 +6317,7 @@ def a_route_read_after_planning(page: Any) -> Check:
     pins = """() => [...document.querySelectorAll('.trails-plan-pin')]
         .filter(n => n.style.display !== 'none').length"""
     on_panel = page.evaluate(pins)
-    away = select(page, LONG_CHAIN)
+    away = select(page, SCENE.long_chain)
     page.wait_for_timeout(900)
     elsewhere = page.evaluate(pins)
     back = press_route_chip(page)
@@ -6091,9 +6376,9 @@ def press_route_chip(page: Any) -> bool:
     )
     if not where:
         return False
-    page.evaluate(with_map("(at) => __MAP__.setView([at.lat, at.lng], 14, {animate: false})"), where)
+    page.evaluate(with_map("(at) => { __MAP__.setView([at.lat, at.lng], 14, {animate: false}); }"), where)
     page.wait_for_timeout(600)
-    page.evaluate(with_map("(at) => __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)})"), where)
+    page.evaluate(with_map("(at) => { __MAP__.fire('click', {latlng: L.latLng(at.lat, at.lng)}); }"), where)
     page.wait_for_timeout(1200)
     return bool(page.evaluate("() => !!(window.trailsProfile && window.trailsProfile.composed && !window.trailsProfile.goal)"))
 
@@ -6132,7 +6417,7 @@ def a_sheet_over_a_panel(page: Any) -> Check:
     page.set_viewport_size({"width": 390, "height": 844})
     page.wait_for_timeout(600)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     page.wait_for_timeout(900)
     resting = page.evaluate(THE_SURFACES)
 
@@ -6240,7 +6525,7 @@ def two_scales_for_one_profile(page: Any) -> Check:
     page.wait_for_timeout(600)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
     page.evaluate("() => window.trailsProfilePanel.scale('readable')")
-    laid = select(page, LONG_CHAIN)
+    laid = select(page, SCENE.long_chain)
     page.wait_for_timeout(900)
     readable = page.evaluate(THE_RELIEF)
     # Pressed rather than called: the mark over the drawing is the whole of the
@@ -6272,11 +6557,14 @@ def two_scales_for_one_profile(page: Any) -> Check:
             Reading("and says by how much", readable["mark"], "\u00d7" + str(round(readable["said"]["lift"]))),
             # The reading the report was about: something to see, against
             # almost nothing.
+            # Or at the cap: a ribbon of a chain -- 150 m of relief over 30 km
+            # on the Abisko valley floor -- stays a ribbon at ten times, and
+            # that is the page's own rule against blowing a molehill up.
             Reading(
-                "the lifted band is worth looking at",
-                readable["band"] > 40,
+                "the lifted band is worth looking at, or the lift is at its cap",
+                readable["band"] > 40 or round(readable["said"]["lift"]) >= 10,
                 True,
-                note=f"{readable['band']} px of {readable['chart']}",
+                note=f"{readable['band']} px of {readable['chart']} at \u00d7{round(readable['said']['lift'])}",
             ),
             Reading("the ground's own scale draws a ribbon", ground["band"] < 12, True, note=f"{ground['band']} px"),
             Reading("and it is the factor apart", round(readable["band"] / max(1, ground["band"])), round(readable["said"]["lift"]), within=2),
@@ -6368,12 +6656,10 @@ def the_dark_set(page: Any) -> Check:
             Reading("and so do the zoom buttons", darker("zoom"), True, note=f"{light['zoom']['bg']} to {dark['zoom']['bg']}"),
             # A panel nobody can read is not a dark theme. 4.5 is the ordinary
             # text threshold; these are 12 px labels, so it is the right one.
-            Reading(
+            stands(
                 "readable in the light set",
                 round(contrast(light["panel"]["fg"], light["panel"]["bg"]), 1),
-                15.1,
                 within=3.0,
-                holds=False,
             ),
             Reading(
                 "and readable in the dark one",
@@ -6416,8 +6702,8 @@ def a_plan_survives_a_reload(page: Any) -> Check:
     page.wait_for_timeout(600)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
     page.wait_for_timeout(500)
-    if not select(page, LONG_CHAIN):
-        return Check("a plan survives a reload", skipped=f"{LONG_CHAIN} is not in this page")
+    if not select(page, SCENE.long_chain):
+        return Check("a plan survives a reload", skipped=f"{SCENE.long_chain} is not in this page")
     places = page.evaluate(
         """() => { const shape = window.trailsProfile.shape;
         return [0.1, 0.4, 0.7].map(f => Math.floor(f * (shape.lon.length - 1)))
@@ -6428,7 +6714,7 @@ def a_plan_survives_a_reload(page: Any) -> Check:
     # leaning on the zoom the check before it happened to leave behind: from
     # z18, where a finger is 3 m, the three points do not land on the network,
     # and the restored plan is then a different question from the saved one.
-    page.evaluate(with_map("() => __MAP__.setZoom(13, {animate: false})"))
+    page.evaluate(with_map("() => { __MAP__.setZoom(13, {animate: false}); }"))
     page.wait_for_timeout(400)
     page.evaluate("() => window.trailsPlan.toggle(true)")
     page.wait_for_timeout(600)
@@ -6513,8 +6799,8 @@ def a_plan_survives_a_reload(page: Any) -> Check:
             # The price of one writer and one reader: the kept copy is the file
             # the download button offers, `<trkpt>` and all, and those are
             # routed again on the way back in rather than read.
-            Reading("what it weighs", round((kept["bytes"] if kept else 0) / 1024), 549, within=250, holds=False, note="kB"),
-            Reading("and what writing it cost", kept["ms"] if kept else None, 34, within=40, holds=False, note="ms"),
+            stands("what it weighs", round((kept["bytes"] if kept else 0) / 1024), within=250, note="kB"),
+            stands("and what writing it cost", kept["ms"] if kept else None, within=40, note="ms"),
             Reading("the points come back", after.get("points"), before["points"]),
             Reading("the stage marks come back", after.get("cuts"), before["cuts"]),
             Reading("the tour's name comes back", after.get("stem"), before["stem"]),
@@ -6525,7 +6811,7 @@ def a_plan_survives_a_reload(page: Any) -> Check:
             # does not find every tap placing a point.
             Reading("still planning, as they were", after.get("on"), before["on"]),
             Reading("what the reader is told", "Back as you left it" in ((said or {}).get("said") or ""), True, note=(said or {}).get("said") or ""),
-            Reading("and how long it took to come back", took, 21, within=20, holds=False, note="s, load included"),
+            stands("and how long it took to come back", took, within=20, note="s, load included"),
             Reading("starting again clears the map", cleared["points"], 0),
             Reading("and forgets what was kept", cleared["kept"], None),
             Reading("and undo brings it back", again, before["points"]),
@@ -6551,6 +6837,11 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
     #: that says how many times the 5.2 MB map was actually downloaded.
     heads: dict[str, int] = {}
 
+    #: A piece of a path whose requests are taken and not answered while it is
+    #: set: the connection stays open, which is the case of a far end that
+    #: says nothing, and is answered once it is cleared.
+    hold: str | None = None
+
     def log_message(self, format: str, *args: Any) -> None:
         """Say nothing.
 
@@ -6567,6 +6858,12 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
         """
         counted = _Quiet.heads if self.command == "HEAD" else _Quiet.asked
         counted[self.path] = counted.get(self.path, 0) + 1
+        holding = _Quiet.hold
+        if holding and holding in self.path:
+            waited = 0.0
+            while _Quiet.hold == holding and waited < 120:
+                time.sleep(0.25)
+                waited += 0.25
         return super().send_head()
 
 
@@ -6609,7 +6906,7 @@ def served(directory: pathlib.Path) -> Any:
 #: entries in a cache: the first `caches.open()` of any cache costs 23 s on a
 #: phone with the ground kept.
 ROWS = """async (store) => await new Promise(done => {
-    const ask = indexedDB.open('trails', 2);
+    const ask = indexedDB.open('__DB__', 2);
     ask.onsuccess = () => {
         const count = ask.result.transaction(store, 'readonly').objectStore(store).count();
         count.onsuccess = () => done(count.result);
@@ -6619,7 +6916,7 @@ ROWS = """async (store) => await new Promise(done => {
 })"""
 
 CACHED_PAGE = """async () => await new Promise(done => {
-    const ask = indexedDB.open('trails', 2);
+    const ask = indexedDB.open('__DB__', 2);
     ask.onsuccess = () => {
         const get = ask.result.transaction('pages', 'readonly').objectStore('pages').get(location.href);
         get.onsuccess = () => done(!!get.result);
@@ -6679,7 +6976,7 @@ def the_zoom_the_scale_says(page: Any) -> Check:
     was = page.evaluate(with_map("() => ({at: __MAP__.getCenter(), z: __MAP__.getZoom()})"))
     readings = []
     for zoom, bar in ((15, "100 m"), (16, "50 m")):
-        page.evaluate(with_map(f"() => __MAP__.setView([65.55, 13.05], {zoom})"))
+        page.evaluate(with_map("(v) => { __MAP__.setView([v[0], v[1]], v[2]); }"), [*SCENE.position, zoom])
         page.wait_for_timeout(400)
         said = page.evaluate(
             """() => ({
@@ -6692,23 +6989,16 @@ def the_zoom_the_scale_says(page: Any) -> Check:
     # A metres-per-pixel figure, because that is what this whole map argues in.
     said = page.evaluate("() => (document.querySelector('.trails-scale-zoom') || {}).textContent")
     readings.append(Reading("and it says the ground it is drawing at", "m/px" in (said or ""), True, note=said or ""))
-    page.evaluate(with_map(f"() => __MAP__.setView([{was['at']['lat']}, {was['at']['lng']}], {was['z']})"))
+    page.evaluate(with_map("(v) => { __MAP__.setView(v.at, v.z); }"), was)
     page.wait_for_timeout(300)
     return Check("the scale bar says which zoom it is", readings)
 
 
-#: The piece of ground the offline check keeps, and the shape of it matters.
+#: Set the scene's kept area and take the coarsest zoom the chooser offers.
 #:
 #: **The chooser's viewport scope is gone**, so the small real download below is
 #: an area the reader drew, set through ``area()`` -- which is the seam that
-#: exists for exactly this. About 5 x 9 km round 65.55 N 13.05 E: 176 tiles at
-#: z14 and 416 at z15, which is a check and not a bulk fetch off somebody else's
-#: service, and wide enough to cover the 1400 x 900 viewport the offline visit
-#: looks at, so that *the kept ground draws* is asking about coverage rather than
-#: about luck.
-KEPT_AREA = [[65.528, 12.955], [65.572, 12.955], [65.572, 13.145], [65.528, 13.145]]
-
-#: Set that area and take the coarsest zoom the chooser offers.
+#: exists for exactly this.
 KEEP_AREA = """async (ring) => {
     await window.trailsOffline.area(ring);
     return await window.trailsOffline.choose('draw', 14);
@@ -6841,7 +7131,7 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
     # nothing in the source can show that it arrives.
     without = page.evaluate(SCOPES_OFFERED)
     out.append(Reading("with no line to follow, only the two scopes that need none", without, ["all", "draw"]))
-    if select(page, LONG_CHAIN):
+    if select(page, SCENE.long_chain):
         page.evaluate("async () => await window.trailsOffline.choose('band', 15)")
         page.wait_for_function(
             "() => { const s = window.trailsOffline.state(); return s && s.counted && s.counted.scope === 'band'; }",
@@ -6852,15 +7142,15 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
         out.append(Reading("and the panel says which line it took", "the track you have selected" in said_line, True, note=said_line[:110]))
         # **Toggled off again**, or every figure below is read with a chain
         # highlighted and the offline page's, loaded fresh, is not.
-        page.evaluate(SELECT_CHAIN, LONG_CHAIN)
+        page.evaluate(SELECT_CHAIN, SCENE.long_chain)
     else:
-        out.append(Reading("selecting a track brings the other two back", "no such chain", LONG_CHAIN))
-    page.evaluate(KEEP_AREA, KEPT_AREA)
+        out.append(Reading("selecting a track brings the other two back", "no such chain", SCENE.long_chain))
+    page.evaluate(KEEP_AREA, SCENE.kept_area)
     page.wait_for_function("() => { const s = window.trailsOffline.state(); return s && s.counted; }", timeout=60_000)
 
     # Close in, where the selection is bigger than the window: the paint is the
     # window, and the panel says the level covers more ground than is on screen.
-    page.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
+    page.evaluate(with_map("(at) => { __MAP__.setView(at, 14); }"), list(SCENE.position))
     page.wait_for_timeout(1500)
     close, said_close, sentence = painted_ground(page)
     out.append(Reading("the panel says which level it is colouring in", "level z" in sentence, True, note=sentence[:96]))
@@ -6877,7 +7167,7 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
     # preview has no finer level to fall back to, so a screen tile covers 64 of
     # the ones it holds; filling it whole would paint about 4,200 km2 for each
     # tile the selection touches, against the 790 km2 the selection is.
-    page.evaluate(with_map("() => __MAP__.setZoom(8)"))
+    page.evaluate(with_map("() => { __MAP__.setZoom(8); }"))
     page.wait_for_timeout(2500)
     far, said_far, sentence_far = painted_ground(page)
     out.append(
@@ -6891,7 +7181,7 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
 
     # A corner, dragged with a finger, is a different piece of ground. Driven at
     # z12, where all four are on the screen at once.
-    page.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 12)"))
+    page.evaluate(with_map("(at) => { __MAP__.setView(at, 12); }"), list(SCENE.position))
     page.wait_for_timeout(1200)
     before = counted_now(page)
     spot = page.evaluate(
@@ -6938,7 +7228,10 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
         }"""
     )
     shut = sorted(at for at, how in locks.items() if how["off"])
-    out.append(Reading("the zooms that would be an archive are shut", shut, ["17", "18"], note=str(locks.get("17", {}).get("why"))))
+    # Every level the sheet offers above 16, however many that is: two on
+    # Kartverket's sheet, one on Lantmäteriet's.
+    archive = sorted(at for at in locks if int(at) > 16)
+    out.append(Reading("the zooms that would be an archive are shut", shut, archive, note=str(locks.get("17", {}).get("why"))))
     out.append(Reading("and every zoom that fits the budget is open", [at for at in ("14", "15", "16") if locks.get(at, {}).get("off")], []))
     # Held rather than painted on: a button drawn `disabled` proves what the
     # screen does, and this proves what is true underneath it.
@@ -6997,12 +7290,19 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # the run from 180 to 315; the page says when it is ready.
         first.wait_for_function("() => window.trailsWorker", timeout=120_000)
         registered = first.evaluate("() => window.trailsWorker")
-        kept = wait_until(first, CACHED_PAGE, 60_000)
+        kept = wait_until(first, in_db(CACHED_PAGE), 60_000)
+        # What the sheet was built with, read before the switch holds it down:
+        # 18 for Kartverket's, 17 for Lantmäteriet's.
+        sheet_top = first.evaluate(
+            with_map("() => { let seen = null; __MAP__.eachLayer(l => { if (l.getTileUrl) { seen = l.options.maxNativeZoom; } }); return seen; }")
+        )
         # Move, so that some terrain is asked for while the worker is in the way
-        # of it. The tiles the first paint fetched went out before it took over.
-        first.evaluate("() => window[Object.keys(window).find(k => k.startsWith('map_'))].setZoom(10)")
+        # of it. The tiles the first paint fetched went out before it took over
+        # -- **a level in from wherever it opened**, because a page that opens
+        # at the level asked for here would ask for nothing new.
+        first.evaluate(with_map("() => { __MAP__.setZoom(__MAP__.getZoom() + 1); }"))
         first.wait_for_timeout(4000)
-        tiles = first.evaluate(ROWS, "browse")
+        tiles = first.evaluate(in_db(ROWS), "browse")
         # **What the first visit paid**, read off the server rather than the
         # page: the worker keeps the map by asking for it a second time, and if
         # that second ask crossed the wire the first visit would cost twice.
@@ -7016,7 +7316,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # mtime, which is what `Last-Modified` is served from and what the worker
         # compares.
         newer: list[Reading] = []
-        before_tiles = first.evaluate(ROWS, "tiles")
+        before_tiles = first.evaluate(in_db(ROWS), "tiles")
         page_path.touch()
         got_before = _Quiet.asked.get(f"/{page_path.name}", 0)
         # Through the page's own switch and not a hand-written message: what is
@@ -7051,7 +7351,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         newer.append(
             Reading(
                 "and finding one costs the terrain nothing",
-                first.evaluate(ROWS, "tiles"),
+                first.evaluate(in_db(ROWS), "tiles"),
                 before_tiles,
             )
         )
@@ -7084,9 +7384,9 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         page_path.touch()
         published = int(page_path.stat().st_mtime * 1000)
         stamped = first.evaluate(
-            """(when) => new Promise(resolve => {
+            in_db("""(when) => new Promise(resolve => {
                 const stamp = new Date(when).toUTCString();
-                const ask = indexedDB.open('trails', 2);
+                const ask = indexedDB.open('__DB__', 2);
                 ask.onsuccess = () => { const db = ask.result;
                   const store = db.transaction('pages', 'readwrite').objectStore('pages');
                   const got = store.get(location.href);
@@ -7098,7 +7398,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                     put.onsuccess = () => resolve(stamp);
                     put.onerror = () => resolve(null); };
                   got.onerror = () => resolve(null); };
-                ask.onerror = () => resolve(null); })""",
+                ask.onerror = () => resolve(null); })"""),
             published,
         )
         first.evaluate("() => { const line = document.querySelector('.trails-newer'); if (line) { line.remove(); } }")
@@ -7298,7 +7598,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # expensive thing this page could do, in the situation where the battery
         # is the whole question.
         SAID = "() => (document.querySelector('.trails-offline-figures') || {}).textContent || ''"
-        first.evaluate(KEEP_AREA, KEPT_AREA)
+        first.evaluate(KEEP_AREA, [list(corner) for corner in SCENE.kept_area])
         context.set_offline(True)
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
@@ -7335,7 +7635,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # network for the terrain under the preview and the switch still off, and
         # both are true here and neither is once the download below has run.
         first.evaluate("async () => await window.trailsOffline.open(true)")
-        first.evaluate(KEEP_AREA, KEPT_AREA)
+        first.evaluate(KEEP_AREA, [list(corner) for corner in SCENE.kept_area])
         first.wait_for_function("() => { const s = window.trailsOffline.state(); return s && s.counted; }", timeout=60_000)
         terrain.extend(what_the_chooser_draws(first))
 
@@ -7350,9 +7650,9 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # Set again rather than assumed: the check above drags one of its corners
         # on purpose, and what is kept here has to be the ground the offline
         # visit at the bottom looks at.
-        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
+        first.evaluate(with_map("(at) => { __MAP__.setView(at, 14); }"), list(SCENE.position))
         first.wait_for_timeout(1500)
-        first.evaluate(KEEP_AREA, KEPT_AREA)
+        first.evaluate(KEEP_AREA, [list(corner) for corner in SCENE.kept_area])
         first_ask = first.evaluate("() => window.trailsOffline.needed()")
         RAIL_OFFLINE = "() => (document.querySelector('.trails-rail [data-tool=offline] svg') || {}).innerHTML"
         drawn_off = first.evaluate(RAIL_OFFLINE)
@@ -7415,8 +7715,8 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             )
         )
         weighed = first.evaluate(
-            """async () => await new Promise(done => {
-                const ask = indexedDB.open('trails', 2);
+            in_db("""async () => await new Promise(done => {
+                const ask = indexedDB.open('__DB__', 2);
                 ask.onsuccess = () => {
                     const store = ask.result.transaction('tiles', 'readonly').objectStore('tiles');
                     const all = store.getAll(undefined, 40);
@@ -7429,7 +7729,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                     all.onerror = () => done({kept: -1, smallest: -1, sampled: 0});
                 };
                 ask.onerror = () => done({kept: -1, smallest: -1, sampled: 0});
-            })"""
+            })""")
         )
         terrain.append(
             Reading(
@@ -7470,10 +7770,10 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # new address off the device -- the invariant the token has to satisfy or
         # it would be a re-download dressed as a fix.
         context.set_offline(True)
-        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 15)"))
+        first.evaluate(with_map("(at) => { __MAP__.setView(at, 15); }"), list(SCENE.position))
         first.wait_for_timeout(3000)
         at_top = first.evaluate(COUNT)
-        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 16)"))
+        first.evaluate(with_map("(at) => { __MAP__.setView(at, 16); }"), list(SCENE.position))
         first.wait_for_timeout(3000)
         past_top = first.evaluate(COUNT)
         terrain.append(
@@ -7506,11 +7806,11 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                     )
                 ),
                 15,
-                note="both sheets are built with 18",
+                note=f"the sheet's own is {sheet_top}",
             )
         )
         context.set_offline(False)
-        first.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
+        first.evaluate(with_map("(at) => { __MAP__.setView(at, 14); }"), list(SCENE.position))
         first.wait_for_timeout(1500)
 
         # **And the switch is what stops the fetch, not a missing network.** The
@@ -7518,18 +7818,25 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # before walking out; if the network were what was answering, this would
         # be untested and nobody would know until a valley. Driven online, on
         # ground nobody kept.
-        first.evaluate(with_map("() => __MAP__.setView([65.30, 12.40], 12)"))
+        first.evaluate(with_map("(at) => { __MAP__.setView(at, 12); }"), list(SCENE.unkept))
         first.wait_for_timeout(3000)
         indoors = first.evaluate(
             """() => {
-                let good = 0, blank = 0;
+                let good = 0, blank = 0, drawn = [];
                 document.querySelectorAll('img.leaflet-tile').forEach(img => {
-                    if (img.naturalWidth > 1) { good += 1; } else { blank += 1; }
+                    if (img.naturalWidth > 1) { good += 1; drawn.push(img.src.split('/').slice(-3).join('/')); } else { blank += 1; }
                 });
-                return {good: good, blank: blank};
+                return {good: good, blank: blank, drawn: drawn.slice(0, 4)};
             }"""
         )
-        terrain.append(Reading("with the switch on, unkept ground stays blank even online", indoors["good"], 0, note=f"{indoors['blank']} blank"))
+        terrain.append(
+            Reading(
+                "with the switch on, unkept ground stays blank even online",
+                indoors["good"],
+                0,
+                note=f"{indoors['blank']} blank" + (f"; drawn: {', '.join(indoors['drawn'])}" if indoors["drawn"] else ""),
+            )
+        )
         # **And turning the switch off keeps every tile.** Nothing about the
         # switch is a deletion -- it is a flag in `localStorage` and a message to
         # the worker -- and the only thing in this page that empties a tile cache
@@ -7551,7 +7858,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                         "() => { let seen = null; __MAP__.eachLayer(l => { if (l.getTileUrl) { seen = l.options.maxNativeZoom; } }); return seen; }"
                     )
                 ),
-                18,
+                sheet_top,
                 note="held to 15 while it was on",
             )
         )
@@ -7590,15 +7897,16 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         thrown: list[str] = []
         second.on("pageerror", lambda error: thrown.append(str(error)))
         second.goto(address, timeout=180_000)
-        second.wait_for_function(with_map("() => {" + DRAWN + " return drawn.length > 11000; }"), timeout=120_000)
+        # As many as the online page drew, not a number written down here.
+        second.wait_for_function(with_map("(n) => {" + DRAWN + " return drawn.length >= n; }"), arg=online["paths"], timeout=120_000)
         offline = second.evaluate(WHOLE_MAP)
         # And with the network off, what was kept is what is drawn: the tiles
         # come back from the cache and none of them is the worker's blank. **On
         # the ground it was kept for**, which is the part that has to be said:
-        # the terrain above was drawn as a rectangle round 65.55 N 13.05 E, and
+        # the terrain above was drawn as a rectangle round the scene's position, and
         # looking somewhere else asks for ground nobody kept and is answered,
         # correctly, with blanks.
-        second.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 14)"))
+        second.evaluate(with_map("(at) => { __MAP__.setView(at, 14); }"), list(SCENE.position))
         second.wait_for_timeout(3000)
         drawn_terrain = second.evaluate(
             """() => {
@@ -7623,7 +7931,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # other half of the same design: offline the worker answers an unkept
         # tile with a 1x1 transparent PNG so Leaflet draws the page's own ground
         # instead of a torn image over it.
-        second.evaluate(with_map("() => __MAP__.setView([65.55, 13.05], 11)"))
+        second.evaluate(with_map("(at) => { __MAP__.setView(at, 11); }"), list(SCENE.position))
         second.wait_for_timeout(3000)
         unkept = second.evaluate(
             """() => {
@@ -7837,7 +8145,7 @@ def a_finger_can_hit_a_line(page: Any) -> Check:
     entry = page.evaluate(
         with_map("() => { const map = __MAP__; const at = map.getCenter(); return {lat: at.lat, lon: at.lng, zoom: map.getZoom()}; }")
     )
-    spot = page.evaluate(FIND_TAP, {"off": TAP_OFF_PX, "far": TAP_FAR_PX, "chain": LONG_CHAIN})
+    spot = page.evaluate(FIND_TAP, {"off": TAP_OFF_PX, "far": TAP_FAR_PX, "chain": SCENE.long_chain})
     if not spot:
         page.evaluate(SETTLE_TAP, entry)
         return Check("a finger can hit a line", skipped="no stretch of line stands far enough from the rest")
@@ -7900,8 +8208,8 @@ def drive(page: Any) -> list[Check]:
     if wanted(a_finger_can_hit_a_line):
         checks.append(a_finger_can_hit_a_line(page))
 
-    if not select(page, LONG_CHAIN):
-        checks.append(Check("the profile panel", skipped=f"{LONG_CHAIN} is not in this page — see LONG_CHAIN"))
+    if not select(page, SCENE.long_chain):
+        checks.append(Check("the profile panel", skipped=f"{SCENE.long_chain} is not in this page — see its scene"))
         return checks
 
     if wanted(sea_level):
@@ -7932,7 +8240,7 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_place_takes_the_panel(page))
     if wanted(the_theme_switch):
         checks.append(the_theme_switch(page))
-    select(page, LONG_CHAIN)
+    select(page, SCENE.long_chain)
 
     # A chain already drawn finer than its own samples, which is 99 % of them:
     # there the wheel belongs to the map and the chart must not touch it.
@@ -7945,14 +8253,14 @@ def drive(page: Any) -> list[Check]:
                     if (cls !== long) { return cls; } }
                   return null; }"""
         ),
-        LONG_CHAIN,
+        SCENE.long_chain,
     )
     if short and select(page, short):
         if page.evaluate("() => { const v = window.trailsProfilePanel.view(); return v && v.closest <= 1.001; }"):
             if wanted(curve_wheel):
                 checks.append(curve_wheel(page, zoomable=False))
 
-    select(page, LONG_CHAIN)
+    select(page, SCENE.long_chain)
     places = page.evaluate(
         """() => { const shape = window.trailsProfile.shape;
         // Four positions along a real chain, so every leg has a network under it
@@ -8052,7 +8360,7 @@ def report(checks: list[Check]) -> int:
         0 where everything holds, 1 where an invariant broke, 2 where only a
         recorded figure moved — which may be news rather than a fault
     """
-    broke, moved, skipped = 0, 0, 0
+    broke, moved, new, skipped = 0, 0, 0, 0
     for check in checks:
         if check.skipped:
             skipped += 1
@@ -8060,13 +8368,17 @@ def report(checks: list[Check]) -> int:
             continue
         print(f"\n     {check.name}")
         for reading in check.readings:
-            mark = " ok " if reading.passed else ("FAIL" if reading.holds else "MOVED")
+            unrecorded = not reading.holds and reading.want is None
+            mark = " ok " if reading.passed else ("FAIL" if reading.holds else ("NEW" if unrecorded else "MOVED"))
             if not reading.passed:
                 broke += reading.holds
-                moved += not reading.holds
+                moved += not reading.holds and not unrecorded
+                new += unrecorded
             got = f"{reading.got:.6g}" if isinstance(reading.got, float) else reading.got
             said = f"       {mark:>5}  {reading.what}: {got}"
-            if not reading.passed:
+            if unrecorded:
+                said += "   (not recorded for this scene)"
+            elif not reading.passed:
                 said += f"   (expected {reading.want}" + (f" ± {reading.within}" if reading.within else "") + ")"
             if reading.note:
                 said += f"   [{reading.note}]"
@@ -8076,14 +8388,17 @@ def report(checks: list[Check]) -> int:
         f"\n{'-' * 72}\n"
         f"  {sum(len(c.readings) for c in checks)} readings, "
         f"{broke} broken invariant{'' if broke == 1 else 's'}, "
-        f"{moved} recorded figure{'' if moved == 1 else 's'} moved, {skipped} skipped"
+        f"{moved} recorded figure{'' if moved == 1 else 's'} moved, "
+        f"{new} not yet recorded, {skipped} skipped"
     )
     if moved and not broke:
         print(
             "  A moved figure is news, not necessarily a fault: the sources move and the\n"
-            "  page moves with them. Look at why before changing the number here."
+            "  page moves with them. Look at why before changing the number in the scene."
         )
-    return 1 if broke else (2 if moved else 0)
+    if new and not broke:
+        print("  A figure not yet recorded is one to look at and then write into the page's scene.")
+    return 1 if broke else (2 if moved or new else 0)
 
 
 def main() -> int:
@@ -8093,7 +8408,7 @@ def main() -> int:
         The process's exit code
     """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--page", default=str(PAGE), help="The built map to drive")
+    parser.add_argument("--page", default=str(PAGE), help=f"The built map to drive; one of {', '.join(f'{stem}.html' for stem in SCENES)}")
     parser.add_argument("--only", default="", help="Run only the checks whose name holds this word")
     parser.add_argument("--headed", action="store_true", help="Show the browser rather than hiding it")
     parser.add_argument("--json", action="store_true", help="Print the readings as JSON as well")
@@ -8103,14 +8418,27 @@ def main() -> int:
     if not page_path.exists():
         print(f"no page at {page_path} — run `command make map` first", file=sys.stderr)
         return 1
+    if page_path.stem not in SCENES:
+        print(f"no scene for {page_path.name}: the pages this can drive are {', '.join(SCENES)} — see Scene", file=sys.stderr)
+        return 1
 
     from playwright.sync_api import sync_playwright
 
-    global ONLY
+    global ONLY, SCENE
     ONLY = args.only
+    SCENE = SCENES[page_path.stem]
     print(f"driving {page_path} ({page_path.stat().st_size / 1e6:.2f} MB)" + (f" -- only {ONLY}" if ONLY else ""))
-    with sync_playwright() as playwright:
+    with sync_playwright() as playwright, contextlib.ExitStack() as serving:
         browser = playwright.firefox.launch(headless=not args.headed)
+        # **Off the disk where it can be, served where it must be.** A page
+        # whose sheets and height tiles are addressed from the root has no root
+        # under `file://`; it is served from its own directory, as the offline
+        # check serves every page, and the server is taken down before that
+        # check starts its own.
+        if SCENE.over_http:
+            address = f"{serving.enter_context(served(page_path.parent))}/{page_path.name}"
+        else:
+            address = page_path.resolve().as_uri()
         # **A position is granted here or it cannot be driven at all.** The
         # browser asks the reader, and a driven browser has no reader; Playwright
         # answers for one. Somewhere inside the drawn park, so the check can ask
@@ -8118,7 +8446,7 @@ def main() -> int:
         page = browser.new_page(
             viewport={"width": 1400, "height": 900},
             permissions=["geolocation"],
-            geolocation={"latitude": 65.55, "longitude": 13.05, "accuracy": 24},
+            geolocation=located(SCENE.position, 24),
         )
         # **Everything this page does is in one script block**, so one syntax
         # error anywhere in it stops all of it -- and every check below then
@@ -8131,7 +8459,7 @@ def main() -> int:
         # A 40 MB page is 25 seconds of parsing on a good day, and the
         # default 30 is a margin thin enough to fail on a busy machine -- which
         # reads as a broken run rather than as the slow load it is.
-        page.goto(page_path.resolve().as_uri(), timeout=120_000)
+        page.goto(address, timeout=120_000)
         page.wait_for_timeout(SETTLE_MS)
         checks = [Check("the page ran at all", [Reading("errors thrown while loading", len(thrown), 0, note="; ".join(thrown[:2]))])]
         if thrown:
@@ -8177,6 +8505,7 @@ def main() -> int:
         # said about why. Two 42 MB documents at once is not a thing to ask for.
         if wanted(the_map_opens_with_the_network_off):
             page.close()
+            serving.close()
             checks.extend(the_map_opens_with_the_network_off(browser, page_path))
         browser.close()
 

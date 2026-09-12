@@ -660,7 +660,7 @@ this map is the reason.
    reading and the build's mosaic reading differ by 0.07 m at the median, 0.47 m at the 95th
    percentile, 3.3 m at worst. No page errors. The graph itself: 22 components, the largest
    1,367 km and 95 % of the network, reaching 99 % of the park's 14.2 km north to south, with
-   *Abisko* on it. Not driven by `make drive` (§8.2).
+   *Abisko* on it. **Driven by `make drive` the same evening** (§9.10).
 5. **Heights** — the tile build (§6.3). **Done 2026-09-12**: `command make dem` writes
    `analysis/output/dem/lantmateriet/1/` from the STAC COGs with the login, 540 tiles, 49 MB,
    in a minute; not uploaded. **The reader is done too** (§4.4): the page reads the tiles for
@@ -668,7 +668,12 @@ this map is the reason.
    other in step 4.
 6. **Acceptance and publish** — the structural readings of `make drive` against the Abisko page,
    then `command make map --park abisko`, then `deploy_map.py --map abisko --tree tiles --tree dem`,
-   which mirrors the trees first and then uploads the page and its own companions.
+   which mirrors the trees first and then uploads the page and its own companions. **The drive
+   is done, 2026-09-12** (§9.10): `command make drive ARGS="--page analysis/output/abisko.html"`
+   reads **570 readings, none broken**, the 22 figures the page's build gives recorded in its
+   scene, and three checks skipped for ground nobody has measured on this box (a pair of taps
+   beside a path, an island across a sound, a river a goal wades to). The Lomsdal-Visten drive
+   reads as before, 596 readings and none moved. What remains of this step is the publish, at Uwe's word.
 
 Step 3's tile copy needs no credential and can start now; steps 4 and 5 need the login in sops.
 
@@ -686,11 +691,6 @@ settled, move it to §9 with the date and what settled it.
 The packed z13 tile weighs 92.7 kB (§6.3). Still open: whether Geotorget offers the tile
 product cut to an area, and how often the FTP files are refreshed (dated 2026-06-22 to 24 when
 first seen). The WFS question of step 4 is settled (§9.6): the files replace it.
-
-### 8.2 `make drive` for a second page
-
-*Trigger: step 6.* The 278 readings assert Lomsdal-Visten's figures. Which are structural and
-hold for any page, and which are that park's numbers, is not yet separated.
 
 
 ---
@@ -784,12 +784,62 @@ lettering; since then they read the register, and the lettering is kept for the 
 register lacks, the size a name is drawn at. `io/sources/ortnamn.py` fetches the file once with
 the login and reads the box out of it.
 
+### 9.10 `make drive` for a second page — separated, 2026-09-12
+
+**What was that park's, and where it went.** The suite carried Lomsdal-Visten in three
+shapes: the recorded figures (26 of them, each a number in a `Reading`), the ground the checks
+stand on and look at (one chain id, the reader's granted position, and fourteen coordinates
+inside the checks — the spot on open water, the spot with no path near it, the walk, the kept
+area, the fix off the route, the two taps beside a path, the three taps that made a loop, the
+sound, the junction by Granlia and the goal across Krutåga), and the page's own names (the
+icon files, the database `trails`, the height service's address, the name the search types).
+All three now live in a **`Scene`** per page in `drive_map.py`, chosen by the page's stem;
+a figure is a `stands(...)` reading that looks its number up in the scene and is reported as
+**new** where the scene has none, so the first drive of a page is the run that fills its
+scene in. Checks whose ground a scene lacks say they were skipped rather than pretending.
+The Abisko page has to be **served**, not opened off the disk: its sheets and height tiles
+are addressed from the root, and `file://` has no root — so the suite serves `analysis/output`
+itself for that scene, as the offline check always did for every page.
+
+**What the second page found in the suite itself**, none of it visible on the first page:
+
+- Five evaluates handed Leaflet's map object back (`setView`, `setZoom`, `fire` as an
+  arrow's whole body) and Playwright serialised it — silently on the Lomsdal page, and on
+  the Abisko page a recursion overflow in the client, the map's object graph being deeper
+  there. Every such call now returns nothing.
+- A fix that lands exactly on the map's centre read as *not panned*: `panned or 1` took a
+  distance of 0.0 for *no reading*.
+- The archive zooms and *the sheet's own ceiling again* were written as Kartverket's 17–18
+  and 18; both now come off the page (the chooser's own levels above 16; the layer's
+  `maxNativeZoom` read before the switch holds it down).
+- *Terrain it was shown is kept too* zoomed to 10, which is the level the Abisko page opens
+  at, so nothing new was asked for; it now zooms a level in from wherever the page opened.
+- *A route and not a line across the map* wanted 30 % over the flight; the Abisko valley's
+  path gives 27 %, and a line across the map gives 0 % — the bar is 5 % now, which is what
+  the reading was for.
+- *The lifted band is worth looking at* assumed enough relief: Kungsleden along the valley
+  floor is 150 m over 30 km, which the page's own cap (×10, so as not to blow a molehill
+  up) keeps a ribbon. The reading accepts a band at the cap.
+- *A leg whose heights never arrive* held the request in the browser, which never sees a
+  request the page's own worker makes; for a served page the suite's server takes the
+  connection and says nothing until the check lets go.
+- The offline check's *unkept ground* view had a tile in it that an earlier check had
+  browsed, and a browsed tile is served with the switch on by design; the Abisko scene
+  looks at the box's south-west corner instead. And the offline visit waited for `> 11000`
+  chains drawn — Lomsdal's count — where it now waits for as many as the online visit drew.
+
+Measured: the Abisko page, 570 readings, 0 broken, 22 recorded, 3 skipped, about ten
+minutes as a transient unit; the Lomsdal-Visten page after the same change, 596 readings, 0 broken, 0 moved, its figures now read out of its scene rather than out of the checks.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, evening** — `make drive` drives both pages (§9.10, §7 step 6): a `Scene`
+  per page in `drive_map.py` carries what was Lomsdal-Visten's; eight faults of the suite's
+  own found by the second page and fixed. §8.2 settles into §9.10.
 - **2026-09-12, later** — Ortnamn ordered by Uwe and read (§9.9): `io/sources/ortnamn.py`, the
   name layers, the search, the cabins' and the rivers' names off the register, the lettering
   kept for the size. §8.3 settles into §9.9.
@@ -913,4 +963,5 @@ A line per change to this document or to the decisions in it, newest first.
 | which products face a legal review | the `Juridisk prövning` field on the Geotorget product pages, rendered in Firefox: Topografi 10 *Ja*, Hydrografi Nedladdning *Ja*, Topografi 50 / Ortnamn / Markhöjdmodell *Nej*; and the *Sökande* form Uwe reached on 2026-09-12, which asks for a personnummer |
 | Swedish service URLs | Naturvårdsverket's *Leder och friluftsanordningar, beskrivning av öppna data* (PDF), Lantmäteriet's and Naturvårdsverket's product pages, read 2026-09-11 |
 | DEM tile counts and pixel sizes | WebMercator tile index over the box at z8–z13; 156,543 m · cos(68.3°) / 2^z |
+| the Abisko drive | `drive_map.py --page analysis/output/abisko.html --json` as a transient unit on forge, Playwright Firefox 1400 × 900, the page served from `analysis/output` by the suite's own server; four runs on 2026-09-12 to get from a crash in the second check to a clean report, the Lomsdal page driven in between to hold |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |

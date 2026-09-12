@@ -198,7 +198,8 @@ route has settled the map goes to it.
 ### Checking the built page
 
 ```bash
-command make drive
+command make drive                                          # the Lomsdal-Visten page
+command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
 Drives the built map in a browser and reports **278 readings** — the counts the
@@ -215,6 +216,16 @@ the worker's own blank.
 parts of one report costs two runs. While one behaviour is being written,
 `ARGS="--only <word>"` is ten readings instead of 278. And **build before
 driving**: the run reads the page `command make map` last built.
+
+**The checks are the same for every page; what is a page's own is its `Scene`** in
+`drive_map.py`, chosen by the page's stem: the long chain the profile checks select, the
+ground the position and offline checks stand on and look at, the request pattern its heights
+come by, and the figures its last build recorded. A page whose sheets are addressed from the
+root — Abisko's — is served from its directory rather than opened off the disk. A reading whose
+figure the scene has not recorded yet is reported as **new**, with what was read, so the first
+drive of a page is the run that fills its scene in. Checks that need ground a scene does not
+have — a measured pair of taps beside a path, an island across a sound, a river a goal wades to
+— say they were skipped.
 
 **It does not overlap with `command make test`.** The tests assert on the page's
 source; this asks a running browser what the page actually does, which is the
