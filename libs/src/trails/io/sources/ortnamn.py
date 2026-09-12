@@ -96,8 +96,8 @@ TIMEOUT_S = 300
 #: How far apart the register puts two languages' points for one place. Measured
 #: over the Abisko box on 2026-09-12: the real pairs -- Abiskojåkka / Ábeskoeatnu
 #: 46 m, Torneträsk / Duortnosjávri 80–148 m, Lapporten / Čuonjávággi 87 m,
-#: Trollsjön / Geargejávri 240 m (though the register calls that lake Geargejávri
-#: in Swedish too, so the two stay two names -- same language, never joined),
+#: Trollsjön / Geargejávri 240 m (the register carries Geargejávri as a Swedish
+#: name as well, which stays a place of its own: same language, never joined),
 #: Katterjåkk / Gátterjohka 249 m, Abisko / Ábeskovvu 412 m -- and the first pair
 #: that is two different places at 637 m.
 #: One real pair sits beyond it, Gorsajökeln / Gorsajiekŋa at 619 m, and stays

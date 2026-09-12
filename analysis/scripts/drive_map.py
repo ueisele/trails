@@ -299,10 +299,12 @@ SCENES: dict[str, Scene] = {
         # Recorded 2026-09-12 from the first build of the page: 813 chains,
         # 19 legend rows, one base map.
         figures={
-            "paths in the overlay pane": 830,
+            # Clipped to the box since the review (§9.15): one point chain and
+            # three markers fewer than the first build drew.
+            "paths in the overlay pane": 829,
             "of them chains drawn as lines": 813,
-            "and chains drawn as circle markers": 16,
-            "things in the marker pane": 84,
+            "and chains drawn as circle markers": 15,
+            "things in the marker pane": 81,
             "checkboxes in the legend": 19,
             "of them switched off": 4,
             "zoom before": 10,
