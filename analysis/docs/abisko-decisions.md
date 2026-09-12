@@ -1067,7 +1067,10 @@ do today: some 600 readings and ten minutes a page, the page and its companions,
 its head drops a trailing slash from `location.pathname` with `history.replaceState`, before
 the icon, manifest and worker links are read, so they resolve against `/abisko` wherever the
 page was opened. The root and a file on disk are left alone. Tested on the built page (the
-script precedes every link); measured at the edge after the next publish.
+script precedes every link) and **measured at the edge after the publish**, Playwright Firefox
+opening `https://atlas.cairn.zone/abisko/`: the path reads `/abisko`, the manifest and the icon
+resolve at the root, the worker is registered at scope `/abisko` from `/abisko-sw.js`, and the
+whole map at z14 counts 2,343 tiles (§9.13) against the bucket.
 
 ### 9.18 The tree's stand, the part files, the build's keys, and the small ones — fixed, 2026-09-12
 
@@ -1089,11 +1092,15 @@ beside the compressed size; the module's README says what the upload does.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, republished** — both pages and their companions at Uwe's word (`just deploy
+  --map abisko`, `just deploy`; the trees untouched), read back from the edge byte for byte,
+  page and worker; the trailing-slash fix measured live (§9.17), the whole map counts 2,343
+  tiles against the bucket (§9.13).
 - **2026-09-12, the rest of the review** — §8.2 items 2–15 fixed (§9.14–§9.18): the drive names
   its skips and exits 1 on any other; the names join the nearest head and letter on either
   name; the page drops a trailing slash itself; the tree refuses another stand of the file; the
   build sees only its own keys; this document's status lines and the READMEs brought current.
-  Both pages rebuilt and driven clean; a republish is Uwe's call.
+  Both pages rebuilt and driven clean.
 - **2026-09-12, first fix** — the whole-map download no longer stalls on the box's edge
   (§9.13): the margin is clipped to the tree's extent and a 404 is not a refusal.
 - **2026-09-12, after the review** — the whole app reviewed (§8.2): fifteen findings, three of
