@@ -1,5 +1,6 @@
 """Tests for Folium map building."""
 
+import inspect
 import json
 import pathlib
 import re
@@ -2338,6 +2339,26 @@ class TestPopupShape:
         assert shape["heading"] == "Published elsewhere"
         assert shape["links"] == ["Route page"]
 
+    def test_a_link_column_may_hold_a_page_per_state_trail(self, trails):
+        """The register's state trails run on into each other, so one chain is
+        *BD 21 / BD 92 / BD 16 / BD 91* and four Naturkartan pages describe it.
+        One text per column cannot name four pages: the column carries
+        (text, url) pairs, the page writes one link per pair, and a pair whose
+        URL is not http(s) is dropped as a bare URL would be."""
+        gdf = trails.copy()
+        gdf["naturkartan"] = [
+            (("→ BD 21 on Naturkartan", "https://www.naturkartan.se/sv/bd21"), ("→ BD 92 on Naturkartan", "javascript:alert(1)")),
+            None,
+        ]
+        shape = maps._popup_shape(gdf, {"trail_name": "Route"}, {"naturkartan": "→ On Naturkartan"}, "Leder", "Published elsewhere")
+
+        assert shape["links"] == ["→ On Naturkartan"]
+        assert maps._popup_values(gdf.iloc[0], shape) == ["Sjøbergmarsjen", [["→ BD 21 on Naturkartan", "https://www.naturkartan.se/sv/bd21"]]]
+        # A chain without a page says nothing under the heading, as before.
+        assert maps._popup_values(gdf.iloc[1], shape) == []
+        # And the page writes each pair as a link of its own, with its own text.
+        assert "values[at].forEach(function (pair) { link(pair[1], pair[0]); })" in inspect.getsource(maps._PopupText)
+
     def test_what_somebody_else_states_travels_in_its_own_group(self, trails):
         """A route's own site saying *23,4 km, 2 d, +1088 m* is their claim, not
         this map's measurement — and it stood among the figures above, where it
@@ -2503,8 +2524,12 @@ class TestPopupText:
         """Values are third-party data and must not be able to inject markup."""
         assert "var AS = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#x27;'};" in page
         assert "function esc(text) { return String(text).replace(MARKUP, function (c) { return AS[c]; }); }" in page
-        for written in ("shape.labels[i]", "values[at]", "shape.heading", "shape.links[i]", "shape.source"):
+        # A link's URL and text both pass through `link(url, text)`, whether
+        # the text is the column's or a pair's own.
+        for written in ("shape.labels[i]", "values[at]", "shape.heading", "url", "text", "shape.source"):
             assert f"esc({written})" in page
+        assert "link(values[at], shape.links[i]);" in page
+        assert "link(pair[1], pair[0]);" in page
 
     def test_a_link_cannot_reach_back_into_this_page(self, page):
         assert 'target=\\"_blank\\" rel=\\"noopener noreferrer\\"' in page
@@ -2512,7 +2537,7 @@ class TestPopupText:
     def test_the_heading_stands_above_the_first_link_that_survives(self, page):
         """A route with no description elsewhere must not get a heading over nothing."""
         assert "if (shape.heading && !written) {" in page
-        assert page.index("if (shape.heading && !written) {") < page.index('esc(shape.links[i]) + "</a></td></tr>"')
+        assert page.index("if (shape.heading && !written) {") < page.index('esc(text) + "</a></td></tr>"')
 
     def test_the_source_is_set_off_by_a_rule(self, page):
         assert "border-top:1px solid var(--trails-rule);" in page

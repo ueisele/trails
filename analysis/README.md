@@ -129,7 +129,11 @@ no login — and OSM. Heights come off the cached 1 m model rather than a point
 service; the place names are Lantmäteriet's *Ortnamn* (`io/sources/ortnamn.py`, the
 country file fetched once with the login); and the page reads the same model off the height tiles `make dem` cut
 (`maps.HeightTiles`, beside the provider's map tiles; the worker keeps them and
-the offline panel counts them). `analysis/docs/abisko-decisions.md` is the record.
+the offline panel counts them). A state trail's popup links to the county's page
+for it on Naturkartan, one link per *BD* number on the chain, out of a hand-kept
+catalogue (`analysis/routes/abisko-naturkartan.toml`, `io/sources/naturkartan.py`):
+links only, since Naturkartan's terms allow private use alone and the line itself
+is the register's. `analysis/docs/abisko-decisions.md` is the record.
 
 ### What the map does once it is open
 
@@ -208,8 +212,8 @@ command make drive                                          # the Lomsdal-Visten
 command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
-Drives the built map in a browser and reports **some 600 readings** (602 on the
-Lomsdal-Visten page, 603 on Abisko's, 2026-09-12) — the counts the
+Drives the built map in a browser and reports **some 600 readings** (609 on the
+Lomsdal-Visten page, 609 on Abisko's, 2026-09-12) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,

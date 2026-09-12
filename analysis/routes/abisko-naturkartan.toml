@@ -1,0 +1,74 @@
+# Naturkartan's pages for the state trails over the Abisko box.
+#
+# Researched by hand on 2026-09-12 through naturkartan.se's own search, because
+# the page slugs are not derivable from the trail number and a short URL by
+# site id answers 404. Every page below answered 200 that day and carries a
+# site id of its own (12842 for BD 16, 12850 for BD 21, and so on).
+#
+# The id is the register's number, `STATLED_ID` in Naturvårdsverket's Leder
+# file, which is what the county's brochures, the signs and Naturkartan all
+# use. Nothing but the link is taken from Naturkartan: its terms allow private
+# use only, and the line itself is the county's state trail, which the
+# register draws (analysis/docs/abisko-decisions.md §5, §9.22).
+#
+# Of the fifteen state trails the register draws over the box, two have no
+# page on Naturkartan: BD 23 (Riksgränsen - Unna Allakas) and BD 29 (Alesjaure
+# - Alesätno - Årosjokk). Searched for by number and by every place in their
+# names.
+
+name = "Abisko"
+compiled = "2026-09-12"
+source = "https://www.naturkartan.se"
+publisher = "Länsstyrelsen Norrbotten"
+
+[[trail]]
+id = "BD 16"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd16-mellan-norska-gransen-och-tornehamn-6"
+
+[[trail]]
+id = "BD 16A"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd16a-fran-kopparasen-till-vadvetjakka-nationalpark"
+
+[[trail]]
+id = "BD 18"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd18-fran-laktatjakka-via-mandalen-till-abisko"
+
+[[trail]]
+id = "BD 19"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd19-fran-bjorkliden-till-karsavagge"
+
+[[trail]]
+id = "BD 20"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd20-fran-kuoblavagge-via-karsavagge-till-abisko"
+
+[[trail]]
+id = "BD 21"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd21-fran-abisko-till-abiskojaure"
+
+[[trail]]
+id = "BD 22"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd22-fran-abisko-ostra-jvst-till-abiskojakka"
+
+[[trail]]
+id = "BD 25"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd25-mellan-abiskojaure-och-unna-allakas"
+
+[[trail]]
+id = "BD 26"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd26-mellan-abiskojaure-och-alesjaure_e"
+
+[[trail]]
+id = "BD 27"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd27-mellan-unna-allakas-och-alesjaure"
+
+[[trail]]
+id = "BD 28"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd28-mellan-kaisepakte-och-ravetievvakatorna"
+
+[[trail]]
+id = "BD 91"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd91-mellan-tornehamn-och-bjorkliden"
+
+[[trail]]
+id = "BD 92"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd92-mellan-abisko-och-bjorkliden"

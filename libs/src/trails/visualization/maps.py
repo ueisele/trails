@@ -3043,7 +3043,9 @@ def _popup_shape(
         fields: Mapping of column name to display label
         link_fields: Mapping of a column holding a URL to the link text to show
             for it. Rendered below the table rows, one link per line. Values that
-            are not http(s) URLs are dropped.
+            are not http(s) URLs are dropped. A column may instead hold a list
+            of ``(text, url)`` pairs, for a feature that answers to several
+            pages; then each pair is a link of its own, with its own text.
         source: Dataset the feature came from, shown as a footer. A map that
             stacks seven sources is unreadable without it, so it is worth a line
             even where nothing else about the feature is known.
@@ -3080,7 +3082,39 @@ def _popup_shape(
     return shape
 
 
-def _popup_values(row: pd.Series, shape: dict[str, Any]) -> list[str | None] | None:
+#: One slot of a feature's popup values: text for a label, a URL for a link --
+#: or, for a link column, a list of ``[text, url]`` pairs where one feature
+#: answers to several pages at once.
+PopupValue = str | list[list[str]]
+
+
+def _link_value(value: object) -> PopupValue | None:
+    """Pick a link column's value out of a row, dropping what is not a link.
+
+    **A chain may answer to several pages.** The register's state trails are
+    joined into one chain where they run on into each other, so *BD 21 / BD 92
+    / BD 16 / BD 91* is one line with four pages describing it. One link text
+    per column cannot name four pages, so such a column carries a list of
+    ``(text, url)`` pairs and the page writes one link per pair, each with its
+    own text; a plain URL still travels as the string it always was, under the
+    column's text.
+
+    Args:
+        value: The cell: a URL, a list of ``(text, url)`` pairs, or nothing
+
+    Returns:
+        The URL, the pairs whose URL is http(s) as lists, or None if nothing
+        of it is a link
+    """
+    if isinstance(value, list | tuple):
+        pairs = [[str(text), str(url)] for text, url in value if str(url).startswith(_LINK_SCHEMES)]
+        return pairs or None
+    if value is None or (isinstance(value, float) and pd.isna(value)) or not str(value).startswith(_LINK_SCHEMES):
+        return None
+    return str(value)
+
+
+def _popup_values(row: pd.Series, shape: dict[str, Any]) -> list[PopupValue | None] | None:
     """Pick one feature's popup values out of its row.
 
     **Everything travels as text**, including numbers: that is what
@@ -3096,13 +3130,12 @@ def _popup_values(row: pd.Series, shape: dict[str, Any]) -> list[str | None] | N
         ``None`` where the row says nothing -- or None altogether if the row
         fills no slot and the layer has no source line to fall back on
     """
-    values: list[str | None] = []
+    values: list[PopupValue | None] = []
     for column in shape["columns"] + shape.get("publishedColumns", []):
         value = row[column]
         values.append(None if pd.isna(value) or value == "" else str(value))
     for column in shape["linkColumns"]:
-        url = row[column]
-        values.append(None if pd.isna(url) or not str(url).startswith(_LINK_SCHEMES) else str(url))
+        values.append(_link_value(row[column]))
     if not any(value is not None for value in values) and "source" not in shape:
         return None
     # Trailing empties say nothing the builder cannot assume, and there are a lot
@@ -3291,12 +3324,22 @@ class _PopupText(MacroElement):
                     rows.push("<tr><td style='padding:2px 8px 2px 0;color:var(--trails-ink-3)'>" + esc(stated[i])
                         + "</td><td style='padding:2px 0'><b>" + esc(values[at]) + "</b></td></tr>");
                 }
+                // noopener keeps the opened page from reaching back into this one.
+                function link(url, text) {
+                    rows.push("<tr><td colspan='2' style='padding:3px 0'><a href=\\"" + esc(url)
+                        + "\\" target=\\"_blank\\" rel=\\"noopener noreferrer\\">" + esc(text) + "</a></td></tr>");
+                }
                 for (i = 0; i < shape.links.length; i++, at++) {
                     if (values[at] === null || values[at] === undefined) { continue; }
                     heading();
-                    // noopener keeps the opened page from reaching back into this one.
-                    rows.push("<tr><td colspan='2' style='padding:3px 0'><a href=\\"" + esc(values[at])
-                        + "\\" target=\\"_blank\\" rel=\\"noopener noreferrer\\">" + esc(shape.links[i]) + "</a></td></tr>");
+                    // One URL under the column's text -- or, for a line that
+                    // several pages describe, a list of [text, url] pairs, each
+                    // a link of its own.
+                    if (Array.isArray(values[at])) {
+                        values[at].forEach(function (pair) { link(pair[1], pair[0]); });
+                    } else {
+                        link(values[at], shape.links[i]);
+                    }
                 }
                 // Set off by a rule, so it reads as provenance rather than as
                 // another attribute of the feature.

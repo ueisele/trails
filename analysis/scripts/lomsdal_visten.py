@@ -102,6 +102,7 @@ from trails.io.sources import (
     markhojd,
     n50,
     naturbase,
+    naturkartan,
     naturvardsregistret,
     ortnamn,
     overpass,
@@ -170,6 +171,9 @@ class Park:
     bounds: maps.Bounds | None
     #: The catalogue of UT.no routes under ``analysis/routes``, if there is one.
     ut_routes: str | None
+    #: The catalogue of Naturkartan pages for the register's state trails under
+    #: ``analysis/routes``, if there is one -- links only, nothing drawn.
+    naturkartan: str | None = None
 
     @property
     def app_name(self) -> str:
@@ -215,6 +219,8 @@ PARKS: dict[str, Park] = {
         # graph, the water grid and the page all cover exactly it.
         bounds=(18.15, 68.17, 19.00, 68.46),
         ut_routes=None,
+        # The county's pages for its state trails, one per BD number (§9.22).
+        naturkartan="abisko-naturkartan.toml",
     ),
 }
 
@@ -416,7 +422,7 @@ UT_PUBLISHED_FIELDS = {"ut_summary": "UT.no states"}
 #: also carries a timestamp on every point, which is what this map's writer
 #: refuses so that a plan does not read as a walk somebody took. Two files of
 #: one route, and only the words tell them apart.
-UT_LINK_HEADING = "Published elsewhere, not by this map"
+PUBLISHED_ELSEWHERE_HEADING = "Published elsewhere, not by this map"
 
 #: Clickable links in the UT.no popup. The route page and the park's own
 #: description carry everything the geometry cannot: season, difficulty, the
@@ -427,6 +433,15 @@ UT_LINK_FIELDS = {
     "guide_url_en": "→ Description on lomsdalvisten.no",
     "gpx_url": "→ UT.no's own GPX recording",
 }
+
+#: The link in a state trail's popup, under the same heading as UT.no's: the
+#: county's page for the trail on Naturkartan, which carries what the register
+#: does not -- the description, the photos, the state of the crossings. The
+#: column holds one ``(text, url)`` pair per state trail on the chain, since
+#: the register's trails run on into each other and a chain may be four of
+#: them (§9.22); the text here stands only for a chain that holds a bare URL,
+#: which none does.
+NATURKARTAN_LINK_FIELDS = {"naturkartan": "→ On Naturkartan"}
 
 TRAIL_POPUP_FIELDS = {
     "trail_name": "Route",
@@ -1868,6 +1883,26 @@ def describe_norway(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDat
     return frames
 
 
+def naturkartan_links(numbers: object, pages: dict[str, str]) -> tuple[tuple[str, str], ...] | None:
+    """The Naturkartan pages describing a chain of the register's state trails.
+
+    Args:
+        numbers: The chain's ``route_id``: one state trail number, or several
+            joined by :data:`IDENTITY_SEPARATOR` where trails run on into each
+            other, or nothing
+        pages: The catalogue, page URL by number
+
+    Returns:
+        One ``(text, url)`` pair per number the catalogue has a page for, in
+        the chain's order -- or None, so the popup writes no heading over
+        nothing
+    """
+    if not isinstance(numbers, str):
+        return None
+    links = tuple((f"→ {number} on Naturkartan", pages[number]) for number in numbers.split(IDENTITY_SEPARATOR) if number in pages)
+    return links or None
+
+
 def describe_sweden(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDataFrame]:
     """Add what the Swedish registers say about their own chains.
 
@@ -2434,7 +2469,7 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             UT_POPUP_FIELDS,
             UT_LINK_FIELDS,
             search_field="name",
-            link_heading=UT_LINK_HEADING,
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
             published_fields=UT_PUBLISHED_FIELDS,
         ),
         TrailLayer(
@@ -2445,7 +2480,7 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             UT_POPUP_FIELDS,
             UT_LINK_FIELDS,
             search_field="name",
-            link_heading=UT_LINK_HEADING,
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
             published_fields=UT_PUBLISHED_FIELDS,
         ),
     ]
@@ -2610,13 +2645,15 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     Args:
         which: The park
         args: The command line
-        repo_root: The checkout; unused here, and in the signature so the two
-            builds are one shape
+        repo_root: The checkout, for the Naturkartan catalogue
 
     Returns:
         What :func:`assemble` needs
     """
-    del repo_root
+    # Links only: the pages describe the county's state trails, which the
+    # register draws (§9.22). Loaded first, so a broken catalogue fails before
+    # the graph is read.
+    pages = naturkartan.load_catalogue(repo_root / "analysis" / "routes" / which.naturkartan) if which.naturkartan else {}
     if which.bounds is None:
         raise ValueError(f"{which.name} declares no box, and the Swedish build is over a box (decisions §2)")
 
@@ -2641,6 +2678,8 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     order, tracks = laid_out(network)
 
     leder = by_source[LEDER]
+    # Before the split at the boundary, so both state-trail layers carry it.
+    leder["naturkartan"] = pd.Series([naturkartan_links(numbers, pages) for numbers in leder["route_id"]], index=leder.index, dtype=object)
     roads = by_source[T50_ROADS]
     ferries = by_source[sweden.FERRIES]
     layer_of = split_at_the_boundary(
@@ -2649,6 +2688,10 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     named = leder[naturvardsregistret.TRAIL_NAME].notna()
     print(f"  state trails named by the register: {int(named.sum()):,} of {len(leder):,} chains")
     print(f"    {leder['route'].value_counts().head(8).to_dict()}")
+    if pages:
+        linked = leder["naturkartan"].notna()
+        numbers = {number for cell in leder["route_id"].dropna() for number in str(cell).split(IDENTITY_SEPARATOR)}
+        print(f"  Naturkartan pages: {int(linked.sum()):,} of {len(leder):,} chains link to one; without a page: {sorted(numbers - set(pages))}")
     summarize("Roads", roads)
     print(f"    {roads['road_class'].value_counts().head(6).to_dict()}")
     print(f"    numbered: {int(roads['road_number'].notna().sum()):,} of {len(roads):,} chains ({roads['road_number'].dropna().unique().tolist()})")
@@ -2784,7 +2827,14 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             search_field="route_name",
         ),
         TrailLayer(
-            layer_of[f"{LEDER}/approach"], "State trails, outside park [Leder]", "#ef6c00", 3.5, LEDER_POPUP_FIELDS, search_field="trail_name"
+            layer_of[f"{LEDER}/approach"],
+            "State trails, outside park [Leder]",
+            "#ef6c00",
+            3.5,
+            LEDER_POPUP_FIELDS,
+            NATURKARTAN_LINK_FIELDS,
+            search_field="trail_name",
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
         ),
         TrailLayer(layer_of[f"{OSM}/park"], "Paths in park [OSM]", "#8e24aa", 2.5, OSM_POPUP_FIELDS, search_field="name"),
         TrailLayer(layer_of[f"{T50_PATHS}/park"], "Paths in park [Topografi 50]", "#00796b", 2.5, T50_PATH_POPUP_FIELDS),
@@ -2794,7 +2844,16 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         # The register's state trails last and on top: the one source that
         # describes a trail rather than draws it, and the identity the marked
         # trails under it were named from.
-        TrailLayer(layer_of[f"{LEDER}/park"], "State trails in park [Leder]", "#c62828", 4.0, LEDER_POPUP_FIELDS, search_field="trail_name"),
+        TrailLayer(
+            layer_of[f"{LEDER}/park"],
+            "State trails in park [Leder]",
+            "#c62828",
+            4.0,
+            LEDER_POPUP_FIELDS,
+            NATURKARTAN_LINK_FIELDS,
+            search_field="trail_name",
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
+        ),
     ]
     points = [
         PointLayer(terminals, "Ferry quays [OSM]", "#5f9ea0", TERMINAL_POPUP_FIELDS, "ferry quay", "OSM", color="cadetblue", icon="ship"),

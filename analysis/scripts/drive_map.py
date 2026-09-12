@@ -239,6 +239,9 @@ SCENES: dict[str, Scene] = {
             "and what writing it cost": 34,
             "and how long it took to come back": 21,
             "and how far it moves on to it": 135.5,
+            # The Rundtur's page on ut.no and its GPX; it is the one route
+            # without a lomsdalvisten.no counterpart.
+            "links to pages published elsewhere": 2,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -334,6 +337,9 @@ SCENES: dict[str, Scene] = {
             # The river where the goal's line wades it, off the outline.
             "and what width it says": 22,
             "and how far it moves on to it": 134.4,
+            # The long chain is BD 21, BD 92, BD 16 and BD 91 run together, and
+            # Naturkartan has a page for each.
+            "links to pages published elsewhere": 4,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -1271,7 +1277,8 @@ def popup_click(page: Any) -> Check:
         const text = held.getBoundingClientRect(), mark = lit.getBoundingClientRect();
         return {mark: {x: mark.left + mark.width / 2, y: mark.top + mark.height / 2},
                 text: {x: text.left + text.width / 2, y: text.top + 24},
-                rows: held.querySelectorAll('tr').length}; }"""
+                rows: held.querySelectorAll('tr').length,
+                links: [...held.querySelectorAll('a[href]')].map(a => a.hostname)}; }"""
     )
     if not where:
         return Check("a click in a chain's detail", skipped="the detail page did not open")
@@ -1289,6 +1296,11 @@ def popup_click(page: Any) -> Check:
             # The popup carried 13 rows when it floated and carries them still:
             # the panel moves the node folium built, it does not rebuild it.
             Reading("rows the detail holds", where["rows"] > 0, True, note=f"{where['rows']} rows"),
+            # What somebody else published about the line, under its own
+            # heading: UT.no's pages on the first map, Naturkartan's on the
+            # second, where one register chain is four state trails and so
+            # four pages (§9.22).
+            stands("links to pages published elsewhere", len(where["links"]), note=", ".join(sorted(set(where["links"])))),
             Reading("waypoints placed by reading it", after_text - before, 0),
             Reading("waypoints placed by the mark that folds it", page.evaluate("() => window.trailsPlan.state().points.length") - before, 0),
             Reading(

@@ -363,7 +363,11 @@ there is no way in anyway: the page offers no GPX, the map is an embedded Mapbox
 prose; the line itself is the county's state trail, which Naturvårdsverket's register and
 Topografi 50's `Vandringsled` carry, and the *BD* number is the key to match it there. A
 Naturkartan tour is what `atlas` §3.6 calls a personal input — downloaded for one's own use and
-added to one's own copy — not a layer of this map.
+added to one's own copy — not a layer of this map. **What the map does carry, since the evening
+of 2026-09-12, is the link**: a state trail's popup names the county's Naturkartan page for each
+*BD* number on the chain, out of a hand-kept catalogue (§9.22). Measured that evening, Naturkartan's
+Abisko tours *are* the state trails, one page per number, and thirteen of the fifteen the register
+draws over the box have one.
 
 Licences the credits will carry: Lantmäteriet's *värdefulla datamängder* terms with attribution for
 the tiles, CC0 for Topografi 50, CC BY 4.0 for the height model, Naturvårdsverket open data,
@@ -1151,12 +1155,46 @@ refuses anything that is not a version directory of a known tree, and refuses th
 tree on disk calls current — the one the next page build draws. The directory on disk is left
 to be removed by hand.
 
+### 9.22 Naturkartan's pages, linked from the state trails — settled, 2026-09-12
+
+Uwe asked whether Naturkartan's tours could join the map the way UT.no's join the first one, or
+failing that whether the ways on a Naturkartan tour could be marked, linked and preferred.
+Measured the same evening on naturkartan.se: **its Abisko tours are the county's state trails**,
+one page per *BD* number — BD 16, 16A, 17, 18, 19, 20, 21, 22, 25, 26, 27, 28, 91, 92 — plus two
+Rallarvägen articles describing the same ground. So two of the three were already done: the
+state trails are a layer of their own, drawn last and on top with the register's name and number
+(§7.4), and the register is the source a route prefers (cost 1.02 against 1.05 for Topografi 50's
+line of the same trail, 1.10 for a path, 1.20 for OSM, 1.30 for a road — the same rank UT.no
+holds in Norway). What was missing was the link, and a link is not a copy: nothing of
+Naturkartan's enters the page, and its private-use terms (§5) are not touched.
+
+**The catalogue** is `analysis/routes/abisko-naturkartan.toml`, read by
+`io/sources/naturkartan.py`: number to URL, thirteen entries, researched by hand through the
+site's own search because the slugs are not derivable and a short URL by site id answers 404.
+Every entry answered 200 with a site id of its own. Of the fifteen state trails the register
+draws over the box, BD 23 and BD 29 have no page, searched by number and by every place in their
+names. `Park.naturkartan` names the catalogue; Lomsdal has none.
+
+**One chain, several pages.** The register's trails run on into each other, so the long chain is
+*BD 21 / BD 92 / BD 16 / BD 91* and four pages describe it. A popup's link column carried one
+URL under one fixed text; it may now carry a list of *(text, url)* pairs, and the page writes one
+link per pair with the pair's own text — `→ BD 21 on Naturkartan` — under the heading the UT.no
+popup already used, *Published elsewhere, not by this map*. A pair whose URL is not http(s) is
+dropped as a bare one was. The build reports it: 14 of 16 state-trail chains link to a page. The
+drive reads the links in the long chain's detail on both pages — 2 on Lomsdal (the Rundtur's page
+and its GPX), 4 on Abisko — so a catalogue that stops matching the register's numbers is a
+reading that moves, not a popup nobody opens.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, later still** — Naturkartan's pages linked from the state trails (§9.22, §5):
+  its Abisko tours are the county's state trails, so the ways were already drawn and preferred;
+  a hand-kept catalogue of thirteen pages, one link per *BD* number on a chain, under the
+  *Published elsewhere* heading. The drive reads the links on both pages.
 - **2026-09-12, after that** — kept tiles survive a new stand (§9.21): the worker answers a
   miss from the old stand, Keep replaces and sweeps; `deploy --drop-tree` deletes an old
   version from the bucket, never the current one. Both pages republished at Uwe's word the
@@ -1328,3 +1366,4 @@ A line per change to this document or to the decisions in it, newest first.
 | the tap checks' ground | the cached Abisko graph as a `networkx` graph weighted by edge cost; for the tap, every fifth node of the Kungsleden chain with the perpendicular to its two edges laid 135 m and 163 m out, kept where no edge is nearer than 100 m and the segment crosses no Topografi 50 water polygon, the start a chain node 1.9–2.1 km along; for the loop, every sixth marked-trail node in the park against every marked node 600–1,800 m off whose bounded Dijkstra cost is five times the line or more and whose line is dry, the first tap a marked node 1.5–2.5 lines along by cost that stands at least three quarters of that straight off |
 | the review of 2026-09-12 | five readers over the code, each verifying its own findings with `uv run` snippets, Playwright Firefox against the built tree served locally, and `curl` against the edge; the high and medium findings re-read or re-measured by hand (`curl -sI` on the ring tiles, the pairing and lettering code, `drive()` and `report()`) before §8.2 was written |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |
+| Naturkartan's pages | `curl -sL` against `naturkartan.se/sv/search/sites?query=…` for every place and number in the register's state-trail names over the box, then each page fetched and its `data-naturkartan-preselected-site-id` read; the short forms `/sv/sites/<id>` and `/sv/norrbottens-lan/<id>` tried and 404; `api.naturkartan.se/v3/sites/12849` 401 |
