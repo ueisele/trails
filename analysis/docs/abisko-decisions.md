@@ -673,7 +673,12 @@ this map is the reason.
    reads **570 readings, none broken**, the 22 figures the page's build gives recorded in its
    scene, and three checks skipped for ground nobody has measured on this box (a pair of taps
    beside a path, an island across a sound, a river a goal wades to). The Lomsdal-Visten drive
-   reads as before, 596 readings and none moved. What remains of this step is the publish, at Uwe's word.
+   reads as before, 596 readings and none moved. **Published 2026-09-12 at Uwe's word**: the page
+   rebuilt (12 s, byte-identical, 3.3 MB → 1.12 MB brotli), `just deploy --map abisko --tree tiles
+   --tree dem` from `home/trails-map` — the tile sync found nothing to upload in 103 s, the 540
+   height tiles (49.3 MB) went up in 11 s, then the page, its worker, manifest and four icons, and
+   the edge purged. Read back from the edge: a height tile, a map tile and the page byte-identical
+   to the files. **https://atlas.cairn.zone/abisko**. The step is done; §7 is done.
 
 Step 3's tile copy needs no credential and can start now; steps 4 and 5 need the login in sops.
 
@@ -837,6 +842,8 @@ minutes as a transient unit; the Lomsdal-Visten page after the same change, 596 
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12, night** — **the Abisko map is published** (§7 step 6): page, companions and the
+  height tiles in the bucket, the tiles were there already; verified from the edge byte for byte.
 - **2026-09-12, evening** — `make drive` drives both pages (§9.10, §7 step 6): a `Scene`
   per page in `drive_map.py` carries what was Lomsdal-Visten's; eight faults of the suite's
   own found by the second page and fixed. §8.2 settles into §9.10.
