@@ -4974,11 +4974,20 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     drop_offered = page.evaluate(THE_GOAL)
     goal_rows = page.evaluate("() => document.querySelectorAll('.trails-profile-stop').length")
     asked: list[str] = []
-    page.once("dialog", lambda dialog: (asked.append(dialog.message), dialog.dismiss()))
+
+    def answer(dialog: Any, accept: bool) -> None:
+        """Record what the page asked before answering it."""
+        asked.append(dialog.message)
+        if accept:
+            dialog.accept()
+        else:
+            dialog.dismiss()
+
+    page.once("dialog", lambda dialog: answer(dialog, False))
     page.evaluate("() => document.querySelector('.trails-profile-hide').click()")
     page.wait_for_timeout(700)
     declined = page.evaluate(THE_GOAL)
-    page.once("dialog", lambda dialog: (asked.append(dialog.message), dialog.accept()))
+    page.once("dialog", lambda dialog: answer(dialog, True))
     page.evaluate("() => document.querySelector('.trails-profile-hide').click()")
     page.wait_for_timeout(700)
     dropped = page.evaluate(THE_GOAL)

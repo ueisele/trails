@@ -182,7 +182,13 @@ def river_table(rivers: gpd.GeoDataFrame, bounds: tuple[float, float, float, flo
     for name, geometry in zip(clipped["name"], metric.to_crs(GRID_CRS).geometry, strict=True):
         if geometry is None or geometry.is_empty:
             continue
-        pieces = geometry.geoms if geometry.geom_type == "MultiPolygon" else [geometry]
+        # A MultiPolygon is what clipping hands back wherever the box cuts a
+        # river in two, and a Polygon has no `geoms`. Annotated the way the
+        # protected areas' own ring table annotates it: shapely's stubs type
+        # a frame's geometry as the base class, which has neither `geoms` nor
+        # `exterior`, and the check is the geometry's own word for what it is.
+        outline: Any = geometry
+        pieces: list[Any] = list(outline.geoms) if outline.geom_type == "MultiPolygon" else [outline]
         for piece in pieces:
             if piece.geom_type != "Polygon" or piece.is_empty:
                 continue
