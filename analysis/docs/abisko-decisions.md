@@ -1159,7 +1159,8 @@ A line per change to this document or to the decisions in it, newest first.
 
 - **2026-09-12, after that** — kept tiles survive a new stand (§9.21): the worker answers a
   miss from the old stand, Keep replaces and sweeps; `deploy --drop-tree` deletes an old
-  version from the bucket, never the current one. Republish pending Uwe's word.
+  version from the bucket, never the current one. Both pages republished at Uwe's word the
+  same night, read back from the edge byte for byte.
 - **2026-09-12, last of all** — a new stand of the tiles is a new version chosen by `make tiles`
   itself, and the page draws the newest complete one (§9.20); §8.1 loses its cadence question.
 - **2026-09-12, last** — the two tap checks driven on Abisko's ground (§9.19): a tap beside the
