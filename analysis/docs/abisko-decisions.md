@@ -322,6 +322,19 @@ GeoPackage's spatial index.
 Exact layer names, attribute names and the winter/summer field are read off the services when
 the module is written, not guessed here.
 
+**Naturkartan is not a source** (asked by Uwe 2026-09-12, measured the same day). It is
+Outdoormap AB's platform, on which counties and municipalities publish their trails with text and
+photos — the Abisko page is Länsstyrelsen Norrbotten's trail *BD20*, Kuoblavagge–Kårsavagge–Abisko.
+Its terms say material may be downloaded *"endast för enskilt bruk"* (private use only) and that
+the protected material may not be copied, distributed or exploited without the author's leave —
+stricter than UT.no's CC BY-NC, which `atlas` §3.6 already took out of the published graph. And
+there is no way in anyway: the page offers no GPX, the map is an embedded Mapbox app, and
+`api.naturkartan.se/v3/sites/12849` answers 401 without the app's token. What it would give is the
+prose; the line itself is the county's state trail, which Naturvårdsverket's register and
+Topografi 50's `Vandringsled` carry, and the *BD* number is the key to match it there. A
+Naturkartan tour is what `atlas` §3.6 calls a personal input — downloaded for one's own use and
+added to one's own copy — not a layer of this map.
+
 Licences the credits will carry: Lantmäteriet's *värdefulla datamängder* terms with attribution for
 the tiles, CC0 for Topografi 50, CC BY 4.0 for the height model, Naturvårdsverket open data,
 OpenStreetMap ODbL. Nothing NC. UT.no's CC BY-NC does not enter this map.
@@ -651,6 +664,8 @@ box is an hour and a half, once.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-12** — Naturkartan weighed as a source of curated tours and declined (§5): private-use
+  terms, no GPX, API behind a token; the lines are the county's and come through the register.
 - **2026-09-12** — the tiles are in the bucket: 118,967 objects, 700 MB, 57 minutes, verified
   from the edge (§7 step 3). Naturvårdsverket's WFS answered 503 today; noted in §8.1.
 - **2026-09-12** — the height tiles are built (§6.3, §7 step 5): `markhojd.py`, `dem_tiles.py`,
