@@ -1333,7 +1333,8 @@ A line per change to this document or to the decisions in it, newest first.
   because a watch that has answered *position unavailable* never calls back (measured, 108 s),
   and the last place is kept and drawn red — dot, dashed ring, both switches — with its age said
   under it. The goal keeps a place to route from. §10's own heading, lost when §9.24 was written
-  in above it the same day, is back.
+  in above it the same day, is back. Both pages published at Uwe's word the same afternoon, page
+  and companions only, byte-identical from the edge.
 - **2026-09-13, later** — the box widened to 18.15–19.10 E, 68.139–68.46 N at Uwe's word (§2,
   §9.24): the valley path through Lapporten whole, the south on the tile row's edge; tiles
   resumed into stand 1, heights and graph rebuilt, 866 chains; BD 31 joins the Naturkartan
