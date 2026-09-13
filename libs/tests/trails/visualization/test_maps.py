@@ -2629,55 +2629,81 @@ class TestCanvas:
 
         assert '"preferCanvas": true' in html
 
-    def test_the_search_hides_a_canvas_layer_without_an_element(self, trails):
-        """A canvas layer has no element to give `display: none` to: it is drawn
-        out of its own options every frame, so being visible has to be one of
-        them."""
+    def test_the_search_draws_nothing_and_hides_nothing(self, trails):
+        """It used to reach into how every feature was drawn -- `display` on an
+        element, `stroke` and `interactive` on a canvas layer that has none --
+        in order to leave only the matches standing. A list answers the same
+        question without touching the map, so none of that is here any more."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         group = maps.add_trails(fmap, trails, name="Paths", search_field="trail_name")
         maps.add_search(fmap, [group])
 
         html = fmap.get_root().render()
-        assert "if (!layer.setStyle || layer.options.stroke === visible) { return; }" in html
-        assert "layer.setStyle({stroke: visible, fill: visible && layer._trailsFill});" in html
-
-    def test_visible_and_emphasised_stay_different_properties(self, trails):
-        """The search decides what is *visible* and the highlight what is
-        *emphasised*, and the two are used together -- so the search must not
-        reach for `opacity`, which is the highlight's."""
-        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
-        group = maps.add_trails(fmap, trails, name="Paths", search_field="trail_name")
-        maps.add_search(fmap, [group])
-        maps.add_click_highlight(fmap, [group])
-
-        html = fmap.get_root().render()
-        hiding = html[html.index("function display(layer, visible) {") :]
-        hiding = hiding[: hiding.index("var query = ")]
-        # The comments say why, at length; this is about what the code does.
-        code = "\n".join(line for line in hiding.splitlines() if not line.strip().startswith("//"))
+        box = html[html.index("var ROWS = 24;") : html.index("window.trailsSearch = {")]
+        code = "\n".join(line for line in box.splitlines() if not line.strip().startswith("//"))
+        assert "setStyle" not in code
+        assert "layer._path" not in code
+        assert "layer._icon" not in code
+        assert "options.interactive" not in code
+        # And the one property it does decide -- which rows there are -- is
+        # nothing the highlight uses, so the two still cannot undo each other.
         assert "opacity" not in code
-        assert "stroke: visible" in code
 
-    def test_a_hidden_line_stops_answering_clicks(self, trails):
-        """Canvas hit-tests off the option rather than off a class, so a line
-        the search has hidden would still take a click that looks like empty
-        ground."""
+    def test_a_row_is_the_thing_itself(self, trails):
+        """Everything a click on a line does is wired to that event already, so
+        a row fires the click rather than doing any of it a second way -- and
+        without the point it was tapped at, which is what keeps the panel's own
+        row of choices still."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         group = maps.add_trails(fmap, trails, name="Paths", search_field="trail_name")
         maps.add_search(fmap, [group])
 
-        assert "layer.options.interactive = visible;" in fmap.get_root().render()
+        html = fmap.get_root().render()
+        assert "found.entry.layer.fire('click', {layer: found.entry.layer});" in html
 
-    def test_a_marker_is_still_hidden_by_its_icon(self, shelters):
-        """A marker keeps its icon whichever renderer the map uses, so that case
-        is first and is unconditional."""
+    def test_a_row_switches_its_own_layer_on(self, shelters):
+        """A layer that is off holds its features and draws none of them, so a
+        row of it would otherwise move the map to a blank spot."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         group = maps.add_points(fmap, shelters, name="Huts", label_field="name")
         maps.add_search(fmap, [group])
 
         html = fmap.get_root().render()
-        assert "var element = layer._icon || layer._path;" in html
-        assert "if (layer._shadow) { layer._shadow.style.display = value; }" in html
+        assert "if (!map.hasLayer(groups[found.entry.group])) { map.addLayer(groups[found.entry.group]); }" in html
+
+    def test_a_row_taken_on_a_phone_gets_the_panel_out_of_the_way(self, shelters):
+        """On a narrow screen the list stands in the dock, over the map, and the
+        thing a row names would land behind it: at 390 x 844 the dock takes the
+        top 500 px and the map's middle is at 422."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_points(fmap, shelters, name="Huts", label_field="name")
+        maps.add_search(fmap, [group])
+
+        html = fmap.get_root().render()
+        assert "if (window.trailsChrome && window.trailsChrome.narrow && window.trailsChrome.narrow()) {" in html
+
+    def test_a_position_is_read_and_marked(self, shelters):
+        """What the picker copies, read back: the same five decimals, and a mark
+        that offers what a place offers."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_points(fmap, shelters, name="Huts", label_field="name")
+        maps.add_search(fmap, [group])
+
+        html = fmap.get_root().render()
+        assert "function readCoordinate(text) {" in html
+        assert "return at.lat.toFixed(5) + ', ' + at.lon.toFixed(5);" in html
+        # A typed number is not a finger: no `tapped`, so it snaps to nothing.
+        assert "window.trailsChrome.goalOffer(at.lat, at.lon, null)" in html
+        assert "mark.openPopup();" in html
+
+    def test_a_position_needs_something_between_its_two_sides(self, shelters):
+        """Measured while it was written: with the separator optional, the
+        expression backed off and read `68.39275` alone as `68.3927, 5`."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_points(fmap, shelters, name="Huts", label_field="name")
+        maps.add_search(fmap, [group])
+
+        assert "'(?:\\\\s*[,;]\\\\s*|\\\\s+)' +" in fmap.get_root().render()
 
 
 class TestAFingerCanHitALine:

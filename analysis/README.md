@@ -155,6 +155,17 @@ the angle you see is the angle on the ground. Then:
 | drag the grip on the panel's top edge | make it taller, which on a steep line is resolution rather than taste |
 | *Download GPX* | the line as a file, with a height on every point and no invented time |
 
+**Search for a name, or type a position.** The box at the top left lists what it
+finds — one row per thing, nearest first, saying which layer each came from and,
+where a named way is drawn in several lines, how many. Tap a row and the map goes
+to it and it is selected, exactly as if you had tapped it on the ground; nothing
+else is hidden while you search, so the answer keeps the map around it. On a phone
+the panel steps aside when you take a row, since it is standing on the ground the
+row points at. A pair of
+coordinates is a name here too: `68.39275, 18.68033` — the form the *Copy a
+position* tool writes to the clipboard — or `68°23'34"N 18°40'49"E` is read as
+the place it names, marked on the map, and can be set as a goal like any hut.
+
 **Plan a route** with the button at the top right. Every click on the map places
 a waypoint and the way between is worked out over the network; click the route
 itself to put a point in the middle, drag a pin to move it. Click the point count
@@ -212,8 +223,8 @@ command make drive                                          # the Lomsdal-Visten
 command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
-Drives the built map in a browser and reports **some 600 readings** (633 on the
-Lomsdal-Visten page, 633 on Abisko's, 2026-09-13) — the counts the
+Drives the built map in a browser and reports **some 650 readings** (649 on the
+Lomsdal-Visten page, 649 on Abisko's, 2026-09-13) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,

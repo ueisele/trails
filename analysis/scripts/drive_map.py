@@ -147,6 +147,10 @@ class Scene:
     base_maps: int
     #: A name the search finds on this page.
     search_for: str
+    #: A position on this page's ground, as ``(lat, lon)``, for the check that
+    #: types one into the search. Five decimals, because that is what the
+    #: picker copies and the round trip is the point.
+    typed: tuple[float, float]
     #: Whether the page has to be served rather than opened off the disk: a sheet
     #: or a height tile addressed from the root resolves to nothing under
     #: ``file://``.
@@ -213,6 +217,7 @@ SCENES: dict[str, Scene] = {
         base_maps=2,
         borrowed_name=("trail-group-fkb", "trail-group-turrutebasen"),
         search_for="Gåsvatnet",
+        typed=(65.44000, 13.04000),
         over_http=False,
         figures={
             # Re-recorded 2026-09-01, from 11,589 and 11,290: the source cache
@@ -243,6 +248,9 @@ SCENES: dict[str, Scene] = {
             "sideways: px the panel is": 186,
             "seconds it took to give up": 18,
             "and it still finds a name": 3,
+            # Three matches for *Gåsvatnet* are two rows: two of them are one
+            # thing drawn twice in one layer (§9.27).
+            "rows the list draws for the scene's name": 2,
             "m shown by a quarter-width drag": 11188,
             "the plan walks this far on paths": 1.6,
             "and crosses this much water": 0.39,
@@ -319,6 +327,7 @@ SCENES: dict[str, Scene] = {
         base_maps=1,
         borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
         search_for="Abiskojaure",
+        typed=(68.39275, 18.68033),
         # Lantmäteriet's sheets and the height tiles are addressed from the root.
         over_http=True,
         # The whole copy: 118,967 tiles, about 700 MB (§9.23).
@@ -350,6 +359,11 @@ SCENES: dict[str, Scene] = {
             "sideways: px the panel is": 189,
             "seconds it took to give up": 16.9,
             "and it still finds a name": 16,
+            # The sixteen matches for *Abiskojaure* are twelve rows: one row per
+            # named thing, and Topografi 50 draws BD 26 in four chains and BD 21
+            # in two (§9.27). The names that carry two register numbers are rows
+            # of their own, because they are other names.
+            "rows the list draws for the scene's name": 12,
             "m shown by a quarter-width drag": 8114,
             "readable in the light set": 15.1,
             "what it weighs": 463,
@@ -912,7 +926,10 @@ def select(page: Any, chain: str) -> bool:
 
 
 #: Set by ``--only``. Empty means every check runs, which is what a full read of
-#: the page is; a word in it runs the checks whose name contains that word.
+#: the page is; a word in it runs the checks whose name contains that word, and
+#: **several words parted by commas run all of those**, in the order the suite
+#: has them. Two checks together is how a check that passes alone and fails in a
+#: run is pinned down: what one leaves standing, the next drives into.
 ONLY = ""
 
 
@@ -931,7 +948,7 @@ def wanted(check: Any) -> bool:
     Returns:
         Whether to run it
     """
-    return not ONLY or ONLY in check.__name__
+    return not ONLY or any(word.strip() in check.__name__ for word in ONLY.split(",") if word.strip())
 
 
 #: Every wait for plan mode that ran out of patience, and where it was waiting.
@@ -3399,6 +3416,214 @@ def the_search_on_a_narrow_panel(page: Any) -> Check:
     )
 
 
+#: Everything either search check may have left standing, put back. **A check
+#: that drives a control hands the page on as it found it**: a row taken selects
+#: a line, opens its page over the map and can leave a mark and a goal behind it,
+#: and the checks after these two drive real taps at real pixels.
+LET_THE_SEARCH_GO = with_map(
+    """() => {
+  window.trailsSearch.find('');
+  window.trailsSearch.dropMark();
+  if (window.trailsGoal) { window.trailsGoal.clear(); }
+  if (window.trailsChrome) { window.trailsChrome.aiming(false); window.trailsChrome.closeDetail(); window.trailsChrome.close(); }
+  // **And what the row chose is let go of the way a reader lets go of it**: a
+  // click on empty ground, which is the one gesture that clears the selection,
+  // its page in the panel and the highlight together. Measured on the suite
+  // rather than reasoned about: the place page left standing here was still
+  // open three checks later, and when *a goal the reader sets* narrowed the
+  // window and asked for the profile, the panel opened 853 px tall over an
+  // 844 px screen and swallowed the tap that sets the goal.
+  __MAP__.fire('click');
+}"""
+)
+
+
+def the_search_lists_what_it_finds(page: Any) -> Check:
+    """Every match as a row, and the map still whole behind them.
+
+    **Asked for from the phone**: *results are listed and I can tap one; the one
+    I chose is then selected and the map has zoomed to it, and all the other
+    places stay drawn instead of disappearing.* What this box did until now was
+    the opposite of its last clause -- it cleared ``display`` on everything that
+    did not match, which finds the name by removing the map it is on.
+
+    So the list is what narrows now, and the map is not touched by typing at all:
+    that is the first reading here, and it is a structural one. The second is
+    that a row taken moves the map to the thing it names.
+
+    A row whose thing is a name drawn on the map -- the lettering, which takes no
+    tap on the ground either -- moves the map and selects nothing, which is why
+    what is measured here is where the map went and not what it chose.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the list held, and what the map did behind it
+    """
+    drawn = with_map(
+        """() => { let shown = 0, dark = 0;
+        __MAP__.eachLayer(l => { if (!l.options) { return; }
+          const element = l._icon || l._path;
+          if (element) { shown += 1; if (element.style.display === 'none') { dark += 1; } }
+          else if (l.setStyle && l.options.className) { shown += 1;
+            // What the filter used to do to a line drawn on canvas, which has
+            // no element to hide: stop stroking it and stop it taking taps.
+            if (l.options.stroke === false && l.options.interactive === false) { dark += 1; } } });
+        const at = __MAP__.getCenter();
+        return {shown, dark, lat: at.lat, lng: at.lng, zoom: __MAP__.getZoom()}; }"""
+    )
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); }")
+    page.evaluate("() => window.trailsSearch.find('')")
+    page.wait_for_timeout(400)
+    before = page.evaluate(drawn)
+
+    rows = page.evaluate("(name) => window.trailsSearch.find(name)", SCENE.search_for)
+    page.wait_for_timeout(400)
+    after = page.evaluate(drawn)
+
+    moved = metres_between((before["lat"], before["lng"]), (after["lat"], after["lng"]))
+    first = rows[0] if rows else {}
+    took = page.evaluate("() => window.trailsSearch.take(0)") if rows else False
+    page.wait_for_timeout(1600)
+    went = page.evaluate(drawn)
+    off = metres_between((first["lat"], first["lon"]), (went["lat"], went["lng"])) if rows and first.get("lat") is not None else None
+
+    page.evaluate(LET_THE_SEARCH_GO)
+    page.wait_for_timeout(400)
+
+    return Check(
+        "the search lists what it finds",
+        [
+            stands("rows the list draws for the scene's name", len(rows)),
+            Reading("the first of them is that name", SCENE.search_for.lower() in str(first.get("name", "")).lower(), True),
+            Reading(
+                "and every row says which layer it came from",
+                all(row["kind"] for row in rows),
+                True,
+                note=str(first.get("kind", ""))[:40],
+            ),
+            # The whole of the change, in one number: what a search hides.
+            # **What it hid, and not what stands dark.** A layer drawn with no
+            # stroke and taking no taps is one the page drew that way -- Lomsdal
+            # has one such -- and the question here is what *typing* did.
+            Reading(
+                "typing hides nothing",
+                after["dark"] - before["dark"],
+                0,
+                note=f"{after['dark']} of {after['shown']} drawn stood dark before it too",
+            ),
+            Reading("and leaves every layer where it was", after["shown"], before["shown"]),
+            Reading("and does not move the map either", round(moved, 1), 0.0, within=1.0),
+            Reading("taking a row is what moves it", took, True),
+            Reading("m from where the row said it was", off if off is not None else -1.0, 0.0, within=60.0),
+        ],
+    )
+
+
+def a_position_typed_into_the_search(page: Any) -> Check:
+    """A pair of coordinates, read back into the place they name.
+
+    **Asked for from the phone**: *I want to type 68.39275, 18.68033 and have a
+    mark appear there, and to be able to set it as a goal the way I can a place.*
+    The first half of that pair is already on the page -- the picker at the foot
+    copies exactly that string -- so what was missing was the way back in, and
+    the two of them together are a round trip: copy a position on one device,
+    type it on another, stand on the same spot.
+
+    Read here in five forms, because a position is written more than one way and
+    the ones off a sign or an old map are degrees, minutes and seconds. What
+    they must agree about is the ground: the tolerance below is a metre, which is
+    what the seconds' own rounding is worth at this latitude.
+
+    The mark is a place the reader made, so it carries what a place carries: the
+    same *Set as goal* button, through the same markup and the same listener.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What each form was read as, where the mark landed, and what the goal did
+    """
+    lat, lon = SCENE.typed
+    forms = [
+        f"{lat:.5f}, {lon:.5f}",
+        f"{lat:.5f} {lon:.5f}",
+        f"N {lat:.5f}, E {lon:.5f}",
+        f"E {lon:.5f}, N {lat:.5f}",
+        dms(lat, "NS") + " " + dms(lon, "EW"),
+    ]
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsPlan.toggle(false); window.trailsGoal.clear(); }")
+    page.wait_for_timeout(400)
+
+    read = [page.evaluate("(text) => window.trailsSearch.read(text)", form) for form in forms]
+    apart = max((metres_between((lat, lon), (said["lat"], said["lon"])) if said else 1e6) for said in read)
+
+    rows = page.evaluate("(text) => window.trailsSearch.find(text)", forms[0])
+    page.evaluate("() => window.trailsSearch.take(0)")
+    page.wait_for_timeout(1500)
+    mark = page.evaluate("() => window.trailsSearch.mark()")
+    zoom = page.evaluate(with_map("() => __MAP__.getZoom()"))
+    offered = page.evaluate("""() => { const b = document.querySelector('.trails-goal-take'); return b ? b.textContent : null; }""")
+    page.evaluate("""() => { const b = document.querySelector('.trails-goal-take'); if (b) { b.click(); } }""")
+    page.wait_for_timeout(1500)
+    goal = page.evaluate("() => window.trailsGoal.state()")
+    page.evaluate("""() => { const b = document.querySelector('.trails-search-drop'); if (b) { b.click(); } }""")
+    page.wait_for_timeout(600)
+    left = page.evaluate("() => window.trailsSearch.mark()")
+
+    page.evaluate(LET_THE_SEARCH_GO)
+    page.wait_for_timeout(400)
+
+    at = goal.get("at") or {}
+    return Check(
+        "a position typed into the search",
+        [
+            Reading("forms of one position read alike, m apart at worst", round(apart, 1), 0.0, within=1.0, note=" | ".join(forms[-1:])),
+            Reading("a position is the first row", bool(rows) and rows[0]["coordinate"], True),
+            Reading("and the only one", len(rows), 1),
+            Reading(
+                "the mark stands where it was typed, m off",
+                round(metres_between((lat, lon), (mark["lat"], mark["lon"])), 2) if mark else -1.0,
+                0.0,
+                within=0.5,
+            ),
+            Reading("and zoomed in to z14 at least", bool(zoom is not None and zoom >= 14), True, note=f"z{zoom}"),
+            Reading("what the mark offers", offered, "Set as goal"),
+            Reading(
+                "and the goal stands where the mark did, m off",
+                round(metres_between((lat, lon), (at["lat"], at["lon"])), 2) if at else -1.0,
+                0.0,
+                within=0.5,
+            ),
+            Reading("taking the mark away leaves none", left, None),
+        ],
+    )
+
+
+def dms(degrees: float, letters: str) -> str:
+    """An angle written the way a sign or an older map writes one.
+
+    Args:
+        degrees: The angle, signed
+        letters: The two hemisphere letters, positive first: ``NS`` or ``EW``
+
+    Returns:
+        Degrees, minutes and seconds with the hemisphere letter after them
+    """
+    letter = letters[0] if degrees >= 0 else letters[1]
+    value = abs(degrees)
+    whole = int(value)
+    minutes = (value - whole) * 60
+    seconds = (minutes - int(minutes)) * 60
+    return f"{whole}\u00b0{int(minutes)}'{seconds:.1f}\"{letter}"
+
+
 def the_profile_tool(page: Any) -> Check:
     """A tool that is never dead, and says what it needs when it has nothing.
 
@@ -5352,7 +5577,13 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
     page.wait_for_timeout(900)
     moved = page.evaluate(THE_GOAL)
-    moved_off = metres_between((moved["goal"]["stops"][0]["lat"], moved["goal"]["stops"][0]["lon"]), (aside_again["lat"], aside_again["lng"]))
+    # **Read out of the list rather than off its first row**, because a run in
+    # which nothing was set has no first row -- and a check that throws there
+    # takes every reading after it down with it, including the ones that would
+    # say what went wrong. The same rule `STALLED` states for a leg that never
+    # settles: report it, do not raise.
+    moved_stop = (moved["goal"]["stops"] or [{}])[0]
+    moved_off = metres_between((moved_stop["lat"], moved_stop["lon"]), (aside_again["lat"], aside_again["lng"])) if moved_stop else -1.0
 
     # And taken away again through the same menu, in words.
     press_row(0, "trails-profile-stop-more")
@@ -8848,6 +9079,10 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_click_is_not_a_pan(page))
     if wanted(the_search_on_a_narrow_panel):
         checks.append(the_search_on_a_narrow_panel(page))
+    if wanted(the_search_lists_what_it_finds):
+        checks.append(the_search_lists_what_it_finds(page))
+    if wanted(a_position_typed_into_the_search):
+        checks.append(a_position_typed_into_the_search(page))
     if wanted(sharing_the_room):
         checks.append(sharing_the_room(page))
     if wanted(where_the_reader_is):
@@ -8963,7 +9198,7 @@ def main() -> int:
     """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--page", default=str(PAGE), help=f"The built map to drive; one of {', '.join(f'{stem}.html' for stem in SCENES)}")
-    parser.add_argument("--only", default="", help="Run only the checks whose name holds this word")
+    parser.add_argument("--only", default="", help="Run only the checks whose name holds this word; several, parted by commas")
     parser.add_argument("--headed", action="store_true", help="Show the browser rather than hiding it")
     parser.add_argument("--json", action="store_true", help="Print the readings as JSON as well")
     args = parser.parse_args()

@@ -22,8 +22,9 @@ The library it uses lives in `libs/src/trails/`:
 
 - `visualization/maps.py` — every Folium layer helper, plus two behaviours
   already implemented as `branca` `MacroElement`s: `_ClickHighlight` (click a
-  line, it lifts out of the bundle) and `_NameSearch` (type a name, everything
-  else hides). Read both before writing a third: they establish the pattern.
+  line, it lifts out of the bundle) and `_NameSearch` (type a name or a
+  position, and the matches are listed). Read both before writing a third: they
+  establish the pattern.
 - `io/export/gpx.py` — `export_to_gpx`, used for the existing exports
 - `utils/geo.py` — `merge_lines`, `thin_points`, `attach_nearest`
 - `io/sources/` — one module per dataset, all reading from `.cache/`

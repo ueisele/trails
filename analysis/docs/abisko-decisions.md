@@ -1421,11 +1421,135 @@ invalidate it. Both graphs had to be rebuilt with `--rebuild`, and a build that 
 `make graph`-ed would have served the old chains from the cache and looked like the change had
 done nothing.
 
+### 9.27 The search lists what it finds, and reads a position — settled, 2026-09-13
+
+Asked for from the phone, in one message: *I want to be able to type coordinates like 68.39275,
+18.68033 and have a position marker appear there. As with a place, I want to be able to set it as
+a goal. How could the input be made? Through the search? … Could we do it that way for searching
+by name too — results are listed and I can tap one, the one chosen is then selected and the map
+has zoomed to it, and all the other places stay drawn instead of being hidden.*
+
+**The first half was already half-built and facing the other way.** The *Copy a position* tool at
+the foot writes `where.lat.toFixed(5) + ', ' + where.lng.toFixed(5)` to the clipboard — which is
+`68.39275, 18.68033`, the string that was typed into that message. Nothing on the page could read
+one back. The two together are a round trip: copy a position on one device, type it on another,
+stand on the same spot.
+
+**Two decisions, both Uwe's, taken before anything was written** (asked with what each would cost):
+the list *replaces* the hiding — the map stays whole while a search runs — and the forms read are
+decimal degrees **and** degrees, minutes and seconds, which is what a sign or an older map writes.
+
+#### What the box did before
+
+Typing cleared `display` on every feature that did not match, and on a canvas layer — which has no
+element to hide — cleared `stroke` and `interactive` instead; a layer switched off was switched on
+for as long as it held a match and put back afterwards. It found the name by removing the map it is
+on: what the match lies near, what it lies between, which of six lines through that valley it is.
+Enter fitted the view around every match at once.
+
+#### What it does now
+
+One row per named thing, nearest first, in `_NameSearch`:
+
+- **Ranked** by how the name matched — the whole name, then a name starting with what was typed,
+  then a word inside it starting with it, then anything holding it — and within a rank by distance
+  from where the reader is if the page knows, and from the middle of the screen if it does not.
+- **One row per thing, not per drawing.** The sources cut a named way into as many chains as they
+  please and name every one: *Abiskojaure - Alesjaure (BD 26)* was four rows. A line's pieces are
+  one row saying how many lines carry the name, pointing at the nearest of them. A *place* is kept
+  apart by distance instead, 2 km: two waters of one name a valley apart are two answers, and the
+  same hut in two registers is one hut twice, which is worth two rows because the registers differ.
+  A name carrying two register numbers is another name and another row (§9.22).
+- **What each row says**: the name, then the layer it was drawn in — without the legend's count and
+  without the detail after the em dash, which is `_layer_label` — the number of lines where there
+  is more than one, and how far off it is where the page knows where the reader is.
+- **A row is the thing itself.** Taking one fires the click that thing's own handlers are already
+  wired to: the highlight widens the line, the panel selects it and draws its profile, a place opens
+  its popup. Without the point it was tapped at, which is the rule the panel's row of chips follows.
+  A layer switched off is switched on by taking one of its rows. A name drawn on the map — the
+  lettering — takes no tap on the ground either, so its row moves the map and does nothing else.
+- **On a phone the panel steps aside.** The list stands in the chrome's dock there, over the map:
+  at 390 × 844 the dock takes the top 500 px and the map's middle — where a row puts what it chose
+  — is at 422, so the answer would land behind the question. A row taken closes the dock; the field
+  keeps what was typed and one press has the list back.
+- Enter takes the first row. Escape clears the field. **Nothing is hidden at any point**, which is
+  the reading the drive takes to say so: the same 988 features are drawn on the Abisko page before
+  and while a search runs, not one of them darkened by it, and the map has not moved either until a
+  row is taken. Sixteen matches for *Abiskojaure* are twelve rows there; three for *Gåsvatnet* are
+  two on Lomsdal-Visten.
+
+#### A position is a name here too
+
+`readCoordinate` reads both sides of a pair as an angle: an optional hemisphere letter in front,
+degrees, optionally minutes and seconds behind a degree sign, an optional letter after. So all of
+these are the same place, measured 0.1 m apart at worst (the seconds' own rounding):
+
+```
+68.39275, 18.68033      68.39275 18.68033       N 68.39275, E 18.68033
+E 18.68033, N 68.39275  68°23'34"N 18°40'49"E   68° 23.565' N, 18° 40.82' E
+```
+
+- **N names the latitude wherever it stands**, so the order does not matter when the letters are
+  there; without them the first side is the latitude, which is the order this map writes one in.
+- **Minutes need the degree sign.** `68 23` with no symbol is two numbers and nothing can say
+  whether they are a latitude and a longitude or 68 degrees and 23 minutes of one of them.
+- **The decimal point is a point**, because the comma parts the two sides — the form the picker
+  copies — and cannot be both without `68,39275, 18,68033` becoming four numbers.
+- **Something has to part them.** Found while this was written: with the separator optional,
+  `68.39275` alone read as a position — the second side has to match something, so the expression
+  backed off and took `68.3927` and `5`. A comma or a space between the two, always. Twenty-two
+  strings were put through the reader to settle its edges, the whole-name cases among them.
+
+The row it makes is the first one, always. Taking it marks the spot — a ring in a third colour,
+neither the goal's green nor the position's blue, one at a time — and opens the mark's own page,
+which carries the *Set as goal* button a hut's popup carries, through the same markup and the same
+listener on the document (`trailsChrome.goalOffer`), and a line to take the mark away again.
+
+**A typed position snaps to nothing.** `trailsGoal.set(lat, lon, name)` without the fourth argument
+is the path a goal taken from a popup already followed: a typed number is not a finger, so the
+ladder of *a named thing within reach, then a line within a finger, then the tap as it fell* does
+not apply to it. The mark and the goal both stand at the five decimals that were typed, 0.00 m off.
+
+#### What it cost, and where it is
+
+`_NameSearch` in `visualization/maps.py`, with `_layer_label` beside it and `window.trailsSearch`
+for whoever drives it; `trailsChrome.goalOffer` is the one new line in the chrome. One function
+serves both pages, so Lomsdal-Visten has all of it too. Four tests that asserted the hiding are
+rewritten to the new truth and five new ones stand beside them; the suite is 1,436 green. Two new
+checks drive it — *the search lists what it finds* and *a position typed into the search*, sixteen
+readings — and both pages read **649 readings, 0 broken invariants, 0 figures moved**, up from 633.
+
+**And one lesson about the suite, paid for with seven runs.** The first drive of each page died in
+*a goal the reader sets* — `stops[0]` out of range, which is a goal that was never set — while that
+check passed when it was run alone, and so did the two new ones with it. Pinned down by bisection
+and then by measuring the page at the moment of the tap: the new checks left **a place's page open
+in the panel**, `paged: 'details'`, three checks earlier; when the goal check narrowed the window to
+390 × 844 and asked for the profile, the panel opened **853 px tall over an 844 px screen** and the
+tap that sets the goal landed on `trails-profile-page` instead of on the map. The panel's own clamp
+is not at fault — a place opened at 1400 × 900 and carried down to 390 × 844 stays 240 px, and a
+trail read upright is 189 px with the phone turned sideways, both measured — it is the state the
+checks handed on.
+
+So `LET_THE_SEARCH_GO` puts everything back: the field, the mark, the goal, the armed tap, the
+chrome, **and a click on empty ground**, which is the one gesture that lets go of a selection, its
+page and the highlight together. Two tools came out of the hunt and stay: `--only` takes a list of
+names parted by commas, which is how a check that passes alone and fails in a run gets pinned down,
+and the goal check reads its moved stop out of the list rather than off its first row, so a run that
+set nothing reports that instead of throwing and taking every later reading with it.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-13, fifth of the day** — the search lists what it finds and reads a position
+  (§9.27), asked for from the phone. Typing no longer hides the map: the matches are rows, one per
+  named thing, nearest first, saying which layer each came from and how many lines carry the name;
+  a row taken fires the click that thing's own handlers are wired to, and switches its layer on if
+  it is off. And `68.39275, 18.68033` — the string the *Copy a position* tool copies — is read back
+  as the place it names, in decimal or in degrees, minutes and seconds, marked on the map and set
+  as a goal through the button a hut's popup carries. One function serves both pages.
 
 - **2026-09-13, later still again** — a name stops where the register stops (§9.26), reported
   from the phone with a sign photographed at the trailhead. A chain took the union of its
@@ -1637,3 +1761,4 @@ A line per change to this document or to the decisions in it, newest first.
 | Naturkartan's pages | `curl -sL` against `naturkartan.se/sv/search/sites?query=…` for every place and number in the register's state-trail names over the box, then each page fetched and its `data-naturkartan-preselected-site-id` read; the short forms `/sv/sites/<id>` and `/sv/norrbottens-lan/<id>` tried and 404; `api.naturkartan.se/v3/sites/12849` 401 |
 | the river ground after the widening | Playwright Firefox against the built page served locally and the published one: `window.trailsGoal.set` from a located standing spot, `state()` read routed and with `stayOnPaths(true)`; `window.trailsGraph.waterAt` sampled 200 times along the old line and over a 41 × 41 window of cells; `window.trailsPlan.geometry()` walked with the distance to the nearest of `nodeLon`/`nodeLat` at every fifth point; then standing spots and goals taken from the cached graph's nodes within 800 m and 600 m of the old ones, 8 × 8 pairs tried on the page |
 | that a failed watch never calls back | Playwright Firefox against a bare chrome page rendered from `maps.py` (no tiles, no data): `context.set_geolocation(None)` with the watch running, then a position restored and the page read at 3, 10, 20, 30 and 45 s — every reading still *no fix*, 108 s in all; the same probe with the retry in place recovered 15 s after the position came back, with nothing pressed |
+| the coordinate forms the search reads | twenty-two strings through the page's own `readCoordinate`, rendered out of `maps.py` and run in node, then five of them through the built page in Playwright Firefox and measured against the position they name |
