@@ -1194,7 +1194,8 @@ A line per change to this document or to the decisions in it, newest first.
 - **2026-09-12, later still** — Naturkartan's pages linked from the state trails (§9.22, §5):
   its Abisko tours are the county's state trails, so the ways were already drawn and preferred;
   a hand-kept catalogue of thirteen pages, one link per *BD* number on a chain, under the
-  *Published elsewhere* heading. The drive reads the links on both pages.
+  *Published elsewhere* heading. The drive reads the links on both pages. Both pages
+  republished at Uwe's word in the small hours of 2026-09-13, byte-identical from the edge.
 - **2026-09-12, after that** — kept tiles survive a new stand (§9.21): the worker answers a
   miss from the old stand, Keep replaces and sweeps; `deploy --drop-tree` deletes an old
   version from the bucket, never the current one. Both pages republished at Uwe's word the
