@@ -1436,7 +1436,10 @@ A line per change to this document or to the decisions in it, newest first.
   so the register's own BD 21 / BD 92 / BD 16 / BD 91 chain stands (§9.22). 2.6 km off now,
   122 m at worst; 866 chains become 886. Lantmäteriet's marked trails carry the Naturkartan link
   too, which is the other half of what was asked. And *BD 6* on the sign is a Fjällkartan sheet,
-  not a trail number.
+  not a trail number. Both pages published at Uwe's word the same afternoon, page and companions
+  only — nothing in the tile trees changed — and byte-identical from the edge, carrying the
+  2,436 m BD 18 chain where a 12,353 m one used to be and 57 Naturkartan links where there
+  were 17.
 
 - **2026-09-13, later still** — a fix that does not arrive no longer stops the watch (§9.25),
   asked for by Uwe from the phone. The mode stands, the page asks again by itself every 30 s
