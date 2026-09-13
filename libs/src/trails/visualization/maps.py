@@ -7643,7 +7643,10 @@ class _ProfilePanel(MacroElement):
                 // line, a route being planned -- with no points down yet as much
                 // as with four -- or a place whose popup has been handed over.
                 paintPages();
-                hold.style.display = (open && pagesOpen) ? 'block' : 'none';
+                // `open` is *something is selected*, and while plan mode owns
+                // the map nothing is -- so a popup's page, which is the one
+                // thing a reader can ask for there, needs saying separately.
+                hold.style.display = ((open || (suspended && detailHtml)) && pagesOpen) ? 'block' : 'none';
                 header.style.marginTop = (open && pagesOpen) ? '4px' : '0';
                 // **Folded, the row is the whole panel and pays a row's price.**
                 // Plan mode's bar was 44 px; this was 63 with the panel's own
@@ -9420,7 +9423,13 @@ class _ProfilePanel(MacroElement):
                 // would throw away the page that had just arrived. Driven, plan
                 // mode showed the table of whatever line had been chosen before
                 // it, on the page where the points belong.
-                if (given === null) { detailHtml = null; choices = []; }
+                // **Except while plan mode owns the map.** Nothing else can
+                // open a popup there -- every click on the map is a waypoint --
+                // so the only way one exists is that the reader asked for it,
+                // out of the search. Cleared on the plan's next refresh, and
+                // the plan refreshes on every edit, it was held exactly where
+                // `wantedPages` says it must not be: in a page nobody can read.
+                if (given === null) { if (!suspended) { detailHtml = null; } choices = []; }
                 // **And a composed route has no popup of its own.** Reported:
                 // taking the planned route from the row of choices left the
                 // ⓘ page showing the table of the line chosen before it --
@@ -9428,7 +9437,7 @@ class _ProfilePanel(MacroElement):
                 // is a selection changing. Nothing ever hands a popup for a
                 // route somebody planned, so the page is the route's own
                 // figures, which is what it has to say about itself.
-                if (given && given.composed) { detailHtml = null; }
+                if (given && given.composed && !suspended) { detailHtml = null; }
                 selected = given;
                 // A window belongs to the chain it was opened on. Carried over,
                 // it would open the panel somewhere in the middle of whatever
@@ -9512,6 +9521,17 @@ class _ProfilePanel(MacroElement):
                     }
                     pageAt = 0;
                     fold();
+                    // **While planning, the page is opened at itself.** The
+                    // panel does not open by itself there -- on a narrow screen
+                    // the map is what is being tapped -- but a reader who has
+                    // just asked to read a place has asked for something, and
+                    // the page they asked for is not the plan's point list.
+                    if (suspended && detailHtml) {
+                        showPages(true);
+                        for (var turn = 0; turn < pages.length; turn += 1) {
+                            if (pages[turn].key === 'details') { goPage(turn); break; }
+                        }
+                    }
                     paintSummary();
                 },
                 // What the goal control is doing, pushed by the chrome the way
@@ -9593,8 +9613,13 @@ class _ProfilePanel(MacroElement):
                         plan: spec.plan || null});
                 },
                 suspend: function (taken) {
+                    var was = suspended;
                     suspended = !!taken;
-                    if (suspended) { present(null); }
+                    if (suspended) { present(null); return; }
+                    // A place read while planning is read while planning: it
+                    // outlives the plan's own refreshes, above, and not plan
+                    // mode itself.
+                    if (was) { detailHtml = null; fold(); }
                 },
                 // What a line is called, for whoever holds the class and not the
                 // line: the chrome heads a docked popup with it, and it used to

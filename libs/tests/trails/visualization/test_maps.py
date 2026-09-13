@@ -3394,7 +3394,7 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "if (given === null) { detailHtml = null; choices = []; }" in html
+        assert "if (given === null) { if (!suspended) { detailHtml = null; } choices = []; }" in html
 
     def test_a_place_takes_the_panel_over_whole(self, group):
         """Tapping a place while a line was chosen left the line's curve standing
@@ -4247,6 +4247,26 @@ class TestProfilePanel:
         html = fmap.get_root().render()
         assert "nameOf: function (className) { return (figures[className] || {}).name || null; }," in html
 
+    def test_a_place_read_while_planning_keeps_its_page(self, group):
+        """Reported from the phone as *how do I add a coordinate as a waypoint*,
+        and the answer was that you could not: the offer stood on the page of the
+        place, plan mode refreshes the panel on every edit, and each refresh fed
+        it a route or a null -- both of which threw the popup's page away. So the
+        button was in the document where no finger could reach it.
+
+        While plan mode owns the map nothing else can open a popup -- every click
+        is a waypoint -- so the one there is one the reader asked for, out of the
+        search. It outlives the plan's refreshes, the panel unfolds at it, and it
+        goes when plan mode does."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "if (suspended && detailHtml) {" in html
+        assert "if (pages[turn].key === 'details') { goPage(turn); break; }" in html
+        assert "hold.style.display = ((open || (suspended && detailHtml)) && pagesOpen) ? 'block' : 'none';" in html
+        assert "if (was) { detailHtml = null; fold(); }" in html
+
     def test_a_composed_route_is_not_the_thing_the_popup_came_off(self, group):
         """Reported: taking the planned route from the row of choices left the ⓘ
         page showing the table of the line chosen before it. A popup is cleared
@@ -4258,7 +4278,7 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "if (given && given.composed) { detailHtml = null; }" in html
+        assert "if (given && given.composed && !suspended) { detailHtml = null; }" in html
         # And the page is still offered, because a composed route says its
         # figures there rather than a table.
         assert "if (detailHtml || (!(planNow && planNow.on) && saidLines.length)) {" in html
@@ -4312,7 +4332,7 @@ class TestProfilePanel:
         assert "if (was !== picks.style.display) {" in html
         assert "if (window.trailsChrome && window.trailsChrome.placed) { window.trailsChrome.placed(); }" in html
         # Nothing selected is nothing to choose between.
-        assert "if (given === null) { detailHtml = null; choices = []; }" in html
+        assert "if (given === null) { if (!suspended) { detailHtml = null; } choices = []; }" in html
 
     def test_one_chip_per_source_and_not_one_per_line(self, group):
         """Measured at the busiest crossing on this map: thirteen lines within

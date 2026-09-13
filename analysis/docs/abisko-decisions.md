@@ -1617,13 +1617,35 @@ refuses even the node a point is standing *on* — which is what a tap that snap
 Measured: a goal set by tap on node 10353 comes back as a plan point on node 10353, and a typed
 position 1.1 km from anything comes back as open ground with the leg drawn `land, routed, land`.
 
+#### And the offer nobody could reach
+
+Asked the same evening, off the published page: *how do I add a coordinate as a waypoint in a plan?*
+The answer was that you could not. The offer stood on the place's page, and the place's page is a
+page of the panel — but **plan mode refreshes the panel on every edit**, and each refresh feeds it
+either the composed route or a null. Both threw the popup's page away: `present(null)` clears
+`detailHtml`, and so does `present(composed)`. Measured at 390 × 844 with one point down: the
+button was in the document, `offsetParent` null, in a page the panel held and would not show — the
+very state `wantedPages` says in its own comment must not happen.
+
+**While plan mode owns the map, a popup's page is not a stale selection.** Nothing else can open one
+there — every click on the map is a waypoint — so the only way one exists is that the reader asked
+for it, out of the search. It now outlives the plan's refreshes, the panel unfolds at it and turns
+to it (the pages are *Points and stages* and *Details*, either one press away), and it goes when
+plan mode goes. Measured again: shown, inside the window, and the topmost thing at its own middle,
+at y = 745 of an 844 px screen.
+
+**And the check that missed it now reads what a finger could do.** It pressed the button through
+`querySelector`, which works on a node nobody can see; it reads `offsetParent`, the window and
+`elementFromPoint` first.
+
 #### Driven
 
-*A way to a goal becomes a plan*, eight readings on both pages, with the position switched off —
+*A way to a goal becomes a plan*, nine readings on both pages, with the position switched off —
 which is where the goal's own page cannot be reached and the state a reader who has just opened the
 map is in. A position typed in, set as a goal; a second typed in and added as a stop, named after
 itself; the flag's four lines; the two places as the plan's two points in order with the goal gone;
-a third typed in as a waypoint and landing on its five decimals.
+a third typed in as a waypoint, reachable by a finger on a phone, and landing on its five decimals.
+661 readings a page.
 
 ---
 
@@ -1639,8 +1661,11 @@ A line per change to this document or to the decisions in it, newest first.
   page knows it, and the goal comes off the map. And the page of any place — a hut, or a position
   typed into the search — now offers a stop on the way while a goal stands and a waypoint while a
   plan is being made, so coordinates reach both without anything new reading them. Driven, 660
-  readings a page, and published the same evening — byte-identical from the edge, 3,551,379 and
-  17,109,497 bytes, page and companions only.
+  readings a page, and published the same evening — byte-identical from the edge, page and
+  companions only. Then the offer turned out to be unreachable in plan mode, which is what the next
+  question from the phone was about: a popup's page kept its place against the plan's own refreshes,
+  and the check learned to read what a finger could do. 661 readings a page, republished at
+  3,552,668 and 17,110,786 bytes.
 
 - **2026-09-13, fifth of the day** — the search lists what it finds and reads a position
   (§9.27), asked for from the phone. Typing no longer hides the map: the matches are rows, one per

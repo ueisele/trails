@@ -3715,8 +3715,31 @@ def a_way_to_a_goal_becomes_a_plan(page: Any) -> Check:
         points: window.trailsPlan.state().points.map(p => [Number(p.lat.toFixed(5)), Number(p.lon.toFixed(5))])})"""
     )
 
+    # **On a phone, where the panel does not open by itself.** The offer was
+    # there and unreachable: plan mode refreshes on every edit, each refresh fed
+    # the panel a route or a null, and both threw the popup's page away -- so the
+    # button stood in the document where no finger could get at it, and a check
+    # that pressed it through `querySelector` said it worked. What is read here
+    # is what a finger could do: shown, inside the window, and the topmost thing
+    # at its own middle.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.wait_for_timeout(700)
     planning = typed(point_at)
+    reach = page.evaluate(
+        """() => { const b = document.querySelector('.trails-point-take');
+        if (!b) { return null; }
+        const r = b.getBoundingClientRect();
+        return {shown: b.offsetParent !== null,
+                inWindow: r.top >= 0 && r.bottom <= window.innerHeight && r.height > 0,
+                onTop: document.elementFromPoint(Math.round(r.left + r.width / 2),
+                                                 Math.round(r.top + r.height / 2)) === b,
+                page: window.trailsProfilePanel.page()}; }"""
+    )
     press(".trails-point-take")
+    page.evaluate("() => window.trailsChrome.coarse(null)")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(600)
     ended = page.evaluate("""() => window.trailsPlan.state().points.map(p => [Number(p.lat.toFixed(5)), Number(p.lon.toFixed(5))])""")
 
     page.evaluate(
@@ -3745,6 +3768,11 @@ def a_way_to_a_goal_becomes_a_plan(page: Any) -> Check:
             Reading("which turns the places into the plan's points, in order", made["points"], [list(stop_at), list(goal_at)]),
             Reading("with plan mode on and the goal off the map", [made["on"], made["goal"]], [True, None]),
             Reading("while planning, a place offers a waypoint", planning, ["Set as goal", "Add a waypoint"]),
+            Reading(
+                "and a finger on a phone can reach it",
+                [reach["shown"], reach["inWindow"], reach["onTop"], reach["page"]] if reach else None,
+                [True, True, True, "details"],
+            ),
             Reading("and it lands where it was typed", ended, [list(stop_at), list(goal_at), list(point_at)]),
         ],
     )
