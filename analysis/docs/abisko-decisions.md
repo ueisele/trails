@@ -1200,12 +1200,12 @@ tiles — and checks that every zoom from 14 to the cap is open and that asking 
 back with the cap.
 
 **What it costs on the phone.** The rule of the memory budget stands: nothing in the panel grows
-with the tile count, and 119,327 is fewer than the 131,033 the first map was measured at. What
-does grow is Cache Storage itself: WebKit's first `caches.open()` after a large download was
-measured at 23 s on the installed app once, with a partly finished whole map at z16 in the
-cache. A whole map at z17 here puts about 119,000 entries there, so that first open after the
-download is worth measuring on the device before the figure is trusted; the page is usable once
-it is paid.
+with the tile count, and 119,327 is fewer than the 131,033 the first map was measured at. The
+tiles go where Lomsdal-Visten's go, IndexedDB — the `kept` store, keyed by address, which the
+worker answers a request from by one lookup — and not Cache Storage; the 23 s that WebKit's first
+`caches.open()` once cost (memory note of 2026-09-02) belongs to the time the tiles were kept
+there, and the cache names left in the worker only clear that old store away. First written
+here as a Cache Storage cost and corrected at Uwe's word the same morning.
 
 ---
 
