@@ -3249,6 +3249,38 @@ def files_from_the_page(page: Any) -> Check:
         settled(page)
         restored = page.evaluate("() => window.trailsPlan.state().points.length")
 
+    # **And a point taken out of the restored plan.** Reported from the phone
+    # with the file: point 5 of eight removed, and the new leg from 4 to 6 was
+    # laid out as the file's leg from 4 to 5 -- ending in the open 8 km short
+    # of its far point, the walk shorter by exactly the leg that was dropped.
+    # A restored leg belongs to the pair of points the file put it between,
+    # and two things say whether it does: every leg ends where its own far
+    # point stands, and no leg is shorter than the line between its ends.
+    edited = None
+    if restored and restored >= 3:
+        page.evaluate("() => window.trailsPlan.remove(1)")
+        settled(page)
+        page.wait_for_timeout(300)
+        edited = page.evaluate(
+            """() => { const s = window.trailsPlan.state(); const ends = {};
+            window.trailsPlan.segments((aLat, aLon, bLat, bLon, leg) => { ends[leg] = [bLat, bLon]; });
+            return {points: s.points.map(p => [p.lat, p.lon]), ends: ends,
+                    legs: s.legs.map(l => ({settled: l.settled, drawn: l.drawn,
+                                            metres: (l.parts || []).reduce((sum, p) => sum + (p.length || 0), 0)}))}; }"""
+        )
+    short_of = None
+    shorter = None
+    if edited:
+        short_of = max(
+            metres_between(tuple(edited["ends"][str(i)]), tuple(edited["points"][i + 1])) if str(i) in edited["ends"] else float("inf")
+            for i in range(len(edited["legs"]))
+        )
+        shorter = [
+            i + 1
+            for i, leg in enumerate(edited["legs"])
+            if leg["settled"] and leg["metres"] < 0.98 * metres_between(tuple(edited["points"][i]), tuple(edited["points"][i + 1]))
+        ]
+
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(900)
 
@@ -3292,6 +3324,15 @@ def files_from_the_page(page: Any) -> Check:
             ),
             Reading("a file picked with the picker is offered", bool(offer), True, note=str(offer["kind"]) if offer else ""),
             Reading("and taking it restores its points", restored, offer["waypoints"] if offer else None),
+            Reading("a point taken out of it leaves one leg fewer", len(edited["legs"]) if edited else None, (restored - 2) if restored else None),
+            Reading(
+                "every leg of which ends where its own far point stands",
+                short_of is not None and short_of < 5.0,
+                True,
+                note=f"{short_of} m off at worst",
+            ),
+            Reading("none shorter than the line between its ends", shorter, []),
+            Reading("and all drawn", all(leg["settled"] and leg["drawn"] > 0 for leg in edited["legs"]) if edited else None, True),
         ],
     )
 

@@ -1770,16 +1770,27 @@ edge. A tap costs 220–310 ms including the settle, as before. Driven as *a tap
 a long edge*, which takes its ground from the page's own graph, and reads as well that **every
 leg that settled has something on the map** — the first report.
 
-**The first report could not be reproduced.** The screenshot's route was rebuilt to the metre —
-Abisko, the cabin west of Njullá added from its page, a tap on the trail, Kårsavagge — and every
-leg drew; so did removing a point, undoing it, and every cabin in the box as point 2. What the
-screenshot shows is a leg the list says is *drawn straight* at 5.99 km and no line on the map
-between its two points. Two things came out of the hunt: `state()` now says how many layers each
-leg has on the map (`drawn`), and the drive reads it, so a leg with parts and no line is a broken
-invariant rather than a screenshot. And the row's word is by the greater part of the leg now: a
-leg of 5.4 km with 63 m of it walked to a hut used to read *drawn straight*, which the map
-plainly did not show. If the hole comes back, its two positions from *Copy a position* are what
-would find it.
+**The first report could not be reproduced from the screenshot** — the route was rebuilt to the
+metre (Abisko, the cabin west of Njullá from its page, a tap on the trail, Kårsavagge) and every
+leg drew, through removals, undo and every cabin in the box as point 2. Two things came out of
+that hunt anyway: `state()` says how many layers each leg has on the map (`drawn`) and the drive
+reads it, and the row's word goes by the greater part of the leg (5.4 km with 63 m walked to a hut
+used to read *drawn straight*).
+
+**Then it came back, an hour later, with the file** — and the file was the whole of the
+difference. The plan had been **restored from its own GPX**, and a restored leg is laid out the
+way the file described it (`from.restore`, §9.7-era), before any routing. The description lived
+on the leg's *first* point and named nothing about its second, so after point 5 of eight was
+taken out, the new leg from 4 to 6 was laid out as the file's leg from 4 to 5: a line ending in
+the open, 8 km short of its far point, the walk shorter by exactly the 8,115 m of the leg that
+was dropped (36,746 → 28,631 m, measured with the file), and every one of its layers drawn — which
+is why the *drawn* reading could never have caught it. Not the router, not the canvas, not the
+phone: a leg made after an edit that was never described by the file. The description now names
+the point it ran to (`restoreTo`, set in `pointsForLoaded`), and `resolve` honours it only for
+that pair — a dragged point is a new object and a removed one leaves its neighbour facing another,
+and neither matches. Driven in *files written and read back*: a point taken out of the restored
+plan leaves one leg fewer, every leg ends where its own far point stands, none is shorter than
+the line between its ends, and all are drawn.
 
 **Four figures moved with it, all the change's own doing.** Lomsdal: *the plan walks this far on
 paths* 1.6 → 1.8 km (a tap that stood as open ground is on its line), *how far it moves on to it*
@@ -1802,7 +1813,9 @@ A line per change to this document or to the decisions in it, newest first.
   end is drawn as path — in a plan's leg and in the way to a goal. The row's word goes by the
   greater part of the leg, `state()` says what each leg has drawn, and a new check taps into the
   page's longest edge. 677 readings a page, republished at 3,570,634 and 17,128,756 bytes,
-  byte-identical from the edge.
+  byte-identical from the edge. Then the hole came back with its GPX: a plan restored from its
+  file laid a leg made after an edit out as the file's leg from the same first point, whatever
+  the far point had become (`restoreTo`). 681 readings a page, republished.
 
 - **2026-09-13, sixth of the day** — a goal becomes a plan, and a place offers what can be done
   with it (§9.28), all three asked for from the phone in one message. *Make a plan of this way*

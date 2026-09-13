@@ -5027,6 +5027,15 @@ class TestPlanMode:
 
         assert deciding.index("from.restore") < deciding.index("from.track === loaded.id")
         assert deciding.index("from.restore") < deciding.index("onNetwork(from) && onNetwork(to)")
+        # **And only for the pair the file described.** Reported from the phone
+        # with the file: point 5 of eight taken out, and the new leg from 4 to
+        # 6 was laid out as the file's leg from 4 to 5 -- ending in the open,
+        # 8 km short of its far point, the walk shorter by exactly the leg
+        # that was dropped. The description lives on the first point and now
+        # names the second; a dragged point is a new object and a removed one
+        # leaves its neighbour facing another, and neither matches.
+        assert "if (from.restore && from.restoreTo === to) {" in deciding
+        assert "for (i = 0; i + 1 < made.length; i += 1) { made[i].restoreTo = made[i + 1]; }" in planning
 
         # And it is offered only where there is a plan in the file to restore.
         assert "loaded.mode === 'asis' && loaded.isRoute" in planning

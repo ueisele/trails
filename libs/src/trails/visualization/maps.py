@@ -12127,7 +12127,11 @@ class _PlanMode(MacroElement):
                 // may well sit on a node, so routing would quietly replace a
                 // recorded stretch, and the seam this restores is *inside* the
                 // leg where the recorded test cannot see it at all.
-                if (from.restore) {
+                // Only for the far point the file put it with: a point that
+                // was dragged is a new object, a point taken out leaves its
+                // neighbour facing another, and both are legs the file never
+                // described (see `pointsForLoaded`).
+                if (from.restore && from.restoreTo === to) {
                     var laid = restoredParts(graph, from, to, from.restore);
                     if (laid) { return Promise.resolve(laid); }
                 }
@@ -12855,6 +12859,18 @@ class _PlanMode(MacroElement):
                         if (loaded.legs[i]) { here.restore = loaded.legs[i]; }
                         made.push(here);
                     }
+                    // **A restored leg belongs to a pair of points, not to
+                    // one.** The file's leg i runs from its point i to its
+                    // point i + 1, and the description lives on the first of
+                    // them -- so with nothing saying which point it ran *to*,
+                    // a leg made after an edit was laid out from the file
+                    // whatever its far end had become. Reported from the phone
+                    // with the file: point 5 of eight taken out, and the new
+                    // leg from 4 to 6 came back as the file's leg from 4 to 5,
+                    // ending in the open 8 km short of its own far point --
+                    // the walk shorter by exactly the leg that was dropped,
+                    // and a line that stopped in the middle of nowhere.
+                    for (i = 0; i + 1 < made.length; i += 1) { made[i].restoreTo = made[i + 1]; }
                     return made;
                 }
                 if (loaded.mode === 'align') {
