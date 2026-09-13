@@ -1260,8 +1260,80 @@ the graph's own nodes on the page: standing 68.34038 N 18.75252 E, goal 68.34147
 routed 893 m with 522 m straight over one crossing 23 m wide, *stay on paths* 4.90 km by the
 bridge. The scene records it.
 
+### 9.25 A fix that stops arriving keeps the watch — settled, 2026-09-13
+
+Reported from the phone with a screenshot: *This device could not work out where it is*, and
+"then I have to keep pressing until it works at some point". Worse, a mode that had been working
+switched itself off the moment one fix failed — which Uwe called out as most annoying in goal
+mode, and it is: the way to a goal is worked out from where the reader is standing, so every
+failed fix took that place away and the goal had nothing to route from.
+
+The cause was one line. `failedHere` called `stopHere` for every error the browser could give,
+which clears the watch, drops the dot and the ring, and puts the lamp out. A device under a cliff
+was treated exactly like a browser told never to share a position.
+
+**Measured before deciding what to do about it**, because keeping the watch on is only worth
+anything if the watch can still answer: in Firefox, once `watchPosition` has called back with
+*position unavailable*, it never calls back again — not when a position becomes available, not
+after 108 s of one being there to have (probe of 2026-09-13, geolocation withdrawn and restored
+under Playwright). The watch is finished and says so only by silence. So *pressing again* was
+never a habit of Uwe's; it was the only thing that worked.
+
+**What the page does now.**
+
+- **The watch stands** through anything that might still answer, and the mode with it. A
+  refusal (`PERMISSION_DENIED`) is the one exception and still stops it: that one will not
+  change its mind, and a lamp left burning for it would be the page claiming to wait for
+  something that is not coming. It says so, in the line at the foot, and that message stays
+  because it is the one a reader can act on.
+- **It asks again by itself** — `askAgain`, a fresh watch with the same options, at once on the
+  first failure of a drought and every 30 s after that. Thirty rather than twenty because the
+  watch waits 20 s before giving up and a retry inside that window would keep throwing away the
+  attempt about to answer. This is the press Uwe was making, made by the page.
+- **What is drawn is where the reader was.** The dot stands and turns red, the ring turns red
+  and dashed at the radius the last fix claimed. The radius is not grown: it is that fix's own
+  claim and still true of it, and growing it by a guessed walking pace would be the map
+  inventing the one figure it does not have.
+- **The age is said in words under the dot** — *no fix*, *no fix for 4 min*, *no fix for 2 h*,
+  redrawn on the same 30 s clock. This is the figure that makes a red dot worth anything: how
+  far the reader may have walked from the place it is drawn at. Asked for by Uwe as "we
+  probably don't know how inaccurate it is", and this is the honest answer to that.
+- **The switch goes red**, both of them — the mark at the foot and the rail's lamp — whether or
+  not a place is known, which is what Uwe asked for. Where no fix has ever arrived that red
+  switch is all there is, and it is enough: it says *on, and getting nothing*. The title and the
+  aria-label carry the reason in words.
+- **The line at the foot says why once** and fades. A watch that times out every 20 s would
+  otherwise put the same sentence over the map three times a minute.
+- **`trailsChrome.position()` keeps answering**, with `stale` and `when` beside the place, so
+  the goal still routes from the last place the device was sure of. That is the goal-mode half
+  of the complaint.
+
+Red is the compass rim's red and deliberately the same one: two reds would be two things to
+learn, and between them they say *the instrument is talking*. They are told apart by shape — thin
+arcs around the dot against the dot and its ring — which is how everything else at this position
+is told apart.
+
+Driven as *a fix that stops arriving* (20 readings) on both pages: blue while fixes arrive, red
+and dashed and labelled when they stop, the watch still on, the place still answerable, and then
+a position found again **with nothing pressed**. The drought is driven through `watchPosition`
+itself — the check wraps it, keeps the error callback of the running watch and fires it — and not
+by withdrawing the position with `set_geolocation(None)`. Withdrawing it works, and is how the
+measurement above was made, but it leaves the context unable to push a position to any watch
+already running for the rest of the run: driven that way the check passed and seven checks after
+it failed on a map that had stopped hearing where it was.
+
+---
+
+## 10. Changes
+
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-13, later still** — a fix that does not arrive no longer stops the watch (§9.25),
+  asked for by Uwe from the phone. The mode stands, the page asks again by itself every 30 s
+  because a watch that has answered *position unavailable* never calls back (measured, 108 s),
+  and the last place is kept and drawn red — dot, dashed ring, both switches — with its age said
+  under it. The goal keeps a place to route from. §10's own heading, lost when §9.24 was written
+  in above it the same day, is back.
 - **2026-09-13, later** — the box widened to 18.15–19.10 E, 68.139–68.46 N at Uwe's word (§2,
   §9.24): the valley path through Lapporten whole, the south on the tile row's edge; tiles
   resumed into stand 1, heights and graph rebuilt, 866 chains; BD 31 joins the Naturkartan
@@ -1449,3 +1521,4 @@ A line per change to this document or to the decisions in it, newest first.
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |
 | Naturkartan's pages | `curl -sL` against `naturkartan.se/sv/search/sites?query=…` for every place and number in the register's state-trail names over the box, then each page fetched and its `data-naturkartan-preselected-site-id` read; the short forms `/sv/sites/<id>` and `/sv/norrbottens-lan/<id>` tried and 404; `api.naturkartan.se/v3/sites/12849` 401 |
 | the river ground after the widening | Playwright Firefox against the built page served locally and the published one: `window.trailsGoal.set` from a located standing spot, `state()` read routed and with `stayOnPaths(true)`; `window.trailsGraph.waterAt` sampled 200 times along the old line and over a 41 × 41 window of cells; `window.trailsPlan.geometry()` walked with the distance to the nearest of `nodeLon`/`nodeLat` at every fifth point; then standing spots and goals taken from the cached graph's nodes within 800 m and 600 m of the old ones, 8 × 8 pairs tried on the page |
+| that a failed watch never calls back | Playwright Firefox against a bare chrome page rendered from `maps.py` (no tiles, no data): `context.set_geolocation(None)` with the watch running, then a position restored and the page read at 3, 10, 20, 30 and 45 s — every reading still *no fix*, 108 s in all; the same probe with the retry in place recovered 15 s after the position came back, with nothing pressed |

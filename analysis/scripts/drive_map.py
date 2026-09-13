@@ -4041,6 +4041,190 @@ def where_the_reader_is(page: Any) -> Check:
     )
 
 
+#: What the position switch says about itself when nothing is arriving, read
+#: where each thing is actually drawn: the dot and the ring are canvas layers
+#: and are asked as layers, the two switches are elements, and the age under the
+#: dot is an SVG label inside a group that is hidden as a whole.
+HERE_LOST = """() => {
+  const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
+  let dot = null, ring = null;
+  map.eachLayer(l => { const cls = l.options && l.options.className;
+    if (cls === 'trails-here-dot') { dot = l; }
+    if (cls === 'trails-here-ring') { ring = l; } });
+  const mark = document.querySelector('.trails-quick-here');
+  const lamp = document.querySelector('.trails-rail button[data-tool=here]');
+  const said = document.querySelector('.trails-here-lost');
+  const group = document.querySelector('.trails-here-marks');
+  const shown = !!group && group.style.display !== 'none'
+      && !!said && said.getAttribute('display') !== 'none';
+  const state = window.trailsChrome.state();
+  return {dot: !!dot, fill: dot ? dot.options.fillColor : null,
+          ring: !!ring, reach: ring ? Math.round(ring.getRadius()) : null,
+          dash: ring ? (ring.options.dashArray || null) : null,
+          mark: mark ? getComputedStyle(mark).backgroundColor : null,
+          lamp: lamp ? getComputedStyle(lamp).color : null,
+          age: shown ? said.textContent : null,
+          told: mark ? mark.title : null,
+          watching: state.here, lost: state.lost,
+          position: window.trailsChrome.position()}; }"""
+
+
+def a_fix_that_stops_arriving(page: Any) -> Check:
+    """A watch that is on and getting nothing, which is what a valley is.
+
+    **Reported from the phone.** Every failed fix used to stop the watch: the
+    mark went out, and the reader pressed it again, and again, in the one place
+    where pressing it is least likely to work. With a goal set it was worse than
+    tedious -- the way there is worked out from where the reader is standing,
+    and each failure took that place away.
+
+    So the watch stands through it. What the map knows is not nothing: it is
+    *where you were*, which is drawn red, with the ring dashed at the radius
+    that last fix claimed and the age said in words under the dot -- because how
+    far a reader may have walked since is the whole of what a red dot is worth.
+
+    **And the page asks again by itself**, which is the last leg here: nothing is
+    pressed between the drought and the fix that ends it.
+
+    **Driven through the browser's own error callback and not by taking the
+    position away.** Playwright can withdraw a position -- `set_geolocation(None)`
+    -- and it is how the measurement in the decisions doc was made, but it
+    leaves the context unable to push a new position to a watch that is already
+    running, for the rest of the run: driven that way, this check passed and the
+    seven after it failed on a map that had stopped hearing where it was. What
+    is wrapped here is `watchPosition` itself, which is the seam the page is
+    written against: its error callback is kept, fired by hand, and answered for
+    as long as the drought is meant to last.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What is drawn while fixes arrive, while they have stopped, and after the
+        page has found one again on its own
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(400)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.context.set_geolocation(located(SCENE.standing, 22))
+    page.evaluate(with_map("(at) => { __MAP__.setView(at, 14); }"), list(SCENE.standing))
+    page.wait_for_timeout(500)
+
+    # **The seam.** Every watch the page opens from now on is a real one whose
+    # answers are passed through -- until `broken` is set, when it swallows what
+    # arrives and refuses the watch at once, which is a device under a cliff.
+    # The error callback of the newest watch is kept, so the drought can be
+    # started on a watch that is already running and has already drawn a fix.
+    page.evaluate(
+        """() => {
+        const geo = navigator.geolocation;
+        const real = geo.watchPosition.bind(geo);
+        window.__here = {broken: false, bad: null, was: geo.watchPosition};
+        geo.watchPosition = function (ok, bad, opts) {
+          window.__here.bad = bad;
+          // While it is broken nothing is watching at all -- so the fix that
+          // ends the drought can only come from a watch the page opened after
+          // it, which is the leg this check exists for. A cleared id that was
+          // never a watch is a no-op, which is what `clearWatch` says.
+          if (window.__here.broken) {
+            window.setTimeout(function () { bad({code: 2, message: 'forced'}); }, 30);
+            return -1;
+          }
+          return real(function (fix) { if (!window.__here.broken) { ok(fix); } }, bad, opts); }; }"""
+    )
+    page.evaluate("() => window.trailsChrome.here(true)")
+    page.wait_for_function(
+        with_map(
+            """() => { let there = false;
+            __MAP__.eachLayer(l => { if (l.options && l.options.className === 'trails-here-dot') { there = true; } });
+            return there; }"""
+        ),
+        timeout=20_000,
+    )
+    page.wait_for_timeout(600)
+    arriving = page.evaluate(HERE_LOST)
+
+    # The valley: the browser answers the watch that is running with the error
+    # the phone reported, and goes on answering every watch opened after it.
+    page.evaluate("() => { window.__here.broken = true; window.__here.bad({code: 2, message: 'forced'}); }")
+    page.wait_for_function("() => !!window.trailsChrome.state().lost", timeout=30_000)
+    page.wait_for_timeout(600)
+    lost = page.evaluate(HERE_LOST)
+
+    # **And out of it, with nothing pressed.** The page's own retry is on a
+    # thirty-second clock, so this waits for it rather than pausing for a figure.
+    page.evaluate("() => { window.__here.broken = false; }")
+    found = None
+    try:
+        page.wait_for_function("() => !window.trailsChrome.state().lost", timeout=120_000)
+        page.wait_for_timeout(700)
+        found = page.evaluate(HERE_LOST)
+    except Exception:
+        # Read anyway: a leg that says *it never came back* is the reading, and
+        # an exception here would take the whole check's other twenty with it.
+        found = page.evaluate(HERE_LOST)
+
+    page.evaluate("() => window.trailsChrome.here(false)")
+    page.wait_for_timeout(400)
+    off = page.evaluate(HERE_LOST)
+    # The browser's own watch back, before anything else drives this page.
+    page.evaluate("() => { navigator.geolocation.watchPosition = window.__here.was; delete window.__here; }")
+    page.context.set_geolocation(located(SCENE.position, 24))
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+
+    return Check(
+        "a fix that stops arriving",
+        [
+            Reading("a fix arriving is drawn blue", arriving["fill"], "#1565c0"),
+            Reading("with an unbroken ring", arriving["dash"], None),
+            Reading("and the switch says only that it is on", arriving["mark"], "rgb(13, 71, 161)"),
+            # The whole of the change: the watch is not what failed.
+            Reading("nothing arriving does not stop the watch", lost["watching"], True),
+            Reading("and does not take the place away", lost["dot"], True),
+            Reading("the dot goes red", lost["fill"], "#d32f2f"),
+            Reading("the ring goes red and dashed", lost["dash"], "5 4"),
+            # The radius is the last fix's own claim and is still true of it;
+            # growing it by a guessed pace would be inventing the one figure the
+            # page does not have.
+            Reading("at the radius that fix claimed", lost["reach"], arriving["reach"]),
+            Reading("the switch goes red", lost["mark"], "rgb(211, 47, 47)"),
+            Reading("the rail's lamp with it", lost["lamp"], "rgb(211, 47, 47)"),
+            # How far they may have walked since is the whole of what a red dot
+            # is worth, and the ring cannot say it.
+            Reading(
+                "and the age is said under the dot",
+                (lost["age"] or "").startswith("no fix"),
+                True,
+                note=lost["age"] or "nothing said",
+            ),
+            # Which refusal it was is the browser's business -- driven, the same
+            # missing position came back as *unavailable* once and as *timed
+            # out* the next time -- so what is asked is that the switch says
+            # something about it rather than going on offering its own name.
+            Reading(
+                "the switch says why in words",
+                (lost["told"] or "") != "Where I am",
+                True,
+                note=lost["told"] or "nothing said",
+            ),
+            # The goal routes from here and would otherwise have nothing to
+            # route from at exactly the moment a reader most wants the way there.
+            Reading("the goal can still ask where the reader is", bool(lost["position"]), True),
+            Reading("and is told the place is standing", (lost["position"] or {}).get("stale"), True),
+            # Nothing was pressed for this leg.
+            Reading("a position again, with nothing pressed", found["lost"], None),
+            Reading("and the dot goes back to blue", found["fill"], "#1565c0"),
+            Reading("with the ring unbroken", found["dash"], None),
+            Reading("and nothing left saying no fix", found["age"], None),
+            # A watch that is off is not a watch that is failing.
+            Reading("pressing again stops it as before", off["watching"], False),
+            Reading("and the dot goes with it", off["dot"], False),
+            Reading("with nothing left failing", off["lost"], None),
+        ],
+    )
+
+
 def bearing_between(start: tuple[float, float], end: tuple[float, float]) -> float:
     """The bearing the page works out, worked out here to compare it with.
 
@@ -8527,6 +8711,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(sharing_the_room(page))
     if wanted(where_the_reader_is):
         checks.append(where_the_reader_is(page))
+    if wanted(a_fix_that_stops_arriving):
+        checks.append(a_fix_that_stops_arriving(page))
     if wanted(which_way_the_reader_faces):
         checks.append(which_way_the_reader_faces(page))
     if wanted(the_accuracy_only_gets_better):

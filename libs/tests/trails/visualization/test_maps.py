@@ -7822,9 +7822,134 @@ class TestWhereTheReaderIs:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "problem.code === 1" in html
+        assert "var code = problem ? problem.code : 0;" in html
         assert "This browser was told not to share your position." in html
-        assert "problem.code === 3" in html
+        assert "var why = code === 3" in html
+
+    def test_a_fix_that_does_not_arrive_does_not_stop_the_watch(self):
+        """Reported from the phone: under a cliff the first fixes often fail,
+        and the watch used to stop itself over each one — so the reader pressed
+        the mark again, and again, in the one place where pressing it is least
+        likely to work. With a goal set it took away the place the way there was
+        worked out from, every time.
+
+        A refusal is the exception and still stops it: a browser told not to
+        share a position answers once and never again, and a lamp left burning
+        for it would be the page claiming to wait for something that is not
+        coming."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        failed = html.split("function failedHere(problem) {")[1].split("\n            }")[0]
+        assert "stopHere('This browser was told not to share your position.');" in failed
+        assert "hereLost = {code: code, why: why, since: first ? Date.now() : hereLost.since};" in failed
+        # Nothing else in there stops anything: that is the whole change.
+        assert failed.count("stopHere(") == 1
+        # And it is said once rather than on every timeout.
+        assert "if (first) { saySomething(why); hereAgeing(true); askAgain(); }" in failed
+
+    def test_a_drought_asks_again_by_itself(self):
+        """Measured in a browser: once `watchPosition` has answered *position
+        unavailable* it never calls back — not when a position becomes available
+        again, not after a hundred seconds of one being there to have. The watch
+        is finished and says so only by silence, which is why pressing the mark
+        again is what has always worked, and why the reader was left doing it.
+
+        Thirty seconds between tries, which is longer than the twenty the watch
+        waits before giving up: a retry inside that window would keep throwing
+        away the attempt that was about to answer. The first failure is the
+        exception and asks at once, because the common case is one fix that
+        failed."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var HERE_WANTS = {enableHighAccuracy: true, maximumAge: 10000, timeout: 20000};" in html
+        assert "var LOST_AGAIN_MS = 30000;" in html
+        again = html.split("function askAgain() {")[1].split("\n            }")[0]
+        # A new watch and not a one-off: whatever arrives has to land in
+        # `drawHere` like every other fix, and a `getCurrentPosition` that
+        # succeeded would leave nothing watching afterwards.
+        assert "navigator.geolocation.clearWatch(hereWatch);" in again
+        assert "hereWatch = navigator.geolocation.watchPosition(drawHere, failedHere, HERE_WANTS);" in again
+        assert "if (hereWatch === null || !navigator.geolocation) { return; }" in again
+        # One watch, asked for the same things from both places.
+        assert html.count("watchPosition(drawHere, failedHere, HERE_WANTS)") == 2
+
+    def test_a_position_it_cannot_confirm_is_drawn_red(self):
+        """What the map knows when a fix fails is not nothing: it is *where you
+        were*, which is the second best answer and the only one there is. The
+        dot stands and turns red, the ring turns red and dashed, and the switch
+        goes red with them — the half a reader sees without looking for it.
+
+        The radius is left where the last fix put it. It is that fix's own claim
+        and still true of it; growing it by a guessed walking pace would be the
+        map inventing the one figure it does not have."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "var HERE_LOST = HERE_FACING;" in html
+        paint = html.split("function paintHereColour() {")[1].split("\n            }")[0]
+        assert "var colour = hereLost ? HERE_LOST : HERE_BLUE;" in paint
+        assert "if (hereDot) { hereDot.setStyle({fillColor: colour}); }" in paint
+        assert "dashArray: hereLost ? '5 4' : null" in paint
+        # Nothing here touches the radius.
+        assert "setRadius" not in paint
+        # The two marks at the foot and the rail's lamp, from the same state.
+        assert "[quickHere, hereWatch !== null, !!hereLost]].forEach(function (each) {" in html
+        assert "var lost = tool.key === 'here' && hereLost && hereWatch !== null;" in html
+
+    def test_how_old_the_dot_is_is_said_under_it(self):
+        """A red dot says the device has stopped confirming it; a reader on a
+        mountain has to know whether that started twenty seconds ago or twenty
+        minutes, because that is the whole of how far they may have walked from
+        the place it is drawn at. The ring cannot say it — it is the last fix's
+        own claim and does not grow — so it is said in words.
+
+        Rounded hard, and redrawn on a timer, because nothing else pushes a
+        figure worked out from a clock."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        said = html.split("function lostSaid(since) {")[1].split("\n            }")[0]
+        assert "if (mins < 1) { return 'no fix'; }" in said
+        assert "if (mins < 60) { return 'no fix for ' + mins + ' min'; }" in said
+        assert "return 'no fix for ' + Math.round(mins / 60) + ' h';" in said
+        assert "hereLostSaid = aimText('trails-here-lost', 600, HERE_LOST);" in html
+        assert "hereLostSaid.textContent = lostSaid(hereKept ? hereKept.when : null);" in html
+        # A watch with no bearing and no compass still draws the marks, because
+        # the words under the dot are now a reason to.
+        assert "if (!hereDot || (hereBearing === null && hereFacing === null && !hereGoal && !hereLost)) {" in html
+        ageing = html.split("function hereAgeing(on) {")[1].split("\n            }")[0]
+        assert "paintHereMarks();" in ageing
+        assert "}, LOST_AGAIN_MS);" in ageing
+        assert "if (hereAgeTimer) { window.clearInterval(hereAgeTimer); hereAgeTimer = null; }" in ageing
+        # A label left standing would come back with the group, which returns
+        # for a goal or a compass reading long after the fix it was about.
+        hidden = html.split("function paintHereMarks() {")[1].split("node.style.display = 'none';")[0]
+        assert "hereLostSaid.setAttribute('display', 'none');" in hidden
+
+    def test_the_last_place_is_what_the_goal_routes_from(self):
+        """The goal is worked out from where the reader is standing and would
+        otherwise have nothing to stand on at exactly the moment they most want
+        the way there. It gets the last place the device was sure of, said to be
+        the last place and dated."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "stale: !!hereLost, when: hereKept ? hereKept.when : null};" in html
+        assert "lost: hereLost ? hereLost.why : null," in html
+        # A fix ending the drought takes the red with it, and says nothing.
+        assert "var wasLost = hereLost;" in html
+        assert "if (wasLost) { hereAgeing(false); paintHereColour(); paintHere(''); }" in html
+        # A watch switched off is not a watch that is failing.
+        dropped = html.split("function dropHere() {")[1].split("\n            }")[0]
+        assert "hereLost = null;" in dropped
+        assert "hereAgeing(false);" in dropped
 
     def test_which_way_is_asked_of_whichever_can_say(self):
         """A phone reports a course over the ground only while it is moving, and
@@ -7950,7 +8075,7 @@ class TestWhereTheReaderIs:
         # counts as something: a reader who has just switched the position on
         # has no bearing and no compass yet, while *which way to the route* is
         # known from the first fix.
-        assert "if (!hereDot || (hereBearing === null && hereFacing === null && !hereGoal)) {" in html
+        assert "if (!hereDot || (hereBearing === null && hereFacing === null && !hereGoal && !hereLost)) {" in html
 
     def test_a_vaguer_fix_does_not_replace_a_sharper_one(self):
         """Standing still while the sky thins, the reported radius grows from

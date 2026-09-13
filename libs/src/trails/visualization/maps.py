@@ -19779,7 +19779,9 @@ class _Chrome(MacroElement):
             // reader because it was opened is a map that has decided something
             // for them; this asks the browser for a position when the button is
             // pressed and stops the moment it is pressed again, when the page is
-            // hidden, or when the browser refuses.
+            // hidden, or when the browser refuses to share at all. **A fix that
+            // merely fails to arrive does not stop it** -- `failedHere` says
+            // why, and it is the defect this section was rewritten for.
             //
             // **The accuracy is drawn.** A fix is a claim with a radius on it —
             // 8 m under an open sky, 300 m in a valley — and a page that draws it
@@ -19798,6 +19800,15 @@ class _Chrome(MacroElement):
             // wide -- a movement with slack in it -- and this is red, thin and
             // hard-edged, which is what an instrument looks like.
             var HERE_FACING = '#d32f2f';
+            // **The same red again, for a position the device can no longer
+            // confirm.** A second red would be a second thing to learn, and
+            // these two say one thing between them: *the instrument is
+            // talking*. The rim is the compass reporting where the phone
+            // points; this is the phone admitting it has stopped knowing where
+            // it is. They are told apart by shape, which is how everything else
+            // at this position is told apart -- thin arcs around the dot,
+            // against the dot itself and the ring around it.
+            var HERE_LOST = HERE_FACING;
             //: The namespace the marks are drawn in. The profile panel has its
             //: own copy of this line for its own arrow; a shared one would have
             //: to live above both closures, and one constant is not worth a
@@ -19835,11 +19846,24 @@ class _Chrome(MacroElement):
             //: a reader walking slowly under a sky that is getting worse would
             //: otherwise be shown where they were a quarter of an hour ago.
             var HOLD_MS = 90000;
+            //: What the watch asks the browser for. Written once because it is
+            //: asked twice: on the press, and on every retry while nothing is
+            //: arriving.
+            var HERE_WANTS = {enableHighAccuracy: true, maximumAge: 10000, timeout: 20000};
+            //: How often a drought asks again, and how often the age under the
+            //: dot is redrawn -- one timer for both, because they are one
+            //: thing: the page doing what the reader was doing by hand.
+            var LOST_AGAIN_MS = 30000;
             //: The fix on the screen, which is not always the last one that
             //: arrived: where it was, how wide its claim was, and when it was
             //: made.
             var hereKept = null;
             var hereWatch = null, hereDot = null, hereRing = null, hereFixes = 0;
+            //: While the watch is on and nothing is arriving: which refusal it
+            //: was, what there is to say about it, and when the drought began.
+            //: `null` while fixes are coming, and everything red on this mark
+            //: reads it.
+            var hereLost = null, hereAgeTimer = null;
             //: The last bearing worth drawing, whether the device reported it or
             //: it was worked out here, and where it was worked out from.
             var hereBearing = null, hereFrom = null, hereMoving = false;
@@ -19852,6 +19876,8 @@ class _Chrome(MacroElement):
             var hereGoal = null;
             var hereAim = null, hereAimEdge = null, hereAimHead = null;
             var hereAimSaid = null, hereAimNamed = null, hereAimMs = null;
+            //: How old the dot is, said under it while no fix confirms it.
+            var hereLostSaid = null;
             // **Where the reader is is the last thing drawn on this map.**
             // Reported: with a plan loaded the dot sat *under* the route --
             // because it was in the overlay pane at 400 and the route has a pane
@@ -20211,6 +20237,18 @@ class _Chrome(MacroElement):
                 return Math.round(metres) + ' m';
             }
 
+            //: How long the dot has stood without confirmation, at the size the
+            //: mark can carry. Rounded hard, because what the reader is judging
+            //: is how far they might have walked since -- and no part of that
+            //: answer turns on the difference between four minutes and four and
+            //: a half.
+            function lostSaid(since) {
+                var mins = since === null ? 0 : Math.floor((Date.now() - since) / 60000);
+                if (mins < 1) { return 'no fix'; }
+                if (mins < 60) { return 'no fix for ' + mins + ' min'; }
+                return 'no fix for ' + Math.round(mins / 60) + ' h';
+            }
+
             // A wedge, and an arc, in the pane the direction arrow already uses
             // the idiom of: an SVG placed by hand at the position and turned by
             // an attribute, re-placed whenever the map moves under it. Not
@@ -20265,6 +20303,14 @@ class _Chrome(MacroElement):
                 hereAimHead.setAttribute('stroke-linejoin', 'round');
                 hereAimSaid = aimText('trails-here-aim-said', 700);
                 hereAimNamed = aimText('trails-here-aim-named', 500);
+                // **How old the dot is, and only while it is old.** A red dot
+                // says the device has stopped confirming it; a reader on a
+                // mountain has to know whether that started twenty seconds ago
+                // or twenty minutes, because that is the whole of how far they
+                // may have walked from the place it is drawn at. The ring
+                // cannot say it -- it is the last fix's own claim and does not
+                // grow -- so this is said in words, which is what words are for.
+                hereLostSaid = aimText('trails-here-lost', 600, HERE_LOST);
                 // The cone under the wedge, and the rim over both: the rim is
                 // 17 px of the 72 the wedge covers and would otherwise be
                 // painted over at exactly the angle a reader is looking at.
@@ -20275,6 +20321,7 @@ class _Chrome(MacroElement):
                 hereMarks.appendChild(hereHalo);
                 hereMarks.appendChild(hereAimSaid);
                 hereMarks.appendChild(hereAimNamed);
+                hereMarks.appendChild(hereLostSaid);
                 pane.appendChild(hereMarks);
                 return hereMarks;
             }
@@ -20306,11 +20353,11 @@ class _Chrome(MacroElement):
             //: A figure that stays readable over whatever the tile puts under
             //: it: the white is painted first and the green over it, which is
             //: what `paint-order` is for and is cheaper than a second node.
-            function aimText(className, weight) {
+            function aimText(className, weight, colour) {
                 var node = document.createElementNS(HERE_SVG, 'text');
                 node.setAttribute('class', className);
                 node.setAttribute('text-anchor', 'middle');
-                node.setAttribute('fill', HERE_GOAL);
+                node.setAttribute('fill', colour || HERE_GOAL);
                 node.setAttribute('stroke', '#ffffff');
                 node.setAttribute('stroke-width', '3.2');
                 node.setAttribute('stroke-linejoin', 'round');
@@ -20390,7 +20437,12 @@ class _Chrome(MacroElement):
                 // switched the position on has no bearing and no compass yet,
                 // and *which way to the route* is the one thing that is already
                 // known from the first fix.
-                if (!hereDot || (hereBearing === null && hereFacing === null && !hereGoal)) {
+                if (!hereDot || (hereBearing === null && hereFacing === null && !hereGoal && !hereLost)) {
+                    // Hidden with the group rather than left as it was: the
+                    // group comes back for a goal or a compass reading, and a
+                    // label carrying *no fix for 4 min* from an hour ago would
+                    // come back with it.
+                    hereLostSaid.setAttribute('display', 'none');
                     node.style.display = 'none';
                     return;
                 }
@@ -20433,6 +20485,18 @@ class _Chrome(MacroElement):
                     lit.setAttribute('stroke-width', '5.4');
                     lit.setAttribute('stroke-linecap', 'round');
                     hereHalo.appendChild(lit);
+                }
+                // Under the dot rather than out along a bearing: this is
+                // about the dot itself, and there may be no bearing at all --
+                // a watch that lost the sky on its second fix has a place and
+                // nothing else.
+                if (hereLost) {
+                    hereLostSaid.removeAttribute('display');
+                    hereLostSaid.textContent = lostSaid(hereKept ? hereKept.when : null);
+                    hereLostSaid.setAttribute('x', '0');
+                    hereLostSaid.setAttribute('y', '26');
+                } else {
+                    hereLostSaid.setAttribute('display', 'none');
                 }
                 paintAim();
                 placeHereMarks();
@@ -20480,6 +20544,67 @@ class _Chrome(MacroElement):
                 if (typeof paintQuick === 'function') { paintQuick(); }
             }
 
+            // **Red, and it keeps the dot.** A fix that stopped arriving used
+            // to take the watch, the dot and the ring with it: the mark went
+            // out and the reader had to press it again -- in the one place
+            // where pressing it again is least likely to work, and reported
+            // from exactly there. What this map knows when a fix fails is not
+            // nothing. It is *where you were*, which is the second best answer
+            // and the only one there is.
+            //
+            // So the dot stands and turns red, the ring turns red and dashed --
+            // a dashed line being what this map draws for something it cannot
+            // confirm -- and the switch goes red with them, which is the half a
+            // reader sees without looking for it.
+            //
+            // **The radius is left where the last fix put it.** It is that
+            // fix's own claim and is still true of that fix; growing it by a
+            // guessed walking pace would be the map inventing the one figure it
+            // does not have. How long ago the claim was made is said in words
+            // under the dot instead, which is a fact rather than a guess.
+            function paintHereColour() {
+                var colour = hereLost ? HERE_LOST : HERE_BLUE;
+                if (hereDot) { hereDot.setStyle({fillColor: colour}); }
+                if (hereRing) {
+                    hereRing.setStyle({color: colour, fillColor: colour,
+                                       fillOpacity: hereLost ? 0.07 : 0.12,
+                                       dashArray: hereLost ? '5 4' : null});
+                }
+            }
+
+            // **And it asks again by itself, because the watch will not.**
+            // Measured in a browser: once `watchPosition` has answered *position
+            // unavailable*, it never calls back -- not when a position becomes
+            // available again, not after a hundred seconds of one being there
+            // to have. The watch is finished and only says so by silence, which
+            // is why pressing the mark again is what has always worked and why
+            // the reader was left doing it. This is that press, made by the
+            // page, on a clock.
+            //
+            // A new watch and not `getCurrentPosition`: whatever arrives has to
+            // land in `drawHere` like every other fix, and a one-off that
+            // succeeded would leave nothing watching afterwards.
+            function askAgain() {
+                if (hereWatch === null || !navigator.geolocation) { return; }
+                navigator.geolocation.clearWatch(hereWatch);
+                hereWatch = navigator.geolocation.watchPosition(drawHere, failedHere, HERE_WANTS);
+            }
+
+            //: The drought's own clock: it asks again, and redraws the age under
+            //: the dot, which is worked out from a clock and pushed by nothing.
+            //: Thirty seconds, which is longer than the twenty the watch waits
+            //: before giving up -- a retry inside that window would keep
+            //: throwing away the attempt that was about to answer.
+            function hereAgeing(on) {
+                if (hereAgeTimer) { window.clearInterval(hereAgeTimer); hereAgeTimer = null; }
+                if (on) {
+                    hereAgeTimer = window.setInterval(function () {
+                        paintHereMarks();
+                        askAgain();
+                    }, LOST_AGAIN_MS);
+                }
+            }
+
             function dropHere() {
                 if (hereDot) { map.removeLayer(hereDot); hereDot = null; }
                 if (hereRing) { map.removeLayer(hereRing); hereRing = null; }
@@ -20493,6 +20618,10 @@ class _Chrome(MacroElement):
                 // somewhere else, and the fix held for its accuracy would be a
                 // claim about the place they left.
                 hereKept = null;
+                // A watch that is off is not a watch that is failing: the red
+                // belongs to a mark that is still trying.
+                hereLost = null;
+                hereAgeing(false);
             }
 
             function stopHere(said) {
@@ -20569,6 +20698,12 @@ class _Chrome(MacroElement):
                 var fix = L.latLng(position.coords.latitude, position.coords.longitude);
                 var claimed = Math.max(1, position.coords.accuracy || 0);
                 var when = position.timestamp || Date.now();
+                // **A fix that arrives ends the drought, whatever it says.**
+                // The dot goes back to blue, the switch with it, and the words
+                // under the dot go. Nothing is said about that in the line at
+                // the foot: the colour coming back is the whole sentence.
+                var wasLost = hereLost;
+                hereLost = null;
                 // What is drawn is the better of the two claims, and what is
                 // remembered is whichever of them was drawn.
                 var kept = keepingBetter(fix, claimed, when);
@@ -20594,6 +20729,7 @@ class _Chrome(MacroElement):
                     hereRing.setRadius(spread);
                     hereDot.setLatLng(where);
                 }
+                if (wasLost) { hereAgeing(false); paintHereColour(); paintHere(''); }
                 hereFixes += 1;
                 if (hereFixes === 1) { goThere(where); }
                 // **Which way, from whichever of the two can say.** The device's
@@ -20646,13 +20782,51 @@ class _Chrome(MacroElement):
                 // this map can draw.
             }
 
+            // **A fix that did not arrive is not a switch that was turned
+            // off.** Reported from the phone: under a cliff the first fixes
+            // often fail, and the watch used to stop itself over each one -- so
+            // the reader pressed the mark again, and again, in the one place
+            // where pressing it is least likely to work. With a goal set it was
+            // worse than tedious: the way there is worked out from where the
+            // reader is standing, and every failure took that place away.
+            //
+            // The watch stands now through anything that might still answer,
+            // and says in red that it is not answering.
+            //
+            // **Except a refusal, which will not change its mind.** A browser
+            // told not to share a position answers once and never again, and a
+            // lamp left burning for it would be this page claiming to wait for
+            // something that is not coming. That one stops, and the reason
+            // stands on the screen because it is the one a reader can do
+            // something about.
             function failedHere(problem) {
-                var why = problem && problem.code === 1
-                    ? 'This browser was told not to share your position.'
-                    : problem && problem.code === 3
-                        ? 'No position arrived in time \u2014 under a cliff or indoors that is ordinary.'
-                        : 'This device could not work out where it is.';
-                stopHere(why);
+                var code = problem ? problem.code : 0;
+                if (code === 1) {
+                    stopHere('This browser was told not to share your position.');
+                    return;
+                }
+                var why = code === 3
+                    ? 'No position arrived in time \u2014 under a cliff or indoors that is ordinary.'
+                    : 'This device could not work out where it is.';
+                var first = !hereLost;
+                hereLost = {code: code, why: why, since: first ? Date.now() : hereLost.since};
+                paintHereColour();
+                paintHereMarks();
+                paintHere('');
+                // **Said once, and drawn from then on.** A watch that times out
+                // every twenty seconds would otherwise put the same sentence
+                // over the map three times a minute, which is how a page
+                // teaches somebody to stop reading it. It fades, too: the red
+                // is what carries this afterwards, on the mark the reader is
+                // already looking at.
+                // **The first one asks again straight away.** The common
+                // case is a fix that failed once -- stepping out from under a
+                // cliff, a phone that has just woken -- and thirty seconds of
+                // red for something the next attempt would have answered is
+                // thirty seconds of a map saying it is lost when it is not.
+                // Later failures wait for the clock, which is what keeps this
+                // from being a loop.
+                if (first) { saySomething(why); hereAgeing(true); askAgain(); }
             }
 
             // **Pressed once and it watches; pressed again and it stops.** No
@@ -20729,9 +20903,7 @@ class _Chrome(MacroElement):
                     return false;
                 }
                 startCompass();
-                hereWatch = navigator.geolocation.watchPosition(drawHere, failedHere, {
-                    enableHighAccuracy: true, maximumAge: 10000, timeout: 20000
-                });
+                hereWatch = navigator.geolocation.watchPosition(drawHere, failedHere, HERE_WANTS);
                 paintHere('');
                 return true;
             }
@@ -21241,14 +21413,27 @@ class _Chrome(MacroElement):
                 // Called from the position switch as well, which is written
                 // above these two and runs once before they exist.
                 if (!quickPick || !quickHere || !quickGoal) { return; }
-                [[quickPick, picking], [quickGoal, aiming || goalSet()],
-                 [quickHere, hereWatch !== null]].forEach(function (each) {
-                    var lit = each[1];
-                    each[0].style.background = lit ? 'var(--trails-accent)' : 'var(--trails-panel)';
-                    each[0].style.borderColor = lit ? 'var(--trails-accent)' : 'var(--trails-edge)';
+                // **The position mark has a third state.** Lit says *this is
+                // on*; lit red says *this is on and getting nothing* -- which
+                // is a thing a reader has to be able to take in from the corner
+                // of an eye, on a screen held at arm's length in the rain, and
+                // is why the colour comes before the words.
+                [[quickPick, picking, false], [quickGoal, aiming || goalSet(), false],
+                 [quickHere, hereWatch !== null, !!hereLost]].forEach(function (each) {
+                    var lit = each[1], paint = each[2] ? HERE_LOST : 'var(--trails-accent)';
+                    each[0].style.background = lit ? paint : 'var(--trails-panel)';
+                    each[0].style.borderColor = lit ? paint : 'var(--trails-edge)';
                     each[0].style.color = lit ? 'var(--trails-on-accent)' : 'var(--trails-ink)';
                     each[0].setAttribute('aria-pressed', String(!!lit));
                 });
+                // And why, in words, for the reader who came back to a red
+                // button and missed the line that faded. The title is a desktop
+                // thing and the label is what a screen reader speaks; on a
+                // phone it is neither, which is the whole reason the colour
+                // had to carry it first.
+                var told = hereLost ? hereLost.why : 'Where I am';
+                quickHere.title = told;
+                quickHere.setAttribute('aria-label', told);
             }
 
             // ---- what is being looked at, and who says so --------------------
@@ -21378,8 +21563,16 @@ class _Chrome(MacroElement):
                         (tool.key === 'pick' && picking) ||
                         (tool.key === 'goal' && (aiming || goalSet())) ||
                         (tool.key === 'offline' && offlineOn());
-                    button.style.color = lit ? 'var(--trails-on-accent)' : (running ? 'var(--trails-accent)' : 'var(--trails-ink-3)');
+                    // The one lamp with a third colour: watching, and getting
+                    // nothing back.
+                    var lost = tool.key === 'here' && hereLost && hereWatch !== null;
+                    button.style.color = lit ? 'var(--trails-on-accent)'
+                        : (lost ? HERE_LOST : (running ? 'var(--trails-accent)' : 'var(--trails-ink-3)'));
                     button.setAttribute('aria-pressed', String(lit));
+                    if (tool.key === 'here') {
+                        button.title = lost ? hereLost.why : tool.label;
+                        button.setAttribute('aria-label', button.title);
+                    }
                 });
             }
 
@@ -21987,7 +22180,14 @@ class _Chrome(MacroElement):
                 // must route from the place the map is showing.
                 position: function () {
                     if (!hereAt || !hereRing) { return null; }
-                    return {lat: hereAt.lat, lon: hereAt.lng, spread: hereRing.getRadius()};
+                    // **The place still stands when the fixes stop**, and says
+                    // that it is standing. The goal routes from here and would
+                    // otherwise have nothing to route from at exactly the
+                    // moment a reader most wants the way there; what it gets is
+                    // the last place the device was sure of, with the age of
+                    // that certainty beside it.
+                    return {lat: hereAt.lat, lon: hereAt.lng, spread: hereRing.getRadius(),
+                            stale: !!hereLost, when: hereKept ? hereKept.when : null};
                 },
                 aiming: function (want, at) { return askAiming(want, at); },
                 // What the armed tap will do, for whoever draws a control that
@@ -22027,6 +22227,10 @@ class _Chrome(MacroElement):
                         aimingAt: aiming === 'move' ? aimingAt : -1,
                         goal: goalSet(),
                         here: hereWatch !== null,
+                        // Watching and getting nothing, which is a state of the
+                        // switch and not the absence of one.
+                        lost: hereLost ? hereLost.why : null,
+                        lostSaid: hereLost ? lostSaid(hereKept ? hereKept.when : null) : null,
                         planPoints: planState ? planState.points : 0,
                         // The row at the foot, which is the panel's own now:
                         // standing while anything is selected or planned.
