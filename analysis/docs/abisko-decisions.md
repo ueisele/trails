@@ -1801,7 +1801,8 @@ A line per change to this document or to the decisions in it, newest first.
   a point on an edge is routed from either end of it at the edge's own price and the piece to the
   end is drawn as path — in a plan's leg and in the way to a goal. The row's word goes by the
   greater part of the leg, `state()` says what each leg has drawn, and a new check taps into the
-  page's longest edge. 677 readings a page, republished.
+  page's longest edge. 677 readings a page, republished at 3,570,634 and 17,128,756 bytes,
+  byte-identical from the edge.
 
 - **2026-09-13, sixth of the day** — a goal becomes a plan, and a place offers what can be done
   with it (§9.28), all three asked for from the phone in one message. *Make a plan of this way*
