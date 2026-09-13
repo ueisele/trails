@@ -1815,7 +1815,8 @@ A line per change to this document or to the decisions in it, newest first.
   page's longest edge. 677 readings a page, republished at 3,570,634 and 17,128,756 bytes,
   byte-identical from the edge. Then the hole came back with its GPX: a plan restored from its
   file laid a leg made after an edit out as the file's leg from the same first point, whatever
-  the far point had become (`restoreTo`). 681 readings a page, republished.
+  the far point had become (`restoreTo`). 681 readings a page, republished at 3,571,588 and
+  17,129,710 bytes, byte-identical from the edge.
 
 - **2026-09-13, sixth of the day** — a goal becomes a plan, and a place offers what can be done
   with it (§9.28), all three asked for from the phone in one message. *Make a plan of this way*
