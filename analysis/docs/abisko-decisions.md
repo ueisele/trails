@@ -1217,7 +1217,7 @@ A line per change to this document or to the decisions in it, newest first.
 
 - **2026-09-13** — the whole map to z17 on Abisko (§9.23): the offline panel's cap is the
   source's own figure, z16 on Kartverket and z17 on Lantmäteriet, where it is the whole copy;
-  the drive reads the count at the cap.
+  the drive reads the count at the cap. Both pages republished at Uwe's word the same morning.
 - **2026-09-12, later still** — Naturkartan's pages linked from the state trails (§9.22, §5):
   its Abisko tours are the county's state trails, so the ways were already drawn and preferred;
   a hand-kept catalogue of thirteen pages, one link per *BD* number on a chain, under the
