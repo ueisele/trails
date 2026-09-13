@@ -805,6 +805,16 @@ journal; §6.5 is enforced; every CRS is explicit; the tile tree matches its inv
     says 22 m and then 49 m for the same river width; §9.12 and `ortnamn.py`'s comment disagree
     about Trollsjön/Geargejávri; §8.1's trigger names steps that are done.
 
+### 8.3 Looking a place up while planning
+
+*Trigger: somebody wanting a hut's page with plan mode on.* With plan mode on every tap on the map
+is a waypoint, so no place can be selected until the mode is switched off — which is why *Add to
+the plan* is offered with the mode off and leaves it off (§9.28). Uwe named the alternative when
+that was settled: a switch in plan mode that stops a tap from placing a waypoint, so a place could
+be read and added without leaving the mode. Today the mode switch is that switch, and the search
+reaches a place either way; worth building only if the round trip through *Done* turns out to be
+what people trip over.
+
 ---
 
 ## 9. Settled
@@ -1584,7 +1594,7 @@ thing; it offers what can be done with that place **as the page stands now**:
 |---|---|---|
 | *Set as goal* | always | that is what a place on a map is for |
 | *Add a stop on the way* | while a goal stands | there is no way for a stop to be on otherwise |
-| *Add a waypoint* | while plan mode is on | adding to a plan nobody is making would be a mode change hiding inside a button |
+| *Add to the plan* | while a plan stands — points on it, or its mode on | adding to a plan nobody is making would be a mode change hiding inside a button; and the press leaves the mode as it finds it (see below) |
 
 A hut's page offers the same three; a typed position's page does because it is a place like any
 other. **None of the three snaps.** A press on a page is not a finger on the map: the place is where
@@ -1616,6 +1626,26 @@ snapped a second time; but `nearestNode` takes its reach as a strict bound, so a
 refuses even the node a point is standing *on* — which is what a tap that snapped leaves behind.
 Measured: a goal set by tap on node 10353 comes back as a plan point on node 10353, and a typed
 position 1.1 km from anything comes back as open ground with the leg drawn `land, routed, land`.
+
+#### The offer that only worked where nothing could be selected
+
+The first version offered *Add a waypoint* while plan mode was **on** — and Uwe pointed out that this
+is exactly when it is useless: with plan mode on every tap on the map *is* a waypoint, so no place
+can be selected there at all, and the offer was reachable only through the search. The mode is
+switched off to look a place up — switching it off leaves the route drawn, on purpose — and that is
+the state in which a reader stands on a hut's page wanting it on the plan. So the offer is made
+**while a plan stands, whether or not its mode is on**, under one name, *Add to the plan*.
+
+And the press **leaves the mode as it finds it**. The draft brought plan mode back with the point,
+the way a loaded file does; Uwe's objection: then the next place could not be selected either until
+the mode was switched off again. A loaded file brings the mode on because a route that arrived
+whole wants editing; a place added to a standing plan is an edit already made. Driven: with the
+mode off and three points standing, a typed position's page offers *Set as goal* and *Add to the
+plan*, and the press puts the point fourth with the mode still off.
+
+He also named the alternative — a switch in plan mode that stops a tap from placing a waypoint — and
+that stays open (§8) in case looking things up *while* planning turns out to be wanted; today the
+mode switch is that switch.
 
 #### And the offer nobody could reach
 
@@ -1706,7 +1736,11 @@ A line per change to this document or to the decisions in it, newest first.
   and the check learned to read what a finger could do. Then the mark itself could not be got back
   to: an 18 px target, and a page that came back folded. And the legend, which is this map's layer
   control, said *off* about a layer a search result had switched on — it followed its own presses
-  and not the map. 665 readings a page, republished at 3,555,297 and 17,113,415 bytes.
+  and not the map. 665 readings a page, republished at 3,555,297 and 17,113,415 bytes. Then the
+  waypoint offer turned out to be made only where nothing can be selected — with plan mode on
+  every tap is a waypoint — so it is *Add to the plan* while a plan stands, mode on or off, and the
+  press leaves the mode as it finds it (Uwe: switching it on would take the next place away again).
+  667 readings a page, republished.
 
 - **2026-09-13, fifth of the day** — the search lists what it finds and reads a position
   (§9.27), asked for from the phone. Typing no longer hides the map: the matches are rows, one per

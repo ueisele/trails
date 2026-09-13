@@ -8637,8 +8637,17 @@ class TestWhereTheReaderIs:
         offers = html[html.index("function goalOffer(where, called) {") : html.index("var adopting = false;")]
         assert "if (goalNow && goalNow.at) {" in offers
         assert "'Add a stop on the way'" in offers
-        assert "if (planOn()) {" in offers
-        assert "'Add a waypoint'" in offers
+        # One offer while a plan stands, whether or not its mode is on -- with
+        # the mode on every tap is a waypoint and nothing can be selected, so
+        # this is pressed with the mode off, and it leaves the mode as it is:
+        # bringing plan mode back would take the next place away again.
+        assert "if (planOn() || planStanding()) {" in offers
+        assert "'Add to the plan'" in offers
+        assert "'Add a waypoint'" not in offers
+        assert "function planStanding() { return !!(planState && planState.points > 0); }" in html
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        placing = source[source.index("function place(lat, lon, exact) {") : source.index("function planFromPlaces(places) {")]
+        assert "switchTo(" not in placing
         # None of the three snaps: a press on a page is not a finger on the map.
         assert "window.trailsGoal.addStop(lat, lon, called);" in offers
         assert "window.trailsPlan.place(lat, lon, true);" in offers

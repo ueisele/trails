@@ -13823,6 +13823,12 @@ class _PlanMode(MacroElement):
             // the nearest path would be this page guessing at something that was
             // already said exactly.
             function place(lat, lon, exact) {
+                // **The mode is left as it is found.** A place's page offers
+                // this while the plan's mode is off -- that is the only time a
+                // place can be selected at all, since with the mode on every
+                // tap is a waypoint -- and switching the mode on here would
+                // take the next place away again. A loaded file brings the
+                // mode on; a place added to a standing plan does not.
                 applyEdit(function (graph) {
                     points.push(snapped(graph, lat, lon, exact ? SAME_SPOT_M : fingerReach(lat)));
                     chosen = points.length - 1;
@@ -22207,6 +22213,9 @@ class _Chrome(MacroElement):
             // composes the whole route, which is 45 ms over a 37 km one, and
             // this is called on every paint.
             function planOn() { return !!(planState && planState.on); }
+            // A plan with points in it, whether or not its mode is on: what a
+            // place's page offers *Add to the plan* for.
+            function planStanding() { return !!(planState && planState.points > 0); }
 
             function paintRail() {
                 TOOLS.forEach(function (tool) {
@@ -22427,9 +22436,16 @@ class _Chrome(MacroElement):
                     offers.push(['trails-stop-take', 'Add a stop on the way',
                                  'Go by way of this on the way to the goal']);
                 }
-                if (planOn()) {
-                    offers.push(['trails-point-take', 'Add a waypoint',
-                                 'Put this at the end of the route being planned']);
+                if (planOn() || planStanding()) {
+                    // **While a plan stands, whether or not its mode is on.**
+                    // With the mode on every tap on the map is a waypoint, so
+                    // nothing can be selected there; the mode is switched off
+                    // to look a place up, and that is when this is pressed.
+                    // Reported from the phone. So it is one offer under one
+                    // name, and it leaves the mode as it found it: bringing
+                    // plan mode back would take the next place away again.
+                    offers.push(['trails-point-take', 'Add to the plan',
+                                 'Put this at the end of the plan']);
                 }
                 return '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:7px 0 0;margin-top:5px;' +
                     'border-top:1px solid var(--trails-rule)">' +

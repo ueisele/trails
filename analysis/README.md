@@ -169,9 +169,10 @@ the place it names, marked on the map, and can be set as a goal like any hut.
 
 **What a place offers, it offers from its page.** Tap a hut, a quay or a position you typed, and
 under what it says about itself are the things that can be done with it as the map stands: *Set as
-goal* always, *Add a stop on the way* while a goal stands, *Add a waypoint* while a route is being
-planned. That is how coordinates become waypoints and stops — the search reads them, the place's
-page does the rest. And a goal you have set, with its stops, becomes a route to edit with *Make a
+goal* always, *Add a stop on the way* while a goal stands, *Add to the plan* while a plan stands —
+switch plan mode off to look places up, since with it on every tap is a waypoint, and the press
+leaves the mode off so the next place can be picked too. That is how coordinates become waypoints
+and stops — the search reads them, the place's page does the rest. And a goal you have set, with its stops, becomes a route to edit with *Make a
 plan of this way*, on the goal's own page and on the page the flag opens: the places become the
 plan's points in order, your own position in front of them if the page knows it.
 
@@ -232,8 +233,8 @@ command make drive                                          # the Lomsdal-Visten
 command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
-Drives the built map in a browser and reports **some 650 readings** (665 on the
-Lomsdal-Visten page, 665 on Abisko's, 2026-09-13) — the counts the
+Drives the built map in a browser and reports **some 650 readings** (667 on the
+Lomsdal-Visten page, 667 on Abisko's, 2026-09-13) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,

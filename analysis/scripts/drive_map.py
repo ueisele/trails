@@ -3746,6 +3746,7 @@ def a_way_to_a_goal_becomes_a_plan(page: Any) -> Check:
     goal_at = (lat, lon)
     stop_at = (round(lat + 0.010, 5), round(lon + 0.010, 5))
     point_at = (round(lat - 0.010, 5), round(lon + 0.005, 5))
+    later_at = (round(lat - 0.015, 5), round(lon - 0.005, 5))
 
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(400)
@@ -3825,6 +3826,20 @@ def a_way_to_a_goal_becomes_a_plan(page: Any) -> Check:
     page.wait_for_timeout(600)
     ended = page.evaluate("""() => window.trailsPlan.state().points.map(p => [Number(p.lat.toFixed(5)), Number(p.lon.toFixed(5))])""")
 
+    # **With the mode off, which is the only time a place can be selected.**
+    # With plan mode on every tap on the map is a waypoint, so the offer while
+    # planning was reachable only through the search; the mode is switched off
+    # to look a place up, and the press has to leave it off -- bringing it back
+    # would take the next place away again. Reported from the phone.
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(600)
+    resting = typed(later_at)
+    press(".trails-point-take")
+    grown = page.evaluate(
+        """() => ({on: window.trailsPlan.state().on,
+        points: window.trailsPlan.state().points.map(p => [Number(p.lat.toFixed(5)), Number(p.lon.toFixed(5))])})"""
+    )
+
     page.evaluate(
         """() => { const standing = window.trailsPlan.state().points.length;
         for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); }
@@ -3850,13 +3865,19 @@ def a_way_to_a_goal_becomes_a_plan(page: Any) -> Check:
             Reading("the flag offers to make a plan of it", steps, ["Where I am", "⌖ Move the goal", "Make a plan of this way", "Drop the goal"]),
             Reading("which turns the places into the plan's points, in order", made["points"], [list(stop_at), list(goal_at)]),
             Reading("with plan mode on and the goal off the map", [made["on"], made["goal"]], [True, None]),
-            Reading("while planning, a place offers a waypoint", planning, ["Set as goal", "Add a waypoint"]),
+            Reading("while a plan stands, a place offers to join it", planning, ["Set as goal", "Add to the plan"]),
             Reading(
                 "and a finger on a phone can reach it",
                 [reach["shown"], reach["inWindow"], reach["onTop"], reach["page"]] if reach else None,
                 [True, True, True, "details"],
             ),
             Reading("and it lands where it was typed", ended, [list(stop_at), list(goal_at), list(point_at)]),
+            Reading("and with its mode off, where a place can be selected at all, the same", resting, ["Set as goal", "Add to the plan"]),
+            Reading(
+                "and joining it leaves the mode off, with the point on the plan",
+                [grown["on"], grown["points"]],
+                [False, [list(stop_at), list(goal_at), list(point_at), list(later_at)]],
+            ),
         ],
     )
 
