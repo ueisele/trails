@@ -1188,7 +1188,9 @@ names. `Park.naturkartan` names the catalogue; Lomsdal has none.
 URL under one fixed text; it may now carry a list of *(text, url)* pairs, and the page writes one
 link per pair with the pair's own text — `→ BD 21 on Naturkartan` — under the heading the UT.no
 popup already used, *Published elsewhere, not by this map*. A pair whose URL is not http(s) is
-dropped as a bare one was. The build reports it: 14 of 16 state-trail chains link to a page. The
+dropped as a bare one was. The build reports it: 14 of 16 state-trail chains link to a page — 14
+of 17 since the box widened, and since §9.26 the same links ride on Lantmäteriet's drawing of those
+trails as well, 36 of its 86 marked-trail chains. The
 drive reads the links in the long chain's detail on both pages — 2 on Lomsdal (the Rundtur's page
 and its GPX), 4 on Abisko — so a catalogue that stops matching the register's numbers is a
 reading that moves, not a popup nobody opens.
@@ -1322,11 +1324,119 @@ measurement above was made, but it leaves the context unable to push a position 
 already running for the rest of the run: driven that way the check passed and seven checks after
 it failed on a map that had stopped hearing where it was.
 
+
+### 9.26 A name stops where the register stops — settled, 2026-09-13
+
+Reported from the phone with two photographs: the map's own panel, headed *State trail:
+Låktatjåkka - Måndalen - Abisko (BD 18)*, and a trailhead sign for the same ground saying the
+route is marked on **Fjällkartan BD6**. Two questions came with them — why a trail the panel
+calls BD 18 offers no Naturkartan link, and why the sign says BD 6 where the map says BD 18.
+
+**BD 6 is not a trail number.** It is a sheet of Lantmäteriet's printed *Fjällkartan* at
+1:100 000 — the sign says *"Rödprickad på Lantmäteriets Fjällkarta BD6"* and, in English, *"On
+Fjällkartan BD6 it is marked with red dots"*, beside the 1:50 000 sheet *Abisko, Björkliden,
+Riksgränsen*. The BD numbers on this map are `STATLED_ID` out of Naturvårdsverket's trail
+register, which is what the county's brochures, the waymarking and Naturkartan use (§5). Two
+registers whose keys both begin *BD*, and nothing more than that. The sign's own trails —
+Färdledarvägen and Sommarleden, Björkliden to Låktatjåkko — carry no state trail number at all:
+the register's trails there are BD 19, BD 91 and BD 92.
+
+**The other question was a defect, and the sign is the evidence for it.** The line under the
+reader's finger was Topografi 50's marked trail, not the register's, and it ran from Låktatjåkka
+to Björkliden as **one chain of 12.2 km** reading BD 18 along all of it. Measured against the
+register every 500 m: the first four kilometres are BD 18 (0–100 m from it), and from there the
+chain leaves the state trail and climbs to Björkliden, **4.3 km** away at worst. Its name was
+Björkliden's trail wearing BD 18's, which is exactly the pair of ways the sign describes.
+
+Nothing had gone wrong in the naming. Topografi 50 draws the marked trails and names none of
+them; the register names them and lies on the same ground, so a Topografi 50 line takes the state
+trail it runs along — but only where it runs **within 25 m of it for half its own length**
+(`network/sweden.py`, `params.trail_name_m`). No line 4 km away can be named by that rule, and
+none was. **It was the chaining.** A chain carries the union of its pieces' names, and where
+exactly two arms meet, `_pair_arms` joined them whatever the angle — so the marked trail ran on
+past the end of BD 18 into ground the register never named, and took the name with it.
+
+**The rule now** (`routing/chains.py`, `_agree`): a piece its source names and a piece its source
+does not name are two ways, whatever the angle between them. **Two different names are not**, and
+that limit is deliberate and was measured: refusing those as well cut the register's own 17
+chains over the box into 22, ending the chain from Abisko that is *BD 21 / BD 92 / BD 16 / BD 91*
+and carries four Naturkartan pages (§9.22), for no defect at all. Every metre of that chain is
+named by the register that drew it; nothing is claimed there that was not recorded.
+
+What it cost and what it bought, over the box:
+
+| | before | after |
+|---|---|---|
+| chains | 866 | 886 |
+| — the register (*Leder*) | 17 | 17 |
+| — Topografi 50 marked trails | 76 | 86 |
+| — Topografi 50 paths | 215 | 215 |
+| — Topografi 50 roads | 72 | 74 |
+| — OSM | 486 | 494 |
+| edges / nodes | 44,393 / 20,683 | 44,429 / 20,706 |
+| network length | 1,604 km | 1,604 km |
+| marked trail carrying a state trail's number | 170.5 km | 132.1 km |
+| of that, further than 25 m from the trail it names | **38.0 km** | **2.6 km** |
+| worst distance from it | **4,331 m** | **122 m** |
+
+The 2.6 km that remain are the two sources drawing one trail slightly apart — 25 m is allowed per
+line and a chain is many lines — which is a disagreement between Lantmäteriet and the register
+and not a claim this map invented.
+
+**Lomsdal has the same machinery and the same defect**: FKB's paths take their route from
+Turrutebasen and N50's roads take their number and name from the register and from Stedsnavn,
+both by nearness (`network/norway.py`). Its page goes from 11,302 chains to 11,964 — FKB 6,201 to
+6,306, OSM 1,515 to 1,531, and **N50's roads 2,326 to 2,823**, which is the largest single effect
+of this change anywhere and is a road number that used to run on into whatever unnumbered lane
+left the junction straightest. The page grows from 16.7 to 17.1 MB for it.
+
+**And the link Uwe was looking for.** It hung on the register's line alone, which near Låktatjåkka
+lies under the marked trail and east of it does not exist. Now that a marked trail named after a
+state trail *is* that state trail, it carries the same link: the register's number travels with
+its name (`route_id`, taken in the same `attach_nearest` call), and the popup writes
+*→ BD 18 on Naturkartan* under the same heading the register's own line uses. **36 of the 86
+marked-trail chains** carry one, against 14 of the register's 17. Still links only — nothing of
+Naturkartan's enters the page (§5, §9.22).
+
+**Driven as *a borrowed name has its register under it***: the longest sixty chains of the
+borrowing source, each one clicked to read the name the panel gives it — a chain the register
+never named is headed by its own id, which is how the two are told apart — and then the longest
+six named ones sampled at seven points, each point asking whether a line of the register is
+within the tap's reach at z11, about 340 m on the ground. **42 of 42 on both pages** — nine of
+Lomsdal's sixty longest FKB chains carry a Turrutebasen route, 32 of Abisko's carry a state
+trail. The reach is read at z11 rather than z12 on purpose: the two sources are up to 122 m
+apart, and a tighter reach would report *that* as this defect.
+
+One reading elsewhere had to be freed of an accident while this was driven. *Setting it puts the
+way there on the panel* expected the words **To the goal**, which is what a goal beside nothing
+is called — but the goal it sets is 70 % along the long chain by index, the panel's series has a
+sample more or less when the chains are rebuilt, and that moved the point from 46 m to 37 m from
+the *Vindskydd Nissonjohka* shelter. A goal within a finger's reach of something named is that
+thing (42 m at z14), so the panel rightly said *To Vindskydd Nissonjohka* and a check about the
+panel failed over a shelter. It now expects the name the goal itself carries.
+
+**A trap worth writing down**: the graph's cache key (`network/graphs.py`, `fingerprint`) is made
+of the data and the parameters, not of the code, so a change to the chaining rule does not
+invalidate it. Both graphs had to be rebuilt with `--rebuild`, and a build that had only been
+`make graph`-ed would have served the old chains from the cache and looked like the change had
+done nothing.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-13, later still again** — a name stops where the register stops (§9.26), reported
+  from the phone with a sign photographed at the trailhead. A chain took the union of its
+  pieces' names, so Topografi 50's marked trail carried BD 18 for eight kilometres past the end
+  of BD 18, to a Björkliden the register numbers differently; over the box 38.0 of 170.5 named
+  kilometres were not the trail they claimed, 4.3 km off at worst. The chaining rule now refuses
+  to run a named piece into an unnamed one — and deliberately still joins two *different* names,
+  so the register's own BD 21 / BD 92 / BD 16 / BD 91 chain stands (§9.22). 2.6 km off now,
+  122 m at worst; 866 chains become 886. Lantmäteriet's marked trails carry the Naturkartan link
+  too, which is the other half of what was asked. And *BD 6* on the sign is a Fjällkartan sheet,
+  not a trail number.
 
 - **2026-09-13, later still** — a fix that does not arrive no longer stops the watch (§9.25),
   asked for by Uwe from the phone. The mode stands, the page asks again by itself every 30 s
@@ -1500,6 +1610,7 @@ A line per change to this document or to the decisions in it, newest first.
 | bytes per Kartverket tile | 6.76 GB over 131,033 tiles, both from the offline panel at load (`atlas` §3.3) |
 | what in the code is Norway | a read of `maps.py`, `lomsdal_visten.py`, `route_graph.py`, `deploy_map.py`, `drive_map.py` and `libs/src/trails/io/sources/` on 2026-09-11, with line numbers as they stood that day |
 | Lantmäteriet's grid, layers, ceiling, and its white outside Sweden | `atlas/docs/decisions.md` §3.7, measured 2026-09-11 |
+| how much of a named chain is the trail it names | every Topografi 50 marked-trail chain read off the built page in Firefox, its name from the packed figures, its line sampled every 50 m against the register's summer lines for that BD number in SWEREF 99 TM |
 | the page's tile reading against the build's mosaic | the page's bilinear rule re-implemented in Python over the z13 tiles on disk, against `markhojd.sample` off the cached 4 m mosaic, at 2,000 uniform random points of the box and along the straight leg planned in Firefox |
 | the straight leg in Firefox | `analysis/output` served by `http.server`, `abisko.html` opened in Playwright Firefox, `window.trailsPlan.place()` twice over open fell, `state()` read back, the `dem/` requests counted |
 | which Lantmäteriet products carry a fee | Geotorget product pages rendered in Playwright Firefox (the site is a single-page app): the `Avgift`, `Villkor`, `Åtkomst` fields of the cache, WMS, vector-tile, översiktlig, raster-download, Topografi 10 and Markhöjdmodell products |

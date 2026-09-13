@@ -2681,6 +2681,14 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     leder = by_source[LEDER]
     # Before the split at the boundary, so both state-trail layers carry it.
     leder["naturkartan"] = pd.Series([naturkartan_links(numbers, pages) for numbers in leder["route_id"]], index=leder.index, dtype=object)
+    # **And Lantmäteriet's drawing of the same trail, which is the line a
+    # reader is likelier to tap.** Reported from the phone (§9.26): a popup
+    # headed *State trail: Låktatjåkka - Måndalen - Abisko (BD 18)* with no way
+    # to the page that describes it, because the link hung on the register's
+    # line alone. The number is the register's, taken with the name and only
+    # where the line runs along it, so this links what it is.
+    marked = by_source[T50_TRAILS]
+    marked["naturkartan"] = pd.Series([naturkartan_links(numbers, pages) for numbers in marked["route_id"]], index=marked.index, dtype=object)
     roads = by_source[T50_ROADS]
     ferries = by_source[sweden.FERRIES]
     layer_of = split_at_the_boundary(
@@ -2693,6 +2701,8 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         linked = leder["naturkartan"].notna()
         numbers = {number for cell in leder["route_id"].dropna() for number in str(cell).split(IDENTITY_SEPARATOR)}
         print(f"  Naturkartan pages: {int(linked.sum()):,} of {len(leder):,} chains link to one; without a page: {sorted(numbers - set(pages))}")
+        marked_linked = int(marked["naturkartan"].notna().sum())
+        print(f"    and {marked_linked:,} of {len(marked):,} marked-trail chains, which carry the same numbers")
     summarize("Roads", roads)
     print(f"    {roads['road_class'].value_counts().head(6).to_dict()}")
     print(f"    numbered: {int(roads['road_number'].notna().sum()):,} of {len(roads):,} chains ({roads['road_number'].dropna().unique().tolist()})")
@@ -2825,7 +2835,9 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             "#f9a825",
             2.5,
             T50_TRAIL_POPUP_FIELDS,
+            NATURKARTAN_LINK_FIELDS,
             search_field="route_name",
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
         ),
         TrailLayer(
             layer_of[f"{LEDER}/approach"],
@@ -2840,7 +2852,14 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         TrailLayer(layer_of[f"{OSM}/park"], "Paths in park [OSM]", "#8e24aa", 2.5, OSM_POPUP_FIELDS, search_field="name"),
         TrailLayer(layer_of[f"{T50_PATHS}/park"], "Paths in park [Topografi 50]", "#00796b", 2.5, T50_PATH_POPUP_FIELDS),
         TrailLayer(
-            layer_of[f"{T50_TRAILS}/park"], "Marked trails in park [Topografi 50]", "#1b5e20", 3.5, T50_TRAIL_POPUP_FIELDS, search_field="route_name"
+            layer_of[f"{T50_TRAILS}/park"],
+            "Marked trails in park [Topografi 50]",
+            "#1b5e20",
+            3.5,
+            T50_TRAIL_POPUP_FIELDS,
+            NATURKARTAN_LINK_FIELDS,
+            search_field="route_name",
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
         ),
         # The register's state trails last and on top: the one source that
         # describes a trail rather than draws it, and the identity the marked

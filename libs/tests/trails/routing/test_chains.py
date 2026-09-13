@@ -154,8 +154,14 @@ class TestIdentity:
         )
         assert len(chains_of(fork)) == 3
 
-    def test_an_arm_with_no_counterpart_falls_through_to_the_geometry(self):
-        """Test that a name nothing else carries does not end a chain."""
+    def test_a_name_that_stops_ends_the_chain(self):
+        """Test that a chain does not carry a name onto ground nothing named.
+
+        The arm carrying R runs straight into an arm carrying nothing, and
+        straightness used to be enough: one 100 m chain, named R along all of
+        it. A chain carries the union of its pieces' names, so that is the map
+        saying R where the source said nothing at all.
+        """
         named = source(
             LineString([(0, 0), (50, 0)]),
             LineString([(50, 0), (100, 0)]),
@@ -163,7 +169,63 @@ class TestIdentity:
             road=["R", None, None],
             identity_field="road",
         )
-        assert sorted(chains_of(named)["length_m"]) == [50.0, 100.0]
+        chains = chains_of(named)
+        assert sorted(chains["length_m"]) == [50.0, 50.0, 50.0]
+        assert sorted(chains.loc[chains["identity"] == "R", "length_m"]) == [50.0]
+
+    def test_a_name_stops_where_it_stops_even_where_nothing_branches(self):
+        """Test the case reported from the phone, which is not a junction at all.
+
+        Two arms meeting is a continuation whatever the angle, and that rule ran
+        ahead of the names: on Abisko the marked trail from Låktatjåkka came to
+        the end of state trail BD 18 and carried its number another eight
+        kilometres to Björkliden, ending 4.3 km from the trail it claimed to be.
+        Nothing branches here — which is why the junction rules never saw it.
+        """
+        onwards = source(
+            LineString([(0, 0), (50, 0)]),
+            LineString([(50, 0), (100, 0)]),
+            route=["BD 18", None],
+            identity_field="route",
+        )
+        chains = chains_of(onwards)
+        assert sorted(chains["length_m"]) == [50.0, 50.0]
+        assert sorted(chains.loc[chains["identity"] == "BD 18", "length_m"]) == [50.0]
+
+    def test_one_way_published_as_two_registered_ways_is_one_chain(self):
+        """Test the limit of the rule above, which is deliberate.
+
+        Norrbotten publishes the way out of Abisko as BD 21, then BD 92, then
+        BD 16, then BD 91, each running on into the next, and one chain of the
+        four is what carries four Naturkartan pages (decisions §9.22). Every
+        metre of it is named by the register that drew it, so nothing is claimed
+        here that was not recorded — unlike a name running on into no name.
+        """
+        onwards = source(
+            LineString([(0, 0), (50, 0)]),
+            LineString([(50, 0), (100, 0)]),
+            route=["BD 21", "BD 92"],
+            identity_field="route",
+        )
+        chains = chains_of(onwards)
+        assert sorted(chains["length_m"]) == [100.0]
+        assert list(chains["identity"]) == ["BD 21 / BD 92"]
+
+    def test_two_unnamed_arms_still_continue_each_other(self):
+        """Test that the rule above is about names and not about their absence.
+
+        Nothing is named here, so nothing disagrees, and the geometry decides as
+        it always did: the two arms in line with each other are one way and the
+        third is its own.
+        """
+        plain = source(
+            LineString([(0, 0), (50, 0)]),
+            LineString([(50, 0), (100, 0)]),
+            LineString([(50, 0), (50, 50)]),
+            road=[None, None, None],
+            identity_field="road",
+        )
+        assert sorted(chains_of(plain)["length_m"]) == [50.0, 100.0]
 
     def test_a_column_that_says_nothing_the_nullable_way_still_says_nothing(self):
         """Test the one missing value that is neither None nor a nan.
@@ -180,7 +242,10 @@ class TestIdentity:
         named = NetworkSource("S", frame, identity_field="road")
 
         assert frame["road"].isna().sum() == 2, "the fixture has to hold the value it is about"
-        assert sorted(chains_of(named)["length_m"]) == [50.0, 100.0]
+        # Read as the name ``<NA>`` the two unnamed arms are one another's only
+        # candidate and the identity rule joins them through a right angle:
+        # 50 and 100. Read as nothing they are three ways of their own.
+        assert sorted(chains_of(named)["length_m"]) == [50.0, 50.0, 50.0]
 
     def test_a_placeholder_identity_does_not_glue_two_ways(self):
         """Test that a register's word for "no name" is not read as a name.
@@ -229,6 +294,10 @@ class TestIdentity:
         and the continuation of neither. What it leaves without a partner has no
         identity left to follow, so the angle decides it — rather than it
         inheriting a verdict reached about a different arm.
+
+        Two *different* names are not a reason to refuse: the register publishes
+        one way as several state trails running on into each other, and a chain
+        of them names nothing that was not recorded.
         """
         junction = source(
             LineString([(0, 0), (50, 0)]),

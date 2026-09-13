@@ -418,15 +418,69 @@ def _pair_arms(
             continue
         if len(arms) == 2:
             # Two arms meeting is not a junction, it is a continuation, whatever
-            # the angle. This is what linemerge already does.
-            _link(partners, arms[0], arms[1])
+            # the angle -- this is what linemerge already does -- unless it
+            # would carry a name onto ground that has none. `_agree` says why,
+            # and this is the node the defect it is about was found at.
+            if _agree(identities[arms[0] // 2], identities[arms[1] // 2]):
+                _link(partners, arms[0], arms[1])
             continue
         if rule is ChainRule.JUNCTION:
             continue
 
         undecided = _pair_by_identity(partners, arms, identities)
-        _pair_by_angle(partners, undecided, geometries, stroke_angle_deg, probe_m)
+        _pair_by_angle(partners, undecided, geometries, identities, stroke_angle_deg, probe_m)
     return partners
+
+
+def _agree(one: frozenset[str], other: frozenset[str]) -> bool:
+    """Whether a chain may run from one piece into the other.
+
+    **A name may not spread onto ground that has none**, which is the whole of
+    this rule and deliberately no more than that.
+
+    **A chain carries the union of its pieces' identities, so a chain that runs
+    on past the end of a name says that name over ground nothing named.**
+    Reported from the phone on 2026-09-13, on Abisko: the marked trail from
+    Låktatjåkka to Björkliden was drawn as one 12.2 km chain reading *State
+    trail: Låktatjåkka - Måndalen - Abisko (BD 18)* along its whole length. Only
+    its first four kilometres are BD 18. From there the trail leaves the state
+    trail and climbs to Björkliden, **4.3 km** from it at worst — and the
+    register, which knows Björkliden–Kårsavagge as BD 19 and Björkliden–Abisko
+    as BD 92, has no number at all for the way the chain had taken. The reader's
+    own evidence was a sign at the trailhead naming neither.
+
+    Nothing had gone wrong in the naming: Topografi 50's lines take the
+    register's state trail only where they run within 25 m of it for half their
+    length (`network/sweden.py`). It was the chaining. Where exactly two arms
+    meet, the rule above joins them whatever the angle, and the name of the one
+    then became the name of both.
+
+    So: a piece its source names and a piece its source does not name are two
+    ways, whatever the angle between them. **Two different names are not**, and
+    that is the deliberate limit. The register publishes one way as several
+    state trails running on into each other — the chain from Abisko is *BD 21 /
+    BD 92 / BD 16 / BD 91* and four Naturkartan pages describe it (§9.22) — and
+    every metre of that chain is named by the register that drew it. Nothing is
+    being claimed there that was not recorded. Refusing those too was tried
+    first and measured: it broke the register's 17 chains over Abisko into 22,
+    cutting that long chain into one per state trail, for no defect at all.
+
+    Measured over the Abisko box before the rule: 44 chains carried a state
+    trail's number over 170.5 km, of which **38.0 km lay further than 25 m from
+    the trail it was named after** — BD 29 over 16.7 km, BD 18 over 10.6 km,
+    BD 91 over 3.7 km, BD 21 over 2.3 km, and the other forty within metres.
+    After it: 132.1 km named, 2.6 km of that beyond 25 m and 122 m away at
+    worst, which is the two sources drawing one trail slightly apart and not a
+    name that travelled. Decisions §9.26.
+
+    Args:
+        one: One piece's identities, empty where its source names it nothing
+        other: The other piece's
+
+    Returns:
+        Whether a chain may run from one into the other
+    """
+    return bool(one) == bool(other)
 
 
 def _link(partners: dict[int, int], one: int, other: int) -> None:
@@ -482,15 +536,21 @@ def _pair_by_angle(
     partners: dict[int, int],
     arms: Sequence[int],
     geometries: Sequence[LineString],
+    identities: Sequence[frozenset[str]],
     stroke_angle_deg: float,
     probe_m: float,
 ) -> None:
     """Pair the arms that continue each other straightest.
 
+    The geometry decides among arms that may continue each other at all, which
+    is `_agree`'s question and not the angle's: a named way running straight on
+    into an unnamed one is as straight as it ever was and is still two ways.
+
     Args:
         partners: Mapping being extended
         arms: Arms still to decide
         geometries: The pieces
+        identities: Identities of each piece
         stroke_angle_deg: Largest deflection accepted as a continuation
         probe_m: How far either side of the node a direction is read
     """
@@ -501,6 +561,8 @@ def _pair_by_angle(
         for other in arms[position + 1 :]:
             first, second = directions[one], directions[other]
             if first is None or second is None:
+                continue
+            if not _agree(identities[one // 2], identities[other // 2]):
                 continue
             # Both directions point away from the node, so two arms continuing
             # each other point in opposite directions: deflection 0.

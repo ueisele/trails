@@ -165,6 +165,11 @@ class Scene:
     #: round by land.
     sound: tuple[dict[str, float], dict[str, float], dict[str, float]] | None = None
     river_goal: RiverGoal | None = None
+    #: The source that takes its names from a register, and the register's own
+    #: layer, as class-name prefixes: Topografi 50's marked trails and *Leder*
+    #: here, FKB's paths and Turrutebasen there. None where a page has no such
+    #: pair, and the check then says it was skipped by choice.
+    borrowed_name: tuple[str, str] | None = None
     #: The checks this scene skips by choice, by name: ground nobody has
     #: measured on its page. **Any other skip is a fault.** A check that could
     #: not run for a reason the scene did not give -- a chain the page no
@@ -206,6 +211,7 @@ SCENES: dict[str, Scene] = {
         far_off_the_map=(66.3128, 14.1428),
         heights_path="hoydedata",
         base_maps=2,
+        borrowed_name=("trail-group-fkb", "trail-group-turrutebasen"),
         search_for="Gåsvatnet",
         over_http=False,
         figures={
@@ -213,9 +219,16 @@ SCENES: dict[str, Scene] = {
             # was cleared and the map regenerated, so Turrutebasen was fetched
             # again and came back with twelve more chains. This is the movement
             # a recorded figure is for -- looked at, understood, written down.
-            "paths in the overlay pane": 11601,
-            "of them chains drawn as lines": 11302,
+            # And 662 chains more since §9.26, where a name stopped running on
+            # past the ground its register named: N50's roads 2,326 to 2,823 --
+            # a road number that used to carry into whatever unnumbered lane
+            # left the junction straightest -- FKB 6,201 to 6,306, OSM 1,515 to
+            # 1,531, Turrutebasen's own 244 either way.
+            "paths in the overlay pane": 12263,
+            "of them chains drawn as lines": 11964,
             "and chains drawn as circle markers": 298,
+            # Of the sixty longest FKB chains (§9.26).
+            "chains named after a register trail": 9,
             "things in the marker pane": 198,
             "checkboxes in the legend": 30,
             "of them switched off": 7,
@@ -304,6 +317,7 @@ SCENES: dict[str, Scene] = {
         # The z13 Terrarium tiles under `dem/`, read for a straight leg.
         heights_path="/dem/",
         base_maps=1,
+        borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
         search_for="Abiskojaure",
         # Lantmäteriet's sheets and the height tiles are addressed from the root.
         over_http=True,
@@ -313,10 +327,15 @@ SCENES: dict[str, Scene] = {
         # 19 legend rows, one base map.
         figures={
             # Clipped to the box since the review (§9.15): one point chain and
-            # three markers fewer than the first build drew.
-            "paths in the overlay pane": 883,
-            "of them chains drawn as lines": 866,
+            # three markers fewer than the first build drew. Twenty chains more
+            # since §9.26, where a name stopped running on past the ground the
+            # register named: Topografi 50's marked trails 76 to 86, its roads
+            # 72 to 74, OSM 486 to 494, the register's own 17 either way.
+            "paths in the overlay pane": 903,
+            "of them chains drawn as lines": 886,
             "and chains drawn as circle markers": 16,
+            # Of the sixty longest marked-trail chains (§9.26).
+            "chains named after a register trail": 32,
             "things in the marker pane": 86,
             "checkboxes in the legend": 19,
             "of them switched off": 4,
@@ -5694,7 +5713,18 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             # two are not the same direction, and the one under the feet wins.
             Reading("and the head follows the route, not the goal", apart > 5, True, note=f"{apart:.0f} deg between the path and the goal"),
             Reading("the row at the foot says what it is", (routed["row"], routed["way"]), (True, ["Routed"]), note=routed["says"]),
-            Reading("setting it puts the way there on the panel", (routed["mine"], routed["shown"]), (True, "To the goal")),
+            # **By the name the goal itself carries**, not by a word written
+            # down here. A goal set within a finger of something named is that
+            # thing -- 42 m at z14 -- and *the goal* is only what a goal beside
+            # nothing is called. This spot is 37 m from Vindskydd Nissonjohka
+            # and was 46 m from it before the chains were rebuilt, so the
+            # sentence written down here changed under a check that was about
+            # neither the shelter nor the chains.
+            Reading(
+                "setting it puts the way there on the panel",
+                (routed["mine"], routed["shown"]),
+                (True, f"To {routed['goal'].get('name') or 'the goal'}"),
+            ),
             Reading("opened at the curve", routed["page"], "profile"),
             # Its own count of points and not the one the line read before it
             # left there: the row under the drawing used to return before it was
@@ -5739,7 +5769,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             Reading(
                 "every place on the way is a row at the foot",
                 (listed["shown"], [row["said"] for row in listed["rows"]]),
-                (True, ["Stop 1", "the goal"]),
+                (True, ["Stop 1", stopped["goal"].get("name") or "the goal"]),
             ),
             Reading(
                 "and each says how far into the way it comes",
@@ -8515,6 +8545,114 @@ def tap(page: Any, spot: dict[str, Any], at: str, roll: tuple[int, int] = (0, 0)
     return page.evaluate("() => window.trailsHighlight && window.trailsHighlight.selected()")
 
 
+#: Every chain of the borrowing source, longest first, with the name the panel
+#: gives it. A chain the register never named is headed by its own id, which is
+#: what tells the two apart without asking the page for anything it does not
+#: already show a reader.
+BORROWED_NAMES = with_map("""(prefix) => {
+  const map = __MAP__;
+  const lines = [];
+  map.eachLayer(l => {
+    const cls = (l.options || {}).className || '';
+    if (cls.indexOf(prefix) === 0 && l._latlngs) {
+      const said = /-([0-9]+)$/.exec(cls);
+      lines.push({cls: cls, metres: said ? +said[1] : 0});
+    }
+  });
+  lines.sort((a, b) => b.metres - a.metres);
+  return lines.slice(0, 60).map(each => {
+    let found = null;
+    map.eachLayer(l => { if ((l.options || {}).className === each.cls) { found = l; } });
+    found.fire('click');
+    const said = document.querySelector('.trails-profile-name');
+    const name = said ? said.textContent.trim() : '';
+    return {cls: each.cls, metres: each.metres, name: name,
+            named: !!name && each.cls.indexOf(name) < 0};
+  });
+}""")
+
+#: How far the register's line is from a chain that says it is that trail,
+#: sampled along the chain. Read at z11, where the reach is about 340 m on
+#: ground: the two sources draw one trail up to 122 m apart over Abisko -- the
+#: naming rule allows 25 m per line and a chain is many -- so a tighter reach
+#: would report that disagreement as this defect, and 340 m is still two orders
+#: off the kilometres a name used to run on for.
+REGISTER_UNDER = with_map("""(spec) => {
+  const map = __MAP__;
+  let chain = null;
+  map.eachLayer(l => { if ((l.options || {}).className === spec.cls) { chain = l; } });
+  if (!chain) { return null; }
+  const points = chain.getLatLngs();
+  const out = [];
+  for (let i = 0; i < spec.samples; i += 1) {
+    const at = points[Math.floor(i * (points.length - 1) / (spec.samples - 1))];
+    map.setView(at, 11, {animate: false});
+    const near = window.trailsReach.near(map.latLngToLayerPoint(at));
+    const found = near.filter(f => ((f.layer.options || {}).className || '').indexOf(spec.register) === 0);
+    out.push({at: [Math.round(at.lat * 10000) / 10000, Math.round(at.lng * 10000) / 10000],
+              under: found.length > 0});
+  }
+  return out;
+}""")
+
+
+def a_borrowed_name_has_its_register_under_it(page: Any) -> Check:
+    """A chain named after a register's trail lies on that trail, all of it.
+
+    **The one source that draws the ground does not name it, and the one that
+    names it does not draw it.** Topografi 50's marked trails take the state
+    trail they run along from Naturvardsverket's register, FKB's paths take
+    their route from Turrutebasen, and both take it only where they run within
+    25 m of it for half a line's length. The line is not the chain, though, and
+    a chain carries the union of its pieces' names -- so a name used to run on
+    through every junction to the end of whatever the geometry joined next.
+
+    Reported from the phone on 2026-09-13: *State trail: Låktatjåkka - Måndalen
+    - Abisko (BD 18)* over a 12.2 km chain of which four kilometres are BD 18,
+    the rest climbing to Björkliden, 4.3 km from it at worst. Fixed in the
+    chaining (`routing/chains.py`, `_agree`), which is not a thing the source
+    tests can see: they can prove the rule is written, not that the built page
+    stopped saying it.
+
+    Args:
+        page: The driven page, before anything is selected
+
+    Returns:
+        How far the longest borrowed names run off the trail they name
+    """
+    if not SCENE.borrowed_name:
+        return Check("a borrowed name has its register under it", skipped="this scene names no borrowing source")
+    borrower, register = SCENE.borrowed_name
+    chains = page.evaluate(BORROWED_NAMES, borrower)
+    named = [chain for chain in chains if chain["named"]]
+    if not named:
+        return Check("a borrowed name has its register under it", skipped=f"no chain of {borrower} carries a name")
+
+    # The longest few, which is where a name that runs on runs on furthest.
+    off: list[str] = []
+    samples = 0
+    under = 0
+    for chain in named[:6]:
+        read = page.evaluate(REGISTER_UNDER, {"cls": chain["cls"], "register": register, "samples": 7})
+        samples += len(read)
+        under += sum(1 for one in read if one["under"])
+        missing = [one for one in read if not one["under"]]
+        if missing:
+            off.append(f"{chain['name'][:40]} ({chain['metres'] / 1000:.1f} km): {len(missing)} of {len(read)} at {missing[0]['at']}")
+
+    return Check(
+        "a borrowed name has its register under it",
+        [
+            stands(
+                "chains named after a register trail",
+                len(named),
+                note=f"of the {len(chains)} longest, {named[0]['metres'] / 1000:.1f} km the longest",
+            ),
+            Reading("samples of them with the register's line under them", under, samples, note="; ".join(off[:2])),
+        ],
+    )
+
+
 def a_finger_can_hit_a_line(page: Any) -> Check:
     """Reported from a phone: a trail can only be selected by tapping around.
 
@@ -8602,6 +8740,9 @@ def drive(page: Any) -> list[Check]:
     # on the container and would answer this one itself.
     if wanted(a_finger_can_hit_a_line):
         checks.append(a_finger_can_hit_a_line(page))
+    # Before the long chain is selected, because it selects chains of its own.
+    if wanted(a_borrowed_name_has_its_register_under_it):
+        checks.append(a_borrowed_name_has_its_register_under_it(page))
 
     if not select(page, SCENE.long_chain):
         # Everything past this point stands on the long chain, so it goes with

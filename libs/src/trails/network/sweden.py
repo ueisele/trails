@@ -108,6 +108,11 @@ UNMARKED_CLASSES = ("Gångstig", "Lämplig färdväg", "Svårorienterad gångsti
 #: and when Lantmäteriet last wrote it.
 PATH_ATTRIBUTES = (topografi50.TYPE, "vagutforande", "skoterkorning_tillaten", "ruskmarkering", SURVEYED_FIELD)
 
+#: And what a *marked* trail carries on top: the number of the state trail it
+#: was named after, taken off the register with the name. Only the marked
+#: trails are named from the register, so only they have it.
+MARKED_ATTRIBUTES = (*PATH_ATTRIBUTES, "route_id")
+
 #: What a road carries: its class, its street name where it has one, and its
 #: number. The number is also the identity: ``E10`` is one road across the box.
 ROAD_NUMBER = "vardvagnummer"
@@ -311,7 +316,11 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     trails = attach_nearest(
         trails,
         routed,
-        {naturvardsregistret.TRAIL_ROUTE: "route_name"},
+        # The number as well as the name. It is the key the county's brochures,
+        # the signs and Naturkartan use, and a line that is a state trail can
+        # then say which page describes it — the register's own line is no
+        # longer the only one a reader can reach it from (§9.26).
+        {naturvardsregistret.TRAIL_ROUTE: "route_name", naturvardsregistret.TRAIL_ROUTE_ID: "route_id"},
         max_distance_m=params.trail_name_m,
         metric_crs=METRIC_CRS,
         # Nearness alone hands a route's name to every side path that meets it.
@@ -343,7 +352,7 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
             trails,
             cost_factor=COST_FACTORS[T50_TRAILS],
             identity_field="route_name",
-            attributes=PATH_ATTRIBUTES,
+            attributes=MARKED_ATTRIBUTES,
         ),
         # No identity: a worn path has no name, and under a marked trail it is
         # a second line of the same way, which the register and the trail
