@@ -1510,6 +1510,30 @@ is the path a goal taken from a popup already followed: a typed number is not a 
 ladder of *a named thing within reach, then a line within a finger, then the tap as it fell* does
 not apply to it. The mark and the goal both stand at the five decimals that were typed, 0.00 m off.
 
+#### Two faults on the phone, within the hour
+
+Uwe read the published page and found both at once, with a screenshot of the mark's page.
+
+**The same button twice.** The mark's page carried *Set as goal*, and so did the page the chrome
+built around it — the chrome appends that offer to every popup whose source has one position, which
+is written in its own comment as the reason not to build it into a popup. The mark's own offer is
+gone; `trailsChrome.goalOffer`, added an hour earlier for it, went with it. One place on this page
+turns a thing into a goal.
+
+**And a goal with nowhere to route from was a dead end.** Set from the mark with the position
+switch off, the goal stood — a ring on the map, the flag lit — and pressing the flag did nothing
+at all: no page, no way to be rid of it. The cause is neither the search nor the mark. The panel
+draws the *way* to a goal, `showGoal` returns false without one, and there is no way until the page
+knows where the reader is, because routing starts where they stand. So a goal taken from a hut's
+popup with the position off had been as stuck since the goal was written; a typed position is just
+the easiest way to reach that state, since nothing about it asks for a fix.
+
+The flag says it now, and *Set as goal* says it at once where there is no position to route from —
+a page of three lines in the chrome's sheet: **Where I am**, which switches the position on and is
+the missing half; **Move the goal**, which arms the next tap; and **Drop the goal**, which asks
+first where stops would go with it. Driven: `['Where I am', '⌖ Move the goal', 'Drop the goal']`,
+and dropping it there takes the goal off the map.
+
 #### What it cost, and where it is
 
 `_NameSearch` in `visualization/maps.py`, with `_layer_label` beside it and `window.trailsSearch`
@@ -1517,7 +1541,8 @@ for whoever drives it; `trailsChrome.goalOffer` is the one new line in the chrom
 serves both pages, so Lomsdal-Visten has all of it too. Four tests that asserted the hiding are
 rewritten to the new truth and five new ones stand beside them; the suite is 1,436 green. Two new
 checks drive it — *the search lists what it finds* and *a position typed into the search*, sixteen
-readings — and both pages read **649 readings, 0 broken invariants, 0 figures moved**, up from 633.
+readings, and twenty-one with the two faults above — and both pages read **652 readings, 0 broken
+invariants, 0 figures moved**, up from 633.
 
 **And one lesson about the suite, paid for with seven runs.** The first drive of each page died in
 *a goal the reader sets* — `stops[0]` out of range, which is a goal that was never set — while that
@@ -1551,7 +1576,11 @@ A line per change to this document or to the decisions in it, newest first.
   as the place it names, in decimal or in degrees, minutes and seconds, marked on the map and set
   as a goal through the button a hut's popup carries. One function serves both pages. Both pages
   published the same evening — page and companions only, nothing in the tile trees — and
-  byte-identical from the edge, 3,540,231 and 17,098,349 bytes.
+  byte-identical from the edge, 3,540,231 and 17,098,349 bytes. Uwe read the published page and
+  found two faults within the hour, both fixed and republished the same evening (3,543,170 and
+  17,101,288 bytes): *Set as goal* stood on the mark's page twice, and a goal set with the position
+  switch off could be neither read nor dropped — the second one older than this change and reachable
+  from any place's popup. §9.27 has both.
 
   **And a publish stops being a question.** Uwe's standing word, given with this one: publish
   directly, *as long as nothing breaks the offline cache*. So the condition to check before each

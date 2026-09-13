@@ -2692,9 +2692,13 @@ class TestCanvas:
         html = fmap.get_root().render()
         assert "function readCoordinate(text) {" in html
         assert "return at.lat.toFixed(5) + ', ' + at.lon.toFixed(5);" in html
-        # A typed number is not a finger: no `tapped`, so it snaps to nothing.
-        assert "window.trailsChrome.goalOffer(at.lat, at.lon, null)" in html
         assert "mark.openPopup();" in html
+        # **And the mark's own page does not offer the goal.** The chrome puts
+        # *Set as goal* on the page of every popup that has one position, and a
+        # second offer here was the same button twice.
+        made = html[html.index("function markPage(at) {") : html.index("function dropMark() {")]
+        assert "trails-goal-take" not in made
+        assert "goalOffer" not in html
 
     def test_a_position_needs_something_between_its_two_sides(self, shelters):
         """Measured while it was written: with the separator optional, the
@@ -8414,6 +8418,26 @@ class TestWhereTheReaderIs:
         assert "found.away = remains;" in html
         assert "found.at = {lat: goal.lat, lon: goal.lon};" in html
 
+    def test_the_flag_says_something_when_there_is_no_way_to_show(self):
+        """Reported from the phone: a position typed into the search, set as a
+        goal with the position switch off, and then the flag did nothing at all
+        -- no page, no way to be rid of it, a green ring standing on the map for
+        good. The panel draws the *way* to a goal and there is none until the
+        page knows where the reader is, so the flag says that instead, and
+        carries the three things they can do about it."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        assert "if (!window.trailsGoal.showProfile() && !window.trailsGoal.show()) { goalAdrift(); }" in html
+        assert "function goalAdrift() {" in html
+        adrift = html[html.index("function goalAdrift() {") : html.index("function setGoalHere(event)")]
+        assert "askHere(true)" in adrift
+        assert "askAiming('move'" in adrift
+        assert "window.trailsGoal.clear();" in adrift
+        # The same question the panel's own drop asks, for the same reason.
+        assert "window.confirm('Drop the goal and '" in adrift
+
     def test_the_goal_switch_arms_one_tap_and_lets_go(self):
         """A switch that stayed on would make every later tap a goal, which is
         the mistake plan mode is allowed to make because planning is a mode a
@@ -8451,8 +8475,11 @@ class TestWhereTheReaderIs:
         assert "function pressGoal() {" in html
         assert "if (aiming) { askAiming(false); return; }" in html
         assert "if (goalSet() && window.trailsGoal) {" in html
-        assert "if (!window.trailsGoal.showProfile()) { window.trailsGoal.show(); }" in html
-        assert "window.trailsGoal.clear();" not in html
+        assert "if (!window.trailsGoal.showProfile() && !window.trailsGoal.show()) { goalAdrift(); }" in html
+        # The press itself still drops nothing -- what is below it is a page in
+        # words, which is where putting a goal away belongs.
+        pressed = html[html.index("function pressGoal() {") : html.index("function adriftStep(")]
+        assert "window.trailsGoal.clear();" not in pressed
         assert "quickMark('goal', 'Set a goal', function () { pressGoal(); });" in html
         # And it is the tap and nothing else: no waypoint, no selection, no
         # popup, which is what the capture phase is for.

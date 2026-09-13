@@ -3878,13 +3878,15 @@ class _NameSearch(MacroElement):
             //: screen and in a popup on a wide one, because that is where every
             //: other popup on this map goes. The button is the chrome's own, so
             //: a typed position becomes a goal through the code a hut does.
+            //
+            //: **And it does not offer the goal itself.** The chrome adds *Set
+            //: as goal* to the page of every popup that has one position, which
+            //: is what this is -- offering it here too put the same button on
+            //: the page twice, reported from the phone within the hour.
             function markPage(at) {
-                var offer = (window.trailsChrome && window.trailsChrome.goalOffer)
-                    ? window.trailsChrome.goalOffer(at.lat, at.lon, null) : '';
                 return '<div style="font-family:sans-serif;font-size:12px;line-height:1.5">' +
                     '<div style="font-size:13px;font-weight:600">' + saidAt(at) + '</div>' +
                     '<div style="color:var(--trails-ink-3)">A position typed into the search.</div>' +
-                    offer +
                     '<div style="padding-top:6px"><button type="button" class="trails-search-drop" ' +
                     'style="font:inherit;font-size:12px;padding:4px 10px;cursor:pointer;' +
                     'border:1px solid var(--trails-rule);border-radius:9px;' +
@@ -21680,10 +21682,67 @@ class _Chrome(MacroElement):
             function pressGoal() {
                 if (aiming) { askAiming(false); return; }
                 if (goalSet() && window.trailsGoal) {
-                    if (!window.trailsGoal.showProfile()) { window.trailsGoal.show(); }
+                    if (!window.trailsGoal.showProfile() && !window.trailsGoal.show()) { goalAdrift(); }
                     return;
                 }
                 askAiming(true);
+            }
+
+            //: One line of the page below, as a button.
+            function adriftStep(label, told, act) {
+                var made = document.createElement('button');
+                made.type = 'button';
+                made.className = 'trails-goal-adrift-step';
+                made.textContent = label;
+                made.title = told;
+                made.style.cssText = 'display:block;width:100%;text-align:left;font:inherit;font-size:13px;' +
+                    'margin-top:6px;padding:8px 10px;cursor:pointer;border:1px solid var(--trails-rule);' +
+                    'border-radius:9px;background:var(--trails-solid);color:var(--trails-ink)';
+                made.addEventListener('click', function (event) { event.stopPropagation(); act(); });
+                return made;
+            }
+
+            // **A goal with no way to it is still a goal, and the flag has to
+            // say so.** Reported from the phone: a position typed into the
+            // search, set as a goal with the position switch off, and then the
+            // flag did nothing at all -- no page, no way to be rid of it, a
+            // green ring standing on the map for good. The cause is that the
+            // panel draws the *way* there and there is none: routing starts
+            // where the reader is, and nobody had told the page where that was.
+            //
+            // So this page says exactly that, and carries the three things the
+            // reader can do about it. Nothing here is particular to a typed
+            // position -- a goal taken from a hut's popup with the position off
+            // was as stuck, and had been since the goal was written.
+            function goalAdrift() {
+                var said = window.trailsGoal.state();
+                var at = said.at;
+                if (!at) { return; }
+                var node = document.createElement('div');
+                node.className = 'trails-goal-adrift';
+                node.style.cssText = 'font-family:sans-serif;font-size:13px;line-height:1.5';
+                var where = document.createElement('div');
+                where.style.cssText = 'font-weight:600';
+                where.textContent = at.lat.toFixed(5) + ', ' + at.lon.toFixed(5);
+                var why = document.createElement('div');
+                why.style.cssText = 'color:var(--trails-ink-3);margin-bottom:4px';
+                why.textContent = 'There is no way to show yet: the way to a goal is worked out from '
+                    + 'where you are, and this page does not know that. Switch your position on and '
+                    + 'it appears with the first fix.';
+                node.appendChild(where);
+                node.appendChild(why);
+                node.appendChild(adriftStep('Where I am', 'Switch the position on and work the way out',
+                    function () { askHere(true); closeSheet(); }));
+                node.appendChild(adriftStep('\u2316  Move the goal', 'The next tap on the map puts the goal there',
+                    function () { askAiming('move', Math.max(0, (said.stops || []).length - 1)); closeSheet(); }));
+                node.appendChild(adriftStep('Drop the goal', 'Take the goal off the map', function () {
+                    var stops = Math.max(0, (said.stops || []).length - 1);
+                    if (stops > 0 && !window.confirm('Drop the goal and ' + stops +
+                            (stops === 1 ? ' stop?' : ' stops?'))) { return; }
+                    window.trailsGoal.clear();
+                    closeSheet();
+                }));
+                readInSheet(said.name || 'The goal', node, false, 'goal-adrift');
             }
 
             function setGoalHere(event) {
@@ -22166,6 +22225,13 @@ class _Chrome(MacroElement):
                 // of a goal, and a crosshair left over it would take the next
                 // tap for a second one.
                 askAiming(false);
+                // **And a press has to show for something.** With a position
+                // the panel turns to the way there on its own; with none there
+                // is no way to turn to, and the page a reader had just read
+                // stayed where it was -- which is the silence this was reported
+                // as. `hereAt` and not the routing: a way that is being worked
+                // out is on its way, and this is the case where none can be.
+                if (!hereAt) { goalAdrift(); }
             });
 
             var adopting = false;
@@ -22483,14 +22549,6 @@ class _Chrome(MacroElement):
                 // everything, and everything is not what a second press on one
                 // panel's own button means.
                 closeDetail: function () { closeSheet(); },
-                // **The one button a popup carries, for a popup that is not a
-                // feature's.** The search marks a position the reader typed, and
-                // a position they meant is a place: it offers what a hut offers,
-                // through the same markup and the same delegated listener, so
-                // there is one way on this page to turn something into a goal.
-                goalOffer: function (lat, lon, called) {
-                    return goalOffer({lat: lat, lng: lon}, called || null);
-                },
                 // **Whether the next tap on the map is a position and nothing
                 // else.** Asked by plan mode before it takes a click of its own,
                 // set by the rail, by the mark at the foot and from here.

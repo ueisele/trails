@@ -3564,15 +3564,37 @@ def a_position_typed_into_the_search(page: Any) -> Check:
     read = [page.evaluate("(text) => window.trailsSearch.read(text)", form) for form in forms]
     apart = max((metres_between((lat, lon), (said["lat"], said["lon"])) if said else 1e6) for said in read)
 
+    # Without a position, so that the page has nothing to route from: that is
+    # the state the two defects below were reported in, and it is the ordinary
+    # state of a map somebody has just opened.
+    page.evaluate("() => window.trailsChrome.here(false)")
+    page.wait_for_timeout(400)
     rows = page.evaluate("(text) => window.trailsSearch.find(text)", forms[0])
     page.evaluate("() => window.trailsSearch.take(0)")
     page.wait_for_timeout(1500)
     mark = page.evaluate("() => window.trailsSearch.mark()")
     zoom = page.evaluate(with_map("() => __MAP__.getZoom()"))
+    # **One offer and not two.** The chrome puts *Set as goal* on the page of
+    # every popup that has one position; the mark offered it as well, and the
+    # same button twice was reported from the phone within the hour.
+    offers = page.evaluate("() => document.querySelectorAll('.trails-goal-take').length")
     offered = page.evaluate("""() => { const b = document.querySelector('.trails-goal-take'); return b ? b.textContent : null; }""")
     page.evaluate("""() => { const b = document.querySelector('.trails-goal-take'); if (b) { b.click(); } }""")
     page.wait_for_timeout(1500)
     goal = page.evaluate("() => window.trailsGoal.state()")
+    # **And a goal with nowhere to route from is not a dead end.** Reported from
+    # the phone: set with the position off, the panel could draw no way there,
+    # the flag did nothing, and there was no way to be rid of it either.
+    adrift = page.evaluate(
+        """() => { const n = document.querySelector('.trails-goal-adrift');
+        return n ? [...n.querySelectorAll('button')].map(b => b.textContent.replace(/\\s+/g, ' ').trim()) : []; }"""
+    )
+    page.evaluate(
+        """() => { const b = [...document.querySelectorAll('.trails-goal-adrift-step')]
+        .filter(x => x.textContent.indexOf('Drop') >= 0)[0]; if (b) { b.click(); } }"""
+    )
+    page.wait_for_timeout(900)
+    dropped = page.evaluate("() => window.trailsGoal.state().at")
     page.evaluate("""() => { const b = document.querySelector('.trails-search-drop'); if (b) { b.click(); } }""")
     page.wait_for_timeout(600)
     left = page.evaluate("() => window.trailsSearch.mark()")
@@ -3595,12 +3617,19 @@ def a_position_typed_into_the_search(page: Any) -> Check:
             ),
             Reading("and zoomed in to z14 at least", bool(zoom is not None and zoom >= 14), True, note=f"z{zoom}"),
             Reading("what the mark offers", offered, "Set as goal"),
+            Reading("once, and not twice", offers, 1),
             Reading(
                 "and the goal stands where the mark did, m off",
                 round(metres_between((lat, lon), (at["lat"], at["lon"])), 2) if at else -1.0,
                 0.0,
                 within=0.5,
             ),
+            Reading(
+                "with no position, the goal says what can be done with it instead",
+                adrift,
+                ["Where I am", "\u2316 Move the goal", "Drop the goal"],
+            ),
+            Reading("and dropping it there takes it off the map", dropped, None),
             Reading("taking the mark away leaves none", left, None),
         ],
     )
