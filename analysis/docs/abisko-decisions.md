@@ -1740,7 +1740,7 @@ A line per change to this document or to the decisions in it, newest first.
   waypoint offer turned out to be made only where nothing can be selected — with plan mode on
   every tap is a waypoint — so it is *Add to the plan* while a plan stands, mode on or off, and the
   press leaves the mode as it finds it (Uwe: switching it on would take the next place away again).
-  667 readings a page, republished.
+  667 readings a page, republished at 3,556,256 and 17,114,378 bytes, byte-identical from the edge.
 
 - **2026-09-13, fifth of the day** — the search lists what it finds and reads a position
   (§9.27), asked for from the phone. Typing no longer hides the map: the matches are rows, one per
