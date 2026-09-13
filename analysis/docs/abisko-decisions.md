@@ -1562,11 +1562,85 @@ names parted by commas, which is how a check that passes alone and fails in a ru
 and the goal check reads its moved stop out of the list rather than off its first row, so a run that
 set nothing reports that instead of throwing and taking every later reading with it.
 
+### 9.28 A goal becomes a plan, and a place offers what can be done with it — settled, 2026-09-13
+
+Asked for from the phone, three questions in one message: *can we add a button to turn a goal into a
+plan? Can we, in plan mode, add geo coordinates directly as waypoints? Also for intermediate stops?*
+
+They are one shape. **A goal answers *how do I get there from where I am*; a plan answers *what
+shall the walk be*.** The first is set in a moment and walked at once; the second is edited —
+reordered, cut into stages, written to a file. A reader who has set a goal with two stops on the way
+has already laid out exactly the thing a plan is for, and there was no way from the one to the
+other. And a position typed into the search (§9.27) is a place on the map by the time it has a mark,
+so nothing new has to read coordinates for the other two: the page of a *place* is where this
+belongs.
+
+#### What a place offers
+
+The chrome adds its offer to the page of every popup whose source has one position. It offered one
+thing; it offers what can be done with that place **as the page stands now**:
+
+| offer | when | what it does |
+|---|---|---|
+| *Set as goal* | always | that is what a place on a map is for |
+| *Add a stop on the way* | while a goal stands | there is no way for a stop to be on otherwise |
+| *Add a waypoint* | while plan mode is on | adding to a plan nobody is making would be a mode change hiding inside a button |
+
+A hut's page offers the same three; a typed position's page does because it is a place like any
+other. **None of the three snaps.** A press on a page is not a finger on the map: the place is where
+the popup says it is — the hut, or the five decimals somebody typed — so `place` takes an `exact`
+flag and `addStop` is called the way a popup already called `set`.
+
+And the place names what it becomes: a stop taken from a hut's page is that hut, and one taken from
+a typed position is `68.40275, 18.69033`, which is what the list would otherwise call *Stop 1*.
+
+#### The way to a goal, as the plan's points
+
+`planFromGoal` lives with `planFromPlaces` in the plan control, because both halves of it are there
+— the goal and the plan share that closure — and because it is offered from two places:
+
+- **the goal's own page**, under the places it goes by: *Make a plan of this way*;
+- **the page the flag opens where there is no way to show** (§9.27), which is where a reader without
+  a position fix actually is. Measured: `showGoal` returns false without a line, so the goal's own
+  page cannot be reached at all then — and the whole point of a plan is that it does not need to
+  know where anybody is standing.
+
+The reader's own position goes in front of the places where the page knows it, because the way being
+looked at starts there; the stops follow in the order they are walked, the goal last. **The goal
+goes with the conversion** — two routes over the same places, one editable and one not, is a page
+that cannot say which is being walked — and a plan that already has points is asked about first,
+which an empty one is not.
+
+**`SAME_SPOT_M = 1`, and it is not decoration.** The places arrive as they were put down and are not
+snapped a second time; but `nearestNode` takes its reach as a strict bound, so a reach of zero
+refuses even the node a point is standing *on* — which is what a tap that snapped leaves behind.
+Measured: a goal set by tap on node 10353 comes back as a plan point on node 10353, and a typed
+position 1.1 km from anything comes back as open ground with the leg drawn `land, routed, land`.
+
+#### Driven
+
+*A way to a goal becomes a plan*, eight readings on both pages, with the position switched off —
+which is where the goal's own page cannot be reached and the state a reader who has just opened the
+map is in. A position typed in, set as a goal; a second typed in and added as a stop, named after
+itself; the flag's four lines; the two places as the plan's two points in order with the goal gone;
+a third typed in as a waypoint and landing on its five decimals.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-13, sixth of the day** — a goal becomes a plan, and a place offers what can be done
+  with it (§9.28), all three asked for from the phone in one message. *Make a plan of this way*
+  stands on the goal's own page and on the page the flag opens without a position — which is where a
+  reader without a fix actually is, since the goal's own page is the way there and there is none.
+  The places become the plan's points in order, the reader's position in front of them where the
+  page knows it, and the goal comes off the map. And the page of any place — a hut, or a position
+  typed into the search — now offers a stop on the way while a goal stands and a waypoint while a
+  plan is being made, so coordinates reach both without anything new reading them. Driven, 660
+  readings a page, and published the same evening — byte-identical from the edge, 3,551,379 and
+  17,109,497 bytes, page and companions only.
 
 - **2026-09-13, fifth of the day** — the search lists what it finds and reads a position
   (§9.27), asked for from the phone. Typing no longer hides the map: the matches are rows, one per

@@ -4591,6 +4591,26 @@ class TestProfilePanel:
         assert "var at = box.bottom + STRIP / 2 + 1 + station.row * (2 * STATION_R + 3);" in html
         assert "var rule = line(here, level, here, at - radius, ink);" in html
 
+    def test_the_way_to_a_goal_can_become_a_plan(self):
+        """Asked for from the phone. A goal is set in a moment and walked at
+        once; a plan is edited, cut into stages and written to a file -- and a
+        goal with three stops on the way is already the thing a plan is for.
+
+        The reader's position goes in front where the page knows it, because
+        that is where the way being looked at starts. The goal goes with the
+        conversion: two routes over the same places, one editable and one not,
+        is a page that cannot say which is being walked."""
+        fmap, layer = self.drawn()
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+
+        assert "window.trailsPlan.fromGoal();" in html
+        assert "goalToPlan.textContent = 'Make a plan of this way';" in html
+        # Offered while a goal stands, whether or not a way to it has been
+        # worked out: the places are places either way.
+        assert "goalToPlan.style.display = standing ? 'block' : 'none';" in html
+
     def test_a_goal_has_figures_of_its_own(self):
         """Reported from the phone as *the info is from another way*, and it
         was. The row under the drawing — the point count, the licences, the
@@ -6114,6 +6134,45 @@ class TestPlanMode:
         assert "? composeRoute(null, null, legs) : null;" in planning
         assert "draw(leg.parts, leg.provisional, {pane: goalPane(), colour: GOAL_COLOUR})" in planning
 
+    def test_the_way_to_a_goal_becomes_the_plan_s_points(self):
+        """Asked for from the phone. A goal is set in a moment and walked at
+        once; a plan is edited, cut into stages and written to a file -- and a
+        goal with three stops on the way is already the thing a plan is for.
+
+        Here rather than in the panel that offers it, because both halves of it
+        are here: the goal and the plan share this closure. The reader's own
+        position goes in front where the page knows it, and the goal goes with
+        the conversion -- two routes over the same places, one editable and one
+        not, is a page that cannot say which is being walked."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        made = html[html.index("function planFromGoal() {") : html.index("// **Inserting is this phase")]
+        assert "var here = goalHere();" in made
+        assert "places.unshift({lat: here.lat, lon: here.lon});" in made
+        assert "planFromPlaces(places);" in made
+        assert "clearGoal();" in made
+        # Asked only where there is something to lose.
+        assert "if (points.length && !window.confirm('Replace the '" in made
+        assert "fromGoal: planFromGoal," in html
+
+    def test_a_plan_can_be_made_of_places_somebody_already_put_down(self):
+        """The other half of turning a goal into a plan: the places arrive as
+        they were put down and are not snapped a second time -- each was already
+        laid on the line under a finger, or typed exactly -- and plan mode comes
+        on with them, the way it does for a loaded file."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        html = fmap.get_root().render()
+        made = html[html.index("function planFromPlaces(places) {") : html.index("// **Inserting is this phase")]
+        assert "snapped(graph, each.lat, each.lon, SAME_SPOT_M)" in made
+        assert "if (!on) { switchTo(true); }" in made
+        # Nothing a loaded file left behind survives the route it described.
+        assert "loaded = null;" in made
+        assert "fromPlaces: planFromPlaces," in html
+
     def test_a_goal_is_routed_from_where_the_reader_is(self):
         """Not from where the goal was set and not from the goal outwards: a way
         to somewhere starts where you are. Which means it goes stale as the
@@ -6283,7 +6342,9 @@ class TestPlanMode:
         assert "function fingerReach(lat) {" in planning
         assert "return Math.min(PLAN.snapM, across);" in planning
         # Every gesture asks the screen.
-        assert "points.push(snapped(graph, lat, lon, fingerReach(lat)));" in planning
+        # The finger is the default and a caller that is not one says so: a
+        # place pressed on a page is where that place is.
+        assert "points.push(snapped(graph, lat, lon, exact ? SAME_SPOT_M : fingerReach(lat)));" in planning
         assert "points[dragging.at] = snapped(held, where.lat, where.lng, fingerReach(where.lat));" in planning
         # And the file does not ask the screen — nor, restoring a plan, does it
         # move the point at all: a file says where the reader put one, and a leg
@@ -8502,10 +8563,29 @@ class TestWhereTheReaderIs:
         assert "function goalOffer(where, called) {" in html
         assert "content = (content || '') + goalOffer(source.getLatLng(), titleFor(popup));" in html
         assert "if (isPoint && window.trailsGoal) {" in html
-        assert "event.target.closest('.trails-goal-take')" in html
+        assert "event.target.closest('.trails-goal-take, .trails-stop-take, .trails-point-take')" in html
         # Escaped into the attributes it rides in, like every other name this
         # page takes out of somebody else's register.
         assert "'\" data-name=\"' + esc(called || '') + '\" '" in html
+
+    def test_a_place_offers_what_can_be_done_with_it_now(self):
+        """Asked for from the phone: coordinates as waypoints, and as stops on
+        the way. A typed position is a place like any other by the time it is on
+        the map, so the offer is made on every place's page and the search
+        needed nothing for it -- but only where there is something to add to: a
+        stop needs a goal to be on the way to, and a waypoint needs a plan."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+
+        html = fmap.get_root().render()
+        offers = html[html.index("function goalOffer(where, called) {") : html.index("var adopting = false;")]
+        assert "if (goalNow && goalNow.at) {" in offers
+        assert "'Add a stop on the way'" in offers
+        assert "if (planOn()) {" in offers
+        assert "'Add a waypoint'" in offers
+        # None of the three snaps: a press on a page is not a finger on the map.
+        assert "window.trailsGoal.addStop(lat, lon, called);" in offers
+        assert "window.trailsPlan.place(lat, lon, true);" in offers
 
     def test_the_goal_is_the_only_green_line_this_map_draws(self):
         """The same green the position mark aims in, because they are one

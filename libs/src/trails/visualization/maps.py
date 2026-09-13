@@ -6359,6 +6359,38 @@ class _ProfilePanel(MacroElement):
                 track.style.background = on ? 'var(--trails-accent)' : 'var(--trails-rule)';
                 knob.style.transform = on ? 'translateX(14px)' : 'none';
             }
+            // **The way there, handed to the plan.** Asked for from the phone,
+            // and it is the one road between the two halves of this page that
+            // was missing: a goal is set in a moment and walked at once, a plan
+            // is edited -- reordered, cut into stages, written to a file -- and
+            // a reader who has set a goal with three stops on the way has laid
+            // out exactly the thing the plan is for.
+            //
+            // A line in words at the foot of the places, not a glyph in the row
+            // above them: the row is what is done *to* the goal while it stands,
+            // and this ends it.
+            var goalToPlan = document.createElement('button');
+            goalToPlan.type = 'button';
+            goalToPlan.className = 'trails-profile-goal-plan';
+            goalToPlan.textContent = 'Make a plan of this way';
+            goalToPlan.title = 'The places become the plan\u2019s points, in order, and the goal comes off the map';
+            goalToPlan.style.cssText = 'display:none;width:100%;text-align:left;font:inherit;font-size:12px;' +
+                'margin-top:6px;padding:7px 10px;border:1px solid var(--trails-rule);border-radius:9px;' +
+                'background:var(--trails-solid);color:var(--trails-ink-2);cursor:pointer';
+            goalToPlan.addEventListener('click', function (event) {
+                event.stopPropagation();
+                if (window.trailsPlan && window.trailsPlan.fromGoal) { window.trailsPlan.fromGoal(); }
+            });
+
+            // **Everywhere the journey goes, in the order it is walked**, and
+            // the reader's own position in front of it where the page knows it:
+            // the way being looked at starts there, and a plan that began at the
+            // first stop would be a different walk. Where it is not known the
+            // plan starts at the first place, which is what a plan does anyway.
+            //
+            // **And the goal goes, because it has become the plan.** Two routes
+            // over the same places, one of them editable and one of them not, is
+            // a page that cannot say which is being walked.
             var goalNote = document.createElement('div');
             goalNote.className = 'trails-profile-goal-note';
             goalNote.style.cssText = 'display:none;padding:0 3px 5px;font-size:11px;color:var(--trails-ink-3);white-space:pre-line';
@@ -6507,6 +6539,10 @@ class _ProfilePanel(MacroElement):
             function paintGoal() {
                 var standing = !!(goalNow && goalNow.at);
                 goalRow.style.display = standing ? 'flex' : 'none';
+                // Offered while there is a way to hand over, which is whenever a
+                // goal stands: the places are places whether or not the page
+                // has worked out a line between them yet.
+                goalToPlan.style.display = standing ? 'block' : 'none';
                 paintStopList();
                 if (!standing) { return; }
                 var routed = goalNow.way === 'routed';
@@ -7123,6 +7159,7 @@ class _ProfilePanel(MacroElement):
             placesPage.appendChild(goalPaths);
             placesPage.appendChild(goalNote);
             placesPage.appendChild(goalList);
+            placesPage.appendChild(goalToPlan);
 
             function wantedPages() {
                 var made = [];
@@ -13717,11 +13754,93 @@ class _PlanMode(MacroElement):
                 return Math.min(PLAN.namedM, fingerReach(lat));
             }
 
-            function place(lat, lon) {
+            //: The reach that pulls a point nowhere and still recognises the
+            //: node it is already standing on. Zero will not do: `nearestNode`
+            //: takes its limit strictly, so a point sitting *exactly* on a node
+            //: -- which is what a tap that snapped leaves behind -- would be
+            //: refused that node and treated as open ground.
+            var SAME_SPOT_M = 1;
+
+            // **`exact` is a caller saying it is not a finger.** A tap is taken
+            // as the line it lands on, which is what `fingerReach` is for; a
+            // place pressed on a page is where that place is -- a hut, or the
+            // five decimals somebody typed -- and pulling it twenty metres on to
+            // the nearest path would be this page guessing at something that was
+            // already said exactly.
+            function place(lat, lon, exact) {
                 applyEdit(function (graph) {
-                    points.push(snapped(graph, lat, lon, fingerReach(lat)));
+                    points.push(snapped(graph, lat, lon, exact ? SAME_SPOT_M : fingerReach(lat)));
                     chosen = points.length - 1;
                 });
+            }
+
+            // **A way somebody has already laid out, handed to the plan.** A
+            // goal answers *how do I get there from where I am*; a plan answers
+            // *what shall the walk be* -- and the places are the same places, so
+            // between the two halves of this page there was one thing missing:
+            // the way from the first to the second. The goal's stops become the
+            // plan's points, in the order they were to be walked.
+            //
+            // **Not snapped.** Every one of them was put where it is already --
+            // by a tap that snapped it to the line under the finger, or by a
+            // coordinate typed exactly -- and snapping a second time, at
+            // whatever zoom happens to be showing, would move what the reader
+            // placed. `0` and not `fingerReach`, for that reason and no other.
+            //
+            // **And this is not a loaded file**, so everything a file left
+            // behind goes with the points it described: a route that came from
+            // a goal has no recording in it and no name of its own.
+            function planFromPlaces(places) {
+                if (!places || !places.length) { return 0; }
+                applyEdit(function (graph) {
+                    points = places.map(function (each) { return snapped(graph, each.lat, each.lon, SAME_SPOT_M); });
+                    chosen = -1;
+                });
+                loaded = null;
+                tourName = '';
+                loadDetail = '';
+                loadSaid = '';
+                pendingFile = null;
+                // Plan mode comes on with it, for the reason a loaded file
+                // brings it on: a route drawn on a map that will not let it be
+                // touched is the state this is the way out of.
+                if (!on) { switchTo(true); }
+                fitWanted = true;
+                refresh();
+                return places.length;
+            }
+
+            // **Everywhere the journey goes, in the order it is walked**, with
+            // the reader's own position in front of it where the page knows it:
+            // the way being looked at starts there, and a plan that began at the
+            // first stop would be a different walk.
+            //
+            // **And the goal goes, because it has become the plan.** Two routes
+            // over the same places, one of them editable and one of them not, is
+            // a page that cannot say which is being walked.
+            //
+            // Here rather than in the panel that offers it, because both halves
+            // of it are here -- the goal and the plan share this closure -- and
+            // because it is offered from two places: the goal's own page, and
+            // the page the flag opens where there is no way to show.
+            function planFromGoal() {
+                var said = goalState();
+                var places = (said.stops || []).map(function (stop) {
+                    return {lat: stop.lat, lon: stop.lon};
+                });
+                if (!places.length) { return false; }
+                var here = goalHere();
+                if (here) { places.unshift({lat: here.lat, lon: here.lon}); }
+                // **Asked only where there is something to lose.** A plan with
+                // points in it is somebody's work; an empty one is not, and a
+                // question about nothing teaches people to press through
+                // questions.
+                if (points.length && !window.confirm('Replace the ' + points.length +
+                        (points.length === 1 ? ' point' : ' points') + ' of the plan with the ' +
+                        places.length + ' places of this way?')) { return false; }
+                planFromPlaces(places);
+                clearGoal();
+                return true;
             }
 
             // **Inserting is this phase's own addition and not one of the
@@ -16324,6 +16443,11 @@ class _PlanMode(MacroElement):
 
             window.trailsPlan = {
                 place: place,
+                // A whole route at once, from places somebody already put down;
+                // and the way to the goal as one of those, which is what the
+                // goal's page and the flag's own page hand over.
+                fromPlaces: planFromPlaces,
+                fromGoal: planFromGoal,
                 undo: undo,
                 // Read with no argument, set with one: the price of open
                 // ground, ten to one or the build's three.
@@ -21735,6 +21859,15 @@ class _Chrome(MacroElement):
                     function () { askHere(true); closeSheet(); }));
                 node.appendChild(adriftStep('\u2316  Move the goal', 'The next tap on the map puts the goal there',
                     function () { askAiming('move', Math.max(0, (said.stops || []).length - 1)); closeSheet(); }));
+                // **And the way out that does not need a position at all.** The
+                // goal's own page carries this too, and that page is exactly
+                // what cannot be reached from here: it is the *way there*, and
+                // there is none. The places are places regardless.
+                if (window.trailsPlan && window.trailsPlan.fromGoal) {
+                    node.appendChild(adriftStep('Make a plan of this way',
+                        'The places become the plan\u2019s points, in order, and the goal comes off the map',
+                        function () { if (window.trailsPlan.fromGoal()) { closeSheet(); } }));
+                }
                 node.appendChild(adriftStep('Drop the goal', 'Take the goal off the map', function () {
                     var stops = Math.max(0, (said.stops || []).length - 1);
                     if (stops > 0 && !window.confirm('Drop the goal and ' + stops +
@@ -22197,13 +22330,38 @@ class _Chrome(MacroElement):
                 place();
             }
 
+            // **What can be done with a place, as the page stands now.** A
+            // goal always: that is what a place on a map is for. A stop on the
+            // way only while a goal stands, because there is no way for it to be
+            // on otherwise. A waypoint only while plan mode is on, because
+            // adding one to a plan nobody is making would be a mode change
+            // hiding inside a button.
+            //
+            // Asked for from the phone, together with the goal that becomes a
+            // plan: *can I add coordinates as waypoints, and as intermediate
+            // stops?* A typed position is a place like any other by the time it
+            // is on the map, so both of them are offered here, on every place's
+            // page, and the search needed nothing for it.
             function goalOffer(where, called) {
-                return '<div style="padding:7px 0 0;margin-top:5px;border-top:1px solid var(--trails-rule)">' +
-                    '<button type="button" class="trails-goal-take" data-lat="' + esc(where.lat) +
-                    '" data-lon="' + esc(where.lng) + '" data-name="' + esc(called || '') + '" ' +
-                    'style="font:inherit;font-size:12px;padding:4px 10px;cursor:pointer;' +
-                    'border:1px solid var(--trails-rule);border-radius:9px;' +
-                    'background:var(--trails-solid);color:var(--trails-ink)">Set as goal</button></div>';
+                var offers = [['trails-goal-take', 'Set as goal', 'Walk to this, and the mark points the way']];
+                if (goalNow && goalNow.at) {
+                    offers.push(['trails-stop-take', 'Add a stop on the way',
+                                 'Go by way of this on the way to the goal']);
+                }
+                if (planOn()) {
+                    offers.push(['trails-point-take', 'Add a waypoint',
+                                 'Put this at the end of the route being planned']);
+                }
+                return '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:7px 0 0;margin-top:5px;' +
+                    'border-top:1px solid var(--trails-rule)">' +
+                    offers.map(function (offer) {
+                        return '<button type="button" class="' + offer[0] + '" data-lat="' + esc(where.lat) +
+                            '" data-lon="' + esc(where.lng) + '" data-name="' + esc(called || '') + '" ' +
+                            'title="' + esc(offer[2]) + '" ' +
+                            'style="font:inherit;font-size:12px;padding:4px 10px;cursor:pointer;' +
+                            'border:1px solid var(--trails-rule);border-radius:9px;' +
+                            'background:var(--trails-solid);color:var(--trails-ink)">' + esc(offer[1]) + '</button>';
+                    }).join('') + '</div>';
             }
 
             // **Delegated, on the document, because the button is markup and not
@@ -22215,12 +22373,27 @@ class _Chrome(MacroElement):
             // panel and deliberately not click, which is what lets this work.
             document.addEventListener('click', function (event) {
                 var button = (event.target && event.target.closest)
-                    ? event.target.closest('.trails-goal-take') : null;
-                if (!button || !window.trailsGoal) { return; }
+                    ? event.target.closest('.trails-goal-take, .trails-stop-take, .trails-point-take') : null;
+                if (!button) { return; }
                 event.stopPropagation();
+                var lat = Number(button.getAttribute('data-lat'));
+                var lon = Number(button.getAttribute('data-lon'));
                 var called = button.getAttribute('data-name') || null;
-                window.trailsGoal.set(Number(button.getAttribute('data-lat')),
-                                      Number(button.getAttribute('data-lon')), called);
+                // **None of the three snaps.** A press on a page is not a
+                // finger on the map: the place is where the popup says it is,
+                // which for a hut is the hut and for a typed position is the
+                // five decimals that were typed.
+                if (button.classList.contains('trails-stop-take')) {
+                    if (window.trailsGoal) { window.trailsGoal.addStop(lat, lon, called); }
+                    askAiming(false);
+                    return;
+                }
+                if (button.classList.contains('trails-point-take')) {
+                    if (window.trailsPlan) { window.trailsPlan.place(lat, lon, true); }
+                    return;
+                }
+                if (!window.trailsGoal) { return; }
+                window.trailsGoal.set(lat, lon, called);
                 // The armed tap is not wanted any more: this *was* the setting
                 // of a goal, and a crosshair left over it would take the next
                 // tap for a second one.

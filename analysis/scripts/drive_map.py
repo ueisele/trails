@@ -3627,10 +3627,125 @@ def a_position_typed_into_the_search(page: Any) -> Check:
             Reading(
                 "with no position, the goal says what can be done with it instead",
                 adrift,
-                ["Where I am", "\u2316 Move the goal", "Drop the goal"],
+                ["Where I am", "\u2316 Move the goal", "Make a plan of this way", "Drop the goal"],
             ),
             Reading("and dropping it there takes it off the map", dropped, None),
             Reading("taking the mark away leaves none", left, None),
+        ],
+    )
+
+
+def a_way_to_a_goal_becomes_a_plan(page: Any) -> Check:
+    """A goal with a stop on it, handed to the plan, and coordinates for both.
+
+    **Asked for from the phone**: *can we add a button to turn a goal into a
+    plan? And in plan mode, add coordinates directly as waypoints — and as
+    intermediate stops?* The three are one shape: a goal is set in a moment and
+    walked at once, a plan is edited, and the places are the same places.
+
+    Nothing new reads coordinates for it. A typed position is a place on the map
+    by the time it has a mark, so the page of a place offers what can be done
+    with it *now* — a goal always, a stop while a goal stands, a waypoint while a
+    plan is being made — and a hut's page offers the same three.
+
+    Driven with the position switched off, which is where the way to a goal
+    cannot be drawn and the goal's own page cannot be reached: the flag's page
+    carries the conversion for that reason, and this is the state a reader who
+    has just opened the map is in.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What each press did to the goal, to the plan and to the points
+    """
+    lat, lon = SCENE.typed
+    goal_at = (lat, lon)
+    stop_at = (round(lat + 0.010, 5), round(lon + 0.010, 5))
+    point_at = (round(lat - 0.010, 5), round(lon + 0.005, 5))
+
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
+    page.evaluate(
+        """() => { window.trailsChrome.close(); window.trailsChrome.here(false);
+        if (window.trailsPlan.state().on) { window.trailsPlan.toggle(true); }
+        const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); }
+        window.trailsPlan.toggle(false);
+        window.trailsGoal.clear(); window.trailsSearch.find(''); window.trailsSearch.dropMark(); }"""
+    )
+    page.wait_for_timeout(600)
+
+    def typed(at: tuple[float, float]) -> Any:
+        """Type a position, take its row, and read what its page offers."""
+        page.evaluate("(text) => window.trailsSearch.find(text)", f"{at[0]:.5f}, {at[1]:.5f}")
+        page.evaluate("() => window.trailsSearch.take(0)")
+        page.wait_for_timeout(1400)
+        return page.evaluate(
+            """() => [...document.querySelectorAll('.trails-goal-take, .trails-stop-take, .trails-point-take')]
+            .map(b => b.textContent.trim())"""
+        )
+
+    def press(css: str) -> None:
+        page.evaluate("(sel) => { const b = document.querySelector(sel); if (b) { b.click(); } }", css)
+        page.wait_for_timeout(1500)
+
+    alone = typed(goal_at)
+    press(".trails-goal-take")
+    page.wait_for_timeout(600)
+    with_goal = typed(stop_at)
+    press(".trails-stop-take")
+    stops = page.evaluate("() => window.trailsGoal.state().stops")
+
+    # The goal's own page is the way *there*, and with no position there is
+    # none -- so the flag's page is where a reader stands, and it carries this.
+    page.evaluate("() => window.trailsChrome.open('goal')")
+    page.wait_for_timeout(1200)
+    steps = page.evaluate(
+        """() => { const n = document.querySelector('.trails-goal-adrift');
+        return n ? [...n.querySelectorAll('button')].map(b => b.textContent.replace(/\\s+/g, ' ').trim()) : []; }"""
+    )
+    page.evaluate(
+        """() => { const b = [...document.querySelectorAll('.trails-goal-adrift-step')]
+        .filter(x => x.textContent.indexOf('Make a plan') >= 0)[0]; if (b) { b.click(); } }"""
+    )
+    page.wait_for_timeout(2500)
+    made = page.evaluate(
+        """() => ({on: window.trailsPlan.state().on, goal: window.trailsGoal.state().at,
+        points: window.trailsPlan.state().points.map(p => [Number(p.lat.toFixed(5)), Number(p.lon.toFixed(5))])})"""
+    )
+
+    planning = typed(point_at)
+    press(".trails-point-take")
+    ended = page.evaluate("""() => window.trailsPlan.state().points.map(p => [Number(p.lat.toFixed(5)), Number(p.lon.toFixed(5))])""")
+
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); }
+        window.trailsPlan.toggle(false); }"""
+    )
+    page.wait_for_timeout(600)
+    page.evaluate(LET_THE_SEARCH_GO)
+    page.wait_for_timeout(400)
+
+    return Check(
+        "a way to a goal becomes a plan",
+        [
+            Reading("with nothing standing, a place offers one thing", alone, ["Set as goal"]),
+            Reading("with a goal standing, it offers a stop on the way", with_goal, ["Set as goal", "Add a stop on the way"]),
+            # **Named after itself**, which is what the page a stop was taken
+            # from is called: a hut's page names the hut, and a typed position's
+            # names the position. The list would otherwise read *Stop 1*.
+            Reading(
+                "and the stop goes on the way, named",
+                [len(stops), stops[0]["name"] if stops else None],
+                [2, f"{stop_at[0]:.5f}, {stop_at[1]:.5f}"],
+            ),
+            Reading("the flag offers to make a plan of it", steps, ["Where I am", "⌖ Move the goal", "Make a plan of this way", "Drop the goal"]),
+            Reading("which turns the places into the plan's points, in order", made["points"], [list(stop_at), list(goal_at)]),
+            Reading("with plan mode on and the goal off the map", [made["on"], made["goal"]], [True, None]),
+            Reading("while planning, a place offers a waypoint", planning, ["Set as goal", "Add a waypoint"]),
+            Reading("and it lands where it was typed", ended, [list(stop_at), list(goal_at), list(point_at)]),
         ],
     )
 
@@ -9112,6 +9227,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_search_lists_what_it_finds(page))
     if wanted(a_position_typed_into_the_search):
         checks.append(a_position_typed_into_the_search(page))
+    if wanted(a_way_to_a_goal_becomes_a_plan):
+        checks.append(a_way_to_a_goal_becomes_a_plan(page))
     if wanted(sharing_the_room):
         checks.append(sharing_the_room(page))
     if wanted(where_the_reader_is):
