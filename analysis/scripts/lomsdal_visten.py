@@ -212,12 +212,13 @@ PARKS: dict[str, Park] = {
         # The colour sheet only: the grey one was never used on the first map.
         extras=(),
         companions=maps.Companions.of("abisko"),
-        # West on the Norwegian border, south past Áhpparjávri, east at the
-        # western tip of Rautasjaure, north with the whole E10 inside. **The
+        # West on the Norwegian border, south on the tile row past Áhpparjávri
+        # that takes Kårsavagge's hut, east past Lapporten's valley path, north
+        # with the whole E10 inside (§2, widened §9.24). **The
         # box is the extent**, not a band round the park: it is what the
         # tiles were copied for and the height mosaic was read over, and the
         # graph, the water grid and the page all cover exactly it.
-        bounds=(18.15, 68.17, 19.00, 68.46),
+        bounds=(18.15, 68.139, 19.10, 68.46),
         ut_routes=None,
         # The county's pages for its state trails, one per BD number (§9.22).
         naturkartan="abisko-naturkartan.toml",

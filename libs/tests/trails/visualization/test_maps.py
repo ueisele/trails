@@ -2023,7 +2023,7 @@ class TestTwoMapsOnOneOrigin:
         assert kartverket.tiles == "https://cache.kartverket.no/"
         # Our tree ends at its box and the panel's margin must end there too;
         # Kartverket answers everywhere, so it has no edge to clip to.
-        assert lantmateriet.extent == (18.15, 68.17, 19.00, 68.46)
+        assert lantmateriet.extent == (18.15, 68.139, 19.10, 68.46)
         assert kartverket.extent is None
 
     def test_a_kept_tile_of_an_older_stand_answers_until_keep_replaces_it(self, tmp_path):
@@ -2050,7 +2050,7 @@ class TestTwoMapsOnOneOrigin:
         try:
             drawn = maps.tile_tree_version("lantmateriet", 2)
             assert drawn.tiles == "/tiles/lantmateriet/topowebb/2/"
-            assert drawn.extent == (18.15, 68.17, 19.00, 68.46), "the rest of the provider is untouched"
+            assert drawn.extent == (18.15, 68.139, 19.10, 68.46), "the rest of the provider is untouched"
             assert maps.provider_of(maps.BaseMap.LANTMATERIET_TOPO) is drawn
             page, companions = self.abisko(tmp_path)
             html = page.read_text(encoding="utf-8")
@@ -2069,7 +2069,7 @@ class TestTwoMapsOnOneOrigin:
         carries null, and both carry the clipping `padded` that reads it."""
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
-        assert 'var EXTENT = {"w": 18.15, "s": 68.17, "e": 19.0, "n": 68.46};' in html
+        assert 'var EXTENT = {"w": 18.15, "s": 68.139, "e": 19.1, "n": 68.46};' in html
         assert "function padded(core, pad, z)" in html
         norway = tmp_path / "lomsdal-visten.html"
         fmap = maps.create_map(bounds=(12.0, 65.0, 13.0, 66.0), companions=maps.Companions.of("lomsdal-visten"))

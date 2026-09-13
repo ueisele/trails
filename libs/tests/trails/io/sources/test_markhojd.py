@@ -6,7 +6,7 @@ import rasterio
 from affine import Affine
 from trails.io.sources import markhojd
 
-ABISKO = (18.15, 68.17, 19.00, 68.46)
+ABISKO = (18.15, 68.139, 19.10, 68.46)
 
 
 def _item(east: float, north: float, href: str) -> dict:
@@ -32,7 +32,7 @@ class TestSearch:
         squares = markhojd.search(ABISKO, fetch)
         assert [square.href for square in squares] == ["a.tif", "b.tif"]
         assert squares[0].bounds == (640000.0, 7580000.0, 642500.0, 7582500.0)
-        assert asked[0].startswith(f"{markhojd.STAC_URL}/collections/{markhojd.COLLECTION}/items?bbox=18.150000,68.170000,19.000000,68.460000")
+        assert asked[0].startswith(f"{markhojd.STAC_URL}/collections/{markhojd.COLLECTION}/items?bbox=18.150000,68.139000,19.100000,68.460000")
 
 
 @pytest.fixture

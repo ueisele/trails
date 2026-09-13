@@ -28,7 +28,7 @@ from trails.processing import dem_tiles
 from trails.utils.tiles import Bounds, tile_count
 
 #: The Abisko box, as in ``lantmateriet_tiles.py`` and the decisions doc §2.
-ABISKO: Bounds = (18.15, 68.17, 19.00, 68.46)
+ABISKO: Bounds = (18.15, 68.139, 19.10, 68.46)
 
 #: The finest level built: at 68° N a z13 pixel is 7 m, and the tiles would
 #: only repeat the model's posts beyond it (§6.3).

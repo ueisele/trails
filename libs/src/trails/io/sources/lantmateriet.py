@@ -17,7 +17,7 @@ rows for the wanted box are read — 0.048 s a tile when read in order, because
 the rows sit in spatial chunks and a 1 MB block holds many neighbours::
 
     source = lantmateriet.Source()
-    written = source.copy_tiles((18.15, 68.17, 19.00, 68.46), zooms=range(8, 18), out_dir=Path("tiles"))
+    written = source.copy_tiles((18.15, 68.139, 19.10, 68.46), zooms=range(8, 18), out_dir=Path("tiles"))
 
 Tiles are written as ``{out_dir}/{z}/{x}/{y}.png`` and a run resumes: a tile
 already on disk is not read again.

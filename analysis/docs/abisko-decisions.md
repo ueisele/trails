@@ -47,6 +47,14 @@ Geocoded 2026-09-11 through Nominatim (OSM) and Lantmäteriet's own place-name s
 | inside | Abisko (village) | 68.350 N, 18.830 E | — |
 | inside | Abisko nationalpark | 68.327 N, 18.701 E | the park the build looks up by name |
 
+**Widened 2026-09-13 at Uwe's word to 18.15–19.10 E, 68.139–68.46 N** (§9.24). The east edge at
+19.00 E cut the valley path through Lapporten, which runs south through the gate to 19.03 E;
+19.10 E takes it whole, and nothing else lies between 19.03 and 19.17 E. The south edge moves
+to the tile row's own edge: the row that held 68.17 N ends at 68.1389 N on z11, z12 and z13
+alike, so 68.139 N costs no partial row and brings in Kårsavagge's hut at 68.14 N and the
+south end of Abiskojaure with the Kungsleden on it. The west and north edges and their
+reasons stand. The box is 146,648 tiles from z8 to z17, 27,681 more than before.
+
 The border trace comes from OSM relation 2978650 (the Norway–Sweden boundary), read at 0.05°
 steps. It matters twice: it sets the west edge, and it is where the north edge stops being free.
 **Between 68.15 N and 68.55 N the border never goes east of 18.15 E**, so a west edge at 18.15 E
@@ -366,8 +374,8 @@ Naturkartan tour is what `atlas` §3.6 calls a personal input — downloaded for
 added to one's own copy — not a layer of this map. **What the map does carry, since the evening
 of 2026-09-12, is the link**: a state trail's popup names the county's Naturkartan page for each
 *BD* number on the chain, out of a hand-kept catalogue (§9.22). Measured that evening, Naturkartan's
-Abisko tours *are* the state trails, one page per number, and thirteen of the fifteen the register
-draws over the box have one.
+Abisko tours *are* the state trails, one page per number, and fourteen of the seventeen the
+register draws over the widened box have one (thirteen of fifteen before §9.24).
 
 Licences the credits will carry: Lantmäteriet's *värdefulla datamängder* terms with attribution for
 the tiles, CC0 for Topografi 50, CC BY 4.0 for the height model, Naturvårdsverket open data,
@@ -1169,10 +1177,10 @@ holds in Norway). What was missing was the link, and a link is not a copy: nothi
 Naturkartan's enters the page, and its private-use terms (§5) are not touched.
 
 **The catalogue** is `analysis/routes/abisko-naturkartan.toml`, read by
-`io/sources/naturkartan.py`: number to URL, thirteen entries, researched by hand through the
+`io/sources/naturkartan.py`: number to URL, thirteen entries when written and fourteen since the box widened (§9.24), researched by hand through the
 site's own search because the slugs are not derivable and a short URL by site id answers 404.
 Every entry answered 200 with a site id of its own. Of the fifteen state trails the register
-draws over the box, BD 23 and BD 29 have no page, searched by number and by every place in their
+draws over the box as first cut, BD 23 and BD 29 have no page, searched by number and by every place in their
 names. `Park.naturkartan` names the catalogue; Lomsdal has none.
 
 **One chain, several pages.** The register's trails run on into each other, so the long chain is
@@ -1209,12 +1217,55 @@ measured on the same phone: 59,092 rows in IndexedDB open in 107 ms and the app 
 against 23.6 s with the tiles in Cache Storage. First written here as a Cache Storage cost and
 corrected at Uwe's word the same morning.
 
----
+### 9.24 The box widened east past Lapporten and south to the tile row — settled, 2026-09-13
 
-## 10. Changes
+Uwe asked for the paths needed to walk through Lapporten and round back, which the east edge at
+19.00 E cut. Measured against Topografi 50 and OSM over the strip out to 19.60 E: two Topografi
+50 lines cross 19.00 E, both of the valley path through the gate, which reaches 19.03 E; south
+of it BD 28 turns east round Nissuntjårro to Kaisepakte on the E10 at 19.30 E, and between
+19.03 and 19.17 E there is nothing else. 19.35 E would have taken BD 28 whole for 49,000 more
+tiles; Uwe did not want Kaisepakte, so **the east edge is 19.10 E**. **The south edge is
+68.139 N**, at Uwe's word: the tile row that held 68.17 N ends at 68.1389 N on z11, z12 and z13
+alike, so the box gains whole rows and no partial one, and with them Kårsavagge's hut at 68.14 N
+and Abiskojaure's south end with the Kungsleden on it. §2 carries the box.
+
+**What the widening cost, measured.** `just abisko` as one unit, 2026-09-13: the tile copy
+resumed stand 1 of the same FTP file and wrote the new columns and rows only — 26,375 tiles
+written, 120,620 already there, none missing, 552 s; the height mosaic was read afresh for the
+new box, 259 squares in 54 s into 11,250 × 10,000 posts, and cut into 610 height tiles instead
+of 540; the graph rebuilt under its new fingerprint to 866 chains over 44,393 edges (813 and
+39,775 before), 353,777 height samples, none outside the mosaic; the page is 3.5 MB. The
+register now draws seventeen state trails over the box, BD 31 and BD 32 new; Naturkartan has a
+page for BD 31 (site 12865) and none for BD 32, so the catalogue holds fourteen and three
+numbers go without. Overpass answered 429 once and the retry took it. The version of the tree
+stays 1: the same stand, wider — a kept tile keeps its address, and the panel's `EXTENT` moves
+with the provider's.
+
+**The drive, and the river ground that moved.** Seven recorded figures moved with the box —
+883 paths in the overlay pane, 866 chains, 16 drawn as circle markers, 86 things in the marker
+pane, 16 hits for the search, the whole map 147,415 tiles and 903 MB at z17 — and are
+re-recorded. Three readings broke: the river goal of §9.11 no longer waded at the end. Measured
+on the page with the goal tool against the published page: the graphs are the same at the river
+(the same nine edges cross it, the bridges among them), the water grid answers the same seven wet
+samples along the old line, and yet the new page walks 385 m straight from the standing spot
+south-east *over a meander* — two crossings, 42 m and 20 m by the outlines — and then paths to
+the goal, with *stay on paths* changing nothing. The cause is the grid's arithmetic: the cell
+width is set by the box's middle latitude, so widening the box south moved the columns by about
+0.7 of a cell at the river, 17 m, and the page prices a straight walk by one sample per 25 m
+piece against 25 m cells whose centre decides them, so a 20 m river can fall between the samples
+where before it did not. That is a fragility of the page's water pricing, not of the ground, and
+it is left as it is today: a narrow river is *said, not priced* by §9.11's own rule. The ground
+was moved 70 m down the west-bank path instead, found by trying standing spots and goals from
+the graph's own nodes on the page: standing 68.34038 N 18.75252 E, goal 68.34147 N 18.77090 E,
+routed 893 m with 522 m straight over one crossing 23 m wide, *stay on paths* 4.90 km by the
+bridge. The scene records it.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-13, later** — the box widened to 18.15–19.10 E, 68.139–68.46 N at Uwe's word (§2,
+  §9.24): the valley path through Lapporten whole, the south on the tile row's edge; tiles
+  resumed into stand 1, heights and graph rebuilt, 866 chains; BD 31 joins the Naturkartan
+  catalogue.
 - **2026-09-13** — the whole map to z17 on Abisko (§9.23): the offline panel's cap is the
   source's own figure, z16 on Kartverket and z17 on Lantmäteriet, where it is the whole copy;
   the drive reads the count at the cap. Both pages republished at Uwe's word the same morning.
@@ -1395,3 +1446,4 @@ A line per change to this document or to the decisions in it, newest first.
 | the review of 2026-09-12 | five readers over the code, each verifying its own findings with `uv run` snippets, Playwright Firefox against the built tree served locally, and `curl` against the edge; the high and medium findings re-read or re-measured by hand (`curl -sI` on the ring tiles, the pairing and lettering code, `drive()` and `report()`) before §8.2 was written |
 | SWEREF99 TM against UTM 33N | the two projections' parameters: both TM, central meridian 15° E, scale 0.9996, false easting 500 km |
 | Naturkartan's pages | `curl -sL` against `naturkartan.se/sv/search/sites?query=…` for every place and number in the register's state-trail names over the box, then each page fetched and its `data-naturkartan-preselected-site-id` read; the short forms `/sv/sites/<id>` and `/sv/norrbottens-lan/<id>` tried and 404; `api.naturkartan.se/v3/sites/12849` 401 |
+| the river ground after the widening | Playwright Firefox against the built page served locally and the published one: `window.trailsGoal.set` from a located standing spot, `state()` read routed and with `stayOnPaths(true)`; `window.trailsGraph.waterAt` sampled 200 times along the old line and over a 41 × 41 window of cells; `window.trailsPlan.geometry()` walked with the distance to the nearest of `nodeLon`/`nodeLat` at every fifth point; then standing spots and goals taken from the cached graph's nodes within 800 m and 600 m of the old ones, 8 × 8 pairs tried on the page |

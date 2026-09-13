@@ -16,7 +16,7 @@ none of it.
 ::
 
     source = markhojd.Source(cache_dir=".cache")
-    heights, transform = source.mosaic((18.15, 68.17, 19.00, 68.46), posts_m=4.0)
+    heights, transform = source.mosaic((18.15, 68.139, 19.10, 68.46), posts_m=4.0)
 
 The mosaic is cached as a GeoTIFF under ``cache_dir/elevation/``, so a second
 build reads nothing over the network.

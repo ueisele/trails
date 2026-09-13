@@ -314,10 +314,10 @@ SCENES: dict[str, Scene] = {
         figures={
             # Clipped to the box since the review (§9.15): one point chain and
             # three markers fewer than the first build drew.
-            "paths in the overlay pane": 829,
-            "of them chains drawn as lines": 813,
-            "and chains drawn as circle markers": 15,
-            "things in the marker pane": 81,
+            "paths in the overlay pane": 883,
+            "of them chains drawn as lines": 866,
+            "and chains drawn as circle markers": 16,
+            "things in the marker pane": 86,
             "checkboxes in the legend": 19,
             "of them switched off": 4,
             "zoom before": 10,
@@ -330,7 +330,7 @@ SCENES: dict[str, Scene] = {
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 189,
             "seconds it took to give up": 16.9,
-            "and it still finds a name": 15,
+            "and it still finds a name": 16,
             "m shown by a quarter-width drag": 8114,
             "readable in the light set": 15.1,
             "what it weighs": 463,
@@ -349,8 +349,9 @@ SCENES: dict[str, Scene] = {
             # The long chain is BD 21, BD 92, BD 16 and BD 91 run together, and
             # Naturkartan has a page for each.
             "links to pages published elsewhere": 4,
-            # The tree from z11 to z17 (118,947 tiles) and the 380 height tiles.
-            "tiles the whole map holds at its cap": 119327,
+            # The tree from z11 to z17 (146,975 tiles) and the 440 height tiles, over
+            # the box widened on 2026-09-13 (§9.24).
+            "tiles the whole map holds at its cap": 147415,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -388,9 +389,12 @@ SCENES: dict[str, Scene] = {
         ),
         # Measured 27 % over the flight at the first drive (§9.10).
         way_over_flight=1.2,
+        # Moved 70 m down the west-bank path when the box widened (§9.24): the
+        # grid's columns shifted 17 m at the river, and from the old spot the
+        # page walked straight over a meander first, sampling no water on it.
         river_goal=RiverGoal(
-            standing=(68.34103, 18.75284),
-            goal=(68.34142, 18.77066),
+            standing=(68.34038, 18.75252),
+            goal=(68.34147, 18.77090),
             label="Across Abiskojåkka",
             river="Abiskojåkka (Ábeskoeatnu)",
             straight=(400, 900),

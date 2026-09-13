@@ -252,7 +252,7 @@ PROVIDERS: dict[str, Provider] = {
         # The box the tree was cut to, as `index.json` beside it records
         # (§2 of the decisions): the copy holds every tile of the box at
         # every zoom and not one outside it.
-        extent=(18.15, 68.17, 19.00, 68.46),
+        extent=(18.15, 68.139, 19.10, 68.46),
         # The 1 m height model as tiles (§6.3), z8 to z13; the weights are
         # the mean per zoom of the first build's 540 tiles, 2026-09-12.
         heights=HeightTiles(

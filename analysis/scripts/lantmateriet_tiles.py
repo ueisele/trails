@@ -18,10 +18,10 @@ from pathlib import Path
 
 from trails.io.sources import lantmateriet
 
-#: The Abisko box: west on the border at 18.15 E, south so that Áhpparjávri is
-#: whole, east at the western tip of Rautasjaure, north with the E10 inside.
-#: Its reasons are in analysis/docs/abisko-decisions.md §2.
-ABISKO: lantmateriet.Bounds = (18.15, 68.17, 19.00, 68.46)
+#: The Abisko box: west on the border at 18.15 E, south on the tile row that
+#: takes Kårsavagge's hut, east past Lapporten's valley path, north with the
+#: E10 inside. Its reasons are in analysis/docs/abisko-decisions.md §2 and §9.24.
+ABISKO: lantmateriet.Bounds = (18.15, 68.139, 19.10, 68.46)
 
 #: Where the tiles go, under analysis/output/: the bucket prefix the page will
 #: fetch them from. The version segment is chosen per run: the stand of the

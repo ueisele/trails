@@ -11,10 +11,10 @@
 # use only, and the line itself is the county's state trail, which the
 # register draws (analysis/docs/abisko-decisions.md §5, §9.22).
 #
-# Of the fifteen state trails the register draws over the box, two have no
-# page on Naturkartan: BD 23 (Riksgränsen - Unna Allakas) and BD 29 (Alesjaure
-# - Alesätno - Årosjokk). Searched for by number and by every place in their
-# names.
+# Of the seventeen state trails the register draws over the box (widened
+# 2026-09-13, §9.24), three have no page on Naturkartan: BD 23 (Riksgränsen -
+# Unna Allakas), BD 29 (Alesjaure - Alesätno - Årosjokk) and BD 32 (Alesjaure -
+# Vistas). Searched for by number and by every place in their names.
 
 name = "Abisko"
 compiled = "2026-09-12"
@@ -64,6 +64,11 @@ url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd27-mellan-un
 [[trail]]
 id = "BD 28"
 url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd28-mellan-kaisepakte-och-ravetievvakatorna"
+
+# In the box since it was widened south on 2026-09-13; site id 12865.
+[[trail]]
+id = "BD 31"
+url = "https://www.naturkartan.se/sv/norrbottens-lan/vandringsled-bd31-mellan-alesjaure-och-salka"
 
 [[trail]]
 id = "BD 91"
