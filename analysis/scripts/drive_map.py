@@ -252,7 +252,8 @@ SCENES: dict[str, Scene] = {
             # thing drawn twice in one layer (§9.27).
             "rows the list draws for the scene's name": 2,
             "m shown by a quarter-width drag": 11188,
-            "the plan walks this far on paths": 1.6,
+            # 1.6 until §9.29: a tap that stood as open ground is on its line now.
+            "the plan walks this far on paths": 1.8,
             "and crosses this much water": 0.39,
             "from 10 km off, the way is on paths for": 8.5,
             "and straight for": 4.0,
@@ -263,7 +264,9 @@ SCENES: dict[str, Scene] = {
             "what it weighs": 549,
             "and what writing it cost": 34,
             "and how long it took to come back": 21,
-            "and how far it moves on to it": 135.5,
+            # 135.5 until §9.29, which was the node; the line's own foot is nearer.
+            "and how far it moves on to it": 129.2,
+            "what the index over the edges cost to build": 91,
             # The Rundtur's page on ut.no and its GPX; it is the one route
             # without a lomsdalvisten.no counterpart.
             "links to pages published elsewhere": 2,
@@ -373,12 +376,15 @@ SCENES: dict[str, Scene] = {
             # 7 km off the same road after a connector.
             "the plan walks this far on paths": 3.4,
             "and crosses this much water": 0,
-            "from 10 km off, the way is on paths for": 6.3,
-            "and straight for": 0.9,
+            # 6.3 and 0.9 until §9.29: the goal's tap is on its line, so the way
+            # reaches it along the line rather than straight from a junction.
+            "from 10 km off, the way is on paths for": 6.8,
+            "and straight for": 0.8,
             "crossing this much water": 0,
             # The river where the goal's line wades it, off the outline.
             "and what width it says": 22,
             "and how far it moves on to it": 134.4,
+            "what the index over the edges cost to build": 15,
             # The long chain is BD 21, BD 92, BD 16 and BD 91 run together, and
             # Naturkartan has a page for each.
             "links to pages published elsewhere": 4,
@@ -5480,6 +5486,153 @@ def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
     )
 
 
+#: The ground a tap on a long stretch of trail is driven on, chosen from the
+#: page's own graph so it needs no measuring by hand: the longest edge that is
+#: walked ground (no crossing, no connector), its two ends, and the places a
+#: half and three quarters of the way along it.
+A_LONG_EDGE = """() => window.trailsGraph.ready.then(g => {
+  const E = g.header.edges, co = g.coordinates, at = g.vertexAt;
+  const m = (aLon, aLat, bLon, bLat) => { const s = Math.cos(aLat * Math.PI / 180);
+    const dx = (bLon - aLon) * s, dy = bLat - aLat; return Math.sqrt(dx * dx + dy * dy) * 111320; };
+  const crossing = g.header.crossingKind || 'ferry', connector = g.header.connectorKind || 'connector';
+  let best = -1, longest = 0;
+  for (let i = 0; i < E; i++) {
+    const kind = g.header.sources[g.sources[i]].kind;
+    if (kind === 'ferry' || kind === 'bridge' || kind === 'crossing' || kind === 'connector') continue;
+    let run = 0;
+    for (let v = at[i] + 1; v < at[i + 1]; v++) run += m(co[2 * v - 2], co[2 * v - 1], co[2 * v], co[2 * v + 1]);
+    if (run > longest) { longest = run; best = i; }
+  }
+  const along = (want) => { let run = 0;
+    for (let v = at[best] + 1; v < at[best + 1]; v++) {
+      const seg = m(co[2 * v - 2], co[2 * v - 1], co[2 * v], co[2 * v + 1]);
+      if (run + seg >= want) { const t = seg > 0 ? (want - run) / seg : 0;
+        return {lat: co[2 * v - 1] + t * (co[2 * v + 1] - co[2 * v - 1]), lon: co[2 * v - 2] + t * (co[2 * v] - co[2 * v - 2])}; }
+      run += seg; }
+    return {lat: co[2 * at[best + 1] - 1], lon: co[2 * at[best + 1] - 2]}; };
+  const a = g.fromNode[best];
+  return {edge: best, metres: Math.round(longest), source: g.header.sources[g.sources[best]].name,
+          start: {lat: g.nodeLat[a], lon: g.nodeLon[a]}, half: along(longest / 2), threeQuarters: along(longest * 3 / 4)}; })"""
+
+
+def a_tap_in_the_middle_of_a_long_edge(page: Any) -> Check:
+    """Reported from the phone: once one leg was drawn straight, every tap after
+    it was too, until a tap landed on *a path further on* -- which turned out
+    to be the next junction. A node is where edges meet or a chain ends, and a
+    tap snapped to nodes and nothing else, so a tap in the middle of a long
+    stretch of trail found nothing within a finger's width and stood as open
+    ground; from there every leg was a straight line priced over the ground.
+    Measured on the two graphs before the change: 37 % of Abisko's network by
+    length and 32 % of Lomsdal's lie more than 21 m -- a finger at z15 -- from
+    any node.
+
+    The ground is the page's own longest walked edge, so it needs no measuring
+    by hand and moves with the graph. Driven: a tap half way along it stands on
+    the edge and not on a node, its leg from the edge's own end is path end to
+    end and as long as the metres along the edge say, a second tap further along
+    is path again, and a place put down exactly beside the line -- a hut's
+    page, say -- reaches it by the metres beside it rather than by the way
+    back to a junction. Then a point is taken out and the legs are made again,
+    and every leg that settled has something on the map: a leg with parts and
+    no layers is the hole reported in the same breath, and this is where one
+    would show.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        Where the taps landed, what their legs are made of, and what is drawn
+    """
+    ground = page.evaluate(A_LONG_EDGE)
+    if not ground or ground["metres"] < 400:
+        return Check("a tap in the middle of a long edge", skipped="this page has no walked edge of 400 m to tap into")
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.evaluate("() => { if (window.trailsGoal) { window.trailsGoal.clear(); } }")
+    page.evaluate("() => window.trailsPlan.toggle(true)")
+    settled(page)
+    for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
+        page.evaluate("() => window.trailsPlan.remove(0)")
+        settled(page)
+    page.evaluate(with_map("(w) => { __MAP__.setView([w.lat, w.lon], 15, {animate: false}); }"), ground["half"])
+    page.wait_for_timeout(500)
+
+    def put(at: dict[str, float], exact: bool = False) -> None:
+        page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lon, w.exact)", {**at, "exact": exact})
+        settled(page)
+        page.wait_for_timeout(200)
+
+    def read() -> dict[str, Any]:
+        state = page.evaluate("() => window.trailsPlan.state()")
+        legs = [
+            {
+                "kinds": [part["kind"] for part in leg["parts"]],
+                "metres": round(sum(part["length"] for part in leg["parts"])),
+                "straight": round(sum(part["length"] for part in leg["parts"] if part["kind"] == "land")),
+                "drawn": leg["drawn"],
+                "settled": leg["settled"],
+            }
+            for leg in state["legs"]
+        ]
+        return {"points": state["points"], "legs": legs, "indexMs": state["indexMs"]}
+
+    put(ground["start"])
+    put(ground["half"])
+    put(ground["threeQuarters"])
+    # A place beside the line, put down exactly the way a hut's page puts one:
+    # 30 m off the three-quarter mark, square to the line's rough direction.
+    across = {"lat": ground["threeQuarters"]["lat"] + 30 / 111320, "lon": ground["threeQuarters"]["lon"]}
+    put(across, exact=True)
+    four = read()
+    page.evaluate("() => window.trailsPlan.remove(1)")
+    settled(page)
+    page.wait_for_timeout(300)
+    three = read()
+    for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
+        page.evaluate("() => window.trailsPlan.remove(0)")
+        settled(page)
+    page.evaluate("() => window.trailsPlan.toggle(false)")
+    page.wait_for_timeout(300)
+
+    half, quarter = ground["metres"] / 2, ground["metres"] / 4
+    mid, on = four["points"][1], four["points"][2]
+    first, second, beside = four["legs"][0], four["legs"][1], four["legs"][2]
+    return Check(
+        "a tap in the middle of a long edge",
+        [
+            Reading(
+                "a tap half way along it stands on the edge, not on a node",
+                [mid["node"], mid["edge"] == ground["edge"]],
+                [-1, True],
+                note=f"{ground['source']}, {ground['metres']} m long, edge {ground['edge']}",
+            ),
+            Reading("and its leg from the edge's own end is path end to end", first["kinds"], ["routed"]),
+            Reading("as long as the metres along the edge", first["metres"], round(half), within=max(5.0, 0.01 * half), note="m"),
+            Reading("a second tap further along is path again", [on["edge"] == ground["edge"], second["kinds"]], [True, ["routed"]]),
+            Reading("for the metres between the two", second["metres"], round(quarter), within=max(5.0, 0.01 * quarter), note="m"),
+            Reading(
+                "a place put down beside the line reaches it by the metres beside it",
+                beside["straight"] < 60 and beside["metres"] < 100,
+                True,
+                note=f"{beside['metres']} m, {beside['straight']} m of it off the path",
+            ),
+            Reading("every leg that settled has something on the map", all(leg["drawn"] > 0 for leg in four["legs"] if leg["settled"]), True),
+            Reading(
+                "and still after a point is taken out and the legs are made again",
+                [len(three["legs"]), all(leg["settled"] and leg["drawn"] > 0 for leg in three["legs"])],
+                [2, True],
+            ),
+            Reading("with the merged leg still path end to end", three["legs"][0]["kinds"], ["routed"]),
+            stands(
+                "what the index over the edges cost to build",
+                round(four["indexMs"]) if four["indexMs"] is not None else None,
+                within=60,
+                note="ms",
+            ),
+        ],
+    )
+
+
 def a_planned_leg_that_is_not_worth_routing(page: Any) -> Check:
     """The three taps from the report, planned rather than aimed at.
 
@@ -9383,6 +9536,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_planned_leg_that_is_not_worth_routing(page))
     if wanted(a_tap_beside_a_path_in_plan_mode):
         checks.append(a_tap_beside_a_path_in_plan_mode(page))
+    if wanted(a_tap_in_the_middle_of_a_long_edge):
+        checks.append(a_tap_in_the_middle_of_a_long_edge(page))
     if wanted(a_tap_that_could_have_meant_several_lines):
         checks.append(a_tap_that_could_have_meant_several_lines(page))
     if wanted(the_chosen_line_is_on_top):

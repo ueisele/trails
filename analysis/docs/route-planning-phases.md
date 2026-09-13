@@ -1113,6 +1113,10 @@ seen in time.
 - Snap a click to the nearest node within about 150 m; beyond that keep the raw
   point. The payload's decoder already offers `nearestNode`, and phase 3B
   measured it at **0.15 ms over 116,967 nodes** — a linear scan, no index.
+  *Superseded 2026-09-13 (`abisko-decisions.md` §9.29): a node is a junction or
+  a chain end, and a third of the network by length is more than a finger's
+  width from one — so a click snaps to the nearest point on the line as well,
+  over the edge index, and is routed from either end of its edge.*
 - **Dijkstra with a binary heap over the weighted graph**, once per new leg. The
   cost of an edge is its length times its source's factor, both in the payload's
   header; a crossing costs the header's flat `flatM` instead. Nothing else is

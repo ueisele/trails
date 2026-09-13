@@ -5026,7 +5026,7 @@ class TestPlanMode:
         deciding = planning.split("function resolve(graph, from, to, mayAsk, partly) {")[1]
 
         assert deciding.index("from.restore") < deciding.index("from.track === loaded.id")
-        assert deciding.index("from.restore") < deciding.index("from.node >= 0")
+        assert deciding.index("from.restore") < deciding.index("onNetwork(from) && onNetwork(to)")
 
         # And it is offered only where there is a plan in the file to restore.
         assert "loaded.mode === 'asis' && loaded.isRoute" in planning
@@ -5591,7 +5591,7 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         protecting = planning.index("addProtected(out, graph, edge, metres)")
-        connector = planning.index("if (source.kind === CONNECTOR) { out.undrawn += metres; continue; }")
+        connector = planning.index("if (source.kind === CONNECTOR) { out.undrawn += metres; return; }")
         assert protecting < connector
 
     def test_a_leg_drawn_straight_reads_its_areas_off_its_own_samples(self):
@@ -5681,7 +5681,8 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "if (used < 0 || before < 0)" in planning
+        assert "while (viaEdge[walk] >= 0) {" in planning
+        assert "if (before < 0) { throw new Error('node ' + walk + ' was reached by nothing'); }" in planning
         # Which way round an edge is walked comes off the predecessor, not off
         # the edge's own ends: fourteen edges in this graph begin and end at the
         # same node and say nothing about direction.
@@ -6354,7 +6355,7 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "function partlyRouted(graph, from, to, head, tail, over, mayAsk) {" in planning
+        assert "function partlyRouted(graph, from, to, joined, mayAsk) {" in planning
         assert "var middle = over ? routedParts(graph, over) : [];" in planning
         assert "return ends[0].concat(middle, ends[1]); });" in planning
         # **Both ends, and neither need be on a path.** The reader is as likely
@@ -6363,8 +6364,11 @@ class TestPlanMode:
         # its own reach, which is right for placing a waypoint and wrong here.
         assert "var joined = joinedRoute(graph, from, to);" in planning
         # And the goal is the one caller that asks for it, with both of its ends
-        # raw: a stop is a place the reader chose and nothing may move it.
-        assert "return resolve(graph, {lat: head.lat, lon: head.lon, node: -1}," in planning
+        # where the reader put them: a stop is a place the reader chose and
+        # nothing may move it -- `placed` keeps the position and only asks
+        # whether it already stands on the line.
+        assert "return resolve(graph, placed(graph, head), placed(graph, tail), true, true);" in planning
+        assert "return {lat: point.lat, lon: point.lon, node: at.node, edge: at.edge, along: at.along};" in planning
 
     def test_a_tap_snaps_to_the_line_it_lands_on(self):
         """At a fixed 150 m the same tap meant the same thing at every zoom.
@@ -6394,7 +6398,11 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function snapped(graph, lat, lon, within) {" in planning
-        assert "graph.nearestNode(lat, lon, within === undefined ? PLAN.snapM : within)" in planning
+        assert "var reach = within === undefined ? PLAN.snapM : within;" in planning
+        assert "var node = graph.nearestNode(lat, lon, reach);" in planning
+        # And the line itself, not only its junctions: see
+        # test_a_tap_lands_on_the_line_and_not_only_on_its_junctions.
+        assert "var line = nearestOnNetwork(graph, lat, lon, reach);" in planning
         assert "function fingerReach(lat) {" in planning
         assert "return Math.min(PLAN.snapM, across);" in planning
         # Every gesture asks the screen.
@@ -6410,6 +6418,84 @@ class TestPlanMode:
         assert "anchored(graph, at) : {lat: wp.lat, lon: wp.lon, node: -1};" in planning
         # Align mode still snaps, because that is the whole of what it offers.
         assert "var here = snapped(graph, point.lat, point.lon);" in planning
+
+    def test_a_tap_lands_on_the_line_and_not_only_on_its_junctions(self):
+        """Reported from the phone: once one leg was drawn straight, every tap
+        after it was too, until a tap landed on *a path further on* -- which
+        was the next junction. A node is where edges meet or a chain ends, and
+        ``snapped`` asked only the nodes, so a tap in the middle of a long
+        stretch of trail found nothing within a finger's width and stood as
+        open ground. Measured: 37 % of Abisko's network by length lies more
+        than 21 m from any node, 13 % more than 150 m; edges run to 13 km.
+
+        The line itself is asked as well, over the grid match mode builds, and
+        a point put on it remembers its edge and how far along. The router
+        starts from either end of that edge at the edge's own price, and the
+        piece walked to the end travels as a cut, drawn as the path it is --
+        in a leg between two points on the network and in the joined way a
+        goal is routed by. A junction within reach still wins over the line
+        beside it, give or take two metres."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        # The line, over the index, and never a crossing or a connector.
+        assert "function nearestOnNetwork(graph, lat, lon, withinM) {" in planning
+        assert "var index = edgeIndex(graph);" in planning
+        assert "if (kind === CROSSING || kind === CONNECTOR) { continue; }" in planning
+        assert "return {edge: best, along: along, lon: foot.lon, lat: foot.lat, m: Math.sqrt(closest) * 111320};" in planning
+        # A junction as near as the line is the junction.
+        assert "var NODE_FIRST_M = 2;" in planning
+        assert "if (!line || nodeM <= line.m + NODE_FIRST_M) {" in planning
+        assert "if (line) { return {lat: line.lat, lon: line.lon, node: -1, edge: line.edge, along: line.along}; }" in planning
+        # On the network is on a node or on an edge; either end of the edge at
+        # the edge's own price, with the piece to it as a cut.
+        assert "function onNetwork(point) { return point.node >= 0 || point.edge >= 0; }" in planning
+        assert "function endsOf(graph, point) {" in planning
+        assert "var length = work.length[edge], rate = length > 0 ? work.cost[edge] / length : 0;" in planning
+        assert "return [{node: graph.fromNode[edge], cost: along * rate, cut: {edge: edge, from: along, to: 0}}," in planning
+        # One search from every end to every end, stopped by the cheapest
+        # whole way in hand; two points on one edge take the piece between.
+        assert "function routeBetween(graph, from, to) {" in planning
+        assert "if (found && taken.cost >= found.cost) { break; }" in planning
+        assert "if (direct && (!found || direct.cost <= found.cost)) { return direct; }" in planning
+        assert "function route(graph, from, to) { return routeBetween(graph, {node: from}, {node: to}); }" in planning
+        assert "if (onNetwork(from) && onNetwork(to)) {" in planning
+        # The cut is path: laid like an edge, tallied by its metres.
+        assert "function cutPart(graph, cut) {" in planning
+        assert "tallyEdge(tally, graph, edge, hi - lo);" in planning
+        assert "var head = found.head ? cutPart(graph, found.head) : null;" in planning
+        # And the joined way takes an end on the network by its edge, not by
+        # a walk over the ground to a node.
+        assert "var toEnds = endsOf(graph, to);" in planning
+        assert "for (i = 0; i < nodes && !toEnds.length; i += 1) {" in planning
+        assert "joined.tailCut = tailCuts[joined.tail] || null;" in planning
+        assert "joined.headCut ? pieceOf(joined.headCut) : walkTo(graph, from, enter, mayAsk)," in planning
+        # A goal's leg asks once, at the same spot, whether its ends stand on
+        # the line: a tap was put there, a hut from a popup was not.
+        assert "return resolve(graph, placed(graph, head), placed(graph, tail), true, true);" in planning
+        assert "var at = snapped(graph, point.lat, point.lon, SAME_SPOT_M);" in planning
+        # Warmed with the graph when plan mode comes on.
+        switching = planning[planning.index("function switchTo(want) {") : planning.index("status.addEventListener('click'")]
+        assert "edgeIndex(graph);" in switching
+        # A check can see a leg that settled and drew nothing, and a point
+        # on an edge.
+        assert "drawn: leg.layers.length," in planning
+        assert "edge: point.edge === undefined ? -1 : point.edge," in planning
+
+    def test_a_row_is_named_by_the_greater_part_of_its_leg(self):
+        """A hut stands a few metres off the path and the walk to it is a
+        straight piece of a leg that is otherwise all path; the row called that
+        leg *drawn straight*, which the map plainly did not show. Reported from
+        the phone beside a leg of 5.4 km with 63 m of it off the path."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        naming = planning[planning.index("function groundInto(index) {") : planning.index("function shutMenus() {")]
+        assert "var crossing = false, recorded = false, straight = 0, walked = 0;" in naming
+        assert "if (straight > 0 && straight >= walked / 2) { return 'drawn straight'; }" in naming
+        assert "if (crossing) { return 'over a crossing'; }" in naming
 
     def test_a_plan_reaches_the_network_rather_than_being_moved_on_to_it(self):
         """The other half of what a point that did not snap used to mean.
@@ -6579,7 +6665,7 @@ class TestPlanMode:
         # The straight line as one more connector, and what everything else has
         # to beat.
         assert "var plain = priced(graph, from.lon, from.lat, to.lon, to.lat);" in planning
-        assert "var head = -1, cheapest = plain;" in planning
+        assert "var head = -1, headCut = null, cheapest = plain;" in planning
         assert "var floor = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];" in planning
         assert "var whole = priced(graph, from.lon, from.lat, graph.nodeLon[next.node], graph.nodeLat[next.node]) + best[next.node];" in planning
         # Bounded like every other loop over this graph, with room for each

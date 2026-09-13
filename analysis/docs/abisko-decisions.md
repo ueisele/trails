@@ -1716,11 +1716,92 @@ lists what it finds*, two more again: with every layer switched off first, a row
 exactly one row ticked in the legend — its own — and every other row is put back as it was found.
 665 readings a page.
 
+### 9.29 A tap lands on the line, and not only on its junctions — settled, 2026-09-13
+
+Reported from the phone, with two screenshots, in one message: *"I removed a waypoint and the
+stretch between stayed open and was not re-routed"*, and *"once I have drawn one straight line, I
+cannot select the path after it any more — only straight lines are drawn — until I mark a path
+that comes after it, and then it routes over that path."*
+
+**The second is a design defect, and it was measured before it was fixed.** `snapped` asked
+`nearestNode` and nothing else, and a node is where edges meet or a chain ends. A tap in the
+middle of a long stretch of trail therefore found nothing within a finger's width, stood as open
+ground, and every leg from it was priced over the ground: a straight line at three times its
+length against a path that had to be *walked back to the junction first* at the same price. The
+"path further on" that made it work was the next junction. On the two graphs, sampled every 25 m
+along every walked edge:
+
+| | nodes | edges | median edge | longest edge | beyond 21 m of a node (z15) | beyond 150 m |
+|---|---|---|---|---|---|---|
+| Abisko | 20,706 | 44,429 | 15 m | 13,432 m (OSM) | **37 %** of the length | 13 % |
+| Lomsdal-Visten | 117,437 | 235,141 | 7 m | 6,820 m (OSM) | **32 %** | 8 % |
+
+So more than a third of the network could not be tapped on at the zoom a plan is made at. The
+first version of the routing (`route-planning-phases.md`, *Routing*) chose *the nearest node
+within about 150 m* because the decoder offered it and it cost 0.15 ms; nobody had asked what
+share of the ground a node is near.
+
+**The line itself is asked now.** `nearestOnNetwork` finds the nearest point on any walked edge
+within reach, over the grid `edgeIndex` already built for the match mode (16 ms to build on
+Abisko, 83 ms on Lomsdal; built once, when plan mode comes on), and skips crossings and
+connectors, which are not ground to stand on. A point put on the line remembers its edge and how
+far along it stands. A junction within reach still wins over the line beside it when it is as
+near, give or take 2 m: at a junction the line *is* the node.
+
+**And the router starts from there.** `endsOf` gives a point on an edge two ways on to the
+network — either end of the edge, at the metres between times the edge's own price — with the
+piece walked to that end carried along as a *cut*. `routeBetween` is one Dijkstra seeded with
+every end of one point and stopped by the cheapest way off at the other, so a point mid-edge is
+routed from whichever end the way actually goes rather than from the nearer one and back; two
+points on one edge take the piece between them unless some way round is cheaper. `cutPart` lays
+a cut the way `layEdges` lays a whole edge — the vertices between, the samples between with the
+two ends read off their neighbours, the ground tallied by the metres walked — so it is path in
+the file, in the profile and on the map. The joined way a goal is routed by (`joinedRoute`) takes
+an end on the network by its edge too, and a goal's legs ask once (`placed`, at `SAME_SPOT_M`)
+whether their ends stand on the line: a tap was put there by `onTheLine`, a hut from a popup was
+not, and the position stays the reader's own either way.
+
+Measured on the rebuilt pages, with the longest walked edge as the ground: a tap half way along
+it stands on edge 43295 at 6,734 m (Abisko), its leg from the edge's own end is `routed` end to
+end and 6,734 m long, a second tap at three quarters gives 3,366 m of path; on Lomsdal 3,418 and
+1,709 m. A goal tapped half way along, with the reader standing 40 m off the edge's start, is
+40 m straight and the rest path; a stop tapped at three quarters is walked to and back along the
+edge. A tap costs 220–310 ms including the settle, as before. Driven as *a tap in the middle of
+a long edge*, which takes its ground from the page's own graph, and reads as well that **every
+leg that settled has something on the map** — the first report.
+
+**The first report could not be reproduced.** The screenshot's route was rebuilt to the metre —
+Abisko, the cabin west of Njullá added from its page, a tap on the trail, Kårsavagge — and every
+leg drew; so did removing a point, undoing it, and every cabin in the box as point 2. What the
+screenshot shows is a leg the list says is *drawn straight* at 5.99 km and no line on the map
+between its two points. Two things came out of the hunt: `state()` now says how many layers each
+leg has on the map (`drawn`), and the drive reads it, so a leg with parts and no line is a broken
+invariant rather than a screenshot. And the row's word is by the greater part of the leg now: a
+leg of 5.4 km with 63 m of it walked to a hut used to read *drawn straight*, which the map
+plainly did not show. If the hole comes back, its two positions from *Copy a position* are what
+would find it.
+
+**Four figures moved with it, all the change's own doing.** Lomsdal: *the plan walks this far on
+paths* 1.6 → 1.8 km (a tap that stood as open ground is on its line), *how far it moves on to it*
+135.5 → 129.2 m (the line's own foot rather than the node beside it). Abisko: *from 10 km off, the
+way is on paths for* 6.3 → 6.8 km and *straight for* 0.9 → 0.8 (the goal's tap is on its line, so
+the way reaches it along the line rather than straight from a junction). The index costs 91 ms on
+Lomsdal and 15 on Abisko, recorded. Both pages 677 readings, none broken.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-13, seventh of the day** — a tap lands on the line, and not only on its junctions
+  (§9.29), reported from the phone as *once one straight line is drawn, every tap after it is one*.
+  `snapped` asked only the nodes, and 37 % of Abisko's network (32 % of Lomsdal's) lies more than a
+  finger's width at z15 from any node. The line is asked as well, over the match mode's edge index;
+  a point on an edge is routed from either end of it at the edge's own price and the piece to the
+  end is drawn as path — in a plan's leg and in the way to a goal. The row's word goes by the
+  greater part of the leg, `state()` says what each leg has drawn, and a new check taps into the
+  page's longest edge. 677 readings a page, republished.
 
 - **2026-09-13, sixth of the day** — a goal becomes a plan, and a place offers what can be done
   with it (§9.28), all three asked for from the phone in one message. *Make a plan of this way*
@@ -1950,6 +2031,7 @@ A line per change to this document or to the decisions in it, newest first.
 | bytes per Kartverket tile | 6.76 GB over 131,033 tiles, both from the offline panel at load (`atlas` §3.3) |
 | what in the code is Norway | a read of `maps.py`, `lomsdal_visten.py`, `route_graph.py`, `deploy_map.py`, `drive_map.py` and `libs/src/trails/io/sources/` on 2026-09-11, with line numbers as they stood that day |
 | Lantmäteriet's grid, layers, ceiling, and its white outside Sweden | `atlas/docs/decisions.md` §3.7, measured 2026-09-11 |
+| how much of the network lies beyond a finger's reach of a node | every walked edge of each built page's graph in Firefox, sampled every 25 m, the straight distance to the nearer of its two end nodes against 10.5 / 21 / 42 / 84 / 150 m; edge lengths summed from the vertices (`/tmp` script, 2026-09-13; the check *a tap in the middle of a long edge* reads the longest edge the same way) |
 | how much of a named chain is the trail it names | every Topografi 50 marked-trail chain read off the built page in Firefox, its name from the packed figures, its line sampled every 50 m against the register's summer lines for that BD number in SWEREF 99 TM |
 | the page's tile reading against the build's mosaic | the page's bilinear rule re-implemented in Python over the z13 tiles on disk, against `markhojd.sample` off the cached 4 m mosaic, at 2,000 uniform random points of the box and along the straight leg planned in Firefox |
 | the straight leg in Firefox | `analysis/output` served by `http.server`, `abisko.html` opened in Playwright Firefox, `window.trailsPlan.place()` twice over open fell, `state()` read back, the `dem/` requests counted |

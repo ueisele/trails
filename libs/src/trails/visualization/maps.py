@@ -10375,12 +10375,70 @@ class _PlanMode(MacroElement):
             // the source factors weighs an edge: elevation-aware routing is a
             // decision nobody has taken, and the per-edge ascent it would need
             // is deliberately not in the payload.
-            function route(graph, from, to) {
+            // Whether a point is somewhere the router can start from or end
+            // at: on a node, or on an edge at some distance along it.
+            function onNetwork(point) { return point.node >= 0 || point.edge >= 0; }
+
+            // **How a point gets on to the network, and what that costs.** A
+            // node is on it for nothing. A point on an edge is on it at either
+            // end of that edge, for the metres between at the edge's own price
+            // -- and the piece walked to get there travels along as a *cut*,
+            // so the leg draws it as the path it is rather than as a line
+            // across to the junction. A point on neither has no ends here;
+            // `joinedRoute` prices its way in over the ground. A cut runs from
+            // the point to the node; `flipCut` turns it round for the far end.
+            function endsOf(graph, point) {
+                if (point.node >= 0) { return [{node: point.node, cost: 0, cut: null}]; }
+                if (!(point.edge >= 0)) { return []; }
+                var work = router(graph), edge = point.edge;
+                var length = work.length[edge], rate = length > 0 ? work.cost[edge] / length : 0;
+                var along = Math.max(0, Math.min(length, point.along || 0));
+                return [{node: graph.fromNode[edge], cost: along * rate, cut: {edge: edge, from: along, to: 0}},
+                        {node: graph.toNode[edge], cost: (length - along) * rate, cut: {edge: edge, from: along, to: length}}];
+            }
+
+            function flipCut(cut) { return cut ? {edge: cut.edge, from: cut.to, to: cut.from} : null; }
+
+            function route(graph, from, to) { return routeBetween(graph, {node: from}, {node: to}); }
+
+            // **Dijkstra from every end of one point to every end of the
+            // other.** Seeded with each way on to the network and what it
+            // costs, and stopped when nothing left in the heap can beat the
+            // cheapest way off it already found -- so a point on an edge is
+            // routed from whichever end of that edge the way actually goes,
+            // rather than from the nearer one and back. Two points on one
+            // edge are joined by the piece of it between them, unless some
+            // way round is cheaper, which on a loop it can be.
+            function routeBetween(graph, from, to) {
                 var work = router(graph);
                 var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
-                if (from === to) { return {edges: [], reversed: [], cost: 0}; }
+                var seeds = endsOf(graph, from), targets = endsOf(graph, to), i;
+                if (!seeds.length || !targets.length) { return null; }
+                var direct = null;
+                if (from.edge >= 0 && from.edge === to.edge) {
+                    var rate = work.length[from.edge] > 0 ? work.cost[from.edge] / work.length[from.edge] : 0;
+                    direct = {edges: [], reversed: [], cost: Math.abs((to.along || 0) - (from.along || 0)) * rate,
+                              head: {edge: from.edge, from: from.along || 0, to: to.along || 0}, tail: null};
+                }
                 best.fill(Infinity); viaEdge.fill(-1); viaNode.fill(-1);
-                best[from] = 0;
+                var seedAt = {};
+                var heap = new Heap();
+                for (i = 0; i < seeds.length; i += 1) {
+                    if (seeds[i].cost >= best[seeds[i].node]) { continue; }
+                    best[seeds[i].node] = seeds[i].cost; seedAt[seeds[i].node] = seeds[i];
+                    heap.push(seeds[i].node, seeds[i].cost);
+                }
+                // The cheapest whole way found so far, read off the targets:
+                // what a target's node was reached for plus its own way off.
+                var found = null;
+                function arrivedAt(node) {
+                    for (var t = 0; t < targets.length; t += 1) {
+                        if (targets[t].node !== node) { continue; }
+                        var whole = best[node] + targets[t].cost;
+                        if (!found || whole < found.cost) { found = {target: targets[t], cost: whole}; }
+                    }
+                }
+                for (i = 0; i < seeds.length; i += 1) { arrivedAt(seeds[i].node); }
 
                 // Every loop over this graph is bounded and throws when it
                 // reaches the bound. A settled node is never settled twice and
@@ -10388,15 +10446,15 @@ class _PlanMode(MacroElement):
                 // cannot exceed one per node plus one per arc; anything past
                 // that is a defect, and a defect that runs for ever in a page
                 // is indistinguishable from a page that has hung.
-                var heap = new Heap();
                 var pops = 0, mostPops = graph.header.nodes + 2 * graph.header.edges + 1;
-                heap.push(from, 0);
                 while (heap.node.length) {
                     pops += 1;
                     if (pops > mostPops) { throw new Error('the search took more than ' + mostPops + ' steps'); }
                     var taken = heap.pop();
                     if (taken.cost > best[taken.node]) { continue; }
-                    if (taken.node === to) { break; }
+                    // Popped in order of cost, so once the top is no cheaper
+                    // than a whole way already in hand, no later one can be.
+                    if (found && taken.cost >= found.cost) { break; }
                     for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
                         var edge = work.arc[a];
                         var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
@@ -10404,10 +10462,12 @@ class _PlanMode(MacroElement):
                         if (reached < best[other]) {
                             best[other] = reached; viaEdge[other] = edge; viaNode[other] = taken.node;
                             heap.push(other, reached);
+                            arrivedAt(other);
                         }
                     }
                 }
-                if (!isFinite(best[to])) { return null; }
+                if (direct && (!found || direct.cost <= found.cost)) { return direct; }
+                if (!found) { return null; }
 
                 // Walking the path back out. **Bounded, and the sentinel is
                 // tested for rather than indexed with**: a typed array answers
@@ -10416,12 +10476,14 @@ class _PlanMode(MacroElement):
                 // carry on, and a walk that never reached its start would
                 // append for ever. The Python sibling of this loop, written
                 // without either guard, took 42 GB and the kernel killed it.
-                var edges = [], reversed = [], walk = to, steps = 0;
-                while (walk !== from) {
+                // It stops at a seed -- the node nothing relaxed -- which is
+                // the end the way came on to the network by.
+                var edges = [], reversed = [], walk = found.target.node, steps = 0;
+                while (viaEdge[walk] >= 0) {
                     steps += 1;
                     if (steps > graph.header.edges) { throw new Error('the way back is longer than the graph'); }
                     var used = viaEdge[walk], before = viaNode[walk];
-                    if (used < 0 || before < 0) { throw new Error('node ' + walk + ' was reached by nothing'); }
+                    if (before < 0) { throw new Error('node ' + walk + ' was reached by nothing'); }
                     edges.push(used);
                     // An edge's geometry and its heights run from its own
                     // from-node to its own to-node, and the walk can arrive at
@@ -10432,8 +10494,11 @@ class _PlanMode(MacroElement):
                     reversed.push(graph.fromNode[used] !== before);
                     walk = before;
                 }
+                var seed = seedAt[walk];
+                if (!seed) { throw new Error('the way back ended at node ' + walk + ', which is no seed'); }
                 edges.reverse(); reversed.reverse();
-                return {edges: edges, reversed: reversed, cost: best[to]};
+                return {edges: edges, reversed: reversed, cost: found.cost,
+                        head: seed.cut, tail: flipCut(found.target.cut)};
             }
 
             // ---- a way to somewhere that is not on the network ----------------
@@ -10552,7 +10617,21 @@ class _PlanMode(MacroElement):
                 // price over ground, which is a floor on the true one -- and
                 // into the floors' own queue, not into `best`.
                 best.fill(Infinity);
-                for (i = 0; i < nodes; i += 1) {
+                // **A far end standing on the network leaves it by its own
+                // edge.** Its two ends are seeded with the metres along that
+                // edge at the edge's own price -- exact, so straight into the
+                // heap -- and no node is seeded with a walk over the ground: a
+                // point on a line is reached along the line, which is the
+                // whole of what a tap in the middle of a long trail means.
+                var tailCuts = {};
+                var toEnds = endsOf(graph, to);
+                for (i = 0; i < toEnds.length; i += 1) {
+                    if (toEnds[i].cost >= plain || toEnds[i].cost >= best[toEnds[i].node]) { continue; }
+                    best[toEnds[i].node] = toEnds[i].cost;
+                    tailCuts[toEnds[i].node] = flipCut(toEnds[i].cut);
+                    heap.push(toEnds[i].node, toEnds[i].cost);
+                }
+                for (i = 0; i < nodes && !toEnds.length; i += 1) {
                     var leave = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;
                     if (leave >= plain) { continue; }
                     floors.push(i, leave);
@@ -10614,13 +10693,20 @@ class _PlanMode(MacroElement):
                 // than `plain` and is never an answer -- so the walk in to a
                 // node is priced for real only in the order its floor puts
                 // it, until the next floor is dearer than the best whole found.
+                var head = -1, headCut = null, cheapest = plain;
+                // And a near end on the network enters by its own edge, for
+                // the same reason and at the same exact price.
+                var fromEnds = endsOf(graph, from);
+                for (i = 0; i < fromEnds.length; i += 1) {
+                    var wholeIn = fromEnds[i].cost + best[fromEnds[i].node];
+                    if (wholeIn < cheapest) { cheapest = wholeIn; head = fromEnds[i].node; headCut = fromEnds[i].cut; }
+                }
                 var entries = new Heap();
-                for (i = 0; i < nodes; i += 1) {
+                for (i = 0; i < nodes && !fromEnds.length; i += 1) {
                     if (!isFinite(best[i])) { continue; }
                     var floor = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];
                     if (floor < plain) { entries.push(i, floor); }
                 }
-                var head = -1, cheapest = plain;
                 while (entries.node.length) {
                     var next = entries.pop();
                     if (next.cost >= cheapest) { break; }
@@ -10628,7 +10714,10 @@ class _PlanMode(MacroElement):
                     if (whole < cheapest) { cheapest = whole; head = next.node; }
                 }
                 if (head < 0) { return null; }
-                return leavingAt(graph, head);
+                var joined = leavingAt(graph, head);
+                joined.headCut = headCut;
+                joined.tailCut = tailCuts[joined.tail] || null;
+                return joined;
             }
 
             // **What a straight walk costs, by what it crosses.** Its metres at
@@ -10747,48 +10836,51 @@ class _PlanMode(MacroElement):
             // page, put there for exactly this.
             function tallyOf(graph, list) {
                 var work = router(graph), out = blankTally();
-                for (var i = 0; i < list.length; i += 1) {
-                    var edge = list[i], source = graph.header.sources[graph.sources[edge]];
-                    var metres = work.length[edge];
-                    // Before the two lines below take a connector and a crossing
-                    // out, because the three questions have different answers
-                    // for them. A connector was never drawn, so no register says
-                    // whether it is waymarked — but a walker covers its ground,
-                    // and that ground lies inside a boundary or outside it. A
-                    // crossing is the other way round: there is no walking
-                    // distance under a ferry, so it is asked neither.
-                    if (source.kind !== CROSSING) { addProtected(out, graph, edge, metres); }
-                    // An inferred connector is not a dataset — nobody drew it,
-                    // which is what a connector is — so it names no source and
-                    // answers nothing about marking. Its ground is walked and
-                    // counted, apart, under its own name.
-                    if (source.kind === CONNECTOR) { out.undrawn += metres; continue; }
-                    out.sources[source.name] = (out.sources[source.name] || 0) + metres;
-                    // A crossing is not walking and no register marks water, so
-                    // it is credited for its metres and counted in none of the
-                    // buckets. Its length is reported apart, as a crossing.
-                    if (source.kind === CROSSING) { continue; }
-                    // header.waymarked[0] is null and means the edge was never
-                    // asked. That is not 'unknown', which means it was asked and
-                    // no source answered, and the two must not be added together.
-                    // Every edge left here is walked ground the build asked
-                    // about, so it has an answer. One that did not would be
-                    // reported as ground on a connector *and* credited to a
-                    // named dataset — two contradictory claims about one edge —
-                    // so it is a defect rather than a fourth bucket.
-                    var state = graph.header.waymarked[graph.waymarked[edge]];
-                    if (state === null || state === undefined) {
-                        throw new Error('edge ' + edge + ' is walked ground on ' + source.name + ' that was never asked about');
-                    }
-                    if (MARKING.indexOf(state) < 0) {
-                        throw new Error('the payload names a marking state this page has no bucket for: ' + state);
-                    }
-                    out[state] += metres;
-                    // Recorded, never fact: the sources over-record, so their
-                    // silence is evidence and their lines are not.
-                    if (graph.noPathRecorded[edge]) { out.unrecorded += metres; }
-                }
+                for (var i = 0; i < list.length; i += 1) { tallyEdge(out, graph, list[i], work.length[list[i]]); }
                 return out;
+            }
+
+            // One edge's metres into a tally -- the whole edge for a routed
+            // one, the piece walked for a cut (`cutPart`).
+            function tallyEdge(out, graph, edge, metres) {
+                var source = graph.header.sources[graph.sources[edge]];
+                // Before the two lines below take a connector and a crossing
+                // out, because the three questions have different answers
+                // for them. A connector was never drawn, so no register says
+                // whether it is waymarked — but a walker covers its ground,
+                // and that ground lies inside a boundary or outside it. A
+                // crossing is the other way round: there is no walking
+                // distance under a ferry, so it is asked neither.
+                if (source.kind !== CROSSING) { addProtected(out, graph, edge, metres); }
+                // An inferred connector is not a dataset — nobody drew it,
+                // which is what a connector is — so it names no source and
+                // answers nothing about marking. Its ground is walked and
+                // counted, apart, under its own name.
+                if (source.kind === CONNECTOR) { out.undrawn += metres; return; }
+                out.sources[source.name] = (out.sources[source.name] || 0) + metres;
+                // A crossing is not walking and no register marks water, so
+                // it is credited for its metres and counted in none of the
+                // buckets. Its length is reported apart, as a crossing.
+                if (source.kind === CROSSING) { return; }
+                // header.waymarked[0] is null and means the edge was never
+                // asked. That is not 'unknown', which means it was asked and
+                // no source answered, and the two must not be added together.
+                // Every edge left here is walked ground the build asked
+                // about, so it has an answer. One that did not would be
+                // reported as ground on a connector *and* credited to a
+                // named dataset — two contradictory claims about one edge —
+                // so it is a defect rather than a fourth bucket.
+                var state = graph.header.waymarked[graph.waymarked[edge]];
+                if (state === null || state === undefined) {
+                    throw new Error('edge ' + edge + ' is walked ground on ' + source.name + ' that was never asked about');
+                }
+                if (MARKING.indexOf(state) < 0) {
+                    throw new Error('the payload names a marking state this page has no bucket for: ' + state);
+                }
+                out[state] += metres;
+                // Recorded, never fact: the sources over-record, so their
+                // silence is evidence and their lines are not.
+                if (graph.noPathRecorded[edge]) { out.unrecorded += metres; }
             }
 
             // A leg drawn straight is unmarked by construction rather than
@@ -10958,6 +11050,73 @@ class _PlanMode(MacroElement):
                     }
                 }
                 return best < 0 ? null : {edge: best, m: Math.sqrt(closest) * 111320};
+            }
+
+            // **The nearest place on the network itself, and not its nearest
+            // junction.** `nearestNode` answers over the nodes, and a node is
+            // where edges meet or a chain ends -- so a tap in the middle of a
+            // long stretch of trail found nothing within a finger's width and
+            // was taken as open ground, and every leg from it was drawn
+            // straight. Reported from the phone as *once one straight line is
+            // drawn, every tap after it is one, until I tap a path further
+            // on* -- the path further on being the next junction. Measured on
+            // the two graphs: an edge is 15 m at the median and 13 km at the
+            // longest on Abisko, and 37 % of Abisko's network by length (32 %
+            // of Lomsdal's) lies more than 21 m -- a finger at z15 -- from any
+            // node; 13 % lies more than 150 m from one.
+            //
+            // Over the grid the match mode builds, so a lookup reads a few
+            // cells rather than 948,465 vertices; it is built once, when plan
+            // mode is switched on or at the first tap that asks. A crossing
+            // and a connector are not ground to stand on and are skipped:
+            // nobody drew the connector, and the ferry is water.
+            //
+            // What comes back is the foot on the line and how far along its
+            // edge that is, from the edge's own from-node -- which is what the
+            // router needs to reach the point along the edge (`endsOf`).
+            function nearestOnNetwork(graph, lat, lon, withinM) {
+                if (!(withinM > 0) || !graph.header.edges) { return null; }
+                var index = edgeIndex(graph);
+                var co = graph.coordinates, lonScale = index.lonScale;
+                var reach = withinM / 111320;
+                var c0 = Math.floor((lon - reach / lonScale - index.minLon) / index.dLon);
+                var c1 = Math.floor((lon + reach / lonScale - index.minLon) / index.dLon);
+                var r0 = Math.floor((lat - reach - index.minLat) / index.dLat);
+                var r1 = Math.floor((lat + reach - index.minLat) / index.dLat);
+                if (c0 < 0) { c0 = 0; }
+                if (r0 < 0) { r0 = 0; }
+                if (c1 > index.cols - 1) { c1 = index.cols - 1; }
+                if (r1 > index.rows - 1) { r1 = index.rows - 1; }
+                var closest = reach * reach, best = -1, bestVertex = -1, bestT = 0;
+                for (var r = r0; r <= r1; r += 1) {
+                    for (var c = c0; c <= c1; c += 1) {
+                        var cell = r * index.cols + c;
+                        for (var e = index.at[cell]; e < index.at[cell + 1]; e += 1) {
+                            var edge = index.item[e];
+                            var kind = graph.header.sources[graph.sources[edge]].kind;
+                            if (kind === CROSSING || kind === CONNECTOR) { continue; }
+                            var v = index.vert[e];
+                            var ax = co[2 * v], ay = co[2 * v + 1];
+                            var ex = (co[2 * v + 2] - ax) * lonScale, ey = co[2 * v + 3] - ay;
+                            var span = ex * ex + ey * ey;
+                            var px = (lon - ax) * lonScale, py = lat - ay;
+                            var t = span > 0 ? (px * ex + py * ey) / span : 0;
+                            t = t < 0 ? 0 : (t > 1 ? 1 : t);
+                            var qx = px - t * ex, qy = py - t * ey;
+                            var away = qx * qx + qy * qy;
+                            if (away < closest) { closest = away; best = edge; bestVertex = v; bestT = t; }
+                        }
+                    }
+                }
+                if (best < 0) { return null; }
+                var fx = co[2 * bestVertex], fy = co[2 * bestVertex + 1];
+                var foot = {lon: fx + bestT * (co[2 * bestVertex + 2] - fx), lat: fy + bestT * (co[2 * bestVertex + 3] - fy)};
+                var between = panel().metresBetween, along = 0;
+                for (var w = graph.vertexAt[best]; w < bestVertex; w += 1) {
+                    along += between(co[2 * w], co[2 * w + 1], co[2 * w + 2], co[2 * w + 3]);
+                }
+                along += between(fx, fy, foot.lon, foot.lat);
+                return {edge: best, along: along, lon: foot.lon, lat: foot.lat, m: Math.sqrt(closest) * 111320};
             }
 
             // How far a position lies from a run of coordinates, in metres. It
@@ -11334,13 +11493,89 @@ class _PlanMode(MacroElement):
                     run = []; reversed = [];
                 }
 
+                // The pieces of the edges the way begins and ends on, where
+                // it begins or ends part way along one: path, laid the way the
+                // whole edges are.
+                var head = found.head ? cutPart(graph, found.head) : null;
+                if (head) { parts.push(head); }
                 for (var i = 0; i < found.edges.length; i += 1) {
                     var here = graph.header.sources[graph.sources[found.edges[i]]].kind === CROSSING ? CROSSING : 'routed';
                     if (here !== kind) { flush(); kind = here; }
                     run.push(found.edges[i]); reversed.push(found.reversed[i]);
                 }
                 flush();
+                var tail = found.tail ? cutPart(graph, found.tail) : null;
+                if (tail) { parts.push(tail); }
                 return parts;
+            }
+
+            // **A piece of one edge, from one distance along it to another.**
+            // What a leg walks between a point standing on the edge and the
+            // node it leaves by, laid out the way `layEdges` lays a whole
+            // edge: the vertices between, the samples between with the two
+            // ends read off their neighbours, and the ground tallied by the
+            // metres walked. Nothing where the two distances are the same
+            // place, which is a point standing on the node itself.
+            function cutPart(graph, cut) {
+                var lo = Math.min(cut.from, cut.to), hi = Math.max(cut.from, cut.to);
+                if (!(hi - lo >= 0.5)) { return null; }
+                var edge = cut.edge, forward = cut.to >= cut.from;
+                var co = graph.coordinates, between = panel().metresBetween;
+                var v0 = graph.vertexAt[edge], v1 = graph.vertexAt[edge + 1];
+                var lon = [], lat = [], along = [];
+                function put(x, y, d) { lon.push(x); lat.push(y); along.push(d - lo); }
+                var run = 0, began = false, ended = false;
+                for (var v = v0; v + 1 < v1; v += 1) {
+                    var ax = co[2 * v], ay = co[2 * v + 1], bx = co[2 * v + 2], by = co[2 * v + 3];
+                    var seg = between(ax, ay, bx, by), end = run + seg, last = v + 2 >= v1;
+                    if (!began && (lo <= end || last)) {
+                        var t = seg > 0 ? Math.max(0, Math.min(1, (lo - run) / seg)) : 0;
+                        put(ax + t * (bx - ax), ay + t * (by - ay), lo);
+                        began = true;
+                    }
+                    if (began && (hi <= end || last)) {
+                        var u = seg > 0 ? Math.max(0, Math.min(1, (hi - run) / seg)) : 1;
+                        put(ax + u * (bx - ax), ay + u * (by - ay), hi);
+                        ended = true;
+                        break;
+                    }
+                    if (began) { put(bx, by, end); }
+                    run = end;
+                }
+                if (!began || !ended || lon.length < 2) { return null; }
+                var total = router(graph).length[edge];
+                // The samples lie evenly along the edge, the last on its far
+                // end: the sth at total * s / (n - 1). The two ends of the
+                // piece take a height between their neighbours, or none where
+                // either neighbour has none.
+                var s0 = graph.sampleAt[edge], n = graph.sampleAt[edge + 1] - s0;
+                var height = [], distance = [];
+                function heightAt(d) {
+                    var pos = total > 0 ? d / total * (n - 1) : 0, k = Math.floor(pos), f = pos - k;
+                    if (k >= n - 1) { return graph.heights[s0 + n - 1]; }
+                    var a = graph.heights[s0 + k], b = graph.heights[s0 + k + 1];
+                    if (f === 0) { return a; }
+                    return (isNaN(a) || isNaN(b)) ? NaN : a + f * (b - a);
+                }
+                if (n >= 2) {
+                    height.push(heightAt(lo)); distance.push(0);
+                    for (var k = 0; k < n; k += 1) {
+                        var d = total * k / (n - 1);
+                        if (d > lo && d < hi) { height.push(graph.heights[s0 + k]); distance.push(d - lo); }
+                    }
+                    height.push(heightAt(hi)); distance.push(hi - lo);
+                }
+                if (!forward) {
+                    lon.reverse(); lat.reverse();
+                    along = along.map(function (d) { return (hi - lo) - d; }).reverse();
+                    height.reverse();
+                    distance = distance.map(function (d) { return (hi - lo) - d; }).reverse();
+                }
+                var read = height.some(function (h) { return !isNaN(h); });
+                var tally = blankTally();
+                tallyEdge(tally, graph, edge, hi - lo);
+                return {kind: 'routed', lon: lon, lat: lat, along: along, length: hi - lo,
+                        height: height, distance: distance, read: read, tally: tally};
             }
 
             // ---- heights for a leg the network cannot carry -------------------
@@ -11906,8 +12141,8 @@ class _PlanMode(MacroElement):
                 if (loaded && from.track === loaded.id && to.track === loaded.id && from.at !== to.at) {
                     return Promise.resolve(recordedParts(graph, from, to));
                 }
-                if (from.node >= 0 && to.node >= 0) {
-                    var found = route(graph, from.node, to.node);
+                if (onNetwork(from) && onNetwork(to)) {
+                    var found = routeBetween(graph, from, to);
                     if (found && worthRouting(graph, from, to, found.cost)) {
                         return Promise.resolve(routedParts(graph, found));
                     }
@@ -11922,7 +12157,7 @@ class _PlanMode(MacroElement):
                     // graph by connectors and the cheapest way through wins.
                     var joined = joinedRoute(graph, from, to);
                     if (joined) {
-                        return partlyRouted(graph, from, to, joined.head, joined.tail, joined.over, mayAsk);
+                        return partlyRouted(graph, from, to, joined, mayAsk);
                     }
                     // The direct connector won, which in this reading is an
                     // answer and not a failure -- and it is drawn the way every
@@ -11977,7 +12212,8 @@ class _PlanMode(MacroElement):
             // it has no length, which is every end that was standing on a node
             // already -- and it is a piece a metre long where the reader is a
             // metre off one, because nothing here moves them on to it.
-            function partlyRouted(graph, from, to, head, tail, over, mayAsk) {
+            function partlyRouted(graph, from, to, joined, mayAsk) {
+                var head = joined.head, tail = joined.tail, over = joined.over;
                 var enter = {lat: graph.nodeLat[head], lon: graph.nodeLon[head], node: head};
                 var leave = {lat: graph.nodeLat[tail], lon: graph.nodeLon[tail], node: tail};
                 // **Whether this was worth doing at all was settled before it
@@ -11990,8 +12226,16 @@ class _PlanMode(MacroElement):
                 // that would have caught it had already returned yes. This
                 // assembles the three pieces and judges nothing.
                 var middle = over ? routedParts(graph, over) : [];
-                return Promise.all([walkTo(graph, from, enter, mayAsk),
-                                    walkTo(graph, leave, to, mayAsk)])
+                // **An end standing on the network walks its own edge**, as
+                // the piece of it between the point and the node -- path, and
+                // drawn as path. Only an end off the network walks over the
+                // ground to reach it.
+                function pieceOf(cut) {
+                    var part = cutPart(graph, cut);
+                    return Promise.resolve(part ? [part] : []);
+                }
+                return Promise.all([joined.headCut ? pieceOf(joined.headCut) : walkTo(graph, from, enter, mayAsk),
+                                    joined.tailCut ? pieceOf(joined.tailCut) : walkTo(graph, leave, to, mayAsk)])
                     .then(function (ends) { return ends[0].concat(middle, ends[1]); });
             }
 
@@ -13768,11 +14012,30 @@ class _PlanMode(MacroElement):
             // a question about the ground and must answer the same whatever the
             // map happens to be showing. A single reach served both only for as
             // long as nobody asked what it was for.
+            //
+            // **On to the line, and not only on to its junctions.** A node is
+            // where edges meet or a chain ends, and a tap in the middle of a
+            // long stretch found none within reach and stood as open ground
+            // (`nearestOnNetwork` has the figures). The line itself is asked
+            // as well, and the point put on it remembers which edge and how
+            // far along, which is what lets the router start from there. A
+            // junction within reach is taken over the line beside it when it
+            // is as near, give or take `NODE_FIRST_M`: at a junction the line
+            // *is* the node, and a tap meant for a junction is meant for it.
+            var NODE_FIRST_M = 2;
+
             function snapped(graph, lat, lon, within) {
-                var node = graph.nearestNode(lat, lon, within === undefined ? PLAN.snapM : within);
-                return node >= 0
-                    ? {lat: graph.nodeLat[node], lon: graph.nodeLon[node], node: node}
-                    : {lat: lat, lon: lon, node: -1};
+                var reach = within === undefined ? PLAN.snapM : within;
+                var node = graph.nearestNode(lat, lon, reach);
+                var line = nearestOnNetwork(graph, lat, lon, reach);
+                if (node >= 0) {
+                    var nodeM = panel().metresBetween(lon, lat, graph.nodeLon[node], graph.nodeLat[node]);
+                    if (!line || nodeM <= line.m + NODE_FIRST_M) {
+                        return {lat: graph.nodeLat[node], lon: graph.nodeLon[node], node: node};
+                    }
+                }
+                if (line) { return {lat: line.lat, lon: line.lon, node: -1, edge: line.edge, along: line.along}; }
+                return {lat: lat, lon: lon, node: -1};
             }
 
             // **A tap means the line it lands on, and landing on it is
@@ -14477,18 +14740,26 @@ class _PlanMode(MacroElement):
                 if (!leg) { return ''; }
                 if (leg.failed) { return 'no way found'; }
                 if (!leg.parts) { return 'working\u2026'; }
-                var crossing = false, straight = false, recorded = false;
+                var crossing = false, recorded = false, straight = 0, walked = 0;
                 leg.parts.forEach(function (part) {
                     if (part.kind === CROSSING || part.kind === 'water' || part.height === null) {
                         crossing = true;
-                    } else if (part.kind === 'land') {
-                        straight = true;
+                        return;
+                    }
+                    walked += part.length || 0;
+                    if (part.kind === 'land') {
+                        straight += part.length || 0;
                     } else if (part.kind === PLAN.gpx.trackKind) {
                         recorded = true;
                     }
                 });
                 if (crossing) { return 'over a crossing'; }
-                if (straight) { return 'drawn straight'; }
+                // **By the greater part.** A hut stands a few metres off the
+                // path and the walk to it is a straight piece of a leg that is
+                // otherwise all path; a row calling that leg *drawn straight*
+                // said what the map plainly did not show. Reported from the
+                // phone beside a leg of 5.4 km with 63 m of it off the path.
+                if (straight > 0 && straight >= walked / 2) { return 'drawn straight'; }
                 if (recorded) { return 'as recorded'; }
                 return 'along a path';
             }
@@ -15595,7 +15866,12 @@ class _PlanMode(MacroElement):
                 // because switching plan mode on is not yet a request to route
                 // anything, and a page without a graph says so at the click.
                 if (on && !held && window.trailsGraph) {
-                    window.trailsGraph.ready.then(function (graph) { held = graph; }, function () { held = null; });
+                    window.trailsGraph.ready.then(function (graph) {
+                        held = graph;
+                        // And the index a tap snaps to the line by, so the
+                        // first tap pays for nothing but itself.
+                        edgeIndex(graph);
+                    }, function () { held = null; });
                 }
                 refresh();
             }
@@ -15903,8 +16179,19 @@ class _PlanMode(MacroElement):
                 // open ground beside the line. A stop is a place the reader
                 // chose; the walk from it to the path is part of the answer and
                 // is drawn as what it is.
-                return resolve(graph, {lat: head.lat, lon: head.lon, node: -1},
-                               {lat: tail.lat, lon: tail.lon, node: -1}, true, true);
+                return resolve(graph, placed(graph, head), placed(graph, tail), true, true);
+            }
+
+            // **Raw, and then asked once whether it stands on the line.** A
+            // tap was moved on to the line by `onTheLine` and a place taken
+            // from a popup was not, and the difference matters here: a point
+            // standing on an edge is reached along that edge, one beside it
+            // walks to it. Asked at `SAME_SPOT_M`, which finds the line under
+            // a point put on it and nothing under one that was not -- the
+            // position stays the reader's own either way.
+            function placed(graph, point) {
+                var at = snapped(graph, point.lat, point.lon, SAME_SPOT_M);
+                return {lat: point.lat, lon: point.lon, node: at.node, edge: at.edge, along: at.along};
             }
 
             // **Worked out from where the reader is, which is the whole of what
@@ -16676,11 +16963,25 @@ class _PlanMode(MacroElement):
                         // the one thing about a waypoint that no position says,
                         // and a check reading this could not see it at all.
                         points: points.map(function (point) {
-                            return {lat: point.lat, lon: point.lon, node: point.node, stage: point.stage};
+                            return {lat: point.lat, lon: point.lon, node: point.node, stage: point.stage,
+                                    // The edge a point stands on part way
+                                    // along, or -1: a tap on a long stretch
+                                    // of trail is on the network without
+                                    // being on a node.
+                                    edge: point.edge === undefined ? -1 : point.edge,
+                                    along: point.along === undefined ? null : point.along};
                         }),
+                        // What the index over the edges cost to build, or null
+                        // while nothing has asked for it.
+                        indexMs: gridded ? gridded.buildMs : null,
                         legs: legs.map(function (leg) {
                             return {
                                 settled: !!leg.parts, failed: leg.failed, provisional: leg.provisional,
+                                // How many layers the leg has on the map. A
+                                // leg that has settled and draws nothing is a
+                                // hole in the route, and this is where a check
+                                // sees one.
+                                drawn: leg.layers.length,
                                 parts: (leg.parts || []).map(function (part) {
                                     return {kind: part.kind, length: part.length, read: !!part.read,
                                             samples: part.height ? part.height.length : 0};
