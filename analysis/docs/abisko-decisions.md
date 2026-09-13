@@ -1265,7 +1265,9 @@ A line per change to this document or to the decisions in it, newest first.
 - **2026-09-13, later** — the box widened to 18.15–19.10 E, 68.139–68.46 N at Uwe's word (§2,
   §9.24): the valley path through Lapporten whole, the south on the tile row's edge; tiles
   resumed into stand 1, heights and graph rebuilt, 866 chains; BD 31 joins the Naturkartan
-  catalogue.
+  catalogue. Published at Uwe's word the same morning: the sync added 28,028 tile objects
+  (165 MB, 749 s) and 70 height tiles, the page byte-identical from the edge, new tiles at the
+  east and south edges answering 200, the index in the bucket carrying the new box.
 - **2026-09-13** — the whole map to z17 on Abisko (§9.23): the offline panel's cap is the
   source's own figure, z16 on Kartverket and z17 on Lantmäteriet, where it is the whole copy;
   the drive reads the count at the cap. Both pages republished at Uwe's word the same morning.
