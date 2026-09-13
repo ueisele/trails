@@ -198,6 +198,14 @@ class Provider:
     #: The finest zoom the source answers. Kartverket's cache ends at z18 (z19
     #: answers 400); Lantmäteriet's file ends at z17.
     top: int
+    #: Where *the whole map* stops being a download and starts being an
+    #: archive -- and with it the budget every other scope on the offline panel
+    #: is held to. Per source, because the same zoom is not the same weight:
+    #: Kartverket's whole box costs 6.76 GB at z16 and four times that at z17;
+    #: Lantmäteriet's tree over the Abisko box is 118,967 tiles and about
+    #: 700 MB at z17, which is everything the copy holds, so its cap is its top
+    #: (analysis/docs/abisko-decisions.md §9.23).
+    cap: int
     #: Bytes a kept tile weighs, per zoom, for every size estimate on the panel.
     weight: dict[int, int]
     #: Height tiles cut beside the map tiles, where the map has them. None
@@ -223,6 +231,7 @@ PROVIDERS: dict[str, Provider] = {
         label="Kartverket",
         tiles="https://cache.kartverket.no/",
         top=18,
+        cap=16,
         # Twelve samples per zoom taken on the trail network rather than over
         # the park: the sea tiles a bounding box is full of are a fraction of
         # the size and would make every estimate optimistic.
@@ -233,6 +242,8 @@ PROVIDERS: dict[str, Provider] = {
         label="Lantmäteriet",
         tiles="/tiles/lantmateriet/topowebb/1/",
         top=17,
+        # The whole box at z17 is the whole copy, 700 MB: asked for by Uwe.
+        cap=17,
         # The mean over every tile of the Abisko box, read off the copy of
         # 2026-09-12 (analysis/docs/abisko-decisions.md §3): indexed PNG, and
         # a box that is mountain and lake rather than sea, so the whole-box
@@ -16407,7 +16418,9 @@ class _OfflinePanel(MacroElement):
                 var BOTTOM = 11;
                 // Where the whole map stops being a download and starts being an
                 // archive -- and with it the budget every other scope is held to.
-                var CAP_ZOOM = 16;
+                // The source's own figure: z16 on Kartverket, z17 -- the top of
+                // the copy -- on Lantmäteriet (see `Provider.cap`).
+                var CAP_ZOOM = {{ this.cap }};
                 // What a kept tile weighs, per zoom, measured on the provider's
                 // own tiles -- see `PROVIDERS` for how each table was taken.
                 var WEIGHT = {{ this.weight_json }};
@@ -18698,6 +18711,7 @@ class _OfflinePanel(MacroElement):
         super().__init__()
         self._name = "OfflinePanel"
         self.top = provider.top
+        self.cap = provider.cap
         self.weight_json = _script_json({str(zoom): bytes_ for zoom, bytes_ in provider.weight.items()})
         self.heights_json = _script_json(provider.heights.as_settings() if provider.heights else None)
         self.tile_prefix_json = _script_json(provider.tiles)

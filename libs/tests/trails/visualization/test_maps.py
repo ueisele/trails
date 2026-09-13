@@ -628,7 +628,14 @@ class TestOfflinePanel:
         figure that goes stale the first time the sources move."""
         panel = self.panel()
         assert "cap = cost('all', CAP_ZOOM).bytes;" in panel
-        assert "var CAP_ZOOM = 16;" in panel
+        # The source's own figure, not one typed in here: z16 on Kartverket,
+        # where z17 would be four times 6.76 GB, and z17 -- the whole copy,
+        # 700 MB -- on Lantmäteriet.
+        assert "var CAP_ZOOM = {{ this.cap }};" in panel
+        assert maps.PROVIDERS["kartverket"].cap == 16
+        assert maps.PROVIDERS["lantmateriet"].cap == 17 == maps.PROVIDERS["lantmateriet"].top
+        assert all(provider.cap <= provider.top for provider in maps.PROVIDERS.values())
+        assert maps._OfflinePanel(maps.PROVIDERS["lantmateriet"], maps.Companions.named("abisko")).cap == 17
         # Every zoom whose result would go over it is refused, and says why.
         assert "cap !== null && known && known.bytes > cap" in panel
         assert "'Over the budget: '" in panel

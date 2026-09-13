@@ -1185,12 +1185,37 @@ drive reads the links in the long chain's detail on both pages — 2 on Lomsdal 
 and its GPX), 4 on Abisko — so a catalogue that stops matching the register's numbers is a
 reading that moves, not a popup nobody opens.
 
+### 9.23 The whole map to z17 — settled, 2026-09-13
+
+Uwe asked to be able to keep the whole map at z17. *The whole map* on the offline panel was capped
+at z16 for every page, and the cap is also the budget every other scope is held to — a figure
+chosen on the first map, where Kartverket's box costs 6.76 GB at z16 and would cost four times
+that at z17. The same zoom is not the same weight here: Lantmäteriet's tree over the Abisko box
+is the copy of §3, 118,967 tiles from z8 to z17, about 700 MB by the panel's own weights (578 MB
+of it z17), and it is all in the bucket already. So the cap is the source's figure now,
+`Provider.cap`: 16 on Kartverket, 17 on Lantmäteriet, where it is the top of the copy and
+nothing on the sheet is an archive. The drive takes it from the scene (`Scene.cap`), reads the
+whole map's count at the cap — 119,327 tiles on Abisko, the tree from z11 plus the 380 height
+tiles — and checks that every zoom from 14 to the cap is open and that asking for more comes
+back with the cap.
+
+**What it costs on the phone.** The rule of the memory budget stands: nothing in the panel grows
+with the tile count, and 119,327 is fewer than the 131,033 the first map was measured at. What
+does grow is Cache Storage itself: WebKit's first `caches.open()` after a large download was
+measured at 23 s on the installed app once, with a partly finished whole map at z16 in the
+cache. A whole map at z17 here puts about 119,000 entries there, so that first open after the
+download is worth measuring on the device before the figure is trusted; the page is usable once
+it is paid.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-13** — the whole map to z17 on Abisko (§9.23): the offline panel's cap is the
+  source's own figure, z16 on Kartverket and z17 on Lantmäteriet, where it is the whole copy;
+  the drive reads the count at the cap.
 - **2026-09-12, later still** — Naturkartan's pages linked from the state trails (§9.22, §5):
   its Abisko tours are the county's state trails, so the ways were already drawn and preferred;
   a hand-kept catalogue of thirteen pages, one link per *BD* number on a chain, under the

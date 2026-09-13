@@ -212,8 +212,8 @@ command make drive                                          # the Lomsdal-Visten
 command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
-Drives the built map in a browser and reports **some 600 readings** (609 on the
-Lomsdal-Visten page, 609 on Abisko's, 2026-09-12) — the counts the
+Drives the built map in a browser and reports **some 600 readings** (610 on the
+Lomsdal-Visten page, 610 on Abisko's, 2026-09-13) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,

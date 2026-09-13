@@ -176,6 +176,10 @@ class Scene:
     #: half again over Lomsdal's fjords, a fifth along the Abisko valley, where
     #: the path is straight. Per scene rather than loosened for both.
     way_over_flight: float = 1.3
+    #: The zoom *the whole map* is capped at on this page's sheet -- the
+    #: provider's own figure (`maps.Provider.cap`): z16 on Kartverket's, z17,
+    #: the top of the copy, on Lantmäteriet's.
+    cap: int = 16
 
     @property
     def companions(self) -> maps.Companions:
@@ -242,6 +246,9 @@ SCENES: dict[str, Scene] = {
             # The Rundtur's page on ut.no and its GPX; it is the one route
             # without a lomsdalvisten.no counterpart.
             "links to pages published elsewhere": 2,
+            # The box from z11 to z16 on Kartverket's sheet, 6.76 GB; no height
+            # tiles on this page.
+            "tiles the whole map holds at its cap": 131033,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -300,6 +307,8 @@ SCENES: dict[str, Scene] = {
         search_for="Abiskojaure",
         # Lantmäteriet's sheets and the height tiles are addressed from the root.
         over_http=True,
+        # The whole copy: 118,967 tiles, about 700 MB (§9.23).
+        cap=17,
         # Recorded 2026-09-12 from the first build of the page: 813 chains,
         # 19 legend rows, one base map.
         figures={
@@ -340,6 +349,8 @@ SCENES: dict[str, Scene] = {
             # The long chain is BD 21, BD 92, BD 16 and BD 91 run together, and
             # Naturkartan has a page for each.
             "links to pages published elsewhere": 4,
+            # The tree from z11 to z17 (118,947 tiles) and the 380 height tiles.
+            "tiles the whole map holds at its cap": 119327,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -7357,13 +7368,18 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
         )
     )
 
-    # And a zoom nobody may have cannot be pressed. The whole map stops at z16
-    # because that *is* the budget; everything above it would be an archive.
-    page.evaluate("async () => await window.trailsOffline.choose('all', 16)")
+    # And a zoom nobody may have cannot be pressed. The whole map stops at the
+    # source's cap -- z16 on Kartverket, z17 on Lantmäteriet, where that is the
+    # whole copy -- because that *is* the budget; everything above it would be
+    # an archive.
+    cap = SCENE.cap
+    page.evaluate("async (cap) => await window.trailsOffline.choose('all', cap)", cap)
     page.wait_for_function(
         "() => { const s = window.trailsOffline.state(); return s && s.counted && s.counted.scope === 'all'; }",
         timeout=120_000,
     )
+    whole = page.evaluate("() => window.trailsOffline.state().counted")
+    out.append(stands("tiles the whole map holds at its cap", whole.get("tiles"), note=f"z{cap}, {whole.get('bytes', 0) / 1e6:,.0f} MB"))
     locks = page.evaluate(
         """() => {
             const out = {};
@@ -7374,15 +7390,16 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
         }"""
     )
     shut = sorted(at for at, how in locks.items() if how["off"])
-    # Every level the sheet offers above 16, however many that is: two on
-    # Kartverket's sheet, one on Lantmäteriet's.
-    archive = sorted(at for at in locks if int(at) > 16)
-    out.append(Reading("the zooms that would be an archive are shut", shut, archive, note=str(locks.get("17", {}).get("why"))))
-    out.append(Reading("and every zoom that fits the budget is open", [at for at in ("14", "15", "16") if locks.get(at, {}).get("off")], []))
+    # Every level the sheet offers above the cap, however many that is: two on
+    # Kartverket's sheet, none on Lantmäteriet's, whose cap is its top.
+    archive = sorted(at for at in locks if int(at) > cap)
+    out.append(Reading("the zooms that would be an archive are shut", shut, archive, note=str(locks.get(str(cap + 1), {}).get("why"))))
+    fits = [str(at) for at in range(14, cap + 1)]
+    out.append(Reading("and every zoom that fits the budget is open", [at for at in fits if locks.get(at, {}).get("off")], []))
     # Held rather than painted on: a button drawn `disabled` proves what the
     # screen does, and this proves what is true underneath it.
     clamped = page.evaluate("async () => (await window.trailsOffline.choose('all', 18)).zoom")
-    out.append(Reading("and asking for one anyway comes back with one that fits", clamped, 16))
+    out.append(Reading("and asking for one anyway comes back with one that fits", clamped, cap))
     # **Waited for, and read once.** Choosing throws the count away and the panel
     # says *working out how much that is* until the tick that does it lands;
     # asking twice reads one side of that and reports the other.
