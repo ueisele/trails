@@ -1549,7 +1549,17 @@ A line per change to this document or to the decisions in it, newest first.
   a row taken fires the click that thing's own handlers are wired to, and switches its layer on if
   it is off. And `68.39275, 18.68033` — the string the *Copy a position* tool copies — is read back
   as the place it names, in decimal or in degrees, minutes and seconds, marked on the map and set
-  as a goal through the button a hut's popup carries. One function serves both pages.
+  as a goal through the button a hut's popup carries. One function serves both pages. Both pages
+  published the same evening — page and companions only, nothing in the tile trees — and
+  byte-identical from the edge, 3,540,231 and 17,098,349 bytes.
+
+  **And a publish stops being a question.** Uwe's standing word, given with this one: publish
+  directly, *as long as nothing breaks the offline cache*. So the condition to check before each
+  one is the kept ground — the worker, the store it keeps tiles in, the addresses they are kept
+  under, and the tile trees themselves. A change that leaves all four alone goes out; a change that
+  touches any of them is asked about first, because what it costs is somebody's map in a valley
+  with no signal. This one left all four alone: the diff is the search box, one line in the chrome
+  and a comment.
 
 - **2026-09-13, later still again** — a name stops where the register stops (§9.26), reported
   from the phone with a sign photographed at the trailhead. A chain took the union of its
