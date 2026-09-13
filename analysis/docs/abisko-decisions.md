@@ -1204,8 +1204,10 @@ with the tile count, and 119,327 is fewer than the 131,033 the first map was mea
 tiles go where Lomsdal-Visten's go, IndexedDB — the `kept` store, keyed by address, which the
 worker answers a request from by one lookup — and not Cache Storage; the 23 s that WebKit's first
 `caches.open()` once cost (memory note of 2026-09-02) belongs to the time the tiles were kept
-there, and the cache names left in the worker only clear that old store away. First written
-here as a Cache Storage cost and corrected at Uwe's word the same morning.
+there, and the cache names left in the worker only clear that old store away. The move was
+measured on the same phone: 59,092 rows in IndexedDB open in 107 ms and the app in 1.0 s,
+against 23.6 s with the tiles in Cache Storage. First written here as a Cache Storage cost and
+corrected at Uwe's word the same morning.
 
 ---
 
