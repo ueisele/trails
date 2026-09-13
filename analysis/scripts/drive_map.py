@@ -3595,6 +3595,42 @@ def a_position_typed_into_the_search(page: Any) -> Check:
     )
     page.wait_for_timeout(900)
     dropped = page.evaluate("() => window.trailsGoal.state().at")
+    # **And the mark can be tapped again.** Reported from the phone: with its
+    # page put away there was no way back to it. Two reasons, both measured --
+    # an 18 px target on a screen a finger is 44 px wide on, and a page that
+    # came back folded because the reader had folded the pages away. Driven
+    # with a real press at the mark's own middle, on a phone-sized screen.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.wait_for_timeout(700)
+    page.evaluate(
+        """() => { window.trailsChrome.closeDetail(); window.trailsChrome.close();
+        const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
+        map.fire('click'); }"""
+    )
+    page.wait_for_timeout(900)
+    spot = page.evaluate(
+        """() => { const icon = document.querySelector('.trails-search-mark');
+        if (!icon) { return null; }
+        const r = icon.getBoundingClientRect();
+        return {side: Math.round(r.width), x: Math.round(r.left + r.width / 2),
+                y: Math.round(r.top + r.height / 2),
+                onTop: document.elementFromPoint(Math.round(r.left + r.width / 2),
+                                                 Math.round(r.top + r.height / 2)) === icon.firstChild ||
+                       document.elementFromPoint(Math.round(r.left + r.width / 2),
+                                                 Math.round(r.top + r.height / 2)) === icon}; }"""
+    )
+    if spot:
+        page.mouse.click(spot["x"], spot["y"])
+        page.wait_for_timeout(1800)
+    again = page.evaluate(
+        """() => ({page: window.trailsProfilePanel.page(), open: window.trailsProfilePanel.pages().open,
+        offers: [...document.querySelectorAll('.trails-goal-take')].length})"""
+    )
+    page.evaluate("() => window.trailsChrome.coarse(null)")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(500)
+
     page.evaluate("""() => { const b = document.querySelector('.trails-search-drop'); if (b) { b.click(); } }""")
     page.wait_for_timeout(600)
     left = page.evaluate("() => window.trailsSearch.mark()")
@@ -3630,6 +3666,13 @@ def a_position_typed_into_the_search(page: Any) -> Check:
                 ["Where I am", "\u2316 Move the goal", "Make a plan of this way", "Drop the goal"],
             ),
             Reading("and dropping it there takes it off the map", dropped, None),
+            Reading(
+                "the mark is a finger wide, px",
+                spot["side"] if spot else 0,
+                36,
+                note="18 before, and the ring is still 18",
+            ),
+            Reading("and tapping it again brings its page back", [again["page"], again["open"], again["offers"]], ["details", True, 1]),
             Reading("taking the mark away leaves none", left, None),
         ],
     )

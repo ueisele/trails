@@ -4247,6 +4247,22 @@ class TestProfilePanel:
         html = fmap.get_root().render()
         assert "nameOf: function (className) { return (figures[className] || {}).name || null; }," in html
 
+    def test_a_place_tapped_shows_its_page(self, group):
+        """Reported from the phone about the search's own mark: *I have no way of
+        selecting the point I set again.* Pressing the panel's heading folds the
+        pages away -- which is what a reader who wanted the map back has just
+        done -- and with them folded, tapping a place brought the panel back as a
+        46 px strip carrying its name and nothing else. Asking to read a place is
+        asking."""
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer])
+
+        html = fmap.get_root().render()
+        assert "showDetails: function () {" in html
+        # From both branches, and the early return for a place was the branch
+        # that needed it.
+        assert html.count("this.showDetails();") == 2
+
     def test_a_place_read_while_planning_keeps_its_page(self, group):
         """Reported from the phone as *how do I add a coordinate as a waypoint*,
         and the answer was that you could not: the offer stood on the page of the
@@ -4262,7 +4278,7 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "if (suspended && detailHtml) {" in html
+        assert "if (detailHtml && (isPoint || suspended)) { this.showDetails(); }" in html
         assert "if (pages[turn].key === 'details') { goPage(turn); break; }" in html
         assert "hold.style.display = ((open || (suspended && detailHtml)) && pagesOpen) ? 'block' : 'none';" in html
         assert "if (was) { detailHtml = null; fold(); }" in html

@@ -3868,10 +3868,22 @@ class _NameSearch(MacroElement):
             //: reader wondering which of them they typed.
             var mark = null;
 
+            //: How wide the mark's own target is, against 18 px of ring drawn
+            //: in the middle of it. **The one mark on this map that takes a
+            //: tap** -- the goal's ring and the position's dot take none, and
+            //: are reached through the row at the foot -- so it is the one that
+            //: has to be a finger wide. 36 and not 44: a transparent box over
+            //: the map takes the taps meant for whatever runs under it, and 18
+            //: px of halo is already more than the 12 px a line is hit by.
+            //: Pinching in is how a reader says they meant the trail instead.
+            var MARK_PX = 36, RING_PX = 18;
+
             function markIcon() {
-                return '<span style="display:block;width:100%;height:100%;box-sizing:border-box;' +
+                return '<span style="display:flex;align-items:center;justify-content:center;' +
+                    'width:100%;height:100%"><span style="display:block;box-sizing:border-box;' +
+                    'width:' + RING_PX + 'px;height:' + RING_PX + 'px;' +
                     'border-radius:50%;border:3px solid ' + MARK + ';background:' + CASING +
-                    ';box-shadow:0 0 0 2px ' + CASING + '"></span>';
+                    ';box-shadow:0 0 0 2px ' + CASING + '"></span></span>';
             }
 
             //: What the mark says when it is opened -- in the sheet on a narrow
@@ -3921,8 +3933,8 @@ class _NameSearch(MacroElement):
             function markAt(at) {
                 dropMark();
                 mark = L.marker([at.lat, at.lon], {
-                    icon: L.divIcon({className: 'trails-search-mark', iconSize: [18, 18],
-                                     iconAnchor: [9, 9], html: markIcon()}),
+                    icon: L.divIcon({className: 'trails-search-mark', iconSize: [MARK_PX, MARK_PX],
+                                     iconAnchor: [MARK_PX / 2, MARK_PX / 2], html: markIcon()}),
                     keyboard: false, zIndexOffset: 1100
                 });
                 mark.bindTooltip(saidAt(at), {direction: 'right'});
@@ -9490,6 +9502,21 @@ class _ProfilePanel(MacroElement):
                 // markup here instead, and it becomes the second page of the
                 // panel -- beside the curve where there is one, and alone where
                 // there is not, which is what a place gets.
+                //: A place's page, shown and turned to. Pressing the panel's
+                //: heading folds the pages away, which is what a reader who
+                //: wanted the map back has just done -- and with them folded,
+                //: tapping a place brought the panel back as a 46 px strip
+                //: carrying its name and nothing else. Reported from the phone
+                //: about the search's own mark: *I have no way of selecting the
+                //: point I set again.*
+                showDetails: function () {
+                    if (!detailHtml) { return false; }
+                    showPages(true);
+                    for (var turn = 0; turn < pages.length; turn += 1) {
+                        if (pages[turn].key === 'details') { goPage(turn); break; }
+                    }
+                    return true;
+                },
                 detail: function (label, html, isPoint) {
                     detailHtml = html || null;
                     // **While plan mode owns the map, a popup is a page and not
@@ -9507,6 +9534,7 @@ class _ProfilePanel(MacroElement):
                         if (window.trailsHighlight) { window.trailsHighlight.clear(); }
                         present({detail: true, label: label, figure: null,
                                  shape: null, told: [], mid: null});
+                        this.showDetails();
                         return;
                     }
                     if (label && !suspended && (!selected || !selected.label)) {
@@ -9521,17 +9549,19 @@ class _ProfilePanel(MacroElement):
                     }
                     pageAt = 0;
                     fold();
-                    // **While planning, the page is opened at itself.** The
-                    // panel does not open by itself there -- on a narrow screen
-                    // the map is what is being tapped -- but a reader who has
-                    // just asked to read a place has asked for something, and
-                    // the page they asked for is not the plan's point list.
-                    if (suspended && detailHtml) {
-                        showPages(true);
-                        for (var turn = 0; turn < pages.length; turn += 1) {
-                            if (pages[turn].key === 'details') { goPage(turn); break; }
-                        }
-                    }
+                    // **A place's page shows itself.** Reported from the phone
+                    // about the search's own mark, and true of every place: with
+                    // the pages folded away -- which is what pressing the
+                    // heading leaves behind, and what a reader who wanted the
+                    // map back has just done -- tapping a place brought the
+                    // panel back as a 46 px strip with the name in it and
+                    // nothing else. Asking to read a place is asking.
+                    //
+                    // **While planning, for the same reason and one more**: the
+                    // panel does not open by itself there, because on a narrow
+                    // screen the map is what is being tapped -- and the page the
+                    // reader asked for is not the plan's point list.
+                    if (detailHtml && (isPoint || suspended)) { this.showDetails(); }
                     paintSummary();
                 },
                 // What the goal control is doing, pushed by the chrome the way

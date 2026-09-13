@@ -1638,6 +1638,24 @@ at y = 745 of an 844 px screen.
 `querySelector`, which works on a node nobody can see; it reads `offsetParent`, the window and
 `elementFromPoint` first.
 
+#### And the mark nobody could get back to
+
+Reported next, with the mark standing alone on the map at z17: *I have no way of selecting the point
+I set again.* Two causes, both measured, and the second is not about the search at all.
+
+**The target was 18 px.** It is the one mark on this map that takes a tap — the goal's ring and the
+position's dot take none and are reached through the row at the foot — so it is the one that has to
+be a finger wide. It is 36 px now, with the same 18 px ring drawn in the middle of it. Not 44:
+a transparent box over the map takes the taps meant for whatever runs under it, and 18 px of halo is
+already more than the 12 px a line is hit by; pinching in is how a reader says they meant the trail.
+
+**And its page came back folded.** Pressing the panel's heading folds the pages away — which is
+exactly what a reader who wanted the map back has just done — and `pagesOpen` outlives the
+selection, so tapping the mark brought the panel back as a 46 px strip carrying the name and nothing
+else. **Asking to read a place is asking**: a place's page now shows itself and turns to itself,
+through one `showDetails`, called from both branches of `detail` — the early return for a place was
+the branch that needed it. True of every hut and quay on both maps, not only of the search's mark.
+
 #### Driven
 
 *A way to a goal becomes a plan*, nine readings on both pages, with the position switched off —
@@ -1645,7 +1663,9 @@ which is where the goal's own page cannot be reached and the state a reader who 
 map is in. A position typed in, set as a goal; a second typed in and added as a stop, named after
 itself; the flag's four lines; the two places as the plan's two points in order with the goal gone;
 a third typed in as a waypoint, reachable by a finger on a phone, and landing on its five decimals.
-661 readings a page.
+And in *a position typed into the search*, two more: the mark is 36 px wide, and a real press at its
+middle on a phone-sized screen brings its page back, open, with the offer on it. 663 readings a
+page.
 
 ---
 
@@ -1664,8 +1684,9 @@ A line per change to this document or to the decisions in it, newest first.
   readings a page, and published the same evening — byte-identical from the edge, page and
   companions only. Then the offer turned out to be unreachable in plan mode, which is what the next
   question from the phone was about: a popup's page kept its place against the plan's own refreshes,
-  and the check learned to read what a finger could do. 661 readings a page, republished at
-  3,552,668 and 17,110,786 bytes.
+  and the check learned to read what a finger could do. Then the mark itself could not be got back
+  to: an 18 px target, and a page that came back folded. 663 readings a page, republished at
+  3,554,271 and 17,112,389 bytes.
 
 - **2026-09-13, fifth of the day** — the search lists what it finds and reads a position
   (§9.27), asked for from the phone. Typing no longer hides the map: the matches are rows, one per
