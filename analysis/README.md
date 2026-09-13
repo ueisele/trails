@@ -139,7 +139,8 @@ is the register's. `analysis/docs/abisko-decisions.md` is the record.
 
 The legend at the bottom left **is** the layer control: every row switches its own
 layer and a row whose layer is off is greyed rather than hidden, so it is still
-the key to that colour. The base maps sit above the rows.
+the key to that colour. It says what the map holds, whoever switched it — a search
+result in a layer that was off switches that layer on, and the row ticks itself. The base maps sit above the rows.
 
 **Click a line** and the panel at the foot draws its profile — distance against
 height, coloured by how steep the ground is, with the ascent, the high and low
@@ -231,8 +232,8 @@ command make drive                                          # the Lomsdal-Visten
 command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
-Drives the built map in a browser and reports **some 650 readings** (663 on the
-Lomsdal-Visten page, 663 on Abisko's, 2026-09-13) — the counts the
+Drives the built map in a browser and reports **some 650 readings** (665 on the
+Lomsdal-Visten page, 665 on Abisko's, 2026-09-13) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,

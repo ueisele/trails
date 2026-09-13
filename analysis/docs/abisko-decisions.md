@@ -1656,6 +1656,23 @@ else. **Asking to read a place is asking**: a place's page now shows itself and 
 through one `showDetails`, called from both branches of `detail` — the early return for a place was
 the branch that needed it. True of every hut and quay on both maps, not only of the search's mark.
 
+#### And the legend that did not follow the map
+
+Reported next: *when I choose a place name in the search, the name layer is switched on
+automatically, but the layer panel still shows it as off — and the only way to switch the names off
+again is to tick that layer on and off.*
+
+True, and not only of the search. The legend **is** the layer control on this map (§ its own
+docstring), and it set each row's checkbox once, when it was drawn, and then followed nothing but
+its own presses. Anything else that switched a layer — and a row taken switches its own layer on,
+which is what it is for, or the row would move the map to a blank spot — left the box saying one
+thing and the map drawing another.
+
+It follows `layeradd` and `layerremove` now, which Leaflet fires for every add and remove whoever
+asked, so what the panel says is what the map holds. **Collapsed into one repaint through a
+timeout**, because a layer group adds its features one at a time and each of those is an event:
+12,461 of them on the Lomsdal page for a single tick.
+
 #### Driven
 
 *A way to a goal becomes a plan*, nine readings on both pages, with the position switched off —
@@ -1664,8 +1681,10 @@ map is in. A position typed in, set as a goal; a second typed in and added as a 
 itself; the flag's four lines; the two places as the plan's two points in order with the goal gone;
 a third typed in as a waypoint, reachable by a finger on a phone, and landing on its five decimals.
 And in *a position typed into the search*, two more: the mark is 36 px wide, and a real press at its
-middle on a phone-sized screen brings its page back, open, with the offer on it. 663 readings a
-page.
+middle on a phone-sized screen brings its page back, open, with the offer on it. In *the search
+lists what it finds*, two more again: with every layer switched off first, a row taken leaves
+exactly one row ticked in the legend — its own — and every other row is put back as it was found.
+665 readings a page.
 
 ---
 
@@ -1685,8 +1704,9 @@ A line per change to this document or to the decisions in it, newest first.
   companions only. Then the offer turned out to be unreachable in plan mode, which is what the next
   question from the phone was about: a popup's page kept its place against the plan's own refreshes,
   and the check learned to read what a finger could do. Then the mark itself could not be got back
-  to: an 18 px target, and a page that came back folded. 663 readings a page, republished at
-  3,554,271 and 17,112,389 bytes.
+  to: an 18 px target, and a page that came back folded. And the legend, which is this map's layer
+  control, said *off* about a layer a search result had switched on — it followed its own presses
+  and not the map. 665 readings a page, republished at 3,555,297 and 17,113,415 bytes.
 
 - **2026-09-13, fifth of the day** — the search lists what it finds and reads a position
   (§9.27), asked for from the phone. Typing no longer hides the map: the matches are rows, one per

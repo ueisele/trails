@@ -19412,7 +19412,7 @@ class _Legend(MacroElement):
                     name.textContent = row.label;
                     line.appendChild(name);
                     body.appendChild(line);
-                    drawn.push({line: line, layer: layer});
+                    drawn.push({line: line, layer: layer, tick: tick});
                 });
 
                 // A colour for something switched off is a colour for something
@@ -19424,6 +19424,30 @@ class _Legend(MacroElement):
                     });
                 }
                 paint();
+
+                // **What a box says is what the map holds, not what was last
+                // pressed on it.** Reported from the phone: a search result in a
+                // layer that was switched off switches that layer on -- which is
+                // what it is for, or the row would move the map to a blank spot
+                // -- and this panel went on saying *off* about names that were
+                // drawn. The only way back was to tick the row on and off again.
+                //
+                // Leaflet fires these for every add and every remove, whoever
+                // asked for it, so following them is following the map itself.
+                // **Collapsed into one repaint**, because a layer group adds its
+                // features one by one and each of those is an event: 12,461 of
+                // them on the Lomsdal page for a single tick.
+                var following = null;
+                function follow() {
+                    drawn.forEach(function (row) {
+                        if (row.tick && row.layer) { row.tick.checked = map.hasLayer(row.layer); }
+                    });
+                    paint();
+                }
+                map.on('layeradd layerremove', function () {
+                    if (following) { return; }
+                    following = window.setTimeout(function () { following = null; follow(); }, 0);
+                });
 
                 function draw() {
                     header.textContent = (open ? '▾ ' : '▸ ') + title;

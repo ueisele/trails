@@ -2629,6 +2629,26 @@ class TestCanvas:
 
         assert '"preferCanvas": true' in html
 
+    def test_the_legend_says_what_the_map_holds(self, trails):
+        """Reported from the phone: a search result in a layer that was switched
+        off switches that layer on -- which is what it is for -- and the legend
+        went on saying *off* about names that were drawn. The only way back was
+        to tick the row on and off again.
+
+        Leaflet fires `layeradd` and `layerremove` for every add and remove,
+        whoever asked, so following them is following the map. Collapsed into one
+        repaint, because a group adds its features one by one and each is an
+        event -- 12,461 of them on the Lomsdal page for a single tick."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="Paths", search_field="trail_name")
+        maps.add_legend(fmap, "What is drawn", [maps.LegendRow("Paths", "#000000", group)])
+
+        html = fmap.get_root().render()
+        assert "map.on('layeradd layerremove', function () {" in html
+        assert "if (row.tick && row.layer) { row.tick.checked = map.hasLayer(row.layer); }" in html
+        # One repaint and not one per feature.
+        assert "if (following) { return; }" in html
+
     def test_the_search_draws_nothing_and_hides_nothing(self, trails):
         """It used to reach into how every feature was drawn -- `display` on an
         element, `stroke` and `interactive` on a canvas layer that has none --

@@ -3492,6 +3492,39 @@ def the_search_lists_what_it_finds(page: Any) -> Check:
     went = page.evaluate(drawn)
     off = metres_between((first["lat"], first["lon"]), (went["lat"], went["lng"])) if rows and first.get("lat") is not None else None
 
+    # **And the legend says what the map holds.** A row taken switches its own
+    # layer on; reported from the phone, the legend went on saying *off* about
+    # it, and ticking it on and off again was the only way back. Driven with
+    # every layer switched off first, so that the one the row switches on is the
+    # one thing ticked -- and the ticks are put back as they were found.
+    ticked = page.evaluate(
+        """() => { const ticks = [...document.querySelectorAll('.trails-legend input[type=checkbox]')];
+        const was = ticks.map(t => t.checked);
+        ticks.forEach(t => { if (t.checked) { t.click(); } });
+        return was; }"""
+    )
+    page.wait_for_timeout(900)
+    page.evaluate("(name) => window.trailsSearch.find(name)", SCENE.search_for)
+    page.evaluate("() => window.trailsSearch.take(0)")
+    page.wait_for_timeout(1600)
+    legend = page.evaluate(
+        """() => { const ticks = [...document.querySelectorAll('.trails-legend input[type=checkbox]')];
+        const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
+        let drawn = 0;
+        ticks.forEach(t => { if (t.checked) { drawn += 1; } });
+        return {ticked: drawn,
+                rows: [...document.querySelectorAll('.trails-legend label')].filter(l => {
+                  const t = l.querySelector('input'); return t && t.checked;
+                }).map(l => l.textContent.trim()).slice(0, 2)}; }"""
+    )
+    page.evaluate(
+        """(was) => { const ticks = [...document.querySelectorAll('.trails-legend input[type=checkbox]')];
+        ticks.forEach((t, i) => { if (t.checked !== was[i]) { t.click(); } }); }""",
+        ticked,
+    )
+    page.wait_for_timeout(900)
+    restored = page.evaluate("""() => [...document.querySelectorAll('.trails-legend input[type=checkbox]')].map(t => t.checked)""")
+
     page.evaluate(LET_THE_SEARCH_GO)
     page.wait_for_timeout(400)
 
@@ -3520,6 +3553,13 @@ def the_search_lists_what_it_finds(page: Any) -> Check:
             Reading("and does not move the map either", round(moved, 1), 0.0, within=1.0),
             Reading("taking a row is what moves it", took, True),
             Reading("m from where the row said it was", off if off is not None else -1.0, 0.0, within=60.0),
+            Reading(
+                "and the legend ticks the layer it switched on",
+                [legend["ticked"], bool(legend["rows"])],
+                [1, True],
+                note=" | ".join(legend["rows"]),
+            ),
+            Reading("with every other row left as it was", restored, ticked),
         ],
     )
 
