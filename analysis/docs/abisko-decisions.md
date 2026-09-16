@@ -1932,6 +1932,12 @@ A line per change to this document or to the decisions in it, newest first.
   asked for the script, and a browser asks at most daily and only around a navigation. One
   conditional request on load, guarded by `navigator.onLine`, and no automatic reload — the
   document is still taken by the reader, through the *newer* line.
+  **Published with the relief**: the tree first (9,330 objects, 104.0 MB, 250 s), then both pages —
+  `abisko.html` 3,575,908 B and `lomsdal-visten.html` 17,133,175 B, byte-identical from the edge,
+  and both workers with them. Checked live in Firefox against `atlas.cairn.zone/abisko`: the relief
+  tiles are asked for and answer, the worker is active with nothing left waiting, and the panel
+  names the new tree. The comparison mockup under `~/mockups/hillshade` is gone, its figures
+  being in §6.6.
 
 - **2026-09-16** — the relief is shaded (§6.6), asked for from the phone with two photographs of a
   Calazo sheet: *"Fast schon ein 3D Effekt."* Neither Lantmäteriet's sheet nor Kartverket's carries
