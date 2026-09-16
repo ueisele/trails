@@ -1955,7 +1955,9 @@ A line per change to this document or to the decisions in it, newest first.
   `register()` already, and the extra call fetched it a second time on every load, the whole 30 kB
   where Safari sends no validator. Firefox had folded the two into one, which is why the first
   measurement here did not show it. Test pages `c` and `d` behind the tunnel, three loads each,
-  server-side log with the `Service-Worker: script` header as the mark.
+  server-side log with the `Service-Worker: script` header as the mark. **Published**: both pages
+  and both workers, `abisko.html` 3,575,518 B and `lomsdal-visten.html` 17,132,785 B,
+  byte-identical from the edge, neither carrying the call; 690 and 682 readings before it.
 
 - **2026-09-16, second of the day** — the page asks for a newer worker every time it loads (§9.30),
   asked for with the publish. The worker already skipped waiting and claimed its clients; nothing
