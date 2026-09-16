@@ -58,15 +58,17 @@ and Overpass and takes considerably longer. Re-fetch on purpose with
 `--force-download`; `command make cache-clean` throws the cache away entirely,
 which is rarely what you want.
 
-**The Abisko ground** is two more targets. `command make tiles` copies the base-map
+**The Abisko ground** is three more targets. `command make tiles` copies the base-map
 tiles for the box out of Lantmäteriet's open download over FTP (no login), and
 `command make dem` builds z8–z13 height tiles from the 1 m height model, which
 needs the Geotorget login in the environment — run it from `home/trails-map` as
-`sops exec-env secrets.sops.env 'cd ../../trails && command make dem'`. Both
-resume, both write under `analysis/output/`, and `make deploy ARGS="--tree …"`
+`sops exec-env secrets.sops.env 'cd ../../trails && command make dem'`.
+`command make shade` cuts the relief shadow the page lays under the contours out of the
+same cached model, z8–z15, and needs no login once `make dem` has cached it. All three
+resume, all three write under `analysis/output/`, and `make deploy ARGS="--tree …"`
 uploads what they wrote. `analysis/docs/abisko-decisions.md` carries every figure.
 
-**Or the whole chain at once**: `command make abisko` runs tiles, dem, the graph
+**Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, the graph
 with its report and the page, in that order, and from `home/trails-map`
 `just abisko` is the same with the login supplied. Every step resumes or reads
 the cache, so a rerun costs a few minutes of checking and the page; it builds
@@ -134,7 +136,11 @@ no login — and OSM. Heights come off the cached 1 m model rather than a point
 service; the place names are Lantmäteriet's *Ortnamn* (`io/sources/ortnamn.py`, the
 country file fetched once with the login); and the page reads the same model off the height tiles `make dem` cut
 (`maps.HeightTiles`, beside the provider's map tiles; the worker keeps them and
-the offline panel counts them). A state trail's popup links to the county's page
+the offline panel counts them). **The relief is shaded from that same model**
+(`maps.ShadeTiles`, `processing/shade_tiles.py`): neither Lantmäteriet's sheet nor
+Kartverket's carries shading, so the page draws its own over the base and under
+everything it draws itself, black with an alpha channel so level ground stays the
+sheet's own colour. It has a row in the legend and starts on. A state trail's popup links to the county's page
 for it on Naturkartan, one link per *BD* number on the chain, out of a hand-kept
 catalogue (`analysis/routes/abisko-naturkartan.toml`, `io/sources/naturkartan.py`):
 links only, since Naturkartan's terms allow private use alone and the line itself
@@ -240,8 +246,8 @@ command make drive                                          # the Lomsdal-Visten
 command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
-Drives the built map in a browser and reports **some 680 readings** (681 on the
-Lomsdal-Visten page, 681 on Abisko's, 2026-09-13) — the counts the
+Drives the built map in a browser and reports **some 690 readings** (682 on the
+Lomsdal-Visten page, 690 on Abisko's, 2026-09-16) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,
@@ -309,9 +315,9 @@ steps, in that order, because this one does not build.
 A map named `<name>` is uploaded as `<name>.html` and is then readable at `https://<host>/<name>`.
 Publishing a second map needs nothing but a second upload.
 
-**Tile trees** are the other thing it uploads — the base-map tiles `command make tiles` copied and
-the height tiles `command make dem` built — and they go up by `aws s3 sync` rather than one `cp`
-each:
+**Tile trees** are the other thing it uploads — the base-map tiles `command make tiles` copied,
+the height tiles `command make dem` built and the relief `command make shade` cut — and they go up
+by `aws s3 sync` rather than one `cp` each:
 
 ```bash
 command make deploy ARGS="--tree tiles"              # analysis/output/tiles/ → s3://…/tiles/

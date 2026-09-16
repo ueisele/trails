@@ -204,23 +204,37 @@ dem:
 	uv run python analysis/scripts/dem_tiles.py $(ARGS)
 	@echo "✅ analysis/output/dem/lantmateriet/1/"
 
+# Cuts the relief shadow the page draws under the contours from the same cached mosaic the height
+# tiles come from, z8-z15. Needs no login once `make dem` has cached the mosaic. Resumable; the
+# deploy uploads with --tree shade. See analysis/docs/abisko-decisions.md §6.6.
+shade:
+	@echo "🌄 Building the Abisko hillshade tiles (resumable)..."
+	uv run python analysis/scripts/shade_tiles.py $(ARGS)
+	@echo "✅ analysis/output/shade/lantmateriet/1/"
+
 # The whole Abisko chain in one run, in the order the pieces depend on each other: the base-map
-# tiles off the FTP, the height mosaic and tiles with the login, then the graph (Topografi 50 through
+# tiles off the FTP, the height mosaic and tiles with the login, the hillshade off the same mosaic,
+# then the graph (Topografi 50 through
 # the delivery API with the login and the order id, Naturvårdsverket's nightly files, OSM through
 # Overpass -- fetched once each and cached) and its report, then the page. Every step is resumable
 # or cached, so a second run is a few minutes of checking and a rebuild of the page. It builds and
-# does not publish: `just deploy --map abisko --tree tiles --tree dem` from home/trails-map is that,
-# and `just abisko` there is this target with the login supplied.
-abisko: tiles dem
+# does not publish: `just deploy --map abisko --tree tiles --tree dem --tree shade` from
+# home/trails-map is that, and `just abisko` there is this target with the login supplied.
+abisko: tiles dem shade
 	@echo "🕸️  Building and reporting the Abisko routing graph..."
 	uv run python analysis/scripts/route_graph.py --park abisko
 	@echo "🗺️  Building the Abisko map..."
 	uv run python analysis/scripts/lomsdal_visten.py --park abisko
-	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem (from home/trails-map)"
+	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem --tree shade (from home/trails-map)"
 
+# **Pinned, because the browser is not.** `--with playwright` takes the newest release, and each
+# one wants a Firefox build of its own: the newest asks for `firefox-1543` and dies with
+# "Executable doesn't exist", which reads like a missing browser rather than a version skew. The box
+# holds `firefox-1538`, which is 1.62.0's. When the browser cache is refreshed, print
+# `p.firefox.executable_path` under a few releases and move this to the one that matches.
 drive:
 	@echo "🖱️  Driving the built map in a browser (about ten minutes a page; output is buffered under systemd)..."
-	uv run --with playwright python analysis/scripts/drive_map.py $(ARGS)
+	uv run --with "playwright==1.62.0" python analysis/scripts/drive_map.py $(ARGS)
 
 cache-clean:
 	@echo "🗑️  Cleaning cache directory (.cache)..."

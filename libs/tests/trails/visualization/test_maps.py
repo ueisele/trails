@@ -1710,7 +1710,10 @@ class TestNativeZoomFollowsWhatIsKept:
         assert "layer.redraw();" in html
         # **Only while the switch is on.** With it off the reader wants the real
         # z17 from Kartverket and can have it.
-        assert "var want = (on() && top) ? top : layer.options.trailsNative;" in html
+        # And never above the level a tree was actually cut to: the sheet goes
+        # deeper than the relief overlay does, and asking the shadow for a level
+        # nobody built would blank it.
+        assert "var want = (on() && top) ? Math.min(top, layer.options.trailsNative) : layer.options.trailsNative;" in html
         # The sheet's own ceiling is remembered once, so turning offline mode off
         # gives back what the layer was built with rather than a guess.
         assert "layer.options.trailsNative = layer.options.maxNativeZoom;" in html
@@ -2116,8 +2119,12 @@ class TestTwoMapsOnOneOrigin:
         and magnifies past it; a sheet ending at z17 is drawn scaled at z18
         rather than requested and answered 404."""
         fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
-        layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
+        layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer) and not child.overlay]
         assert [(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in layers] == [(17, 17)]
+        # The relief overlay is drawn over the same sheet and stops two levels
+        # earlier, which is where the height model stops having anything to add.
+        relief = getattr(fmap, maps.MAP_SHADE_ATTR)
+        assert (relief.options["max_zoom"], relief.options["max_native_zoom"]) == (17, 15)
         norwegian = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         layers = [child for child in norwegian._children.values() if isinstance(child, folium.TileLayer)]
         assert {(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in layers} == {(18, 18)}
@@ -2182,8 +2189,77 @@ class TestTwoMapsOnOneOrigin:
         assert '"zoom": 13' in heights
         assert '"13": 92693' in heights
         # Over the same set the map is kept over, after the map tiles of it.
-        assert "if (HEIGHTS && !ground && z === HEIGHTS.zoom) {" in html
-        assert "state.bytes += next.ground ? heightWeight(next.z) : (WEIGHT[next.z] || 45000);" in html
+        assert "if (pass === 'map' && HEIGHTS && z === HEIGHTS.zoom) {" in html
+        assert "state.bytes += next.kind === 'height' ? heightWeight(next.z)" in html
+
+    def test_the_relief_is_drawn_over_the_sheet_and_is_on_when_the_page_opens(self, tmp_path):
+        """What the paper map has and ours had not: a shadow under the contours.
+        It is a drawing decision rather than data, so it has a checkbox — and it
+        starts on, because the plasticity is the point of building it."""
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
+        relief = getattr(fmap, maps.MAP_SHADE_ATTR)
+        assert relief.overlay is True and relief.show is True
+        assert relief.options["opacity"] == 0.55
+        # Over every base layer whatever order they are switched in.
+        assert relief.options["z_index"] == 250
+        # Held to the box the tree was cut to, so panning west of it asks for
+        # nothing rather than collecting 404s the offline panel reads as a
+        # connection giving out.
+        assert relief.options["bounds"] == [[68.139, 18.15], [68.46, 19.10]]
+
+    def test_the_relief_credits_the_body_whose_model_it_is(self, tmp_path):
+        """It is cut from Lantmäteriet's height model and laid over Lantmäteriet's
+        sheet. Leaflet keys its attributions by the string, so naming the same
+        body twice adds a count rather than a second line."""
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
+        relief = getattr(fmap, maps.MAP_SHADE_ATTR)
+        assert relief.options["attribution"] == maps._LANTMATERIET_ATTRIBUTION
+
+    def test_the_relief_is_never_taken_for_the_sheet(self, tmp_path):
+        """The offline panel finds the base map by walking the map's layers for
+        the first one with tiles. A reader who switches the sheet off and on
+        again puts it back behind the overlay, at which point the download would
+        fetch the shadow and call it the map."""
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        assert "if (layer.options && layer.options.trailsShade) { return; }" in html
+        assert '"trailsShade": true' in html or '"trails_shade": true' in html
+
+    def test_the_worker_answers_the_relief_from_what_was_kept(self, tmp_path):
+        """A sheet answered from the store with no shadow over it would look
+        like the download had half failed."""
+        page, companions = self.abisko(tmp_path)
+        script = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
+        assert 'var SHADE_PREFIX = "/shade/lantmateriet/1/" ? new URL("/shade/lantmateriet/1/", self.location.href).href : null;' in script
+        assert "(SHADE_PREFIX && request.url.indexOf(SHADE_PREFIX) === 0)" in script
+        # And a tile of it is found under an older stand like any other.
+        assert "if (SHADE_PREFIX && plain.indexOf(SHADE_PREFIX) === 0) { return SHADE_PREFIX; }" in script
+
+    def test_the_offline_panel_keeps_the_relief_at_every_level_it_draws(self, tmp_path):
+        """Unlike the heights, which are read at one zoom and so kept at one:
+        the relief is drawn, so a reader who keeps ground to z16 and pans out to
+        z12 wants it there too."""
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        shade = html.split("var SHADE = ")[1].split(";\n")[0]
+        assert '"url": "/shade/lantmateriet/1/{z}/{x}/{y}.png"' in shade
+        assert '"top": 15' in shade
+        assert "if (Number(z) > SHADE.top) { return; }" in html
+        assert "if (pass !== 'shade' && SHADE && z <= SHADE.top) {" in html
+        assert "kind: 'shade'" in html
+
+    def test_the_first_map_carries_no_relief(self, tmp_path):
+        """Kartverket's sheet has no height model of this project's behind it,
+        so there is nothing to cut a shadow from and the page draws none."""
+        page = tmp_path / "lomsdal-visten.html"
+        fmap = maps.create_map(bounds=(12.0, 65.0, 13.0, 66.0), companions=maps.Companions.of("lomsdal-visten"))
+        assert getattr(fmap, maps.MAP_SHADE_ATTR, None) is None
+        maps.add_chrome(fmap)
+        maps.save_map(fmap, page)
+        html = page.read_text(encoding="utf-8")
+        assert "var SHADE = null;" in html
+        script = maps.write_service_worker(page, maps.PROVIDERS["kartverket"], maps.Companions.of("lomsdal-visten")).read_text(encoding="utf-8")
+        assert 'var SHADE_PREFIX = "" ? new URL' in script
 
     def test_the_first_map_carries_no_height_tiles(self, tmp_path):
         page = tmp_path / "lomsdal-visten.html"

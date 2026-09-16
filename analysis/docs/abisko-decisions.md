@@ -603,6 +603,104 @@ The Naturvårdsverket trail data carries winter trails (over lakes and bogs) bes
 as their own legend row, off by default, and never enter the graph. The August–September use of
 this map is the reason.
 
+
+### 6.6 The relief is shaded, from the model the profile already reads
+
+Uwe, 2026-09-16, with two photographs of a Calazo 1:25 000 sheet of Latnjavággi: *"Gibt es eine
+Möglichkeit die Höhenunterschiede auf der digitalen Karte deutlicher hervorzuheben? … Fast schon
+ein 3D Effekt."*
+
+**The paper sheet has shading and ours had none** — read off the tiles rather than assumed:
+Lantmäteriet's *Topografisk webbkarta* at z14, z15 and z16 over Latnjajávri and Kartverket's
+*Topo* at z14 over Lomsdal-Visten carry contours, water and lettering and no relief at all. So the
+plasticity is not something to turn up in the sheet; it has to be drawn.
+
+**Decided: cut it here, from the 1 m height model already cached for §6.3.** The mosaic is on
+forge (`.cache/elevation/`, 4 m posts), which makes the whole thing a build step rather than a new
+source, a new licence or a new login. `trails.processing.shade_tiles` does the cutting,
+`analysis/scripts/shade_tiles.py` and `make shade` drive it, and the tree goes up with
+`--tree shade` beside the other two.
+
+**Black with an alpha channel, not a grey image multiplied over the sheet.** Both were built and
+looked at over the same ground. A grey hillshade darkens level ground too — level ground shades to
+`sin(altitude)`, not to white — and the whole map goes grey with it. With the shadow written as
+`alpha = clip(1 − shade / sin(altitude), 0, 1)` the level and the lit are transparent, so the sheet
+keeps its cream, its water and its forest, and only what is turned away from the light darkens.
+
+**Light from the north-west at 45°.** North-west is what relief shading has used since it was drawn
+by hand: a reader takes a lit south-east slope as convex, so lighting from the other quarter turns
+every valley into a ridge. It is also the one thing here a unit test is worth — `np.gradient` hands
+back rows first, and naming those two the other way round lights the map from the wrong side while
+every number in it stays plausible.
+
+**Drawn at 0.55, and that figure was measured rather than chosen.** What bounds it is not the
+contours: the shadow multiplies line and ground alike, so their contrast in the darkest tenth of a
+crop holds at **1.49:1 at 35 % and 1.42:1 at 80 %**. What bounds it is absolute darkness — at 70 %
+a steep flank goes near-black and the water and forest colours go with it. At 55 % shaded ground is
+**68 % darker** than unshaded. It touches little of the sheet: alpha is over 0.5 on **6 %** of a
+z12 view of Kårsavagge and **14 %** of a z15 view of a steep flank. The number lives in
+`ShadeTiles.opacity` and costs no rebuild.
+
+**Cut to z15, and not for the usual reason.** A z14 tree and a z15 tree show the *same* ground: the
+heights are smoothed by one post before they are differentiated, so neither resolves anything finer
+than about 8 m. What the deeper tree buys is that the image is not blown up — compared over a steep
+flank, z14 is visibly soft at z16 where z15 is not, and at z17 both are soft and neither is blocky.
+z16 would only redraw z15's ground on a finer grid. The offline panel keeps to z16 by default,
+which is where that difference is, so **z15**.
+
+**Stored in 64 steps of transparency.** A shadow is a smooth ramp and PNG pays for every level of
+it: at full precision a z14 tile is 24.7 kB, at 64 steps 14.4 kB. The cost in the picture is one
+step of `255/63` in alpha, which over the sheet's cream at 0.55 is **2.2 levels of 255** — under
+where banding is seen, and far under what a 4 m model can justify. 32 steps halves it again and
+puts a 4.3-level step into a smooth slope. A palette PNG with `tRNS` was tried in place of RGBA and
+came out slightly *larger*.
+
+**Every tile is computed with a 12 px margin and cut back**, or the gradient at a tile's border has
+no neighbour and every join in the tree draws as a line — over a whole map, a grid. The resampling
+changes with the zoom for the same reason: bilinear while a tile pixel is finer than a post,
+averaged once it is coarser, because bilinear downsampling takes one post of many and aliases the
+shade into noise.
+
+**Address** `shade/lantmateriet/1/{z}/{x}/{y}.png` — a directory per source and a version segment,
+for the reason §6.3 gives: the offline store keys tiles by URL, so a rebuild that changes the
+shading must change the address or a phone would silently mix two builds.
+
+**On the page** it is a tile layer over the base and under everything the page draws itself,
+`zIndex` 250 against the overlay pane's 400, with a row and a checkbox in the legend and **on when
+the page opens**. It is a drawing decision rather than data, and the one case it gets in the way —
+a screen read in full sun — is the reader's to judge. Two things had to be said explicitly for it:
+the layer is held to the box the tree was cut to, or panning west of it collects the 404s §8.2
+taught us to fear; and it carries a `trailsShade` flag, because the offline panel finds the sheet
+by walking the map's layers for the first one with tiles, and a reader who switches the base map
+off and on again puts it back *behind* the overlay.
+
+**Offline it is kept at every level, unlike the heights.** The heights are read at one zoom and so
+kept at one; the relief is drawn, so a reader who keeps ground to z16 and pans out to z12 wants it
+there too. The worker takes a third prefix and the run walks each level three times — sheet, then
+heights where that level carries them, then relief. An offline run also never asks a tree for a
+level it does not have: holding every layer to the kept depth would ask the shadow for a z16 tile
+nobody built and blank it, so the clamp is `min(kept, what the layer was built with)`.
+
+**What it costs.** Measured on the built page against the published one, same selections:
+
+| kept | sheet and heights | with the relief | added |
+|---|---|---|---|
+| a band along a track, z16 | 30.0 MB | 41.2 MB | +11.2 MB |
+| a band along a track, z17 | 37.6 MB | 48.7 MB | +11.1 MB |
+| the whole map, z16 | 398.7 MB | 502.4 MB | +103.7 MB |
+| the whole map, z17 | 903.3 MB | 1,007.0 MB | +103.7 MB |
+
+The addition is flat, because the relief stops at z15 and the two deep levels — where a band spends
+most of what it spends — carry none. The whole tree in the bucket is **9,330 tiles and 104.0 MB**,
+cut in 17 minutes; at full alpha precision it was 181 MB.
+
+**Nothing a phone already holds is touched by this.** The sheet's addresses do not move, so kept
+tiles still answer; the stand row gains a `shade` entry that is absent on an older device and reads
+as *not moved* rather than as stale. A reader who keeps ground and does not run Keep again simply
+has no relief while the switch is on — the worker answers a tile it does not hold with a 1 × 1
+**transparent** PNG, which over a shadow layer draws nothing at all. The token the panel puts on a
+sheet's URL to get past the browser's image cache is put on this layer too, so the shadow comes
+back the moment the ground is kept.
 ---
 
 ## 7. The order of work
@@ -1805,6 +1903,24 @@ Lomsdal and 15 on Abisko, recorded. Both pages 677 readings, none broken.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-16** — the relief is shaded (§6.6), asked for from the phone with two photographs of a
+  Calazo sheet: *"Fast schon ein 3D Effekt."* Neither Lantmäteriet's sheet nor Kartverket's carries
+  shading — read off the tiles — so the page draws its own, cut here from the 1 m height model
+  already cached for §6.3. Black with an alpha channel rather than a grey image multiplied over the
+  sheet, so level ground keeps the map's cream; light from the north-west at 45°; drawn at 0.55,
+  which was measured against contrast in the darkest tenth (1.49:1 at 35 %, 1.42:1 at 80 % — so the
+  contours are not what bounds it) and against absolute darkness (at 70 % a flank goes near-black);
+  cut to z15, where a z14 tree is visibly soft at z16 and the model has nothing more to give past
+  it; stored in 64 steps of alpha, which halves the tree for a 2.2-level step of 255 in the drawn
+  sheet. A row and a checkbox in the legend, **on when the page opens**. The worker takes a third
+  prefix, the offline run walks each level three times and never asks a tree for a level it does not
+  have, and the panel is told not to take the overlay for the sheet. 9,330 tiles, 104.0 MB; a band
+  costs 11 MB more and the whole map 104 MB more. `make shade`, `--tree shade`, and a check of eight
+  readings in the drive — 690 a page on Abisko, 682 on Lomsdal-Visten, which declares the check a
+  chosen skip because Kartverket's sheet has no model of ours behind it. `make drive` pinned to
+  `playwright==1.62.0` on the way past: the newest release wants a Firefox build this box does not
+  hold, and the failure reads like a missing browser.
+
 - **2026-09-13, seventh of the day** — a tap lands on the line, and not only on its junctions
   (§9.29), reported from the phone as *once one straight line is drawn, every tap after it is one*.
   `snapped` asked only the nodes, and 37 % of Abisko's network (32 % of Lomsdal's) lies more than a
@@ -2049,6 +2165,11 @@ A line per change to this document or to the decisions in it, newest first.
 | how much of the network lies beyond a finger's reach of a node | every walked edge of each built page's graph in Firefox, sampled every 25 m, the straight distance to the nearer of its two end nodes against 10.5 / 21 / 42 / 84 / 150 m; edge lengths summed from the vertices (`/tmp` script, 2026-09-13; the check *a tap in the middle of a long edge* reads the longest edge the same way) |
 | how much of a named chain is the trail it names | every Topografi 50 marked-trail chain read off the built page in Firefox, its name from the packed figures, its line sampled every 50 m against the register's summer lines for that BD number in SWEREF 99 TM |
 | the page's tile reading against the build's mosaic | the page's bilinear rule re-implemented in Python over the z13 tiles on disk, against `markhojd.sample` off the cached 4 m mosaic, at 2,000 uniform random points of the box and along the straight leg planned in Firefox |
+| whether either sheet already carries shading | the tiles themselves: Lantmäteriet's `topowebb` at z14, z15 and z16 over Latnjajávri and Kartverket's `topo` at z14 over Lomsdal-Visten, opened and looked at — no relief in any of them |
+| the strength the relief is drawn at | a 512 px crop of the z15 flank west of Latnjajávri composited at 35, 40, 45, 50, 55, 60, 70 and 80 %: WCAG contrast of contour pixels against ground in the darkest tenth, and the luminance of shaded ground against unshaded; the share of the crop with alpha over 0.5 and over 0.8 at z12 and z15 |
+| z14 against z15 for the relief | one tree cut to z15 and drawn twice through Leaflet's `maxNativeZoom`, at z15, z16 and z17 over the same steep flank, side by side with the unshaded sheet |
+| the steps a relief tile is stored in | forty z14 tiles re-encoded at 256, 128, 64 and 32 steps of alpha and at palette-with-`tRNS`, mean PNG bytes each; the worst step each puts into the drawn sheet computed as `250 × step/255 × 0.55` |
+| what the relief costs a reader offline | `window.trailsOffline.choose()` then `state().counted` on the built page and on the published one, same scopes and zooms, in Playwright Firefox |
 | the straight leg in Firefox | `analysis/output` served by `http.server`, `abisko.html` opened in Playwright Firefox, `window.trailsPlan.place()` twice over open fell, `state()` read back, the `dem/` requests counted |
 | which Lantmäteriet products carry a fee | Geotorget product pages rendered in Playwright Firefox (the site is a single-page app): the `Avgift`, `Villkor`, `Åtkomst` fields of the cache, WMS, vector-tile, översiktlig, raster-download, Topografi 10 and Markhöjdmodell products |
 | the FTP GeoPackage's tile matrix | `curl -r 0-67108863` off the anonymous FTP, the SQLite page count at byte 28 patched to the truncated size, then `gpkg_tile_matrix_set` and `gpkg_tile_matrix` read with `sqlite3` |

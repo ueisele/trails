@@ -100,6 +100,7 @@ PURGE_SETTINGS = (
 TREES = {
     "tiles": "the base-map tiles, tiles/<provider>/<sheet>/<version>/{z}/{x}/{y}.png",
     "dem": "the height tiles, dem/<provider>/<version>/{z}/{x}/{y}.png",
+    "shade": "the hillshade tiles, shade/<provider>/<version>/{z}/{x}/{y}.png",
 }
 
 #: How long an edge may hold an object of a tree. A year is the ceiling browsers honour.

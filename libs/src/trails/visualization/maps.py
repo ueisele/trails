@@ -47,6 +47,11 @@ MAP_COMPANIONS_ATTR = "_trails_companions"
 #: (:class:`Provider`), for the offline panel and the chrome added later.
 MAP_PROVIDER_ATTR = "_trails_provider"
 
+#: Where :func:`create_map` records the hillshade overlay it added, where the
+#: provider has one -- so the legend can give it a row and its checkbox, which
+#: is the only way a reader turns it off.
+MAP_SHADE_ATTR = "_trails_shade"
+
 
 @dataclasses.dataclass(frozen=True)
 class Companions:
@@ -179,6 +184,58 @@ class HeightTiles:
 
 
 @dataclasses.dataclass(frozen=True)
+class ShadeTiles:
+    """Hillshade tiles beside a provider's map tiles: where they are, how deep they go, what they weigh.
+
+    Black-with-alpha PNGs cut by :mod:`trails.processing.shade_tiles`
+    (analysis/docs/abisko-decisions.md §6.6), addressed like the map tiles and
+    kept like them. The page draws them as an overlay over the base map and
+    under everything it draws itself, so the contours keep their colour and the
+    ground beneath them reads as terrain.
+
+    **A layer the reader can switch off, and on by default.** It is a drawing
+    decision rather than data, and the one case it gets in the way -- a screen
+    read in full sun, where every extra bit of dark costs -- is the reader's to
+    judge, not the build's.
+    """
+
+    #: What every hillshade tile's address starts with, root-relative.
+    tiles: str
+    #: The finest zoom cut. Past it Leaflet draws the same tile magnified,
+    #: which is what the ceiling is chosen to be invisible at.
+    top: int
+    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    weight: dict[int, int]
+    #: How dark the shadow is drawn, 0 to 1. The tiles carry the full range, so
+    #: this is the one number that tunes the look and it costs no rebuild.
+    #:
+    #: **0.55 was measured, not chosen.** Legibility of the contours is not what
+    #: bounds it: the shadow multiplies line and ground alike, so their contrast
+    #: holds at 1.49:1 at 35 % and 1.42:1 at 80 %. What bounds it is absolute
+    #: darkness -- at 70 % a steep flank goes near-black and the water and
+    #: forest colours go with it. At 55 % shaded ground is 68 % darker than
+    #: unshaded, which is the paper map's plasticity without its ink.
+    opacity: float = 0.55
+
+    @property
+    def template(self) -> str:
+        """The address of a tile, with ``{z}``, ``{x}`` and ``{y}`` to fill."""
+        return f"{self.tiles}{{z}}/{{x}}/{{y}}.png"
+
+    def as_settings(self) -> dict[str, object]:
+        """What the page is handed: where the tiles are, how deep they go, what they weigh.
+
+        Returns:
+            ``url``, ``top`` and ``weight`` per zoom, for the offline panel.
+        """
+        return {
+            "url": self.template,
+            "top": self.top,
+            "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()},
+        }
+
+
+@dataclasses.dataclass(frozen=True)
 class Provider:
     """Whose tiles a map draws, and the three things the page needs to know about them.
 
@@ -211,6 +268,10 @@ class Provider:
     #: Height tiles cut beside the map tiles, where the map has them. None
     #: for a map whose heights come from a point service.
     heights: HeightTiles | None = None
+    #: Hillshade tiles cut beside the map tiles, where the map has them. None
+    #: for a sheet with no height model of its own behind it -- Kartverket's,
+    #: today -- and then the page draws no relief overlay at all.
+    shade: ShadeTiles | None = None
     #: Where the tiles end, west, south, east, north in degrees -- the box a
     #: tree in our own bucket was cut to. None for a source that answers the
     #: whole world, which is what a third party's cache does.
@@ -259,6 +320,16 @@ PROVIDERS: dict[str, Provider] = {
             tiles="/dem/lantmateriet/1/",
             top=13,
             weight={8: 29019, 9: 35677, 10: 65806, 11: 93498, 12: 93117, 13: 92693},
+        ),
+        # The relief shadow the page draws under the contours (§6.6), z8 to
+        # z15; the weights are the mean per zoom of the first build's 9,330
+        # tiles, 104.0 MB, 2026-09-16. They fall with the zoom because a tile
+        # holds less relief the closer in it is, and the whole tree weighs less
+        # than the height tiles' 55 MB twice over.
+        shade=ShadeTiles(
+            tiles="/shade/lantmateriet/1/",
+            top=15,
+            weight={8: 9528, 9: 10633, 10: 18582, 11: 26043, 12: 25044, 13: 20474, 14: 14404, 15: 9415},
         ),
     ),
 }
@@ -581,6 +652,11 @@ var TILE_PREFIX = new URL("__TILE_PREFIX__", self.location.href).href;
 // switch, because a route planned offline reads its straight legs off them.
 // Empty where there are none, and then nothing here matches.
 var HEIGHT_PREFIX = "__HEIGHT_PREFIX__" ? new URL("__HEIGHT_PREFIX__", self.location.href).href : null;
+// And what a hillshade tile's address starts with, where the map has them. The
+// relief overlay is kept with the map tiles and under the same switch, because
+// a sheet answered from the store with no shadow over it would look like the
+// download had half failed.
+var SHADE_PREFIX = "__SHADE_PREFIX__" ? new URL("__SHADE_PREFIX__", self.location.href).href : null;
 
 // **Where the offline switch is kept, and why it is kept at all.** A service
 // worker is not a process that stays alive: the browser starts it for a fetch
@@ -933,6 +1009,7 @@ function within(ms, work, fallback) {
 function prefixOf(plain) {
     if (plain.indexOf(TILE_PREFIX) === 0) { return TILE_PREFIX; }
     if (HEIGHT_PREFIX && plain.indexOf(HEIGHT_PREFIX) === 0) { return HEIGHT_PREFIX; }
+    if (SHADE_PREFIX && plain.indexOf(SHADE_PREFIX) === 0) { return SHADE_PREFIX; }
     return null;
 }
 
@@ -940,7 +1017,7 @@ function prefixOf(plain) {
 // the one the page names now.
 function olderPrefix(stand, now) {
     if (!stand || !now) { return null; }
-    var was = now === TILE_PREFIX ? stand.tiles : stand.heights;
+    var was = now === TILE_PREFIX ? stand.tiles : (now === HEIGHT_PREFIX ? stand.heights : stand.shade);
     return was && was !== now ? was : null;
 }
 
@@ -1023,7 +1100,8 @@ self.addEventListener("fetch", function (event) {
     // would be written into the terrain cache as terrain. The reader would be
     // told their park was kept, and it would be white.
     if (request.cache === "reload") { return; }
-    if (request.url.indexOf(TILE_PREFIX) === 0 || (HEIGHT_PREFIX && request.url.indexOf(HEIGHT_PREFIX) === 0)) {
+    if (request.url.indexOf(TILE_PREFIX) === 0 || (HEIGHT_PREFIX && request.url.indexOf(HEIGHT_PREFIX) === 0)
+            || (SHADE_PREFIX && request.url.indexOf(SHADE_PREFIX) === 0)) {
         event.respondWith(tileFor(request));
     }
 });
@@ -1089,6 +1167,7 @@ def write_service_worker(beside: pathlib.Path, provider: Provider = PROVIDERS["k
         SERVICE_WORKER.replace("__VERSION__", stamp)
         .replace("__TILE_PREFIX__", provider.tiles)
         .replace("__HEIGHT_PREFIX__", provider.heights.tiles if provider.heights else "")
+        .replace("__SHADE_PREFIX__", provider.shade.tiles if provider.shade else "")
         .replace("__DB__", companions.database)
         .replace("__CACHE__", companions.cache)
     )
@@ -2659,6 +2738,52 @@ def create_map(
             # `access-control-allow-origin: *` -- measured, not assumed.
             cross_origin=True,
         ).add_to(fmap)
+
+    # **The relief shadow, where the provider has one.** It is a tile layer like
+    # the base and sits directly on top of it, so everything this map draws
+    # itself -- paths, markers, the plan -- is drawn over it and keeps its
+    # colour, while the ground beneath the contours reads as terrain
+    # (analysis/docs/abisko-decisions.md §6.6).
+    #
+    # **It credits the same body the sheet under it does, and that draws once.**
+    # The shadow is cut from Lantmäteriet's height model and laid over
+    # Lantmäteriet's map, so the honest credit is the one already there --
+    # and Leaflet keeps its attributions in an object keyed by the string, so
+    # naming it twice adds a count rather than a second line. Folium refuses an
+    # empty attribution outright, which is the right refusal: a tile layer
+    # nobody is credited for is how a licence gets dropped by accident.
+    if provider is not None and provider.shade is not None:
+        shade = folium.TileLayer(
+            tiles=provider.shade.template,
+            attr=_BASE_LAYERS[base]["attr"] or "",
+            name="Relief",
+            overlay=True,
+            # The legend is this map's layer control and is given the row
+            # explicitly, by the caller that knows what to call it.
+            control=False,
+            show=True,
+            opacity=provider.shade.opacity,
+            max_zoom=provider.top,
+            max_native_zoom=provider.shade.top,
+            cross_origin=True,
+            # **Named, so the offline panel does not take it for the base map.**
+            # That panel finds the sheet by walking the map's layers for the
+            # first one with tiles, and a reader who switches the base off and on
+            # again puts it back *after* this one -- at which point the download
+            # would fetch the shadow and call it the map.
+            trails_shade=True,
+            # Above every base layer whatever order they are switched in: a
+            # reader changing the sheet would otherwise draw the new base over
+            # the shadow, and Leaflet stacks equal z-indices by insertion.
+            z_index=250,
+            # **Held to the box the tree was cut to.** Outside it every tile is
+            # a 404, and the offline panel reads a run of those as the
+            # connection giving out (§8.2) -- so the layer is told where the
+            # ground ends rather than finding out one refusal at a time.
+            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]] if provider.extent else None,
+        )
+        shade.add_to(fmap)
+        setattr(fmap, MAP_SHADE_ATTR, shade)
 
     # Every page gets the colours, chrome or no chrome: the panels carry them
     # as inline styles, and an inline style resolves its variables against the
@@ -17322,6 +17447,9 @@ class _OfflinePanel(MacroElement):
                 // third again on a band along a day's walk. `null` where the
                 // map carries none, and then nothing here changes.
                 var HEIGHTS = {{ this.heights_json }};
+                // The relief overlay's tiles, kept with the map's. Null where
+                // the sheet has no height model behind it.
+                var SHADE = {{ this.shade_json }};
                 // Where the source's tiles end, or null for one that answers
                 // everywhere. A margin is clipped to it: see `padded`.
                 var EXTENT = {{ this.extent_json }};
@@ -17711,11 +17839,28 @@ class _OfflinePanel(MacroElement):
                         tiles += levels[HEIGHTS.zoom].size;
                         bytes += levels[HEIGHTS.zoom].size * heightWeight(HEIGHTS.zoom);
                     }
+                    // **Every level of the shadow, not one.** The heights are
+                    // read at a single zoom and so are kept at one; the relief
+                    // is *drawn*, so a reader who keeps ground to z16 and pans
+                    // out to z12 wants it there too. It is cheap enough for that
+                    // to be the obvious answer: over a band to z17 the whole
+                    // shadow is a few megabytes against the sheet's hundreds.
+                    if (SHADE) {
+                        Object.keys(levels).forEach(function (z) {
+                            if (Number(z) > SHADE.top) { return; }
+                            tiles += levels[z].size;
+                            bytes += levels[z].size * shadeWeight(z);
+                        });
+                    }
                     return {tiles: tiles, bytes: bytes};
                 }
 
                 function heightWeight(z) {
                     return (HEIGHTS && HEIGHTS.weight[z]) || 90000;
+                }
+
+                function shadeWeight(z) {
+                    return (SHADE && SHADE.weight[z]) || 30000;
                 }
 
                 // **Buffered, because the zoom row prices every level it draws.**
@@ -17830,7 +17975,13 @@ class _OfflinePanel(MacroElement):
                 function base() {
                     var found = null;
                     map.eachLayer(function (layer) {
-                        if (!found && layer.getTileUrl && layer._url) { found = layer; }
+                        if (found || !layer.getTileUrl || !layer._url) { return; }
+                        // Not the relief overlay, which is tiles like the sheet
+                        // and is not the sheet. Switching the base map off and
+                        // on again re-adds it behind this one in the map's own
+                        // order, so "the first tile layer" is not enough.
+                        if (layer.options && layer.options.trailsShade) { return; }
+                        found = layer;
                     });
                     return found;
                 }
@@ -17864,10 +18015,19 @@ class _OfflinePanel(MacroElement):
                     return new URL(HEIGHTS.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
                 }
 
+                function shadeUrlFor(x, y, z) {
+                    return new URL(SHADE.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
+                }
+
                 function walker(picked) {
                     picked = picked || recount();
                     var layer = base();
-                    var z = BOTTOM, it = null, ground = false;
+                    // Which of the three trees this level is being walked
+                    // for: the sheet, then its heights where that level carries
+                    // them, then its relief. Each pass is the same set of
+                    // tiles, so the level is walked up to three times and the
+                    // set is built once.
+                    var z = BOTTOM, it = null, pass = 'map';
                     return {
                         total: layer ? picked.tiles : 0,
                         bytes: picked.bytes,
@@ -17882,14 +18042,17 @@ class _OfflinePanel(MacroElement):
                                 var step = it.next();
                                 if (step.done) {
                                     it = null;
-                                    // The height tiles of this level, after the
-                                    // map tiles of it and over the same set.
-                                    if (HEIGHTS && !ground && z === HEIGHTS.zoom) {
-                                        ground = true;
+                                    if (pass === 'map' && HEIGHTS && z === HEIGHTS.zoom) {
+                                        pass = 'height';
                                         it = picked.levels[z].values();
                                         continue;
                                     }
-                                    ground = false;
+                                    if (pass !== 'shade' && SHADE && z <= SHADE.top) {
+                                        pass = 'shade';
+                                        it = picked.levels[z].values();
+                                        continue;
+                                    }
+                                    pass = 'map';
                                     z += 1;
                                     continue;
                                 }
@@ -17897,10 +18060,13 @@ class _OfflinePanel(MacroElement):
                                 // run weighs what it keeps, and parsing it back
                                 // out of the URL would be the third time this
                                 // page had written that particular guess down.
-                                if (ground) {
-                                    return {url: heightUrlFor(keyX(step.value), keyY(step.value), z), z: z, ground: true};
+                                if (pass === 'height') {
+                                    return {url: heightUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'height'};
                                 }
-                                return {url: urlFor(layer, keyX(step.value), keyY(step.value), z), z: z, ground: false};
+                                if (pass === 'shade') {
+                                    return {url: shadeUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'shade'};
+                                }
+                                return {url: urlFor(layer, keyX(step.value), keyY(step.value), z), z: z, kind: 'map'};
                             }
                             return null;
                         }
@@ -18201,10 +18367,16 @@ class _OfflinePanel(MacroElement):
                 }
 
                 // The prefixes the page names now, one per kind of tile.
+                // **Keyed by the walker's own words for the three trees**, so
+                // a tile fetched as `shade` is replaced under `shade` without
+                // anything having to map one name onto the other.
                 function prefixes() {
                     return {
+                        map: TILE_PREFIX,
                         tiles: TILE_PREFIX,
-                        heights: HEIGHTS ? new URL(HEIGHTS.url.split('{z}')[0], location.href).href : null
+                        height: HEIGHTS ? new URL(HEIGHTS.url.split('{z}')[0], location.href).href : null,
+                        heights: HEIGHTS ? new URL(HEIGHTS.url.split('{z}')[0], location.href).href : null,
+                        shade: SHADE ? new URL(SHADE.url.split('{z}')[0], location.href).href : null
                     };
                 }
 
@@ -18212,11 +18384,13 @@ class _OfflinePanel(MacroElement):
                 function staleOf(stand) {
                     if (!stand) { return null; }
                     var now = prefixes(), out = null;
-                    if (stand.tiles && stand.tiles !== now.tiles) { out = {tiles: stand.tiles, heights: null}; }
-                    if (now.heights && stand.heights && stand.heights !== now.heights) {
-                        out = out || {tiles: null, heights: null};
-                        out.heights = stand.heights;
+                    function moved(mine, theirs) {
+                        return mine && theirs && theirs !== mine ? theirs : null;
                     }
+                    var was = {map: moved(now.map, stand.tiles), tiles: moved(now.tiles, stand.tiles),
+                               height: moved(now.height, stand.heights), heights: moved(now.heights, stand.heights),
+                               shade: moved(now.shade, stand.shade)};
+                    if (was.tiles || was.heights || was.shade) { out = was; }
                     return out;
                 }
 
@@ -18372,7 +18546,11 @@ class _OfflinePanel(MacroElement):
                         if (layer.options.trailsNative === undefined) {
                             layer.options.trailsNative = layer.options.maxNativeZoom;
                         }
-                        var want = (on() && top) ? top : layer.options.trailsNative;
+                        // **Never above the level the tree was cut to.** The
+                        // sheet goes deeper than the relief does, so holding
+                        // every layer to the kept depth would ask the shadow for
+                        // a z16 tile that was never built and blank it.
+                        var want = (on() && top) ? Math.min(top, layer.options.trailsNative) : layer.options.trailsNative;
                         if (layer.options.maxNativeZoom === want) { return; }
                         layer.options.maxNativeZoom = want;
                         layer.redraw();
@@ -18687,9 +18865,10 @@ class _OfflinePanel(MacroElement):
                     // two stands of the same ground; what the run did not ask
                     // for is swept once it has completed.
                     function replacing(next) {
-                        var was = state.stale && (next.ground ? state.stale.heights : state.stale.tiles);
+                        var stood = prefixes();
+                        var was = state.stale && state.stale[next.kind];
                         if (!was) { return Promise.resolve(false); }
-                        var now = next.ground ? prefixes().heights : prefixes().tiles;
+                        var now = stood[next.kind];
                         return dbDelete(KEPT, was + next.url.slice(now.length));
                     }
                     state.done_ = kept().then(function (had) {
@@ -18741,7 +18920,8 @@ class _OfflinePanel(MacroElement):
                                 // overstate what it had.
                                 if (kept) {
                                     if (next.z > state.top) { state.top = next.z; }
-                                    state.bytes += next.ground ? heightWeight(next.z) : (WEIGHT[next.z] || 45000);
+                                    state.bytes += next.kind === 'height' ? heightWeight(next.z)
+                                        : (next.kind === 'shade' ? shadeWeight(next.z) : (WEIGHT[next.z] || 45000));
                                 }
                                 // **Give up on the connection, not on the tile.**
                                 // One tile that will not come is a tile, and the
@@ -19603,6 +19783,7 @@ class _OfflinePanel(MacroElement):
         self.cap = provider.cap
         self.weight_json = _script_json({str(zoom): bytes_ for zoom, bytes_ in provider.weight.items()})
         self.heights_json = _script_json(provider.heights.as_settings() if provider.heights else None)
+        self.shade_json = _script_json(provider.shade.as_settings() if provider.shade else None)
         self.tile_prefix_json = _script_json(provider.tiles)
         extent = provider.extent
         self.extent_json = _script_json({"w": extent[0], "s": extent[1], "e": extent[2], "n": extent[3]} if extent else None)

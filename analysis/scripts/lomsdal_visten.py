@@ -3133,6 +3133,14 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
     for label, count, color in point_rows:
         legend.append(maps.LegendRow(f"{label} ({count})", color, switched(f"{label} ({count})")))
 
+    # **The relief shadow gets the last row, where the map has one.** It is the
+    # only row that switches something drawn *under* everything else, so it is
+    # listed where a reader looks for the ground rather than among the lines;
+    # its swatch is the shadow's own colour at the opacity it is drawn at.
+    relief = getattr(fmap, maps.MAP_SHADE_ATTR, None)
+    if relief is not None:
+        legend.append(maps.LegendRow("Relief shading", "rgba(0,0,0,0.55)", relief))
+
     maps.add_legend(fmap, f"{which.name} {which.kind}", legend)
 
     # It shares the bottom left with the legend and the scale bar, and puts

@@ -190,6 +190,11 @@ class Scene:
     #: the top of the copy, on Lantmäteriet's.
     cap: int = 16
 
+    #: What a relief tile's address has in it, where this page draws one. None
+    #: for a sheet with no height model of this project's behind it, and then
+    #: the relief check says so instead of failing.
+    relief_path: str | None = None
+
     @property
     def companions(self) -> maps.Companions:
         """The files beside the page and the database it keeps, by the stem."""
@@ -209,6 +214,11 @@ SCENES: dict[str, Scene] = {
         standing=(65.4400, 13.0400),
         a_step=(65.44002, 13.04002),
         a_walk=(65.4418, 13.0400),
+        # Kartverket's sheet has no height model of this project's behind it, so
+        # there is nothing to cut a relief shadow from and the page draws none
+        # (§6.6). Chosen, not forced: when Norway gets its own shade tree this
+        # line comes out and the check runs here too.
+        skips=("the relief under the map",),
         # 176 tiles at z14 and 416 at z15.
         kept_area=((65.528, 12.955), (65.572, 12.955), (65.572, 13.145), (65.528, 13.145)),
         unkept=(65.30, 12.40),
@@ -327,6 +337,8 @@ SCENES: dict[str, Scene] = {
         far_off_the_map=(67.50, 20.00),
         # The z13 Terrarium tiles under `dem/`, read for a straight leg.
         heights_path="/dem/",
+        # The relief shadow the page draws under the contours (§6.6).
+        relief_path="/shade/",
         base_maps=1,
         borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
         search_for="Abiskojaure",
@@ -349,14 +361,16 @@ SCENES: dict[str, Scene] = {
             # Of the sixty longest marked-trail chains (§9.26).
             "chains named after a register trail": 32,
             "things in the marker pane": 86,
-            "checkboxes in the legend": 19,
+            # Twenty since the relief shadow got its row (§6.6).
+            "checkboxes in the legend": 20,
             "of them switched off": 4,
             "zoom before": 10,
             "zoom after": 12,
             "desktop: map free with nothing asked for": 97.7,
             "upright: map free with nothing asked for": 97.8,
             "sideways: map free with nothing asked for": 97.7,
-            "and the legend is what is in it": 19,
+            # Twenty since the relief shadow got its row (§6.6).
+            "and the legend is what is in it": 20,
             "px of map left above it": 562,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 189,
@@ -388,9 +402,10 @@ SCENES: dict[str, Scene] = {
             # The long chain is BD 21, BD 92, BD 16 and BD 91 run together, and
             # Naturkartan has a page for each.
             "links to pages published elsewhere": 4,
-            # The tree from z11 to z17 (146,975 tiles) and the 440 height tiles, over
-            # the box widened on 2026-09-13 (§9.24).
-            "tiles the whole map holds at its cap": 147415,
+            # The tree from z11 to z17 (146,975 tiles), the 440 height tiles and,
+            # since §6.6, the 9,310 relief tiles of every level up to z15, over
+            # the box widened on 2026-09-13 (§9.24). 1,007 MB against 903.
+            "tiles the whole map holds at its cap": 156725,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -661,7 +676,8 @@ FURNITURE = with_map(
     boxes: legend.filter(i => i.type === 'checkbox').length,
     off: legend.filter(i => i.type === 'checkbox' && !i.checked).length,
     radios: bases.filter(i => i.type === 'radio').length,
-    tiles: Object.values(__MAP__._layers).filter(l => l._url).length,
+    tiles: Object.values(__MAP__._layers).filter(l => l._url && !(l.options || {}).trailsShade).length,
+    relief: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsShade).length,
     // The rail takes the top-left corner and the zoom steps aside for it. Left
     // rather than top, because both stand at 10 from the top and only the one
     // that moved says whether the corner made room.
@@ -1050,8 +1066,11 @@ def furniture(page: Any) -> Check:
             stands("of them switched off", seen["off"]),
             Reading("base maps offered", seen["radios"], SCENE.base_maps),
             # Folium hands every base layer to the map; the legend takes the
-            # unwanted ones off again, and nothing else will.
+            # unwanted ones off again, and nothing else will. **The relief is
+            # not one of them**: it is tiles over the sheet rather than a sheet,
+            # so it is counted on its own line and never as a base map.
             Reading("tile layers actually on the map", seen["tiles"], 1),
+            Reading("and the relief over it", seen["relief"], 1 if SCENE.relief_path else 0),
             Reading("separate layer controls", seen["layerControls"], 0),
             # **One bar and not two.** A bare `L.control.scale()` draws metric
             # and imperial, one above the other, and with the zoom line under
@@ -5424,6 +5443,123 @@ THE_STOPS = """() => {
           at: window.trailsChrome.state().aimingAt}; }"""
 
 
+def the_relief_under_the_map(page: Any) -> Check:
+    """The shadow the page lays under the contours, and the checkbox that takes it away.
+
+    **What the paper map has and ours had not.** Neither Lantmäteriet's sheet
+    nor Kartverket's carries shading, so the ground reads as a pattern of brown
+    lines rather than as terrain. This one is cut here from the height model the
+    profile already reads, laid over the sheet and under everything the page
+    draws itself.
+
+    Four things can go wrong and none of them shows in the source: the tiles can
+    be asked for and not answer; the shadow can land *over* the paths instead of
+    under them; the checkbox can switch nothing; and the offline panel can take
+    the overlay for the base map and download the shadow instead of the sheet.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the overlay drew, and what the checkbox did to it
+    """
+    if SCENE.relief_path is None:
+        return Check("the relief under the map", skipped="this page's sheet has no height model behind it")
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(1200)
+
+    def drawn() -> tuple[int, int]:
+        """How many relief tiles the page asked for, and how many answered."""
+        return tuple(
+            page.evaluate(
+                """(path) => {
+                    const imgs = [...document.querySelectorAll('img')].filter(i => (i.src || '').indexOf(path) >= 0);
+                    return [imgs.length, imgs.filter(i => i.naturalWidth > 0).length];
+                }""",
+                SCENE.relief_path,
+            )
+        )
+
+    asked, answered = drawn()
+    settings = page.evaluate(
+        with_map("""(path) => {
+            let found = null;
+            __MAP__.eachLayer(layer => {
+                if (found || !layer._url || String(layer._url).indexOf(path) < 0) { return; }
+                found = {opacity: layer.options.opacity, top: layer.options.maxNativeZoom,
+                         above: layer.options.zIndex, shade: !!layer.options.trailsShade};
+            });
+            return found;
+        }"""),
+        SCENE.relief_path,
+    )
+    # The pane the page's own lines are drawn into. The shadow has to sit under
+    # it, or a marked trail would be shaded along with the ground it crosses.
+    lines_at = page.evaluate(with_map("() => Number(getComputedStyle(__MAP__.getPane('overlayPane')).zIndex) || 400"))
+    # Which layer the offline panel would download as the sheet, after the base
+    # map has been switched off and on again -- which is what puts it *behind*
+    # the overlay in the map's own order.
+    page.evaluate(
+        with_map("""() => {
+            let sheet = null;
+            __MAP__.eachLayer(layer => { if (!sheet && layer._url && !(layer.options || {}).trailsShade) { sheet = layer; } });
+            if (sheet) { __MAP__.removeLayer(sheet); __MAP__.addLayer(sheet); }
+            return null;
+        }""")
+    )
+    page.wait_for_timeout(800)
+    sheet = page.evaluate("() => { const p = window.trailsOffline.prefixes(); return p && p.tiles ? p.tiles : null; }")
+
+    switched = page.evaluate(
+        """() => {
+            const rows = [...document.querySelectorAll('.trails-legend label')];
+            const row = rows.find(r => (r.textContent || '').indexOf('Relief') >= 0);
+            if (!row) { return 'no row'; }
+            const box = row.querySelector('input[type=checkbox]');
+            if (!box) { return 'no checkbox'; }
+            box.click();
+            return box.checked;
+        }"""
+    )
+    page.wait_for_timeout(1200)
+    after_off = drawn()[1]
+    if switched is False:
+        page.evaluate(
+            """() => {
+                const rows = [...document.querySelectorAll('.trails-legend label')];
+                const row = rows.find(r => (r.textContent || '').indexOf('Relief') >= 0);
+                row.querySelector('input[type=checkbox]').click();
+            }"""
+        )
+        page.wait_for_timeout(1500)
+    back = drawn()[1]
+
+    return Check(
+        "the relief under the map",
+        [
+            Reading("the relief asks for tiles", asked > 0, True, note=f"{asked} asked"),
+            Reading("and every one of them answers", answered, asked),
+            Reading("drawn at the strength that was measured", settings and settings.get("opacity"), 0.55),
+            Reading("and no deeper than the model can carry", settings and settings.get("top"), 15),
+            Reading(
+                "under the page's own lines",
+                bool(settings and settings.get("above") < lines_at),
+                True,
+                note=f"{settings and settings.get('above')} against {lines_at}",
+            ),
+            Reading("the legend's checkbox takes it off the map", after_off, 0),
+            Reading("and puts it back", back > 0, True, note=f"{back} answered"),
+            Reading(
+                "and the panel still downloads the sheet, not the shadow",
+                bool(sheet and SCENE.relief_path not in sheet),
+                True,
+                note=str(sheet),
+            ),
+        ],
+    )
+
+
 def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
     """What a tap means, and what it costs to be a finger's width out.
 
@@ -9575,6 +9711,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_way_across_a_sound_goes_round_by_land(page))
     if wanted(a_planned_leg_that_is_not_worth_routing):
         checks.append(a_planned_leg_that_is_not_worth_routing(page))
+    if wanted(the_relief_under_the_map):
+        checks.append(the_relief_under_the_map(page))
     if wanted(a_tap_beside_a_path_in_plan_mode):
         checks.append(a_tap_beside_a_path_in_plan_mode(page))
     if wanted(a_tap_in_the_middle_of_a_long_edge):
