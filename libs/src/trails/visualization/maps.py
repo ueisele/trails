@@ -1695,8 +1695,33 @@ class _ServiceWorker(MacroElement):
                     window.trailsWorker.why = 'no worker in this browser';
                     return;
                 }
-                navigator.serviceWorker.register('{{ this.worker }}'{{ this.scope_arg }}).then(function () {
+                navigator.serviceWorker.register('{{ this.worker }}'{{ this.scope_arg }}).then(function (registered) {
                     window.trailsWorker.kept = true;
+                    // **Asked for once on every load, because nothing else asks
+                    // promptly enough.** A browser re-fetches a worker script on
+                    // its own schedule -- at most daily, and only around a
+                    // navigation -- and an installed app resumed from the home
+                    // screen may not navigate for days. So a deploy could sit on
+                    // the edge unnoticed while the reader looked at the map that
+                    // was there before it. This is one conditional request for a
+                    // file of a few tens of kB, and the worker this page installs
+                    // already calls `skipWaiting` and `clients.claim`, so what
+                    // comes back takes over at once instead of waiting for every
+                    // tab to close.
+                    //
+                    // **Only with a connection.** Off one it would fail anyway;
+                    // the point of the guard is the radio, which on this map is
+                    // the thing being spent. The page still asks the reader
+                    // before reloading under them -- a document that replaces
+                    // itself mid-gesture is how a half-drawn plan is lost.
+                    if (registered && registered.update && navigator.onLine !== false) {
+                        try {
+                            var asking = registered.update();
+                            if (asking && asking.catch) { asking.catch(function () {}); }
+                        } catch (refused) {
+                            window.trailsWorker.why = String(refused);
+                        }
+                    }
                 }, function (failure) {
                     window.trailsWorker.why = String(failure);
                 });

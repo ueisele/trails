@@ -2138,6 +2138,31 @@ class TestTwoMapsOnOneOrigin:
         first = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
         assert "navigator.serviceWorker.register('sw.js').then" in first
 
+    def test_the_page_asks_for_a_newer_worker_every_time_it_loads(self, tmp_path):
+        """A browser re-fetches a worker script on its own schedule — at most
+        daily, and only around a navigation — so an installed app resumed from
+        the home screen can sit on the worker it had for days while a deploy
+        waits on the edge. The worker this page installs already calls
+        `skipWaiting` and `clients.claim`, so what comes back takes over at once;
+        what was missing was somebody asking."""
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        assert "if (registered && registered.update && navigator.onLine !== false) {" in html
+        assert "var asking = registered.update();" in html
+        # Off a connection it would fail anyway, and the guard is there for the
+        # radio rather than for the failure.
+        assert "navigator.onLine !== false" in html
+        # And a refusal is swallowed: an update that cannot be had is not a
+        # reason for the map not to open.
+        assert "if (asking && asking.catch) { asking.catch(function () {}); }" in html
+
+    def test_the_worker_takes_over_without_waiting_for_every_tab_to_close(self):
+        """Asking is only half of it. Without these two a new worker installs and
+        then waits, and the page goes on being served by the one it had."""
+        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        assert "self.skipWaiting();" in source
+        assert "self.clients.claim()" in source
+
     def test_the_page_opens_its_own_database_and_caches(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")

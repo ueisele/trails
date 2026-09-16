@@ -1899,9 +1899,39 @@ Lomsdal and 15 on Abisko, recorded. Both pages 677 readings, none broken.
 
 ---
 
+### 9.30 The page asks for a newer worker every time it loads — settled, 2026-09-16
+
+Uwe, 2026-09-16, with the relief: *"Aber mach beim Service worker das er bei mir beim Laden einmal
+sofort aktualisiert wird."*
+
+**Two halves, and only one of them was missing.** The worker already calls `self.skipWaiting()` on
+install and `self.clients.claim()` on activate, so a new one takes over at once instead of waiting
+for every tab to close. What nothing did was *ask*. A browser re-fetches a worker script on its own
+schedule — at most once a day, and only around a navigation — and an installed app resumed from the
+home screen may not navigate for days, so a deploy could sit on the edge while the reader looked at
+the map that was there before it.
+
+**Decided:** `registration.update()` once on every load, right after `register()` resolves. It is
+one conditional request for a file of about 29 kB, and the object is served `no-cache` (§4.5), so
+the edge revalidates rather than answering from its own copy.
+
+Two things it deliberately does not do. It does not run without a connection — `navigator.onLine`
+guards it, not because the fetch would fail loudly but because the radio is the thing this map
+spends carefully. And it does not reload the page under the reader: the *document* is still the one
+the worker had, and a document that replaces itself mid-gesture is how a half-drawn plan is lost, so
+the existing *newer* line and its Reload button stay the way the new map is taken.
+
+---
+
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-16, second of the day** — the page asks for a newer worker every time it loads (§9.30),
+  asked for with the publish. The worker already skipped waiting and claimed its clients; nothing
+  asked for the script, and a browser asks at most daily and only around a navigation. One
+  conditional request on load, guarded by `navigator.onLine`, and no automatic reload — the
+  document is still taken by the reader, through the *newer* line.
 
 - **2026-09-16** — the relief is shaded (§6.6), asked for from the phone with two photographs of a
   Calazo sheet: *"Fast schon ein 3D Effekt."* Neither Lantmäteriet's sheet nor Kartverket's carries
