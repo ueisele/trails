@@ -34,6 +34,10 @@ Each notebook is self-contained and downloads/caches its own data.
   Start here if you are coming back to this after a while.
 - `docs/abisko-decisions.md` — the second map, Abisko in Sweden: what was decided,
   what is open, and a log of how each open point was settled
+- `docs/garmin-decisions.md` — getting a planned track, and possibly a map, onto a
+  Garmin fēnix 7 without an internet connection. Unlike the others, **nothing in it
+  has been measured on a device** — it says so at the top and lists what must be
+  checked first
 
 ### Scripts
 
