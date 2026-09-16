@@ -2138,23 +2138,19 @@ class TestTwoMapsOnOneOrigin:
         first = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
         assert "navigator.serviceWorker.register('sw.js').then" in first
 
-    def test_the_page_asks_for_a_newer_worker_every_time_it_loads(self, tmp_path):
-        """A browser re-fetches a worker script on its own schedule — at most
-        daily, and only around a navigation — so an installed app resumed from
-        the home screen can sit on the worker it had for days while a deploy
-        waits on the edge. The worker this page installs already calls
-        `skipWaiting` and `clients.claim`, so what comes back takes over at once;
-        what was missing was somebody asking."""
+    def test_the_page_does_not_ask_twice_for_a_newer_worker(self, tmp_path):
+        """A `registration.update()` after `register()` was here for one evening.
+        Measured from the phone against a logging server: Safari fetches the
+        script on every `register()` already, and the extra call fetched it a
+        second time on every load, uncoalesced — the whole file, since Safari
+        mostly sends no validator. Firefox folded the two into one. So the
+        eager check doubled the one request already being made, and the
+        takeover the worker does on its own is the whole of the mechanism."""
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
-        assert "if (registered && registered.update && navigator.onLine !== false) {" in html
-        assert "var asking = registered.update();" in html
-        # Off a connection it would fail anyway, and the guard is there for the
-        # radio rather than for the failure.
-        assert "navigator.onLine !== false" in html
-        # And a refusal is swallowed: an update that cannot be had is not a
-        # reason for the map not to open.
-        assert "if (asking && asking.catch) { asking.catch(function () {}); }" in html
+        assert "registration.update" not in html.replace("No `registration.update()`", "")
+        assert "registered.update()" not in html
+        assert "navigator.serviceWorker.register('abisko-sw.js', {scope: './abisko'}).then(function () {" in html
 
     def test_the_worker_takes_over_without_waiting_for_every_tab_to_close(self):
         """Asking is only half of it. Without these two a new worker installs and

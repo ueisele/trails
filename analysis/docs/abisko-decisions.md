@@ -1899,33 +1899,63 @@ Lomsdal and 15 on Abisko, recorded. Both pages 677 readings, none broken.
 
 ---
 
-### 9.30 The page asks for a newer worker every time it loads — settled, 2026-09-16
+### 9.30 The page asked for a newer worker on every load — done and undone the same evening, 2026-09-16
 
 Uwe, 2026-09-16, with the relief: *"Aber mach beim Service worker das er bei mir beim Laden einmal
-sofort aktualisiert wird."*
+sofort aktualisiert wird."* Then, an hour later: *"Würde gerne unnötiges Laden vermeiden"* — and
+whether that could be tested.
 
-**Two halves, and only one of them was missing.** The worker already calls `self.skipWaiting()` on
-install and `self.clients.claim()` on activate, so a new one takes over at once instead of waiting
-for every tab to close. What nothing did was *ask*. A browser re-fetches a worker script on its own
-schedule — at most once a day, and only around a navigation — and an installed app resumed from the
-home screen may not navigate for days, so a deploy could sit on the edge while the reader looked at
-the map that was there before it.
+**What was built.** The worker already calls `self.skipWaiting()` on install and
+`self.clients.claim()` on activate, so a new one takes over at once. The page gained
+`registration.update()` after `register()`, on the reasoning that a browser checks for a newer
+script only around a navigation and an installed app may not navigate for days. It was published
+with the relief.
 
-**Decided:** `registration.update()` once on every load, right after `register()` resolves. It is
-one conditional request for a file of about 29 kB, and the object is served `no-cache` (§4.5), so
-the edge revalidates rather than answering from its own copy.
+**What was measured, and it says the opposite.** Two one-page tests behind the tunnel — `c` calls
+`register()` alone, `d` calls `register()` and then `update()`, the way the map did — against a
+server that logs every request and marks the ones carrying the `Service-Worker: script` header,
+which only the browser's own fetch of a worker script sends. Each page loaded three times, on
+Firefox here and on Uwe's iPhone in Safari. (The first pair of paths had to be abandoned: one
+`curl` of the script put it into Cloudflare's edge cache for four hours and the log went blind —
+the zone rewrites the tunnel's `max-age`. The scripts are served `private` since, which the edge
+does not cache.)
 
-Two things it deliberately does not do. It does not run without a connection — `navigator.onLine`
-guards it, not because the fetch would fail loudly but because the radio is the thing this map
-spends carefully. And it does not reload the page under the reader: the *document* is still the one
-the worker had, and a document that replaces itself mid-gesture is how a half-drawn plan is lost, so
-the existing *newer* line and its Reload button stay the way the new map is taken.
+| | load 1 | load 2 | load 3 | script fetches a load |
+|---|---|---|---|---|
+| Safari, `register()` alone | 200 | 200 | 304 | **1** |
+| Safari, `register()` + `update()` | 200 + 200 | 200 + 200 | 200 + 304 | **2** |
+| Firefox, `register()` alone | 200 | 304 | 304 | 1 |
+| Firefox, `register()` + `update()` | 200 + 304 | 304 | 304 | 1 after the first |
+
+**Safari fetches the script on every `register()` already**, and `update()` on top of it fetched
+it a second time on every load, uncoalesced. Firefox folded the two into one after the first
+load. And Safari mostly sends no validator, so where Firefox pays a 304 with an empty body Safari
+pays the whole file — 30 kB for the real worker, twice a load with the extra call.
+
+**Decided: the call comes out.** The eager check cost nothing to leave out and doubled the one
+request already being made. What remains is the browser's own check on every load plus the
+worker's own takeover, which together are the whole mechanism — and are what delivered the relief
+to the phone in the first place. The *newer* line and its Reload button stay the way a new
+document is taken; nothing reloads under the reader.
+
+**Two things learned on the way that were not the question.** The zone's cache rule sets edge and
+browser TTL with `override_origin` on every path but `/`, so the `no-cache` the deploy puts on the
+worker never reaches anyone (`home/trails-map/known-issues.md`); harmless, since the script is
+fetched past the HTTP cache anyway and the deploy purges the edge. And a service worker's script
+fetches do not surface in Playwright's request events, so counting them takes a server that logs.
 
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-16, third of the day** — the `registration.update()` of the second entry is taken out
+  again (§9.30), on a measurement from the phone: Safari fetches the worker script on every
+  `register()` already, and the extra call fetched it a second time on every load, the whole 30 kB
+  where Safari sends no validator. Firefox had folded the two into one, which is why the first
+  measurement here did not show it. Test pages `c` and `d` behind the tunnel, three loads each,
+  server-side log with the `Service-Worker: script` header as the mark.
 
 - **2026-09-16, second of the day** — the page asks for a newer worker every time it loads (§9.30),
   asked for with the publish. The worker already skipped waiting and claimed its clients; nothing
@@ -2206,6 +2236,7 @@ A line per change to this document or to the decisions in it, newest first.
 | z14 against z15 for the relief | one tree cut to z15 and drawn twice through Leaflet's `maxNativeZoom`, at z15, z16 and z17 over the same steep flank, side by side with the unshaded sheet |
 | the steps a relief tile is stored in | forty z14 tiles re-encoded at 256, 128, 64 and 32 steps of alpha and at palette-with-`tRNS`, mean PNG bytes each; the worst step each puts into the drawn sheet computed as `250 × step/255 × 0.55` |
 | what the relief costs a reader offline | `window.trailsOffline.choose()` then `state().counted` on the built page and on the published one, same scopes and zooms, in Playwright Firefox |
+| whether the page's own update call is needed | two one-page tests behind the tunnel, `register()` alone and `register()` + `update()`, each loaded three times on Firefox here and on the iPhone in Safari; a Python server logging every request with its `Service-Worker` and conditional headers, the scripts served `private` so the edge cannot answer for them |
 | the straight leg in Firefox | `analysis/output` served by `http.server`, `abisko.html` opened in Playwright Firefox, `window.trailsPlan.place()` twice over open fell, `state()` read back, the `dem/` requests counted |
 | which Lantmäteriet products carry a fee | Geotorget product pages rendered in Playwright Firefox (the site is a single-page app): the `Avgift`, `Villkor`, `Åtkomst` fields of the cache, WMS, vector-tile, översiktlig, raster-download, Topografi 10 and Markhöjdmodell products |
 | the FTP GeoPackage's tile matrix | `curl -r 0-67108863` off the anonymous FTP, the SQLite page count at byte 28 patched to the truncated size, then `gpkg_tile_matrix_set` and `gpkg_tile_matrix` read with `sqlite3` |
