@@ -1959,7 +1959,9 @@ A line per change to this document or to the decisions in it, newest first.
   panel (§6.6), on Uwe's question whether it belonged among the layers. It is not a line or a
   point and has no colour or count; it is how the sheet underneath is drawn, which is that panel's
   question. The legend is back to 19 rows on Abisko; the drive reads the switch from the other
-  panel.
+  panel. 691 readings on Abisko, 682 on Lomsdal-Visten. **Published**: `abisko.html` 3,576,572 B
+  and `lomsdal-visten.html` 17,133,919 B, byte-identical from the edge, the checkbox under the
+  sheet and no legend row.
 
 - **2026-09-16, third of the day** — the `registration.update()` of the second entry is taken out
   again (§9.30), on a measurement from the phone: Safari fetches the worker script on every
