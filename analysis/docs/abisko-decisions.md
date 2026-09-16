@@ -666,8 +666,13 @@ for the reason §6.3 gives: the offline store keys tiles by URL, so a rebuild th
 shading must change the address or a phone would silently mix two builds.
 
 **On the page** it is a tile layer over the base and under everything the page draws itself,
-`zIndex` 250 against the overlay pane's 400, with a row and a checkbox in the legend and **on when
-the page opens**. It is a drawing decision rather than data, and the one case it gets in the way —
+`zIndex` 250 against the overlay pane's 400, with a checkbox under the sheet in the *Base map*
+panel and **on when the page opens**. It had a row in the legend for a day. Uwe, 2026-09-16:
+*"Gehört es wirklich da hin? Oder ist das nicht eine andere Art von Karten overlay?"* — and it is:
+the legend's own hint is *every line and point drawn here, and what each one is*, while the base-map
+panel's is *which sheet is drawn underneath*. The relief is neither a line nor a point, has no
+colour to explain and no count, and answers the second question, so it sits beside the choice of
+sheet — which on Abisko also gives that panel a choice to offer, where before it held one radio. It is a drawing decision rather than data, and the one case it gets in the way —
 a screen read in full sun — is the reader's to judge. Two things had to be said explicitly for it:
 the layer is held to the box the tree was cut to, or panning west of it collects the 404s §8.2
 taught us to fear; and it carries a `trailsShade` flag, because the offline panel finds the sheet
@@ -1949,6 +1954,12 @@ fetches do not surface in Playwright's request events, so counting them takes a 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-16, fourth of the day** — the relief's checkbox moves from the legend to the base-map
+  panel (§6.6), on Uwe's question whether it belonged among the layers. It is not a line or a
+  point and has no colour or count; it is how the sheet underneath is drawn, which is that panel's
+  question. The legend is back to 19 rows on Abisko; the drive reads the switch from the other
+  panel.
 
 - **2026-09-16, third of the day** — the `registration.update()` of the second entry is taken out
   again (§9.30), on a measurement from the phone: Safari fetches the worker script on every

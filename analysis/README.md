@@ -140,7 +140,7 @@ the offline panel counts them). **The relief is shaded from that same model**
 (`maps.ShadeTiles`, `processing/shade_tiles.py`): neither Lantmäteriet's sheet nor
 Kartverket's carries shading, so the page draws its own over the base and under
 everything it draws itself, black with an alpha channel so level ground stays the
-sheet's own colour. It has a row in the legend and starts on. A state trail's popup links to the county's page
+sheet's own colour. It is a checkbox under the sheet in the base-map panel and starts on. A state trail's popup links to the county's page
 for it on Naturkartan, one link per *BD* number on the chain, out of a hand-kept
 catalogue (`analysis/routes/abisko-naturkartan.toml`, `io/sources/naturkartan.py`):
 links only, since Naturkartan's terms allow private use alone and the line itself
@@ -247,7 +247,7 @@ command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
 Drives the built map in a browser and reports **some 690 readings** (682 on the
-Lomsdal-Visten page, 690 on Abisko's, 2026-09-16) — the counts the
+Lomsdal-Visten page, 691 on Abisko's, 2026-09-16) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
 which zoom the scale bar says it is on, that the map opens with the network off,

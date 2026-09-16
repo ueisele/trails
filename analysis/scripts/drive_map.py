@@ -361,16 +361,16 @@ SCENES: dict[str, Scene] = {
             # Of the sixty longest marked-trail chains (§9.26).
             "chains named after a register trail": 32,
             "things in the marker pane": 86,
-            # Twenty since the relief shadow got its row (§6.6).
-            "checkboxes in the legend": 20,
+            # Nineteen: the relief shadow had a row here for a day and is a
+            # checkbox under the sheet in the base-map panel since (§6.6).
+            "checkboxes in the legend": 19,
             "of them switched off": 4,
             "zoom before": 10,
             "zoom after": 12,
             "desktop: map free with nothing asked for": 97.7,
             "upright: map free with nothing asked for": 97.8,
             "sideways: map free with nothing asked for": 97.7,
-            # Twenty since the relief shadow got its row (§6.6).
-            "and the legend is what is in it": 20,
+            "and the legend is what is in it": 19,
             "px of map left above it": 562,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 189,
@@ -5511,9 +5511,13 @@ def the_relief_under_the_map(page: Any) -> Check:
     page.wait_for_timeout(800)
     sheet = page.evaluate("() => { const p = window.trailsOffline.prefixes(); return p && p.tiles ? p.tiles : null; }")
 
+    # **In the base-map panel, not the legend.** The relief is how the sheet
+    # underneath is drawn, which is that panel's question; the legend lists
+    # lines and points with a colour and a count, and this has neither.
+    in_legend = page.evaluate("() => [...document.querySelectorAll('.trails-legend label')].some(r => (r.textContent || '').indexOf('Relief') >= 0)")
     switched = page.evaluate(
         """() => {
-            const rows = [...document.querySelectorAll('.trails-legend label')];
+            const rows = [...document.querySelectorAll('.trails-basemap label')];
             const row = rows.find(r => (r.textContent || '').indexOf('Relief') >= 0);
             if (!row) { return 'no row'; }
             const box = row.querySelector('input[type=checkbox]');
@@ -5527,7 +5531,7 @@ def the_relief_under_the_map(page: Any) -> Check:
     if switched is False:
         page.evaluate(
             """() => {
-                const rows = [...document.querySelectorAll('.trails-legend label')];
+                const rows = [...document.querySelectorAll('.trails-basemap label')];
                 const row = rows.find(r => (r.textContent || '').indexOf('Relief') >= 0);
                 row.querySelector('input[type=checkbox]').click();
             }"""
@@ -5548,7 +5552,8 @@ def the_relief_under_the_map(page: Any) -> Check:
                 True,
                 note=f"{settings and settings.get('above')} against {lines_at}",
             ),
-            Reading("the legend's checkbox takes it off the map", after_off, 0),
+            Reading("its checkbox sits under the sheet, not among the layers", in_legend, False),
+            Reading("and takes it off the map", after_off, 0),
             Reading("and puts it back", back > 0, True, note=f"{back} answered"),
             Reading(
                 "and the panel still downloads the sheet, not the shadow",

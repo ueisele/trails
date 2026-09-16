@@ -19890,6 +19890,31 @@ class _Legend(MacroElement):
                     line.appendChild(name);
                     picked.appendChild(line);
                 });
+                // **The relief shadow belongs to the sheet, not to the layers.**
+                // It is neither a line nor a point and has no colour for the
+                // legend to explain; it answers how the ground underneath is
+                // drawn, which is this panel's one question. So it is a checkbox
+                // under the sheets, where a reader who wants the map plain finds
+                // it beside the choice of map -- and the legend stays a list of
+                // things with a colour and a count (decisions §6.6).
+                var relief = {{ this.relief_name }};
+                if (relief) {
+                    var shading = document.createElement('label');
+                    shading.className = 'trails-relief';
+                    shading.style.cssText = 'display:flex;align-items:center;gap:6px;margin:6px 0 3px;cursor:pointer';
+                    var shadeTick = document.createElement('input');
+                    shadeTick.type = 'checkbox';
+                    shadeTick.style.cssText = 'flex:none;margin:0';
+                    shadeTick.checked = map.hasLayer(relief);
+                    shadeTick.addEventListener('change', function () {
+                        if (shadeTick.checked) { map.addLayer(relief); } else { map.removeLayer(relief); }
+                    });
+                    var word = document.createElement('span');
+                    word.textContent = 'Relief shading';
+                    shading.appendChild(shadeTick);
+                    shading.appendChild(word);
+                    picked.appendChild(shading);
+                }
                 if (bases.length) { body.appendChild(picked); }
 
                 // A row is a label where it switches something and a plain div
@@ -20012,6 +20037,9 @@ class _Legend(MacroElement):
         self.base_names: list[str] = []
         self.base_labels_json = "[]"
         self.base_shown_json = "[]"
+        # The relief overlay's variable in the page, or `null`: filled in at
+        # render, beside the base layers, since it is drawn in their panel.
+        self.relief_name = "null"
 
     def render(self, **kwargs: Any) -> Any:
         """Collect the base layers, then render.
@@ -20036,6 +20064,8 @@ class _Legend(MacroElement):
                 shown.append(bool(child.show))
         self.base_labels_json = _script_json(labels)
         self.base_shown_json = _script_json(shown)
+        relief = getattr(self._parent, MAP_SHADE_ATTR, None) if self._parent is not None else None
+        self.relief_name = relief.get_name() if relief is not None else "null"
         return super().render(**kwargs)
 
 

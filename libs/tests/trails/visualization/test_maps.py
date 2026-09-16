@@ -2228,6 +2228,25 @@ class TestTwoMapsOnOneOrigin:
         # connection giving out.
         assert relief.options["bounds"] == [[68.139, 18.15], [68.46, 19.10]]
 
+    def test_the_relief_is_switched_beside_the_sheet_and_not_among_the_layers(self, tmp_path):
+        """It is neither a line nor a point, has no colour for the legend to
+        explain and no count; it is how the ground underneath is drawn, which
+        is the base-map panel's one question. So its checkbox goes there, under
+        the sheets, and the legend stays a list of things with a colour."""
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
+        maps.add_legend(fmap, "Abisko", [maps.LegendRow("a line", "#000", None)])
+        html = fmap.get_root().render()
+        relief = getattr(fmap, maps.MAP_SHADE_ATTR).get_name()
+        assert f"var relief = {relief};" in html
+        assert "shading.className = 'trails-relief';" in html
+        assert "word.textContent = 'Relief shading';" in html
+        assert "picked.appendChild(shading);" in html
+        # And a map with no relief says so in the same place, rather than
+        # drawing a checkbox that switches nothing.
+        first = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_legend(first, "Lomsdal", [maps.LegendRow("a line", "#000", None)])
+        assert "var relief = null;" in first.get_root().render()
+
     def test_the_relief_credits_the_body_whose_model_it_is(self, tmp_path):
         """It is cut from Lantmäteriet's height model and laid over Lantmäteriet's
         sheet. Leaflet keys its attributions by the string, so naming the same
