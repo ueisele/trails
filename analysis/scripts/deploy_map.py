@@ -227,6 +227,14 @@ def beside(companions: Companions) -> dict[str, tuple[str, str]]:
         # The one object whose whole job is to be noticed when it changes -- an edge
         # holding yesterday's worker would hold yesterday's map with it, for as long
         # as the header said to.
+        #
+        # **Today nobody sees this header.** The zone's cache rule sets edge and
+        # browser TTL with `override_origin` on every path but `/`, so a reader
+        # gets `max-age=300` whatever is written here -- measured 2026-09-16,
+        # `home/trails-map/known-issues.md`. It costs nothing, because a browser
+        # fetches a worker's top-level script bypassing the HTTP cache anyway and
+        # the deploy purges the edge; the intent is kept here so that a front end
+        # that does respect it gets the right answer.
         companions.worker: ("text/javascript; charset=utf-8", "no-cache"),
         # What makes the map installable, and an installed map is what survives
         # WebKit's seven-day sweep of storage a script created. It changes only when
