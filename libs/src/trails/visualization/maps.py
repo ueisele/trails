@@ -26,6 +26,7 @@ import pandas as pd
 from branca.element import Element, Figure, MacroElement
 from jinja2 import Template
 
+from trails.processing import slope_tiles
 from trails.processing.dem_tiles import TERRARIUM_OFFSET, TERRARIUM_STEP
 from trails.routing import elevation
 
@@ -51,6 +52,11 @@ MAP_PROVIDER_ATTR = "_trails_provider"
 #: provider has one -- so the legend can give it a row and its checkbox, which
 #: is the only way a reader turns it off.
 MAP_SHADE_ATTR = "_trails_shade"
+
+#: Where :func:`create_map` records the slope-class overlay it added, where the
+#: provider has one -- for the legend's checkbox under the relief's, and the
+#: class rows it explains the colours with.
+MAP_SLOPE_ATTR = "_trails_slope"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -236,6 +242,70 @@ class ShadeTiles:
 
 
 @dataclasses.dataclass(frozen=True)
+class SlopeTiles:
+    """Slope-class tiles beside a provider's map tiles: where they are, how deep they go, what they weigh.
+
+    Palette PNGs cut by :mod:`trails.processing.slope_tiles`
+    (analysis/docs/abisko-decisions.md §6.7): how steep the ground is, in the
+    SLF's avalanche classes with one of ours at 25° below them, one colour
+    each with the alpha in the palette. Drawn over the relief shadow and under
+    everything the page draws itself, so a class keeps its hue and the shadow
+    only darkens it, which is how swisstopo and Kartverket lay theirs.
+
+    **A layer the reader switches on, and off by default.** It answers a
+    question the paths do not ask -- how steep is it *here*, off them -- and
+    an eighth of the ground coloured is a lot of colour for a reader who is
+    following a marked trail. The profile grades the *path*, in per cent along
+    it; this grades the ground, in degrees down the fall line, and the two
+    are not the same measure even where they share a colour.
+    """
+
+    #: What every slope tile's address starts with, root-relative.
+    tiles: str
+    #: The finest zoom cut: the relief's, since the classes are read off the
+    #: same smoothed heights and the model has no more to give past it.
+    top: int
+    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    weight: dict[int, int]
+
+    @property
+    def template(self) -> str:
+        """The address of a tile, with ``{z}``, ``{x}`` and ``{y}`` to fill."""
+        return f"{self.tiles}{{z}}/{{x}}/{{y}}.png"
+
+    def as_settings(self) -> dict[str, object]:
+        """What the page is handed: where the tiles are, how deep they go, what they weigh.
+
+        Returns:
+            ``url``, ``top`` and ``weight`` per zoom, for the offline panel.
+        """
+        return {
+            "url": self.template,
+            "top": self.top,
+            "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()},
+        }
+
+    @staticmethod
+    def classes() -> list[dict[str, object]]:
+        """The legend's rows: each class's lower bound, colour and who set the bound.
+
+        Returns:
+            One row per class, lowest first, ``from``, ``to`` (``None`` for the
+            last), ``colour`` and ``source``
+        """
+        edges = slope_tiles.EDGES
+        return [
+            {
+                "from": edges[at],
+                "to": edges[at + 1] if at + 1 < len(edges) else None,
+                "colour": slope_tiles.COLOURS[at],
+                "source": slope_tiles.SOURCES[at],
+            }
+            for at in range(len(edges))
+        ]
+
+
+@dataclasses.dataclass(frozen=True)
 class Provider:
     """Whose tiles a map draws, and the three things the page needs to know about them.
 
@@ -272,6 +342,9 @@ class Provider:
     #: for a sheet with no height model of its own behind it -- Kartverket's,
     #: today -- and then the page draws no relief overlay at all.
     shade: ShadeTiles | None = None
+    #: Slope-class tiles cut beside the map tiles, where the map has them
+    #: (§6.7): the same condition as the relief's, and None with it.
+    slope: SlopeTiles | None = None
     #: Where the tiles end, west, south, east, north in degrees -- the box a
     #: tree in our own bucket was cut to. None for a source that answers the
     #: whole world, which is what a third party's cache does.
@@ -330,6 +403,15 @@ PROVIDERS: dict[str, Provider] = {
             tiles="/shade/lantmateriet/1/",
             top=15,
             weight={8: 9528, 9: 10633, 10: 18582, 11: 26043, 12: 25044, 13: 20474, 14: 14404, 15: 9415},
+        ),
+        # The slope classes the page colours over the relief (§6.7), z8 to
+        # z15; the weights are the mean per zoom of the first build's 9,330
+        # tiles, 24.7 MB, 2026-09-16. Flat colour in a palette: a quarter of
+        # the relief's 104 MB.
+        slope=SlopeTiles(
+            tiles="/slope/lantmateriet/1/",
+            top=15,
+            weight={8: 2328, 9: 2539, 10: 3618, 11: 4532, 12: 4411, 13: 3955, 14: 3172, 15: 2398},
         ),
     ),
 }
@@ -657,6 +739,10 @@ var HEIGHT_PREFIX = "__HEIGHT_PREFIX__" ? new URL("__HEIGHT_PREFIX__", self.loca
 // a sheet answered from the store with no shadow over it would look like the
 // download had half failed.
 var SHADE_PREFIX = "__SHADE_PREFIX__" ? new URL("__SHADE_PREFIX__", self.location.href).href : null;
+// And a slope-class tile's, kept with the others for the same reason: a
+// reader who switched the classes on and then lost the connection would
+// otherwise see them stop at the edge of the last view.
+var SLOPE_PREFIX = "__SLOPE_PREFIX__" ? new URL("__SLOPE_PREFIX__", self.location.href).href : null;
 
 // **Where the offline switch is kept, and why it is kept at all.** A service
 // worker is not a process that stays alive: the browser starts it for a fetch
@@ -1010,6 +1096,7 @@ function prefixOf(plain) {
     if (plain.indexOf(TILE_PREFIX) === 0) { return TILE_PREFIX; }
     if (HEIGHT_PREFIX && plain.indexOf(HEIGHT_PREFIX) === 0) { return HEIGHT_PREFIX; }
     if (SHADE_PREFIX && plain.indexOf(SHADE_PREFIX) === 0) { return SHADE_PREFIX; }
+    if (SLOPE_PREFIX && plain.indexOf(SLOPE_PREFIX) === 0) { return SLOPE_PREFIX; }
     return null;
 }
 
@@ -1017,7 +1104,8 @@ function prefixOf(plain) {
 // the one the page names now.
 function olderPrefix(stand, now) {
     if (!stand || !now) { return null; }
-    var was = now === TILE_PREFIX ? stand.tiles : (now === HEIGHT_PREFIX ? stand.heights : stand.shade);
+    var was = now === TILE_PREFIX ? stand.tiles
+        : (now === HEIGHT_PREFIX ? stand.heights : (now === SHADE_PREFIX ? stand.shade : stand.slope));
     return was && was !== now ? was : null;
 }
 
@@ -1101,7 +1189,8 @@ self.addEventListener("fetch", function (event) {
     // told their park was kept, and it would be white.
     if (request.cache === "reload") { return; }
     if (request.url.indexOf(TILE_PREFIX) === 0 || (HEIGHT_PREFIX && request.url.indexOf(HEIGHT_PREFIX) === 0)
-            || (SHADE_PREFIX && request.url.indexOf(SHADE_PREFIX) === 0)) {
+            || (SHADE_PREFIX && request.url.indexOf(SHADE_PREFIX) === 0)
+            || (SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)) {
         event.respondWith(tileFor(request));
     }
 });
@@ -1168,6 +1257,7 @@ def write_service_worker(beside: pathlib.Path, provider: Provider = PROVIDERS["k
         .replace("__TILE_PREFIX__", provider.tiles)
         .replace("__HEIGHT_PREFIX__", provider.heights.tiles if provider.heights else "")
         .replace("__SHADE_PREFIX__", provider.shade.tiles if provider.shade else "")
+        .replace("__SLOPE_PREFIX__", provider.slope.tiles if provider.slope else "")
         .replace("__DB__", companions.database)
         .replace("__CACHE__", companions.cache)
     )
@@ -2797,6 +2887,34 @@ def create_map(
         )
         shade.add_to(fmap)
         setattr(fmap, MAP_SHADE_ATTR, shade)
+
+    # **The slope classes, where the provider has them.** Tiles like the relief
+    # and directly over it, so a class keeps its hue and the shadow only
+    # darkens it; off until the reader asks, because it answers a question
+    # off the paths and an eighth of the ground coloured is a lot of colour
+    # for a reader following one (§6.7).
+    if provider is not None and provider.slope is not None:
+        slope = folium.TileLayer(
+            tiles=provider.slope.template,
+            attr=_BASE_LAYERS[base]["attr"] or "",
+            name="Slope",
+            overlay=True,
+            control=False,
+            show=False,
+            # Full strength: the alpha is in the palette, chosen on the mockup.
+            opacity=1.0,
+            max_zoom=provider.top,
+            max_native_zoom=provider.slope.top,
+            cross_origin=True,
+            # Named for the same reason the relief is: the offline panel must
+            # never take it for the sheet, and the drive counts it apart.
+            trails_slope=True,
+            # Over the relief, whatever order they are switched in.
+            z_index=260,
+            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]] if provider.extent else None,
+        )
+        slope.add_to(fmap)
+        setattr(fmap, MAP_SLOPE_ATTR, slope)
 
     # Every page gets the colours, chrome or no chrome: the panels carry them
     # as inline styles, and an inline style resolves its variables against the
@@ -17463,6 +17581,9 @@ class _OfflinePanel(MacroElement):
                 // The relief overlay's tiles, kept with the map's. Null where
                 // the sheet has no height model behind it.
                 var SHADE = {{ this.shade_json }};
+                // And the slope classes' tiles, kept with them, on the same
+                // condition. Null where the sheet has no model behind it.
+                var SLOPE = {{ this.slope_json }};
                 // Where the source's tiles end, or null for one that answers
                 // everywhere. A margin is clipped to it: see `padded`.
                 var EXTENT = {{ this.extent_json }};
@@ -17865,6 +17986,18 @@ class _OfflinePanel(MacroElement):
                             bytes += levels[z].size * shadeWeight(z);
                         });
                     }
+                    // The slope classes likewise, at every level they are
+                    // drawn at -- and whether or not they are switched on
+                    // now, because the switch is the reader's to flip in the
+                    // field and a class that was never kept is a blank tile
+                    // where a wall is.
+                    if (SLOPE) {
+                        Object.keys(levels).forEach(function (z) {
+                            if (Number(z) > SLOPE.top) { return; }
+                            tiles += levels[z].size;
+                            bytes += levels[z].size * slopeWeight(z);
+                        });
+                    }
                     return {tiles: tiles, bytes: bytes};
                 }
 
@@ -17874,6 +18007,10 @@ class _OfflinePanel(MacroElement):
 
                 function shadeWeight(z) {
                     return (SHADE && SHADE.weight[z]) || 30000;
+                }
+
+                function slopeWeight(z) {
+                    return (SLOPE && SLOPE.weight[z]) || 5000;
                 }
 
                 // **Buffered, because the zoom row prices every level it draws.**
@@ -17993,7 +18130,7 @@ class _OfflinePanel(MacroElement):
                         // and is not the sheet. Switching the base map off and
                         // on again re-adds it behind this one in the map's own
                         // order, so "the first tile layer" is not enough.
-                        if (layer.options && layer.options.trailsShade) { return; }
+                        if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope)) { return; }
                         found = layer;
                     });
                     return found;
@@ -18032,14 +18169,18 @@ class _OfflinePanel(MacroElement):
                     return new URL(SHADE.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
                 }
 
+                function slopeUrlFor(x, y, z) {
+                    return new URL(SLOPE.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
+                }
+
                 function walker(picked) {
                     picked = picked || recount();
                     var layer = base();
-                    // Which of the three trees this level is being walked
+                    // Which of the four trees this level is being walked
                     // for: the sheet, then its heights where that level carries
-                    // them, then its relief. Each pass is the same set of
-                    // tiles, so the level is walked up to three times and the
-                    // set is built once.
+                    // them, then its relief, then its slope classes. Each pass
+                    // is the same set of tiles, so the level is walked up to
+                    // four times and the set is built once.
                     var z = BOTTOM, it = null, pass = 'map';
                     return {
                         total: layer ? picked.tiles : 0,
@@ -18060,8 +18201,13 @@ class _OfflinePanel(MacroElement):
                                         it = picked.levels[z].values();
                                         continue;
                                     }
-                                    if (pass !== 'shade' && SHADE && z <= SHADE.top) {
+                                    if ((pass === 'map' || pass === 'height') && SHADE && z <= SHADE.top) {
                                         pass = 'shade';
+                                        it = picked.levels[z].values();
+                                        continue;
+                                    }
+                                    if (pass !== 'slope' && SLOPE && z <= SLOPE.top) {
+                                        pass = 'slope';
                                         it = picked.levels[z].values();
                                         continue;
                                     }
@@ -18078,6 +18224,9 @@ class _OfflinePanel(MacroElement):
                                 }
                                 if (pass === 'shade') {
                                     return {url: shadeUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'shade'};
+                                }
+                                if (pass === 'slope') {
+                                    return {url: slopeUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'slope'};
                                 }
                                 return {url: urlFor(layer, keyX(step.value), keyY(step.value), z), z: z, kind: 'map'};
                             }
@@ -18380,7 +18529,7 @@ class _OfflinePanel(MacroElement):
                 }
 
                 // The prefixes the page names now, one per kind of tile.
-                // **Keyed by the walker's own words for the three trees**, so
+                // **Keyed by the walker's own words for the four trees**, so
                 // a tile fetched as `shade` is replaced under `shade` without
                 // anything having to map one name onto the other.
                 function prefixes() {
@@ -18389,7 +18538,8 @@ class _OfflinePanel(MacroElement):
                         tiles: TILE_PREFIX,
                         height: HEIGHTS ? new URL(HEIGHTS.url.split('{z}')[0], location.href).href : null,
                         heights: HEIGHTS ? new URL(HEIGHTS.url.split('{z}')[0], location.href).href : null,
-                        shade: SHADE ? new URL(SHADE.url.split('{z}')[0], location.href).href : null
+                        shade: SHADE ? new URL(SHADE.url.split('{z}')[0], location.href).href : null,
+                        slope: SLOPE ? new URL(SLOPE.url.split('{z}')[0], location.href).href : null
                     };
                 }
 
@@ -18402,8 +18552,8 @@ class _OfflinePanel(MacroElement):
                     }
                     var was = {map: moved(now.map, stand.tiles), tiles: moved(now.tiles, stand.tiles),
                                height: moved(now.height, stand.heights), heights: moved(now.heights, stand.heights),
-                               shade: moved(now.shade, stand.shade)};
-                    if (was.tiles || was.heights || was.shade) { out = was; }
+                               shade: moved(now.shade, stand.shade), slope: moved(now.slope, stand.slope)};
+                    if (was.tiles || was.heights || was.shade || was.slope) { out = was; }
                     return out;
                 }
 
@@ -18934,7 +19084,8 @@ class _OfflinePanel(MacroElement):
                                 if (kept) {
                                     if (next.z > state.top) { state.top = next.z; }
                                     state.bytes += next.kind === 'height' ? heightWeight(next.z)
-                                        : (next.kind === 'shade' ? shadeWeight(next.z) : (WEIGHT[next.z] || 45000));
+                                        : (next.kind === 'shade' ? shadeWeight(next.z)
+                                        : (next.kind === 'slope' ? slopeWeight(next.z) : (WEIGHT[next.z] || 45000)));
                                 }
                                 // **Give up on the connection, not on the tile.**
                                 // One tile that will not come is a tile, and the
@@ -19797,6 +19948,7 @@ class _OfflinePanel(MacroElement):
         self.weight_json = _script_json({str(zoom): bytes_ for zoom, bytes_ in provider.weight.items()})
         self.heights_json = _script_json(provider.heights.as_settings() if provider.heights else None)
         self.shade_json = _script_json(provider.shade.as_settings() if provider.shade else None)
+        self.slope_json = _script_json(provider.slope.as_settings() if provider.slope else None)
         self.tile_prefix_json = _script_json(provider.tiles)
         extent = provider.extent
         self.extent_json = _script_json({"w": extent[0], "s": extent[1], "e": extent[2], "n": extent[3]} if extent else None)
@@ -19914,6 +20066,54 @@ class _Legend(MacroElement):
                     shading.appendChild(shadeTick);
                     shading.appendChild(word);
                     picked.appendChild(shading);
+                }
+                // **The slope classes, under the relief, with the colours they
+                // are drawn in.** The same kind of thing as the shadow -- how
+                // the ground is drawn -- so the same place; but these have
+                // colours that mean something, so the rows that say what are
+                // drawn under the checkbox, and only while it is on
+                // (decisions §6.7).
+                var slope = {{ this.slope_name }};
+                var slopeClasses = {{ this.slope_classes_json }};
+                if (slope) {
+                    var classing = document.createElement('label');
+                    classing.className = 'trails-slope';
+                    classing.style.cssText = 'display:flex;align-items:center;gap:6px;margin:3px 0;cursor:pointer';
+                    var slopeTick = document.createElement('input');
+                    slopeTick.type = 'checkbox';
+                    slopeTick.style.cssText = 'flex:none;margin:0';
+                    slopeTick.checked = map.hasLayer(slope);
+                    var slopeWord = document.createElement('span');
+                    slopeWord.textContent = 'Slope classes';
+                    classing.appendChild(slopeTick);
+                    classing.appendChild(slopeWord);
+                    picked.appendChild(classing);
+                    var slopeRows = document.createElement('div');
+                    slopeRows.className = 'trails-slope-classes';
+                    slopeRows.style.cssText = 'margin:0 0 4px 22px;font-size:12px;line-height:1.5';
+                    slopeClasses.forEach(function (row) {
+                        var line = document.createElement('div');
+                        line.style.cssText = 'display:flex;align-items:center;gap:6px';
+                        var swatch = document.createElement('span');
+                        swatch.style.cssText = 'display:inline-block;width:18px;height:11px;flex:none;border:1px solid #999;'
+                            + 'background:' + row.colour + ';opacity:0.6';
+                        var text = document.createElement('span');
+                        text.textContent = (row.to === null ? row.from + '\u00b0 and more' : row.from + '\u2013' + row.to + '\u00b0')
+                            + (row.source === 'ours' ? ' (ours)' : '');
+                        line.appendChild(swatch);
+                        line.appendChild(text);
+                        slopeRows.appendChild(line);
+                    });
+                    var slopeNote = document.createElement('div');
+                    slopeNote.style.cssText = 'color:#666;margin-top:2px';
+                    slopeNote.textContent = 'Steepness of the ground down its fall line; the profile grades the path.';
+                    slopeRows.appendChild(slopeNote);
+                    slopeRows.style.display = slopeTick.checked ? '' : 'none';
+                    picked.appendChild(slopeRows);
+                    slopeTick.addEventListener('change', function () {
+                        if (slopeTick.checked) { map.addLayer(slope); } else { map.removeLayer(slope); }
+                        slopeRows.style.display = slopeTick.checked ? '' : 'none';
+                    });
                 }
                 if (bases.length) { body.appendChild(picked); }
 
@@ -20040,6 +20240,9 @@ class _Legend(MacroElement):
         # The relief overlay's variable in the page, or `null`: filled in at
         # render, beside the base layers, since it is drawn in their panel.
         self.relief_name = "null"
+        # And the slope overlay's, with the rows that explain its colours.
+        self.slope_name = "null"
+        self.slope_classes_json = "[]"
 
     def render(self, **kwargs: Any) -> Any:
         """Collect the base layers, then render.
@@ -20066,6 +20269,9 @@ class _Legend(MacroElement):
         self.base_shown_json = _script_json(shown)
         relief = getattr(self._parent, MAP_SHADE_ATTR, None) if self._parent is not None else None
         self.relief_name = relief.get_name() if relief is not None else "null"
+        slope = getattr(self._parent, MAP_SLOPE_ATTR, None) if self._parent is not None else None
+        self.slope_name = slope.get_name() if slope is not None else "null"
+        self.slope_classes_json = _script_json(SlopeTiles.classes()) if slope is not None else "[]"
         return super().render(**kwargs)
 
 

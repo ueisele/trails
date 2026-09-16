@@ -2262,7 +2262,7 @@ class TestTwoMapsOnOneOrigin:
         fetch the shadow and call it the map."""
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
-        assert "if (layer.options && layer.options.trailsShade) { return; }" in html
+        assert "if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope)) { return; }" in html
         assert '"trailsShade": true' in html or '"trails_shade": true' in html
 
     def test_the_worker_answers_the_relief_from_what_was_kept(self, tmp_path):
@@ -2285,8 +2285,81 @@ class TestTwoMapsOnOneOrigin:
         assert '"url": "/shade/lantmateriet/1/{z}/{x}/{y}.png"' in shade
         assert '"top": 15' in shade
         assert "if (Number(z) > SHADE.top) { return; }" in html
-        assert "if (pass !== 'shade' && SHADE && z <= SHADE.top) {" in html
+        assert "if ((pass === 'map' || pass === 'height') && SHADE && z <= SHADE.top) {" in html
         assert "kind: 'shade'" in html
+
+    def test_the_slope_classes_are_drawn_over_the_relief_and_start_off(self, tmp_path):
+        """How steep the ground is, off the paths, in the SLF's classes with one
+        of ours below them. Tiles like the relief and directly over it, so a
+        class keeps its hue and the shadow only darkens it; off until asked
+        for, because an eighth of the ground coloured is a lot of colour for
+        a reader following a marked trail."""
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
+        slope = getattr(fmap, maps.MAP_SLOPE_ATTR)
+        assert slope.overlay is True and slope.show is False
+        assert slope.options["opacity"] == 1.0, "the alpha is in the palette, chosen on the mockup"
+        assert slope.options["z_index"] == 260 > getattr(fmap, maps.MAP_SHADE_ATTR).options["z_index"]
+        assert (slope.options["max_zoom"], slope.options["max_native_zoom"]) == (17, 15)
+        assert slope.options["bounds"] == [[68.139, 18.15], [68.46, 19.10]]
+        assert slope.options["attribution"] == maps._LANTMATERIET_ATTRIBUTION
+
+    def test_the_slope_classes_are_the_documented_ones_and_the_legend_says_whose(self, tmp_path):
+        """Four SLF classes, swisstopo's over 50, and ours at 25 -- marked as
+        ours -- with the profile's own colours for the first three, so a reader
+        who learned them there reads them here. The rows sit under the checkbox
+        in the base-map panel, beside the relief's, and say what they measure:
+        the ground's fall line, where the profile grades the path."""
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
+        maps.add_legend(fmap, "Abisko", [maps.LegendRow("a line", "#000", None)])
+        html = fmap.get_root().render()
+        slope = getattr(fmap, maps.MAP_SLOPE_ATTR).get_name()
+        assert f"var slope = {slope};" in html
+        classes = html.split("var slopeClasses = ")[1].split(";\n")[0]
+        rows = json.loads(classes)
+        assert [row["from"] for row in rows] == [25.0, 30.0, 35.0, 40.0, 45.0, 50.0]
+        assert rows[-1]["to"] is None and rows[0]["to"] == 30.0
+        assert [row["source"] for row in rows] == ["ours", "SLF", "SLF", "SLF", "SLF", "swisstopo"]
+        assert [row["colour"] for row in rows[1:4]] == [band[2] for band in maps.GRADIENT_BANDS[1:]]
+        assert "classing.className = 'trails-slope';" in html
+        assert "slopeWord.textContent = 'Slope classes';" in html
+        assert "slopeRows.className = 'trails-slope-classes';" in html
+        assert "the profile grades the path" in html
+        # Drawn under the relief's checkbox, in the same block.
+        assert html.index("picked.appendChild(shading);") < html.index("picked.appendChild(classing);")
+        first = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_legend(first, "Lomsdal", [maps.LegendRow("a line", "#000", None)])
+        assert "var slope = null;" in first.get_root().render()
+
+    def test_the_slope_classes_are_never_taken_for_the_sheet(self, tmp_path):
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        assert "if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope)) { return; }" in html
+        assert '"trailsSlope": true' in html or '"trails_slope": true' in html
+
+    def test_the_worker_answers_the_slope_classes_from_what_was_kept(self, tmp_path):
+        page, companions = self.abisko(tmp_path)
+        script = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
+        assert 'var SLOPE_PREFIX = "/slope/lantmateriet/1/" ? new URL("/slope/lantmateriet/1/", self.location.href).href : null;' in script
+        assert "(SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)" in script
+        assert "if (SLOPE_PREFIX && plain.indexOf(SLOPE_PREFIX) === 0) { return SLOPE_PREFIX; }" in script
+        assert "(now === SHADE_PREFIX ? stand.shade : stand.slope)" in script
+
+    def test_the_offline_panel_keeps_the_slope_classes_whether_or_not_they_are_on(self, tmp_path):
+        """The switch is the reader's to flip in the field, and a class that
+        was never kept is a blank tile where a wall is. So every level up to
+        the tree's top, after the relief of the same level."""
+        page, _companions = self.abisko(tmp_path)
+        html = page.read_text(encoding="utf-8")
+        slope = html.split("var SLOPE = ")[1].split(";\n")[0]
+        assert '"url": "/slope/lantmateriet/1/{z}/{x}/{y}.png"' in slope
+        assert '"top": 15' in slope
+        assert "if (Number(z) > SLOPE.top) { return; }" in html
+        assert "if (pass !== 'slope' && SLOPE && z <= SLOPE.top) {" in html
+        # And the relief is not walked again after the classes.
+        assert "if ((pass === 'map' || pass === 'height') && SHADE && z <= SHADE.top) {" in html
+        assert "kind: 'slope'" in html
+        assert "slope: SLOPE ? new URL(SLOPE.url.split('{z}')[0], location.href).href : null" in html
+        assert "(next.kind === 'slope' ? slopeWeight(next.z) : (WEIGHT[next.z] || 45000))" in html
 
     def test_the_first_map_carries_no_relief(self, tmp_path):
         """Kartverket's sheet has no height model of this project's behind it,
@@ -2298,6 +2371,8 @@ class TestTwoMapsOnOneOrigin:
         maps.save_map(fmap, page)
         html = page.read_text(encoding="utf-8")
         assert "var SHADE = null;" in html
+        assert "var SLOPE = null;" in html
+        assert getattr(fmap, maps.MAP_SLOPE_ATTR, None) is None
         script = maps.write_service_worker(page, maps.PROVIDERS["kartverket"], maps.Companions.of("lomsdal-visten")).read_text(encoding="utf-8")
         assert 'var SHADE_PREFIX = "" ? new URL' in script
 

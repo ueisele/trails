@@ -212,20 +212,30 @@ shade:
 	uv run python analysis/scripts/shade_tiles.py $(ARGS)
 	@echo "✅ analysis/output/shade/lantmateriet/1/"
 
+# Colours how steep the ground is, in the SLF's classes with one of our own below them, from the
+# same cached mosaic, z8-z15, cut exactly as the relief is. Needs no login once `make dem` has
+# cached the mosaic. Resumable; the deploy uploads with --tree slope. See
+# analysis/docs/abisko-decisions.md §6.7.
+slope:
+	@echo "📐 Building the Abisko slope-class tiles (resumable)..."
+	uv run python analysis/scripts/slope_tiles.py $(ARGS)
+	@echo "✅ analysis/output/slope/lantmateriet/1/"
+
 # The whole Abisko chain in one run, in the order the pieces depend on each other: the base-map
-# tiles off the FTP, the height mosaic and tiles with the login, the hillshade off the same mosaic,
+# tiles off the FTP, the height mosaic and tiles with the login, the hillshade and the slope classes
+# off the same mosaic,
 # then the graph (Topografi 50 through
 # the delivery API with the login and the order id, Naturvårdsverket's nightly files, OSM through
 # Overpass -- fetched once each and cached) and its report, then the page. Every step is resumable
 # or cached, so a second run is a few minutes of checking and a rebuild of the page. It builds and
-# does not publish: `just deploy --map abisko --tree tiles --tree dem --tree shade` from
+# does not publish: `just deploy --map abisko --tree tiles --tree dem --tree shade --tree slope` from
 # home/trails-map is that, and `just abisko` there is this target with the login supplied.
-abisko: tiles dem shade
+abisko: tiles dem shade slope
 	@echo "🕸️  Building and reporting the Abisko routing graph..."
 	uv run python analysis/scripts/route_graph.py --park abisko
 	@echo "🗺️  Building the Abisko map..."
 	uv run python analysis/scripts/lomsdal_visten.py --park abisko
-	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem --tree shade (from home/trails-map)"
+	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem --tree shade --tree slope (from home/trails-map)"
 
 # **Pinned, because the browser is not.** `--with playwright` takes the newest release, and each
 # one wants a Firefox build of its own: the newest asks for `firefox-1543` and dies with

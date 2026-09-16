@@ -3133,9 +3133,10 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
     for label, count, color in point_rows:
         legend.append(maps.LegendRow(f"{label} ({count})", color, switched(f"{label} ({count})")))
 
-    # The relief shadow is not a row here: it is neither a line nor a point,
-    # and the legend draws it as a checkbox under the sheets in the base-map
-    # panel instead (`_Legend`, decisions §6.6).
+    # The relief shadow and the slope classes are not rows here: neither is a
+    # line or a point, and the legend draws them as checkboxes under the
+    # sheets in the base-map panel instead, the classes with their own colour
+    # rows (`_Legend`, decisions §6.6 and §6.7).
     maps.add_legend(fmap, f"{which.name} {which.kind}", legend)
 
     # It shares the bottom left with the legend and the scale bar, and puts

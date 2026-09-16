@@ -28,6 +28,7 @@ measured over a steep flank, z14 is visibly soft at z16 where z15 is not. Past
 z15 even that stops paying, because the model has no more to give.
 """
 
+import dataclasses
 import json
 import math
 import time
@@ -160,6 +161,106 @@ def shadow(lit: np.ndarray, altitude: float = ALTITUDE, steps: int = STEPS) -> n
     return (np.rint(deep * (steps - 1)) * (255.0 / (steps - 1))).astype(np.uint8)
 
 
+@dataclasses.dataclass(frozen=True)
+class Level:
+    """One zoom of a tree, and how a tile of it is cut from the model."""
+
+    #: The zoom.
+    zoom: int
+    #: What one tile pixel spans on the ground, in metres, at the box's middle latitude.
+    ground_m: float
+    #: How far the heights are smoothed, in tile pixels.
+    sigma: float
+    #: Pixels of ground carried round a tile while it is computed.
+    margin: int
+    #: How the model is resampled into a tile: averaged once a pixel is wider
+    #: than a post, bilinear while it is not.
+    how: Resampling
+    #: The tile columns and rows the box covers: x0, y0, x1, y1, inclusive.
+    span: tuple[int, int, int, int]
+
+    @property
+    def side(self) -> int:
+        """Pixels a patch is cut at: the tile and its margin on both sides."""
+        return TILE_PX + 2 * self.margin
+
+
+def plan(zoom: int, bounds: Bounds, smooth_m: float, posts_m: float) -> Level:
+    """How the tiles of one zoom are cut, for :func:`cut`.
+
+    **The resampling changes with the zoom.** Down to about the model's own post
+    spacing a tile is asking for detail the model has, and bilinear is right;
+    above it a tile pixel covers many posts, and bilinear would take one of them
+    and alias whatever is derived from the heights into noise, so those levels
+    are averaged.
+
+    Args:
+        zoom: The zoom
+        bounds: The box to cover, WGS 84
+        smooth_m: How far the heights are smoothed, in metres
+        posts_m: The model's post spacing, in metres
+
+    Returns:
+        The level's plan
+    """
+    middle = (bounds[1] + bounds[3]) / 2.0
+    ground_m = tile_resolution(zoom, middle)
+    sigma = smooth_m / ground_m
+    margin = max(MARGIN_PX, int(math.ceil(3.0 * sigma)) + 1)
+    how = Resampling.average if ground_m > posts_m else Resampling.bilinear
+    return Level(zoom=zoom, ground_m=ground_m, sigma=sigma, margin=margin, how=how, span=tile_range(bounds, zoom))
+
+
+def cut(
+    model: np.ndarray,
+    transform: Affine,
+    source_crs: CRS,
+    nodata: float | None,
+    level: Level,
+    x: int,
+    y: int,
+) -> tuple[np.ndarray, bool]:
+    """Warp one tile's ground out of the model, with its margin, and smooth it.
+
+    Args:
+        model: The height model, one band, rows from the top
+        transform: Its georeferencing
+        source_crs: Its projection
+        nodata: Its no-data value, if it has one
+        level: The zoom's plan, from :func:`plan`
+        x: Tile column
+        y: Tile row
+
+    Returns:
+        The smoothed patch, ``side`` × ``side`` ``float32`` with no NaN in it,
+        and whether the tile holds no ground at all -- in which case the patch
+        is level zero and whatever is cut from it should draw nothing
+    """
+    west, south, east, north = tile_bounds(level.zoom, x, y)
+    grown = (east - west) / TILE_PX * level.margin
+    side = level.side
+    patch = np.full((side, side), np.nan, dtype=np.float32)
+    reproject(
+        source=model,
+        destination=patch,
+        src_transform=transform,
+        src_crs=source_crs,
+        src_nodata=nodata,
+        dst_transform=from_bounds(west - grown, south - grown, east + grown, north + grown, side, side),
+        dst_crs=TILE_CRS,
+        dst_nodata=np.nan,
+        resampling=level.how,
+    )
+    blank = ~np.isfinite(patch)
+    if blank.all():
+        # No ground here at all: level, so the map beneath is drawn exactly
+        # as it would be without the tile.
+        return np.zeros((side, side), dtype=np.float32), True
+    if blank.any():
+        patch = np.where(blank, np.float32(np.nanmedian(patch)), patch)
+    return blurred(patch, level.sigma), False
+
+
 def build_tiles(
     heights: np.ndarray,
     transform: Affine,
@@ -178,11 +279,7 @@ def build_tiles(
     Each tile is warped out of the model with :data:`MARGIN_PX` of ground round
     it, smoothed, shaded and cut back to 256 × 256. Tiles already on disk are
     skipped, so a build resumes. What was done is written to ``index.json``.
-
-    **The resampling changes with the zoom.** Down to about the model's own post
-    spacing a tile is asking for detail the model has, and bilinear is right;
-    above it a tile pixel covers many posts, and bilinear would take one of them
-    and alias the shade into noise, so those levels are averaged.
+    How a level is resampled is :func:`plan`'s to say.
 
     Args:
         heights: The model, one band, rows from the top
@@ -206,19 +303,14 @@ def build_tiles(
     model = np.asarray(heights, dtype=np.float32)
     posts_m = abs(transform.a)
     smooth_m = smooth_posts * posts_m
-    middle = (bounds[1] + bounds[3]) / 2.0
     started = time.time()
     total = tile_count(bounds, levels)
     per_zoom: dict[str, dict[str, int]] = {}
     print(f"Building {total:,} hillshade tiles for z{levels[0]}–z{levels[-1]} from a {model.shape[1]:,} × {model.shape[0]:,} model...", flush=True)
     for zoom in levels:
-        x0, y0, x1, y1 = tile_range(bounds, zoom)
-        ground_m = tile_resolution(zoom, middle)
-        sigma = smooth_m / ground_m
-        margin = max(MARGIN_PX, int(math.ceil(3.0 * sigma)) + 1)
-        side = TILE_PX + 2 * margin
-        # Averaged once a pixel is wider than a post, bilinear while it is not.
-        how = Resampling.average if ground_m > posts_m else Resampling.bilinear
+        level_plan = plan(zoom, bounds, smooth_m, posts_m)
+        x0, y0, x1, y1 = level_plan.span
+        margin = level_plan.margin
         written = skipped = level = 0
         size = 0
         level_started = time.time()
@@ -231,30 +323,10 @@ def build_tiles(
                     skipped += 1
                     size += target.stat().st_size
                     continue
-                west, south, east, north = tile_bounds(zoom, x, y)
-                grown = (east - west) / TILE_PX * margin
-                patch = np.full((side, side), np.nan, dtype=np.float32)
-                reproject(
-                    source=model,
-                    destination=patch,
-                    src_transform=transform,
-                    src_crs=source_crs,
-                    src_nodata=nodata,
-                    dst_transform=from_bounds(west - grown, south - grown, east + grown, north + grown, side, side),
-                    dst_crs=TILE_CRS,
-                    dst_nodata=np.nan,
-                    resampling=how,
-                )
-                blank = ~np.isfinite(patch)
-                if blank.all():
-                    # No ground here at all: a fully transparent tile, so the
-                    # map beneath it is drawn exactly as it would be without.
-                    patch = np.zeros((side, side), dtype=np.float32)
-                elif blank.any():
-                    patch = np.where(blank, np.float32(np.nanmedian(patch)), patch)
-                lit = shade(blurred(patch, sigma), ground_m, azimuth, altitude)
+                patch, empty = cut(model, transform, source_crs, nodata, level_plan, x, y)
+                lit = shade(patch, level_plan.ground_m, azimuth, altitude)
                 alpha = shadow(lit, altitude, steps)[margin:-margin, margin:-margin]
-                if blank.all():
+                if empty:
                     alpha = np.zeros_like(alpha)
                     level += 1
                 rgba = np.zeros((TILE_PX, TILE_PX, 4), dtype=np.uint8)
@@ -268,7 +340,7 @@ def build_tiles(
         elapsed = time.time() - level_started
         print(
             f"  z{zoom}: {written:,} written, {skipped:,} already there, {level:,} without ground, of {wanted:,}"
-            f" — {size / 1e6:,.1f} MB, {elapsed:,.0f} s, {ground_m:.2f} m/px, sigma {sigma:.2f} px, {how.name}",
+            f" — {size / 1e6:,.1f} MB, {elapsed:,.0f} s, {level_plan.ground_m:.2f} m/px, sigma {level_plan.sigma:.2f} px, {level_plan.how.name}",
             flush=True,
         )
         per_zoom[str(zoom)] = {"tiles": wanted, "written": written, "skipped": skipped, "empty": level, "bytes": size}

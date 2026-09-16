@@ -706,6 +706,108 @@ has no relief while the switch is on — the worker answers a tile it does not h
 **transparent** PNG, which over a shadow layer draws nothing at all. The token the panel puts on a
 sheet's URL to get past the browser's image cache is put on this layer too, so the shadow comes
 back the moment the ground is kept.
+
+### 6.7 The slope is classed over the relief, in the classes the avalanche services publish
+
+Uwe, 2026-09-16, the evening the relief went up: *"Ließe sich ein ähnliches Overlay auch für die
+Steigung bauen? Das sollte auch in Kombination mit dem Schatten-Overlay funktionieren."* Then,
+with Outdooractive's *Slope angle* legend as a reference and not a template: *"Müssen wir nicht so
+machen."*
+
+**Two measures, not one.** The profile already grades steepness — the *path's*, in per cent along
+it, over a 25 m window, in four bands whose lowest edge was set against the model's own noise
+(§9, `GRADIENT_BANDS`: 15, 25 and 40 %, which is 8.5°, 14° and 22°). That is the wrong instrument
+for the question a reader asks off the paths. The network stays under 22° on 98.5 % of its length
+because paths were laid where the ground allows, while a fifth of the box's ground is over 20°: a
+path crossing a 30° hillside in zigzags at 12 % is green on the profile and the ground under it is
+orange here, and both are right. So the overlay reads the ground's slope down its fall line, in
+degrees, and shares the profile's *colours* and nothing else — Uwe asked whether the two should
+agree, and the answer is that they cannot, because 25° along a path is 47 %, a grade no path holds,
+and 22° on the ground would colour a fifth of Abisko red. The legend says which it measures.
+
+**The classes are documented ones, with one of ours below them.** Looked for and not found: no
+hiking scale publishes a threshold in degrees. The SAC scale T1–T6 describes terrain in words
+(*sehr steile Grashänge*, *Kletterstellen bis II*), the DNT's green-to-black grades in words plus
+height and length, the Alpenverein's categories likewise; the one number the DAV gives for pathless
+ground is that a fall becomes dangerous from about 30°. What is documented is the avalanche
+practice: the SLF's recommendation of 30–35, 35–40, 40–45 and over 45, which swisstopo draws as
+*Hangneigungsklassen ab 30 Grad* and extended in January 2026, agreed with the SLF and the SAC, by
+a class over 50; the EAWS glossary's *moderately steep* under 30°, *steep* over it, *very steep,
+extreme* over about 40°. Outdooractive, CalTopo and Gaia all build on those. Winter classes, chosen
+where slabs release; summer walking is decided lower — from about 25° cross-country is laborious,
+from 35° the hands come out — so one class of our own at 25° sits under the SLF's four, marked
+*(ours)* in the legend, and the boundaries above it are nobody's taste.
+
+**A class over 45 stays, and it names the angle rather than the walkability.** Uwe: *"Heißt 45
+wirklich, ich kann nicht mehr gehen? … eine Art Stufen durch Felsen … geht das schon. Aber ja,
+glatte Fläche geht nicht."* Right, and the model cannot see the difference: at 4 m a post a stepped
+rock slope reads its mean angle exactly as a smooth slab does. So the legend carries degrees and no
+words like *extreme*, and the reading is the reader's. Over 50° is a real class here because the
+4 m model resolves it — swisstopo's is cut from 10 m — and it holds **0.7 %** of the ground, the
+walls of Lapporten and the north face of Njulla.
+
+Measured over the whole model, 101 million posts, the slope read over an 8 m baseline after the
+relief's own smoothing:
+
+| class | source | share of the ground |
+|---|---|---|
+| 25–30° | ours | 5.2 % |
+| 30–35° | SLF | 3.3 % |
+| 35–40° | SLF | 1.9 % |
+| 40–45° | SLF | 0.9 % |
+| 45–50° | SLF | 0.5 % |
+| 50° and more | swisstopo 2026 | 0.7 % |
+
+An eighth of the ground coloured. Outdooractive's own scale from 30° would put six colours on 7 %
+of it and three of them on one per cent, which is more legend than terrain.
+
+**Cut exactly as the relief is.** `trails.processing.slope_tiles` reads the same mosaic through
+the relief's own `plan()` and `cut()` — same smoothing, same margin, same resampling per level, same
+z8–z15 — so a class boundary and a shadow's edge fall in the same place, and a unit test holds the
+two trees to that. The slope is the magnitude of the gradient the shade already takes the normal
+from. `make slope` drives it and the tree goes up with `--tree slope`, the fourth.
+
+**A palette PNG with the alpha in it.** Flat colour compresses where a shadow's ramp does not: a
+z15 tile is **2.4 kB** against the relief's 9.4, and the whole tree **9,330 tiles, 24.7 MB**, cut
+in 12 minutes — a quarter of the relief. Index 0 is transparent and the classes follow, at an
+alpha of 150 (0.59), so a tile can be looked at on its own and the page draws it at full strength.
+
+**Colours: the profile's, continued.** Scheme A on the mockup (`~/mockups/slope`, since deleted):
+the 30–35 class is the profile's *steep* yellow, 35–40 its *very steep* orange, 40–45 its
+*extreme* red, so a reader who learned them there reads them here; a lighter yellow below for our
+class, and purple and indigo above rather than deeper reds, because a deep red vanishes under the
+relief shadow, which is densest on exactly the walls those mark — the same reason the Swiss layer
+goes to purple. Uwe, against scheme B (the swisstopo/Outdooractive ramp from pale yellow to
+maroon): *"Farben sind gut auseinanderhaltbar, das passt so."*
+
+**On the page** it is a tile layer over the relief, `zIndex` 260 against the relief's 250 and the
+overlay pane's 400, so a class keeps its hue and the shadow only darkens it, which is how swisstopo
+and Kartverket lay theirs. It carries a `trailsSlope` flag for the reason the relief carries its
+own, and is held to the box for the same reason. Its checkbox sits under the relief's in the *Base
+map* panel — it is the same kind of thing, how the ground is drawn — with the six colour rows and
+the line *steepness of the ground down its fall line; the profile grades the path* under it, shown
+only while it is on. **Off when the page opens**: it answers a question off the paths, and an
+eighth of the ground coloured is a lot of colour for a reader following a marked trail.
+
+**Offline it is kept whether or not it is on.** The switch is the reader's to flip in the field,
+and a class that was never kept is a blank tile where a wall is. So the worker takes a fourth
+prefix, the run walks each level a fourth time after the relief, the panel prices the tree at its
+own weights, and the stand row gains a `slope` entry — absent on an older device and read as *not
+moved*. Nothing a phone already holds is touched, exactly as for the relief; a tile the worker does
+not hold is answered with the same transparent 1 × 1 PNG, which for a class layer draws nothing.
+
+**What it costs.** Measured on the built page with the panel open, same selections as §6.6's
+table, against the figures there:
+
+| kept | with the relief | with the slope classes too | added |
+|---|---|---|---|
+| a band along a track, z16 | 41.2 MB | 43.6 MB | +2.4 MB |
+| a band along a track, z17 | 48.7 MB | 51.2 MB | +2.5 MB |
+| the whole map, z16 | 502.4 MB | 527.1 MB | +24.7 MB |
+| the whole map, z17 | 1,007.0 MB | 1,031.6 MB | +24.6 MB |
+
+Flat for the same reason the relief's was, and a quarter of it. The whole map at its cap is now
+166,035 tiles: the sheet's 146,975, the 440 height tiles, and 9,310 each of relief and slope.
 ---
 
 ## 7. The order of work
@@ -1955,6 +2057,20 @@ fetches do not surface in Playwright's request events, so counting them takes a 
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-16, fifth of the day** — the slope is classed over the relief (§6.7), asked for from
+  the phone the same evening: *"Ließe sich ein ähnliches Overlay auch für die Steigung bauen?"*
+  Six classes — 25° ours, 30/35/40/45 the SLF's, 50 swisstopo's of this January — after a search
+  for a hiking scale in degrees found none; a class above 45 kept on Uwe's point that stepped rock
+  at that angle is walked and a smooth face is not, which the model cannot tell apart, so the
+  legend names the angle. Colours continue the profile's bands, scheme A of two on a mockup;
+  the profile's own per-cent bands stay, being a different measure. A fourth tree
+  `slope/lantmateriet/1/` — 9,330 palette PNGs, 24.7 MB, 12 minutes — cut through the relief's
+  own `plan()`/`cut()`, which were factored out of `shade_tiles` for it; a second checkbox under
+  the relief's in the base-map panel with the colour rows under it, **off by default**; the
+  worker's fourth prefix; kept offline whether on or off. A band costs 2.4 MB more, the whole map
+  24.7. 706 readings on Abisko (fifteen new), 683 on Lomsdal-Visten (the check a declared skip
+  there); the whole-map figure moves from 156,725 to 166,035 tiles. Not yet published.
+
 - **2026-09-16, fourth of the day** — the relief's checkbox moves from the legend to the base-map
   panel (§6.6), on Uwe's question whether it belonged among the layers. It is not a line or a
   point and has no colour or count; it is how the sheet underneath is drawn, which is that panel's
@@ -2275,3 +2391,7 @@ A line per change to this document or to the decisions in it, newest first.
 | the river ground after the widening | Playwright Firefox against the built page served locally and the published one: `window.trailsGoal.set` from a located standing spot, `state()` read routed and with `stayOnPaths(true)`; `window.trailsGraph.waterAt` sampled 200 times along the old line and over a 41 × 41 window of cells; `window.trailsPlan.geometry()` walked with the distance to the nearest of `nodeLon`/`nodeLat` at every fifth point; then standing spots and goals taken from the cached graph's nodes within 800 m and 600 m of the old ones, 8 × 8 pairs tried on the page |
 | that a failed watch never calls back | Playwright Firefox against a bare chrome page rendered from `maps.py` (no tiles, no data): `context.set_geolocation(None)` with the watch running, then a position restored and the page read at 3, 10, 20, 30 and 45 s — every reading still *no fix*, 108 s in all; the same probe with the retry in place recovered 15 s after the position came back, with nothing pressed |
 | the coordinate forms the search reads | twenty-two strings through the page's own `readCoordinate`, rendered out of `maps.py` and run in node, then five of them through the built page in Playwright Firefox and measured against the position they name |
+| the shares of the ground per slope class | the cached 4 m mosaic read in 2,048-post blocks with `rasterio`, smoothed by one post as the relief is, `np.gradient` over 4 m, `arctan(hypot)` in degrees, a histogram of 101,091,830 posts; the excerpt's shares from the mockup tree's own `index.json` at z15 |
+| what a slope-class tile weighs | sixty random 113-post blocks of the mosaic classed under three schemes and written as palette PNGs at 256 px, then the whole box built with `make slope` and its `index.json` read per zoom |
+| the documented slope classes | swisstopo's *Hangneigungsklassen ab 30 Grad* record on geocat and the Geomatik Schweiz note on the class over 50 (January 2026); the EAWS glossary; the SAC scale on Wikipedia and in the bergundsteigen article on its revision; the DNT's *Gradering: Vandring* PDF; the DAV's article on pathless walking — every one read for a number in degrees, and only the avalanche sources had one |
+| what the slope classes cost offline | Playwright Firefox against the built page served locally, the panel opened with `window.trailsOffline.open(true)`, then `choose('all', z)` and, with the long chain selected, `choose('band', z)` at z16 and z17, `state().counted` read each time; the §6.6 figures as the baseline |

@@ -194,6 +194,9 @@ class Scene:
     #: for a sheet with no height model of this project's behind it, and then
     #: the relief check says so instead of failing.
     relief_path: str | None = None
+    #: What a slope-class tile's address has in it, where this page draws
+    #: them: the same condition as the relief, and None with it.
+    slope_path: str | None = None
 
     @property
     def companions(self) -> maps.Companions:
@@ -218,7 +221,7 @@ SCENES: dict[str, Scene] = {
         # there is nothing to cut a relief shadow from and the page draws none
         # (§6.6). Chosen, not forced: when Norway gets its own shade tree this
         # line comes out and the check runs here too.
-        skips=("the relief under the map",),
+        skips=("the relief under the map", "the slope classes over the relief"),
         # 176 tiles at z14 and 416 at z15.
         kept_area=((65.528, 12.955), (65.572, 12.955), (65.572, 13.145), (65.528, 13.145)),
         unkept=(65.30, 12.40),
@@ -339,6 +342,8 @@ SCENES: dict[str, Scene] = {
         heights_path="/dem/",
         # The relief shadow the page draws under the contours (§6.6).
         relief_path="/shade/",
+        # And the slope classes it colours over that, off until asked (§6.7).
+        slope_path="/slope/",
         base_maps=1,
         borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
         search_for="Abiskojaure",
@@ -403,9 +408,10 @@ SCENES: dict[str, Scene] = {
             # Naturkartan has a page for each.
             "links to pages published elsewhere": 4,
             # The tree from z11 to z17 (146,975 tiles), the 440 height tiles and,
-            # since §6.6, the 9,310 relief tiles of every level up to z15, over
-            # the box widened on 2026-09-13 (§9.24). 1,007 MB against 903.
-            "tiles the whole map holds at its cap": 156725,
+            # since §6.6 and §6.7, the 9,310 relief tiles and the 9,310 slope
+            # tiles of every level up to z15, over the box widened on
+            # 2026-09-13 (§9.24). 1,032 MB against 903.
+            "tiles the whole map holds at its cap": 166035,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -676,8 +682,10 @@ FURNITURE = with_map(
     boxes: legend.filter(i => i.type === 'checkbox').length,
     off: legend.filter(i => i.type === 'checkbox' && !i.checked).length,
     radios: bases.filter(i => i.type === 'radio').length,
-    tiles: Object.values(__MAP__._layers).filter(l => l._url && !(l.options || {}).trailsShade).length,
+    tiles: Object.values(__MAP__._layers).filter(l => l._url && !(l.options || {}).trailsShade && !(l.options || {}).trailsSlope).length,
     relief: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsShade).length,
+    // The slope classes start off, so a page that draws them holds none here.
+    slope: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsSlope).length,
     // The rail takes the top-left corner and the zoom steps aside for it. Left
     // rather than top, because both stand at 10 from the top and only the one
     // that moved says whether the corner made room.
@@ -1071,6 +1079,7 @@ def furniture(page: Any) -> Check:
             # so it is counted on its own line and never as a base map.
             Reading("tile layers actually on the map", seen["tiles"], 1),
             Reading("and the relief over it", seen["relief"], 1 if SCENE.relief_path else 0),
+            Reading("and no slope classes until they are asked for", seen["slope"], 0),
             Reading("separate layer controls", seen["layerControls"], 0),
             # **One bar and not two.** A bare `L.control.scale()` draws metric
             # and imperial, one above the other, and with the zoom line under
@@ -5503,7 +5512,10 @@ def the_relief_under_the_map(page: Any) -> Check:
     page.evaluate(
         with_map("""() => {
             let sheet = null;
-            __MAP__.eachLayer(layer => { if (!sheet && layer._url && !(layer.options || {}).trailsShade) { sheet = layer; } });
+            __MAP__.eachLayer(layer => {
+                const options = layer.options || {};
+                if (!sheet && layer._url && !options.trailsShade && !options.trailsSlope) { sheet = layer; }
+            });
             if (sheet) { __MAP__.removeLayer(sheet); __MAP__.addLayer(sheet); }
             return null;
         }""")
@@ -5561,6 +5573,126 @@ def the_relief_under_the_map(page: Any) -> Check:
                 True,
                 note=str(sheet),
             ),
+        ],
+    )
+
+
+def the_slope_classes_over_the_relief(page: Any) -> Check:
+    """How steep the ground is, coloured over the shadow when the reader asks.
+
+    The profile grades the path; this grades the ground down its fall line,
+    in the SLF's avalanche classes with one of ours at 25° below them, and
+    starts off. What can go wrong without showing in the source: the checkbox
+    can switch nothing; the tiles can be asked for and not answer; the classes
+    can land under the shadow, where the darkest of them vanish, or over the
+    page's own lines; the rows explaining the colours can be shown while the
+    layer is off; and the offline panel can price the tree at nothing because
+    the layer is off.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the checkbox drew, and what the panel counts for it
+    """
+    if SCENE.slope_path is None:
+        return Check("the slope classes over the relief", skipped="this page's sheet has no height model behind it")
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(800)
+
+    def drawn() -> tuple[int, int]:
+        """How many slope tiles the page asked for, and how many answered."""
+        return tuple(
+            page.evaluate(
+                """(path) => {
+                    const imgs = [...document.querySelectorAll('img')].filter(i => (i.src || '').indexOf(path) >= 0);
+                    return [imgs.length, imgs.filter(i => i.naturalWidth > 0).length];
+                }""",
+                SCENE.slope_path,
+            )
+        )
+
+    rows_shown = "() => { const r = document.querySelector('.trails-slope-classes'); return r ? getComputedStyle(r).display : 'none'; }"
+    before = drawn()[0]
+    rows_before = page.evaluate(rows_shown)
+    switched = page.evaluate(
+        """() => {
+            const row = [...document.querySelectorAll('.trails-basemap label')].find(r => (r.textContent || '').indexOf('Slope') >= 0);
+            if (!row) { return 'no row'; }
+            const box = row.querySelector('input[type=checkbox]');
+            if (!box) { return 'no checkbox'; }
+            box.click();
+            return box.checked;
+        }"""
+    )
+    page.wait_for_timeout(1500)
+    asked, answered = drawn()
+    rows_on = page.evaluate(rows_shown)
+    classes = page.evaluate(
+        "() => [...document.querySelectorAll('.trails-slope-classes > div')].map(d => d.textContent.trim()).filter(t => /\u00b0/.test(t))"
+    )
+    settings = page.evaluate(
+        with_map("""(path) => {
+            let found = null;
+            __MAP__.eachLayer(layer => {
+                if (found || !layer._url || String(layer._url).indexOf(path) < 0) { return; }
+                found = {opacity: layer.options.opacity, top: layer.options.maxNativeZoom, above: layer.options.zIndex};
+            });
+            return found;
+        }"""),
+        SCENE.slope_path,
+    )
+    relief_at = page.evaluate(
+        with_map("""() => {
+            let z = null;
+            __MAP__.eachLayer(l => { if (l.options && l.options.trailsShade) { z = l.options.zIndex; } });
+            return z;
+        }""")
+    )
+    lines_at = page.evaluate(with_map("() => Number(getComputedStyle(__MAP__.getPane('overlayPane')).zIndex) || 400"))
+    # The offline panel prices the tree whether or not the layer is on: the
+    # switch is the reader's to flip in the field.
+    priced = page.evaluate(
+        """(path) => {
+            const p = window.trailsOffline.prefixes();
+            return p && p.slope ? p.slope.indexOf(path) >= 0 : false;
+        }""",
+        SCENE.slope_path,
+    )
+    if switched is True:
+        page.evaluate(
+            """() => {
+                const row = [...document.querySelectorAll('.trails-basemap label')].find(r => (r.textContent || '').indexOf('Slope') >= 0);
+                row.querySelector('input[type=checkbox]').click();
+            }"""
+        )
+        page.wait_for_timeout(800)
+    after = drawn()[1]
+    rows_after = page.evaluate(rows_shown)
+
+    return Check(
+        "the slope classes over the relief",
+        [
+            Reading("nothing of it is drawn until it is asked for", before, 0),
+            Reading("and its rows are folded away with it", rows_before, "none"),
+            Reading("the checkbox switches it on", switched, True),
+            Reading("and the classes ask for tiles", asked > 0, True, note=f"{asked} asked"),
+            Reading("and every one of them answers", answered, asked),
+            Reading("the rows explain the colours while it is on", rows_on, "block"),
+            Reading("six classes, ours first and marked so", len(classes), 6, note="; ".join(classes)),
+            Reading("the first is ours", bool(classes and "(ours)" in classes[0]), True),
+            Reading("drawn at full strength, the alpha being in the palette", settings and settings.get("opacity"), 1.0),
+            Reading("and no deeper than the relief", settings and settings.get("top"), 15),
+            Reading(
+                "over the relief and under the page's own lines",
+                bool(settings and relief_at is not None and relief_at < settings.get("above") < lines_at),
+                True,
+                note=f"{relief_at} < {settings and settings.get('above')} < {lines_at}",
+            ),
+            Reading("the panel names the tree while the layer is off", priced, True),
+            Reading("and the checkbox takes it off again", after, 0),
+            Reading("with its rows", rows_after, "none"),
         ],
     )
 
@@ -9718,6 +9850,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(a_planned_leg_that_is_not_worth_routing(page))
     if wanted(the_relief_under_the_map):
         checks.append(the_relief_under_the_map(page))
+    if wanted(the_slope_classes_over_the_relief):
+        checks.append(the_slope_classes_over_the_relief(page))
     if wanted(a_tap_beside_a_path_in_plan_mode):
         checks.append(a_tap_beside_a_path_in_plan_mode(page))
     if wanted(a_tap_in_the_middle_of_a_long_edge):

@@ -58,17 +58,18 @@ and Overpass and takes considerably longer. Re-fetch on purpose with
 `--force-download`; `command make cache-clean` throws the cache away entirely,
 which is rarely what you want.
 
-**The Abisko ground** is three more targets. `command make tiles` copies the base-map
+**The Abisko ground** is four more targets. `command make tiles` copies the base-map
 tiles for the box out of Lantmäteriet's open download over FTP (no login), and
 `command make dem` builds z8–z13 height tiles from the 1 m height model, which
 needs the Geotorget login in the environment — run it from `home/trails-map` as
 `sops exec-env secrets.sops.env 'cd ../../trails && command make dem'`.
 `command make shade` cuts the relief shadow the page lays under the contours out of the
-same cached model, z8–z15, and needs no login once `make dem` has cached it. All three
-resume, all three write under `analysis/output/`, and `make deploy ARGS="--tree …"`
-uploads what they wrote. `analysis/docs/abisko-decisions.md` carries every figure.
+same cached model, z8–z15, and needs no login once `make dem` has cached it, and
+`command make slope` colours how steep that ground is, in classes, cut exactly as the
+relief is. All four resume, all four write under `analysis/output/`, and
+`make deploy ARGS="--tree …"` uploads what they wrote. `analysis/docs/abisko-decisions.md` carries every figure.
 
-**Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, the graph
+**Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, slope, the graph
 with its report and the page, in that order, and from `home/trails-map`
 `just abisko` is the same with the login supplied. Every step resumes or reads
 the cache, so a rerun costs a few minutes of checking and the page; it builds
@@ -140,7 +141,11 @@ the offline panel counts them). **The relief is shaded from that same model**
 (`maps.ShadeTiles`, `processing/shade_tiles.py`): neither Lantmäteriet's sheet nor
 Kartverket's carries shading, so the page draws its own over the base and under
 everything it draws itself, black with an alpha channel so level ground stays the
-sheet's own colour. It is a checkbox under the sheet in the base-map panel and starts on. A state trail's popup links to the county's page
+sheet's own colour. It is a checkbox under the sheet in the base-map panel and starts on.
+**And the slope is classed over it** (`maps.SlopeTiles`, `processing/slope_tiles.py`): how
+steep the ground is down its fall line, in the SLF's avalanche classes with one of our
+own at 25° below them, one colour each continuing the profile's; a second checkbox under
+the relief's, off until asked, with the class colours listed under it while it is on. A state trail's popup links to the county's page
 for it on Naturkartan, one link per *BD* number on the chain, out of a hand-kept
 catalogue (`analysis/routes/abisko-naturkartan.toml`, `io/sources/naturkartan.py`):
 links only, since Naturkartan's terms allow private use alone and the line itself
@@ -316,7 +321,8 @@ A map named `<name>` is uploaded as `<name>.html` and is then readable at `https
 Publishing a second map needs nothing but a second upload.
 
 **Tile trees** are the other thing it uploads — the base-map tiles `command make tiles` copied,
-the height tiles `command make dem` built and the relief `command make shade` cut — and they go up
+the height tiles `command make dem` built, the relief `command make shade` cut and the slope
+classes `command make slope` coloured — and they go up
 by `aws s3 sync` rather than one `cp` each:
 
 ```bash
