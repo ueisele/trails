@@ -473,6 +473,66 @@ def lines_column(mode: str) -> str:
     return f"{mode}_lines"
 
 
+def merge_stops_on_one_point(stops: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Draw one pin where a register files one place under two ids.
+
+    **Two pins on one coordinate are one pin and a hidden one.** Abisko Östra is
+    *Abisko Östra station* and *Abisko Östra E10* in Samtrafiken's register, at
+    the same latitude and longitude to the last digit; the bus layer is added
+    after the rail one, so the bus pin covered the station completely and the
+    station was simply not on the map. Reported from the phone on 2026-09-17:
+    *"The Train Station in abisko is missing."*
+
+    **Only the same point, and the measurement is why.** Among the thirteen
+    stops of that box the closest pair is 0.0 m and the next is 114.8 m, so
+    there is nothing between to argue about; over Lomsdal-Visten's 426 the
+    closest is 15.0 m and no pair shares a point at all. Anything further apart
+    is two places, however near — Björkliden station and Björkliden stationshuset
+    are 115 m apart and are a platform and a shop.
+
+    Args:
+        stops: What a national register's loader returned, clipped
+
+    Returns:
+        A copy with coincident rows merged: the names joined, the lines and
+        operators of each merged, and the ``stop_id`` of the one whose mode
+        ranks first in :data:`STOP_LAYERS` -- so a station keeps the id its
+        board is asked for, and the bus lines travel with it.
+    """
+    if not len(stops):
+        return stops
+    rank = {mode: index for index, (mode, *_) in enumerate(STOP_LAYERS)}
+    at = stops.assign(_point=[f"{point.centroid.y:.6f},{point.centroid.x:.6f}" for point in stops.geometry])
+    if not at["_point"].duplicated().any():
+        return stops
+
+    def joined(values: pd.Series) -> str | None:
+        parts = dict.fromkeys(part for value in values.dropna() for part in str(value).split(IDENTITY_SEPARATOR))
+        return IDENTITY_SEPARATOR.join(parts) or None
+
+    def first_by_mode(group: pd.DataFrame) -> str:
+        def ranked(row: pd.Series) -> int:
+            drawn = [rank[mode] for mode in rank if pd.notna(row[lines_column(mode)])]
+            return min(drawn, default=len(rank))
+
+        return str(min((row for _, row in group.iterrows()), key=ranked)["stop_id"])
+
+    merged = []
+    for _, group in at.groupby("_point", sort=False):
+        row = group.iloc[0].copy()
+        if len(group) > 1:
+            row["stop_id"] = first_by_mode(group)
+            row["name"] = joined(group["name"])
+            row["operator"] = joined(group["operator"])
+            for mode in rank:
+                row[lines_column(mode)] = joined(group[lines_column(mode)])
+            row["modes"] = joined(group["modes"])
+        merged.append(row)
+    frame = gpd.GeoDataFrame(merged, columns=stops.columns, crs=stops.crs).reset_index(drop=True)
+    print(f"  stops sharing one point, drawn as one pin: {len(stops) - len(frame)}")
+    return frame
+
+
 def stops_of_mode(stops: gpd.GeoDataFrame, mode: str, taken_by: tuple[str, ...]) -> gpd.GeoDataFrame:
     """The stop places one layer of :data:`STOP_LAYERS` draws.
 
@@ -908,7 +968,11 @@ STOP_PLACE_POPUP_FIELDS = {
     "water_lines": "Boat lines",
     "bus_lines": "Bus lines",
     "operator": "Operated by",
-    "stop_id": "Entur stop",
+    # **Not "Entur stop".** It said that while Entur was the only register that
+    # placed one of these; on the Swedish page it then named a Trafiklab number
+    # after the wrong country, which Uwe read and asked about. Both are their
+    # country's national stop id, and the popup's footer already says whose.
+    "stop_id": "National stop id",
 }
 
 CAMP_SITE_POPUP_FIELDS = {
@@ -2889,7 +2953,9 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     # What Entur adds is the thing a planner is after: whether anything calls
     # there, under which line, and a board to look at on the day.
     print("\nLoading scheduled public transport (Entur)...")
-    scheduled = gpd.clip(entur.Source(cache_dir=args.cache_dir).scheduled_stops(search_bounds, force_download=args.force_download), zone)
+    scheduled = merge_stops_on_one_point(
+        gpd.clip(entur.Source(cache_dir=args.cache_dir).scheduled_stops(search_bounds, force_download=args.force_download), zone)
+    )
     boats = scheduled[scheduled[lines_column(entur.WATER_MODE)].notna()]
     lines_found = sorted(
         {
@@ -3336,7 +3402,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     # the five it adds are all stops on the E10 where a walker gets off,
     # Stordalen 9.65 km from anything the map drew before.
     print("\nLoading scheduled public transport (Trafiklab)...")
-    scheduled = gpd.clip(trafiklab.Source(cache_dir=args.cache_dir).stops(bounds, force_download=args.force_download), zone)
+    scheduled = merge_stops_on_one_point(gpd.clip(trafiklab.Source(cache_dir=args.cache_dir).stops(bounds, force_download=args.force_download), zone))
     # Abisko's quay layer carries no boat call to hand over, so nothing is taken
     # off a stop here; a water stop, if one ever appears, draws itself.
     #

@@ -2891,6 +2891,30 @@ written for one country was hiding the other's. `BUSY_PIN_LAYER` is 50, and the 
 288 is why that figure is not one anybody has to tune — the same argument the quay distance rests
 on.
 
+**Two pins on one coordinate are one pin and a hidden one.** Reported from the phone within the
+hour: *"The Train Station in abisko is missing. Only the Abisko östra e10 Bus Station is there."*
+Samtrafiken files Abisko Östra as two stops — *Abisko Östra station* and *Abisko Östra E10* — at
+the same latitude and longitude to the last digit, and the bus layer is added after the rail one,
+so the bus pin covered the station completely. Not a wrong position: a register that files one
+place under two ids, and a map that believed it twice.
+
+`merge_stops_on_one_point` now draws them as one, keeping the id of the stop whose mode ranks
+first, so the station keeps the number both boards are asked for and the bus lines travel with it.
+The pin reads *Abisko Östra station / Abisko Östra E10*, **train / bus**, two SJ trains and five
+bus lines. Abisko draws 12 stops now, 6 stations and 6 bus stops.
+
+| the rule is the same point and nothing wider, measured 2026-09-17 | |
+|---|---|
+| closest pair among Abisko's 13 stops | **0.0 m** |
+| next closest | **114.8 m** — Björkliden station and Björkliden stationshuset, a platform and a shop |
+| closest pair among Lomsdal-Visten's 426 | 15.0 m, and none sharing a point |
+
+**And the popup stopped calling a Swedish number an Entur one.** *"Weshalb steht weiterhin die
+Entur stop id im Popup?"* — because the label was written when Entur was the only register that
+placed one of these. It reads **National stop id** now, which is what both are; the popup's footer
+already says whose. The quays keep *Entur stop*, because on a Norwegian quay that is exactly what
+it is.
+
 **And the Abisko page was driven for the first time getting here.** `make drive` takes one page and
 defaults to Lomsdal-Visten; every *driven clean* in §9.31 to §9.34 was that page, not this one.
 Driving this one with `ARGS="--page analysis/output/abisko.html"` found 720 readings, 0 broken
