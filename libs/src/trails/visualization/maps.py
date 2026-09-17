@@ -20034,6 +20034,74 @@ class _Legend(MacroElement):
             var title = {{ this.title_json }};
             var open = {{ 'false' if this.collapsed else 'true' }};
 
+            // **What a reader switched stays switched over a reload.**
+            // Reported from the phone, 2026-09-17: *"Nach jedem Neuladen wird
+            // Slope Layer wieder deaktiviert."* Everything this panel switches
+            // -- which sheet is underneath, how the ground on it is drawn, and
+            // which of the map's own layers are drawn over it -- is a state a
+            // reader is *in* while they walk, like the theme, like the offline
+            // switch, like plan mode's *stay on paths*, all of which this page
+            // already remembers. A page reloaded in a valley must not quietly
+            // undo what somebody chose on the way up.
+            //
+            // **Per map, because both maps share one origin.** The key carries
+            // the same name the caches and the offline switch do, so the second
+            // map cannot answer for the first.
+            //
+            // **And only what the reader themself flipped.** A search result in
+            // a layer that is off switches that layer on -- that is what it is
+            // for -- and the tick follows the map; but nothing is written from
+            // there, or looking a place up would quietly change what the map
+            // draws the next morning.
+            //
+            // Storage can be denied outright -- Safari in private browsing
+            // throws on read, not only on write -- and then the build's own
+            // default stands, which is what it did before this existed.
+            var GROUND_KEY = {{ this.ground_key_json }};
+
+            function groundSaid(which) {
+                try { return window.localStorage.getItem(GROUND_KEY + which); } catch (blocked) { return null; }
+            }
+
+            function groundKept(which, fallback) {
+                var said = groundSaid(which);
+                return said === null ? fallback : said === 'on';
+            }
+
+            function keepGround(which, want) {
+                try { window.localStorage.setItem(GROUND_KEY + which, want ? 'on' : 'off'); } catch (blocked) { return; }
+            }
+
+            // **The layers under one key, by the name their row carries.** One
+            // entry holding a word per label rather than one key per layer: a
+            // build that renames a row, adds one or drops one finds nothing for
+            // it and takes the build's own default, and there is nothing left
+            // behind to clean up. The sheet is kept by its label for the same
+            // reason and not by its index -- an index means a different sheet
+            // the day a second one is offered.
+            function keptLayers() {
+                var text = groundSaid('layers');
+                if (!text) { return {}; }
+                try {
+                    var said = JSON.parse(text);
+                    return said && typeof said === 'object' ? said : {};
+                } catch (broken) { return {}; }
+            }
+
+            function keepLayer(label, want) {
+                var said = keptLayers();
+                said[label] = want ? 'on' : 'off';
+                try { window.localStorage.setItem(GROUND_KEY + 'layers', JSON.stringify(said)); } catch (blocked) { return; }
+            }
+
+            // The switch is drawn from what the reader kept and the map is then
+            // put into that state, rather than the tick saying one thing and
+            // the ground showing another.
+            function standAs(layer, want) {
+                if (want && !map.hasLayer(layer)) { map.addLayer(layer); }
+                if (!want && map.hasLayer(layer)) { map.removeLayer(layer); }
+            }
+
             var control = L.control({position: 'bottomleft'});
             control.onAdd = function () {
                 var box = L.DomUtil.create('div', 'trails-legend');
@@ -20066,19 +20134,26 @@ class _Legend(MacroElement):
                 // the two cannot share one list.
                 picked.className = 'trails-basemap';
                 picked.style.cssText = 'margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--trails-rule)';
+                // Which sheet was chosen last, by the name on its row. A name
+                // this build no longer offers matches nothing, and then the
+                // build's own choice stands.
+                var keptSheet = groundSaid('sheet');
+                var wantedBase = keptSheet === null ? -1 : baseLabels.indexOf(keptSheet);
                 bases.forEach(function (layer, index) {
-                    if (!baseShown[index] && map.hasLayer(layer)) { map.removeLayer(layer); }
+                    var wantBase = wantedBase >= 0 ? index === wantedBase : !!baseShown[index];
+                    standAs(layer, wantBase);
                     var line = document.createElement('label');
                     line.style.cssText = 'display:flex;align-items:center;gap:6px;margin:3px 0;cursor:pointer';
                     var pick = document.createElement('input');
                     pick.type = 'radio';
                     pick.name = 'trails-base-{{ this.get_name() }}';
-                    pick.checked = map.hasLayer(layer);
+                    pick.checked = wantBase;
                     pick.addEventListener('change', function () {
                         bases.forEach(function (other) {
                             if (other !== layer && map.hasLayer(other)) { map.removeLayer(other); }
                         });
                         if (!map.hasLayer(layer)) { map.addLayer(layer); }
+                        try { window.localStorage.setItem(GROUND_KEY + 'sheet', baseLabels[index]); } catch (blocked) { return; }
                     });
                     var name = document.createElement('span');
                     name.textContent = baseLabels[index];
@@ -20086,43 +20161,6 @@ class _Legend(MacroElement):
                     line.appendChild(name);
                     picked.appendChild(line);
                 });
-                // **A switch a reader flipped stays flipped over a reload.**
-                // Reported from the phone, 2026-09-17: *"Nach jedem Neuladen
-                // wird Slope Layer wieder deaktiviert."* Both of these say how
-                // the ground underneath is drawn, and that is a state a reader
-                // is *in* while they walk -- like the theme, like the offline
-                // switch, like plan mode's *stay on paths*, all of which this
-                // page already remembers. A page reloaded in a valley must not
-                // quietly undo what somebody chose on the way up.
-                //
-                // **Per map, because both maps share one origin.** The key
-                // carries the same name the caches and the offline switch do,
-                // so the second map cannot answer for the first.
-                //
-                // Storage can be denied outright -- Safari in private browsing
-                // throws on read, not only on write -- and then the build's own
-                // default stands, which is what it did before this existed.
-                var GROUND_KEY = {{ this.ground_key_json }};
-
-                function groundKept(which, fallback) {
-                    try {
-                        var said = window.localStorage.getItem(GROUND_KEY + which);
-                        return said === null ? fallback : said === 'on';
-                    } catch (blocked) { return fallback; }
-                }
-
-                function keepGround(which, want) {
-                    try { window.localStorage.setItem(GROUND_KEY + which, want ? 'on' : 'off'); } catch (blocked) { return; }
-                }
-
-                // Nothing is remembered about a layer the page no longer has:
-                // the switch below draws what the reader kept, and the map is
-                // put into that state rather than the other way round.
-                function standAs(layer, want) {
-                    if (want && !map.hasLayer(layer)) { map.addLayer(layer); }
-                    if (!want && map.hasLayer(layer)) { map.removeLayer(layer); }
-                }
-
                 // **The relief shadow belongs to the sheet, not to the layers.**
                 // It is neither a line nor a point and has no colour for the
                 // legend to explain; it answers how the ground underneath is
@@ -20207,6 +20245,7 @@ class _Legend(MacroElement):
                 // where it only explains a colour — but it keeps the checkbox's
                 // width either way, or the two kinds of row would not line up.
                 var drawn = [];
+                var layersKept = keptLayers();
                 rows.forEach(function (row, index) {
                     var layer = layers[index];
                     var line = document.createElement(layer ? 'label' : 'div');
@@ -20214,13 +20253,20 @@ class _Legend(MacroElement):
                         (layer ? ';cursor:pointer' : '');
                     var tick = null;
                     if (layer) {
-                        if (!row.shown && map.hasLayer(layer)) { map.removeLayer(layer); }
+                        // What the reader left it at, and the build's own
+                        // `show` where they never touched it -- which is also
+                        // what takes the layers folium hands to the map but
+                        // this page starts without back off it.
+                        var wantRow = layersKept[row.label] === undefined
+                            ? !!row.shown : layersKept[row.label] === 'on';
+                        standAs(layer, wantRow);
                         tick = document.createElement('input');
                         tick.type = 'checkbox';
                         tick.style.cssText = 'flex:none;margin:0';
-                        tick.checked = map.hasLayer(layer);
+                        tick.checked = wantRow;
                         tick.addEventListener('change', function () {
-                            if (tick.checked) { map.addLayer(layer); } else { map.removeLayer(layer); }
+                            standAs(layer, tick.checked);
+                            keepLayer(row.label, tick.checked);
                             paint();
                         });
                         line.appendChild(tick);

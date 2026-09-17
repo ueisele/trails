@@ -2367,12 +2367,58 @@ class TestTwoMapsOnOneOrigin:
         assert "standAs(slope, slopeTick.checked);" in html
         assert "keepGround('relief', shadeTick.checked);" in html
         assert "keepGround('slope', slopeTick.checked);" in html
-        # Denied storage is the build's default and not a crash.
-        assert "} catch (blocked) { return fallback; }" in html
+        # Denied storage is the build's default and not a crash: Safari in
+        # private browsing throws on read, not only on write.
+        assert "try { return window.localStorage.getItem(GROUND_KEY + which); } catch (blocked) { return null; }" in html
+        assert "return said === null ? fallback : said === 'on';" in html
         # The first map's key is not the second's.
         first = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_legend(first, "Lomsdal", [maps.LegendRow("a line", "#000", None)])
         assert 'var GROUND_KEY = "trails-ground-";' in first.get_root().render()
+
+    def test_the_layers_and_the_chosen_sheet_are_remembered_too(self):
+        """Asked for after the two above: *"Auch der Layer Zustand wird
+        gemerkt?"* — no, and now yes. Which sheet is underneath and which of the
+        map's own layers are drawn over it are the same kind of thing as the
+        relief switch, and a reader who put four layers away on the way up had
+        them all back at the next reload.
+
+        **The layers under one key, by the name on their row.** One entry
+        holding a word per label rather than one key per layer: a build that
+        renames a row, adds one or drops one finds nothing for it and takes the
+        build's own `show`, and there is nothing left behind to clean up. The
+        sheet is kept by its label for the same reason and not by its index — an
+        index means a different sheet the day a second one is offered.
+
+        **And only what the reader flipped themself.** A search result in a
+        layer that is off switches that layer on, and the tick follows the map;
+        nothing is written from there, or looking a place up would quietly
+        change what the map draws tomorrow."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        layer = maps.add_trails(
+            fmap,
+            gpd.GeoDataFrame({"geometry": [LineString([(12.8, 65.4), (12.81, 65.41)])]}, crs="EPSG:4326"),
+            name="Paths",
+        )
+        maps.add_legend(fmap, "Lomsdal", [maps.LegendRow("Paths", "#000", layer)])
+        html = fmap.get_root().render()
+        # The row takes what was kept and the build's own `show` where nothing was.
+        assert "var layersKept = keptLayers();" in html
+        assert "? !!row.shown : layersKept[row.label] === 'on';" in html
+        assert "standAs(layer, wantRow);" in html
+        assert "keepLayer(row.label, tick.checked);" in html
+        # One entry, keyed by label, and a broken one reads as nothing kept.
+        assert "window.localStorage.setItem(GROUND_KEY + 'layers', JSON.stringify(said));" in html
+        assert "} catch (broken) { return {}; }" in html
+        # The sheet by its name, and a name this build no longer offers matches
+        # nothing at all.
+        assert "var wantedBase = keptSheet === null ? -1 : baseLabels.indexOf(keptSheet);" in html
+        assert "var wantBase = wantedBase >= 0 ? index === wantedBase : !!baseShown[index];" in html
+        assert "window.localStorage.setItem(GROUND_KEY + 'sheet', baseLabels[index]);" in html
+        # Nothing is written where the map switches a layer on by itself: the
+        # follower only ticks the box.
+        follows = html.split("function follow() {")[1].split("}\n")[0]
+        assert "keepLayer" not in follows
 
     def test_the_slope_classes_are_never_taken_for_the_sheet(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
@@ -7558,7 +7604,8 @@ class TestLegend:
 
         html = fmap.get_root().render()
         assert "tick.type = 'checkbox';" in html
-        assert "if (tick.checked) { map.addLayer(layer); } else { map.removeLayer(layer); }" in html
+        assert "standAs(layer, tick.checked);" in html
+        assert "if (want && !map.hasLayer(layer)) { map.addLayer(layer); }" in html
         assert layer.get_name() in html.split("var layers = [")[1].split("]")[0]
 
     def test_a_row_without_a_layer_switches_nothing(self):
@@ -7575,7 +7622,9 @@ class TestLegend:
     def test_a_layer_that_starts_off_is_taken_off(self):
         """**Folium's layer control did this in its own template**, so with that
         control gone the legend has to: a layer added with show=False is on the
-        map like any other until something removes it."""
+        map like any other until something removes it. It is the build's `show`
+        that says so, and since the rows are remembered it is the fallback for a
+        row the reader never touched rather than the last word on it."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         gdf, _ = self.points()
         layer = maps.add_points(fmap, gdf, name="Huts", show=False)
@@ -7583,12 +7632,14 @@ class TestLegend:
 
         html = fmap.get_root().render()
         assert '"shown": false' in html
-        assert "if (!row.shown && map.hasLayer(layer)) { map.removeLayer(layer); }" in html
+        assert "? !!row.shown : layersKept[row.label] === 'on';" in html
+        assert "if (!want && map.hasLayer(layer)) { map.removeLayer(layer); }" in html
 
     def test_the_base_maps_become_radio_buttons(self):
         """And only the one asked for stays on the map, for the same reason:
         folium hands every base layer to the map and left the unwanted ones to
-        the control's template."""
+        the control's template. Which one is asked for is the reader's last
+        choice where they made one, and the build's otherwise."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_legend(fmap, "Legend", {"x": "#000000"})
 
@@ -7596,7 +7647,8 @@ class TestLegend:
         assert '["Kartverket Topo", "Kartverket Grayscale"]' in html
         assert "[true, false]" in html
         assert "pick.type = 'radio';" in html
-        assert "if (!baseShown[index] && map.hasLayer(layer)) { map.removeLayer(layer); }" in html
+        assert "var wantBase = wantedBase >= 0 ? index === wantedBase : !!baseShown[index];" in html
+        assert "standAs(layer, wantBase);" in html
 
     def test_nothing_else_adds_a_layer_control(self):
         """Two controls over one list is two places to look and two to drift."""

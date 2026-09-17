@@ -832,17 +832,7 @@ the two that are ours saying so, and the line *steepness of the ground down its 
 profile grades the path* under it, shown only while it is on. **Off when the page opens**: it answers a question off the paths, and an
 eighth of the ground coloured is a lot of colour for a reader following a marked trail.
 
-**And what the reader flipped is remembered.** Reported from the phone on 2026-09-17:
-*"Nach jedem Neuladen wird Slope Layer wieder deaktiviert."* Both switches in this panel say how
-the ground underneath is drawn, and that is a state a reader is *in* while they walk — like the
-theme, like the offline switch, like plan mode's *stay on paths*, all of which the page already
-remembers. A page reloaded in a valley must not undo what somebody chose on the way up, and that
-holds in both directions: the relief turned off in full sun stays off too. Kept in `localStorage`
-under the name the caches and the offline switch already carry (`trails-abisko-ground-slope`), so
-the two maps on one origin cannot answer for each other; where storage is denied outright — Safari
-in private browsing throws on read, not only on write — the build's own default stands, which is
-what happened before this existed. The checkbox is drawn from what was kept and the map is then put
-into that state, rather than the tick saying one thing and the ground showing another.
+**And the switch is remembered over a reload**, with everything else this panel switches: §6.9.
 
 **Offline it is kept whether or not it is on.** The switch is the reader's to flip in the field,
 and a class that was never kept is a blank tile where a wall is. So the worker takes a fourth
@@ -932,6 +922,55 @@ heights over the same set as the sheet — and the graph's sample elsewhere.
 Driven: on the network the picker's figure is compared against the panel's own series at the same
 place, one surface and two renderings; off it, the check used to read that nothing was claimed and
 now reads Torneträsk's own flat surface, 342 m, from a tap 4.5 km from the nearest path.
+
+### 6.9 What the panel remembers
+
+Reported from the phone on 2026-09-17: *"Nach jedem Neuladen wird Slope Layer wieder
+deaktiviert."* And, when the two switches over the sheet had been given a memory: *"Auch der Layer
+Zustand wird gemerkt?"* — no, and now yes.
+
+**Decided: everything this panel switches is remembered, per map.** Which sheet is drawn
+underneath, how the ground on it is drawn (§6.6, §6.7), and which of the map's own layers are drawn
+over it. All of it is a state a reader is *in* while they walk — like the theme, like the offline
+switch, like plan mode's *stay on paths*, every one of which this page already kept. A page
+reloaded in a valley must not undo what somebody chose on the way up, and that holds in both
+directions: the relief turned off in full sun stays off too.
+
+| what | where it is kept | what a page with nothing kept does |
+|---|---|---|
+| the relief | `<cache>-ground-relief` | the build's `show`, which is on |
+| the slope classes | `<cache>-ground-slope` | off |
+| every legend row | `<cache>-ground-layers`, one JSON object keyed by the row's label | the build's `show` per row |
+| the sheet | `<cache>-ground-sheet`, the row's label | the build's own choice |
+
+- **Per map**, under the name the caches and the offline switch already carry
+  (`trails-abisko-…` against `trails-…`), because both maps are served from one origin and
+  `localStorage` is per origin.
+- **By label, not by index.** An index means a different layer the day a row is added, and a
+  different sheet the day a second one is offered. A label the build no longer has matches nothing
+  and the build's own default stands — which is also what a rebuild that renames a row gets, and
+  there is nothing left behind to clean up.
+- **One key for the layers** rather than one per row: nineteen keys to write, read and tidy for a
+  thing that is read once at load.
+- **Only what the reader flipped themself.** A search result in a layer that is switched off
+  switches that layer on — that is what it is for, or the row would move the map to a blank spot —
+  and the tick follows the map. Nothing is written from there: looking a place up must not quietly
+  change what the map draws tomorrow.
+- **The switch is drawn from what was kept and the map is then put into that state**, not the other
+  way round. The other way round is a tick that says one thing while the ground shows another.
+- Where storage is denied outright — Safari in private browsing throws on read, not only on write —
+  the build's default stands, which is exactly what happened before this existed.
+
+**The one thing this buys that is worth saying out loud:** a layer put away stays away across
+rebuilds too. If a later build adds a source to a layer somebody switched off a month ago, they
+will not see it and will not be told. That is the price of the memory, and it was weighed against
+the alternative — nineteen switches that reset every time the map is opened, on a phone, in the
+field.
+
+Driven as *what the panel remembers*: a layer switched off and the other sheet picked, **one
+reload** for both (a reload is 20 s of a suite that already takes ten minutes), then both read back
+and put where they were found. On the Abisko page there is one sheet and the check says so instead
+of passing on a choice it never made.
 
 ---
 
@@ -2182,7 +2221,17 @@ fetches do not surface in Playwright's request events, so counting them takes a 
 
 A line per change to this document or to the decisions in it, newest first.
 
-- **2026-09-17, third of the day** — the two switches over the sheet remember themselves (§6.7),
+- **2026-09-17, fourth of the day** — the legend's own rows and the choice of sheet are remembered
+  as well (§6.9), asked for from the phone once the two switches over the sheet were: *"Auch der
+  Layer Zustand wird gemerkt?"* One key holds the rows, keyed by label; the sheet is kept by its
+  label too, so an index cannot come to mean another sheet. Nothing is written where the map
+  switches a layer on by itself, which is what a search result does. The decision moved out of
+  §6.7 into a §6.9 of its own, since it is now the whole panel's. **Driven with `--only`** — seven
+  checks rather than sixty — on Uwe's word that a full drive is too long to run after every change:
+  89 readings on Abisko in 2:00 and 58 on Lomsdal-Visten in 1:30, both clean, against ten minutes a
+  page for the whole suite.
+
+- **2026-09-17, third of the day** — the two switches over the sheet remember themselves (§6.7, now §6.9),
   reported from the phone: every reload put the slope classes away again. Kept per map in
   `localStorage`, beside the names the caches and the offline switch carry; the relief goes with
   it, so a shadow turned off in full sun stays off. Denied storage leaves the build's default, as

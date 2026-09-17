@@ -5797,6 +5797,132 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
     )
 
 
+def what_the_panel_remembers(page: Any) -> Check:
+    """A layer put away and a sheet chosen are still that way after a reload.
+
+    Asked for from the phone after the relief and slope switches were given a
+    memory: *"Auch der Layer Zustand wird gemerkt?"* Which sheet is underneath
+    and which of the map's own layers are drawn over it are the same kind of
+    thing — a state a reader is in while they walk — and every reload used to
+    put them back to the build's own.
+
+    **One reload for both**, because a reload is twenty seconds of a suite that
+    already takes ten minutes: a layer is switched off and the other sheet
+    picked before it, and both are read after it.
+
+    What can go wrong and does not show in the source: the tick can come back
+    remembered while the layer itself comes back on the map; a label that is not
+    a key can be written and read as another row's; and the sheet can be kept by
+    its index, which means a different sheet the day a second is offered.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What survived the reload, and whether it was put back
+    """
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(600)
+
+    rows = """() => {
+      const ticks = [...document.querySelectorAll('.trails-legend label')]
+        .map(row => ({label: row.textContent.trim(), box: row.querySelector('input[type=checkbox]'), row: row}))
+        .filter(each => each.box);
+      const sheets = [...document.querySelectorAll('.trails-basemap label')]
+        .map(row => ({label: row.textContent.trim(), box: row.querySelector('input[type=radio]')}))
+        .filter(each => each.box);
+      return {ticks: ticks, sheets: sheets}; }"""
+    # Switched off, and which row that was: a name and not an index, because
+    # what is kept is the name.
+    put_away = page.evaluate(
+        rows.replace(
+            "return {ticks: ticks, sheets: sheets}; }",
+            """
+      const on = ticks.find(each => each.box.checked);
+      if (on) { on.box.click(); }
+      const off = sheets.find(each => !each.box.checked);
+      if (off) { off.box.click(); }
+      return {layer: on ? on.label : null, sheet: off ? off.label : null,
+              was: sheets.length > 1 ? (sheets.find(each => each !== off) || {}).label : null,
+              sheets: sheets.length}; }""",
+        ),
+    )
+    page.wait_for_timeout(900)
+
+    page.reload(timeout=120_000)
+    page.wait_for_timeout(SETTLE_MS)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(1200)
+    after = page.evaluate(
+        """(said) => {
+          const row = [...document.querySelectorAll('.trails-legend label')]
+            .find(each => each.textContent.trim() === said.layer);
+          const box = row ? row.querySelector('input[type=checkbox]') : null;
+          const sheet = [...document.querySelectorAll('.trails-basemap label')]
+            .find(each => each.querySelector('input[type=radio]:checked'));
+          const map = window[Object.keys(window).find(k => k.startsWith('map_'))];
+          let sheets = 0;
+          map.eachLayer(layer => {
+            const options = layer.options || {};
+            if (layer._url && !options.trailsShade && !options.trailsSlope && !options.trailsHeights) { sheets += 1; }
+          });
+          return {ticked: box ? box.checked : null,
+                  // The row a switched-off layer draws is dimmed, which is the
+                  // page saying the colour is not speaking for the terrain --
+                  // read here as the layer really being off the map.
+                  dimmed: row ? getComputedStyle(row).opacity : null,
+                  sheet: sheet ? sheet.textContent.trim() : null, sheets: sheets}; }""",
+        put_away,
+    )
+
+    # Put back where it was found, so the rest of the suite drives the map the
+    # build drew rather than the one this check left behind.
+    page.evaluate(
+        """(said) => {
+          const row = [...document.querySelectorAll('.trails-legend label')]
+            .find(each => each.textContent.trim() === said.layer);
+          const box = row ? row.querySelector('input[type=checkbox]') : null;
+          if (box && !box.checked) { box.click(); }
+          if (!said.was) { return; }
+          const sheet = [...document.querySelectorAll('.trails-basemap label')]
+            .find(each => each.textContent.trim() === said.was);
+          const pick = sheet ? sheet.querySelector('input[type=radio]') : null;
+          if (pick && !pick.checked) { pick.click(); } }""",
+        put_away,
+    )
+    page.wait_for_timeout(900)
+    back = page.evaluate(
+        """(said) => {
+          const row = [...document.querySelectorAll('.trails-legend label')]
+            .find(each => each.textContent.trim() === said.layer);
+          const box = row ? row.querySelector('input[type=checkbox]') : null;
+          return box ? box.checked : null; }""",
+        put_away,
+    )
+
+    one_sheet = put_away["sheets"] < 2
+    return Check(
+        "what the panel remembers",
+        [
+            Reading("a layer can be put away", put_away["layer"] is not None, True, note=str(put_away["layer"])),
+            Reading("and it is still away after a reload", after["ticked"], False),
+            Reading("with its row saying the colour is not on the map", after["dimmed"], "0.45"),
+            # One sheet is one sheet: a page with a single base map has nothing
+            # to choose, and says so rather than passing on a choice it never
+            # made.
+            Reading(
+                "the sheet that was chosen is the sheet drawn",
+                after["sheet"] if not one_sheet else None,
+                put_away["sheet"] if not one_sheet else None,
+                note="this page offers one sheet" if one_sheet else "",
+            ),
+            Reading("and only one sheet is on the map", after["sheets"], 1),
+            Reading("and it can be put back", back, True),
+        ],
+    )
+
+
 def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
     """What a tap means, and what it costs to be a finger's width out.
 
@@ -9952,6 +10078,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(the_relief_under_the_map(page))
     if wanted(the_slope_classes_over_the_relief):
         checks.append(the_slope_classes_over_the_relief(page))
+    if wanted(what_the_panel_remembers):
+        checks.append(what_the_panel_remembers(page))
     if wanted(a_tap_beside_a_path_in_plan_mode):
         checks.append(a_tap_beside_a_path_in_plan_mode(page))
     if wanted(a_tap_in_the_middle_of_a_long_edge):
