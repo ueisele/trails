@@ -2229,7 +2229,11 @@ A line per change to this document or to the decisions in it, newest first.
   §6.7 into a §6.9 of its own, since it is now the whole panel's. **Driven with `--only`** — seven
   checks rather than sixty — on Uwe's word that a full drive is too long to run after every change:
   89 readings on Abisko in 2:00 and 58 on Lomsdal-Visten in 1:30, both clean, against ten minutes a
-  page for the whole suite.
+  page for the whole suite. **Published** the same morning, pages only: `abisko.html` 3,588,769 B
+  and `lomsdal-visten.html` 17,144,931 B, byte-identical from the edge, each worker stamped with
+  its own page's hash (`a87fa97662dc1c60`, `1a747437ea56fbec`). A full drive of both pages was run
+  once afterwards rather than before each of the day's changes, and was clean: **720 readings on
+  Abisko and 689 on Lomsdal-Visten**, nothing broken and no figure moved.
 
 - **2026-09-17, third of the day** — the two switches over the sheet remember themselves (§6.7, now §6.9),
   reported from the phone: every reload put the slope classes away again. Kept per map in
