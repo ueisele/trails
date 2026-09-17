@@ -173,6 +173,13 @@ class SourceMetadata:
 
 METADATA = SourceMetadata()
 
+#: The stop register is a dataset of its own, named separately because the page
+#: carries data from both: the feed says what calls, the register says where.
+REGISTER_METADATA = SourceMetadata(
+    name="Stops data",
+    url="https://www.trafiklab.se/api/netex-datasets/stops-data/",
+)
+
 #: Bounding box as (min_lon, min_lat, max_lon, max_lat), matching GeoPandas.
 Bounds = tuple[float, float, float, float]
 

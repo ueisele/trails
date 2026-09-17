@@ -3616,15 +3616,20 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     credits = Credits(
         sources={
             **source_credits(loaded.versions, SWEDEN_SOURCE_TERMS, SWEDEN_SOURCE_METADATA),
+            # **Two entries, because the page carries both.** The feed says
+            # what calls at a stop and the register says where the stop is
+            # (§9.36); naming only the one the lines came from would leave the
+            # positions unattributed.
             TRAFIKLAB: [
                 credit(
-                    f"{TRAFIKLAB} ({trafiklab.METADATA.name})",
-                    trafiklab.METADATA.license,
+                    f"{TRAFIKLAB} ({described.name})",
+                    described.license,
                     "",
-                    trafiklab.METADATA.attribution,
-                    trafiklab.METADATA.url,
+                    described.attribution,
+                    described.url,
                     f"read {date.today()}",
                 )
+                for described in (trafiklab.METADATA, trafiklab.REGISTER_METADATA)
             ],
         },
         heights=height_credit(markhojd.METADATA),
