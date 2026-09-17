@@ -2215,11 +2215,76 @@ worker never reaches anyone (`home/trails-map/known-issues.md`); harmless, since
 fetched past the HTTP cache anyway and the deploy purges the edge. And a service worker's script
 fetches do not surface in Playwright's request events, so counting them takes a server that logs.
 
+### 9.31 The glyph says what a place is for, the colour who placed it — settled, 2026-09-17
+
+Uwe, 2026-09-17, from the phone: *"Ich bin aber nicht sicher ob die Symbole so passend gewählt
+sind. Auch ob alles was sinnvoll ist angezeigt wird, also etwas fehlt oder ggf etwas unnötig
+ist."* Then, on the review: *"Setze alles so um wie du vorgeschlagen hast."*
+
+**What the review found, measured on the built pages of that morning.** Four glyphs: a house, a
+tent, a ship, an anchor. The house stood for every one of the 51 Topografi 50 buildings — 2
+*fjällstationer*, 4 STF *turiststugor*, 6 *raststugor*, 9 *vindskydd*, 19 *kåtor*, 10 lone
+private cabins and the naturum — and for 104 N50 buildings over Lomsdal-Visten, 85 of them koier,
+seter houses and rorbuer by building type. The one thing a planner asks of a hut, *can I sleep
+there*, sat in the popup. The tent stood for OSM's *Huts and shelters*, which held the STF
+cabins Abiskojaure, Unna Allakas and Kårsavagge as `alpine_hut` beside 27 `amenity=shelter`,
+five of which were bus-stop roofs and two picnic roofs (measured over Overpass with
+`shelter_type`, which the loader did not read). The 48 footbridges and 8 fords of
+`ledintressepunkt_fjall` were one blue dot; the register's bridges, privies, shelters and
+fireplaces one brown one. The legend keyed every pin row with a bar, so the difference between a
+house and a tent was explained nowhere. And nothing on either page said where the train stops:
+OSM has Abisko Östra, Abisko Turiststation, Björkliden, Låktatjåkka, Vassijaure and Katterjåkk
+in the box, and Trofors and Mosjøen over Lomsdal-Visten.
+
+**Decided: the glyph says what a place is for, and the colour says which source placed it.**
+Thirteen outlines more from the same Font Awesome 6.2.0 Free set the four came from, about a
+kilobyte of path each and the same CC BY notice: `bed` where there is one (staffed or
+self-service: *fjällstation*, *turiststuga*, N50 *betjent* and *selvbetjent*, OSM `alpine_hut`),
+`house` for an unstaffed hut (*raststuga*, *ubetjent*, *rastebu*, `wilderness_hut`, a
+`basic_hut`), `person-shelter` for a roof (*vindskydd*, *gapahuk*, *rastskydd*, a lean-to or a
+shelter with no type), `tent` for a camp site, `train` and `bus` for the way in, `bridge` and
+`water` for a footbridge and a ford, `phone`, `square-parking`, `restroom`, `fire` and
+`circle-info` for what the registers place along a trail. One pin colour per source — Topografi
+50 and N50 dark red, OSM dark blue, SSR purple, the register orange — so a pin on a pin at the
+same hut, which Lomsdal-Visten has six of, at least says the same thing in two colours.
+`add_points` reads the glyph per row from a column (`icon_field`), and a name the page does not
+draw is refused at build time as before. The legend's row for a pin layer is its pins, every
+glyph it drew in its colour at half size, built out of the same two paths.
+
+**What is drawn as a dot now, and off.** The 19 kåtor and 10 lone cabins of Topografi 50, and
+N50's 85 buildings by type — a walker heads for none of them, and as pins they were two thirds of
+the hut layer. Dots, switched off, as the farms are; the search still switches the layer on when
+a name matches. A building by type that carries a name off the hut register stays a pin
+(Sæterskaret skogstue, the hut from the brochure, is one). **What is left out:** an
+`amenity=shelter` whose `shelter_type` is a bus-stop roof, a picnic roof, a gazebo, a sun shelter,
+a wildlife hide, a field shelter or a changing room — `overpass.NOT_A_SHELTER_TYPES`; the cache
+key carries `_typed` so an entry without the column cannot answer for one with it. **What is
+new:** *Stations and bus stops [OSM]* and *Camp sites [OSM]* on both maps, the register's
+facilities and Topografi 50's trail points as pins. Over Lomsdal-Visten a bus stop is drawn only
+in the trailhead band, two kilometres off the boundary: the zone held 447 of them, the whole of
+Helgeland's network, against two stations.
+
+**Not done, and known.** The Vindskydd 150 m from Låktatjåkko fjällstation carries the station's
+name off the lettering join, so the station reads twice; the join takes the nearest name within
+reach and a second building inside it is a second hit. OSM's `tourism=chalet` over
+Lomsdal-Visten holds Bustadmoen, Gåsvasshytta, Kvalfors skogstue, Lavasshytta and Litjvasshytta,
+which the shelter selector does not ask for; N50 has all five, so nothing is lost today. OSM's 38
+car parks over Abisko against Topografi 50's 3 were not added.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-17, sixth of the day** — the pins say what a place is for (§9.31), on Uwe's question
+  whether the symbols fit and whether anything is missing or unnecessary. Thirteen Font Awesome
+  outlines more; a bed, a house and a roof where one house stood for a staffed STF cabin, a kåta
+  and a private koie alike; a bridge and a ford where both were a blue dot; one pin colour per
+  source; the legend's pin rows drawn as pins. Kåtor, lone cabins and N50's buildings by type are
+  dots and off; bus-stop and picnic roofs are out of OSM's shelters; stations, bus stops and camp
+  sites are new layers on both maps. Both pages driven clean (Abisko 180 pins and 22 rows,
+  Lomsdal-Visten 127 and 33, no broken invariant) and **published** the same morning.
 
 - **2026-09-17, fifth of the day** — the drive is measured and cut, on Uwe's word that ten minutes
   a page after every change is too much. Three things: the report now times **every check** and

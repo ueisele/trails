@@ -156,15 +156,37 @@ class TestWhatThePageFetches:
         assert "*, *::before, *::after { box-sizing: border-box; }" in html
         assert "font-size: 10px !important;" in html
 
-    def test_the_webfont_is_gone_and_the_four_outlines_are_not(self):
+    def test_the_webfont_is_gone_and_the_outlines_are_not(self):
         """252 kB of stylesheet and webfont bought exactly four glyphs.
 
         The outlines are Font Awesome's own, so the markers are unchanged to the
         pixel, and awesome-markers still writes the same `<i class="fa fa-...">`.
+        Thirteen more since 2026-09-17, at about a kilobyte of path each: the
+        glyph says what a place is for, and a bed, a roof and a ford are not
+        one house.
         """
         html = self.built()
         assert "fontawesome-free" not in html
-        assert set(maps.MARKER_ICONS) == {"house-chimney", "campground", "ship", "anchor"}
+        assert {"house-chimney", "campground", "ship", "anchor"} <= set(maps.MARKER_ICONS)
+        assert {
+            "bed",
+            "house",
+            "person-shelter",
+            "tent",
+            "train",
+            "bus",
+            "bridge",
+            "water",
+            "phone",
+            "square-parking",
+            "restroom",
+            "fire",
+            "circle-info",
+        } <= set(maps.MARKER_ICONS)
+        # Each one a viewBox and a path, and nothing the size of a webfont.
+        for box, path in maps.MARKER_ICONS.values():
+            assert box.startswith("0 0 ")
+            assert len(path) < 2000
         for name in maps.MARKER_ICONS:
             assert f".awesome-marker i.fa-{name} {{ background-image:" in html
         # And the notice travels with them, as it does in the stylesheet this
@@ -9176,3 +9198,54 @@ class TestWhereTheReaderIs:
         assert "aimingFor: function () { return aiming; }," in html
         assert "aimingAt: function () { return aiming === 'move' ? aimingAt : -1; }," in html
         assert "aimingAt: aiming === 'move' ? aimingAt : -1," in html
+
+
+class TestGlyphPerRow:
+    """The glyph says what a place is for; the colour says who placed it."""
+
+    @pytest.fixture
+    def huts(self) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame(
+            {
+                "name": ["Abiskojaure", "Nissonjokk", "Renvaktarstuga"],
+                "glyph": ["bed", "person-shelter", None],
+                "geometry": [Point(18.6, 68.3), Point(18.62, 68.31), Point(18.65, 68.32)],
+            },
+            crs="EPSG:4326",
+        )
+
+    def test_a_row_is_drawn_with_its_own_glyph_and_falls_back_to_the_layers(self, huts):
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46))
+        group = maps.add_points(fmap, huts, name="Cabins", color="darkred", icon="house", icon_field="glyph")
+
+        markers = [child for child in group._children.values() if isinstance(child, folium.Marker)]
+        drawn = [next(c for c in marker._children.values() if isinstance(c, folium.DivIcon)).options["html"] for marker in markers]
+        assert maps.MARKER_ICONS["bed"][1] in drawn[0]
+        assert maps.MARKER_ICONS["person-shelter"][1] in drawn[1]
+        assert maps.MARKER_ICONS["house"][1] in drawn[2]
+        # And the layer says which it drew, in order, once each.
+        assert getattr(group, maps.PIN_GLYPHS_ATTR) == ["bed", "person-shelter", "house"]
+
+    def test_a_glyph_this_page_does_not_draw_is_refused_by_name(self, huts):
+        huts.loc[0, "glyph"] = "hut"
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46))
+        with pytest.raises(ValueError, match="no outline for 'hut'"):
+            maps.add_points(fmap, huts, name="Cabins", icon_field="glyph")
+
+    def test_the_legend_shows_the_pins_a_layer_drew(self, huts):
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46))
+        group = maps.add_points(fmap, huts, name="Cabins", color="darkred", icon="house", icon_field="glyph")
+        maps.add_legend(fmap, "Legend", [maps.LegendRow("Cabins", "#a23336", group, glyphs=tuple(getattr(group, maps.PIN_GLYPHS_ATTR)))])
+
+        html = fmap.get_root().render()
+        # Three pins in the row's colour, the glyph in each, at half the map's size.
+        assert html.count(f'width=\\"{maps.PIN_WIDTH // 2}\\" height=\\"{maps.PIN_HEIGHT // 2}\\"') == 3
+        assert "swatch.innerHTML = row.glyphs.join('');" in html
+
+    def test_a_row_without_glyphs_keeps_its_bar(self, trails):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        group = maps.add_trails(fmap, trails, name="Paths")
+        maps.add_legend(fmap, "Legend", [maps.LegendRow("Paths", "#000000", group)])
+
+        html = fmap.get_root().render()
+        assert '"glyphs": []' in html

@@ -1723,6 +1723,18 @@ per file and **show it at the download** — *3.2 km OSM (ODbL) · 1.1 km UT.no
 (CC BY-NC)* — instead of a blanket warning nobody reads. The reader should know
 what they are passing on before they pass it on.
 
+## The pins: the glyph says what a place is for, the colour who placed it
+
+Settled 2026-09-17 and written up in the Abisko decisions, §9.31, because both maps draw their
+pins through the same code. What it means here: N50's 104 buildings are 19 huts by service level
+(*ubetjent* a house, *rastebu* a house, *gapahuk* a roof) plus any building by type that carries
+a name off the hut register, as pins — and 85 koier, seter houses and rorbuer as dots, switched
+off. OSM's shelters lose their bus-stop and picnic roofs (Forvik, Sjøsiden senter among them) and
+say by glyph whether they have walls. SSR's huts and quays are purple, OSM's quays dark blue, and
+two new OSM layers carry Trofors and Mosjøen stations, the bus stops within the trailhead band
+(447 in the zone on the first build, the whole of Helgeland's network) and the camp sites along
+the way in.
+
 ## Licence: in the file, not in the interface
 
 The graph carries OpenStreetMap geometry (ODbL, share-alike) and UT.no tracks

@@ -421,7 +421,7 @@ PROVIDERS: dict[str, Provider] = {
 }
 
 
-#: The four glyphs the markers ask for, as Font Awesome's own outlines.
+#: The glyphs the markers ask for, as Font Awesome's own outlines.
 #:
 #: **252 kB of stylesheet and webfont bought exactly four of them.** Measured
 #: on the built page, `house-chimney` is asked for 113 times, `campground` 36,
@@ -429,6 +429,17 @@ PROVIDERS: dict[str, Provider] = {
 #: linked `all.min.css` and pulled `fa-solid-900.woff2` from a third host to
 #: draw four shapes. These are the same outlines, so the markers are unchanged
 #: to the pixel, and awesome-markers still writes the same `<i class="fa fa-">`.
+#:
+#: **Then thirteen more, at about a kilobyte of path each.** Reviewed on
+#: 2026-09-17: one house stood for a staffed STF cabin, a reindeer herder's
+#: kåta and a private koie alike, and the one thing a planner asks of a hut --
+#: can I sleep there -- sat in the popup. So the glyph now says what a place is
+#: for: `bed` where there is a bed (staffed or self-service), `house` for an
+#: unstaffed hut, `person-shelter` for a gapahuk or a vindskydd, `tent` for a
+#: camp site, `train` and `bus` for the way in, `bridge` and `water` for a
+#: footbridge and a ford, `phone`, `square-parking`, `restroom`, `fire` and
+#: `circle-info` for what the registers place along a trail. The colour keeps
+#: saying which source placed the pin.
 #:
 #: Font Awesome Free 6.2.0 by @fontawesome, https://fontawesome.com --
 #: Icons: CC BY 4.0. Copyright 2022 Fonticons, Inc. The notice travels with the
@@ -469,6 +480,112 @@ MARKER_ICONS: dict[str, tuple[str, str]] = {
         "c-9.4 9.4-9.4 24.6 0 33.9s24.6 9.4 33.9 0l7-7V352c0 88.4 71.6 160 160 160h80 80c88.4 0 160-71.6 160-160v"
         "-6.1l7 7c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-56-56c-9.4-9.4-24.6-9.4-33.9 0l-56 56c-9.4 9.4-9.4 24.6 0 33.9"
         "s24.6 9.4 33.9 0l7-7V352c0 53-43 96-96 96H320V240h32c17.7 0 32-14.3 32-32s-14.3-32-32-32H341.1z",
+    ),
+    "bed": (
+        "0 0 640 512",
+        "M32 32c17.7 0 32 14.3 32 32V320H288V160c0-17.7 14.3-32 32-32H544c53 0 96 43 96 96V448c0 17.7-14.3 32-32 "
+        "32s-32-14.3-32-32V416H352 320 64v32c0 17.7-14.3 32-32 32s-32-14.3-32-32V64C0 46.3 14.3 32 32 32zM176 288c-44.2 "
+        "0-80-35.8-80-80s35.8-80 80-80s80 35.8 80 80s-35.8 80-80 80z",
+    ),
+    "house": (
+        "0 0 576 512",
+        "M575.8 255.5c0 18-15 32.1-32 32.1h-32l.7 160.2c0 2.7-.2 5.4-.5 8.1V472c0 22.1-17.9 40-40 40H456c-1.1 0-2.2 "
+        "0-3.3-.1c-1.4 .1-2.8 .1-4.2 .1H416 392c-22.1 0-40-17.9-40-40V448 384c0-17.7-14.3-32-32-32H256c-17.7 0-32 14.3-32 32v64"
+        " 24c0 22.1-17.9 40-40 40H160 128.1c-1.5 0-3-.1-4.5-.2c-1.2 .1-2.4 .2-3.6 .2H104c-22.1 0-40-17.9-40-40V360c0-.9 0-1.9 "
+        ".1-2.8V287.6H32c-18 0-32-14-32-32.1c0-9 3-17 10-24L266.4 8c7-7 15-8 22-8s15 2 21 7L564.8 231.5c8 7 12 15 11 24z",
+    ),
+    "person-shelter": (
+        "0 0 512 512",
+        "M271.9 4.2c-9.8-5.6-21.9-5.6-31.8 0l-224 128C6.2 137.9 0 148.5 0 160V480c0 17.7 14.3 32 32 32s32-14.3 32-32V178.6L256 "
+        "68.9 448 178.6V480c0 17.7 14.3 32 32 32s32-14.3 32-32V160c0-11.5-6.2-22.1-16.1-27.8l-224-128zM256 208c22.1 0 40-17.9 "
+        "40-40s-17.9-40-40-40s-40 17.9-40 40s17.9 40 40 40zm-8 280V400h16v88c0 13.3 10.7 24 24 24s24-10.7 24-24V313.5l26.9 "
+        "49.9c6.3 11.7 20.8 16 32.5 9.8s16-20.8 9.8-32.5l-37.9-70.3c-15.3-28.5-45.1-46.3-77.5-46.3H246.2c-32.4 0-62.1 17.8-77.5"
+        " 46.3l-37.9 70.3c-6.3 11.7-1.9 26.2 9.8 32.5s26.2 1.9 32.5-9.8L200 313.5V488c0 13.3 10.7 24 24 24s24-10.7 24-24z",
+    ),
+    "tent": (
+        "0 0 576 512",
+        "M269.4 6C280.5-2 295.5-2 306.6 6l224 160c7.4 5.3 12.2 13.5 13.2 22.5l32 288c1 9-1.9 18.1-8 24.9s-14.7 10.7-23.8 "
+        "10.7H416L288 288V512H32c-9.1 0-17.8-3.9-23.8-10.7s-9-15.8-8-24.9l32-288c1-9 5.8-17.2 13.2-22.5L269.4 6z",
+    ),
+    "train": (
+        "0 0 448 512",
+        "M96 0C43 0 0 43 0 96V352c0 48 35.2 87.7 81.1 94.9l-46 46C28.1 499.9 33.1 512 43 512H82.7c8.5 0 16.6-3.4 22.6-9.4L160 "
+        "448H288l54.6 54.6c6 6 14.1 9.4 22.6 9.4H405c10 0 15-12.1 7.9-19.1l-46-46c46-7.1 81.1-46.9 "
+        "81.1-94.9V96c0-53-43-96-96-96H96zM64 96c0-17.7 14.3-32 32-32H352c17.7 0 32 14.3 32 32v96c0 17.7-14.3 32-32 32H96c-17.7"
+        " 0-32-14.3-32-32V96zM224 384c-26.5 0-48-21.5-48-48s21.5-48 48-48s48 21.5 48 48s-21.5 48-48 48z",
+    ),
+    "bus": (
+        "0 0 512 512",
+        "M256 0C390.4 0 480 35.2 480 80V96l0 32c17.7 0 32 14.3 32 32v64c0 17.7-14.3 32-32 32l0 160c0 17.7-14.3 32-32 32v32c0 "
+        "17.7-14.3 32-32 32H384c-17.7 0-32-14.3-32-32V448H160v32c0 17.7-14.3 32-32 32H96c-17.7 0-32-14.3-32-32l0-32c-17.7 "
+        "0-32-14.3-32-32l0-160c-17.7 0-32-14.3-32-32V160c0-17.7 14.3-32 32-32h0V96h0V80C32 35.2 121.6 0 256 0zM96 160v96c0 17.7"
+        " 14.3 32 32 32H240V128H128c-17.7 0-32 14.3-32 32zM272 288H384c17.7 0 32-14.3 "
+        "32-32V160c0-17.7-14.3-32-32-32H272V288zM112 400c17.7 0 32-14.3 32-32s-14.3-32-32-32s-32 14.3-32 32s14.3 32 32 32zm288 "
+        "0c17.7 0 32-14.3 32-32s-14.3-32-32-32s-32 14.3-32 32s14.3 32 32 32zM352 80c0-8.8-7.2-16-16-16H176c-8.8 0-16 7.2-16 "
+        "16s7.2 16 16 16H336c8.8 0 16-7.2 16-16z",
+    ),
+    "bridge": (
+        "0 0 576 512",
+        "M32 32C14.3 32 0 46.3 0 64S14.3 96 32 96H72v64H0V288c53 0 96 43 96 96v64c0 17.7 14.3 32 32 32h32c17.7 0 32-14.3 "
+        "32-32V384c0-53 43-96 96-96s96 43 96 96v64c0 17.7 14.3 32 32 32h32c17.7 0 32-14.3 32-32V384c0-53 43-96 "
+        "96-96V160H504V96h40c17.7 0 32-14.3 32-32s-14.3-32-32-32H32zM456 96v64H376V96h80zM328 96v64H248V96h80zM200 "
+        "96v64H120V96h80z",
+    ),
+    "water": (
+        "0 0 576 512",
+        "M269.5 69.9c11.1-7.9 25.9-7.9 37 0C329 85.4 356.5 96 384 96c26.9 0 55.4-10.8 77.4-26.1l0 0c11.9-8.5 28.1-7.8 39.2 "
+        "1.7c14.4 11.9 32.5 21 50.6 25.2c17.2 4 27.9 21.2 23.9 38.4s-21.2 27.9-38.4 23.9c-24.5-5.7-44.9-16.5-58.2-25C449.5 "
+        "149.7 417 160 384 160c-31.9 0-60.6-9.9-80.4-18.9c-5.8-2.7-11.1-5.3-15.6-7.7c-4.5 2.4-9.7 5.1-15.6 7.7c-19.8 9-48.5 "
+        "18.9-80.4 18.9c-33 0-65.5-10.3-94.5-25.8c-13.4 8.4-33.7 19.3-58.2 25c-17.2 4-34.4-6.7-38.4-23.9s6.7-34.4 "
+        "23.9-38.4C42.8 92.6 61 83.5 75.3 71.6c11.1-9.5 27.3-10.1 39.2-1.7l0 0C136.7 85.2 165.1 96 192 96c27.5 0 55-10.6 "
+        "77.5-26.1zm37 288C329 373.4 356.5 384 384 384c26.9 0 55.4-10.8 77.4-26.1l0 0c11.9-8.5 28.1-7.8 39.2 1.7c14.4 11.9 32.5"
+        " 21 50.6 25.2c17.2 4 27.9 21.2 23.9 38.4s-21.2 27.9-38.4 23.9c-24.5-5.7-44.9-16.5-58.2-25C449.5 437.7 417 448 384 "
+        "448c-31.9 0-60.6-9.9-80.4-18.9c-5.8-2.7-11.1-5.3-15.6-7.7c-4.5 2.4-9.7 5.1-15.6 7.7c-19.8 9-48.5 18.9-80.4 18.9c-33 "
+        "0-65.5-10.3-94.5-25.8c-13.4 8.4-33.7 19.3-58.2 25c-17.2 4-34.4-6.7-38.4-23.9s6.7-34.4 23.9-38.4c18.1-4.2 36.2-13.3 "
+        "50.6-25.2c11.1-9.4 27.3-10.1 39.2-1.7l0 0C136.7 373.2 165.1 384 192 384c27.5 0 55-10.6 77.5-26.1c11.1-7.9 25.9-7.9 37 "
+        "0zm0-144C329 229.4 356.5 240 384 240c26.9 0 55.4-10.8 77.4-26.1l0 0c11.9-8.5 28.1-7.8 39.2 1.7c14.4 11.9 32.5 21 50.6 "
+        "25.2c17.2 4 27.9 21.2 23.9 38.4s-21.2 27.9-38.4 23.9c-24.5-5.7-44.9-16.5-58.2-25C449.5 293.7 417 304 384 304c-31.9 "
+        "0-60.6-9.9-80.4-18.9c-5.8-2.7-11.1-5.3-15.6-7.7c-4.5 2.4-9.7 5.1-15.6 7.7c-19.8 9-48.5 18.9-80.4 18.9c-33 "
+        "0-65.5-10.3-94.5-25.8c-13.4 8.4-33.7 19.3-58.2 25c-17.2 4-34.4-6.7-38.4-23.9s6.7-34.4 23.9-38.4c18.1-4.2 36.2-13.3 "
+        "50.6-25.2c11.1-9.5 27.3-10.1 39.2-1.7l0 0C136.7 229.2 165.1 240 192 240c27.5 0 55-10.6 77.5-26.1c11.1-7.9 25.9-7.9 37 "
+        "0z",
+    ),
+    "phone": (
+        "0 0 512 512",
+        "M164.9 24.6c-7.7-18.6-28-28.5-47.4-23.2l-88 24C12.1 30.2 0 46 0 64C0 311.4 200.6 512 448 512c18 0 33.8-12.1 "
+        "38.6-29.5l24-88c5.3-19.4-4.6-39.7-23.2-47.4l-96-40c-16.3-6.8-35.2-2.1-46.3 11.6L304.7 368C234.3 334.7 177.3 277.7 144 "
+        "207.3L193.3 167c13.7-11.2 18.4-30 11.6-46.3l-40-96z",
+    ),
+    "square-parking": (
+        "0 0 448 512",
+        "M64 32C28.7 32 0 60.7 0 96V416c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V96c0-35.3-28.7-64-64-64H64zM192 "
+        "256h48c17.7 0 32-14.3 32-32s-14.3-32-32-32H192v64zm48 64H192v32c0 17.7-14.3 32-32 32s-32-14.3-32-32V288 168c0-22.1 "
+        "17.9-40 40-40h72c53 0 96 43 96 96s-43 96-96 96z",
+    ),
+    "restroom": (
+        "0 0 640 512",
+        "M176 48c0 26.5-21.5 48-48 48s-48-21.5-48-48s21.5-48 48-48s48 21.5 48 48zM120 352V480c0 17.7-14.3 32-32 "
+        "32s-32-14.3-32-32V325.2c-8.1 9.2-21.1 13.2-33.5 9.4c-16.9-5.3-26.3-23.2-21-40.1l30.9-99.1C44.9 155.3 82 128 124 "
+        "128h8c42 0 79.1 27.3 91.6 67.4l30.9 99.1c5.3 16.9-4.1 34.8-21 40.1c-12.4 3.9-25.4-.2-33.5-9.4V480c0 17.7-14.3 32-32 "
+        "32s-32-14.3-32-32V352H120zM320 0c13.3 0 24 10.7 24 24V488c0 13.3-10.7 24-24 24s-24-10.7-24-24V24c0-13.3 10.7-24 "
+        "24-24zM560 48c0 26.5-21.5 48-48 48s-48-21.5-48-48s21.5-48 48-48s48 21.5 48 48zM440 480V384H422.2c-10.9 "
+        "0-18.6-10.7-15.2-21.1l9-26.9c-3.2 0-6.4-.5-9.5-1.5c-16.9-5.3-26.3-23.2-21-40.1l29.7-95.2C428.4 156.9 467.6 128 512 "
+        "128s83.6 28.9 96.8 71.2l29.7 95.2c5.3 16.9-4.1 34.8-21 40.1c-3.2 1-6.4 1.5-9.5 1.5l9 26.9c3.5 10.4-4.3 21.1-15.2 "
+        "21.1H584v96c0 17.7-14.3 32-32 32s-32-14.3-32-32V384H504v96c0 17.7-14.3 32-32 32s-32-14.3-32-32z",
+    ),
+    "fire": (
+        "0 0 448 512",
+        "M159.3 5.4c7.8-7.3 19.9-7.2 27.7 .1c27.6 25.9 53.5 53.8 77.7 84c11-14.4 23.5-30.1 37-42.9c7.9-7.4 20.1-7.4 28 .1c34.6 "
+        "33 63.9 76.6 84.5 118c20.3 40.8 33.8 82.5 33.8 111.9C448 404.2 348.2 512 224 512C98.4 512 0 404.1 0 276.5c0-38.4 "
+        "17.8-85.3 45.4-131.7C73.3 97.7 112.7 48.6 159.3 5.4zM225.7 416c25.3 0 47.7-7 68.8-21c42.1-29.4 53.4-88.2 "
+        "28.1-134.4c-2.8-5.6-5.6-11.2-9.8-16.8l-50.6 58.8s-81.4-103.6-87.1-110.6C133.1 243.8 112 273.2 112 306.8C112 375.4 "
+        "162.6 416 225.7 416z",
+    ),
+    "circle-info": (
+        "0 0 512 512",
+        "M256 512c141.4 0 256-114.6 256-256S397.4 0 256 0S0 114.6 0 256S114.6 512 256 512zM216 336h24V272H216c-13.3 "
+        "0-24-10.7-24-24s10.7-24 24-24h48c13.3 0 24 10.7 24 24v88h8c13.3 0 24 10.7 24 24s-10.7 24-24 24H216c-13.3 "
+        "0-24-10.7-24-24s10.7-24 24-24zm40-144c-17.7 0-32-14.3-32-32s14.3-32 32-32s32 14.3 32 32s-14.3 32-32 32z",
     ),
 }
 
@@ -518,6 +635,10 @@ PIN_SHAPE = (
     "M14 0C6.3 0 0 6.3 0 14c0 3.6 1.6 7.4 4 11 2.4 3.6 5.4 7 8.1 9.9"
     "a2.6 2.6 0 0 0 3.8 0C18.6 32 21.6 28.6 24 25c2.4-3.6 4-7.4 4-11 0-7.7-6.3-14-14-14z"
 )
+
+#: Attribute a pin layer carries listing the glyphs it drew, in the order they
+#: first appeared, so the legend's row can show the pins rather than a bar.
+PIN_GLYPHS_ATTR = "_trails_pin_glyphs"
 
 
 #: How many decimals a drawn coordinate is written with.
@@ -4550,6 +4671,7 @@ def add_points(
     name: str,
     color: str = "red",
     icon: str = "house-chimney",
+    icon_field: str | None = None,
     popup_fields: dict[str, str] | None = None,
     label_field: str | None = "name",
     search_field: str | None = None,
@@ -4559,6 +4681,11 @@ def add_points(
 ) -> folium.FeatureGroup:
     """Add point features (huts, shelters, info points) as a toggleable layer.
 
+    **The glyph says what a place is for; the colour says who placed it.** One
+    layer is one source, and a source places huts of several kinds -- a staffed
+    cabin, an open shelter, a private koie -- so the glyph is read per row where
+    ``icon_field`` names a column, and ``icon`` is what a row without one gets.
+
     Args:
         fmap: Map to add the layer to
         gdf: GeoDataFrame with point geometries; reprojected to WGS84 if needed
@@ -4566,7 +4693,11 @@ def add_points(
         color: Marker colour; one of :data:`PIN_COLOURS`, which is the palette
             awesome-markers named
             (e.g. "red", "darkblue", "green"), not a CSS hex value
-        icon: Glyph name from the Font Awesome set bundled with Folium
+        icon: Glyph name, one of :data:`MARKER_ICONS`; the glyph of every row
+            unless ``icon_field`` says otherwise
+        icon_field: Column holding a glyph name per row. A row whose value is
+            empty falls back to ``icon``; a name this page does not draw is
+            refused at build time, by name, as ``icon`` is.
         popup_fields: Mapping of column name to popup label
         label_field: Column used for the hover tooltip
         search_field: Column holding the text :func:`add_search` matches against;
@@ -4586,6 +4717,7 @@ def add_points(
 
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
     named: list[dict[str, object]] = []
+    glyphs: list[str] = []
     shape = _popup_shape(gdf, popup_fields or {}, source=source) if (popup_fields or source) else None
 
     for _, row in gdf.iterrows():
@@ -4596,6 +4728,12 @@ def add_points(
         tooltip = None
         if label_field and label_field in row and pd.notna(row[label_field]):
             tooltip = str(row[label_field])
+
+        glyph = icon
+        if icon_field and icon_field in row and pd.notna(row[icon_field]) and row[icon_field] != "":
+            glyph = str(row[icon_field])
+        if glyph not in glyphs:
+            glyphs.append(glyph)
 
         popup = _popup_values(row, shape) if shape else None
         # Unlike a path, a marker keeps whatever options it is handed, so the
@@ -4608,7 +4746,7 @@ def add_points(
         marker = folium.Marker(
             location=(round(geometry.y, DRAWN_DECIMALS), round(geometry.x, DRAWN_DECIMALS)),
             tooltip=tooltip,
-            icon=folium.DivIcon(html=_pin(color, icon), icon_size=(PIN_WIDTH, PIN_HEIGHT), icon_anchor=(PIN_WIDTH // 2, PIN_HEIGHT)),
+            icon=folium.DivIcon(html=_pin(color, glyph), icon_size=(PIN_WIDTH, PIN_HEIGHT), icon_anchor=(PIN_WIDTH // 2, PIN_HEIGHT)),
             **options,
         )
         if popup is not None:
@@ -4621,6 +4759,7 @@ def add_points(
     if shape:
         group.add_child(_LazyPopups(shape))
     _record_named_points(group, named)
+    setattr(group, PIN_GLYPHS_ATTR, glyphs)
     group.add_to(fmap)
     return group
 
@@ -17493,11 +17632,43 @@ class LegendRow:
         colour: CSS colour of the swatch drawn before the label
         layer: The layer the checkbox adds to and removes from the map, or
             ``None`` for a row that only explains a colour
+        glyphs: The glyphs a pin layer drew, by name in :data:`MARKER_ICONS`.
+            Given any, the row's key is those pins in the row's colour rather
+            than a bar -- a bar never said whether the layer's pins were houses
+            or tents, and once one layer draws both, it cannot.
     """
 
     label: str
     colour: str
     layer: Any = None
+    glyphs: tuple[str, ...] = ()
+
+
+def _legend_pin(colour: str, icon: str) -> str:
+    """Draw one pin at legend size: the bulb in the row's colour, the glyph in it.
+
+    Half the size a pin is drawn at on the map, and the same two paths, so the
+    key looks like the thing it explains.
+
+    Args:
+        colour: CSS colour of the bulb -- a hex value here, as the legend's rows
+            carry, not a name from :data:`PIN_COLOURS`
+        icon: Which of :data:`MARKER_ICONS` to draw in it
+
+    Returns:
+        An inline ``<svg>``.
+
+    Raises:
+        ValueError: If the glyph is one this page does not draw.
+    """
+    if icon not in MARKER_ICONS:
+        raise ValueError(f"no outline for {icon!r}; this page draws " + ", ".join(sorted(MARKER_ICONS)))
+    box, path = MARKER_ICONS[icon]
+    return (
+        f'<svg width="{PIN_WIDTH // 2}" height="{PIN_HEIGHT // 2}" viewBox="0 0 {PIN_WIDTH} {PIN_HEIGHT}" xmlns="http://www.w3.org/2000/svg">'
+        f'<path fill="{colour}" d="{PIN_SHAPE}"/>'
+        f"<svg x='{PIN_WIDTH / 2 - 6.5:.1f}' y='7' width='13' height='13' viewBox='{box}'><path fill='white' d='{path}'/></svg></svg>"
+    )
 
 
 class _OfflinePanel(MacroElement):
@@ -20276,7 +20447,15 @@ class _Legend(MacroElement):
                         line.appendChild(gap);
                     }
                     var swatch = document.createElement('span');
-                    swatch.style.cssText = 'display:inline-block;width:18px;height:4px;flex:none;background:' + row.colour;
+                    if (row.glyphs.length) {
+                        // A pin layer's key is its pins: every glyph it drew, in
+                        // its colour. Built at build time out of the same two
+                        // paths the map draws, so there is no text in it.
+                        swatch.style.cssText = 'display:inline-flex;gap:2px;flex:none;line-height:0';
+                        swatch.innerHTML = row.glyphs.join('');
+                    } else {
+                        swatch.style.cssText = 'display:inline-block;width:18px;height:4px;flex:none;background:' + row.colour;
+                    }
                     line.appendChild(swatch);
                     // As text. A label here routinely holds characters that
                     // would otherwise start a tag — the map's own read
@@ -20365,7 +20544,17 @@ class _Legend(MacroElement):
         self.title_json = _script_json(title)
         self.collapsed = collapsed
         self.layer_names = [row.layer.get_name() if row.layer is not None else "null" for row in rows]
-        self.rows_json = _script_json([{"label": row.label, "colour": row.colour, "shown": bool(getattr(row.layer, "show", True))} for row in rows])
+        self.rows_json = _script_json(
+            [
+                {
+                    "label": row.label,
+                    "colour": row.colour,
+                    "shown": bool(getattr(row.layer, "show", True)),
+                    "glyphs": [_legend_pin(row.colour, glyph) for glyph in row.glyphs],
+                }
+                for row in rows
+            ]
+        )
         self.base_names: list[str] = []
         self.base_labels_json = "[]"
         self.base_shown_json = "[]"

@@ -43,9 +43,30 @@ SHELTER_SELECTORS = (
     'way["amenity"="shelter"]',
 )
 
+#: ``shelter_type`` values that are neither a night's roof nor a place to wait
+#: out weather. Measured 2026-09-17 over the two parks' boxes: of 76
+#: ``amenity=shelter``, ten were bus-stop roofs, seven picnic roofs and one a
+#: wildlife hide -- and every one was drawn as a hut. A shelter with no type is
+#: kept: over Abisko that is the Länsstyrelsen's Vássivágge hut.
+NOT_A_SHELTER_TYPES = ("public_transport", "picnic_shelter", "gazebo", "sun_shelter", "wildlife_hide", "field_shelter", "changing_rooms")
+
 #: Settlement types useful for orientation. Farms and localities are excluded
 #: because Norwegian map data carries them in the hundreds per region.
 SETTLEMENT_PLACE_TYPES = ("town", "village", "hamlet")
+
+#: Tag selectors for where the way in ends: a railway station or halt, a bus
+#: stop. Abisko is reached by train and its six stations were on no layer.
+STOP_SELECTORS = (
+    'node["railway"~"^(station|halt)$"]',
+    'node["highway"="bus_stop"]',
+)
+
+#: Tag selectors for camp sites, a marked pitch in the fell as much as a
+#: campground by the road. Both nodes and areas, since they are mapped either way.
+CAMP_SITE_SELECTORS = (
+    'node["tourism"="camp_site"]',
+    'way["tourism"="camp_site"]',
+)
 
 #: Tag selectors for ferry and express-boat quays. Quays are mapped both as
 #: nodes and as pier ways, so both are requested.
@@ -82,6 +103,25 @@ def _selector_digest(selectors: tuple[str, ...]) -> str:
         Hex digest identifying this exact selector set
     """
     return hashlib.md5("|".join(selectors).encode("utf-8")).hexdigest()[:8]
+
+
+def _position(element: dict) -> Point | None:
+    """Where an element is: a node's own position, or a way's centre.
+
+    Args:
+        element: One entry of an Overpass ``elements`` list, asked for with
+            ``out center``
+
+    Returns:
+        The point, or None where the element carries no position at all.
+    """
+    lon, lat = element.get("lon"), element.get("lat")
+    if lon is None or lat is None:
+        center = element.get("center") or {}
+        lon, lat = center.get("lon"), center.get("lat")
+    if lon is None or lat is None:
+        return None
+    return Point(lon, lat)
 
 
 def _to_overpass_bbox(bounds: Bounds) -> str:
@@ -252,12 +292,15 @@ class Source:
 
         Returns:
             GeoDataFrame in EPSG:4326 with Point geometries and the columns
-            ``osm_id``, ``name``, ``kind`` and ``operator``. Empty if nothing
-            matched.
+            ``osm_id``, ``name``, ``kind``, ``shelter_type`` and ``operator``.
+            Empty if nothing matched. A shelter whose type is one of
+            :data:`NOT_A_SHELTER_TYPES` is dropped.
         """
         bbox = _to_overpass_bbox(bounds)
-        # The selectors belong in the key: widening them must not hit a stale entry.
-        cache_key = f"osm_shelters_{bbox.replace(',', '_')}_{_selector_digest(selectors)}"
+        # The selectors belong in the key: widening them must not hit a stale
+        # entry -- and so does the shape, which is why the key changed with the
+        # ``shelter_type`` column: an entry without it is not this frame.
+        cache_key = f"osm_shelters_{bbox.replace(',', '_')}_{_selector_digest(selectors)}_typed"
 
         if not force_download and self.cache.exists(cache_key):
             print("Loading OSM shelters from cache...")
@@ -272,26 +315,28 @@ class Source:
         payload = self.query(ql)
 
         records = []
+        roofs = 0
         for element in payload["elements"]:
             tags = element.get("tags", {})
-            lon, lat = element.get("lon"), element.get("lat")
-            if lon is None or lat is None:
-                center = element.get("center") or {}
-                lon, lat = center.get("lon"), center.get("lat")
-            if lon is None or lat is None:
+            point = _position(element)
+            if point is None:
+                continue
+            if tags.get("shelter_type") in NOT_A_SHELTER_TYPES:
+                roofs += 1
                 continue
             records.append(
                 {
                     "osm_id": element["id"],
                     "name": tags.get("name"),
                     "kind": tags.get("tourism") or tags.get("amenity") or tags.get("building"),
+                    "shelter_type": tags.get("shelter_type"),
                     "operator": tags.get("operator"),
-                    "geometry": Point(lon, lat),
+                    "geometry": point,
                 }
             )
 
-        gdf = gpd.GeoDataFrame(records, columns=["osm_id", "name", "kind", "operator", "geometry"], crs="EPSG:4326")
-        print(f"Fetched {len(gdf)} OSM shelters")
+        gdf = gpd.GeoDataFrame(records, columns=["osm_id", "name", "kind", "shelter_type", "operator", "geometry"], crs="EPSG:4326")
+        print(f"Fetched {len(gdf)} OSM shelters ({roofs} bus-stop, picnic and other roofs left out)")
 
         self.cache.save(cache_key, gdf, metadata={"bbox": bbox, "count": len(gdf)})
         return gdf
@@ -354,6 +399,112 @@ class Source:
 
         gdf = gpd.GeoDataFrame(records, columns=["osm_id", "name", "operator", "geometry"], crs="EPSG:4326")
         print(f"Fetched {len(gdf)} OSM ferry terminals")
+
+        self.cache.save(cache_key, gdf, metadata={"bbox": bbox, "count": len(gdf)})
+        return gdf
+
+    def fetch_stops(
+        self,
+        bounds: Bounds,
+        selectors: tuple[str, ...] = STOP_SELECTORS,
+        force_download: bool = False,
+    ) -> gpd.GeoDataFrame:
+        """Fetch railway stations, halts and bus stops within a bounding box.
+
+        Args:
+            bounds: (min_lon, min_lat, max_lon, max_lat) in WGS84
+            selectors: Overpass element selectors without the bbox filter
+            force_download: Bypass the cache and re-query Overpass
+
+        Returns:
+            GeoDataFrame in EPSG:4326 with Point geometries and the columns
+            ``osm_id``, ``name``, ``kind`` (``station``, ``halt`` or
+            ``bus_stop``) and ``operator``. Unnamed stops are dropped: a stop
+            is somewhere a timetable names, and one without a name is not.
+        """
+        bbox = _to_overpass_bbox(bounds)
+        cache_key = f"osm_stops_{bbox.replace(',', '_')}_{_selector_digest(selectors)}"
+
+        if not force_download and self.cache.exists(cache_key):
+            print("Loading OSM stops from cache...")
+            cached = self.cache.load(cache_key)
+            assert isinstance(cached, gpd.GeoDataFrame)
+            return cached
+
+        body = "".join(f"{selector}({bbox});" for selector in selectors)
+        ql = f"[out:json][timeout:180];({body});out center;"
+
+        print(f"Querying Overpass for stations and bus stops in {bbox}...")
+        payload = self.query(ql)
+
+        records = []
+        for element in payload["elements"]:
+            tags = element.get("tags", {})
+            point = _position(element)
+            if point is None or not tags.get("name"):
+                continue
+            records.append(
+                {
+                    "osm_id": element["id"],
+                    "name": tags["name"],
+                    "kind": tags.get("railway") or tags.get("highway"),
+                    "operator": tags.get("operator"),
+                    "geometry": point,
+                }
+            )
+
+        gdf = gpd.GeoDataFrame(records, columns=["osm_id", "name", "kind", "operator", "geometry"], crs="EPSG:4326")
+        print(f"Fetched {len(gdf)} OSM stations and bus stops")
+
+        self.cache.save(cache_key, gdf, metadata={"bbox": bbox, "count": len(gdf)})
+        return gdf
+
+    def fetch_camp_sites(
+        self,
+        bounds: Bounds,
+        selectors: tuple[str, ...] = CAMP_SITE_SELECTORS,
+        force_download: bool = False,
+    ) -> gpd.GeoDataFrame:
+        """Fetch camp sites within a bounding box.
+
+        Args:
+            bounds: (min_lon, min_lat, max_lon, max_lat) in WGS84
+            selectors: Overpass element selectors without the bbox filter
+            force_download: Bypass the cache and re-query Overpass
+
+        Returns:
+            GeoDataFrame in EPSG:4326 with Point geometries and the columns
+            ``osm_id``, ``name``, ``kind`` (always ``camp_site``) and
+            ``operator``. Unnamed sites are kept: in the fell a pitch is mapped
+            without a name, and it is still the place to put a tent.
+        """
+        bbox = _to_overpass_bbox(bounds)
+        cache_key = f"osm_camp_sites_{bbox.replace(',', '_')}_{_selector_digest(selectors)}"
+
+        if not force_download and self.cache.exists(cache_key):
+            print("Loading OSM camp sites from cache...")
+            cached = self.cache.load(cache_key)
+            assert isinstance(cached, gpd.GeoDataFrame)
+            return cached
+
+        body = "".join(f"{selector}({bbox});" for selector in selectors)
+        ql = f"[out:json][timeout:180];({body});out center;"
+
+        print(f"Querying Overpass for camp sites in {bbox}...")
+        payload = self.query(ql)
+
+        records = []
+        for element in payload["elements"]:
+            tags = element.get("tags", {})
+            point = _position(element)
+            if point is None:
+                continue
+            records.append(
+                {"osm_id": element["id"], "name": tags.get("name"), "kind": tags.get("tourism"), "operator": tags.get("operator"), "geometry": point}
+            )
+
+        gdf = gpd.GeoDataFrame(records, columns=["osm_id", "name", "kind", "operator", "geometry"], crs="EPSG:4326")
+        print(f"Fetched {len(gdf)} OSM camp sites")
 
         self.cache.save(cache_key, gdf, metadata={"bbox": bbox, "count": len(gdf)})
         return gdf

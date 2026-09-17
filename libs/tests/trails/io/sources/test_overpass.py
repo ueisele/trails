@@ -3,6 +3,7 @@
 from unittest.mock import Mock, patch
 
 import geopandas as gpd
+import pandas as pd
 import pytest
 import requests
 from trails.io.sources import overpass
@@ -365,3 +366,92 @@ class TestFetchPlaces:
             source.fetch_places((12.4, 65.3, 13.3, 65.7), place_types=("town",))
 
         assert mock_post.call_count == 2
+
+
+class TestShelterTypes:
+    """A roof over a bus stop is not a hut."""
+
+    def test_a_bus_stop_roof_and_a_picnic_roof_are_left_out(self, tmp_path):
+        payload = {
+            "elements": [
+                {
+                    "type": "node",
+                    "id": 2101,
+                    "lat": 65.45,
+                    "lon": 12.85,
+                    "tags": {"amenity": "shelter", "shelter_type": "basic_hut", "name": "Strompdalen"},
+                },
+                {
+                    "type": "node",
+                    "id": 2102,
+                    "lat": 65.46,
+                    "lon": 12.86,
+                    "tags": {"amenity": "shelter", "shelter_type": "public_transport", "name": "Forvik"},
+                },
+                {"type": "node", "id": 2103, "lat": 65.47, "lon": 12.87, "tags": {"amenity": "shelter", "shelter_type": "picnic_shelter"}},
+                # No type at all: kept, since over Abisko that is a real hut.
+                {"type": "node", "id": 2104, "lat": 65.48, "lon": 12.88, "tags": {"amenity": "shelter", "name": "Vássivágge"}},
+            ]
+        }
+        source = overpass.Source(cache_dir=str(tmp_path))
+        with patch("requests.post", return_value=_mock_response(payload)):
+            gdf = source.fetch_shelters((12.4, 65.3, 13.3, 65.7))
+
+        assert set(gdf["osm_id"]) == {2101, 2104}
+        types = dict(zip(gdf["osm_id"], gdf["shelter_type"], strict=True))
+        assert types[2101] == "basic_hut"
+        assert pd.isna(types[2104])
+
+    def test_the_cache_key_names_the_shape(self, tmp_path):
+        # An entry written before the column existed must not answer for it.
+        source = overpass.Source(cache_dir=str(tmp_path))
+        with patch("requests.post", return_value=_mock_response({"elements": []})):
+            source.fetch_shelters((12.4, 65.3, 13.3, 65.7))
+        assert any("_typed" in path.name for path in tmp_path.rglob("osm_shelters_*"))
+
+
+class TestFetchStops:
+    """Tests for Source.fetch_stops."""
+
+    def test_stations_halts_and_bus_stops_named_only(self, tmp_path):
+        payload = {
+            "elements": [
+                {"type": "node", "id": 4001, "lat": 68.36, "lon": 18.78, "tags": {"railway": "halt", "name": "Abisko Turiststation"}},
+                {"type": "node", "id": 4002, "lat": 68.35, "lon": 18.83, "tags": {"railway": "station", "name": "Abisko Östra"}},
+                {"type": "node", "id": 4003, "lat": 68.35, "lon": 18.82, "tags": {"highway": "bus_stop", "name": "Abisko Östra"}},
+                {"type": "node", "id": 4004, "lat": 68.35, "lon": 18.81, "tags": {"highway": "bus_stop"}},
+            ]
+        }
+        source = overpass.Source(cache_dir=str(tmp_path))
+        with patch("requests.post", return_value=_mock_response(payload)):
+            gdf = source.fetch_stops((18.15, 68.17, 19.0, 68.46))
+
+        assert dict(zip(gdf["osm_id"], gdf["kind"], strict=True)) == {4001: "halt", 4002: "station", 4003: "bus_stop"}
+        assert gdf.crs.to_epsg() == 4326
+
+    def test_is_cached(self, tmp_path):
+        source = overpass.Source(cache_dir=str(tmp_path))
+        with patch("requests.post", return_value=_mock_response({"elements": []})) as post:
+            source.fetch_stops((18.15, 68.17, 19.0, 68.46))
+            source.fetch_stops((18.15, 68.17, 19.0, 68.46))
+        assert post.call_count == 1
+
+
+class TestFetchCampSites:
+    """Tests for Source.fetch_camp_sites."""
+
+    def test_a_pitch_without_a_name_is_kept_and_an_area_is_its_centre(self, tmp_path):
+        payload = {
+            "elements": [
+                {"type": "way", "id": 5001, "center": {"lat": 68.31, "lon": 18.62}, "tags": {"tourism": "camp_site", "name": "Nissonjokk tältplats"}},
+                {"type": "node", "id": 5002, "lat": 68.25, "lon": 18.5, "tags": {"tourism": "camp_site"}},
+                {"type": "way", "id": 5003, "tags": {"tourism": "camp_site"}},
+            ]
+        }
+        source = overpass.Source(cache_dir=str(tmp_path))
+        with patch("requests.post", return_value=_mock_response(payload)):
+            gdf = source.fetch_camp_sites((18.15, 68.17, 19.0, 68.46))
+
+        assert set(gdf["osm_id"]) == {5001, 5002}
+        assert gdf["kind"].unique().tolist() == ["camp_site"]
+        assert gdf.geometry.geom_type.unique().tolist() == ["Point"]

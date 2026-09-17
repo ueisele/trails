@@ -236,6 +236,110 @@ IN_PARK_SHARE = 0.5
 #: Place types that act as trailheads around this park, as opposed to settlements.
 TRAILHEAD_PLACE_TYPES = ("farm", "isolated_dwelling")
 
+# ---- the pins ---------------------------------------------------------------------
+# **The glyph says what a place is for; the colour says who placed it.** Reviewed
+# 2026-09-17 (abisko decisions §9.31): one house stood for a staffed STF cabin, a
+# kåta and a private koie alike, and the one thing a planner asks of a hut -- can
+# I sleep there -- sat in the popup. So a pin's glyph is read per row from the
+# source's own class, and its colour is the source's, one per source.
+
+#: The pin colour of each source, by the names :data:`maps.PIN_COLOURS` knows.
+PIN_COLOUR_OF = {"N50": "darkred", "Topografi 50": "darkred", "OSM": "darkblue", "SSR": "purple", "Leder": "orange"}
+
+#: N50's service level, as a glyph: a bed where the hut is staffed or
+#: self-service, a house where it is not, a roof for a gapahuk. A building that
+#: has no level and is a hut only by type gets no glyph here and is a dot.
+N50_CABIN_GLYPHS = {"Betjent": "bed", "Selvbetjent": "bed", "Ubetjent": "house", "Rastebu": "house", "Gapahuk": "person-shelter"}
+
+#: OSM's ``tourism`` huts: an ``alpine_hut`` is staffed or stocked, a
+#: ``wilderness_hut`` is not.
+OSM_HUT_GLYPHS = {"alpine_hut": "bed", "wilderness_hut": "house"}
+
+#: And ``amenity=shelter`` by its ``shelter_type``: a ``basic_hut`` has walls and a
+#: door; everything else -- a lean-to, a weather shelter, a rock shelter, or no
+#: type at all -- is a roof.
+OSM_SHELTER_GLYPHS = {"basic_hut": "house"}
+OSM_SHELTER_DEFAULT_GLYPH = "person-shelter"
+
+#: Where the way in ends.
+OSM_STOP_GLYPHS = {"station": "train", "halt": "train", "bus_stop": "bus"}
+
+#: Topografi 50's cabin classes, in the loader's English: a *fjällstation* and
+#: a *turiststuga* have beds, a *raststuga* is the unlocked emergency kind, a
+#: *vindskydd* is a roof. The *naturum* is a visitor centre and says so.
+T50_CABIN_GLYPHS = {
+    "mountain station": "bed",
+    "tourist cabin": "bed",
+    "rest hut": "house",
+    "shelter": "person-shelter",
+    "visitor centre": "circle-info",
+}
+
+#: The classes a walker cannot use: a *kåta* is a reindeer herder's and a lone
+#: mountain cabin is somebody's. Drawn as dots, switched off, as the farms are.
+T50_PRIVATE_CABIN_KINDS = ("Sámi hut", "lone mountain cabin")
+
+#: The register's facilities, by the labels in :data:`FACILITY_LABELS`.
+FACILITY_GLYPHS = {
+    "bridge": "bridge",
+    "suspension bridge": "bridge",
+    "privy": "restroom",
+    "rest shelter": "person-shelter",
+    "wind shelter": "person-shelter",
+    "fireplace": "fire",
+    "information": "circle-info",
+    "map board": "circle-info",
+    "ramp": "anchor",
+}
+FACILITY_DEFAULT_GLYPH = "circle-info"
+
+#: Topografi 50's trail points: a footbridge and a ford are opposite answers to
+#: the same river, and used to be the same blue dot.
+TRAIL_POINT_GLYPHS = {"footbridge": "bridge", "ford": "water", "emergency telephone": "phone", "car park": "square-parking"}
+
+
+def pin_colour(source: str) -> tuple[str, str]:
+    """The pin colour of a source, by name and as the hex its legend row is keyed with.
+
+    Args:
+        source: A key of :data:`PIN_COLOUR_OF`
+
+    Returns:
+        The colour's name for the pin and its hex for the legend.
+    """
+    name = PIN_COLOUR_OF[source]
+    return name, maps.PIN_COLOURS[name]
+
+
+def shelter_glyphs(shelters: gpd.GeoDataFrame) -> pd.Series:
+    """The glyph of each OSM hut or shelter, from its ``kind`` and ``shelter_type``.
+
+    Args:
+        shelters: What :meth:`overpass.Source.fetch_shelters` returned
+
+    Returns:
+        One glyph name per row.
+    """
+    glyphs = shelters["kind"].map(OSM_HUT_GLYPHS)
+    roofed = shelters["kind"] == "shelter"
+    glyphs[roofed] = shelters.loc[roofed, "shelter_type"].map(OSM_SHELTER_GLYPHS).fillna(OSM_SHELTER_DEFAULT_GLYPH)
+    return glyphs.fillna(OSM_SHELTER_DEFAULT_GLYPH)
+
+
+def joined_glyphs(kinds: pd.Series, table: dict[str, str], default: str) -> pd.Series:
+    """The glyph of a kind that may be several labels joined, by the first one the table knows.
+
+    Args:
+        kinds: A column :func:`translate_joined` wrote
+        table: Label to glyph
+        default: The glyph of a kind the table does not know
+
+    Returns:
+        One glyph name per row.
+    """
+    return kinds.map(lambda value: next((table[part] for part in str(value).split(IDENTITY_SEPARATOR) if part in table), default))
+
+
 #: Label colour per terrain feature type. The topographic backdrop is uniformly
 #: pale (luminance 0.77-0.98, its water a washed-out #e0fefe), so these are dark,
 #: saturated versions of the expected hue: readable everywhere, and far enough
@@ -505,6 +609,20 @@ SSR_POINT_POPUP_FIELDS = {
 SHELTER_POPUP_FIELDS = {
     "name": "Name",
     "kind": "Type",
+    "shelter_type": "Shelter type",
+    "operator": "Operator",
+    "osm_id": "OSM ID",
+}
+
+STOP_POPUP_FIELDS = {
+    "name": "Name",
+    "kind": "Type",
+    "operator": "Operator",
+    "osm_id": "OSM ID",
+}
+
+CAMP_SITE_POPUP_FIELDS = {
+    "name": "Name",
     "operator": "Operator",
     "osm_id": "OSM ID",
 }
@@ -2078,7 +2196,8 @@ class PointLayer(NamedTuple):
         pin: True for a pin with an icon, False for a labelled dot
         color: The pin's colour, one of the names awesome-markers knows, or the
             dot's CSS colour
-        icon: The pin's glyph
+        icon: The pin's glyph, for every row ``icon_field`` says nothing about
+        icon_field: Column holding a glyph per row, see :func:`maps.add_points`
         radius: The dot's radius
         label_field: Column the pin's hover label reads
         show: Whether the layer starts switched on
@@ -2092,7 +2211,8 @@ class PointLayer(NamedTuple):
     source: str
     pin: bool = True
     color: str = "darkred"
-    icon: str = "house-chimney"
+    icon: str = "house"
+    icon_field: str | None = None
     radius: float = 6.0
     label_field: str | None = "name"
     show: bool = True
@@ -2373,6 +2493,18 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         cabins["navn"] = cabins["navn"].fillna(cabins["ssr_name"])
         print(f"  named from SSR: {int(cabins['navn'].notna().sum()) - before} cabin(s) that N50 leaves unnamed")
     print(f"  N50 cabins and wilderness huts: {len(cabins)} ({cabins['navn'].notna().sum() if len(cabins) else 0} named)")
+    # **A hut is a pin; a building that is a hut only by type is a dot.** 85 of
+    # the 104 here are koier, seter houses and rorbuer by building type, private
+    # and locked, and stood as the same pin as the nine DNT and Statskog huts.
+    # One with a name off the hut register is a hut whatever N50 calls it --
+    # Sæterskaret skogstue is one -- so the register's name keeps it a pin.
+    named_hut = cabins["ssr_name"].notna() if "ssr_name" in cabins else pd.Series(False, index=cabins.index)
+    is_hut = cabins["betjeningsgrad"].notna() | named_hut
+    cabins["glyph"] = cabins["kind"].map(N50_CABIN_GLYPHS)
+    cabins.loc[is_hut & cabins["glyph"].isna(), "glyph"] = "house"
+    huts, private_cabins = cabins[is_hut].copy(), cabins[~is_hut].copy()
+    private_cabins["name"] = private_cabins["navn"]
+    print(f"  of which huts: {len(huts)} ({huts['glyph'].value_counts(dropna=False).to_dict()}); buildings by type: {len(private_cabins)}")
 
     print("\nLoading N50 water...")
     # The sea and the lakes, for pricing a straight walk by what it crosses.
@@ -2399,8 +2531,19 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     search_bounds = bounds_of(zone)
     # Shelters and settlements matter inside the park and along the way in.
     shelters = gpd.clip(osm_source.fetch_shelters(search_bounds, force_download=args.force_download), zone)
+    shelters["glyph"] = shelter_glyphs(shelters)
     places = gpd.clip(osm_source.fetch_places(search_bounds, force_download=args.force_download), zone)
     terminals = gpd.clip(osm_source.fetch_ferry_terminals(search_bounds, force_download=args.force_download), zone)
+    # **A station anywhere in the zone; a bus stop only in the trailhead band.**
+    # Measured on the first build: 447 bus stops in the zone, the whole of
+    # Helgeland's network, against two stations. A bus stop is a trailhead
+    # where it stands near the boundary, and a settlement's own stop otherwise.
+    all_stops = osm_source.fetch_stops(search_bounds, force_download=args.force_download)
+    stations = gpd.clip(all_stops[all_stops["kind"] != "bus_stop"], zone)
+    bus_stops = gpd.clip(all_stops[all_stops["kind"] == "bus_stop"], norway.zone_around(park, args.trailhead_km))
+    stops = gpd.GeoDataFrame(pd.concat([stations, bus_stops]), crs=all_stops.crs)
+    stops["glyph"] = stops["kind"].map(OSM_STOP_GLYPHS)
+    camp_sites = gpd.clip(osm_source.fetch_camp_sites(search_bounds, force_download=args.force_download), zone)
 
     # Farms and sæters are the actual starting points here (Bønnåa, Strompdalen,
     # Stavassgården), but the region has over a thousand of them, so they are
@@ -2409,10 +2552,12 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         osm_source.fetch_places(search_bounds, place_types=TRAILHEAD_PLACE_TYPES, force_download=args.force_download),
         norway.zone_around(park, args.trailhead_km),
     )
-    print(f"  Shelters and huts: {len(shelters)}")
+    print(f"  Shelters and huts: {len(shelters)} ({shelters['glyph'].value_counts().to_dict()})")
     print(f"  Settlements: {len(places)}")
     print(f"  Trailheads (<{args.trailhead_km:g} km from boundary): {len(trailheads)}")
     print(f"  Ferry and express-boat quays: {len(terminals)}")
+    print(f"  Stations, and bus stops within {args.trailhead_km:g} km of the boundary: {len(stops)} ({stops['kind'].value_counts().to_dict()})")
+    print(f"  Camp sites: {len(camp_sites)}")
 
     approach_label = f"≤{args.approach_km:g} km"
     # Layers are added back-to-front so official routes draw on top of OSM,
@@ -2488,9 +2633,16 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
 
     # Point layers, in the order they are added. Each carries the colour its
     # legend row is keyed with, since a pin carries an icon colour by name.
+    osm_pin, osm_hex = pin_colour("OSM")
+    n50_pin, n50_hex = pin_colour("N50")
+    ssr_pin, ssr_hex = pin_colour("SSR")
     points = [
-        PointLayer(terminals, "Ferry quays [OSM]", "#5f9ea0", TERMINAL_POPUP_FIELDS, "ferry quay", "OSM", color="cadetblue", icon="ship"),
-        PointLayer(cabins, "Cabins and wilderness huts [N50]", "#8b0000", CABIN_POPUP_FIELDS, "cabin", "N50", label_field="navn"),
+        # The way in first: where the train and the bus stop, and where the boat puts in.
+        PointLayer(stops, "Stations and bus stops [OSM]", osm_hex, STOP_POPUP_FIELDS, "stop", "OSM", color=osm_pin, icon="bus", icon_field="glyph"),
+        PointLayer(terminals, "Ferry quays [OSM]", osm_hex, TERMINAL_POPUP_FIELDS, "ferry quay", "OSM", color=osm_pin, icon="ship"),
+        PointLayer(
+            huts, "Huts and shelters [N50]", n50_hex, CABIN_POPUP_FIELDS, "cabin", "N50", color=n50_pin, icon_field="glyph", label_field="navn"
+        ),
     ]
     # **One layer per kind of name rather than one for all of them.** They are
     # different questions — where the water runs, where the passes are — and a
@@ -2512,9 +2664,24 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         [
             # Two of these have no N50 building at all, so the join above cannot
             # reach them; as their own layer none of the register's huts is lost.
-            PointLayer(ssr_huts, "Named huts [SSR]", "#800080", SSR_POINT_POPUP_FIELDS, "hut", "SSR", color="purple"),
-            PointLayer(ssr_quays, "Quays [SSR]", "#0000cd", SSR_POINT_POPUP_FIELDS, "quay", "SSR", color="blue", icon="anchor"),
-            PointLayer(shelters, "Huts and shelters [OSM]", "#00008b", SHELTER_POPUP_FIELDS, "shelter", "OSM", color="darkblue", icon="campground"),
+            PointLayer(ssr_huts, "Named huts [SSR]", ssr_hex, SSR_POINT_POPUP_FIELDS, "hut", "SSR", color=ssr_pin),
+            PointLayer(ssr_quays, "Quays [SSR]", ssr_hex, SSR_POINT_POPUP_FIELDS, "quay", "SSR", color=ssr_pin, icon="anchor"),
+            PointLayer(shelters, "Huts and shelters [OSM]", osm_hex, SHELTER_POPUP_FIELDS, "shelter", "OSM", color=osm_pin, icon_field="glyph"),
+            PointLayer(camp_sites, "Camp sites [OSM]", osm_hex, CAMP_SITE_POPUP_FIELDS, "camp site", "OSM", color=osm_pin, icon="tent"),
+            # The buildings that are huts by type only, as dots and off: a
+            # planner heads for none of them, and the search still finds one.
+            PointLayer(
+                private_cabins,
+                "Koier, seter houses and rorbuer [N50]",
+                "#bf360c",
+                CABIN_POPUP_FIELDS,
+                "cabin",
+                "N50",
+                pin=False,
+                color="#bf360c",
+                radius=4.5,
+                show=False,
+            ),
             PointLayer(
                 trailheads,
                 "Trailheads, farms and sæters [OSM]",
@@ -2756,11 +2923,17 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     print("\nLoading OpenStreetMap points...")
     osm_source = overpass.Source(cache_dir=args.cache_dir)
     shelters = gpd.clip(osm_source.fetch_shelters(bounds, force_download=args.force_download), zone)
+    shelters["glyph"] = shelter_glyphs(shelters)
     places = gpd.clip(osm_source.fetch_places(bounds, force_download=args.force_download), zone)
     terminals = gpd.clip(osm_source.fetch_ferry_terminals(bounds, force_download=args.force_download), zone)
-    print(f"  Shelters and huts: {len(shelters)}")
+    stops = gpd.clip(osm_source.fetch_stops(bounds, force_download=args.force_download), zone)
+    stops["glyph"] = stops["kind"].map(OSM_STOP_GLYPHS)
+    camp_sites = gpd.clip(osm_source.fetch_camp_sites(bounds, force_download=args.force_download), zone)
+    print(f"  Shelters and huts: {len(shelters)} ({shelters['glyph'].value_counts().to_dict()})")
     print(f"  Settlements: {len(places)}")
     print(f"  Ferry and express-boat quays: {len(terminals)}")
+    print(f"  Stations and bus stops: {len(stops)} ({stops['kind'].value_counts().to_dict()})")
+    print(f"  Camp sites: {len(camp_sites)}")
 
     print("\nLoading Topografi 50 cabins...")
     cabins = gpd.clip(country.cabins(bounds, force_download=args.force_download), inside).reset_index(drop=True)
@@ -2788,6 +2961,11 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     )
     if len(cabins):
         print(f"    {cabins['kind'].value_counts().to_dict()}")
+    # A kåta and a lone cabin are somebody's; the rest a walker can head for.
+    cabins["glyph"] = cabins["kind"].map(T50_CABIN_GLYPHS)
+    is_private = cabins["kind"].isin(T50_PRIVATE_CABIN_KINDS)
+    huts, private_cabins = cabins[~is_private].copy(), cabins[is_private].copy()
+    print(f"  of which huts: {len(huts)} ({huts['glyph'].value_counts(dropna=False).to_dict()}); private: {len(private_cabins)}")
 
     print("\nLoading the register's facilities (Leder)...")
     facilities = gpd.clip(register.facilities(bounds, force_download=args.force_download), inside).reset_index(drop=True)
@@ -2796,10 +2974,12 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     facilities["subtype"] = translate_joined(facilities[naturvardsregistret.FACILITY_SUBTYPE], FACILITY_LABELS)
     facilities["description"] = facilities[naturvardsregistret.TRAIL_DESCRIPTION]
     facilities["route"] = facilities[naturvardsregistret.TRAIL_ROUTE]
+    facilities["glyph"] = joined_glyphs(facilities["kind"], FACILITY_GLYPHS, FACILITY_DEFAULT_GLYPH)
     print(f"  {len(facilities):,} facilities: {facilities['kind'].value_counts().to_dict()}")
 
     print("\nLoading Topografi 50 trail points...")
     trail_points = gpd.clip(country.trail_points(bounds, force_download=args.force_download), inside).reset_index(drop=True)
+    trail_points["glyph"] = trail_points["kind"].map(TRAIL_POINT_GLYPHS)
     print(f"  {len(trail_points):,}: {trail_points['kind'].value_counts().to_dict()}")
 
     print("\nLoading Topografi 50 water...")
@@ -2875,26 +3055,55 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             link_heading=PUBLISHED_ELSEWHERE_HEADING,
         ),
     ]
+    osm_pin, osm_hex = pin_colour("OSM")
+    t50_pin, t50_hex = pin_colour("Topografi 50")
+    leder_pin, leder_hex = pin_colour("Leder")
     points = [
-        PointLayer(terminals, "Ferry quays [OSM]", "#5f9ea0", TERMINAL_POPUP_FIELDS, "ferry quay", "OSM", color="cadetblue", icon="ship"),
-        PointLayer(cabins, "Cabins and huts [Topografi 50]", "#8b0000", T50_CABIN_POPUP_FIELDS, "cabin", "Topografi 50"),
-        PointLayer(shelters, "Huts and shelters [OSM]", "#00008b", SHELTER_POPUP_FIELDS, "shelter", "OSM", color="darkblue", icon="campground"),
+        # The way in first: Abisko is reached by train, and the six stations
+        # and halts of the box were on no layer until 2026-09-17.
+        PointLayer(stops, "Stations and bus stops [OSM]", osm_hex, STOP_POPUP_FIELDS, "stop", "OSM", color=osm_pin, icon="bus", icon_field="glyph"),
+        PointLayer(terminals, "Ferry quays [OSM]", osm_hex, TERMINAL_POPUP_FIELDS, "ferry quay", "OSM", color=osm_pin, icon="ship"),
         PointLayer(
-            facilities, "Bridges, shelters and privies [Leder]", "#6d4c41", FACILITY_POPUP_FIELDS, "facility", "Leder", pin=False, color="#6d4c41"
+            huts, "Huts and shelters [Topografi 50]", t50_hex, T50_CABIN_POPUP_FIELDS, "cabin", "Topografi 50", color=t50_pin, icon_field="glyph"
+        ),
+        PointLayer(shelters, "Huts and shelters [OSM]", osm_hex, SHELTER_POPUP_FIELDS, "shelter", "OSM", color=osm_pin, icon_field="glyph"),
+        PointLayer(camp_sites, "Camp sites [OSM]", osm_hex, CAMP_SITE_POPUP_FIELDS, "camp site", "OSM", color=osm_pin, icon="tent"),
+        PointLayer(
+            facilities,
+            "Bridges, shelters and privies [Leder]",
+            leder_hex,
+            FACILITY_POPUP_FIELDS,
+            "facility",
+            "Leder",
+            color=leder_pin,
+            icon=FACILITY_DEFAULT_GLYPH,
+            icon_field="glyph",
         ),
         PointLayer(
             trail_points,
             "Footbridges, fords and car parks [Topografi 50]",
-            "#0277bd",
+            t50_hex,
             TRAIL_POINT_POPUP_FIELDS,
             "trail point",
             "Topografi 50",
-            pin=False,
-            color="#0277bd",
-            radius=4.5,
+            color=t50_pin,
+            icon="bridge",
+            icon_field="glyph",
             label_field="kind",
         ),
         PointLayer(places, "Towns and villages [OSM]", "#37474f", PLACE_POPUP_FIELDS, "settlement", "OSM", pin=False, color="#37474f"),
+        PointLayer(
+            private_cabins,
+            "Sámi huts and private cabins [Topografi 50]",
+            "#bf360c",
+            T50_CABIN_POPUP_FIELDS,
+            "cabin",
+            "Topografi 50",
+            pin=False,
+            color="#bf360c",
+            radius=4.5,
+            show=False,
+        ),
     ]
     name_layers: list[NameLayer] = []
     if len(drawn_names):
@@ -3016,7 +3225,7 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
 
     # Everything a name can be typed at, lines and points alike.
     searchable = list(highlightable)
-    point_rows: list[tuple[str, int, str]] = []
+    point_rows: list[tuple[str, int, str, tuple[str, ...]]] = []
     for point in built.points:
         if not len(point.gdf):
             continue
@@ -3027,6 +3236,7 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
                 name=point.label,
                 color=point.color,
                 icon=point.icon,
+                icon_field=point.icon_field,
                 popup_fields=point.popup_fields,
                 label_field=point.label_field,
                 source=point.source,
@@ -3046,7 +3256,7 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
                 show=point.show,
             )
         searchable.append(group)
-        point_rows.append((point.label, len(point.gdf), point.legend_color))
+        point_rows.append((point.label, len(point.gdf), point.legend_color, tuple(getattr(group, maps.PIN_GLYPHS_ATTR, ()))))
     name_rows: list[maps.LegendRow] = []
     for named in built.names:
         if not len(named.gdf):
@@ -3130,8 +3340,8 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
 
     # Point layers carry an icon rather than a line colour, so they are listed
     # here only to record their source alongside everything else.
-    for label, count, color in point_rows:
-        legend.append(maps.LegendRow(f"{label} ({count})", color, switched(f"{label} ({count})")))
+    for label, count, color, glyphs in point_rows:
+        legend.append(maps.LegendRow(f"{label} ({count})", color, switched(f"{label} ({count})"), glyphs=glyphs))
 
     # The relief shadow and the slope classes are not rows here: neither is a
     # line or a point, and the legend draws them as checkboxes under the

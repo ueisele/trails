@@ -270,15 +270,21 @@ SCENES: dict[str, Scene] = {
             "and chains drawn as circle markers": 298,
             # Of the sixty longest FKB chains (§9.26).
             "chains named after a register trail": 9,
-            "things in the marker pane": 198,
-            "checkboxes in the legend": 30,
-            "of them switched off": 7,
+            # 198 until §9.31 (abisko decisions): 104 N50 buildings and 36 OSM
+            # shelters among them. Then 84 buildings by type left for a dot
+            # layer that starts off, five bus-stop and picnic roofs left OSM's
+            # shelters, and the stations, the bus stops in the trailhead band
+            # and the camp sites arrived as pins: 127.
+            "things in the marker pane": 127,
+            # Thirty-three since §9.31: stations, camp sites, buildings by type.
+            "checkboxes in the legend": 33,
+            "of them switched off": 8,
             "zoom before": 9,
             "zoom after": 11,
             "desktop: map free with nothing asked for": 96,
             "upright: map free with nothing asked for": 96,
             "sideways: map free with nothing asked for": 96,
-            "and the legend is what is in it": 30,
+            "and the legend is what is in it": 33,
             "px of map left above it": 565,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 186,
@@ -386,22 +392,29 @@ SCENES: dict[str, Scene] = {
             # since §9.26, where a name stopped running on past the ground the
             # register named: Topografi 50's marked trails 76 to 86, its roads
             # 72 to 74, OSM 486 to 494, the register's own 17 either way.
-            "paths in the overlay pane": 903,
+            # Twelve paths and twelve circle markers fewer since §9.31: the
+            # register's facilities were dots in the overlay pane and are pins.
+            "paths in the overlay pane": 891,
             "of them chains drawn as lines": 886,
-            "and chains drawn as circle markers": 16,
+            "and chains drawn as circle markers": 4,
             # Of the sixty longest marked-trail chains (§9.26).
             "chains named after a register trail": 32,
-            "things in the marker pane": 86,
+            # 86 until §9.31: the two hut layers' pins. Then the glyph began
+            # saying what a place is for, and the facilities, the trail points,
+            # the stations and the camp sites are pins as well -- while the
+            # kåtor and the lone cabins left for a dot layer that starts off.
+            "things in the marker pane": 180,
             # Nineteen: the relief shadow had a row here for a day and is a
             # checkbox under the sheet in the base-map panel since (§6.6).
-            "checkboxes in the legend": 19,
-            "of them switched off": 4,
+            # Twenty-two since §9.31: stations, camp sites, private cabins.
+            "checkboxes in the legend": 22,
+            "of them switched off": 5,
             "zoom before": 10,
             "zoom after": 12,
             "desktop: map free with nothing asked for": 97.7,
             "upright: map free with nothing asked for": 97.8,
             "sideways: map free with nothing asked for": 97.7,
-            "and the legend is what is in it": 19,
+            "and the legend is what is in it": 22,
             "px of map left above it": 562,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 189,
