@@ -83,9 +83,20 @@ class TestStops:
 
         assert gdf.loc["Abisko turiststation", "rail_lines"] == "98 long-distance train"
         assert gdf.loc["Abisko turiststation", "bus_lines"] == "91 bus / 957 shared taxi"
+        assert gdf.loc["Abisko turiststation", "operator"] == "Länstrafiken Norrbotten / SJ"
         assert gdf.loc["Abisko turiststation", "modes"] == "train / bus"
-        assert gdf.loc["Abisko turiststation", "operator"] == "SJ / Länstrafiken Norrbotten"
         assert pd.isna(gdf.loc["Stordalen E10", "rail_lines"])
+
+    def test_the_line_order_is_the_same_every_build(self, tmp_path):
+        """**The lines arrive in a set and a set has no order.** Left as they
+        came, the same feed wrote the list one way and then the other, because
+        Python salts string hashes per process -- so a popup read differently
+        each time it was built. Numbered lines go in numeric order."""
+        _feed(tmp_path)
+        gdf = trafiklab.Source(cache_dir=str(tmp_path)).stops(BOX).set_index("name")
+        assert gdf.loc["Abisko turiststation", "bus_lines"].split(" / ") == ["91 bus", "957 shared taxi"]
+        assert trafiklab.line_order("91 bus") < trafiklab.line_order("950 express bus") < trafiklab.line_order("60098 express bus")
+        assert trafiklab.line_order("60098 express bus") < trafiklab.line_order("F7 Nordlandsbanen")
 
     def test_the_stop_id_is_the_national_one(self, tmp_path):
         """It is what a Resrobot board is asked for, so the map needs no table of

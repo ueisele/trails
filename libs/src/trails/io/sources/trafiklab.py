@@ -94,6 +94,26 @@ ROUTE_TYPES = {
 SEPARATOR = " / "
 
 
+def line_order(label: str) -> tuple[int, int, str]:
+    """Sort key putting a line list in an order a reader expects, and a stable one.
+
+    **The lines arrive in a set and a set has no order.** Left as they came, the
+    same feed wrote *91 bus / 957 shared taxi* one build and *957 shared taxi /
+    91 bus* the next, because Python salts string hashes per process. A popup
+    that reads differently each time it is built is a popup nobody can diff, and
+    the test that caught it had passed once by luck.
+
+    Args:
+        label: A line as :meth:`Source.stops` writes it, ``code word``
+
+    Returns:
+        Numbered lines first and in numeric order -- 91 before 950 before 60098,
+        which is how they are spoken of -- then the rest alphabetically.
+    """
+    code = label.split(" ", 1)[0]
+    return (0, int(code), label) if code.isdigit() else (1, 0, label)
+
+
 @dataclass(frozen=True)
 class SourceMetadata:
     """Provenance of the timetable data."""
@@ -233,11 +253,11 @@ class Source:
                 "stop_id": stop_id,
                 "name": stop["name"],
                 "modes": SEPARATOR.join(MODES[mode] for mode in MODES if mode in lines),
-                "operator": SEPARATOR.join(dict.fromkeys(agency for by_mode in lines.values() for _, agency in by_mode if agency)) or None,
+                "operator": SEPARATOR.join(sorted({agency for by_mode in lines.values() for _, agency in by_mode if agency})) or None,
                 "geometry": Point(stop["lon"], stop["lat"]),
             }
             for mode in MODES:
-                labels = dict.fromkeys(label for label, _ in lines.get(mode, ()))
+                labels = sorted({label for label, _ in lines.get(mode, ())}, key=line_order)
                 record[lines_column(mode)] = SEPARATOR.join(labels) if labels else None
             records.append(record)
 

@@ -55,6 +55,7 @@ import argparse
 import dataclasses
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -506,9 +507,9 @@ def merge_stops_on_one_point(stops: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if not at["_point"].duplicated().any():
         return stops
 
-    def joined(values: pd.Series) -> str | None:
-        parts = dict.fromkeys(part for value in values.dropna() for part in str(value).split(IDENTITY_SEPARATOR))
-        return IDENTITY_SEPARATOR.join(parts) or None
+    def joined(values: pd.Series, key: Callable[[str], tuple] | None = None) -> str | None:
+        parts = list(dict.fromkeys(part for value in values.dropna() for part in str(value).split(IDENTITY_SEPARATOR)))
+        return IDENTITY_SEPARATOR.join(sorted(parts, key=key) if key else parts) or None
 
     def first_by_mode(group: pd.DataFrame) -> str:
         def ranked(row: pd.Series) -> int:
@@ -523,9 +524,13 @@ def merge_stops_on_one_point(stops: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         if len(group) > 1:
             row["stop_id"] = first_by_mode(group)
             row["name"] = joined(group["name"])
-            row["operator"] = joined(group["operator"])
+            # **Sorted, because two sorted lists concatenated are not one.**
+            # The station's 60098 and 60099 came before the E10's 91 and 950
+            # until this said otherwise; the names are left in the order the
+            # modes rank in, so the station is still named first.
+            row["operator"] = joined(group["operator"], key=lambda name: (name,))
             for mode in rank:
-                row[lines_column(mode)] = joined(group[lines_column(mode)])
+                row[lines_column(mode)] = joined(group[lines_column(mode)], key=trafiklab.line_order)
             row["modes"] = joined(group["modes"])
         merged.append(row)
     frame = gpd.GeoDataFrame(merged, columns=stops.columns, crs=stops.crs).reset_index(drop=True)
