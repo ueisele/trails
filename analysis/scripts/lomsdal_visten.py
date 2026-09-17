@@ -3187,7 +3187,16 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     credits = Credits(
         sources={
             **source_credits(loaded.versions, NORWAY_SOURCE_TERMS, NORWAY_SOURCE_METADATA),
-            ENTUR: [credit(ENTUR, entur.METADATA.license, "", entur.METADATA.attribution, entur.METADATA.url, f"read {date.today()}")],
+            ENTUR: [
+                credit(
+                    f"{ENTUR} ({entur.METADATA.name})",
+                    entur.METADATA.license,
+                    "",
+                    entur.METADATA.attribution,
+                    entur.METADATA.url,
+                    f"read {date.today()}",
+                )
+            ],
         },
         heights=height_credit(hoydedata.METADATA),
         protected=protected_credit(naturbase.METADATA),

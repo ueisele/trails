@@ -74,7 +74,9 @@ BATCH = 50
 class SourceMetadata:
     """Provenance of the timetable data."""
 
-    name: str = "Entur, the national stop register and timetables"
+    #: What Entur calls this API, so the page's *Sources* panel names the
+    #: dataset as its publisher does, the way every other entry there does.
+    name: str = "Journey Planner v3"
     provider: str = "Entur AS"
     country: str = "NO"
     url: str = "https://developer.entur.org/"
