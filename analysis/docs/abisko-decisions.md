@@ -2187,7 +2187,10 @@ A line per change to this document or to the decisions in it, newest first.
   `localStorage`, beside the names the caches and the offline switch carry; the relief goes with
   it, so a shadow turned off in full sun stays off. Denied storage leaves the build's default, as
   before. Driven on both pages, with two reloads inside the slope check: on survives one, off
-  survives one.
+  survives one — 714 readings on Abisko and 683 on Lomsdal-Visten, both clean. **Published** the
+  same morning, pages only: `abisko.html` 3,586,843 B and `lomsdal-visten.html` 17,143,005 B,
+  byte-identical from the edge, each worker stamped with its own page's hash (`0d3e893033182827`,
+  `5a3b55450488b325`), the edge's copy naming the key `trails-abisko-ground-`.
 
 - **2026-09-17, second of the day** — the position picker reads the tapped place's own height off
   the height tiles (§6.8), on Uwe's observation from the phone that it gave heights for paths
