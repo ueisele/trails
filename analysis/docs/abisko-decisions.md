@@ -2069,7 +2069,15 @@ A line per change to this document or to the decisions in it, newest first.
   the relief's in the base-map panel with the colour rows under it, **off by default**; the
   worker's fourth prefix; kept offline whether on or off. A band costs 2.4 MB more, the whole map
   24.7. 706 readings on Abisko (fifteen new), 683 on Lomsdal-Visten (the check a declared skip
-  there); the whole-map figure moves from 156,725 to 166,035 tiles. Not yet published.
+  there); the whole-map figure moves from 156,725 to 166,035 tiles.
+  **Published** in the early hours of 2026-09-17, asked for after the worker's fourth prefix was
+  said out loud: the tree first (9,330 objects, 24.7 MB, 139 s), then both pages —
+  `abisko.html` 3,581,093 B and `lomsdal-visten.html` 17,137,364 B, byte-identical from the edge,
+  and both workers with them (`abisko-sw.js` 30,214 B carrying `SLOPE_PREFIX`,
+  `sw.js` 30,055 B carrying it empty). Four sampled class tiles from z10, z12, z14 and z15 came
+  back byte-identical, the index names six classes at alpha 150, and a tile outside the box is a
+  404 as it should be. Each worker's version stamp was checked against its page's hash before
+  anything went up.
 
 - **2026-09-16, fourth of the day** — the relief's checkbox moves from the legend to the base-map
   panel (§6.6), on Uwe's question whether it belonged among the layers. It is not a line or a
