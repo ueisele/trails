@@ -2700,11 +2700,81 @@ unchanged. The Swedish equivalent would be Trafiklab or Resrobot, and whether ei
 not been checked.
 
 
+### 9.34 Sweden: Entur has the lines, Trafikverket has the board — settled, 2026-09-17
+
+*"Jetzt das ganze für Schweden."*
+
+**The note I had written for this was wrong, and measuring it was the first thing that changed.**
+It said Abisko's six stations were outside Entur and would need Trafiklab or ResRobot, whose terms
+I had not checked. Entur holds all six, because the journey planner carries the Ofotbanen and the
+Malmbanan for cross-border journeys out of Narvik. ResRobot does need a key — free, but registered
+— and is not needed.
+
+| Entur over the Abisko box, 2026-09-17 | |
+|---|---|
+| stop places | 6, all rail: Katterjåkk, Vassijaure, Låktatjåkko, Björkliden, Abisko turiststation, Abisko östra |
+| distance to the OSM stop each replaces | 3 m to 70 m |
+| line at all six | SJ, *Stockholm-Narvik (-Luleå)* |
+| and at two | Snälltåget, *NT Storlien* — at Abisko turiststation and Björkliden |
+| bus lines | **none**, at any of them |
+
+**But Entur has not one Swedish departure, and that killed the link.** `estimatedCalls` over sixty
+days returns nothing at all six — and nothing at **Narvik stasjon**, which is Norwegian and on the
+same line. So the data is structural only: Entur knows which lines call, not when. An
+`entur.no/nearby-stop-place-detail` link would open a page with the station's name and an empty
+board, which is exactly the failure §9.32 rejected the short link form for, and a reader cannot
+tell it from a station with no trains today.
+
+**Trafikverket publishes one that works, and it wants the name exactly.**
+`trafikverket.se/trafikinformation/tag/?Station=<name>` draws a board; a name it does not know
+renders a page with nothing on it — the same indistinguishable failure. Measured in Firefox on
+this box:
+
+| asked for | answer |
+|---|---|
+| `Abisko turiststation` (Entur's name) | board |
+| `Abisko Turiststation` (OSM's name) | **nothing** — the match is case-sensitive |
+| `Låktatjåkka` (OSM's name) | board |
+| `Låktatjåkko` (Entur's name) | **nothing** |
+| `Abk`, `Abö`, `Bln`, `Kjå` (station signatures) | nothing |
+| `Nonsuch station` (a control) | nothing |
+
+**So the name is not taken from either register — both get one of the six wrong.**
+`TRAFIKVERKET_BOARD_NAMES` is a table of six, keyed by the national stop id, each entry opened in
+a browser and seen to draw a board. A stop place absent from it gets no link, and the build prints
+how many were linked and names any that were not. Six of six today.
+
+**The buses stay OSM's, and say nothing they cannot back up.** Länstrafiken Norrbotten's 91 runs
+up the E10 past all of this, and it is in no keyless source — not Entur, and Trafiklab needs an
+account. So the four roadside stops keep their OpenStreetMap pins in OpenStreetMap's blue, with no
+line and no board, beside the six stations in Entur's slate. That the stop is 54 m to 228 m from
+the station it belongs to is the register's doing and the ground's, not an error.
+
+**Same code on both sides.** `entur_stop_layers` builds the per-mode layers for either country;
+what differs is one argument, which board a pin links to. Abisko draws one of the four layers —
+*Train stations [Entur] (6)* — because Entur has no airport, no boat call and no bus line in this
+box, and an empty layer is dropped.
+
+**One label is the register's and reads oddly: *NT Storlien* at Abisko.** Snälltåget files every
+one of its night trains under a single line record called *Storlien*, whose stop list runs from
+Berlin and Innsbruck to Narvik by way of Björkliden and Abisko — read out of `lines { quays }` to
+check. The train is real and does call here; the name is Snälltåget's own label and not a claim
+about where this one goes. It stays as the register wrote it, with *Operated by* naming Snälltåget
+beside SJ.
+
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-17, ninth of the day** — Abisko's stations get the same treatment (§9.34): *"Jetzt das
+  ganze für Schweden."* The note saying they were outside Entur was wrong — it holds all six, with
+  SJ's Stockholm–Narvik at every one — but it holds no departure for them or for Narvik, so the
+  board is Trafikverket's, under a table of six names each opened in a browser, because the match
+  is case-sensitive and Entur and OSM each get one wrong. The four bus stops stay OpenStreetMap's:
+  Länstrafiken's 91 is in no keyless source.
 
 - **2026-09-17, eighth of the day** — every scheduled stop around Lomsdal-Visten is drawn, from
   Entur rather than from OSM (§9.33): *"Kannst du alle Bushaltestellen und Bahnhöfe einzeichnen

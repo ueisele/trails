@@ -59,6 +59,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import NamedTuple, Protocol
+from urllib.parse import quote_plus
 
 import geopandas as gpd
 import pandas as pd
@@ -590,6 +591,35 @@ QUAY_POPUP_FIELDS = {
 #: The live departure board of the quay's stop, under the same heading the
 #: routes' links carry: it is Entur's page and not this map's.
 ENTUR_LINK_FIELDS = {"entur_url": "→ Departures at Entur"}
+
+#: Where a Swedish station's board lives, and under which name.
+#:
+#: **Entur knows the Swedish lines but not one Swedish departure.** It holds all
+#: six stations of the Abisko box and names SJ's *Stockholm-Narvik (-Luleå)* and
+#: Snälltåget at them -- but ``estimatedCalls`` over sixty days returns nothing,
+#: at these six and at Narvik stasjon on the same line alike. An Entur link here
+#: would open an empty board, which is the failure §9.32 rejected the short link
+#: form for. Trafikverket, which runs the Swedish railway, publishes one that
+#: works.
+#:
+#: **It takes the station's name, exactly, and an unknown one renders a page
+#: with nothing on it** -- again indistinguishable from a station with no
+#: trains. So the name is not taken from either register: both get one wrong.
+#: Entur calls it *Låktatjåkko* and Trafikverket has *Låktatjåkka*; OSM has
+#: *Abisko Turiststation* and Trafikverket has *Abisko turiststation*, and the
+#: match is case-sensitive. Each of these six was opened in Firefox on
+#: 2026-09-17 and drew a board; a stop place absent from this table gets no
+#: link, and the build says how many did.
+TRAFIKVERKET_BOARD = "https://www.trafikverket.se/trafikinformation/tag/?Station={station}"
+TRAFIKVERKET_BOARD_NAMES = {
+    "NSR:StopPlace:63197": "Abisko turiststation",
+    "NSR:StopPlace:57778": "Abisko Östra",
+    "NSR:StopPlace:63355": "Björkliden",
+    "NSR:StopPlace:58651": "Låktatjåkka",
+    "NSR:StopPlace:62306": "Katterjåkk",
+    "NSR:StopPlace:63395": "Vassijaure",
+}
+TRAFIKVERKET_LINK_FIELDS = {"board_url": "→ Departures at Trafikverket"}
 
 #: A click now selects the arm of the road under the cursor rather than every
 #: arm sharing its name, so both figures are needed and neither alone is true:
@@ -2407,6 +2437,43 @@ class PointLayer(NamedTuple):
     show: bool = True
 
 
+def entur_stop_layers(stops: gpd.GeoDataFrame, link_fields: dict[str, str]) -> list[PointLayer]:
+    """One pin layer per mode of :data:`ENTUR_STOP_LAYERS`, from one frame of stops.
+
+    Both maps draw their scheduled stops this way. What differs is where a stop
+    sends a reader: Norway to Entur's own board, Sweden to Trafikverket's,
+    because Entur has the Swedish lines and none of their departures.
+
+    Args:
+        stops: What :meth:`entur.Source.scheduled_stops` returned, clipped, and
+            with the water calls handed to the quays where there are quays
+        link_fields: Mapping of the column holding the board's address to the
+            link text, :data:`ENTUR_LINK_FIELDS` or
+            :data:`TRAFIKVERKET_LINK_FIELDS`
+
+    Returns:
+        A layer per mode, in the table's order. Empty ones are dropped further
+        down, so a country with no boat call and no airport shows neither.
+    """
+    pin, hex_colour = pin_colour(ENTUR)
+    return [
+        PointLayer(
+            stops_of_mode(stops, mode, tuple(earlier for earlier, *_ in ENTUR_STOP_LAYERS[:index])),
+            f"{label} [{ENTUR}]",
+            hex_colour,
+            ENTUR_STOP_POPUP_FIELDS,
+            point_type,
+            ENTUR,
+            color=pin,
+            icon=glyph,
+            link_fields=link_fields,
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
+            show=show,
+        )
+        for index, (mode, label, point_type, glyph, show) in enumerate(ENTUR_STOP_LAYERS)
+    ]
+
+
 class NameLayer(NamedTuple):
     """One layer of names drawn as text, and its row in the legend.
 
@@ -2849,26 +2916,10 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     osm_pin, osm_hex = pin_colour("OSM")
     n50_pin, n50_hex = pin_colour("N50")
     ssr_pin, ssr_hex = pin_colour("SSR")
-    entur_pin, entur_hex = pin_colour(ENTUR)
     # The way in first: where the train, the plane and the bus stop, and where
     # the boat puts in. One layer per mode, so the four hundred bus stops can be
     # switched off without taking the two stations with them.
-    points = [
-        PointLayer(
-            stops_of_mode(scheduled, mode, tuple(earlier for earlier, *_ in ENTUR_STOP_LAYERS[:index])),
-            f"{label} [{ENTUR}]",
-            entur_hex,
-            ENTUR_STOP_POPUP_FIELDS,
-            point_type,
-            ENTUR,
-            color=entur_pin,
-            icon=glyph,
-            link_fields=ENTUR_LINK_FIELDS,
-            link_heading=PUBLISHED_ELSEWHERE_HEADING,
-            show=show,
-        )
-        for index, (mode, label, point_type, glyph, show) in enumerate(ENTUR_STOP_LAYERS)
-    ] + [
+    points = entur_stop_layers(scheduled, ENTUR_LINK_FIELDS) + [
         PointLayer(
             terminals,
             "Ferry quays [OSM]",
@@ -3185,13 +3236,33 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     shelters["glyph"] = shelter_glyphs(shelters)
     places = gpd.clip(osm_source.fetch_places(bounds, force_download=args.force_download), zone)
     terminals = gpd.clip(osm_source.fetch_ferry_terminals(bounds, force_download=args.force_download), zone)
-    stops = gpd.clip(osm_source.fetch_stops(bounds, force_download=args.force_download), zone)
-    stops["glyph"] = stops["kind"].map(OSM_STOP_GLYPHS)
+    # **The stations come from Entur here too, and only the bus stops stay
+    # OSM's.** Entur holds all six stations of this box -- each within 70 m of
+    # the OSM stop it replaces -- and names the lines calling at them. It holds
+    # no bus line at all: Länstrafiken Norrbotten's 91 up the E10 is not in its
+    # data, and no keyless source has it, so those four keep their OSM pins and
+    # say nothing they cannot back up.
+    bus_stops = gpd.clip(osm_source.fetch_stops(bounds, force_download=args.force_download), zone)
+    bus_stops = bus_stops[bus_stops["kind"] == "bus_stop"]
+    bus_stops["glyph"] = bus_stops["kind"].map(OSM_STOP_GLYPHS)
     camp_sites = gpd.clip(osm_source.fetch_camp_sites(bounds, force_download=args.force_download), zone)
+
+    print("\nLoading scheduled public transport (Entur)...")
+    scheduled = gpd.clip(entur.Source(cache_dir=args.cache_dir).scheduled_stops(bounds, force_download=args.force_download), zone)
+    # Abisko's quay layer carries no boat call to hand over, so nothing is taken
+    # off a stop place here; a water stop, if one ever appears, draws itself.
+    scheduled["board_url"] = [
+        TRAFIKVERKET_BOARD.format(station=quote_plus(name)) if name else None for name in scheduled["stop_id"].map(TRAFIKVERKET_BOARD_NAMES)
+    ]
+    with_board = int(scheduled["board_url"].notna().sum())
+    drawn = {mode: int(scheduled[entur.lines_column(mode)].notna().sum()) for mode in entur.MODES}
+    print(f"  {len(scheduled)} stop places a line calls at ({drawn})")
+    print(f"  with a Trafikverket board: {with_board}; without: {sorted(scheduled.loc[scheduled['board_url'].isna(), 'name'])}")
+
     print(f"  Shelters and huts: {len(shelters)} ({shelters['glyph'].value_counts().to_dict()})")
     print(f"  Settlements: {len(places)}")
     print(f"  Ferry and express-boat quays: {len(terminals)}")
-    print(f"  Stations and bus stops: {len(stops)} ({stops['kind'].value_counts().to_dict()})")
+    print(f"  Bus stops [OSM]: {len(bus_stops)}")
     print(f"  Camp sites: {len(camp_sites)}")
 
     print("\nLoading Topografi 50 cabins...")
@@ -3317,10 +3388,10 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     osm_pin, osm_hex = pin_colour("OSM")
     t50_pin, t50_hex = pin_colour("Topografi 50")
     leder_pin, leder_hex = pin_colour("Leder")
-    points = [
-        # The way in first: Abisko is reached by train, and the six stations
-        # and halts of the box were on no layer until 2026-09-17.
-        PointLayer(stops, "Stations and bus stops [OSM]", osm_hex, STOP_POPUP_FIELDS, "stop", "OSM", color=osm_pin, icon="bus", icon_field="glyph"),
+    # The way in first: Abisko is reached by train, and the six stations and
+    # halts of the box were on no layer until 2026-09-17.
+    points = entur_stop_layers(scheduled, TRAFIKVERKET_LINK_FIELDS) + [
+        PointLayer(bus_stops, "Bus stops [OSM]", osm_hex, STOP_POPUP_FIELDS, "bus stop", "OSM", color=osm_pin, icon="bus"),
         PointLayer(terminals, "Ferry quays [OSM]", osm_hex, TERMINAL_POPUP_FIELDS, "ferry quay", "OSM", color=osm_pin, icon="ship"),
         PointLayer(
             huts, "Huts and shelters [Topografi 50]", t50_hex, T50_CABIN_POPUP_FIELDS, "cabin", "Topografi 50", color=t50_pin, icon_field="glyph"
@@ -3376,8 +3447,14 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             heading = f"Name {' '.join(glyphs)} {label} — {', '.join(ortnamn.type_label(kind) for kind in present)} [Ortnamn]"
             name_layers.append(NameLayer(part, heading, ORTNAMN_COLORS[present[0]]))
 
+    # Entur again, and for the same reason as Norway: it is not a chain source,
+    # what it contributes is the stations' lines, and the page's *Sources* panel
+    # is where NLOD's attribution is discharged.
     credits = Credits(
-        sources=source_credits(loaded.versions, SWEDEN_SOURCE_TERMS, SWEDEN_SOURCE_METADATA),
+        sources={
+            **source_credits(loaded.versions, SWEDEN_SOURCE_TERMS, SWEDEN_SOURCE_METADATA),
+            ENTUR: [credit(ENTUR, entur.METADATA.license, "", entur.METADATA.attribution, entur.METADATA.url, f"read {date.today()}")],
+        },
         heights=height_credit(markhojd.METADATA),
         protected=protected_credit(naturvardsregistret.METADATA),
         ascent=ascent_method(params, SWEDEN_HEIGHT_MODEL),

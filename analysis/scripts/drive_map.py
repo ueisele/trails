@@ -426,14 +426,17 @@ SCENES: dict[str, Scene] = {
             # Nineteen: the relief shadow had a row here for a day and is a
             # checkbox under the sheet in the base-map panel since (§6.6).
             # Twenty-two since §9.31: stations, camp sites, private cabins.
-            "checkboxes in the legend": 22,
+            # Twenty-three since §9.33, which split the stops into the six
+            # stations Entur knows the lines of and the four bus stops it does
+            # not -- the same ten pins, under two switches.
+            "checkboxes in the legend": 23,
             "of them switched off": 5,
             "zoom before": 10,
             "zoom after": 12,
             "desktop: map free with nothing asked for": 97.7,
             "upright: map free with nothing asked for": 97.8,
             "sideways: map free with nothing asked for": 97.7,
-            "and the legend is what is in it": 22,
+            "and the legend is what is in it": 23,
             "px of map left above it": 562,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 189,
