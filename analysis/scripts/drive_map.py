@@ -422,7 +422,9 @@ SCENES: dict[str, Scene] = {
             # saying what a place is for, and the facilities, the trail points,
             # the stations and the camp sites are pins as well -- while the
             # kåtor and the lone cabins left for a dot layer that starts off.
-            "things in the marker pane": 180,
+            # 183 since §9.35: Trafiklab's 13 stops replaced the 6 Entur
+            # stations and 4 OSM bus stops the page drew before it.
+            "things in the marker pane": 183,
             # Nineteen: the relief shadow had a row here for a day and is a
             # checkbox under the sheet in the base-map panel since (§6.6).
             # Twenty-two since §9.31: stations, camp sites, private cabins.

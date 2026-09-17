@@ -2695,6 +2695,10 @@ own if Entur adds a stop or SSR loses a quay, instead of going quiet. Handing th
 than dropping the row is what keeps Visthus, which a bus also calls at, on the bus layer after its
 boat call has moved to the quay.
 
+**Superseded on the same day: Sweden's stops now come from Trafiklab.** The section below is why,
+and what follows here is the measurement that settled it. Entur is Norway's register and stays
+Norway's; the Swedish half of §9.34 is history from *Trafiklab draws every Swedish stop* onward.
+
 **Entur does not cover Sweden, and Abisko is the exception rather than the rule.** Asked before
 the next map is drawn: *"Entur liefert for ganz Schweden Bahnhöfe?"* It holds a Swedish stop only
 where a line reaching Norway calls there, which is why the whole Ofotbanen–Malmbanan corridor is in
@@ -2842,11 +2846,74 @@ about where this one goes. It stays as the register wrote it, with *Operated by*
 beside SJ.
 
 
+### 9.35 Trafiklab draws every Swedish stop — settled, 2026-09-17
+
+Entur gave Abisko its six stations the same day, and the same day showed why that could not last:
+it holds a Swedish stop only where a line reaches Norway (§9.34), so a second Swedish park would
+draw an empty layer. Uwe registered a Trafiklab key — free, and a **build-time** credential: the
+published page is static and asks nothing of anybody, so nothing of the key ever reaches a reader.
+
+**`GTFS Sverige 2` is the whole country in one file.** Every operator, every mode, CC0, updated at
+most daily, 44 MB zipped, fetched once and cached. Trafiklab's own guidance points here: *"if you
+need to make more than 10 requests in order to get the data you need, you should be using GTFS"*.
+A Bronze key allows fifty calls a month and an ordinary build makes none.
+
+| measured over the Abisko box, 2026-09-17 | |
+|---|---|
+| Trafiklab stops | **13** |
+| OSM stops | 10 |
+| Entur stop places | 6 |
+| furthest an OSM stop stands from a Trafiklab one | **231 m** — so nothing is lost by the swap |
+| stops Trafiklab adds | **5**, every one of them on the E10: Stordalen, Katterjåkk E10, Låktatjåkka E10, Vassijaure E10, Björkliden Hotell Fjället |
+| how far Stordalen is from anything the map drew before | **9.65 km** |
+
+**Those five are the point.** They are where a walker gets off the bus, and four of them sit
+beside a station of the same name that is a different place: Trafiklab keeps *Katterjåkk station*
+and *Katterjåkk E10* apart, where OSM had one halt and Entur one stop place. Stordalen has no
+station at all and was simply missing.
+
+**And the lines are fuller than Entur's.** At Abisko turiststation Entur named two; the feed names
+nine — SJ's 98 and 99, Snälltåget's 20 and 21, SJ's replacement buses 60098 and 60099,
+Länstrafiken's 91, Kiruna Buss's 950 and the 957 shared taxi. The GTFS `route_type` carries the
+word each is labelled with, which is what keeps *957 shared taxi* from reading as a bus that turns
+up by itself.
+
+**`stop_times.txt` is 374 MB and 7.5 million rows, and is read as a stream.** Only rows naming a
+stop inside the box are kept, so what the loader costs in memory is the box and not the country.
+
+**The hand-resolved table of ten Resrobot ids is gone.** It existed because neither OSM nor Entur
+carries a Swedish stop id; Trafiklab's `stop_id` *is* the number Resrobot's board wants. Only
+Trafikverket still needs a name, and only for the six stations — that table stays, re-keyed.
+
+**Whether a layer starts on is counted now, not declared.** The bus layer carried `show=False`
+because Lomsdal-Visten draws 288 of them; Abisko draws **seven**, and they are the way in. A flag
+written for one country was hiding the other's. `BUSY_PIN_LAYER` is 50, and the gap between 7 and
+288 is why that figure is not one anybody has to tune — the same argument the quay distance rests
+on.
+
+**And the Abisko page was driven for the first time getting here.** `make drive` takes one page and
+defaults to Lomsdal-Visten; every *driven clean* in §9.31 to §9.34 was that page, not this one.
+Driving this one with `ARGS="--page analysis/output/abisko.html"` found 720 readings, 0 broken
+invariants and exactly one moved figure — the marker pane at 183 where 180 was recorded, which is
+the three pins Trafiklab adds. Nothing was wrong; it had simply never been looked at.
+
+**What the page says now:** *Train stations [Trafiklab] (6)* and *Bus stops [Trafiklab] (7)*, in
+the same slate Entur's pins wear on the Norwegian map — the two never stand on one map, and N50
+and Topografi 50 already share a red for the same reason. Thirteen Resrobot links, six
+Trafikverket links. Entur is off the Swedish page entirely and keeps Norway.
+
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-17, tenth of the day** — Sweden's stops come from Trafiklab (§9.35), on a key Uwe
+  registered for the build. 13 stops against OSM's 10 and Entur's 6, every OSM stop within 231 m
+  of one of them, and five added that are all E10 stops where a walker gets off — Stordalen among
+  them, 9.65 km from anything the map drew before. The hand-resolved Resrobot id table is gone
+  because the feed carries the id, and whether a layer starts on is counted rather than declared.
 
 - **2026-09-17, ninth of the day** — Abisko's stations get the same treatment (§9.34): *"Jetzt das
   ganze für Schweden."* The note saying they were outside Entur was wrong — it holds all six, with

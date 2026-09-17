@@ -16,6 +16,7 @@ from . import (
     overpass,
     stedsnavn,
     topografi50,
+    trafiklab,
     traktorvegsti,
     ut,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "overpass",
     "stedsnavn",
     "topografi50",
+    "trafiklab",
     "traktorvegsti",
     "ut",
     "TrailDataSource",
