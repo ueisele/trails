@@ -2695,6 +2695,27 @@ own if Entur adds a stop or SSR loses a quay, instead of going quiet. Handing th
 than dropping the row is what keeps Visthus, which a bus also calls at, on the bus layer after its
 boat call has moved to the quay.
 
+**Entur does not cover Sweden, and Abisko is the exception rather than the rule.** Asked before
+the next map is drawn: *"Entur liefert for ganz Schweden Bahnhöfe?"* It holds a Swedish stop only
+where a line reaching Norway calls there, which is why the whole Ofotbanen–Malmbanan corridor is in
+and almost nothing else is. Counted over one box each on 2026-09-17:
+
+| box | Entur stop places | |
+|---|---|---|
+| Abisko | 6 | the six this map draws |
+| Kiruna town | 1 | Kiruna station, and none of the town's buses |
+| **Nikkaluokta / Kebnekaise** | **0** | Transitous has *Nikkaluokta fjällanläggning*, bus 902 |
+| **Kvikkjokk / Sarek** | **0** | Transitous has *Kvikkjokk kyrkan*, bus 47 |
+| **Ritsem / Stora Sjöfallet** | **0** | Transitous has *Ritsem fjällstation*, bus 932 |
+| Storulvån / Sylarna | 8 | the Storlien line, which runs to Trondheim |
+| Stockholm, Göteborg, Malmö | 4, 8, 4 | the cross-border services only, not the cities |
+
+So the trailheads of every Swedish mountain park but this one are **absent from Entur**, and the
+layer would come out empty without anything going wrong — the build prints `0 stop places` and
+carries on. A Swedish map beyond Abisko needs Trafiklab, which wants a free registered key, or
+Transitous, which is keyless and community-run and answered for all five blind spots above with the
+line and the operator.
+
 **Norway only, again.** Abisko's six stations and halts are outside Entur and keep their OSM layer
 unchanged. The Swedish equivalent would be Trafiklab or Resrobot, and whether either is keyless has
 not been checked.
