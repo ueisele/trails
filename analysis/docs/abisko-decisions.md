@@ -2179,7 +2179,12 @@ A line per change to this document or to the decisions in it, newest first.
   against the 4 m mosaic the build samples for the profile: half the points within 0.07 m, 99 in
   100 within 0.89 m, worst 8.56 m on a cliff. No new tree and nothing the worker keeps, so it
   costs a reader offline nothing. The drive now reads Torneträsk's own 342 m where it used to read
-  that a tap off the paths claimed nothing.
+  that a tap off the paths claimed nothing. 708 readings on Abisko and 683 on Lomsdal-Visten, both
+  clean. **Published** the same morning, pages only — no tree was touched and no address moved, so
+  nothing a phone holds is stale: `abisko.html` 3,585,162 B and `lomsdal-visten.html` 17,141,331 B,
+  both byte-identical from the edge, each worker stamped with its own page's hash
+  (`eb8b137d2d7105e8`, `38beacf14d8eecc8`), and a z13 height tile read back from the edge
+  byte-identical to the one on disk.
 
 - **2026-09-17** — the slope classes are drawn multiplied, go to seven, and take a light palette
   (§6.7), on Uwe's finding from the phone over Latnjajávri that the sheet's lettering lay under
