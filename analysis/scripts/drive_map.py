@@ -159,6 +159,13 @@ class Scene:
     #: A reading whose figure is not here is reported as new, and the answer
     #: is to record it here once it has been looked at.
     figures: dict[str, Any]
+    #: What the page's own height model says at :attr:`nowhere`, where the page
+    #: carries one over the whole box rather than along the network alone: the
+    #: picker reads the tapped pixel there (§6.8), and `nowhere` is on
+    #: Torneträsk, whose surface is 341.85 m at every post of the model (§6.3).
+    #: None where the heights are a service asked per leg, and the check then
+    #: reads that a tap off a path claims nothing at all.
+    nowhere_height: float | None = None
     #: A waypoint on the network and two taps either side of the old 150 m
     #: reach, 28 m apart, as ``{"lat", "lng"}``. None where nobody measured one.
     taps_beside: tuple[dict[str, float], dict[str, float], dict[str, float]] | None = None
@@ -327,6 +334,9 @@ SCENES: dict[str, Scene] = {
         off_route=(68.20, 18.95),
         # Torneträsk, 4.5 km from the nearest edge of the network.
         nowhere=(68.40, 18.85),
+        # And the lake's own surface, which the height tiles carry there: every
+        # post of a square on Torneträsk reads 341.85 m (§6.3).
+        nowhere_height=341.85,
         open_water=((68.400, 18.850), (68.402, 18.853)),
         walk=((68.3000, 18.7000), (68.3009, 18.7020), (68.3018, 18.7040)),
         standing=(68.3100, 18.7100),
@@ -2618,6 +2628,13 @@ def planning_keeps_what_it_had(page: Any) -> Check:
     )
 
 
+#: What the picker's message says, and the height in it if there is one.
+READ_PICK = """() => { const t = document.querySelector('.trails-pick-said').textContent;
+  const found = t.match(/\\u00b7\\s*~?([\\d,]+) m/);
+  return {text: t, metres: found ? Number(found[1].replace(/,/g, '')) : null,
+          copied: window.trailsChrome.copied()}; }"""
+
+
 def copying_a_position(page: Any) -> Check:
     """The one switch that has to work whatever else owns the tap.
 
@@ -2671,6 +2688,28 @@ def copying_a_position(page: Any) -> Check:
         page.wait_for_timeout(700)
         return at
 
+    def picked(waiting_ms: int = 3000) -> Any:
+        """What the message says, once a height that is on its way has arrived.
+
+        **The position is on the screen at once and the height a moment later**,
+        where the page reads it off a tile: the tile is fetched through the
+        worker, which is instant over ground that was kept and a request over
+        ground that was not. A check that read the line straight after the tap
+        would read the moment before the number, and on a page whose heights are
+        the network's own it would read the finished line either way -- so this
+        waits for a number and gives up on one rather than assuming which page
+        it is on. The message fades after 2.6 s and its text stays in the
+        document, so waiting past the fade still reads what was said.
+        """
+        waited = 0
+        while waited < waiting_ms:
+            said = page.evaluate(READ_PICK)
+            if said["metres"] is not None:
+                return said
+            page.wait_for_timeout(200)
+            waited += 200
+        return page.evaluate(READ_PICK)
+
     # 1. armed while a route is being planned: no waypoint, a position.
     page.evaluate("() => window.trailsChrome.picking(true)")
     page.wait_for_timeout(300)
@@ -2694,12 +2733,14 @@ def copying_a_position(page: Any) -> Check:
                 marked: m.style.display === 'block'}; }"""
     )
 
-    # 1b. **The height beside the position, where this map has one.** It carries
-    # no height raster: what it has is sampled every 5 m along the network, so a
-    # tap on the route being planned can be told its height and a tap on open
-    # ground cannot. The figure is compared with the panel's own series at the
-    # same place — one derivation, two renderings — and never with a number this
-    # check remembers.
+    # 1b. **The height beside the position.** Where the page carries a height
+    # model over the whole box it reads the tapped pixel off it, and where it has
+    # none the only heights it holds are sampled every 5 m along the network — so
+    # there a tap on the route being planned can be told its height and a tap on
+    # open ground cannot. On the network the figure is compared with the panel's
+    # own series at the same place — one surface, two renderings — and never with
+    # a number this check remembers; off it, with what the model says about the
+    # ground the scene named, which is the lake's own flat surface.
     seen = page.evaluate(with_map("() => { const c = __MAP__.getCenter(); return [c.lat, c.lng, __MAP__.getZoom()]; }"))
     on_track = page.evaluate(
         """() => { const s = window.trailsProfile && window.trailsProfile.shape;
@@ -2733,20 +2774,14 @@ def copying_a_position(page: Any) -> Check:
             at,
         )
         page.mouse.click(at["x"], at["y"])
-        page.wait_for_timeout(800)
-        told = page.evaluate(
-            """() => { const t = document.querySelector('.trails-pick-said').textContent;
-            const found = t.match(/\\u00b7\\s*~?([\\d,]+) m/);
-            return {text: t, metres: found ? Number(found[1].replace(/,/g, '')) : null,
-                    copied: window.trailsChrome.copied()}; }"""
-        )
-    # And where there is no path within a hundred metres, nothing is claimed.
+        told = picked()
+    # And where there is no path within a hundred metres: the model's own
+    # reading where there is a model, and nothing at all where there is not.
     page.evaluate(with_map("(at) => { __MAP__.setView(at, 12, {animate: false}); }"), list(SCENE.nowhere))
     page.wait_for_timeout(900)
     at = page.evaluate(middle)
     page.mouse.click(at["x"], at["y"])
-    page.wait_for_timeout(800)
-    at_sea = page.evaluate("() => document.querySelector('.trails-pick-said').textContent")
+    at_sea = picked()
     page.evaluate(with_map("(v) => { __MAP__.setView([v[0], v[1]], v[2], {animate: false}); }"), seen)
     page.wait_for_timeout(700)
 
@@ -2823,8 +2858,21 @@ def copying_a_position(page: Any) -> Check:
                 False,
                 note=str(under["on"]) if under else "not reached",
             ),
-            # A number about somewhere else is worse than no number.
-            Reading("off the network, no height is claimed", " m" in at_sea, False, note=at_sea),
+            # **Off the network**, and the two answers a page can honestly give
+            # there. With a height model over the whole box the tapped place has
+            # its own height and the lake says so flatly; with none, a number
+            # about somewhere else is worse than no number.
+            (
+                Reading(
+                    "off the network, the tapped place's own height",
+                    at_sea["metres"],
+                    SCENE.nowhere_height,
+                    within=1,
+                    note=at_sea["text"],
+                )
+                if SCENE.nowhere_height is not None
+                else Reading("off the network, no height is claimed", at_sea["metres"] is not None, False, note=at_sea["text"])
+            ),
             Reading("disarmed, the tap is plan mode's again", laid, 1),
             # Where the rail is not, and where it is.
             Reading("narrow: the two marks are drawn", marks["shown"], True),

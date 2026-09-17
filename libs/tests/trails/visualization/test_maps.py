@@ -7835,12 +7835,14 @@ class TestChrome:
         assert "sayCopied" not in armed
         assert "hideCopied" in armed
 
-    def test_the_height_comes_off_the_network_or_not_at_all(self):
-        """This map carries no height raster. The only heights it has are the
-        ones sampled every 5 m along the network, in the routing graph — so a tap
-        on a path can be told its height and a tap on an open hillside cannot,
-        and the honest thing is to say the first and stay quiet about the second
-        rather than quote a number about somewhere else.
+    def test_the_height_comes_off_the_network_where_there_are_no_tiles(self):
+        """Where the map carries no height raster, the only heights it has are
+        the ones sampled every 5 m along the network, in the routing graph — so a
+        tap on a path can be told its height and a tap on an open hillside
+        cannot, and the honest thing is to say the first and stay quiet about the
+        second rather than quote a number about somewhere else. That is the first
+        map, and on the second it is the fallback: the tile that is not there,
+        off the model's edge or offline over ground that was never kept.
 
         Measured on the built graph before this was written: 949,704 vertices,
         and a scan over every one of them is 3 ms — once per tap, which is why
@@ -7857,11 +7859,60 @@ class TestChrome:
         assert "var far = panel.metresBetween;" in html
         # A tilde where it is not the tapped place's own height.
         assert "(high.away > EXACT_M ? '~' : '')" in html
+        # Asked only where nothing better can be: a page with height tiles reads
+        # the tapped pixel and this never runs, which is the next test.
+        assert "var high = asking ? null : pathHeight(where.lat, where.lng);" in html
         # **And never copied.** What goes to the clipboard is what was asked for
         # — a position — and a height read off a path 30 m away would be a figure
         # somebody pastes into a note as if it were measured there.
         assert "navigator.clipboard.writeText(text)" in html
         assert "return where.lat.toFixed(5) + ', ' + where.lng.toFixed(5);" in html
+
+    def test_the_tapped_place_has_its_own_height_where_the_map_carries_tiles(self):
+        """A height model cut to the map's own grid is on the page already — for
+        the legs of a planned route the network cannot carry — and it covers the
+        whole box, not the paths in it. So the picker asks it, and asks the
+        network's samples only where it has no answer: off the model's edge, or
+        offline over ground that was never kept.
+
+        **One reader, not two.** The panel that plans a route decodes these tiles
+        and holds the last two dozen of them; a second decoder in the chrome
+        would be a second answer to *how high is that*, and would fetch the same
+        tile again to give it. The picker asks `window.trailsPlan.heightAt`,
+        which is that reader asked about one point.
+
+        **And the tap asks once.** A leg is asked for once and its profile is the
+        whole point of it, so a leg retries; a tap is cheap to repeat, and a
+        retry chain behind a message that fades after 2.6 s is a number nobody
+        sees arrive."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "window.trailsPlan.heightAt(where.lat, where.lng) : null;" in html
+        # Nothing from the network's samples while a tile is in flight: one tap
+        # would say two different numbers a moment apart.
+        assert "var high = asking ? null : pathHeight(where.lat, where.lng);" in html
+        # Read where the tap was, so nothing is approximate about it and the
+        # tilde stays off.
+        assert ": {metres: metres, away: 0};" in html
+        # Not over a later tap, and not over a message already dismissed.
+        assert "if (!found || turn !== pickTurn || pickSaid !== text) { return; }" in html
+        # A tile that is not there is ground the model does not cover, and then
+        # the network's nearest sample is all there is to say.
+        assert "? pathHeight(where.lat, where.lng)" in html
+
+        # The other half: the panel hands one out only where there are tiles.
+        fmap, _ = TestPlanMode().drawn()
+        maps.add_plan_mode(
+            fmap,
+            TestPlanMode().planned(heightsUrl="", heightsTiles=maps.PROVIDERS["lantmateriet"].heights.as_settings()),
+        )
+        with_tiles = fmap.get_root().render()
+        assert "heightAt: PLAN.heightsTiles ? function (lat, lon) {" in with_tiles
+        assert "return tileHeights({lon: [lon], lat: [lat]}, true).then(function (points) {" in with_tiles
+        # One tile, asked once: `once` is the picker's, and a leg keeps the three
+        # attempts.
+        assert "return once ? fetchHeightTile(wanted[k][0], wanted[k][1], z)" in with_tiles
 
     def test_what_it_said_does_not_eat_the_next_tap(self):
         """It stands over the map, and the map is what is being tapped. Driven: a

@@ -853,6 +853,74 @@ Flat for the same reason the relief's was, and a quarter of it. The whole map at
 166,035 tiles: the sheet's 146,975, the 440 height tiles, and 9,310 each of relief and slope. The
 figures are version 2's — **9,330 tiles, 25.0 MB, cut in 12 minutes**; version 1 with six classes
 was 24.7 MB and priced 0.3 MB less.
+
+### 6.8 A tap anywhere is told how high it is, off the height tiles
+
+Uwe, 2026-09-17, from the phone: *"Der Position Picker liefert auch Höhen. Aber aktuell nur für
+Wege. Durch die Höhen Kacheln können wir das doch zumindest für Abisko an jeder Stelle machen und
+die Höhe aus den Höhen Kacheln ablesen."*
+
+He is right, and the model was already on the page. The picker copies a position and says the
+height beside it; the only heights it could reach were the ones the build samples every 5 m along
+the network into the routing graph, so it looked for the nearest line within 100 m, said `~`
+where that line was more than 25 m away, and stayed quiet beyond. A tap on an open flank — which
+is most of this park — got a position and nothing else. Meanwhile §6.3's height tiles cover the
+whole box at 7.1 m pixels, are kept by the same switch as the sheet, and are already decoded on
+this page for the profile of a straight leg.
+
+**Decided: where the page carries height tiles, the tapped pixel is the answer.** Read bilinearly
+between the four pixel centres round the tap, at z13, off the same tiles a leg reads.
+
+- **One reader, not two.** The plan panel owns the decoder, the 24-tile cache and the unpacking
+  formula; the picker asks `window.trailsPlan.heightAt(lat, lon)`, which is that reader asked
+  about one point. A second decoder in the chrome would be a second answer to *how high is that*
+  and would fetch the same tile again to give it.
+- **Asked once, where a leg asks three times.** A leg is asked for once and its profile is the
+  whole point of it, so it retries with a backoff; a tap is cheap to repeat, and a retry chain
+  behind a message that fades after 2.6 s is a number nobody sees arrive. `tileHeights` takes a
+  `once` flag for exactly that.
+- **Nothing is said from the graph while a tile is in flight.** Showing the nearest path's height
+  first and correcting it a moment later would be one tap saying two different numbers, which is
+  how a reader learns to trust neither. The position is on the screen at once; the height joins it
+  when it is known, and a number that arrives late is given a whole message's worth of time rather
+  than the end of the one it lands in. It is dropped if a later tap has happened or the message
+  was dismissed.
+- **The graph is the fallback, not the answer.** A tile that is not there is ground the model does
+  not cover — off its edge, or offline over ground that was never kept — and then the network's
+  nearest sample is all there is to say, tilde and all, exactly as before.
+- **Nothing changes on the Norwegian page.** Its heights are Geonorge's point service, asked per
+  leg; `heightsTiles` is null there and so is `heightAt`. A tap is not a leg: a point query costs
+  a round trip per tap and answers nothing at all offline, and Kartverket has no height tree of
+  ours to read instead. When Norway gets one (§6.6 says the same of the relief) this follows.
+- **Still never copied.** What goes to the clipboard is the position that was asked for. The
+  height stands beside it on the screen.
+
+**Measured, because the profile and the picker must not be two numbers.** The build samples the
+4 m mosaic for every graph vertex and the tiles were cut from that same mosaic, so the two are one
+surface read at different resolutions — and this is what the difference actually is. The page's
+bilinear rule re-implemented over the z13 tiles on disk against `markhojd.sample` off the cached
+mosaic, at 4,000 uniform random points of the box (3,925 inside both; the rest off the model's
+edge):
+
+| | |
+|---|---|
+| half the points agree within | 0.07 m |
+| nine in ten | 0.30 m |
+| ninety-nine in a hundred | 0.89 m |
+| worst of the 3,925 | 8.56 m, on a cliff, where seven metres of pixel is the whole difference |
+| over 1 m | 0.9 % of points |
+
+**What it costs.** No new tree, no new address, nothing the worker keeps: the tiles are §6.3's,
+already published and already kept. A tap on ground the phone holds is answered out of the store
+with nothing over the network; a tap on ground it does not fetches the one z13 tile under it
+(92.7 kB mean, four only where the tap lands on a tile corner) and keeps it decoded for the next
+two dozen. Offline, the answer is there over the ground the reader kept — the chooser keeps z13
+heights over the same set as the sheet — and the graph's sample elsewhere.
+
+Driven: on the network the picker's figure is compared against the panel's own series at the same
+place, one surface and two renderings; off it, the check used to read that nothing was claimed and
+now reads Torneträsk's own flat surface, 342 m, from a tap 4.5 km from the nearest path.
+
 ---
 
 ## 7. The order of work
@@ -2102,6 +2170,17 @@ fetches do not surface in Playwright's request events, so counting them takes a 
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-17, second of the day** — the position picker reads the tapped place's own height off
+  the height tiles (§6.8), on Uwe's observation from the phone that it gave heights for paths
+  alone while the model covers the whole box. It asks the plan panel's reader — one decoder, one
+  24-tile cache, one surface — once rather than with a leg's three attempts, says nothing from the
+  graph while a tile is in flight, and falls back to the network's nearest sample with its tilde
+  where a tile is not there or the page has no tiles at all, which is the Norwegian one. Measured
+  against the 4 m mosaic the build samples for the profile: half the points within 0.07 m, 99 in
+  100 within 0.89 m, worst 8.56 m on a cliff. No new tree and nothing the worker keeps, so it
+  costs a reader offline nothing. The drive now reads Torneträsk's own 342 m where it used to read
+  that a tap off the paths claimed nothing.
+
 - **2026-09-17** — the slope classes are drawn multiplied, go to seven, and take a light palette
   (§6.7), on Uwe's finding from the phone over Latnjajávri that the sheet's lettering lay under
   the colours and that marked trails run through the class over 50°. A label overlay was looked
@@ -2435,6 +2514,7 @@ A line per change to this document or to the decisions in it, newest first.
 | Lantmäteriet's grid, layers, ceiling, and its white outside Sweden | `atlas/docs/decisions.md` §3.7, measured 2026-09-11 |
 | how much of the network lies beyond a finger's reach of a node | every walked edge of each built page's graph in Firefox, sampled every 25 m, the straight distance to the nearer of its two end nodes against 10.5 / 21 / 42 / 84 / 150 m; edge lengths summed from the vertices (`/tmp` script, 2026-09-13; the check *a tap in the middle of a long edge* reads the longest edge the same way) |
 | how much of a named chain is the trail it names | every Topografi 50 marked-trail chain read off the built page in Firefox, its name from the packed figures, its line sampled every 50 m against the register's summer lines for that BD number in SWEREF 99 TM |
+| the tapped place's height against the profile's surface | the page's bilinear rule re-implemented in Python over the z13 tiles on disk against `markhojd.sample` off the cached 4 m mosaic, at 4,000 seeded uniform random points of the box, 3,925 of them inside both (`/tmp` script, 2026-09-17) |
 | the page's tile reading against the build's mosaic | the page's bilinear rule re-implemented in Python over the z13 tiles on disk, against `markhojd.sample` off the cached 4 m mosaic, at 2,000 uniform random points of the box and along the straight leg planned in Firefox |
 | whether either sheet already carries shading | the tiles themselves: Lantmäteriet's `topowebb` at z14, z15 and z16 over Latnjajávri and Kartverket's `topo` at z14 over Lomsdal-Visten, opened and looked at — no relief in any of them |
 | the strength the relief is drawn at | a 512 px crop of the z15 flank west of Latnjajávri composited at 35, 40, 45, 50, 55, 60, 70 and 80 %: WCAG contrast of contour pixels against ground in the darkest tenth, and the luminance of shaded ground against unshaded; the share of the crop with alpha over 0.5 and over 0.8 at z12 and z15 |

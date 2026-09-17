@@ -184,6 +184,13 @@ coordinates is a name here too: `68.39275, 18.68033` — the form the *Copy a
 position* tool writes to the clipboard — or `68°23'34"N 18°40'49"E` is read as
 the place it names, marked on the map, and can be set as a goal like any hut.
 
+**A tap says how high it is**, beside the position it copies. The Abisko page reads the tapped
+place itself off the height model under it, which covers the whole box, so a spot on an open flank
+has its own figure; Lomsdal-Visten carries heights along the paths alone, so a tap near one reads
+the nearest sample, marked `~` where that sample is more than 25 m off, and a tap far from any path
+says nothing rather than a number about somewhere else. Only the position goes to the clipboard —
+the height stands beside it on the screen.
+
 **What a place offers, it offers from its page.** Tap a hut, a quay or a position you typed, and
 under what it says about itself are the things that can be done with it as the map stands: *Set as
 goal* always, *Add a stop on the way* while a goal stands, *Add to the plan* while a plan stands —

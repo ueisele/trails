@@ -12151,7 +12151,11 @@ class _PlanMode(MacroElement):
                 return {x: (lon + 180) / 360 * n, y: (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n};
             }
 
-            function tileHeights(laid) {
+            // `once` is the picker's: a tap is cheap to repeat and a retry
+            // chain is not, so a tap asks each tile exactly once and takes a
+            // refusal as an answer. A leg keeps the three attempts, because a
+            // leg is asked for once and its profile is the whole point of it.
+            function tileHeights(laid, once) {
                 var z = PLAN.heightsTiles.zoom, count = laid.lon.length;
                 // A pixel's centre is half a pixel in from its corner, so a
                 // position less a half names the centre to its north-west and
@@ -12167,7 +12171,10 @@ class _PlanMode(MacroElement):
                     });
                 }
                 var keys = Object.keys(wanted);
-                return Promise.all(keys.map(function (k) { return heightTile(wanted[k][0], wanted[k][1], z, 1); }))
+                return Promise.all(keys.map(function (k) {
+                    return once ? fetchHeightTile(wanted[k][0], wanted[k][1], z)
+                                : heightTile(wanted[k][0], wanted[k][1], z, 1);
+                }))
                     .then(function (tiles) {
                         var held = Object.create(null);
                         keys.forEach(function (k, n) { held[k] = tiles[n]; });
@@ -17167,6 +17174,30 @@ class _PlanMode(MacroElement):
                 // Which leg a position falls on, and where along it — the same
                 // answer the click uses to decide that it means an insertion.
                 onRoute: onRoute,
+                // **How high one place is, off the same tiles a straight leg
+                // reads.** The picker at the foot asks this. It could not ask
+                // anything before: the only heights the page carried were the
+                // ones sampled along the network, so a tap on open ground got
+                // no number at all — and the height model is right here, cut
+                // to the same grid as the map, kept by the same switch and
+                // already decoded by this panel. One reader, one cache, one
+                // surface; a second decoder on this page would be a second
+                // answer to *how high is that*.
+                //
+                // `null` where the map has no raster of its own and a service
+                // is asked per leg instead: a tap is not a leg, and a point
+                // query over the network answers nothing at all offline.
+                // Measured over 3,925 places in the Abisko box, the tiles
+                // against the 4 m mosaic the build samples for the profile:
+                // half agree within 0.07 m, 99 in 100 within 0.9 m, worst
+                // 8.6 m on a cliff, where seven metres of pixel is the whole
+                // difference. Two renderings of one surface, as §6.8 says.
+                heightAt: PLAN.heightsTiles ? function (lat, lon) {
+                    return tileHeights({lon: [lon], lat: [lat]}, true).then(function (points) {
+                        var metres = points[0].height;
+                        return isNaN(metres) ? null : metres;
+                    });
+                } : null,
                 // **What this map already calls the ground under a point**, for
                 // whoever is putting something there. A waypoint standing beside
                 // a hut takes the hut's name and the hut's position; a goal set
@@ -22464,12 +22495,18 @@ class _Chrome(MacroElement):
                 showSaid(!went);
             }
 
-            // **How high the tapped place is, where this map knows.** It has no
-            // height raster: the only heights it carries are the ones sampled
-            // every 5 m along the network, in the routing graph. So a tap on a
-            // path can be told its height and a tap on an open hillside cannot,
-            // and the honest thing is to say the first and stay quiet about the
+            // **The nearest ground this map ever measured, where there is no
+            // raster to ask.** The heights the page carries along the network
+            // are sampled every 5 m into the routing graph, so a tap on a path
+            // can be told its height and a tap on an open hillside cannot, and
+            // the honest thing is to say the first and stay quiet about the
             // second rather than quote a number about somewhere else.
+            //
+            // **This is the fallback now, and no longer the answer.** Where the
+            // map carries height tiles the tapped place has its own height and
+            // `window.trailsPlan.heightAt` reads it; this stands for the map
+            // that has none, and for the tile that is not there — off the
+            // model's edge, or offline over ground that was never kept.
             //
             // Measured on the built graph before this was written: 949,704
             // vertices, and a scan over every one of them is **3 ms** -- once
@@ -22478,7 +22515,7 @@ class _Chrome(MacroElement):
             // same thing about a hundred thousand nodes.
             var NEAR_M = 100, EXACT_M = 25;
 
-            function heightAt(lat, lon) {
+            function pathHeight(lat, lon) {
                 var graph = window.trailsGraph;
                 var panel = window.trailsProfilePanel;
                 if (!graph || !graph.coordinates || !graph.heights || !panel) { return null; }
@@ -22539,6 +22576,10 @@ class _Chrome(MacroElement):
                 return {metres: value, away: shortest};
             }
 
+            //: Which tap the message on the screen belongs to. A height that
+            //: arrives after the next tap is a figure about the last place.
+            var pickTurn = 0;
+
             function copyHere(event) {
                 var where = map.mouseEventToLatLng(event);
                 var at = map.mouseEventToContainerPoint(event);
@@ -22546,20 +22587,58 @@ class _Chrome(MacroElement):
                 pickMark.style.top = Math.round(at.y) + 'px';
                 pickMark.style.display = 'block';
                 var text = pickText(where);
+                var turn = (pickTurn += 1);
+                // **Where there is a raster, the tapped place has its own
+                // height, and it is worth the moment it takes.** The tiles are
+                // fetched through the worker, so over kept ground this answers
+                // offline and in a few milliseconds; over ground that was never
+                // kept it is a tile off the network, and off the model's edge
+                // there is none. Nothing is shown from the network's samples
+                // while that is in flight: one tap would say two different
+                // numbers a moment apart, and the second correcting the first
+                // is how a reader learns to trust neither.
+                var asking = (window.trailsPlan && window.trailsPlan.heightAt)
+                    ? window.trailsPlan.heightAt(where.lat, where.lng) : null;
                 // **Shown beside the position and never copied with it.** What
                 // goes to the clipboard is what was asked for -- a position --
                 // and a height read off a path 30 m away would be a figure
                 // somebody pastes into a note as if it were measured there.
-                var high = heightAt(where.lat, where.lng);
+                var high = asking ? null : pathHeight(where.lat, where.lng);
+
+                function fill(metres, went) {
+                    // A tile that is not there is not a refusal to answer: it is
+                    // ground this model does not cover, and the network's
+                    // nearest sample is then all there is to say.
+                    var found = (metres === null || metres === undefined || isNaN(metres))
+                        ? pathHeight(where.lat, where.lng)
+                        // Read where the tap was, so nothing is approximate
+                        // about it and nothing says it is.
+                        : {metres: metres, away: 0};
+                    // Not over a later tap, and not over a message the reader
+                    // has already dismissed.
+                    if (!found || turn !== pickTurn || pickSaid !== text) { return; }
+                    // **A number that arrives late is a new thing to read**, so
+                    // it gets a whole message's worth of time rather than
+                    // whatever was left of the one it lands in.
+                    sayCopied(text, went, found);
+                }
+
+                function said(went) {
+                    sayCopied(text, went, high);
+                    if (!asking) { return; }
+                    asking.then(function (metres) { fill(metres, went); },
+                                function () { fill(null, went); });
+                }
+
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(text).then(function () {
-                        sayCopied(text, true, high);
+                        said(true);
                     }, function () {
-                        sayCopied(text, false, high);
+                        said(false);
                     });
                     return;
                 }
-                sayCopied(text, false, high);
+                said(false);
             }
 
             // The same two facts plan mode's own handler is built from: what is
