@@ -49,8 +49,35 @@ ltn,Länstrafiken Norrbotten
 """
 
 
-def _feed(tmp_path: Path, routes: str = ROUTES) -> Path:
-    """Write a small GTFS archive and return where it is."""
+#: The register's answer: the station is 234 m from where the feed put it, the
+#: bus stop is where the feed put it, and Stordalen is not in here at all. The
+#: suffixed place repeats the station and must be skipped rather than counted
+#: twice.
+REGISTER = """<?xml version="1.0" encoding="UTF-8"?>
+<PublicationDelivery xmlns="http://www.netex.org.uk/netex">
+ <dataObjects>
+  <StopPlace id="SE:050:StopPlace:59149">
+   <keyList><KeyValue><Key>rikshallplats</Key><Value>740000114</Value></KeyValue></keyList>
+   <Name>Abisko oestra</Name>
+   <Centroid><Location><Longitude>18.782000</Longitude><Latitude>68.356100</Latitude></Location></Centroid>
+  </StopPlace>
+  <StopPlace id="SE:050:StopPlace:59149_2">
+   <keyList><KeyValue><Key>rikshallplats</Key><Value>740000114</Value></KeyValue></keyList>
+   <Name>Abisko oestra</Name>
+   <Centroid><Location><Longitude>99.000000</Longitude><Latitude>9.000000</Latitude></Location></Centroid>
+  </StopPlace>
+  <StopPlace id="SE:050:StopPlace:58480">
+   <keyList><KeyValue><Key>rikshallplats</Key><Value>740023825</Value></KeyValue></keyList>
+   <Name>Abisko Oestra E10</Name>
+   <Centroid><Location><Longitude>18.831071</Longitude><Latitude>68.350874</Latitude></Location></Centroid>
+  </StopPlace>
+ </dataObjects>
+</PublicationDelivery>
+"""
+
+
+def _feed(tmp_path: Path, routes: str = ROUTES, register: str | None = REGISTER) -> Path:
+    """Write a small GTFS archive and the register beside it, and return the feed."""
     archive = tmp_path / "gtfs" / "sweden.zip"
     archive.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive, "w") as out:
@@ -59,6 +86,9 @@ def _feed(tmp_path: Path, routes: str = ROUTES) -> Path:
         out.writestr("trips.txt", TRIPS)
         out.writestr("routes.txt", routes)
         out.writestr("agency.txt", AGENCY)
+    if register is not None:
+        with zipfile.ZipFile(tmp_path / "gtfs" / "stops-netex.zip", "w") as out:
+            out.writestr(trafiklab.REGISTER_MEMBER, register)
     return archive
 
 
@@ -126,6 +156,48 @@ class TestStops:
         gdf = trafiklab.Source(cache_dir=str(tmp_path)).stops((0.0, 0.0, 1.0, 1.0))
         assert len(gdf) == 0
         assert list(gdf.columns) == trafiklab.COLUMNS
+
+
+class TestPlacedByTheRegister:
+    """Tests for the positions the national stop register supplies."""
+
+    def test_a_station_moves_to_where_the_register_says_it_is(self, tmp_path, capsys):
+        """**GTFS Sverige 2 puts a station where its bus stop is.** Measured over
+        the Abisko box: five of six stations up to 249 m out, the bus stops right
+        to the metre."""
+        _feed(tmp_path)
+        gdf = trafiklab.Source(cache_dir=str(tmp_path)).stops(BOX).set_index("name")
+        moved = gdf.loc["Abisko turiststation"].geometry
+
+        assert (round(moved.y, 6), round(moved.x, 6)) == (68.3561, 18.782)
+        assert "Abisko turiststation" in capsys.readouterr().out
+
+    def test_a_suffixed_place_does_not_win(self, tmp_path):
+        """The register splits a place by type -- 59149 beside 59149_2 -- and all
+        of them carry the same centroid, so only the unsuffixed one is read. The
+        fixture gives the suffixed one an absurd position to prove it is not."""
+        _feed(tmp_path)
+        gdf = trafiklab.Source(cache_dir=str(tmp_path)).stops(BOX).set_index("name")
+        assert gdf.loc["Abisko turiststation"].geometry.y > 60
+
+    def test_a_stop_the_register_does_not_know_stays_where_the_feed_had_it(self, tmp_path, capsys):
+        """Left where it was and **said**, rather than dropped or guessed at."""
+        _feed(tmp_path)
+        gdf = trafiklab.Source(cache_dir=str(tmp_path)).stops(BOX).set_index("name")
+        stordalen = gdf.loc["Stordalen E10"].geometry
+
+        assert (round(stordalen.y, 4), round(stordalen.x, 4)) == (68.30, 18.60)
+        assert "Stordalen E10" in capsys.readouterr().out
+
+    def test_without_the_register_key_the_build_stops(self, tmp_path):
+        """**Not a fallback to the feed's own positions.** Those are the ones
+        that drew a station 249 m from where it is, and a build that quietly used
+        them would look exactly like a build that had the register."""
+        _feed(tmp_path, register=None)
+        source = trafiklab.Source(cache_dir=str(tmp_path))
+        with patch.dict("os.environ", {trafiklab.REGISTER_KEY_VARIABLE: ""}, clear=False):
+            with pytest.raises(trafiklab.TrafiklabError, match=trafiklab.REGISTER_KEY_VARIABLE):
+                source.stops(BOX)
 
 
 class TestDataset:

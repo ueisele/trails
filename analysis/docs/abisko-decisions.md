@@ -2927,11 +2927,72 @@ and Topografi 50 already share a red for the same reason. Thirteen Resrobot link
 Trafikverket links. Entur is off the Swedish page entirely and keeps Norway.
 
 
+### 9.36 The register says where a stop is, the feed says what calls there — settled, 2026-09-17
+
+*"Der Bahnhof in abisko hat aber die falsche Position. Tatsächlich ist er bei ca 68.34885,
+18.82938. Die Position von entur war korrekt."* He was right, and §9.35's merge had been treating
+the symptom: the two Abisko Östra records do not share a point on the ground, they share a **wrong**
+one in the feed.
+
+**GTFS Sverige 2 puts a station where its bus stop is.** Its `stops.txt` carries five columns — id,
+name, latitude, longitude, an empty `location_type` — with no parent and no platform, and
+Trafiklab says as much itself: *"correct but lacking the detailed information found in the GTFS
+Regional dataset"*.
+
+| moved when the register was asked, 2026-09-17 | |
+|---|---|
+| Abisko Östra station | **251 m** |
+| Björkliden station | 200 m |
+| Låktatjåkka E10 | 138 m |
+| Katterjåkk station | 133 m |
+| Låktatjåkka station | 74 m |
+| Vassijaure station, and the seven bus stops | under 25 m, most of them 0 |
+
+Five of the six railway stations, and one bus stop. Against Uwe's position for Abisko Östra: the
+feed 234 m out, the register **46 m**, Entur 28 m — so the register is as good as the source that
+was right, and unlike Entur it covers all of Sweden.
+
+**The join is free.** Every register entry carries a `rikshallplats` key holding the national stop
+number, which is exactly the feed's `stop_id`; all 13 stops of the box matched on it. The entries
+also carry `trafikverket-signatures` — AK, BLN, KJÅ, LÅK, VJ, AKT — which is how the register says
+a stop is a railway station rather than leaving it to be guessed from the name.
+
+**Both datasets stay, and the reason is countable.** The register holds not one `Line`,
+`ServiceJourney`, `Operator` or `Authority` element in 331 MB: it is a stop register and knows
+nothing of timetables. And it lists **15** places in this box where the feed says only **13** are
+served — Kopparåsen and Stordalen are Malmbanan halts nothing stops at any more. Drawing the
+register alone would put them on the map, against the rule *registered is not served* that has
+stood since §9.32. Stordalen makes the point twice over: the halt is dead, and *Stordalen E10* on
+the road below it is served by buses 91 and 950.
+
+**A second key, and a trap worth writing down.** Trafiklab issues one key per dataset, so the
+register needs its own; it lives beside the first in `trails/.env`. The endpoint answers **406**
+with a JSON body — *"This API must be called with the HTTP-header 'Accept-Encoding' set to 'gzip'
+or 'deflate'"* — to any request that does not ask for compression, and a wrong key answers 406 as
+well. An evening went into telling those two apart. The header is written out in the loader so that
+nobody removes it by tidying.
+
+**Without the register key the Swedish build stops.** Falling back to the feed's own coordinates is
+exactly what drew a station 251 m from where it is, and a build that did it quietly would look like
+one that had not.
+
+**§9.35's merge is still there and no longer fires.** Once the station moved, the two Abisko Östra
+records stand 249 m apart and draw as two pins again. The rule was right about what to do with two
+pins on one point; it was the point that was wrong.
+
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-17, eleventh of the day** — Sweden's stops are placed by the national stop register and
+  described by the timetable feed (§9.36), after Uwe found the Abisko Östra station pin 234 m from
+  the station. GTFS Sverige 2 misplaces five of six railway stations by up to 251 m; the register
+  has them right and joins on `rikshallplats`, which is the feed's own id. Neither dataset can go:
+  the register has no timetable at all, and it lists two dead Malmbanan halts the feed knows
+  nothing calls at.
 
 - **2026-09-17, tenth of the day** — Sweden's stops come from Trafiklab (§9.35), on a key Uwe
   registered for the build. 13 stops against OSM's 10 and Entur's 6, every OSM stop within 231 m

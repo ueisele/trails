@@ -27,6 +27,7 @@ using GTFS"*.
 import csv
 import io
 import os
+import xml.etree.ElementTree as ElementTree
 import zipfile
 from collections import defaultdict
 from collections.abc import Iterator
@@ -47,6 +48,41 @@ DATASET_URL = "https://api.resrobot.se/gtfs/sweden.zip?key={key}"
 #: lives in ``trails/.env``, which ``.gitignore`` covers, and this repository is
 #: public.
 KEY_VARIABLE = "TRAFIKLAB_API_KEY"
+
+#: Where the national stop register is fetched from, and the key it wants --
+#: **a second one**, because Trafiklab issues a key per dataset.
+#:
+#: **GTFS Sverige 2 puts a station where its bus stop is.** Measured over the
+#: Abisko box on 2026-09-17: of the six railway stations, five stand up to
+#: **249 m** from where they are, and Abisko Östra carries the same coordinate
+#: as *Abisko Östra E10* down to the last digit -- so the two drew as one pin
+#: and the station was missing from the map. The seven bus stops are right to
+#: the metre. Trafiklab says as much itself: the feed is *"correct but lacking
+#: the detailed information found in the GTFS Regional dataset"*, and its
+#: ``stops.txt`` carries five columns with no parent and no platform.
+#:
+#: The register has the position, and ``rikshallplats`` is the same number as
+#: the feed's ``stop_id`` -- all 13 stops of that box matched on it. What it has
+#: not got is a timetable: not one ``Line``, ``ServiceJourney``, ``Operator`` or
+#: ``Authority`` element in 331 MB. So it says where a stop is and the feed says
+#: what calls there, and neither can be dropped.
+REGISTER_URL = "https://opendata.samtrafiken.se/stopsregister-netex-sweden/sweden.zip?key={key}"
+REGISTER_KEY_VARIABLE = "TRAFIKLAB_STOPS_API_KEY"
+
+#: **The register refuses a request that does not ask for compression**, with
+#: 406 and a JSON body saying so -- which reads exactly like a rejected key and
+#: cost an evening to tell apart. requests sends this by default; it is written
+#: out here so that nobody removes it by tidying.
+REGISTER_HEADERS = {"Accept-Encoding": "gzip, deflate"}
+
+#: The one file in the register archive, and the NeTEx namespace its elements
+#: carry.
+REGISTER_MEMBER = "_stops.xml"
+NETEX = "{http://www.netex.org.uk/netex}"
+
+#: The key under which a register entry carries the national stop number that
+#: the feed calls ``stop_id``.
+REGISTER_JOIN_KEY = "rikshallplats"
 
 #: How many calls a Bronze key may make. One download is one call, and the zip
 #: is cached, so an ordinary build makes none.
@@ -87,6 +123,15 @@ ROUTE_TYPES = {
     "1501": ("bus", "shared taxi"),
     "1700": ("bus", "other"),
 }
+
+#: The projection distances are measured in. SWEREF 99 TM covers Sweden and is
+#: metric, which is all this asks of it.
+METRIC_CRS = "EPSG:3006"
+
+#: How far the register may move a stop before the build says so. Under this it
+#: is the same spot written to a different number of decimals; over it, somebody
+#: should know which stop moved and by how much.
+MOVED_M = 25.0
 
 #: What joins several lines, or several modes, into one field: the same
 #: separator :mod:`trails.io.sources.entur` uses, so a popup reads the same
@@ -157,21 +202,25 @@ COLUMNS = ["stop_id", "name", "modes", *(lines_column(mode) for mode in MODES), 
 class Source:
     """Loader for the stops a scheduled service calls at, anywhere in Sweden."""
 
-    def __init__(self, cache_dir: str = ".cache", api_key: str | None = None, timeout: int = 600):
+    def __init__(self, cache_dir: str = ".cache", api_key: str | None = None, register_key: str | None = None, timeout: int = 600):
         """Initialize the Trafiklab source.
 
         Args:
-            cache_dir: Where the object cache and the feed itself live
-            api_key: The Trafiklab key, or None to read :data:`KEY_VARIABLE`
-            timeout: Seconds the download may take
+            cache_dir: Where the object cache and the two archives live
+            api_key: The GTFS key, or None to read :data:`KEY_VARIABLE`
+            register_key: The stop register's key, a different one, or None to
+                read :data:`REGISTER_KEY_VARIABLE`
+            timeout: Seconds a download may take
         """
         self.cache = ObjectCache(cache_dir=f"{cache_dir}/objects")
         self.archive = Path(cache_dir) / "gtfs" / "sweden.zip"
+        self.register_archive = Path(cache_dir) / "gtfs" / "stops-netex.zip"
         self.api_key = api_key
+        self.register_key = register_key
         self.timeout = timeout
 
     def dataset(self, force_download: bool = False) -> Path:
-        """The feed itself, downloaded once and kept.
+        """The timetable feed, downloaded once and kept.
 
         **Not re-fetched on every build.** It is 44 MB, a Bronze key allows
         fifty calls a month, and the data changes at most daily; a build that
@@ -182,6 +231,33 @@ class Source:
 
         Returns:
             Where the zip is.
+        """
+        return self._fetch(self.archive, DATASET_URL, self.api_key, KEY_VARIABLE, "GTFS Sverige 2", force_download)
+
+    def register(self, force_download: bool = False) -> Path:
+        """The national stop register, downloaded once and kept.
+
+        Args:
+            force_download: Fetch it again even if it is already here
+
+        Returns:
+            Where the zip is. 11 MB, holding one 331 MB NeTEx document.
+        """
+        return self._fetch(self.register_archive, REGISTER_URL, self.register_key, REGISTER_KEY_VARIABLE, "the stop register", force_download)
+
+    def _fetch(self, into: Path, url: str, given: str | None, variable: str, what: str, force_download: bool) -> Path:
+        """Download one of the two archives, unless it is already here.
+
+        Args:
+            into: Where to keep it
+            url: The address, with a ``{key}`` to substitute
+            given: The key passed to the constructor, or None
+            variable: The environment variable to read instead
+            what: What to call it when saying something about it
+            force_download: Fetch it again even if it is already here
+
+        Returns:
+            Where the archive is.
 
         Raises:
             TrafiklabError: If it must be fetched and no key was given, or the
@@ -189,26 +265,72 @@ class Source:
                 substituted into the URL at the last moment and the URL is not
                 reported.
         """
-        if self.archive.exists() and not force_download:
-            return self.archive
+        if into.exists() and not force_download:
+            return into
 
-        key = self.api_key or os.environ.get(KEY_VARIABLE, "")
+        key = given or os.environ.get(variable, "")
         if not key:
-            raise TrafiklabError(f"no Trafiklab key: set {KEY_VARIABLE} in the environment or in trails/.env")
+            raise TrafiklabError(f"no key for {what}: set {variable} in the environment or in trails/.env")
 
-        print(f"Downloading GTFS Sverige 2 (one of {MONTHLY_CALLS} calls a month)...")
-        self.archive.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Downloading {what} (one of {MONTHLY_CALLS} calls a month)...")
+        into.parent.mkdir(parents=True, exist_ok=True)
         try:
-            response = requests.get(DATASET_URL.format(key=key), timeout=self.timeout, stream=True)
+            response = requests.get(url.format(key=key), timeout=self.timeout, stream=True, headers=REGISTER_HEADERS)
             response.raise_for_status()
-            with self.archive.open("wb") as out:
+            with into.open("wb") as out:
                 for chunk in response.iter_content(chunk_size=1 << 20):
                     out.write(chunk)
         except requests.RequestException as e:
-            raise TrafiklabError(f"could not fetch GTFS Sverige 2: {type(e).__name__}") from None
+            raise TrafiklabError(f"could not fetch {what}: {type(e).__name__}") from None
 
-        print(f"  {self.archive.stat().st_size / 1e6:.1f} MB")
-        return self.archive
+        print(f"  {into.stat().st_size / 1e6:.1f} MB")
+        return into
+
+    def placed(self, wanted: set[str], force_download: bool = False) -> dict[str, Point]:
+        """Where the register says each of those stops is.
+
+        **Read as a stream and only the wanted stops kept.** The document is
+        331 MB; what this costs in memory is the box, not the country.
+
+        **One entry per stop, and the parent is the one taken.** The register
+        splits a place by type -- ``SE:050:StopPlace:59149`` alongside
+        ``59149_1`` for its bus side and ``59149_2`` for its rail side -- and
+        all of them carry the same centroid, so the unsuffixed one is enough
+        and the suffixed ones are skipped.
+
+        Args:
+            wanted: National stop numbers, as the feed's ``stop_id`` gives them
+            force_download: Fetch the register again
+
+        Returns:
+            A point per stop number the register knows. A stop it does not know
+            is absent rather than guessed at.
+        """
+        archive = self.register(force_download=force_download)
+        found: dict[str, Point] = {}
+        with zipfile.ZipFile(archive) as register, register.open(REGISTER_MEMBER) as raw:
+            for _, element in ElementTree.iterparse(raw, events=("end",)):
+                if element.tag != f"{NETEX}StopPlace":
+                    continue
+                identity = element.get("id") or ""
+                if not identity.rsplit(":", 1)[-1].isdigit():
+                    element.clear()
+                    continue
+                number = next(
+                    (
+                        pair.findtext(f"{NETEX}Value")
+                        for pair in element.findall(f"{NETEX}keyList/{NETEX}KeyValue")
+                        if pair.findtext(f"{NETEX}Key") == REGISTER_JOIN_KEY
+                    ),
+                    None,
+                )
+                where = element.find(f"{NETEX}Centroid/{NETEX}Location")
+                if number in wanted and where is not None:
+                    latitude, longitude = where.findtext(f"{NETEX}Latitude"), where.findtext(f"{NETEX}Longitude")
+                    if latitude and longitude and number is not None:
+                        found[number] = Point(float(longitude), float(latitude))
+                element.clear()
+        return found
 
     def stops(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
         """Fetch the stops within a box and the lines that call at them.
@@ -229,7 +351,9 @@ class Source:
             registered is not served.
         """
         min_lon, min_lat, max_lon, max_lat = bounds
-        cache_key = f"trafiklab_stops_{min_lat}_{min_lon}_{max_lat}_{max_lon}_{'-'.join(MODES)}"
+        # ``placed`` in the key: an entry written before the register said where
+        # the stations are is not this frame.
+        cache_key = f"trafiklab_stops_{min_lat}_{min_lon}_{max_lat}_{max_lon}_{'-'.join(MODES)}_placed"
 
         if not force_download and self.cache.exists(cache_key):
             print("Loading Trafiklab stops from cache...")
@@ -266,8 +390,49 @@ class Source:
             print(f"  in the feed but with no line calling, left out: {', '.join(sorted(unserved))}")
 
         gdf = gpd.GeoDataFrame(records, columns=COLUMNS, crs="EPSG:4326")
+        gdf = self._placed_by_the_register(gdf, force_download=force_download)
         self.cache.save(cache_key, gdf, metadata={"bounds": list(bounds), "count": len(gdf)})
         return gdf
+
+    def _placed_by_the_register(self, gdf: gpd.GeoDataFrame, force_download: bool) -> gpd.GeoDataFrame:
+        """Move each stop to where the national register says it is.
+
+        Args:
+            gdf: The stops as the feed placed them
+            force_download: Fetch the register again
+
+        Returns:
+            The same frame with its geometry replaced wherever the register
+            knows the stop, and the moves reported.
+
+        Raises:
+            TrafiklabError: If the register names a stop the feed did not, which
+                cannot happen while the join is on the feed's own ids and would
+                mean the two datasets had drifted apart.
+        """
+        if not len(gdf):
+            return gdf
+        where = self.placed(set(gdf["stop_id"]), force_download=force_download)
+        if unknown := set(where) - set(gdf["stop_id"]):
+            raise TrafiklabError(f"the register answered about stops nobody asked after: {sorted(unknown)[:3]}")
+
+        metres = gdf.to_crs(METRIC_CRS).geometry
+        moved: list[tuple[float, str]] = []
+        points = []
+        for (_, row), before in zip(gdf.iterrows(), metres, strict=True):
+            after = where.get(row["stop_id"])
+            points.append(after if after is not None else row.geometry)
+            if after is not None:
+                gap = before.distance(gpd.GeoSeries([after], crs=gdf.crs).to_crs(METRIC_CRS).iloc[0])
+                if gap > MOVED_M:
+                    moved.append((gap, str(row["name"])))
+        placed = gdf.set_geometry(gpd.GeoSeries(points, crs=gdf.crs))
+
+        missing = [str(name) for name, stop in zip(gdf["name"], gdf["stop_id"], strict=True) if stop not in where]
+        print(f"  placed by the register: {len(where)} of {len(gdf)}" + (f"; left where the feed had them: {sorted(missing)}" if missing else ""))
+        if moved:
+            print(f"  moved more than {MOVED_M:g} m: " + ", ".join(f"{name} {gap:.0f} m" for gap, name in sorted(moved, reverse=True)))
+        return placed
 
     @staticmethod
     def _stops_inside(feed: zipfile.ZipFile, bounds: Bounds) -> dict[str, dict]:
