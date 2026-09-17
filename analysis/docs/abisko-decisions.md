@@ -2672,8 +2672,9 @@ nothing calls under leaves no row at all. The lines are still read structurally,
 register's purple — the colour says who placed the pin, as §9.31 settled, and these pins are not
 OpenStreetMap's any more.
 
-**What it costs.** The page grows from 17.09 MB to 17.70 MB, 6.37 MB gzipped — about 2.2 kB a stop,
-all of it popup values, and none of it fetched until a pin is opened. The offline cache is
+**What it costs.** The page grows from 17.09 MB to 17.70 MB, and **5.70 MB** at brotli 11, which
+is what ships — about 2.2 kB a stop before compression, all of it popup values, and none of it
+fetched until a pin is opened. The offline cache is
 untouched: nothing here grows with the tile count.
 
 **Norway only, again.** Abisko's six stations and halts are outside Entur and keep their OSM layer
