@@ -2221,6 +2221,19 @@ fetches do not surface in Playwright's request events, so counting them takes a 
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-17, fifth of the day** — the drive is measured and cut, on Uwe's word that ten minutes
+  a page after every change is too much. Three things: the report now times **every check** and
+  names the dearest, so a cut is aimed rather than guessed; a load or a reload waits for the page
+  to be drivable instead of a fixed 20 s (measured: Abisko is ready in **2.1 s** and Lomsdal-Visten
+  in **20.3 s**, so the one figure was right for one page and ten times too long for the other,
+  five times a run); and the 49 sleeps that sat *after* a condition — `busy()` gone, `working`
+  gone — became two animation frames, since what they stood for was the drawing and not the work,
+  33 s of guessing at 32 ms apiece. **Abisko 10:10 → 7:57 and Lomsdal-Visten 10:27 → 9:24**, with
+  the same 720 and 689 readings, nothing broken and no figure moved. Half of what is left is six
+  checks, and the dearest of them sits out a 31 s cap because sitting it out *is* the rule being
+  driven. The habit alongside it: `--only` while a change is being made — seven checks and two
+  minutes — and the whole suite once before publishing.
+
 - **2026-09-17, fourth of the day** — the legend's own rows and the choice of sheet are remembered
   as well (§6.9), asked for from the phone once the two switches over the sheet were: *"Auch der
   Layer Zustand wird gemerkt?"* One key holds the rows, keyed by label; the sheet is kept by its
@@ -2595,6 +2608,7 @@ A line per change to this document or to the decisions in it, newest first.
 | how much of the network lies beyond a finger's reach of a node | every walked edge of each built page's graph in Firefox, sampled every 25 m, the straight distance to the nearer of its two end nodes against 10.5 / 21 / 42 / 84 / 150 m; edge lengths summed from the vertices (`/tmp` script, 2026-09-13; the check *a tap in the middle of a long edge* reads the longest edge the same way) |
 | how much of a named chain is the trail it names | every Topografi 50 marked-trail chain read off the built page in Firefox, its name from the packed figures, its line sampled every 50 m against the register's summer lines for that BD number in SWEREF 99 TM |
 | the tapped place's height against the profile's surface | the page's bilinear rule re-implemented in Python over the z13 tiles on disk against `markhojd.sample` off the cached 4 m mosaic, at 4,000 seeded uniform random points of the box, 3,925 of them inside both (`/tmp` script, 2026-09-17) |
+| where a drive's minutes go | the suite times every check and prints the dearest six; `ready` measured on both built pages in Playwright Firefox, `goto` and a reload each against the page's own `trailsGraph.ready` (`/tmp/ready.py`, 2026-09-17) |
 | the page's tile reading against the build's mosaic | the page's bilinear rule re-implemented in Python over the z13 tiles on disk, against `markhojd.sample` off the cached 4 m mosaic, at 2,000 uniform random points of the box and along the straight leg planned in Firefox |
 | whether either sheet already carries shading | the tiles themselves: Lantmäteriet's `topowebb` at z14, z15 and z16 over Latnjajávri and Kartverket's `topo` at z14 over Lomsdal-Visten, opened and looked at — no relief in any of them |
 | the strength the relief is drawn at | a 512 px crop of the z15 flank west of Latnjajávri composited at 35, 40, 45, 50, 55, 60, 70 and 80 %: WCAG contrast of contour pixels against ground in the darkest tenth, and the luminance of shaded ground against unshaded; the share of the crop with alpha over 0.5 and over 0.8 at z12 and z15 |

@@ -259,23 +259,35 @@ command make drive                                          # the Lomsdal-Visten
 command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
 ```
 
-Drives the built map in a browser and reports **some 690 readings** (682 on the
-Lomsdal-Visten page, 691 on Abisko's, 2026-09-16) — the counts the
+Drives the built map in a browser and reports **some 700 readings** (689 on the
+Lomsdal-Visten page, 720 on Abisko's, 2026-09-17) — the counts the
 page draws, the profile's scale at several zooms, the wheel, the crosshair's
 mark, the point list, plan mode and the file it writes, the chrome on a phone,
-which zoom the scale bar says it is on, that the map opens with the network off,
+which zoom the scale bar says it is on, what the panel remembers over a reload,
+that the map opens with the network off,
 and that terrain the reader asked for is kept and drawn and can be deleted again.
-**About ten minutes a page** — 16.6 MB of HTML for Lomsdal-Visten and 3.3 for
+**About eight minutes a page** — 17.1 MB of HTML for Lomsdal-Visten and 3.6 for
 Abisko, loaded twice over for the offline check — and about two minutes of it
 fetching real tiles from Kartverket on the first page, which is what it costs to
 prove that a kept tile is terrain and not the worker's own blank. Run it as a
 transient unit (`systemd-run --user --unit=abisko-drive …`); its output is
-buffered until the unit ends.
+buffered until the unit ends, and the two pages are worth driving side by side in
+two units rather than one after the other.
 
 **Drive it once, into a file, and grep the file.** Running it twice to see two
-parts of one report costs two runs. While one behaviour is being written,
-`ARGS="--only <word>"` is ten readings instead of six hundred. And **build before
-driving**: the run reads the page `command make map` last built.
+parts of one report costs two runs. And **build before driving**: the run reads
+the page `command make map` last built.
+
+**Drive what the change touched, and the whole suite once before publishing.**
+`ARGS="--only the_relief_under_the_map,what_the_panel_remembers"` takes the words
+a check's own name holds and runs those — seven checks and two minutes against
+sixty and eight. The checks it leaves out are not reported at all: a skip means
+*this could not be driven*, and "you did not ask for it" is a different sentence.
+
+**The report says where the minutes went**, per check and dearest first. Measured
+2026-09-17: half of a run is six checks, and what is left in them is work rather
+than waiting — the dearest sits out a 31-second cap because sitting it out is the
+rule being driven.
 
 **The checks are the same for every page; what is a page's own is its `Scene`** in
 `drive_map.py`, chosen by the page's stem: the long chain the profile checks select, the

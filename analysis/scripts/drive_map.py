@@ -24,8 +24,23 @@ Two kinds of reading, and the difference is the whole design:
 
 Run it with ``command make drive``, or ``command make drive ARGS="--page
 analysis/output/abisko.html"`` for the other map. It needs a built page and
-about ten minutes a page, which is why everything runs in one browser session
-rather than one apiece.
+about eight minutes a page, which is why everything runs in one browser session
+rather than one apiece -- and why the two pages are worth driving side by side,
+in two units, rather than one after the other.
+
+**A change to one thing does not owe the other sixty a run.** ``--only`` takes
+the words a check's own name holds, parted by commas, and runs those:
+``ARGS="--only the_relief_under_the_map,what_the_panel_remembers"`` is seven
+checks and two minutes against sixty and eight. The checks it leaves out are not
+reported at all -- a skip means *this could not be driven*, and "you did not ask
+for it" is a different sentence. The habit that goes with it: drive the checks a
+change touches while the change is being made, and the whole suite once before
+it is published.
+
+**And the report says where the minutes went**, per check and dearest first, so
+the next cut is aimed rather than guessed. Measured on 2026-09-17: half the run
+is six checks, and what is left in them is mostly work rather than waiting -- one
+of them sits out a 31 s cap because sitting it out *is* the rule being driven.
 
 **What is a page's own lives in its** ``Scene``: the long chain, the ground the
 checks stand on and look at, and the figures its build recorded. The checks
@@ -56,6 +71,7 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -487,8 +503,10 @@ def in_db(js: str) -> str:
     return js.replace("__DB__", SCENE.companions.database)
 
 
-#: How long to wait after ``goto`` before believing anything. The page decodes a
-#: 4.93 MB payload into a graph on load.
+#: What a load used to be given before anything was believed, and what
+#: :func:`ready` replaced: the page decodes a 4.93 MB payload into a graph on
+#: load, and how long that takes is the page's to say rather than this file's to
+#: guess. Kept as the ceiling a check may still want to sleep for.
 SETTLE_MS = 20_000
 
 
@@ -526,6 +544,10 @@ class Check:
     name: str
     readings: list[Reading] = field(default_factory=list)
     skipped: str = ""
+    #: How long it took, in seconds. Filled in by :func:`timed`, which is how
+    #: every check is called -- so a run says where its ten minutes went
+    #: instead of leaving the next cut to be guessed at.
+    seconds: float = 0.0
 
 
 def stands(what: str, got: Any, within: float = 0.0, note: str = "") -> Reading:
@@ -991,6 +1013,29 @@ def wanted(check: Any) -> bool:
     return not ONLY or any(word.strip() in check.__name__ for word in ONLY.split(",") if word.strip())
 
 
+def timed(check: Callable[..., Check], *args: Any, **kwargs: Any) -> Check:
+    """Run one check and record how long it took.
+
+    **Where a suite's minutes go is a measurement, not a hunch.** Ten minutes a
+    page is ten minutes a reader waits to learn whether one line of a template is
+    right, and the obvious cut -- a fixed pause here, a settle there -- is worth
+    nothing if it is aimed at a check that costs four seconds. Every check is
+    called through this, and the report names the dearest of them.
+
+    Args:
+        check: The check function
+        *args: What to call it with, the page first
+        **kwargs: The same
+
+    Returns:
+        What the check returned, with its seconds on it
+    """
+    began = time.monotonic()
+    ran: Check = check(*args, **kwargs)
+    ran.seconds = time.monotonic() - began
+    return ran
+
+
 #: Every wait for plan mode that ran out of patience, and where it was waiting.
 #: **A leg that never settles must be reported, not thrown.** Measured on this
 #: build and on the one before it: a waypoint placed a few hundred metres off the
@@ -1032,6 +1077,60 @@ def settled(page: Any, within_ms: int = 25_000) -> bool:
             where = f"{called.name}, line {called.lineno}"
         STALLED.append(where)
         return False
+
+
+#: What a page has to hold before it can be driven: the graph decoded, and the
+#: three things every check reaches for. `trailsGraph.ready` is a promise, so
+#: awaiting it is awaiting the decode itself rather than a guess at how long one
+#: takes.
+DRIVABLE = "() => window.trailsGraph && window.trailsGraph.ready && window.trailsChrome && window.trailsPlan && window.trailsProfilePanel"
+
+
+def ready(page: Any, within_ms: int = 180_000) -> float:
+    """Wait until a loaded or reloaded page can be driven, rather than for a fixed 20 s.
+
+    **Measured on the two built pages**, 2026-09-17: Abisko is ready **2.1 s**
+    after `goto` and **1.7 s** after a reload; Lomsdal-Visten takes **20.3 s**
+    and **15.0 s**, and says itself that inflating and decoding its graph is
+    half a second of that -- the rest is a 17 MB page being parsed and 11,589
+    paths being laid out. So the fixed twenty seconds was about right for one
+    page and ten times too long for the other, five times a run. This waits for
+    what it actually needs, which is shorter on one page and honest on both.
+
+    Args:
+        page: The driven page, just loaded or reloaded
+        within_ms: How long to allow before giving up
+
+    Returns:
+        How long it took, in seconds
+    """
+    began = time.monotonic()
+    page.wait_for_function(DRIVABLE, timeout=within_ms)
+    # The promise itself, which is the decode: `wait_for_function` above proves
+    # only that it exists.
+    page.evaluate("() => window.trailsGraph.ready")
+    painted(page)
+    return time.monotonic() - began
+
+
+def painted(page: Any) -> None:
+    """Let the page draw what it has just worked out: two frames, not a fixed pause.
+
+    **A sleep that follows a condition is not waiting for the work.** The
+    condition -- `busy()` gone, `working` gone -- already proved the work is
+    done; what the sleep after it stands for is Leaflet and the panel getting a
+    chance to draw the answer. Two animation frames are exactly that, and they
+    are 32 ms where the sleeps were 600 to 1,500: forty-nine of those, 33
+    seconds of a ten-minute run, and every one of them a guess that is too long
+    on a fast machine and too short on a slow one.
+
+    Bounded, because a frame that never comes must not hang a suite: whichever
+    of the two frames and a quarter of a second arrives first.
+
+    Args:
+        page: The driven page
+    """
+    page.evaluate("() => new Promise(resolve => { window.setTimeout(resolve, 250); requestAnimationFrame(() => requestAnimationFrame(resolve)); })")
 
 
 SHOW_TOOL = """(key) => { if (window.trailsChrome.state().tool !== key) { window.trailsChrome.open(key); } }"""
@@ -2230,7 +2329,7 @@ def a_finger_can_use_it(page: Any) -> Check:
     after = page.evaluate("() => window.trailsPlan.state().points.map(p => Math.round(p.lat * 1e5))")
 
     page.evaluate("() => window.trailsChrome.coarse(null)")
-    page.wait_for_timeout(400)
+    painted(page)
     back = page.evaluate(sizes)
 
     swapped = before[:1] + [before[2], before[1]] + before[3:] if len(before) > 2 else before
@@ -2508,7 +2607,7 @@ def planning_keeps_what_it_had(page: Any) -> Check:
     page.evaluate("() => { if (!window.trailsPlan.state().on) { window.trailsPlan.toggle(true); } }")
     settled(page)
     page.evaluate("() => window.trailsProfilePanel.page('list')")
-    page.wait_for_timeout(800)
+    painted(page)
 
     # Each mark, pressed, and what the page under it actually holds — not what
     # the panel says it is showing, which is the half that stayed right.
@@ -2550,7 +2649,7 @@ def planning_keeps_what_it_had(page: Any) -> Check:
         if (cut) { cut.click(); } }"""
     )
     settled(page)
-    page.wait_for_timeout(800)
+    painted(page)
     cut = page.evaluate(
         """() => ({heads: document.querySelectorAll('.trails-plan-stage').length,
         names: document.querySelectorAll('.trails-plan-stage-name').length,
@@ -2662,7 +2761,7 @@ def copying_a_position(page: Any) -> Check:
     page.evaluate("() => window.trailsChrome.close()")
     page.evaluate("() => { if (!window.trailsPlan.state().on) { window.trailsPlan.toggle(true); } }")
     settled(page)
-    page.wait_for_timeout(600)
+    painted(page)
 
     marks = page.evaluate(
         """() => { const q = document.querySelector('.trails-quick');
@@ -2821,7 +2920,7 @@ def copying_a_position(page: Any) -> Check:
 
     # 3. and on a wide screen the two marks are the rail's job.
     page.set_viewport_size({"width": 1400, "height": 900})
-    page.wait_for_timeout(900)
+    painted(page)
     wide = page.evaluate(
         """() => { const q = document.querySelector('.trails-quick');
         const rail = document.querySelector('.trails-rail button[data-tool=pick]');
@@ -2978,7 +3077,7 @@ def a_leg_whose_heights_never_arrive(page: Any) -> Check:
     )
     settled(page)
     page.set_viewport_size({"width": 1400, "height": 900})
-    page.wait_for_timeout(500)
+    painted(page)
 
     return Check(
         "a leg whose heights never arrive",
@@ -3050,7 +3149,7 @@ def the_point_list_takes_the_room(page: Any) -> Check:
         settled(page)
     settled(page)
     page.evaluate("() => window.trailsProfilePanel.page('list')")
-    page.wait_for_timeout(900)
+    painted(page)
 
     listed = """() => { const rows = document.querySelector('.trails-plan-points');
         const page = rows.closest('.trails-profile-page');
@@ -3230,7 +3329,7 @@ def files_from_the_page(page: Any) -> Check:
     named = page.evaluate("() => window.trailsPlan.state().writable.stem")
 
     page.evaluate(SHOW_TOOL, "profile")
-    page.wait_for_timeout(900)
+    painted(page)
     out = pathlib.Path(tempfile.mkdtemp(prefix="trails-drive-"))
 
     # **Named, not found by its words.** The button carries a mark now, like
@@ -3348,7 +3447,7 @@ def files_from_the_page(page: Any) -> Check:
     if restored and restored >= 3:
         page.evaluate("() => window.trailsPlan.remove(1)")
         settled(page)
-        page.wait_for_timeout(300)
+        painted(page)
         edited = page.evaluate(
             """() => { const s = window.trailsPlan.state(); const ends = {};
             window.trailsPlan.segments((aLat, aLon, bLat, bLon, leg) => { ends[leg] = [bLat, bLon]; });
@@ -3477,7 +3576,7 @@ def a_click_is_not_a_pan(page: Any) -> Check:
     panned = page.evaluate("() => window.trailsPlan.state().points.length")
 
     page.evaluate("() => window.trailsPlan.toggle(false)")
-    page.wait_for_timeout(400)
+    painted(page)
 
     return Check(
         "a click places a point and a pan does not",
@@ -4344,7 +4443,7 @@ def undo_undoes_the_last_change(page: Any) -> Check:
     settled(page)
     still = page.evaluate("() => window.trailsPlan.state().points.length")
     page.evaluate("() => window.trailsPlan.toggle(false)")
-    page.wait_for_timeout(400)
+    painted(page)
 
     return Check(
         "undo undoes the last change",
@@ -5328,7 +5427,7 @@ def the_way_to_the_next_goal(page: Any) -> Check:
     for at in places or []:
         page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
         settled(page)
-    page.wait_for_timeout(800)
+    painted(page)
 
     # A fix a couple of hundred metres off the line, vague and then sharp: the
     # same place both times, so the only thing that moves is the circle.
@@ -5738,7 +5837,7 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
                     rows: rows ? getComputedStyle(rows).display : 'none'}; }"""
     )
     page.reload(timeout=120_000)
-    page.wait_for_timeout(SETTLE_MS)
+    ready(page)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
     page.wait_for_timeout(1200)
     reloaded = page.evaluate(stands, SCENE.slope_path)
@@ -5757,7 +5856,7 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
     # And off is remembered as well as on: a reader who put it away has put it
     # away, and the default is what a reader who never touched it gets.
     page.reload(timeout=120_000)
-    page.wait_for_timeout(SETTLE_MS)
+    ready(page)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
     page.wait_for_timeout(1200)
     off_again = page.evaluate(stands, SCENE.slope_path)
@@ -5851,7 +5950,7 @@ def what_the_panel_remembers(page: Any) -> Check:
     page.wait_for_timeout(900)
 
     page.reload(timeout=120_000)
-    page.wait_for_timeout(SETTLE_MS)
+    ready(page)
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
     page.wait_for_timeout(1200)
     after = page.evaluate(
@@ -5966,13 +6065,13 @@ def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
         for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
             page.evaluate("() => window.trailsPlan.remove(0)")
             page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
-            page.wait_for_timeout(200)
+            painted(page)
         page.evaluate(with_map("(w) => { __MAP__.setView([w.lat, w.lng], w.zoom, {animate: false}); }"), {**at, "zoom": zoom})
-        page.wait_for_timeout(500)
+        painted(page)
         for where in (start, at):
             page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", where)
             page.wait_for_function("() => !window.trailsPlan.busy()", timeout=240_000)
-            page.wait_for_timeout(300)
+            painted(page)
         state = page.evaluate("() => window.trailsPlan.state()")
         last = state["points"][-1]
         return {
@@ -6095,12 +6194,12 @@ def a_tap_in_the_middle_of_a_long_edge(page: Any) -> Check:
         page.evaluate("() => window.trailsPlan.remove(0)")
         settled(page)
     page.evaluate(with_map("(w) => { __MAP__.setView([w.lat, w.lon], 15, {animate: false}); }"), ground["half"])
-    page.wait_for_timeout(500)
+    painted(page)
 
     def put(at: dict[str, float], exact: bool = False) -> None:
         page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lon, w.exact)", {**at, "exact": exact})
         settled(page)
-        page.wait_for_timeout(200)
+        painted(page)
 
     def read() -> dict[str, Any]:
         state = page.evaluate("() => window.trailsPlan.state()")
@@ -6126,13 +6225,13 @@ def a_tap_in_the_middle_of_a_long_edge(page: Any) -> Check:
     four = read()
     page.evaluate("() => window.trailsPlan.remove(1)")
     settled(page)
-    page.wait_for_timeout(300)
+    painted(page)
     three = read()
     for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
         page.evaluate("() => window.trailsPlan.remove(0)")
         settled(page)
     page.evaluate("() => window.trailsPlan.toggle(false)")
-    page.wait_for_timeout(300)
+    painted(page)
 
     half, quarter = ground["metres"] / 2, ground["metres"] / 4
     mid, on = four["points"][1], four["points"][2]
@@ -6210,11 +6309,11 @@ def a_planned_leg_that_is_not_worth_routing(page: Any) -> Check:
     for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
         page.evaluate("() => window.trailsPlan.remove(0)")
         page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
-        page.wait_for_timeout(200)
+        painted(page)
     for at in taps:
         page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", at)
         page.wait_for_function("() => !window.trailsPlan.busy()", timeout=240_000)
-        page.wait_for_timeout(300)
+        painted(page)
     state = page.evaluate("() => window.trailsPlan.state()")
     walked = (state["walked"] or 0) + (state["crossed"] or 0)
     flown = sum(metres_between((a["lat"], a["lng"]), (b["lat"], b["lng"])) for a, b in zip(taps, taps[1:], strict=False))
@@ -6302,13 +6401,13 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
     for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
         page.evaluate("() => window.trailsPlan.remove(0)")
         page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
-        page.wait_for_timeout(200)
+        painted(page)
     page.evaluate(with_map("(w) => { __MAP__.setView([w.lat, w.lng], 14, {animate: false}); }"), shore)
-    page.wait_for_timeout(500)
+    painted(page)
     for where in (shore, headland):
         page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", where)
         page.wait_for_function("() => !window.trailsPlan.busy()", timeout=240_000)
-        page.wait_for_timeout(300)
+        painted(page)
     planned = page.evaluate("() => window.trailsPlan.state()")
     plan_straight = (planned["straight"] or 0) + (planned["crossed"] or 0)
     on_paths = planned["walked"] - plan_straight
@@ -6323,11 +6422,11 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
     for _ in range(page.evaluate("() => window.trailsPlan.state().points.length")):
         page.evaluate("() => window.trailsPlan.remove(0)")
         page.wait_for_function("() => !window.trailsPlan.busy()", timeout=120_000)
-        page.wait_for_timeout(200)
+        painted(page)
     for where in (far_off, headland):
         page.evaluate("(w) => window.trailsPlan.place(w.lat, w.lng)", where)
         page.wait_for_function("() => !window.trailsPlan.busy()", timeout=240_000)
-        page.wait_for_timeout(300)
+        painted(page)
     from_afar = page.evaluate("() => window.trailsPlan.state()")
     afar_straight = (from_afar["straight"] or 0) + (from_afar["crossed"] or 0)
     page.evaluate("() => window.trailsPlan.toggle(false)")
@@ -6340,7 +6439,7 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
     page.evaluate("() => window.trailsGoal.way('routed')")
     page.evaluate("(w) => window.trailsGoal.set(w.lat, w.lng)", headland)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
-    page.wait_for_timeout(900)
+    painted(page)
     goal = page.evaluate("() => window.trailsGoal.state()")
     page.evaluate("() => { window.trailsGoal.clear(); window.trailsChrome.here(false); }")
 
@@ -6498,7 +6597,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     # Routed, and the same point: the switch is a reading and not a new goal.
     page.evaluate("() => window.trailsGoal.way('routed')")
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
-    page.wait_for_timeout(900)
+    painted(page)
     routed = page.evaluate(THE_GOAL)
 
     # **A stop on the way**, put down off the line so that the way has to bend
@@ -6512,7 +6611,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     stop_hint = page.evaluate(THE_GOAL)["notice"]
     tap_goal(aside)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(900)
+    painted(page)
     stopped = page.evaluate(THE_GOAL)
 
     # **Every place on the way is a row at the foot, with a menu.** Reported
@@ -6544,7 +6643,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     aside_again = {"lat": aside["lat"] - 0.004, "lng": aside["lng"] + 0.015}
     tap_goal(aside_again)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(900)
+    painted(page)
     moved = page.evaluate(THE_GOAL)
     # **Read out of the list rather than off its first row**, because a run in
     # which nothing was set has no first row -- and a check that throws there
@@ -6558,7 +6657,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     press_row(0, "trails-profile-stop-more")
     press_row(0, "trails-profile-stop-out")
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(900)
+    painted(page)
     unstopped = page.evaluate(THE_GOAL)
 
     # **Several stops, which is how it was reported.** With more than one the
@@ -6578,7 +6677,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
         }
         page.evaluate("(at) => window.trailsGoal.addStop(at.lat, at.lng, null)", at)
         page.wait_for_function("() => !window.trailsGoal.state().working", timeout=240_000)
-        page.wait_for_timeout(600)
+        painted(page)
     several = page.evaluate(THE_JOINS)
     stops_at = several["state"]["stops"]
     ends = several["legs"]
@@ -6616,7 +6715,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     press_row(0, "trails-profile-stop-more")
     press_row(0, "trails-profile-stop-down")
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=240_000)
-    page.wait_for_timeout(600)
+    painted(page)
     stepped = page.evaluate(THE_GOAL)
     after_step = [(stop["lat"], stop["lon"]) for stop in stepped["goal"]["stops"]]
 
@@ -6632,14 +6731,14 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     there_again = {"lat": there["lat"] + 0.006, "lng": there["lng"] - 0.006}
     tap_goal(there_again)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=240_000)
-    page.wait_for_timeout(900)
+    painted(page)
     goal_moved = page.evaluate(THE_GOAL)
     goal_off = metres_between((goal_moved["goal"]["at"]["lat"], goal_moved["goal"]["at"]["lon"]), (there_again["lat"], there_again["lng"]))
 
     while page.evaluate("() => window.trailsGoal.stops().length"):
         page.evaluate("() => window.trailsGoal.dropStop(0)")
         page.wait_for_function("() => !window.trailsGoal.state().working", timeout=240_000)
-    page.wait_for_timeout(600)
+    painted(page)
 
     # **A tap away from the way there is not a tap on it.** The row offers the
     # goal wherever its line runs -- that line takes no clicks, so the row is
@@ -6664,7 +6763,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(31_000)
     took = page.evaluate("(at) => window.trailsGoal.stood(at.lat, at.lng, 20)", astray)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
-    page.wait_for_timeout(600)
+    painted(page)
     again = page.evaluate(THE_GOAL)
 
     # The row of choices offers it, last of all, and pressing it draws it.
@@ -6713,7 +6812,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             page.wait_for_timeout(300)
             tap_goal(beside, zoom)
             page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-            page.wait_for_timeout(600)
+            painted(page)
             state = page.evaluate("() => window.trailsGoal.state()")
             named[key] = {
                 "name": state["name"],
@@ -6728,7 +6827,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     beyond = {"lat": there["lat"] + 0.02, "lng": there["lng"]}
     page.evaluate("(at) => window.trailsGoal.set(at.lat, at.lng, 'Past the end')", beyond)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
-    page.wait_for_timeout(900)
+    painted(page)
     partly = page.evaluate(THE_GOAL)
     flown = metres_between((here["lat"], here["lng"]), (beyond["lat"], beyond["lng"]))
 
@@ -6741,7 +6840,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(2500)
     page.evaluate("(at) => window.trailsGoal.set(at.lat, at.lng, 'Far off the map')", here)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(900)
+    painted(page)
     afar = page.evaluate(THE_GOAL)
 
     # **Another trail tapped takes the panel and not the goal.** The goal's
@@ -6772,7 +6871,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     put_away = page.evaluate(THE_GOAL)
     page.evaluate("() => window.trailsGoal.again()")
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(900)
+    painted(page)
     stayed_away = page.evaluate(THE_GOAL)
 
     # **Being rid of it is the panel's own button**, drawn as a struck flag
@@ -6785,7 +6884,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     page.wait_for_timeout(600)
     page.evaluate("(at) => window.trailsGoal.addStop(at.lat, at.lng, 'A stop')", there)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(900)
+    painted(page)
     drop_offered = page.evaluate(THE_GOAL)
     goal_rows = page.evaluate("() => document.querySelectorAll('.trails-profile-stop').length")
     asked: list[str] = []
@@ -6809,10 +6908,10 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     # And a goal alone goes without a question: nothing to lose but a tap.
     page.evaluate("(at) => window.trailsGoal.set(at.lat, at.lng, 'Alone')", beyond)
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=120_000)
-    page.wait_for_timeout(900)
+    painted(page)
     alone = page.evaluate(THE_GOAL)
     page.evaluate("() => document.querySelector('.trails-profile-hide').click()")
-    page.wait_for_timeout(700)
+    painted(page)
     dropped_alone = page.evaluate(THE_GOAL)
 
     # **What a straight part wades through, and the reader's own price for
@@ -7240,17 +7339,17 @@ def wading_to_a_goal(page: Any, river: RiverGoal) -> list[Reading]:
     page.evaluate("() => window.trailsGoal.way('routed')")
     page.evaluate("(at) => window.trailsGoal.set(at.lat, at.lng, at.label)", {"lat": river.goal[0], "lng": river.goal[1], "label": river.label})
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(1500)
+    painted(page)
     waded = page.evaluate(THE_GOAL)
     page.evaluate("() => window.trailsPlan.stayOnPaths(true)")
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(1500)
+    painted(page)
     on_paths = page.evaluate(THE_GOAL)
     # Off again from the switch on the goal's page, which is where a reader
     # turns it -- and where they see whether it is on.
     page.evaluate("() => document.querySelector('.trails-profile-goal-paths').click()")
     page.wait_for_function("() => !window.trailsGoal.state().working", timeout=180_000)
-    page.wait_for_timeout(1500)
+    painted(page)
     off_paths = page.evaluate(THE_GOAL)
     return [
         Reading(
@@ -7423,7 +7522,7 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
         page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
         settled(page)
     page.evaluate("() => window.trailsPlan.toggle(false)")
-    page.wait_for_timeout(1200)
+    painted(page)
     left = page.evaluate(THE_CHOICES)
     on_route = page.evaluate(
         """() => { const shape = window.trailsPlan.geometry();
@@ -7637,7 +7736,7 @@ def the_chosen_line_is_on_top(page: Any) -> Check:
         page.evaluate("(where) => window.trailsPlan.place(where.lat, where.lon)", at)
         settled(page)
     page.evaluate("() => window.trailsPlan.toggle(false)")
-    page.wait_for_timeout(1200)
+    painted(page)
 
     shared = page.evaluate(
         """() => { const shape = window.trailsPlan.geometry();
@@ -7873,7 +7972,7 @@ def a_route_read_after_planning(page: Any) -> Check:
     )
     settled(page)
     page.evaluate("() => window.trailsProfilePanel.page('list')")
-    page.wait_for_timeout(700)
+    painted(page)
     planning = page.evaluate(THE_ROUTE_PAGES)
 
     page.evaluate("() => window.trailsPlan.toggle(false)")
@@ -8337,7 +8436,7 @@ def a_plan_survives_a_reload(page: Any) -> Check:
 
     began = time.monotonic()
     page.reload(timeout=120_000)
-    page.wait_for_timeout(SETTLE_MS)
+    ready(page)
     restored = True
     try:
         page.wait_for_function(
@@ -9930,19 +10029,19 @@ def drive(page: Any) -> list[Check]:
         Every check, in the order it ran
     """
     checks = [
-        check(page)
+        timed(check, page)
         for check in (furniture, the_icons_are_there, map_wheel, chrome_layout, a_turn_no_resize_event_describes, the_profile_tool)
         if wanted(check)
     ]
     if wanted(the_zoom_the_scale_says):
-        checks.append(the_zoom_the_scale_says(page))
+        checks.append(timed(the_zoom_the_scale_says, page))
     # Before anything is selected and before plan mode, which takes every click
     # on the container and would answer this one itself.
     if wanted(a_finger_can_hit_a_line):
-        checks.append(a_finger_can_hit_a_line(page))
+        checks.append(timed(a_finger_can_hit_a_line, page))
     # Before the long chain is selected, because it selects chains of its own.
     if wanted(a_borrowed_name_has_its_register_under_it):
-        checks.append(a_borrowed_name_has_its_register_under_it(page))
+        checks.append(timed(a_borrowed_name_has_its_register_under_it, page))
 
     if not select(page, SCENE.long_chain):
         # Everything past this point stands on the long chain, so it goes with
@@ -9952,33 +10051,33 @@ def drive(page: Any) -> list[Check]:
         return checks
 
     if wanted(sea_level):
-        checks.append(sea_level(page))
+        checks.append(timed(sea_level, page))
     if wanted(crosshair_mark):
-        checks.append(crosshair_mark(page))
+        checks.append(timed(crosshair_mark, page))
     if wanted(curve_wheel):
-        checks.append(curve_wheel(page, zoomable=True))
+        checks.append(timed(curve_wheel, page, zoomable=True))
     if wanted(true_scale):
-        checks.append(true_scale(page))
+        checks.append(timed(true_scale, page))
     if wanted(zoom_ceiling):
-        checks.append(zoom_ceiling(page))
+        checks.append(timed(zoom_ceiling, page))
     if wanted(brushing_the_curve):
-        checks.append(brushing_the_curve(page))
+        checks.append(timed(brushing_the_curve, page))
     if wanted(reading_with_a_finger):
-        checks.append(reading_with_a_finger(page))
+        checks.append(timed(reading_with_a_finger, page))
     if wanted(pinch_the_curve):
-        checks.append(pinch_the_curve(page))
+        checks.append(timed(pinch_the_curve, page))
     if wanted(a_way_back_to_the_whole):
-        checks.append(a_way_back_to_the_whole(page))
+        checks.append(timed(a_way_back_to_the_whole, page))
     if wanted(room_on_a_short_screen):
-        checks.append(room_on_a_short_screen(page))
+        checks.append(timed(room_on_a_short_screen, page))
     if wanted(narrow_sheets):
-        checks.append(narrow_sheets(page))
+        checks.append(timed(narrow_sheets, page))
     if wanted(the_sources_are_a_page):
-        checks.append(the_sources_are_a_page(page))
+        checks.append(timed(the_sources_are_a_page, page))
     if wanted(a_place_takes_the_panel):
-        checks.append(a_place_takes_the_panel(page))
+        checks.append(timed(a_place_takes_the_panel, page))
     if wanted(the_theme_switch):
-        checks.append(the_theme_switch(page))
+        checks.append(timed(the_theme_switch, page))
     select(page, SCENE.long_chain)
 
     # A chain already drawn finer than its own samples, which is 99 % of them:
@@ -9997,7 +10096,7 @@ def drive(page: Any) -> list[Check]:
     if short and select(page, short):
         if page.evaluate("() => { const v = window.trailsProfilePanel.view(); return v && v.closest <= 1.001; }"):
             if wanted(curve_wheel):
-                checks.append(curve_wheel(page, zoomable=False))
+                checks.append(timed(curve_wheel, page, zoomable=False))
 
     select(page, SCENE.long_chain)
     places = page.evaluate(
@@ -10025,83 +10124,83 @@ def drive(page: Any) -> list[Check]:
     )
 
     if wanted(popup_click):
-        checks.append(popup_click(page))
+        checks.append(timed(popup_click, page))
     if wanted(stations_and_list):
-        checks.append(stations_and_list(page, places))
+        checks.append(timed(stations_and_list, page, places))
     if wanted(a_finger_can_use_it):
-        checks.append(a_finger_can_use_it(page))
+        checks.append(timed(a_finger_can_use_it, page))
     if wanted(the_row_at_the_foot):
-        checks.append(the_row_at_the_foot(page))
+        checks.append(timed(the_row_at_the_foot, page))
     if wanted(planning_keeps_what_it_had):
-        checks.append(planning_keeps_what_it_had(page))
+        checks.append(timed(planning_keeps_what_it_had, page))
     if wanted(copying_a_position):
-        checks.append(copying_a_position(page))
+        checks.append(timed(copying_a_position, page))
     if wanted(a_leg_whose_heights_never_arrive):
-        checks.append(a_leg_whose_heights_never_arrive(page))
+        checks.append(timed(a_leg_whose_heights_never_arrive, page))
     if wanted(the_point_list_takes_the_room):
-        checks.append(the_point_list_takes_the_room(page))
+        checks.append(timed(the_point_list_takes_the_room, page))
     if wanted(undo_undoes_the_last_change):
-        checks.append(undo_undoes_the_last_change(page))
+        checks.append(timed(undo_undoes_the_last_change, page))
     if wanted(files_from_the_page):
-        checks.append(files_from_the_page(page))
+        checks.append(timed(files_from_the_page, page))
     if wanted(a_click_is_not_a_pan):
-        checks.append(a_click_is_not_a_pan(page))
+        checks.append(timed(a_click_is_not_a_pan, page))
     if wanted(the_search_on_a_narrow_panel):
-        checks.append(the_search_on_a_narrow_panel(page))
+        checks.append(timed(the_search_on_a_narrow_panel, page))
     if wanted(the_search_lists_what_it_finds):
-        checks.append(the_search_lists_what_it_finds(page))
+        checks.append(timed(the_search_lists_what_it_finds, page))
     if wanted(a_position_typed_into_the_search):
-        checks.append(a_position_typed_into_the_search(page))
+        checks.append(timed(a_position_typed_into_the_search, page))
     if wanted(a_way_to_a_goal_becomes_a_plan):
-        checks.append(a_way_to_a_goal_becomes_a_plan(page))
+        checks.append(timed(a_way_to_a_goal_becomes_a_plan, page))
     if wanted(sharing_the_room):
-        checks.append(sharing_the_room(page))
+        checks.append(timed(sharing_the_room, page))
     if wanted(where_the_reader_is):
-        checks.append(where_the_reader_is(page))
+        checks.append(timed(where_the_reader_is, page))
     if wanted(a_fix_that_stops_arriving):
-        checks.append(a_fix_that_stops_arriving(page))
+        checks.append(timed(a_fix_that_stops_arriving, page))
     if wanted(which_way_the_reader_faces):
-        checks.append(which_way_the_reader_faces(page))
+        checks.append(timed(which_way_the_reader_faces, page))
     if wanted(the_accuracy_only_gets_better):
-        checks.append(the_accuracy_only_gets_better(page))
+        checks.append(timed(the_accuracy_only_gets_better, page))
     if wanted(the_position_is_over_the_plan):
-        checks.append(the_position_is_over_the_plan(page))
+        checks.append(timed(the_position_is_over_the_plan, page))
     if wanted(the_way_to_the_next_goal):
-        checks.append(the_way_to_the_next_goal(page))
+        checks.append(timed(the_way_to_the_next_goal, page))
     if wanted(a_goal_the_reader_sets):
-        checks.append(a_goal_the_reader_sets(page))
+        checks.append(timed(a_goal_the_reader_sets, page))
     if wanted(a_way_across_a_sound_goes_round_by_land):
-        checks.append(a_way_across_a_sound_goes_round_by_land(page))
+        checks.append(timed(a_way_across_a_sound_goes_round_by_land, page))
     if wanted(a_planned_leg_that_is_not_worth_routing):
-        checks.append(a_planned_leg_that_is_not_worth_routing(page))
+        checks.append(timed(a_planned_leg_that_is_not_worth_routing, page))
     if wanted(the_relief_under_the_map):
-        checks.append(the_relief_under_the_map(page))
+        checks.append(timed(the_relief_under_the_map, page))
     if wanted(the_slope_classes_over_the_relief):
-        checks.append(the_slope_classes_over_the_relief(page))
+        checks.append(timed(the_slope_classes_over_the_relief, page))
     if wanted(what_the_panel_remembers):
-        checks.append(what_the_panel_remembers(page))
+        checks.append(timed(what_the_panel_remembers, page))
     if wanted(a_tap_beside_a_path_in_plan_mode):
-        checks.append(a_tap_beside_a_path_in_plan_mode(page))
+        checks.append(timed(a_tap_beside_a_path_in_plan_mode, page))
     if wanted(a_tap_in_the_middle_of_a_long_edge):
-        checks.append(a_tap_in_the_middle_of_a_long_edge(page))
+        checks.append(timed(a_tap_in_the_middle_of_a_long_edge, page))
     if wanted(a_tap_that_could_have_meant_several_lines):
-        checks.append(a_tap_that_could_have_meant_several_lines(page))
+        checks.append(timed(a_tap_that_could_have_meant_several_lines, page))
     if wanted(the_chosen_line_is_on_top):
-        checks.append(the_chosen_line_is_on_top(page))
+        checks.append(timed(the_chosen_line_is_on_top, page))
     if wanted(a_line_is_named_at_the_foot_and_not_on_the_ground):
-        checks.append(a_line_is_named_at_the_foot_and_not_on_the_ground(page))
+        checks.append(timed(a_line_is_named_at_the_foot_and_not_on_the_ground, page))
     if wanted(a_route_read_after_planning):
-        checks.append(a_route_read_after_planning(page))
+        checks.append(timed(a_route_read_after_planning, page))
     if wanted(a_sheet_over_a_panel):
-        checks.append(a_sheet_over_a_panel(page))
+        checks.append(timed(a_sheet_over_a_panel, page))
     if wanted(two_scales_for_one_profile):
-        checks.append(two_scales_for_one_profile(page))
+        checks.append(timed(two_scales_for_one_profile, page))
     if wanted(the_dark_set):
-        checks.append(the_dark_set(page))
+        checks.append(timed(the_dark_set, page))
     # **Last, because it reloads the page.** Everything after it would be
     # reading a page in a state nothing before it had set up.
     if wanted(a_plan_survives_a_reload):
-        checks.append(a_plan_survives_a_reload(page))
+        checks.append(timed(a_plan_survives_a_reload, page))
     return checks
 
 
@@ -10129,7 +10228,7 @@ def report(checks: list[Check]) -> int:
                 gone += 1
                 print(f"\n GONE  {check.name}\n     could not run: {check.skipped}")
             continue
-        print(f"\n     {check.name}")
+        print(f"\n     {check.name}" + (f"   ({check.seconds:.1f} s)" if check.seconds else ""))
         for reading in check.readings:
             unrecorded = not reading.holds and reading.want is None
             mark = " ok " if reading.passed else ("FAIL" if reading.holds else ("NEW" if unrecorded else "MOVED"))
@@ -10154,6 +10253,16 @@ def report(checks: list[Check]) -> int:
         f"{moved} recorded figure{'' if moved == 1 else 's'} moved, "
         f"{new} not yet recorded, {skipped} skipped by the scene" + (f", {gone} could not run" if gone else "")
     )
+    # **Where the minutes went**, so the next cut is aimed rather than guessed.
+    # Only the dearest few: a list of sixty lines is another thing to read past.
+    timings = sorted((c for c in checks if c.seconds), key=lambda c: -c.seconds)
+    if timings:
+        spent = sum(c.seconds for c in timings)
+        dearest = timings[:6]
+        print(f"  {spent / 60:.1f} min in {len(timings)} checks; the dearest are")
+        for check in dearest:
+            print(f"       {check.seconds:6.1f} s  {check.name}")
+        print(f"       {sum(c.seconds for c in dearest) / spent * 100:5.0f} %  of the run is those {len(dearest)}")
     if gone:
         print(
             "  A check that could not run is a fault of the page or the scene, not a choice: the\n"
@@ -10228,7 +10337,7 @@ def main() -> int:
         # default 30 is a margin thin enough to fail on a busy machine -- which
         # reads as a broken run rather than as the slow load it is.
         page.goto(address, timeout=120_000)
-        page.wait_for_timeout(SETTLE_MS)
+        ready(page)
         checks = [Check("the page ran at all", [Reading("errors thrown while loading", len(thrown), 0, note="; ".join(thrown[:2]))])]
         if thrown:
             browser.close()
