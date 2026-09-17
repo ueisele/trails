@@ -2775,7 +2775,13 @@ link instead:
 
 So a station carries two links: **Trafikverket's** first, because a station is where the train is
 the question and that page is drawn properly, and **Resrobot's** under it, because that is the one
-that also knows buses 91 and 950 call at Abisko turiststation. A bus stop carries Resrobot's alone,
+that also knows buses 91 and 950 call at Abisko turiststation.
+
+**The second one is called *All departures at Resrobot*, after the first name failed.** It read
+*every line*, and Uwe asked what that meant — fairly: beside Trafikverket's row it was a contrast,
+and alone on a bus stop it was a riddle. Naming the modes instead would have promised a bus at
+Låktatjåkka, where none calls. *All* says the one thing true at every stop, that nothing is
+filtered off this board, and it is what makes a station's two links read as a pair. A bus stop carries Resrobot's alone,
 which is the only thing there is — an ugly page with the answer on it, and the ugliness is a
 deployment fault on their side that may well be repaired.
 

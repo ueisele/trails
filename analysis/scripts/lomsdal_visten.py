@@ -658,7 +658,14 @@ RESROBOT_OF_OSM_STOP = {
 #: **No credit entry for this one.** Resrobot's data is CC0, which waives
 #: attribution, and what the page carries is eight identifiers and a link; the
 #: link text names Resrobot, which is where the provenance belongs.
-RESROBOT_LINK_FIELDS = {"board_url": "→ Departures at Resrobot (every line)"}
+#:
+#: **"All departures" and not "train and bus".** The first wording here was
+#: *every line*, which Uwe read and asked what it meant: beside Trafikverket's
+#: it was a contrast, and alone on a bus stop it was a riddle. Naming the modes
+#: instead would promise a bus at Låktatjåkka, where none calls. *All* says the
+#: one thing that is true at every stop -- nothing is filtered out of this board
+#: -- and it is what tells a reader why a station offers two.
+RESROBOT_LINK_FIELDS = {"board_url": "→ All departures at Resrobot"}
 
 #: Trafikverket's board, for the stations, beside Resrobot's rather than instead
 #: of it.
@@ -691,7 +698,9 @@ TRAFIKVERKET_BOARD_NAMES = {
     "NSR:StopPlace:63395": "Vassijaure",
 }
 
-#: A station's links, the drawn board first and the complete one under it.
+#: A station's links, the drawn board first and the complete one under it. At a
+#: station the pair reads as what it is: the trains, drawn properly, and then
+#: everything that calls.
 STATION_LINK_FIELDS = {"rail_board_url": "→ Train departures at Trafikverket", **RESROBOT_LINK_FIELDS}
 
 #: A click now selects the arm of the road under the cursor rather than every
