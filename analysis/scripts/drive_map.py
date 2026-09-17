@@ -5581,7 +5581,8 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
     """How steep the ground is, coloured over the shadow when the reader asks.
 
     The profile grades the path; this grades the ground down its fall line,
-    in the SLF's avalanche classes with one of ours at 25° below them, and
+    in the SLF's avalanche classes with one of ours at 25° below them and one
+    over 55° above, multiplied over the sheet so its lettering stays black, and
     starts off. What can go wrong without showing in the source: the checkbox
     can switch nothing; the tiles can be asked for and not answer; the classes
     can land under the shadow, where the darkest of them vanish, or over the
@@ -5637,7 +5638,8 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
             let found = null;
             __MAP__.eachLayer(layer => {
                 if (found || !layer._url || String(layer._url).indexOf(path) < 0) { return; }
-                found = {opacity: layer.options.opacity, top: layer.options.maxNativeZoom, above: layer.options.zIndex};
+                found = {opacity: layer.options.opacity, top: layer.options.maxNativeZoom, above: layer.options.zIndex,
+                     blend: layer.getContainer ? getComputedStyle(layer.getContainer()).mixBlendMode : null};
             });
             return found;
         }"""),
@@ -5680,8 +5682,10 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
             Reading("and the classes ask for tiles", asked > 0, True, note=f"{asked} asked"),
             Reading("and every one of them answers", answered, asked),
             Reading("the rows explain the colours while it is on", rows_on, "block"),
-            Reading("six classes, ours first and marked so", len(classes), 6, note="; ".join(classes)),
-            Reading("the first is ours", bool(classes and "(ours)" in classes[0]), True),
+            Reading("seven classes", len(classes), 7, note="; ".join(classes)),
+            Reading("the first and the last are ours, and say so", bool(classes and "(ours)" in classes[0] and "(ours)" in classes[-1]), True),
+            Reading("and none between", sum(1 for c in classes[1:-1] if "(ours)" in c), 0),
+            Reading("multiplied over the sheet, so the lettering stays black", settings and settings.get("blend"), "multiply"),
             Reading("drawn at full strength, the alpha being in the palette", settings and settings.get("opacity"), 1.0),
             Reading("and no deeper than the relief", settings and settings.get("top"), 15),
             Reading(

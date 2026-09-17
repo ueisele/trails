@@ -144,8 +144,9 @@ everything it draws itself, black with an alpha channel so level ground stays th
 sheet's own colour. It is a checkbox under the sheet in the base-map panel and starts on.
 **And the slope is classed over it** (`maps.SlopeTiles`, `processing/slope_tiles.py`): how
 steep the ground is down its fall line, in the SLF's avalanche classes with one of our
-own at 25° below them, one colour each continuing the profile's; a second checkbox under
-the relief's, off until asked, with the class colours listed under it while it is on. A state trail's popup links to the county's page
+own at 25° below them and one over 55° above, one light colour each, multiplied over the
+sheet so its lettering stays black; a second checkbox under the relief's, off until asked,
+with the class colours listed under it while it is on. A state trail's popup links to the county's page
 for it on Naturkartan, one link per *BD* number on the chain, out of a hand-kept
 catalogue (`analysis/routes/abisko-naturkartan.toml`, `io/sources/naturkartan.py`):
 links only, since Naturkartan's terms allow private use alone and the line itself

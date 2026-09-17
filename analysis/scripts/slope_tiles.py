@@ -43,7 +43,10 @@ POSTS_M = 4.0
 
 #: Where the tiles go, under analysis/output/: the bucket prefix the page will
 #: fetch them from, with the version segment.
-DEFAULT_OUTPUT = Path("analysis") / "output" / "slope" / "lantmateriet" / "1"
+#: ``2`` since the classes went to seven and the palette to the light one drawn
+#: multiplied (§6.7): a tree whose tiles changed is a new address, never a
+#: changed object, or a phone would mix two builds.
+DEFAULT_OUTPUT = Path("analysis") / "output" / "slope" / "lantmateriet" / "2"
 
 
 def main() -> int:

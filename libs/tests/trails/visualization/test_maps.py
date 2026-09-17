@@ -11,6 +11,7 @@ import folium
 import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
+from trails.processing import slope_tiles
 from trails.routing.sources import BRIDGE, FERRY
 from trails.visualization import maps
 
@@ -2299,16 +2300,20 @@ class TestTwoMapsOnOneOrigin:
         assert slope.overlay is True and slope.show is False
         assert slope.options["opacity"] == 1.0, "the alpha is in the palette, chosen on the mockup"
         assert slope.options["z_index"] == 260 > getattr(fmap, maps.MAP_SHADE_ATTR).options["z_index"]
+        # Multiplied over the sheet, so its lettering stays black: the class
+        # name is what the theme's one rule hangs on.
+        assert slope.options["class_name"] == "trails-slope-tiles"
+        html = fmap.get_root().render()
+        assert ".leaflet-layer.trails-slope-tiles { mix-blend-mode: multiply; }" in html
         assert (slope.options["max_zoom"], slope.options["max_native_zoom"]) == (17, 15)
         assert slope.options["bounds"] == [[68.139, 18.15], [68.46, 19.10]]
         assert slope.options["attribution"] == maps._LANTMATERIET_ATTRIBUTION
 
     def test_the_slope_classes_are_the_documented_ones_and_the_legend_says_whose(self, tmp_path):
-        """Four SLF classes, swisstopo's over 50, and ours at 25 -- marked as
-        ours -- with the profile's own colours for the first three, so a reader
-        who learned them there reads them here. The rows sit under the checkbox
-        in the base-map panel, beside the relief's, and say what they measure:
-        the ground's fall line, where the profile grades the path."""
+        """Four SLF classes, swisstopo's over 50, and ours at either end --
+        marked as ours -- one light colour each. The rows sit under the
+        checkbox in the base-map panel, beside the relief's, and say what they
+        measure: the ground's fall line, where the profile grades the path."""
         fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
         maps.add_legend(fmap, "Abisko", [maps.LegendRow("a line", "#000", None)])
         html = fmap.get_root().render()
@@ -2316,10 +2321,10 @@ class TestTwoMapsOnOneOrigin:
         assert f"var slope = {slope};" in html
         classes = html.split("var slopeClasses = ")[1].split(";\n")[0]
         rows = json.loads(classes)
-        assert [row["from"] for row in rows] == [25.0, 30.0, 35.0, 40.0, 45.0, 50.0]
+        assert [row["from"] for row in rows] == [25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0]
         assert rows[-1]["to"] is None and rows[0]["to"] == 30.0
-        assert [row["source"] for row in rows] == ["ours", "SLF", "SLF", "SLF", "SLF", "swisstopo"]
-        assert [row["colour"] for row in rows[1:4]] == [band[2] for band in maps.GRADIENT_BANDS[1:]]
+        assert [row["source"] for row in rows] == ["ours", "SLF", "SLF", "SLF", "SLF", "swisstopo", "ours"]
+        assert [row["colour"] for row in rows] == list(slope_tiles.COLOURS)
         assert "classing.className = 'trails-slope';" in html
         assert "slopeWord.textContent = 'Slope classes';" in html
         assert "slopeRows.className = 'trails-slope-classes';" in html
@@ -2339,7 +2344,7 @@ class TestTwoMapsOnOneOrigin:
     def test_the_worker_answers_the_slope_classes_from_what_was_kept(self, tmp_path):
         page, companions = self.abisko(tmp_path)
         script = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
-        assert 'var SLOPE_PREFIX = "/slope/lantmateriet/1/" ? new URL("/slope/lantmateriet/1/", self.location.href).href : null;' in script
+        assert 'var SLOPE_PREFIX = "/slope/lantmateriet/2/" ? new URL("/slope/lantmateriet/2/", self.location.href).href : null;' in script
         assert "(SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)" in script
         assert "if (SLOPE_PREFIX && plain.indexOf(SLOPE_PREFIX) === 0) { return SLOPE_PREFIX; }" in script
         assert "(now === SHADE_PREFIX ? stand.shade : stand.slope)" in script
@@ -2351,7 +2356,7 @@ class TestTwoMapsOnOneOrigin:
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
         slope = html.split("var SLOPE = ")[1].split(";\n")[0]
-        assert '"url": "/slope/lantmateriet/1/{z}/{x}/{y}.png"' in slope
+        assert '"url": "/slope/lantmateriet/2/{z}/{x}/{y}.png"' in slope
         assert '"top": 15' in slope
         assert "if (Number(z) > SLOPE.top) { return; }" in html
         assert "if (pass !== 'slope' && SLOPE && z <= SLOPE.top) {" in html

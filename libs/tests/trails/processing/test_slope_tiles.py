@@ -25,18 +25,43 @@ class TestSlope:
 
     def test_the_classes_start_at_the_first_edge(self):
         steep = np.array([[0.0, 24.9, 25.0], [34.9, 35.0, 89.0]], dtype=np.float32)
-        assert slope_tiles.classify(steep).tolist() == [[0, 0, 1], [2, 3, 6]]
+        assert slope_tiles.classify(steep).tolist() == [[0, 0, 1], [2, 3, 7]]
 
     def test_what_cannot_be_measured_is_not_steep(self):
         assert int(slope_tiles.classify(np.array([[np.nan]], dtype=np.float32))[0, 0]) == 0
 
     def test_the_documented_classes_and_ours(self):
-        """The four SLF classes, swisstopo's over 50, and ours at 25 below them
-        -- one colour each, the first three the profile's own."""
-        assert slope_tiles.EDGES == (25.0, 30.0, 35.0, 40.0, 45.0, 50.0)
+        """The four SLF classes, swisstopo's over 50, and ours at either end:
+        25 below them for summer walking, 55 above them because marked trails
+        run through ground the model reads as over 50."""
+        assert slope_tiles.EDGES == (25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0)
         assert len(slope_tiles.COLOURS) == len(slope_tiles.EDGES) == len(slope_tiles.SOURCES)
-        assert slope_tiles.SOURCES == ("ours", "SLF", "SLF", "SLF", "SLF", "swisstopo")
-        assert slope_tiles.COLOURS[1:4] == ("#f9a825", "#ef6c00", "#c62828")
+        assert slope_tiles.SOURCES == ("ours", "SLF", "SLF", "SLF", "SLF", "swisstopo", "ours")
+
+    def test_every_colour_leaves_black_lettering_readable_when_multiplied(self):
+        """The page multiplies the layer over the sheet, so the ground under a
+        class is base × (1 − α + α · colour) and the lettering stays black. The
+        palette is light enough that no class takes black text on the sheet's
+        cream below 7:1 -- the WCAG bar for body text is 4.5."""
+
+        def luminance(rgb):
+            def channel(v):
+                v /= 255
+                return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+            r, g, b = rgb
+            return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+        alpha = slope_tiles.ALPHA / 255
+        cream, ink = (250, 240, 220), (20, 20, 20)
+
+        def multiplied(base, tint):
+            return tuple(b * (1 - alpha + alpha * t / 255) for b, t in zip(base, tint, strict=True))
+
+        for colour in slope_tiles.COLOURS:
+            tint = slope_tiles.rgb(colour)
+            ground, text = luminance(multiplied(cream, tint)), luminance(multiplied(ink, tint))
+            assert (ground + 0.05) / (text + 0.05) >= 7.0, colour
 
     def test_the_palette_leaves_index_zero_clear_and_colours_the_rest(self):
         flat, clear = slope_tiles.palette(("#ff0000", "#00ff00"), 150)

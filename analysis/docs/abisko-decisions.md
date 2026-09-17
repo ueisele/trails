@@ -746,6 +746,13 @@ words like *extreme*, and the reading is the reader's. Over 50° is a real class
 4 m model resolves it — swisstopo's is cut from 10 m — and it holds **0.7 %** of the ground, the
 walls of Lapporten and the north face of Njulla.
 
+**And one more over 55, ours, the morning after.** Uwe, from the published page over Latnjajávri:
+*"Es gibt Wanderwege, die durch die aktuell höchste Klasse laufen."* They do — the marked trail
+down to Kårsavaggestugan crosses ground the model reads as over 50° — so the top class was
+splitting nothing: the steps a path takes and the walls no path crosses were one colour. A
+boundary at 55° parts them. It is ours, like the 25° one, and the legend says so; it holds
+**0.4 %** of the ground, the 50–55 class 0.3 %.
+
 Measured over the whole model, 101 million posts, the slope read over an 8 m baseline after the
 relief's own smoothing:
 
@@ -756,7 +763,8 @@ relief's own smoothing:
 | 35–40° | SLF | 1.9 % |
 | 40–45° | SLF | 0.9 % |
 | 45–50° | SLF | 0.5 % |
-| 50° and more | swisstopo 2026 | 0.7 % |
+| 50–55° | swisstopo 2026 | 0.3 % |
+| 55° and more | ours | 0.4 % |
 
 An eighth of the ground coloured. Outdooractive's own scale from 30° would put six colours on 7 %
 of it and three of them on one per cent, which is more legend than terrain.
@@ -768,25 +776,52 @@ two trees to that. The slope is the magnitude of the gradient the shade already 
 from. `make slope` drives it and the tree goes up with `--tree slope`, the fourth.
 
 **A palette PNG with the alpha in it.** Flat colour compresses where a shadow's ramp does not: a
-z15 tile is **2.4 kB** against the relief's 9.4, and the whole tree **9,330 tiles, 24.7 MB**, cut
-in 12 minutes — a quarter of the relief. Index 0 is transparent and the classes follow, at an
-alpha of 150 (0.59), so a tile can be looked at on its own and the page draws it at full strength.
+z15 tile is a few kilobytes against the relief's 9.4, and the whole tree **9,330 tiles** and about
+a quarter of the relief's 104 MB — the first build, six classes, was 24.7 MB in 12 minutes. Index
+0 is transparent and the classes follow, at an alpha of 150 (0.59), so a tile can be looked at on
+its own and the page draws it at full strength.
 
-**Colours: the profile's, continued.** Scheme A on the mockup (`~/mockups/slope`, since deleted):
-the 30–35 class is the profile's *steep* yellow, 35–40 its *very steep* orange, 40–45 its
-*extreme* red, so a reader who learned them there reads them here; a lighter yellow below for our
-class, and purple and indigo above rather than deeper reds, because a deep red vanishes under the
-relief shadow, which is densest on exactly the walls those mark — the same reason the Swiss layer
-goes to purple. Uwe, against scheme B (the swisstopo/Outdooractive ramp from pale yellow to
-maroon): *"Farben sind gut auseinanderhaltbar, das passt so."*
+**Multiplied over the sheet, not laid on it — the lettering was the first thing lost.** The first
+build was drawn opaquely, and from the phone the same morning: *"Die Beschriftungen des Base
+Layers liegen unter den Farben. Ließe sich die Beschriftung auch als eigenes Overlay bauen?"*
+Looked for: Lantmäteriet's open download has no text-only sheet; the licensed layered WMS
+(*Topografisk webbkarta Visning, skiktindelad*) has a `text` layer and a text-free base, at
+125,000 kr a year or per request under that cap, and its images are for one's own application at
+the service, not for a bucket; Topografi 50's `textpunkt` layer, already cached, carries the
+sheet's 349 labels over the box with direction and spacing — but drawn over a sheet that keeps its
+own lettering they would ghost. So no overlay. Instead the layer is drawn with
+`mix-blend-mode: multiply`, as a printer overprints transparent ink: black multiplied by any
+colour is black, and the ground under a class becomes `base × (1 − α + α · colour)` — the
+layer's own alpha keeps the darkening partial. Black lettering on the sheet's cream, 16:1 with no
+overlay, measured per class:
+
+| class | drawn opaquely, first palette | multiplied, first palette | multiplied, this palette |
+|---|---|---|---|
+| 25–30° | 2.7:1 | 13.7:1 | 15.1:1 |
+| 30–35° | 3.0:1 | 11.5:1 | 13.6:1 |
+| 35–40° | 3.2:1 | 9.0:1 | 11.7:1 |
+| 40–45° | 3.4:1 | 6.4:1 | 10.5:1 |
+| 45–50° | 3.6:1 | 5.5:1 | 10.7:1 |
+| 50–55° | 3.7:1 | 4.6:1 | 10.4:1 |
+| 55° and more | — | 4.6:1 | 12.0:1 |
+
+The first palette survived multiplying at the bottom and went marginal at the top, because
+multiplying darkens the ground by the colour and its top three were dark on purpose. So the
+palette is the light one: pale yellow, amber, orange, coral, pink, lilac, light blue — chosen on a
+second mockup (`~/mockups/slope-multiply`, since deleted) over Latnjajávri and Kårsavaggestugan,
+where the blend and the seven classes were looked at against the first palette. Uwe: *"Ja, setze
+das so um."* The test holds every colour to 7:1 or better under the blend. The tree is **version 2**
+(`slope/lantmateriet/2/`) for the reason §6.3 gives: the tiles changed, so the address changes,
+and a phone that kept version 1 reads it as *moved* rather than mixing the two.
 
 **On the page** it is a tile layer over the relief, `zIndex` 260 against the relief's 250 and the
-overlay pane's 400, so a class keeps its hue and the shadow only darkens it, which is how swisstopo
-and Kartverket lay theirs. It carries a `trailsSlope` flag for the reason the relief carries its
-own, and is held to the box for the same reason. Its checkbox sits under the relief's in the *Base
-map* panel — it is the same kind of thing, how the ground is drawn — with the six colour rows and
-the line *steepness of the ground down its fall line; the profile grades the path* under it, shown
-only while it is on. **Off when the page opens**: it answers a question off the paths, and an
+overlay pane's 400, with the class name the theme's one blend rule hangs on. It carries a
+`trailsSlope` flag for the reason the relief carries its own, and is held to the box for the same
+reason. The blend was measured to be on the layer's container in Firefox and off again with the
+mockup's switch; iOS Safari is Uwe's to confirm from the phone. Its checkbox sits under the relief's in the *Base
+map* panel — it is the same kind of thing, how the ground is drawn — with the seven colour rows,
+the two that are ours saying so, and the line *steepness of the ground down its fall line; the
+profile grades the path* under it, shown only while it is on. **Off when the page opens**: it answers a question off the paths, and an
 eighth of the ground coloured is a lot of colour for a reader following a marked trail.
 
 **Offline it is kept whether or not it is on.** The switch is the reader's to flip in the field,
@@ -803,11 +838,13 @@ table, against the figures there:
 |---|---|---|---|
 | a band along a track, z16 | 41.2 MB | 43.6 MB | +2.4 MB |
 | a band along a track, z17 | 48.7 MB | 51.2 MB | +2.5 MB |
-| the whole map, z16 | 502.4 MB | 527.1 MB | +24.7 MB |
-| the whole map, z17 | 1,007.0 MB | 1,031.6 MB | +24.6 MB |
+| the whole map, z16 | 502.4 MB | 527.4 MB | +25.0 MB |
+| the whole map, z17 | 1,007.0 MB | 1,031.9 MB | +24.9 MB |
 
 Flat for the same reason the relief's was, and a quarter of it. The whole map at its cap is now
-166,035 tiles: the sheet's 146,975, the 440 height tiles, and 9,310 each of relief and slope.
+166,035 tiles: the sheet's 146,975, the 440 height tiles, and 9,310 each of relief and slope. The
+figures are version 2's — **9,330 tiles, 25.0 MB, cut in 12 minutes**; version 1 with six classes
+was 24.7 MB and priced 0.3 MB less.
 ---
 
 ## 7. The order of work
@@ -2057,6 +2094,20 @@ fetches do not surface in Playwright's request events, so counting them takes a 
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-17** — the slope classes are drawn multiplied, go to seven, and take a light palette
+  (§6.7), on Uwe's finding from the phone over Latnjajávri that the sheet's lettering lay under
+  the colours and that marked trails run through the class over 50°. A label overlay was looked
+  for and not built: the open download has no text-only sheet, the licensed layered WMS with one
+  costs 125,000 kr a year and is not for a bucket, and Topografi 50's own label points would ghost
+  over the sheet's. `mix-blend-mode: multiply` on the layer keeps black lettering black; measured,
+  the names had fallen to 3:1 under the opaque classes and stand at 10:1 or better under every
+  class now. A class over 55°, ours, parts the walls no path crosses from the steps one does.
+  Chosen on a mockup with both palettes and the blend switchable. The tree is **version 2**
+  (`slope/lantmateriet/2/`, 9,330 tiles, 25.0 MB, 12 minutes); version 1 stays in the bucket for
+  any phone that kept it, which reads the new address as *moved*. 708 readings on Abisko (two
+  new: seven classes with ours at both ends, and the blend on the layer's container), 683 on
+  Lomsdal-Visten. A band costs the same as before, the whole map 0.3 MB more. Not yet published.
+
 - **2026-09-16, fifth of the day** — the slope is classed over the relief (§6.7), asked for from
   the phone the same evening: *"Ließe sich ein ähnliches Overlay auch für die Steigung bauen?"*
   Six classes — 25° ours, 30/35/40/45 the SLF's, 50 swisstopo's of this January — after a search
@@ -2403,3 +2454,7 @@ A line per change to this document or to the decisions in it, newest first.
 | what a slope-class tile weighs | sixty random 113-post blocks of the mosaic classed under three schemes and written as palette PNGs at 256 px, then the whole box built with `make slope` and its `index.json` read per zoom |
 | the documented slope classes | swisstopo's *Hangneigungsklassen ab 30 Grad* record on geocat and the Geomatik Schweiz note on the class over 50 (January 2026); the EAWS glossary; the SAC scale on Wikipedia and in the bergundsteigen article on its revision; the DNT's *Gradering: Vandring* PDF; the DAV's article on pathless walking — every one read for a number in degrees, and only the avalanche sources had one |
 | what the slope classes cost offline | Playwright Firefox against the built page served locally, the panel opened with `window.trailsOffline.open(true)`, then `choose('all', z)` and, with the long chain selected, `choose('band', z)` at z16 and z17, `state().counted` read each time; the §6.6 figures as the baseline |
+| lettering under the slope classes | WCAG relative luminance and contrast ratio computed in Python for black ink (20,20,20) and the sheet's cream (250,240,220) under each class colour, opaquely at α = 150/255 and multiplied as `base × (1 − α + α · colour)`; the same formula runs in the mockup's legend and in the unit test |
+| that the blend is on the layer | Playwright Firefox against the mockup through the tunnel: `getComputedStyle` of every `.leaflet-layer` container read as `mixBlendMode`, once with the switch on and once off |
+| the ground over 55° | the whole-model histogram of §6.7 read at 50, 55, 60 and 70 |
+| the licensed text layer's price | Lantmäteriet's *Avgifter och leveransinformation för geodata* v2.31 (2026-05-29), the *Visning* rows and the transaction table, converted at 0.0885 EUR/SEK |

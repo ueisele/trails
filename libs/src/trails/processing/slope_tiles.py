@@ -7,27 +7,33 @@ question answered -- how steep is it *here*, in the fall line -- and that is
 what these tiles colour, over the relief shadow and under everything the page
 draws itself (analysis/docs/abisko-decisions.md §6.7).
 
-**The classes are the documented ones, with one of our own below them.** The
+**The classes are the documented ones, with one of our own at each end.** The
 Swiss avalanche institute SLF recommends 30–35, 35–40, 40–45 and over 45; the
 swisstopo layer built on that added a class over 50 in 2026, agreed with SLF
 and the SAC. Those are winter classes, chosen where slabs release. Summer
 walking is decided lower: from about 25° cross-country is laborious, from 35°
 the hands come out, and from 45° a smooth face is not walked -- a stepped one
 is, and the model cannot tell the two apart at four metres a post, so the
-legend names the angle and not the walkability. The 25° class is ours and the
-legend says so. Measured over the Abisko model, 101 million posts, the classes
-hold 5.2, 3.3, 1.9, 0.9, 0.5 and 0.7 % of the ground. No hiking scale we could
-find publishes a threshold in degrees: the SAC scale, the DNT grades and the
-Alpenverein categories all describe terrain in words.
+legend names the angle and not the walkability. The 25° class is ours, and so
+is the one over 55°: marked trails run through ground the model reads as over
+50°, and the walls no path crosses had to be told apart from the steps one
+does. The legend says which are ours. Measured over the Abisko model, 101
+million posts, the classes hold 5.2, 3.3, 1.9, 0.9, 0.5, 0.3 and 0.4 % of the
+ground. No hiking scale we could find publishes a threshold in degrees: the
+SAC scale, the DNT grades and the Alpenverein categories all describe terrain
+in words.
 
-**Coloured classes with an alpha, as a palette PNG.** Flat colour compresses:
-a z15 tile is 2.4 kB against the relief's 9.4, and the whole tree 24.7 MB
-against the shadow's 104. The colours continue the profile's own -- its *steep* yellow,
-*very steep* orange and *extreme* red -- so a reader who learned them there
-reads them here, with two darker ones above for the classes the profile never
-reaches; the boundaries differ because the measures do, and the legend says
-that too. The alpha is in the palette rather than the page, so a tile can be
-looked at on its own; the page draws it at full strength.
+**Coloured classes with an alpha, as a palette PNG, drawn multiplied.** Flat
+colour compresses: a z15 tile is a few kilobytes against the relief's 9.4, and
+the whole tree a quarter of the shadow's. The page draws the layer with
+``mix-blend-mode: multiply``, as a printer overprints transparent ink: black
+lettering stays black under every class, where drawn opaquely the sheet's
+names fell to 3:1 against their ground and were the first thing a reader
+lost. Multiplying darkens the ground by the colour, so the palette is light
+-- a ramp from pale yellow through orange, coral and pink to lilac and light
+blue -- and no class takes black text below 10:1 (§6.7). The alpha is in the
+palette rather than the page, so a tile can be looked at on its own; the page
+draws it at full strength.
 
 The tiles are cut exactly as the relief's are -- same model, same smoothing,
 same margin, same resampling per level -- through :func:`shade_tiles.plan`
@@ -49,22 +55,23 @@ from ..utils.tiles import Bounds, tile_count
 from .shade_tiles import INDEX_FILE, SMOOTH_POSTS, cut, plan
 
 #: Lower bounds of the classes, in degrees of slope. The first is ours; the
-#: next four are the SLF's; the last is swisstopo's of 2026, agreed with the
-#: SLF and the SAC.
-EDGES: tuple[float, ...] = (25.0, 30.0, 35.0, 40.0, 45.0, 50.0)
+#: next four are the SLF's; then swisstopo's of 2026, agreed with the SLF and
+#: the SAC; and the last is ours again, above where any marked trail goes.
+EDGES: tuple[float, ...] = (25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0)
 
-#: One colour per class, in the classes' order. The first three are the
-#: profile's *steep*, *very steep* and *extreme*; the others continue the ramp
-#: darker, purple rather than a deeper red because a deep red vanishes under
-#: the relief shadow, which is densest on exactly the walls these mark.
-COLOURS: tuple[str, ...] = ("#fdd835", "#f9a825", "#ef6c00", "#c62828", "#7b1fa2", "#311b92")
+#: One colour per class, in the classes' order: a light ramp, because the
+#: page multiplies it over the sheet and a dark colour would take the
+#: lettering with it. Pale yellow to light blue, each far enough from its
+#: neighbours to be told apart over the relief -- chosen on the mockup.
+COLOURS: tuple[str, ...] = ("#fff176", "#ffd54f", "#ffab40", "#ff8a65", "#f48fb1", "#ce93d8", "#90caf9")
 
 #: Where each class comes from, for the legend: who set the boundary.
-SOURCES: tuple[str, ...] = ("ours", "SLF", "SLF", "SLF", "SLF", "swisstopo")
+SOURCES: tuple[str, ...] = ("ours", "SLF", "SLF", "SLF", "SLF", "swisstopo", "ours")
 
 #: How opaque a class is drawn, 0 to 255. 150 is what was looked at on the
-#: mockup over the relief at 0.55 and taken as it stood: the six colours stay
-#: apart over the shadow and the sheet's contours read through them.
+#: mockup over the relief at 0.55 and taken as it stood; under multiply it is
+#: also what keeps the darkening partial, so the ground under a class is
+#: ``base × (1 − α + α · colour)`` and never the colour alone.
 ALPHA = 150
 
 

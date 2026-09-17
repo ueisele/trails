@@ -247,10 +247,13 @@ class SlopeTiles:
 
     Palette PNGs cut by :mod:`trails.processing.slope_tiles`
     (analysis/docs/abisko-decisions.md §6.7): how steep the ground is, in the
-    SLF's avalanche classes with one of ours at 25° below them, one colour
-    each with the alpha in the palette. Drawn over the relief shadow and under
-    everything the page draws itself, so a class keeps its hue and the shadow
-    only darkens it, which is how swisstopo and Kartverket lay theirs.
+    SLF's avalanche classes with one of ours at 25° below them and one over
+    55° above, one colour each with the alpha in the palette. Drawn over the
+    relief shadow and under everything the page draws itself, and **drawn
+    multiplied** -- ``mix-blend-mode: multiply`` on the layer -- so the
+    sheet's lettering and lines stay their own black under every class, as ink
+    overprinted on a printed map does. Drawn opaquely the names fell to 3:1
+    against their ground; multiplied, none falls below 10:1 (§6.7).
 
     **A layer the reader switches on, and off by default.** It answers a
     question the paths do not ask -- how steep is it *here*, off them -- and
@@ -405,13 +408,14 @@ PROVIDERS: dict[str, Provider] = {
             weight={8: 9528, 9: 10633, 10: 18582, 11: 26043, 12: 25044, 13: 20474, 14: 14404, 15: 9415},
         ),
         # The slope classes the page colours over the relief (§6.7), z8 to
-        # z15; the weights are the mean per zoom of the first build's 9,330
-        # tiles, 24.7 MB, 2026-09-16. Flat colour in a palette: a quarter of
-        # the relief's 104 MB.
+        # z15. Version 2 since the seven classes and the light palette drawn
+        # multiplied, 2026-09-17; the weights are the mean per zoom of that
+        # build's 9,330 tiles. Flat colour in a palette: a quarter of the
+        # relief's 104 MB.
         slope=SlopeTiles(
-            tiles="/slope/lantmateriet/1/",
+            tiles="/slope/lantmateriet/2/",
             top=15,
-            weight={8: 2328, 9: 2539, 10: 3618, 11: 4532, 12: 4411, 13: 3955, 14: 3172, 15: 2398},
+            weight={8: 2328, 9: 2547, 10: 3646, 11: 4586, 12: 4470, 13: 4010, 14: 3213, 15: 2424},
         ),
     ),
 }
@@ -2067,6 +2071,10 @@ class _Theme(MacroElement):
     _template = Template("""
         {% macro header(this, kwargs) %}
         <style>
+        /* The slope classes overprint the sheet rather than cover it: black
+           lettering multiplied by any colour is still black. The layer's
+           own alpha keeps the darkening partial -- see SlopeTiles. */
+        .leaflet-layer.trails-slope-tiles { mix-blend-mode: multiply; }
         :root {
             color-scheme: light;
             --trails-panel: rgba(255,255,255,0.94);
@@ -2909,6 +2917,11 @@ def create_map(
             # Named for the same reason the relief is: the offline panel must
             # never take it for the sheet, and the drive counts it apart.
             trails_slope=True,
+            # **Multiplied over the sheet, not laid on it.** The class is
+            # `_Theme`'s `mix-blend-mode: multiply` by this class name, so the
+            # lettering under a class keeps its black -- opaque, the names
+            # went to 3:1 against their ground and were the first thing lost.
+            class_name="trails-slope-tiles",
             # Over the relief, whatever order they are switched in.
             z_index=260,
             bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]] if provider.extent else None,
@@ -20072,7 +20085,8 @@ class _Legend(MacroElement):
                 // the ground is drawn -- so the same place; but these have
                 // colours that mean something, so the rows that say what are
                 // drawn under the checkbox, and only while it is on
-                // (decisions §6.7).
+                // (decisions §6.7). The two classes that are ours rather
+                // than the SLF's or swisstopo's say so on their row.
                 var slope = {{ this.slope_name }};
                 var slopeClasses = {{ this.slope_classes_json }};
                 if (slope) {
