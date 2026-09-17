@@ -2688,8 +2688,8 @@ def copying_a_position(page: Any) -> Check:
         page.wait_for_timeout(700)
         return at
 
-    def picked(waiting_ms: int = 3000) -> Any:
-        """What the message says, once a height that is on its way has arrived.
+    def picked(was: str, waiting_ms: int = 3000) -> Any:
+        """What the message says about the tap just made, once its height is in it.
 
         **The position is on the screen at once and the height a moment later**,
         where the page reads it off a tile: the tile is fetched through the
@@ -2700,15 +2700,25 @@ def copying_a_position(page: Any) -> Check:
         waits for a number and gives up on one rather than assuming which page
         it is on. The message fades after 2.6 s and its text stays in the
         document, so waiting past the fade still reads what was said.
+
+        **And the message this tap made, not the one before it.** Driven: the
+        first tap left *342 m* on the screen, the second was asked about
+        immediately, and the wait for *a height* was over before the new tap had
+        redrawn the line -- so the check read the lake's height and compared it
+        with the path's. What was on the screen before the click is passed in,
+        and nothing is read until the line is no longer it.
+
+        Args:
+            was: What the line said before the tap
+            waiting_ms: How long to wait for the new line to carry a height
         """
         waited = 0
-        while waited < waiting_ms:
-            said = page.evaluate(READ_PICK)
-            if said["metres"] is not None:
-                return said
+        said = page.evaluate(READ_PICK)
+        while waited < waiting_ms and (said["text"] == was or said["metres"] is None):
             page.wait_for_timeout(200)
             waited += 200
-        return page.evaluate(READ_PICK)
+            said = page.evaluate(READ_PICK)
+        return said
 
     # 1. armed while a route is being planned: no waypoint, a position.
     page.evaluate("() => window.trailsChrome.picking(true)")
@@ -2773,15 +2783,17 @@ def copying_a_position(page: Any) -> Check:
                     armed: window.trailsChrome.state().picking}; }""",
             at,
         )
+        was = page.evaluate(READ_PICK)["text"]
         page.mouse.click(at["x"], at["y"])
-        told = picked()
+        told = picked(was)
     # And where there is no path within a hundred metres: the model's own
     # reading where there is a model, and nothing at all where there is not.
     page.evaluate(with_map("(at) => { __MAP__.setView(at, 12, {animate: false}); }"), list(SCENE.nowhere))
     page.wait_for_timeout(900)
     at = page.evaluate(middle)
+    was = page.evaluate(READ_PICK)["text"]
     page.mouse.click(at["x"], at["y"])
-    at_sea = picked()
+    at_sea = picked(was)
     page.evaluate(with_map("(v) => { __MAP__.setView([v[0], v[1]], v[2], {animate: false}); }"), seen)
     page.wait_for_timeout(700)
 
@@ -5710,6 +5722,28 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
         }""",
         SCENE.slope_path,
     )
+    # **And it is still on after a reload.** Reported from the phone,
+    # 2026-09-17: every reload switched it off again. The checkbox, the layer
+    # and the rows are read separately, because a tick that survives while the
+    # ground under it does not is the same defect wearing a hat.
+    stands = with_map(
+        """(path) => {
+            const row = [...document.querySelectorAll('.trails-basemap label')]
+              .find(r => (r.textContent || '').indexOf('Slope') >= 0);
+            const box = row ? row.querySelector('input[type=checkbox]') : null;
+            const rows = document.querySelector('.trails-slope-classes');
+            let held = false;
+            __MAP__.eachLayer(l => { if (l._url && String(l._url).indexOf(path) >= 0) { held = true; } });
+            return {ticked: box ? box.checked : null, held: held,
+                    rows: rows ? getComputedStyle(rows).display : 'none'}; }"""
+    )
+    page.reload(timeout=120_000)
+    page.wait_for_timeout(SETTLE_MS)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(1200)
+    reloaded = page.evaluate(stands, SCENE.slope_path)
+    drawn_again = drawn()[1]
+
     if switched is True:
         page.evaluate(
             """() => {
@@ -5720,6 +5754,13 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
         page.wait_for_timeout(800)
     after = drawn()[1]
     rows_after = page.evaluate(rows_shown)
+    # And off is remembered as well as on: a reader who put it away has put it
+    # away, and the default is what a reader who never touched it gets.
+    page.reload(timeout=120_000)
+    page.wait_for_timeout(SETTLE_MS)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(1200)
+    off_again = page.evaluate(stands, SCENE.slope_path)
 
     return Check(
         "the slope classes over the relief",
@@ -5743,8 +5784,15 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
                 note=f"{relief_at} < {settings and settings.get('above')} < {lines_at}",
             ),
             Reading("the panel names the tree while the layer is off", priced, True),
+            # The whole of what was reported: a reload used to put it away.
+            Reading("switched on, it survives a reload", reloaded["ticked"], True),
+            Reading("with its layer on the map", reloaded["held"], True),
+            Reading("its tiles drawn again", drawn_again > 0, True, note=f"{drawn_again} answered"),
+            Reading("and its rows still explaining the colours", reloaded["rows"], "block"),
             Reading("and the checkbox takes it off again", after, 0),
             Reading("with its rows", rows_after, "none"),
+            Reading("and that survives a reload too", off_again["ticked"], False),
+            Reading("with nothing of it on the map", off_again["held"], False),
         ],
     )
 

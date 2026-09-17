@@ -20086,6 +20086,43 @@ class _Legend(MacroElement):
                     line.appendChild(name);
                     picked.appendChild(line);
                 });
+                // **A switch a reader flipped stays flipped over a reload.**
+                // Reported from the phone, 2026-09-17: *"Nach jedem Neuladen
+                // wird Slope Layer wieder deaktiviert."* Both of these say how
+                // the ground underneath is drawn, and that is a state a reader
+                // is *in* while they walk -- like the theme, like the offline
+                // switch, like plan mode's *stay on paths*, all of which this
+                // page already remembers. A page reloaded in a valley must not
+                // quietly undo what somebody chose on the way up.
+                //
+                // **Per map, because both maps share one origin.** The key
+                // carries the same name the caches and the offline switch do,
+                // so the second map cannot answer for the first.
+                //
+                // Storage can be denied outright -- Safari in private browsing
+                // throws on read, not only on write -- and then the build's own
+                // default stands, which is what it did before this existed.
+                var GROUND_KEY = {{ this.ground_key_json }};
+
+                function groundKept(which, fallback) {
+                    try {
+                        var said = window.localStorage.getItem(GROUND_KEY + which);
+                        return said === null ? fallback : said === 'on';
+                    } catch (blocked) { return fallback; }
+                }
+
+                function keepGround(which, want) {
+                    try { window.localStorage.setItem(GROUND_KEY + which, want ? 'on' : 'off'); } catch (blocked) { return; }
+                }
+
+                // Nothing is remembered about a layer the page no longer has:
+                // the switch below draws what the reader kept, and the map is
+                // put into that state rather than the other way round.
+                function standAs(layer, want) {
+                    if (want && !map.hasLayer(layer)) { map.addLayer(layer); }
+                    if (!want && map.hasLayer(layer)) { map.removeLayer(layer); }
+                }
+
                 // **The relief shadow belongs to the sheet, not to the layers.**
                 // It is neither a line nor a point and has no colour for the
                 // legend to explain; it answers how the ground underneath is
@@ -20101,9 +20138,11 @@ class _Legend(MacroElement):
                     var shadeTick = document.createElement('input');
                     shadeTick.type = 'checkbox';
                     shadeTick.style.cssText = 'flex:none;margin:0';
-                    shadeTick.checked = map.hasLayer(relief);
+                    shadeTick.checked = groundKept('relief', map.hasLayer(relief));
+                    standAs(relief, shadeTick.checked);
                     shadeTick.addEventListener('change', function () {
-                        if (shadeTick.checked) { map.addLayer(relief); } else { map.removeLayer(relief); }
+                        standAs(relief, shadeTick.checked);
+                        keepGround('relief', shadeTick.checked);
                     });
                     var word = document.createElement('span');
                     word.textContent = 'Relief shading';
@@ -20127,7 +20166,8 @@ class _Legend(MacroElement):
                     var slopeTick = document.createElement('input');
                     slopeTick.type = 'checkbox';
                     slopeTick.style.cssText = 'flex:none;margin:0';
-                    slopeTick.checked = map.hasLayer(slope);
+                    slopeTick.checked = groundKept('slope', map.hasLayer(slope));
+                    standAs(slope, slopeTick.checked);
                     var slopeWord = document.createElement('span');
                     slopeWord.textContent = 'Slope classes';
                     classing.appendChild(slopeTick);
@@ -20156,8 +20196,9 @@ class _Legend(MacroElement):
                     slopeRows.style.display = slopeTick.checked ? '' : 'none';
                     picked.appendChild(slopeRows);
                     slopeTick.addEventListener('change', function () {
-                        if (slopeTick.checked) { map.addLayer(slope); } else { map.removeLayer(slope); }
+                        standAs(slope, slopeTick.checked);
                         slopeRows.style.display = slopeTick.checked ? '' : 'none';
+                        keepGround('slope', slopeTick.checked);
                     });
                 }
                 if (bases.length) { body.appendChild(picked); }
@@ -20288,6 +20329,11 @@ class _Legend(MacroElement):
         # And the slope overlay's, with the rows that explain its colours.
         self.slope_name = "null"
         self.slope_classes_json = "[]"
+        # What the two switches above the layers remember themselves under,
+        # filled in at render from the map's own companions: the same name the
+        # caches and the offline switch carry, so two maps on one origin do not
+        # answer for each other.
+        self.ground_key_json = _script_json(f"{ROOT.cache}-ground-")
 
     def render(self, **kwargs: Any) -> Any:
         """Collect the base layers, then render.
@@ -20317,6 +20363,8 @@ class _Legend(MacroElement):
         slope = getattr(self._parent, MAP_SLOPE_ATTR, None) if self._parent is not None else None
         self.slope_name = slope.get_name() if slope is not None else "null"
         self.slope_classes_json = _script_json(SlopeTiles.classes()) if slope is not None else "[]"
+        companions = getattr(self._parent, MAP_COMPANIONS_ATTR, ROOT) if self._parent is not None else ROOT
+        self.ground_key_json = _script_json(f"{companions.cache}-ground-")
         return super().render(**kwargs)
 
 

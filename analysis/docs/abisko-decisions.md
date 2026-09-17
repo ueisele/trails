@@ -832,6 +832,18 @@ the two that are ours saying so, and the line *steepness of the ground down its 
 profile grades the path* under it, shown only while it is on. **Off when the page opens**: it answers a question off the paths, and an
 eighth of the ground coloured is a lot of colour for a reader following a marked trail.
 
+**And what the reader flipped is remembered.** Reported from the phone on 2026-09-17:
+*"Nach jedem Neuladen wird Slope Layer wieder deaktiviert."* Both switches in this panel say how
+the ground underneath is drawn, and that is a state a reader is *in* while they walk — like the
+theme, like the offline switch, like plan mode's *stay on paths*, all of which the page already
+remembers. A page reloaded in a valley must not undo what somebody chose on the way up, and that
+holds in both directions: the relief turned off in full sun stays off too. Kept in `localStorage`
+under the name the caches and the offline switch already carry (`trails-abisko-ground-slope`), so
+the two maps on one origin cannot answer for each other; where storage is denied outright — Safari
+in private browsing throws on read, not only on write — the build's own default stands, which is
+what happened before this existed. The checkbox is drawn from what was kept and the map is then put
+into that state, rather than the tick saying one thing and the ground showing another.
+
 **Offline it is kept whether or not it is on.** The switch is the reader's to flip in the field,
 and a class that was never kept is a blank tile where a wall is. So the worker takes a fourth
 prefix, the run walks each level a fourth time after the relief, the panel prices the tree at its
@@ -2169,6 +2181,13 @@ fetches do not surface in Playwright's request events, so counting them takes a 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-17, third of the day** — the two switches over the sheet remember themselves (§6.7),
+  reported from the phone: every reload put the slope classes away again. Kept per map in
+  `localStorage`, beside the names the caches and the offline switch carry; the relief goes with
+  it, so a shadow turned off in full sun stays off. Denied storage leaves the build's default, as
+  before. Driven on both pages, with two reloads inside the slope check: on survives one, off
+  survives one.
 
 - **2026-09-17, second of the day** — the position picker reads the tapped place's own height off
   the height tiles (§6.8), on Uwe's observation from the phone that it gave heights for paths

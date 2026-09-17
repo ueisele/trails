@@ -2335,6 +2335,45 @@ class TestTwoMapsOnOneOrigin:
         maps.add_legend(first, "Lomsdal", [maps.LegendRow("a line", "#000", None)])
         assert "var slope = null;" in first.get_root().render()
 
+    def test_the_two_ground_switches_are_remembered_across_a_reload(self, tmp_path):
+        """Reported from the phone, 2026-09-17: *"Nach jedem Neuladen wird Slope
+        Layer wieder deaktiviert."* Both switches say how the ground underneath
+        is drawn, which is a state a reader is *in* while they walk — as the
+        theme is, as the offline switch is, as plan mode's *stay on paths* is,
+        all of which this page already remembers. A page reloaded in a valley
+        must not undo what somebody chose on the way up, in either direction:
+        the shadow turned off in full sun stays off too.
+
+        **Keyed per map, because both maps share one origin**, under the same
+        name the caches and the offline switch carry. And where storage is
+        denied — Safari in private browsing throws on read, not only on write —
+        the build's own default stands, which is what happened before this
+        existed."""
+        fmap = maps.create_map(
+            bounds=(18.15, 68.17, 19.0, 68.46),
+            base=maps.BaseMap.LANTMATERIET_TOPO,
+            extra_bases=(),
+            companions=maps.Companions.named("abisko"),
+        )
+        maps.add_legend(fmap, "Abisko", [maps.LegendRow("a line", "#000", None)])
+        html = fmap.get_root().render()
+        assert 'var GROUND_KEY = "trails-abisko-ground-";' in html
+        # What was kept decides, and the build's state is only the fallback.
+        assert "shadeTick.checked = groundKept('relief', map.hasLayer(relief));" in html
+        assert "slopeTick.checked = groundKept('slope', map.hasLayer(slope));" in html
+        # The map is then put into that state, rather than the checkbox being
+        # drawn one way and the ground another.
+        assert "standAs(relief, shadeTick.checked);" in html
+        assert "standAs(slope, slopeTick.checked);" in html
+        assert "keepGround('relief', shadeTick.checked);" in html
+        assert "keepGround('slope', slopeTick.checked);" in html
+        # Denied storage is the build's default and not a crash.
+        assert "} catch (blocked) { return fallback; }" in html
+        # The first map's key is not the second's.
+        first = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_legend(first, "Lomsdal", [maps.LegendRow("a line", "#000", None)])
+        assert 'var GROUND_KEY = "trails-ground-";' in first.get_root().render()
+
     def test_the_slope_classes_are_never_taken_for_the_sheet(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
