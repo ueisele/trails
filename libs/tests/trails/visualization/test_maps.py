@@ -9312,3 +9312,68 @@ class TestGlyphPerRow:
 
         html = fmap.get_root().render()
         assert '"glyphs": []' in html
+
+
+class TestPinLinks:
+    """A pin can say where its timetable is; a line always could."""
+
+    @pytest.fixture
+    def quays(self) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame(
+            {
+                "name": ["Bønå hurtigbåtkai", "Stranda"],
+                "lines": ["18-167", None],
+                "entur_url": ["https://entur.no/nearby-stop-place-detail?id=NSR:StopPlace:48932", None],
+                "geometry": [Point(12.75372, 65.64458), Point(12.19784, 65.46645)],
+            },
+            crs="EPSG:4326",
+        )
+
+    def test_a_quay_carries_its_link_and_one_without_carries_none(self, quays):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_points(
+            fmap,
+            quays,
+            name="Quays",
+            popup_fields={"name": "Quay", "lines": "Boat lines"},
+            link_fields={"entur_url": "→ Departures at Entur"},
+            link_heading="Published elsewhere, not by this map",
+        )
+
+        html = fmap.get_root().render()
+        assert "Departures at Entur" in html
+        assert "nearby-stop-place-detail?id=NSR:StopPlace:48932" in html
+        # Read back what each marker actually carries: three values for the
+        # served quay, and for the other one only its name, because a trailing
+        # empty says nothing the builder cannot assume.
+        # Folium writes a trailing comma, which is fine for JavaScript and not for JSON.
+        popups = [json.loads(re.sub(r",\s*\]$", "]", found)) for found in re.findall(r'"popup": (\[.*?\]),', html, re.S)]
+        assert ["Bønå hurtigbåtkai", "18-167", "https://entur.no/nearby-stop-place-detail?id=NSR:StopPlace:48932"] in popups
+        assert ["Stranda"] in popups
+
+    def test_without_link_fields_a_pin_popup_is_what_it_was(self, quays):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_points(fmap, quays, name="Quays", popup_fields={"name": "Quay"})
+
+        html = fmap.get_root().render()
+        assert '"links": []' in html
+
+
+class TestGlyphColumnMustExist:
+    """A caller that meant to say something per row and said nothing."""
+
+    def test_a_missing_glyph_column_stops_the_build(self):
+        """Measured once: the load that fills this column was dropped by a bad
+        patch, and 49 quays that should have been ships and anchors were drawn
+        as the layer's default while the build reported success."""
+        quays = gpd.GeoDataFrame({"name": ["Bønå"], "geometry": [Point(12.75, 65.64)]}, crs="EPSG:4326")
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        with pytest.raises(ValueError, match="which it does not carry"):
+            maps.add_points(fmap, quays, name="Ferry quays [OSM]", icon_field="glyph")
+
+    def test_an_empty_layer_is_not_an_error(self):
+        # Abisko draws no quay at all, and an empty layer carries no columns
+        # worth complaining about.
+        empty = gpd.GeoDataFrame({"name": [], "geometry": []}, crs="EPSG:4326")
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        assert maps.add_points(fmap, empty, name="Ferry quays [OSM]", icon_field="glyph") is not None

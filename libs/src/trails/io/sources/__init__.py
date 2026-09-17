@@ -1,6 +1,7 @@
 """Trail data sources (Geonorge, Naturbase, OpenStreetMap, etc.)."""
 
 from . import (
+    entur,
     geonorge,
     geonorge_order,
     hoydedata,
@@ -21,6 +22,7 @@ from . import (
 from .base import CachedTrailDataSource, DatasetInfo, SourceMetadata, TrailDataSource
 
 __all__ = [
+    "entur",
     "geonorge",
     "geonorge_order",
     "hoydedata",

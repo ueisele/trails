@@ -1763,6 +1763,25 @@ two new OSM layers carry Trofors and Mosjøen stations, the bus stops within the
 (447 in the zone on the first build, the whole of Helgeland's network) and the camp sites along
 the way in.
 
+## A quay says whether a boat calls, and links its timetable
+
+Settled 2026-09-17, written up in the Abisko decisions, §9.32, and Norwegian only: Abisko draws
+no quay. Until then the ship meant *OSM placed this* and the anchor meant *the place-name
+register placed this*, which the pin's colour said already. Anddalsvågen and Anddalsvåg are one
+quay 12 m apart, and all thirteen of the register's `ferjekai` are doubled the same way.
+
+**Entur decides it now.** A quay is a ship where the national journey planner has a stop with a
+boat line within 150 m, and an anchor where it has none. Measured: 45 of the 49 quays match
+within 77 m, and those that do not are 332 m or further, so the figure sits in a gap rather
+than on a slope. Six pins end up anchors: D/S-kai Hestun, Fiskerihavna, Masterberget and Stranda
+from the register, all of them 10 km or more from the park boundary and none of them a way in,
+and Vikdal ferjekai twice over, which both sources place and nothing sails to.
+
+**What a quay's popup gains**: the line codes, the authority behind them, the national stop id
+and a link to the live departure board. The three quays that reach Visten — Bønå, Visthus,
+Visten — are one express-boat line, 18-167, run by Nordland fylkeskommune. Brønnøysund
+kystrutekai carries HUR and HAV, Hurtigruten and Havila, which alternate on the coastal route.
+
 ## Licence: in the file, not in the interface
 
 The graph carries OpenStreetMap geometry (ODbL, share-alike) and UT.no tracks

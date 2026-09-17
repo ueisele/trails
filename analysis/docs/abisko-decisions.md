@@ -2535,11 +2535,88 @@ Lomsdal-Visten holds Bustadmoen, Gåsvasshytta, Kvalfors skogstue, Lavasshytta a
 which the shelter selector does not ask for; N50 has all five, so nothing is lost today. OSM's 38
 car parks over Abisko against Topografi 50's 3 were not added.
 
+### 9.32 A quay says whether a boat calls, and links its timetable — settled, 2026-09-17
+
+Uwe, on the pins of §9.31: *"Was ist der Unterschied zwischen Anker und Boot Symbol?
+Anddalsvågen über SSR ist Anker und Anddalsvåg über OSM ist Boot."*
+
+**There was no difference, and the question found the one place §9.31 missed.** The ship was the
+OSM layer and the anchor was the place-name register's, so the glyph said the source, which the
+colour already said. Worse, it read as a distinction about the place. Anddalsvågen and Anddalsvåg
+are one quay 12 m apart, drawn twice, in two colours, with two glyphs. All thirteen of the
+register's `ferjekai` are like that: each has an OSM ferry terminal within 100 m.
+
+**The first answer was wrong too, and was withdrawn.** Splitting on the register's own type —
+`ferjekai` a ship, `kai` and `havn` an anchor — still tells a reader nothing they can act on, and
+Uwe said so: *"Deine Trennung ist mir etwas zu schwammig."* The rule that had produced the
+count was worse still: distance to an OSM ferry terminal, which a measurement then broke. At
+200 m Masterberget is an anchor; at 400 m it is a ship, because Hestøya ferjekai stands 324 m
+away. A glyph decided by which round number was picked is not a distinction.
+
+**Decided: the glyph is the timetable.** Entur is Norway's national data hub for public
+transport; its journey-planner GraphQL API needs no key, only an `ET-Client-Name` header. Over
+the Lomsdal-Visten box it holds 457 stop places, 37 of them served by water. A quay is drawn as a
+**ship** where an Entur stop with a boat line stands within **150 m**, and as an **anchor**
+where none does. The popup gains the line codes, the authority behind them and a link to the
+stop's live departure board, under the same heading the routes' links carry: it is Entur's page,
+not this map's.
+
+| measured, 2026-09-17 | |
+|---|---|
+| quays this map draws | 49 (32 OSM, 17 register) |
+| matched to an Entur stop | 45, the furthest at **77 m** |
+| unmatched | 6, the nearest at **332 m** |
+| lines found | 18-111, 18-115, 18-142, 18-151, 18-152, 18-153, 18-158, 18-159, 18-162, 18-167, 18-171, 18-172, 18-211, HUR, HAV |
+| authorities | Nordland fylkeskommune, Hurtigruten, Havila |
+
+**The gap between 77 m and 332 m is why 150 m is not a threshold anyone has to tune.** Nothing
+sits between them, so any figure in that range gives the same answer, and the measurement is
+recorded rather than the number defended.
+
+**Three findings that shaped the loader.** The lines are read off `quays { lines }` and not off a
+departure window: a window answers *what sails this week*, which would make a build depend on the
+day it ran and lose a seasonal line out of season. It also found both Hurtigruten and Havila at
+Brønnøysund kystrutekai, which alternate on the coastal route. Second, a line's own
+`transportMode` is checked and not the stop's: Visthus carries boat line 18-167 **and** bus line
+18-166 to Stokkasjøen, and a bus does not make a quay served. Third, a stop place carrying the
+water mode but no water line is **left out** — Vikdal ferjekai and Toftsundet hurtigbåtkai, and
+neither has a departure in a sixty-day window. Registered is not served, and telling those apart
+is what the loader is for.
+
+**The link form was measured, not assumed.** `https://entur.no/nearby-stop-place-detail?id=<id>`
+renders the stop and its board; the shorter `/nearby/<id>` answers 200 and renders *Dead end*.
+Both read in Firefox on this box. An id Entur does not know renders an empty board rather than an
+error, which is why only ids that came from Entur itself are ever written into a link.
+
+**Attribution.** Entur's data is NLOD 2.0 and wants crediting. It is not a chain source, so no
+exported GPX draws on it; the page's *Sources* panel reads the whole credits list, so the entry
+goes there and names the date it was read.
+
+**Six anchors and not four.** The four the register calls `kai` or `havn` — D/S-kai Hestun,
+Fiskerihavna, Masterberget, Stranda — plus Vikdal ferjekai, which both sources place and which
+nothing sails to, so it is an anchor in each. That is the rule earning its keep: a quay named
+*ferjekai* in two registers, and no boat.
+
+**A guard, paid for by getting it wrong.** A bad patch dropped the load that fills the glyph
+column, and the build drew all 49 quays as the layer's default house and reported success.
+`add_points` now refuses a layer whose ``icon_field`` names a column it does not carry, by name
+and at build time. An empty layer is exempt, because Abisko's quay layer is one.
+
+**Norway only.** Abisko draws no quay at all, so nothing there changes. The Swedish equivalent
+for the six railway stations would be a different service and is not done.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-17, seventh of the day** — a quay's glyph is its timetable (§9.32), after Uwe asked
+  what separates the anchor from the ship and found that nothing did. Entur, the national
+  journey planner, now says whether a boat calls: ship where a boat line stands within 150 m,
+  anchor where none does, and the popup carries the line, the authority and a link to the live
+  board. Two answers of mine were withdrawn on the way, one of them broken by its own
+  measurement. 43 quays are ships, 6 are anchors; driven clean at 720 readings and **published**.
 
 - **2026-09-17, seventh of the day** — Lomsdal-Visten gets all three tile trees off Kartverket's
   own model (§6.10), asked for from the phone: *"Diese Overlays möchte ich jetzt auch noch für

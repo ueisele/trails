@@ -4726,6 +4726,8 @@ def add_points(
     icon: str = "house-chimney",
     icon_field: str | None = None,
     popup_fields: dict[str, str] | None = None,
+    link_fields: dict[str, str] | None = None,
+    link_heading: str | None = None,
     label_field: str | None = "name",
     search_field: str | None = None,
     source: str | None = None,
@@ -4750,8 +4752,16 @@ def add_points(
             unless ``icon_field`` says otherwise
         icon_field: Column holding a glyph name per row. A row whose value is
             empty falls back to ``icon``; a name this page does not draw is
-            refused at build time, by name, as ``icon`` is.
+            refused at build time, by name, as ``icon`` is. **A column the frame
+            does not have at all is refused too**, because that is a caller that
+            meant to say something per row and said nothing: measured once, 49
+            quays that should have been ships and anchors were drawn as the
+            layer's default and the build went on without a word.
         popup_fields: Mapping of column name to popup label
+        link_fields: Mapping of a column holding a URL to the link text to show
+            for it, as :func:`add_trails` takes. A quay says where its timetable
+            is; a line has always been able to, and a point could not.
+        link_heading: Line set above the links, saying whose pages they are
         label_field: Column used for the hover tooltip
         search_field: Column holding the text :func:`add_search` matches against;
             defaults to ``label_field``
@@ -4768,10 +4778,19 @@ def add_points(
     if gdf.crs is not None and gdf.crs.to_epsg() != 4326:
         gdf = gdf.to_crs(epsg=4326)
 
+    # Said at build time, and about the layer rather than about a row: a missing
+    # column is missing from every row, so every pin would quietly take ``icon``.
+    if icon_field and len(gdf) and icon_field not in gdf.columns:
+        raise ValueError(f"layer {name!r} asks for its glyph from {icon_field!r}, which it does not carry; it has " + ", ".join(sorted(gdf.columns)))
+
     group = folium.FeatureGroup(name=f"{name} ({len(gdf)})", show=show)
     named: list[dict[str, object]] = []
     glyphs: list[str] = []
-    shape = _popup_shape(gdf, popup_fields or {}, source=source) if (popup_fields or source) else None
+    shape = (
+        _popup_shape(gdf, popup_fields or {}, link_fields=link_fields, source=source, link_heading=link_heading)
+        if (popup_fields or link_fields or source)
+        else None
+    )
 
     for _, row in gdf.iterrows():
         geometry = row.geometry

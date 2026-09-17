@@ -56,6 +56,7 @@ import dataclasses
 import math
 import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
@@ -96,6 +97,7 @@ from trails.io.export.gpx import (
     export_to_gpx,
 )
 from trails.io.sources import (
+    entur,
     geonorge,
     hoydedata,
     lantmateriet,
@@ -269,6 +271,16 @@ OSM_SHELTER_DEFAULT_GLYPH = "person-shelter"
 #: Where the way in ends.
 OSM_STOP_GLYPHS = {"station": "train", "halt": "train", "bus_stop": "bus"}
 
+#: A quay's glyph, by whether a scheduled boat calls there.
+#:
+#: **The ship was the OSM layer and the anchor was the register's, which said
+#: the source twice** -- the colour says it already -- and told a reader nothing
+#: about the place. Asked on 2026-09-17: *"Was ist der Unterschied zwischen
+#: Anker und Boot Symbol?"* There was none. So the glyph is the timetable now:
+#: a ship where Entur has a boat line calling, an anchor where it has none, and
+#: the quay's popup carries the line, whose it is and a link to its board.
+QUAY_SERVED_GLYPH, QUAY_UNSERVED_GLYPH = "ship", "anchor"
+
 #: Topografi 50's cabin classes, in the loader's English: a *fjällstation* and
 #: a *turiststuga* have beds, a *raststuga* is the unlocked emergency kind, a
 #: *vindskydd* is a roof. The *naturum* is a visitor centre and says so.
@@ -314,6 +326,35 @@ def pin_colour(source: str) -> tuple[str, str]:
     """
     name = PIN_COLOUR_OF[source]
     return name, maps.PIN_COLOURS[name]
+
+
+def attach_boat_calls(quays: gpd.GeoDataFrame, stops: gpd.GeoDataFrame, within_m: float, metric_crs: str) -> gpd.GeoDataFrame:
+    """Say of each quay whether a scheduled boat calls there, and under which line.
+
+    **Measured before the distance was chosen.** Over Lomsdal-Visten on
+    2026-09-17, 45 of the 49 quays this map draws stand within **77 m** of an
+    Entur stop and the other four are **332 m** or further, so anything between
+    is the same answer and the figure is not a threshold anyone has to tune.
+
+    Args:
+        quays: Points from either source, carrying whatever names them
+        stops: What :meth:`entur.Source.water_stops` returned
+        within_m: How far a quay may look for its stop
+        metric_crs: Projected CRS the distance is measured in
+
+    Returns:
+        A copy carrying ``boat_lines``, ``boat_operator``, ``boat_stop``,
+        ``entur_url`` and the ``glyph`` those decide.
+    """
+    fields = {"lines": "boat_lines", "operator": "boat_operator", "stop_id": "boat_stop", "entur_url": "entur_url"}
+    attached = attach_nearest(quays, stops, fields, max_distance_m=within_m, metric_crs=metric_crs) if len(quays) else quays.copy()
+    for column in fields.values():
+        if column not in attached:
+            attached[column] = pd.Series(dtype=object)
+    served = attached["boat_lines"].notna()
+    attached["glyph"] = pd.Series(QUAY_UNSERVED_GLYPH, index=attached.index)
+    attached.loc[served, "glyph"] = QUAY_SERVED_GLYPH
+    return attached
 
 
 def shelter_glyphs(shelters: gpd.GeoDataFrame) -> pd.Series:
@@ -436,9 +477,28 @@ CABIN_POPUP_FIELDS = {
 
 TERMINAL_POPUP_FIELDS = {
     "name": "Quay",
+    "boat_lines": "Boat lines",
+    "boat_operator": "Operated by",
+    "boat_stop": "Entur stop",
     "operator": "Operator",
     "osm_id": "OSM ID",
 }
+
+#: The register's quays, which the shared SSR popup cannot describe: it has no
+#: room for a timetable, and every other SSR layer would grow two empty rows.
+QUAY_POPUP_FIELDS = {
+    "name": "Name",
+    "kind": "Type",
+    "boat_lines": "Boat lines",
+    "boat_operator": "Operated by",
+    "boat_stop": "Entur stop",
+    "importance": "Importance",
+    "kommune": "Municipality",
+}
+
+#: The live departure board of the quay's stop, under the same heading the
+#: routes' links carry: it is Entur's page and not this map's.
+ENTUR_LINK_FIELDS = {"entur_url": "→ Departures at Entur"}
 
 #: A click now selects the arm of the road under the cursor rather than every
 #: arm sharing its name, so both figures are needed and neither alone is true:
@@ -533,6 +593,9 @@ UT_PUBLISHED_FIELDS = {"ut_summary": "UT.no states"}
 #: refuses so that a plan does not read as a walk somebody took. Two files of
 #: one route, and only the words tell them apart.
 PUBLISHED_ELSEWHERE_HEADING = "Published elsewhere, not by this map"
+
+#: What the page's *Sources* panel calls the timetable data.
+ENTUR = "Entur"
 
 #: Clickable links in the UT.no popup. The route page and the park's own
 #: description carry everything the geometry cannot: season, difficulty, the
@@ -2213,6 +2276,8 @@ class PointLayer(NamedTuple):
             dot's CSS colour
         icon: The pin's glyph, for every row ``icon_field`` says nothing about
         icon_field: Column holding a glyph per row, see :func:`maps.add_points`
+        link_fields: Mapping of a column holding a URL to its link text
+        link_heading: Line set above those links, saying whose pages they are
         radius: The dot's radius
         label_field: Column the pin's hover label reads
         show: Whether the layer starts switched on
@@ -2228,6 +2293,8 @@ class PointLayer(NamedTuple):
     color: str = "darkred"
     icon: str = "house"
     icon_field: str | None = None
+    link_fields: dict[str, str] | None = None
+    link_heading: str | None = None
     radius: float = 6.0
     label_field: str | None = "name"
     show: bool = True
@@ -2560,6 +2627,19 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     stops["glyph"] = stops["kind"].map(OSM_STOP_GLYPHS)
     camp_sites = gpd.clip(osm_source.fetch_camp_sites(search_bounds, force_download=args.force_download), zone)
 
+    print("\nLoading scheduled boat calls (Entur)...")
+    boats = entur.Source(cache_dir=args.cache_dir).water_stops(search_bounds, force_download=args.force_download)
+    lines_found = sorted({line for value in boats["lines"] for line in value.split(IDENTITY_SEPARATOR)}) if len(boats) else []
+    print(f"  {len(boats)} stops a boat line calls at: {lines_found}")
+    terminals = attach_boat_calls(terminals, boats, args.boat_stop_m, norway.METRIC_CRS)
+    ssr_quays = attach_boat_calls(ssr_quays, boats, args.boat_stop_m, norway.METRIC_CRS)
+    unserved = [
+        f"{name} [{source}]"
+        for source, frame in (("OSM", terminals), ("SSR", ssr_quays))
+        for name in frame.loc[frame["glyph"] == QUAY_UNSERVED_GLYPH, "name"].dropna()
+    ]
+    print(f"  quays with no scheduled call within {args.boat_stop_m:g} m: {len(unserved)} ({', '.join(unserved) if unserved else 'none'})")
+
     # Farms and sæters are the actual starting points here (Bønnåa, Strompdalen,
     # Stavassgården), but the region has over a thousand of them, so they are
     # limited to a narrow band around the boundary.
@@ -2654,7 +2734,18 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     points = [
         # The way in first: where the train and the bus stop, and where the boat puts in.
         PointLayer(stops, "Stations and bus stops [OSM]", osm_hex, STOP_POPUP_FIELDS, "stop", "OSM", color=osm_pin, icon="bus", icon_field="glyph"),
-        PointLayer(terminals, "Ferry quays [OSM]", osm_hex, TERMINAL_POPUP_FIELDS, "ferry quay", "OSM", color=osm_pin, icon="ship"),
+        PointLayer(
+            terminals,
+            "Ferry quays [OSM]",
+            osm_hex,
+            TERMINAL_POPUP_FIELDS,
+            "ferry quay",
+            "OSM",
+            color=osm_pin,
+            icon_field="glyph",
+            link_fields=ENTUR_LINK_FIELDS,
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
+        ),
         PointLayer(
             huts, "Huts and shelters [N50]", n50_hex, CABIN_POPUP_FIELDS, "cabin", "N50", color=n50_pin, icon_field="glyph", label_field="navn"
         ),
@@ -2680,7 +2771,18 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             # Two of these have no N50 building at all, so the join above cannot
             # reach them; as their own layer none of the register's huts is lost.
             PointLayer(ssr_huts, "Named huts [SSR]", ssr_hex, SSR_POINT_POPUP_FIELDS, "hut", "SSR", color=ssr_pin),
-            PointLayer(ssr_quays, "Quays [SSR]", ssr_hex, SSR_POINT_POPUP_FIELDS, "quay", "SSR", color=ssr_pin, icon="anchor"),
+            PointLayer(
+                ssr_quays,
+                "Quays [SSR]",
+                ssr_hex,
+                QUAY_POPUP_FIELDS,
+                "quay",
+                "SSR",
+                color=ssr_pin,
+                icon_field="glyph",
+                link_fields=ENTUR_LINK_FIELDS,
+                link_heading=PUBLISHED_ELSEWHERE_HEADING,
+            ),
             PointLayer(shelters, "Huts and shelters [OSM]", osm_hex, SHELTER_POPUP_FIELDS, "shelter", "OSM", color=osm_pin, icon_field="glyph"),
             PointLayer(camp_sites, "Camp sites [OSM]", osm_hex, CAMP_SITE_POPUP_FIELDS, "camp site", "OSM", color=osm_pin, icon="tent"),
             # The buildings that are huts by type only, as dots and off: a
@@ -2731,8 +2833,15 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         ]
     )
 
+    # **Entur is credited beside the rest and named by no export.** It is not a
+    # chain source, so no GPX draws on it; what it contributes is the quays'
+    # timetable, which lives on the page. The page's *Sources* panel reads the
+    # whole list, so this is where NLOD's attribution is discharged.
     credits = Credits(
-        sources=source_credits(loaded.versions, NORWAY_SOURCE_TERMS, NORWAY_SOURCE_METADATA),
+        sources={
+            **source_credits(loaded.versions, NORWAY_SOURCE_TERMS, NORWAY_SOURCE_METADATA),
+            ENTUR: [credit(ENTUR, entur.METADATA.license, "", entur.METADATA.attribution, entur.METADATA.url, f"read {date.today()}")],
+        },
         heights=height_credit(hoydedata.METADATA),
         protected=protected_credit(naturbase.METADATA),
         ascent=ascent_method(params, NORWAY_HEIGHT_MODEL),
@@ -3253,6 +3362,8 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
                 icon=point.icon,
                 icon_field=point.icon_field,
                 popup_fields=point.popup_fields,
+                link_fields=point.link_fields,
+                link_heading=point.link_heading,
                 label_field=point.label_field,
                 source=point.source,
                 point_type=point.point_type,
@@ -3481,6 +3592,9 @@ def main() -> int:
         "--approach-km", type=float, default=15.0, help="Width of the approach zone around the park (km); not for a park built over a box"
     )
     parser.add_argument("--trailhead-km", type=float, default=2.0, help="Band around the park in which farms and sæters are shown as trailheads (km)")
+    parser.add_argument(
+        "--boat-stop-m", type=float, default=150.0, help="How far a quay may look for the Entur stop that says whether a boat calls there (m)"
+    )
     parser.add_argument("--names-km", type=float, default=2.0, help="Band around the park covered by the terrain-name layer (valleys, passes, peaks)")
     parser.add_argument(
         "--ut-routes",
