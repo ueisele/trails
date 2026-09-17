@@ -251,7 +251,14 @@ TRAILHEAD_PLACE_TYPES = ("farm", "isolated_dwelling")
 # source's own class, and its colour is the source's, one per source.
 
 #: The pin colour of each source, by the names :data:`maps.PIN_COLOURS` knows.
-PIN_COLOUR_OF = {"N50": "darkred", "Topografi 50": "darkred", "OSM": "darkblue", "SSR": "purple", "Leder": "orange"}
+PIN_COLOUR_OF = {
+    "N50": "darkred",
+    "Topografi 50": "darkred",
+    "OSM": "darkblue",
+    "SSR": "purple",
+    "Leder": "orange",
+    "Entur": "cadetblue",
+}
 
 #: N50's service level, as a glyph: a bed where the hut is staffed or
 #: self-service, a house where it is not, a roof for a gapahuk. A building that
@@ -268,8 +275,27 @@ OSM_HUT_GLYPHS = {"alpine_hut": "bed", "wilderness_hut": "house"}
 OSM_SHELTER_GLYPHS = {"basic_hut": "house"}
 OSM_SHELTER_DEFAULT_GLYPH = "person-shelter"
 
-#: Where the way in ends.
+#: Where the way in ends, as OSM tags it. Norway draws its stops from Entur
+#: instead, which knows what calls there; this is what Sweden has.
 OSM_STOP_GLYPHS = {"station": "train", "halt": "train", "bus_stop": "bus"}
+
+#: The layers Entur's stop places are drawn in: the mode, the layer's name, what
+#: a waypoint beside one is called after, its glyph, and whether it starts on.
+#:
+#: **A stop goes in the first of these it is served under**, so Mosjøen stasjon,
+#: which four bus lines also call at, is a train station and not a bus stop, and
+#: its popup names all five lines either way. Water is not a layer here: a boat
+#: call is drawn on the quay it puts in at, which is a place a walker can stand.
+#:
+#: **The buses start switched off.** There are 401 of them around this park
+#: against two stations -- the whole of Helgeland's network, most of it a
+#: settlement's own stop rather than a way to the boundary -- and the map opens
+#: on the park. The switch is in the legend, beside the stations.
+ENTUR_STOP_LAYERS = (
+    ("rail", "Train stations", "station", "train", True),
+    ("air", "Airports", "airport", "plane", True),
+    ("bus", "Bus stops", "bus stop", "bus", False),
+)
 
 #: A quay's glyph, by whether a scheduled boat calls there.
 #:
@@ -338,7 +364,7 @@ def attach_boat_calls(quays: gpd.GeoDataFrame, stops: gpd.GeoDataFrame, within_m
 
     Args:
         quays: Points from either source, carrying whatever names them
-        stops: What :meth:`entur.Source.water_stops` returned
+        stops: The water-served rows of :meth:`entur.Source.scheduled_stops`
         within_m: How far a quay may look for its stop
         metric_crs: Projected CRS the distance is measured in
 
@@ -346,7 +372,12 @@ def attach_boat_calls(quays: gpd.GeoDataFrame, stops: gpd.GeoDataFrame, within_m
         A copy carrying ``boat_lines``, ``boat_operator``, ``boat_stop``,
         ``entur_url`` and the ``glyph`` those decide.
     """
-    fields = {"lines": "boat_lines", "operator": "boat_operator", "stop_id": "boat_stop", "entur_url": "entur_url"}
+    fields = {
+        entur.lines_column(entur.WATER_MODE): "boat_lines",
+        "operator": "boat_operator",
+        "stop_id": "boat_stop",
+        "entur_url": "entur_url",
+    }
     attached = attach_nearest(quays, stops, fields, max_distance_m=within_m, metric_crs=metric_crs) if len(quays) else quays.copy()
     for column in fields.values():
         if column not in attached:
@@ -355,6 +386,26 @@ def attach_boat_calls(quays: gpd.GeoDataFrame, stops: gpd.GeoDataFrame, within_m
     attached["glyph"] = pd.Series(QUAY_UNSERVED_GLYPH, index=attached.index)
     attached.loc[served, "glyph"] = QUAY_SERVED_GLYPH
     return attached
+
+
+def stops_of_mode(stops: gpd.GeoDataFrame, mode: str, taken_by: tuple[str, ...]) -> gpd.GeoDataFrame:
+    """The stop places one layer of :data:`ENTUR_STOP_LAYERS` draws.
+
+    Args:
+        stops: What :meth:`entur.Source.scheduled_stops` returned
+        mode: The mode this layer is for, a key of :data:`entur.MODES`
+        taken_by: The modes whose layers come before it, and so have already
+            drawn any stop they share
+
+    Returns:
+        The rows a line of ``mode`` calls at, less those an earlier layer drew.
+    """
+    if not len(stops):
+        return stops
+    drawn = stops[entur.lines_column(mode)].notna()
+    for earlier in taken_by:
+        drawn &= stops[entur.lines_column(earlier)].isna()
+    return stops[drawn]
 
 
 def shelter_glyphs(shelters: gpd.GeoDataFrame) -> pd.Series:
@@ -687,6 +738,22 @@ STOP_POPUP_FIELDS = {
     "kind": "Type",
     "operator": "Operator",
     "osm_id": "OSM ID",
+}
+
+#: A stop place of the national register, and what calls there. Every mode is
+#: listed and not just the layer's: Mosjøen stasjon is drawn as a station and
+#: four bus lines call at it too, and a reader deciding how to get to the park
+#: wants both. A mode nothing calls under is left out of the popup by the empty
+#: value, so a plain bus stop shows one line row and not four.
+ENTUR_STOP_POPUP_FIELDS = {
+    "name": "Name",
+    "modes": "Served by",
+    "rail_lines": "Train lines",
+    "air_lines": "Flights",
+    "water_lines": "Boat lines",
+    "bus_lines": "Bus lines",
+    "operator": "Operated by",
+    "stop_id": "Entur stop",
 }
 
 CAMP_SITE_POPUP_FIELDS = {
@@ -2616,21 +2683,26 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     shelters["glyph"] = shelter_glyphs(shelters)
     places = gpd.clip(osm_source.fetch_places(search_bounds, force_download=args.force_download), zone)
     terminals = gpd.clip(osm_source.fetch_ferry_terminals(search_bounds, force_download=args.force_download), zone)
-    # **A station anywhere in the zone; a bus stop only in the trailhead band.**
-    # Measured on the first build: 447 bus stops in the zone, the whole of
-    # Helgeland's network, against two stations. A bus stop is a trailhead
-    # where it stands near the boundary, and a settlement's own stop otherwise.
-    all_stops = osm_source.fetch_stops(search_bounds, force_download=args.force_download)
-    stations = gpd.clip(all_stops[all_stops["kind"] != "bus_stop"], zone)
-    bus_stops = gpd.clip(all_stops[all_stops["kind"] == "bus_stop"], norway.zone_around(park, args.trailhead_km))
-    stops = gpd.GeoDataFrame(pd.concat([stations, bus_stops]), crs=all_stops.crs)
-    stops["glyph"] = stops["kind"].map(OSM_STOP_GLYPHS)
     camp_sites = gpd.clip(osm_source.fetch_camp_sites(search_bounds, force_download=args.force_download), zone)
 
-    print("\nLoading scheduled boat calls (Entur)...")
-    boats = entur.Source(cache_dir=args.cache_dir).water_stops(search_bounds, force_download=args.force_download)
-    lines_found = sorted({line for value in boats["lines"] for line in value.split(IDENTITY_SEPARATOR)}) if len(boats) else []
-    print(f"  {len(boats)} stops a boat line calls at: {lines_found}")
+    # **The stops come from Entur and not from OSM, which also has them.**
+    # Measured over this box on 2026-09-17: OSM holds 628 stops to Entur's 430,
+    # because it tags a pole per direction -- only 414 of its names are distinct
+    # -- and every one of the 628 stands within 136 m of an Entur stop place.
+    # What Entur adds is the thing a planner is after: whether anything calls
+    # there, under which line, and a board to look at on the day.
+    print("\nLoading scheduled public transport (Entur)...")
+    scheduled = gpd.clip(entur.Source(cache_dir=args.cache_dir).scheduled_stops(search_bounds, force_download=args.force_download), zone)
+    boats = scheduled[scheduled[entur.lines_column(entur.WATER_MODE)].notna()]
+    lines_found = sorted(
+        {
+            line
+            for column in (entur.lines_column(mode) for mode in entur.MODES)
+            for value in scheduled[column].dropna()
+            for line in value.split(IDENTITY_SEPARATOR)
+        }
+    )
+    print(f"  {len(scheduled)} stop places a line calls at, under {len(lines_found)} lines")
     terminals = attach_boat_calls(terminals, boats, args.boat_stop_m, norway.METRIC_CRS)
     ssr_quays = attach_boat_calls(ssr_quays, boats, args.boat_stop_m, norway.METRIC_CRS)
     unserved = [
@@ -2651,7 +2723,8 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     print(f"  Settlements: {len(places)}")
     print(f"  Trailheads (<{args.trailhead_km:g} km from boundary): {len(trailheads)}")
     print(f"  Ferry and express-boat quays: {len(terminals)}")
-    print(f"  Stations, and bus stops within {args.trailhead_km:g} km of the boundary: {len(stops)} ({stops['kind'].value_counts().to_dict()})")
+    served = {mode: int(scheduled[entur.lines_column(mode)].notna().sum()) for mode in entur.MODES}
+    print(f"  Stop places a line calls at: {len(scheduled)} ({served})")
     print(f"  Camp sites: {len(camp_sites)}")
 
     approach_label = f"≤{args.approach_km:g} km"
@@ -2731,9 +2804,26 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     osm_pin, osm_hex = pin_colour("OSM")
     n50_pin, n50_hex = pin_colour("N50")
     ssr_pin, ssr_hex = pin_colour("SSR")
+    entur_pin, entur_hex = pin_colour(ENTUR)
+    # The way in first: where the train, the plane and the bus stop, and where
+    # the boat puts in. One layer per mode, so the four hundred bus stops can be
+    # switched off without taking the two stations with them.
     points = [
-        # The way in first: where the train and the bus stop, and where the boat puts in.
-        PointLayer(stops, "Stations and bus stops [OSM]", osm_hex, STOP_POPUP_FIELDS, "stop", "OSM", color=osm_pin, icon="bus", icon_field="glyph"),
+        PointLayer(
+            stops_of_mode(scheduled, mode, tuple(earlier for earlier, *_ in ENTUR_STOP_LAYERS[:index])),
+            f"{label} [{ENTUR}]",
+            entur_hex,
+            ENTUR_STOP_POPUP_FIELDS,
+            point_type,
+            ENTUR,
+            color=entur_pin,
+            icon=glyph,
+            link_fields=ENTUR_LINK_FIELDS,
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
+            show=show,
+        )
+        for index, (mode, label, point_type, glyph, show) in enumerate(ENTUR_STOP_LAYERS)
+    ] + [
         PointLayer(
             terminals,
             "Ferry quays [OSM]",

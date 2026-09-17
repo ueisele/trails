@@ -1,8 +1,8 @@
 """Scheduled public transport in Norway, from Entur's national journey planner.
 
-**What this answers is whether a boat calls at a quay, and under which line.**
-Both map sources place quays -- the place-name register names them, OSM tags
-them ``amenity=ferry_terminal`` -- and neither says whether anything sails. The
+**What this answers is whether anything calls at a place, and under which
+line.** Both map sources place quays and stops -- the place-name register names
+them, OSM tags them -- and neither says whether anything sails or drives. The
 difference matters on this coast: measured over Lomsdal-Visten on 2026-09-17,
 four of the register's seventeen quays have no scheduled call at all, and the
 three quays that reach the park (Bønå, Visten, Visthus) are served by a single
@@ -17,6 +17,14 @@ departure window answers *what sails this week*, which makes a build depend on
 the day it ran and loses a seasonal line out of season. ``quays { lines }`` is
 the structural answer, and it is the one that found both Hurtigruten and Havila
 at Brønnøysund kystrutekai, which share the coastal route and alternate.
+
+**One stop place is one place, which is why this draws the buses and not OSM.**
+Measured over the same box on 2026-09-17: OSM holds 628 stops there against
+Entur's 430, because OSM tags a pole per direction and only 414 of its 628 names
+are distinct. Every one of the 628 stands within **136 m** of an Entur stop
+place and 618 of them carry the same name -- so nothing is lost by drawing the
+register instead, and what is gained is the line, the authority and a link to
+the board.
 """
 
 import json
@@ -45,12 +53,20 @@ CLIENT_NAME = "uweeisele-trails-atlas"
 #: came from Entur itself are ever written into a link.
 STOP_PAGE = "https://entur.no/nearby-stop-place-detail?id={stop_id}"
 
-#: The transport mode a boat calls under, in Entur's vocabulary. Ferries and
-#: express boats share it; what tells them apart is the line, not the mode.
+#: The transport modes read, in Entur's vocabulary, and the English word each is
+#: shown under. Ferries and express boats share ``water``; what tells them apart
+#: is the line, not the mode.
+MODES = {"rail": "train", "air": "flight", "water": "boat", "bus": "bus"}
+
+#: The mode a boat calls under, named because the quays ask for it by itself.
 WATER_MODE = "water"
 
+#: What joins several lines, or several modes, into one field. The same
+#: separator the chains are named by, so a popup reads the same either way.
+SEPARATOR = " / "
+
 #: How many stop places one batched query asks about. The whole Lomsdal-Visten
-#: box is 37, so this is one round trip there; the chunking is for the next box.
+#: box is 457, so this is ten round trips there.
 BATCH = 50
 
 
@@ -71,7 +87,7 @@ METADATA = SourceMetadata()
 #: Bounding box as (min_lon, min_lat, max_lon, max_lat), matching GeoPandas.
 Bounds = tuple[float, float, float, float]
 
-#: Every stop place of a box, with the modes it is served under.
+#: Every stop place of a box, with the modes it is registered under.
 _BY_BBOX = """
 {{
   stopPlacesByBbox(
@@ -86,8 +102,24 @@ class EnturError(RuntimeError):
     """Raised when Entur could not be reached, or answered with errors."""
 
 
+def lines_column(mode: str) -> str:
+    """The column a mode's lines are returned under.
+
+    Args:
+        mode: One of :data:`MODES`
+
+    Returns:
+        The column name, e.g. ``bus_lines``.
+    """
+    return f"{mode}_lines"
+
+
+#: The columns :meth:`Source.scheduled_stops` returns, in order.
+COLUMNS = ["stop_id", "name", "modes", *(lines_column(mode) for mode in MODES), "operator", "entur_url", "geometry"]
+
+
 class Source:
-    """Loader for the stop places a scheduled boat calls at."""
+    """Loader for the stop places a scheduled service calls at."""
 
     def __init__(
         self,
@@ -156,71 +188,73 @@ class Source:
 
         raise EnturError("Entur could not be reached:\n  " + "\n  ".join(failures))
 
-    def water_stops(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
-        """Fetch the stop places within a box that a scheduled boat calls at.
+    def scheduled_stops(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
+        """Fetch the stop places within a box that a scheduled service calls at.
 
         Args:
             bounds: (min_lon, min_lat, max_lon, max_lat) in WGS84
             force_download: Bypass the cache and ask Entur again
 
         Returns:
-            GeoDataFrame in EPSG:4326 with Point geometries and the columns
-            ``stop_id`` (the national register's, e.g. ``NSR:StopPlace:48932``),
-            ``name``, ``lines`` (the public codes serving it, joined), ``operator``
-            (the authorities behind them, joined) and ``entur_url`` (its live
-            departure board). Empty if nothing in the box is served by water.
+            GeoDataFrame in EPSG:4326 with Point geometries and the columns in
+            :data:`COLUMNS`: ``stop_id`` (the national register's, e.g.
+            ``NSR:StopPlace:48932``), ``name``, ``modes`` (the English words of
+            :data:`MODES` it is actually served under), one ``<mode>_lines``
+            column per mode holding the lines of that mode as ``code name``,
+            ``operator`` (the authorities behind them) and ``entur_url`` (its
+            live departure board).
 
-            **A stop place carrying the water mode but no water line is left
-            out**, because being registered is not being served. Measured over
-            Lomsdal-Visten on 2026-09-17: two of the box's 37, Vikdal ferjekai
-            and Toftsundet hurtigbåtkai, and neither has a single departure in a
-            sixty-day window. They are what this loader exists to tell apart
-            from a quay a boat actually calls at.
+            **A stop place registered under a mode but carrying no line of it is
+            left out of that mode**, because being registered is not being
+            served, and one carrying no line at all is left out altogether.
+            Measured over Lomsdal-Visten on 2026-09-17: two of the box's 37
+            water stops, Vikdal ferjekai and Toftsundet hurtigbåtkai, neither
+            with a single departure in a sixty-day window; and 32 of its 430 bus
+            and rail stops, among them both airports, which are registered for a
+            bus that no longer calls and are drawn for their flights instead.
         """
         min_lon, min_lat, max_lon, max_lat = bounds
-        # ``_served`` in the key: an entry written when this kept the
-        # registered-but-unserved stops is not this frame.
-        cache_key = f"entur_water_stops_{min_lat}_{min_lon}_{max_lat}_{max_lon}_served"
+        # The modes in the key: an entry written for water alone is not this frame.
+        cache_key = f"entur_stops_{min_lat}_{min_lon}_{max_lat}_{max_lon}_{'-'.join(MODES)}"
 
         if not force_download and self.cache.exists(cache_key):
-            print("Loading Entur water stops from cache...")
+            print("Loading Entur stops from cache...")
             cached = self.cache.load(cache_key)
             assert isinstance(cached, gpd.GeoDataFrame)
             return cached
 
         print(f"Querying Entur for scheduled stops in {min_lat},{min_lon},{max_lat},{max_lon}...")
         places = self.query(_BY_BBOX.format(min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon))
-        water = [
-            place for place in places["stopPlacesByBbox"] if place.get("transportMode") and WATER_MODE in place["transportMode"] and place.get("id")
-        ]
-        print(f"  {len(places['stopPlacesByBbox'])} stop places, {len(water)} of them served by boat")
+        registered = [place for place in places["stopPlacesByBbox"] if place.get("id") and set(place.get("transportMode") or ()) & set(MODES)]
+        print(f"  {len(places['stopPlacesByBbox'])} stop places, {len(registered)} registered under a mode this map draws")
 
-        serving = self._lines_of([place["id"] for place in water])
+        serving = self._lines_of([place["id"] for place in registered])
         records, unserved = [], []
-        for place in water:
-            lines, authorities = serving.get(place["id"], ((), ()))
+        for place in registered:
+            lines, authorities = serving.get(place["id"], ({}, ()))
             if not lines:
                 unserved.append(place["name"])
                 continue
-            records.append(
-                {
-                    "stop_id": place["id"],
-                    "name": place["name"],
-                    "lines": " / ".join(lines),
-                    "operator": " / ".join(authorities) or None,
-                    "entur_url": STOP_PAGE.format(stop_id=place["id"]),
-                    "geometry": Point(place["longitude"], place["latitude"]),
-                }
-            )
+            record = {
+                "stop_id": place["id"],
+                "name": place["name"],
+                "modes": SEPARATOR.join(MODES[mode] for mode in MODES if mode in lines),
+                "operator": SEPARATOR.join(authorities) or None,
+                "entur_url": STOP_PAGE.format(stop_id=place["id"]),
+                "geometry": Point(place["longitude"], place["latitude"]),
+            }
+            for mode in MODES:
+                record[lines_column(mode)] = SEPARATOR.join(lines[mode]) if mode in lines else None
+            records.append(record)
         if unserved:
-            print(f"  registered but with no boat line, left out: {', '.join(sorted(unserved))}")
+            print(f"  registered but with no line calling, left out: {', '.join(sorted(unserved))}")
 
-        gdf = gpd.GeoDataFrame(records, columns=["stop_id", "name", "lines", "operator", "entur_url", "geometry"], crs="EPSG:4326")
+        gdf = gpd.GeoDataFrame(records, columns=COLUMNS, crs="EPSG:4326")
         self.cache.save(cache_key, gdf, metadata={"bounds": list(bounds), "count": len(gdf)})
         return gdf
 
-    def _lines_of(self, stop_ids: list[str]) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
-        """The lines serving each stop place, and whose they are.
+    def _lines_of(self, stop_ids: list[str]) -> dict[str, tuple[dict[str, tuple[str, ...]], tuple[str, ...]]]:
+        """The lines serving each stop place, by mode, and whose they are.
 
         **One query per batch rather than one per stop**, with an alias per stop:
         a national register id holds colons and cannot itself be an alias, so the
@@ -230,15 +264,16 @@ class Source:
             stop_ids: National register ids, e.g. ``NSR:StopPlace:48932``
 
         Returns:
-            Per id, the distinct public codes of the water lines calling there
+            Per id, the lines of each mode of :data:`MODES` that has any --
+            written ``code name``, or whichever of the two the line carries --
             and the distinct authorities behind them, each in the order Entur
-            listed them.
+            listed them. A mode nothing calls under is absent rather than empty.
         """
-        found: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
+        found: dict[str, tuple[dict[str, tuple[str, ...]], tuple[str, ...]]] = {}
         for start in range(0, len(stop_ids), BATCH):
             batch = stop_ids[start : start + BATCH]
             fields = " ".join(
-                f's{index}: stopPlace(id: "{stop_id}") {{ id quays {{ lines {{ publicCode transportMode authority {{ name }} }} }} }}'
+                f's{index}: stopPlace(id: "{stop_id}") {{ id quays {{ lines {{ publicCode name transportMode authority {{ name }} }} }} }}'
                 for index, stop_id in enumerate(batch)
             )
             answered = self.query(f"{{ {fields} }}")
@@ -246,16 +281,18 @@ class Source:
                 place = answered.get(f"s{index}")
                 if not place:
                     continue
-                codes: dict[str, None] = {}
+                by_mode: dict[str, dict[str, None]] = {}
                 authorities: dict[str, None] = {}
                 for quay in place.get("quays") or []:
                     for line in quay.get("lines") or []:
-                        if line.get("transportMode") != WATER_MODE:
+                        mode = line.get("transportMode")
+                        if mode not in MODES:
                             continue
-                        if line.get("publicCode"):
-                            codes[line["publicCode"]] = None
+                        label = " ".join(part for part in (line.get("publicCode"), line.get("name")) if part)
+                        if label:
+                            by_mode.setdefault(mode, {})[label] = None
                         authority = (line.get("authority") or {}).get("name")
                         if authority:
                             authorities[authority] = None
-                found[stop_id] = (tuple(codes), tuple(authorities))
+                found[stop_id] = ({mode: tuple(labels) for mode, labels in by_mode.items()}, tuple(authorities))
         return found

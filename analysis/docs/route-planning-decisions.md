@@ -1759,9 +1759,8 @@ pins through the same code. What it means here: N50's 104 buildings are 19 huts 
 a name off the hut register, as pins — and 85 koier, seter houses and rorbuer as dots, switched
 off. OSM's shelters lose their bus-stop and picnic roofs (Forvik, Sjøsiden senter among them) and
 say by glyph whether they have walls. SSR's huts and quays are purple, OSM's quays dark blue, and
-two new OSM layers carry Trofors and Mosjøen stations, the bus stops within the trailhead band
-(447 in the zone on the first build, the whole of Helgeland's network) and the camp sites along
-the way in.
+a new OSM layer carries the camp sites along the way in. The stations and bus stops started here
+too, as one more OSM layer; they now come from Entur instead, see below.
 
 ## A quay says whether a boat calls, and links its timetable
 
@@ -1781,6 +1780,35 @@ and Vikdal ferjekai twice over, which both sources place and nothing sails to.
 and a link to the live departure board. The three quays that reach Visten — Bønå, Visthus,
 Visten — are one express-boat line, 18-167, run by Nordland fylkeskommune. Brønnøysund
 kystrutekai carries HUR and HAV, Hurtigruten and Havila, which alternate on the coastal route.
+
+## Every scheduled stop, and the board it departs from
+
+Settled 2026-09-17, written up in the Abisko decisions, §9.33, and Norwegian only again: Entur
+holds nothing Swedish. Asked for from the phone — *"Kannst du alle Bushaltestellen und Bahnhöfe
+einzeichnen und auch Linie angeben wenn sinnvoll und einen Link zu Entur setzen?"* — together
+with the question that turned out to matter: is public transport already a switch of its own?
+
+**It was, and it was the wrong switch.** *Stations and bus stops [OSM]* was one layer holding
+both, so hiding four hundred bus stops would have hidden Trofors and Mosjøen with them. It is
+three layers now, one per mode, each with its own checkbox: **Train stations [Entur]** (2),
+**Airports [Entur]** (2) and **Bus stops [Entur]** (288, switched off at load). A stop goes in
+the first layer it is served under, so Mosjøen stasjon is a station although four bus lines call
+there — and its popup names all five.
+
+**The stops come from the register now, not from OSM.** Over this box OSM holds 628 of them
+against Entur's 430, because OSM tags a pole per direction and only 414 of its names are
+distinct. Every one of the 628 stands within **136 m** of an Entur stop place and 618 carry the
+same name, so nothing is lost — and what is gained is the line, the authority and a link to the
+live board, which OSM does not have.
+
+**The 2 km trailhead band is gone with it.** It existed because 447 pins drowned the map; a layer
+that switches off does not need it, and the band was cutting *how do I get here from Mosjøen*
+down to the last two kilometres. 313 stop places are drawn in all, under 45 lines.
+
+**The two airports are here because the line was checked and not the mode.** Both are registered
+for a bus that no longer calls, so the §9.32 rule would have dropped them; they carry Avinor's
+flights instead — Bodø–Brønnøysund, Oslo–Brønnøysund, Trondheim–Mosjøen — and that is a way in.
+Thirty-one stop places in the box carry a mode and no line at all and are left out by name.
 
 ## Licence: in the file, not in the interface
 

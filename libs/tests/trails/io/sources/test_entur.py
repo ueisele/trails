@@ -2,6 +2,7 @@
 
 from unittest.mock import Mock, patch
 
+import pandas as pd
 import pytest
 from trails.io.sources import entur
 
@@ -22,12 +23,12 @@ def box() -> entur.Bounds:
 
 @pytest.fixture
 def places() -> dict:
-    """Three stop places: a served quay, a bus stop, and a quay nothing sails to."""
+    """Three stop places: a served quay, a station a bus also calls at, and a quay nothing sails to."""
     return {
         "data": {
             "stopPlacesByBbox": [
                 {"id": "NSR:StopPlace:48932", "name": "Bønå hurtigbåtkai", "latitude": 65.64458, "longitude": 12.75372, "transportMode": ["water"]},
-                {"id": "NSR:StopPlace:11111", "name": "Somewhere bussholdeplass", "latitude": 65.5, "longitude": 12.6, "transportMode": ["bus"]},
+                {"id": "NSR:StopPlace:58971", "name": "Mosjøen stasjon", "latitude": 65.83, "longitude": 13.19, "transportMode": ["bus", "rail"]},
                 {"id": "NSR:StopPlace:50233", "name": "Vikdal ferjekai", "latitude": 65.88782, "longitude": 13.09585, "transportMode": ["water"]},
             ]
         }
@@ -36,61 +37,115 @@ def places() -> dict:
 
 @pytest.fixture
 def lines() -> dict:
-    """What serves those two water stops: a boat at one, nothing at the other."""
+    """What serves those three: a boat, a train and a bus, and nothing at all."""
     return {
         "data": {
             "s0": {
                 "id": "NSR:StopPlace:48932",
                 "quays": [
-                    {"lines": [{"publicCode": "18-167", "transportMode": "water", "authority": {"name": "Nordland fylkeskommune"}}]},
-                    # The connecting bus is not a boat, and must not make a quay served.
-                    {"lines": [{"publicCode": "18-166", "transportMode": "bus", "authority": {"name": "Nordland fylkeskommune"}}]},
+                    {
+                        "lines": [
+                            {
+                                "publicCode": "18-167",
+                                "name": "Brønnøysund-Vega",
+                                "transportMode": "water",
+                                "authority": {"name": "Nordland fylkeskommune"},
+                            }
+                        ]
+                    },
+                    # The connecting bus is not a boat, and must not be listed as one.
+                    {
+                        "lines": [
+                            {
+                                "publicCode": "18-166",
+                                "name": "Tjøtta-Visthus",
+                                "transportMode": "bus",
+                                "authority": {"name": "Nordland fylkeskommune"},
+                            }
+                        ]
+                    },
                 ],
             },
-            "s1": {"id": "NSR:StopPlace:50233", "quays": []},
+            "s1": {
+                "id": "NSR:StopPlace:58971",
+                "quays": [
+                    {
+                        "lines": [
+                            {"publicCode": "F7", "name": "Nordlandsbanen", "transportMode": "rail", "authority": {"name": "SJ Nord"}},
+                            {
+                                "publicCode": "705",
+                                "name": "Mosjøen-Sandnessjøen",
+                                "transportMode": "bus",
+                                "authority": {"name": "Nordland fylkeskommune"},
+                            },
+                        ]
+                    },
+                ],
+            },
+            "s2": {"id": "NSR:StopPlace:50233", "quays": []},
         }
     }
 
 
-class TestWaterStops:
-    """Tests for Source.water_stops."""
+class TestScheduledStops:
+    """Tests for Source.scheduled_stops."""
 
-    def test_keeps_only_quays_a_boat_line_calls_at(self, tmp_path, box, places, lines):
-        """A stop place carrying the water mode but no water line is registered,
-        not served. Measured over this box: Vikdal ferjekai and Toftsundet
+    def test_keeps_only_the_stops_a_line_calls_at(self, tmp_path, box, places, lines):
+        """A stop place carrying a mode but no line of it is registered, not
+        served. Measured over this box: Vikdal ferjekai and Toftsundet
         hurtigbåtkai, neither with a departure in sixty days."""
         source = entur.Source(cache_dir=str(tmp_path))
         with patch("requests.post", side_effect=[_mock_response(places), _mock_response(lines)]):
-            gdf = source.water_stops(box)
+            gdf = source.scheduled_stops(box)
 
-        assert gdf["stop_id"].tolist() == ["NSR:StopPlace:48932"]
-        assert gdf["lines"].tolist() == ["18-167"]
-        assert gdf["operator"].tolist() == ["Nordland fylkeskommune"]
+        assert gdf["stop_id"].tolist() == ["NSR:StopPlace:48932", "NSR:StopPlace:58971"]
         assert gdf.crs.to_epsg() == 4326
+
+    def test_a_line_is_filed_under_its_own_mode_and_not_the_stops(self, tmp_path, box, places, lines):
+        """Bønå carries a boat line and a bus line; a quay drawn from its stop's
+        modes alone would call the bus a sailing."""
+        source = entur.Source(cache_dir=str(tmp_path))
+        with patch("requests.post", side_effect=[_mock_response(places), _mock_response(lines)]):
+            gdf = source.scheduled_stops(box).set_index("name")
+
+        assert gdf.loc["Bønå hurtigbåtkai", "water_lines"] == "18-167 Brønnøysund-Vega"
+        assert gdf.loc["Bønå hurtigbåtkai", "bus_lines"] == "18-166 Tjøtta-Visthus"
+        assert pd.isna(gdf.loc["Bønå hurtigbåtkai", "rail_lines"])
+        assert gdf.loc["Bønå hurtigbåtkai", "modes"] == "boat / bus"
+
+    def test_a_station_says_the_train_and_the_bus_and_who_runs_them(self, tmp_path, box, places, lines):
+        source = entur.Source(cache_dir=str(tmp_path))
+        with patch("requests.post", side_effect=[_mock_response(places), _mock_response(lines)]):
+            gdf = source.scheduled_stops(box).set_index("name")
+
+        assert gdf.loc["Mosjøen stasjon", "rail_lines"] == "F7 Nordlandsbanen"
+        assert gdf.loc["Mosjøen stasjon", "bus_lines"] == "705 Mosjøen-Sandnessjøen"
+        assert gdf.loc["Mosjøen stasjon", "modes"] == "train / bus"
+        assert gdf.loc["Mosjøen stasjon", "operator"] == "SJ Nord / Nordland fylkeskommune"
 
     def test_the_link_is_the_form_that_renders(self, tmp_path, box, places, lines):
         """`/nearby/<id>` answers 200 and renders *Dead end*; this one renders the
         stop and its board. Measured in Firefox on 2026-09-17."""
         source = entur.Source(cache_dir=str(tmp_path))
         with patch("requests.post", side_effect=[_mock_response(places), _mock_response(lines)]):
-            gdf = source.water_stops(box)
+            gdf = source.scheduled_stops(box)
 
         assert gdf["entur_url"].iloc[0] == "https://entur.no/nearby-stop-place-detail?id=NSR:StopPlace:48932"
 
-    def test_is_cached_and_the_key_names_the_shape(self, tmp_path, box, places, lines):
+    def test_is_cached_and_the_key_names_the_modes(self, tmp_path, box, places, lines):
         source = entur.Source(cache_dir=str(tmp_path))
         with patch("requests.post", side_effect=[_mock_response(places), _mock_response(lines)]) as post:
-            source.water_stops(box)
-            source.water_stops(box)
+            source.scheduled_stops(box)
+            source.scheduled_stops(box)
         assert post.call_count == 2
-        assert any("_served" in path.name for path in tmp_path.rglob("entur_water_stops_*"))
+        assert any("rail-air-water-bus" in path.name for path in tmp_path.rglob("entur_stops_*"))
 
-    def test_a_box_nothing_sails_to_is_empty_rather_than_broken(self, tmp_path, box):
+    def test_a_box_nothing_calls_at_is_empty_rather_than_broken(self, tmp_path, box):
         source = entur.Source(cache_dir=str(tmp_path))
         with patch("requests.post", return_value=_mock_response({"data": {"stopPlacesByBbox": []}})):
-            gdf = source.water_stops(box)
+            gdf = source.scheduled_stops(box)
         assert len(gdf) == 0
-        assert list(gdf.columns) == ["stop_id", "name", "lines", "operator", "entur_url", "geometry"]
+        assert list(gdf.columns) == entur.COLUMNS
 
 
 class TestQuery:

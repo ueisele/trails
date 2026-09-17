@@ -2605,11 +2605,95 @@ and at build time. An empty layer is exempt, because Abisko's quay layer is one.
 **Norway only.** Abisko draws no quay at all, so nothing there changes. The Swedish equivalent
 for the six railway stations would be a different service and is not done.
 
+### 9.33 Every scheduled stop, drawn from the register that knows what calls there — settled, 2026-09-17
+
+Uwe, having seen the quays of §9.32: *"Kannst du alle Bushaltestellen und Bahnhöfe einzeichnen und
+auch Linie angeben wenn sinnvoll und einen Link zu Entur setzen? Wenn wir alle Bushaltestellen
+einfügen wird das zu viel? Andererseits ist das super hilfreich. Aber kann man ja ausblenden. Ist
+ÖPNV bereits ein separat schaltbarer Layer?"*
+
+**It was a switch, and it was the wrong one.** Every point layer already has its own checkbox in
+the legend — but *Stations and bus stops [OSM]* was one layer holding both, so switching the
+bus stops off took the two railway stations with them. That is what made the question worth asking
+and what the answer changes: one layer per mode, so the four hundred bus stops can go without the
+stations going too.
+
+**Decided: Entur draws the stops, and OSM no longer does — in Norway.** Both hold them; only one
+knows whether anything calls.
+
+| measured over the Lomsdal-Visten box, 2026-09-17 | |
+|---|---|
+| stops OSM holds | 628 (626 bus, 2 station) |
+| distinct names among them | 414 |
+| stop places Entur holds | 430 under bus or rail |
+| OSM stops with an Entur stop place within 100 m | 625 of 628; the furthest of all is **136 m** |
+| of those, same name | 618 of 625 |
+| Entur stop places with no OSM stop within 100 m | 16 |
+
+**OSM tags a pole per direction; Entur registers the place.** That is the whole of the 628 against
+430, and it is why the register is the better draw: two pins on two sides of one road are two
+answers to a question nobody asked. Nothing is lost by the swap — every OSM stop stands within
+136 m of a stop place — and what is gained is the line, the authority and the departure board.
+
+**Three layers, by mode, and a stop is drawn in the first it is served under.** Mosjøen stasjon is a
+*station* and not a *bus stop*, although four bus lines call there; its popup names all five lines
+either way. Water is not a layer here: a boat call is drawn on the quay it puts in at (§9.32),
+which is a place a walker can stand.
+
+| in the zone, after the clip | |
+|---|---|
+| Train stations [Entur] | 2 — Mosjøen and Trofors, both on Nordlandsbanen (F7, SJ Nord) |
+| Airports [Entur] | 2 — Brønnøysund and Mosjøen, flights by Avinor |
+| Bus stops [Entur] | 288, of 290 bus-served places; the two stations hold the other two |
+| stop places drawn in all | 313, under 45 lines, run by Nordland fylkeskommune, SJ Nord and Avinor |
+
+**The bus stops start switched off.** 288 pins against a park the map opens on is not a decision
+anyone should have to undo on arrival, and the layer is one click away in the legend beside the
+stations. It is the same judgement the private cabins get, for the same reason.
+
+**The 2 km band is gone, and that is the point of the change.** Bus stops used to be drawn only
+within `--trailhead-km` of the boundary — nine of them — because 447 pins in the zone drowned the
+map. A layer that can be switched off does not need the band, and the band was cutting the answer
+to *how do I get here from Mosjøen* down to the last two kilometres of it.
+
+**The airports are here because a line was checked and not a mode.** Both are registered under
+`bus` with no bus line calling — the airport bus is gone — so the §9.32 rule would have dropped
+them. They carry `air` lines instead (Bodø–Brønnøysund, Oslo–Brønnøysund, Trondheim–Mosjøen), and
+those are as much a way in as the train. Thirty-one other stop places in the box carry a mode and
+no line at all and are left out, printed by name at build time: Vikdal ferjekai and Toftsundet
+hurtigbåtkai from §9.32 among them, and twenty-nine bus stops nothing calls at.
+
+**A line is filed under its own mode, which is the §9.32 finding kept.** Bønå hurtigbåtkai carries
+boat 18-167 and bus 18-166; the popup says *Boat lines* and *Bus lines* separately, and a mode
+nothing calls under leaves no row at all. The lines are still read structurally, from
+`quays { lines }`, so the build does not depend on the day it ran.
+
+**The colour is Entur's own.** Slate (`cadetblue`) beside N50's dark red, OSM's dark blue and the
+register's purple — the colour says who placed the pin, as §9.31 settled, and these pins are not
+OpenStreetMap's any more.
+
+**What it costs.** The page grows from 17.09 MB to 17.70 MB, 6.37 MB gzipped — about 2.2 kB a stop,
+all of it popup values, and none of it fetched until a pin is opened. The offline cache is
+untouched: nothing here grows with the tile count.
+
+**Norway only, again.** Abisko's six stations and halts are outside Entur and keep their OSM layer
+unchanged. The Swedish equivalent would be Trafiklab or Resrobot, and whether either is keyless has
+not been checked.
+
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-17, eighth of the day** — every scheduled stop around Lomsdal-Visten is drawn, from
+  Entur rather than from OSM (§9.33): *"Kannst du alle Bushaltestellen und Bahnhöfe einzeichnen
+  und auch Linie angeben … Ist ÖPNV bereits ein separat schaltbarer Layer?"* It was one layer
+  holding stations and bus stops together, so hiding the buses hid the stations; it is now three,
+  by mode, with the 288 bus stops switched off and the two stations, two airports and their lines
+  on. OSM tags a pole per direction — 628 stops to Entur's 430 — and every one of them stands
+  within 136 m of a stop place, so nothing is lost by the swap and a departure board is gained.
 
 - **2026-09-17, seventh of the day** — a quay's glyph is its timetable (§9.32), after Uwe asked
   what separates the anchor from the ship and found that nothing did. Entur, the national

@@ -486,7 +486,7 @@ PROVIDERS: dict[str, Provider] = {
 #: can I sleep there -- sat in the popup. So the glyph now says what a place is
 #: for: `bed` where there is a bed (staffed or self-service), `house` for an
 #: unstaffed hut, `person-shelter` for a gapahuk or a vindskydd, `tent` for a
-#: camp site, `train` and `bus` for the way in, `bridge` and `water` for a
+#: camp site, `train`, `bus` and `plane` for the way in, `bridge` and `water` for a
 #: footbridge and a ford, `phone`, `square-parking`, `restroom`, `fire` and
 #: `circle-info` for what the registers place along a trail. The colour keeps
 #: saying which source placed the pin.
@@ -573,6 +573,13 @@ MARKER_ICONS: dict[str, tuple[str, str]] = {
         "32-32V160c0-17.7-14.3-32-32-32H272V288zM112 400c17.7 0 32-14.3 32-32s-14.3-32-32-32s-32 14.3-32 32s14.3 32 32 32zm288 "
         "0c17.7 0 32-14.3 32-32s-14.3-32-32-32s-32 14.3-32 32s14.3 32 32 32zM352 80c0-8.8-7.2-16-16-16H176c-8.8 0-16 7.2-16 "
         "16s7.2 16 16 16H336c8.8 0 16-7.2 16-16z",
+    ),
+    "plane": (
+        "0 0 576 512",
+        "M482.3 192c34.2 0 93.7 29 93.7 64c0 36-59.5 64-93.7 64l-116.6 0L265.2 495.9c-5.7 10-16.3 16.1-27.8 16.1l-56.2 0"
+        "c-10.6 0-18.3-10.2-15.4-20.4l49-171.6L112 320 68.8 377.6c-3 4-7.8 6.4-12.8 6.4l-42 0c-7.8 0-14-6.3-14-14"
+        "c0-1.3 .2-2.6 .5-3.9L32 256 .5 145.9c-.4-1.3-.5-2.6-.5-3.9c0-7.8 6.3-14 14-14l42 0c5 0 9.8 2.4 12.8 6.4L112 192"
+        "l102.9 0-49-171.6C162.9 10.2 170.6 0 181.2 0l56.2 0c11.5 0 22.1 6.2 27.8 16.1L365.7 192l116.6 0z",
     ),
     "bridge": (
         "0 0 576 512",

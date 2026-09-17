@@ -287,17 +287,20 @@ SCENES: dict[str, Scene] = {
             # shelters among them. Then 84 buildings by type left for a dot
             # layer that starts off, five bus-stop and picnic roofs left OSM's
             # shelters, and the stations, the bus stops in the trailhead band
-            # and the camp sites arrived as pins: 127.
-            "things in the marker pane": 127,
-            # Thirty-three since §9.31: stations, camp sites, buildings by type.
-            "checkboxes in the legend": 33,
-            "of them switched off": 8,
+            # and the camp sites arrived as pins: 127. Then §9.33 took the nine
+            # OSM stops out and put Entur's two stations and two airports in:
+            # 122. Its 288 bus stops are a layer that starts off, so the pane
+            # does not hold them until somebody asks for them.
+            "things in the marker pane": 122,
+            # Thirty-five since §9.33, which split one stop layer into three.
+            "checkboxes in the legend": 35,
+            "of them switched off": 9,
             "zoom before": 9,
             "zoom after": 11,
             "desktop: map free with nothing asked for": 96,
             "upright: map free with nothing asked for": 96,
             "sideways: map free with nothing asked for": 96,
-            "and the legend is what is in it": 33,
+            "and the legend is what is in it": 35,
             "px of map left above it": 565,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 186,
