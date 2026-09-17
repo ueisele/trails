@@ -59,6 +59,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import NamedTuple, Protocol
+from urllib.parse import quote_plus
 
 import geopandas as gpd
 import pandas as pd
@@ -657,7 +658,41 @@ RESROBOT_OF_OSM_STOP = {
 #: **No credit entry for this one.** Resrobot's data is CC0, which waives
 #: attribution, and what the page carries is eight identifiers and a link; the
 #: link text names Resrobot, which is where the provenance belongs.
-RESROBOT_LINK_FIELDS = {"board_url": "→ Departures at Resrobot"}
+RESROBOT_LINK_FIELDS = {"board_url": "→ Departures at Resrobot (every line)"}
+
+#: Trafikverket's board, for the stations, beside Resrobot's rather than instead
+#: of it.
+#:
+#: **Resrobot's board is the only one that has the buses, and it draws
+#: unstyled.** Reported from the phone on 2026-09-17, and it is not the phone:
+#: the page asks for ``/hafas-res/rel/css/vs_resrobot/resrobot.css`` and that
+#: **404s**, as do its script and its background image, under every layout
+#: ``L=`` takes. So the legacy board is a wall of plain HTML for everyone, with
+#: the right departures on it. There is no styled one to link instead: the
+#: modern planner keeps the stop in a session token -- its own address for a
+#: board is ``index.html#!P|SQ`` with no stop in it, which is what Resrobot's
+#: front page links -- and Länstrafiken's planner has no address for a stop at
+#: all.
+#:
+#: **So a station gets both.** Trafikverket runs the railway, its board is drawn
+#: properly, and a station is where the train is the question; Resrobot is what
+#: also knows that buses 91 and 950 call at Abisko turiststation. The names are
+#: matched exactly and case-sensitively -- Entur has *Låktatjåkko* where
+#: Trafikverket has *Låktatjåkka*, OSM has *Abisko Turiststation* where it has
+#: *Abisko turiststation* -- so these six were each opened in Firefox and seen
+#: to draw a board. A stop place not named here gets Resrobot's link alone.
+TRAFIKVERKET_BOARD = "https://www.trafikverket.se/trafikinformation/tag/?Station={station}"
+TRAFIKVERKET_BOARD_NAMES = {
+    "NSR:StopPlace:63197": "Abisko turiststation",
+    "NSR:StopPlace:57778": "Abisko Östra",
+    "NSR:StopPlace:63355": "Björkliden",
+    "NSR:StopPlace:58651": "Låktatjåkka",
+    "NSR:StopPlace:62306": "Katterjåkk",
+    "NSR:StopPlace:63395": "Vassijaure",
+}
+
+#: A station's links, the drawn board first and the complete one under it.
+STATION_LINK_FIELDS = {"rail_board_url": "→ Train departures at Trafikverket", **RESROBOT_LINK_FIELDS}
 
 #: A click now selects the arm of the road under the cursor rather than every
 #: arm sharing its name, so both figures are needed and neither alone is true:
@@ -2487,7 +2522,7 @@ def entur_stop_layers(stops: gpd.GeoDataFrame, link_fields: dict[str, str]) -> l
             with the water calls handed to the quays where there are quays
         link_fields: Mapping of the column holding the board's address to the
             link text, :data:`ENTUR_LINK_FIELDS` or
-            :data:`RESROBOT_LINK_FIELDS`
+            :data:`STATION_LINK_FIELDS`
 
     Returns:
         A layer per mode, in the table's order. Empty ones are dropped further
@@ -3290,12 +3325,18 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     # Abisko's quay layer carries no boat call to hand over, so nothing is taken
     # off a stop place here; a water stop, if one ever appears, draws itself.
     scheduled["board_url"] = scheduled["stop_id"].map(RESROBOT_OF_STOP_PLACE).map(resrobot_board)
+    scheduled["rail_board_url"] = [
+        TRAFIKVERKET_BOARD.format(station=quote_plus(name)) if isinstance(name, str) else None
+        for name in scheduled["stop_id"].map(TRAFIKVERKET_BOARD_NAMES)
+    ]
     bus_stops["board_url"] = bus_stops["osm_id"].map(RESROBOT_OF_OSM_STOP).map(resrobot_board)
     drawn = {mode: int(scheduled[entur.lines_column(mode)].notna().sum()) for mode in entur.MODES}
     print(f"  {len(scheduled)} stop places a line calls at ({drawn})")
     for label, frame in (("stations", scheduled), ("bus stops", bus_stops)):
         missing = sorted(frame.loc[frame["board_url"].isna(), "name"])
         print(f"  {label} with a Resrobot board: {int(frame['board_url'].notna().sum())} of {len(frame)}; without: {missing}")
+    absent = sorted(scheduled.loc[scheduled["rail_board_url"].isna(), "name"])
+    print(f"  stations with a Trafikverket board too: {int(scheduled['rail_board_url'].notna().sum())} of {len(scheduled)}; without: {absent}")
 
     print(f"  Shelters and huts: {len(shelters)} ({shelters['glyph'].value_counts().to_dict()})")
     print(f"  Settlements: {len(places)}")
@@ -3428,7 +3469,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     leder_pin, leder_hex = pin_colour("Leder")
     # The way in first: Abisko is reached by train, and the six stations and
     # halts of the box were on no layer until 2026-09-17.
-    points = entur_stop_layers(scheduled, RESROBOT_LINK_FIELDS) + [
+    points = entur_stop_layers(scheduled, STATION_LINK_FIELDS) + [
         PointLayer(
             bus_stops,
             "Bus stops [OSM]",

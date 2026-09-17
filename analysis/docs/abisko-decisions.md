@@ -2757,6 +2757,28 @@ four of four bus stops today.
 identifiers and a link; the link text names Resrobot, which is where the provenance belongs. The
 lines are Entur's and that credit is in the panel.
 
+**And then Trafikverket came back, beside Resrobot rather than instead of it.** Reported from the
+phone within the hour: *"Die verlinkten Seiten werden nicht korrekt dargestellt."* It is not the
+phone. Resrobot's legacy board asks for `/hafas-res/rel/css/vs_resrobot/resrobot.css` and that
+**404s**, as do its script and its background image, under every layout `L=` accepts — so it draws
+as a wall of plain HTML for everyone, with the right departures on it. There is nothing styled to
+link instead:
+
+| looked for a board with an address, 2026-09-17 | |
+|---|---|
+| Resrobot legacy `stboard.exe` | has the buses; **stylesheet 404** |
+| the modern planner | keeps the stop in a session token (`index.html#!P|SQ!H|661824`); Resrobot's own front page links the bare form |
+| `L=vs_java3`, `L=vs_java` | 0 bytes and a 48-byte machine answer — not pages |
+| the documented deep link `query.exe` | redirects into the styled planner, but needs an origin **and** a destination: no departure board |
+| Trafikverket | drawn properly — trains only |
+| Länstrafiken Norrbotten | a planner with no address for a stop |
+
+So a station carries two links: **Trafikverket's** first, because a station is where the train is
+the question and that page is drawn properly, and **Resrobot's** under it, because that is the one
+that also knows buses 91 and 950 call at Abisko turiststation. A bus stop carries Resrobot's alone,
+which is the only thing there is — an ugly page with the answer on it, and the ugliness is a
+deployment fault on their side that may well be repaired.
+
 **The bus stops stay OpenStreetMap's pins.** Entur has no Swedish bus line and Resrobot gives a
 board rather than a line list, so the four roadside stops say nothing about which bus calls — they
 say where it stops and where to look. That they stand 54 m to 228 m from the station they belong
