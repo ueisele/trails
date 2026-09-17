@@ -2635,15 +2635,16 @@ knows whether anything calls.
 answers to a question nobody asked. Nothing is lost by the swap — every OSM stop stands within
 136 m of a stop place — and what is gained is the line, the authority and the departure board.
 
-**Three layers, by mode, and a stop is drawn in the first it is served under.** Mosjøen stasjon is a
+**Four layers, by mode, and a stop is drawn in the first it is served under.** Mosjøen stasjon is a
 *station* and not a *bus stop*, although four bus lines call there; its popup names all five lines
-either way. Water is not a layer here: a boat call is drawn on the quay it puts in at (§9.32),
-which is a place a walker can stand.
+either way. A boat call is drawn on the quay it puts in at (§9.32), which is a place a walker can
+stand — so the water layer holds only what no quay took, see below.
 
 | in the zone, after the clip | |
 |---|---|
 | Train stations [Entur] | 2 — Mosjøen and Trofors, both on Nordlandsbanen (F7, SJ Nord) |
 | Airports [Entur] | 2 — Brønnøysund and Mosjøen, flights by Avinor |
+| Boat stops [Entur] | 1 — the one call no quay register knows a quay for, see below |
 | Bus stops [Entur] | 288, of 290 bus-served places; the two stations hold the other two |
 | stop places drawn in all | 313, under 45 lines, run by Nordland fylkeskommune, SJ Nord and Avinor |
 
@@ -2677,6 +2678,23 @@ is what ships — about 2.2 kB a stop before compression, all of it popup values
 fetched until a pin is opened. The offline cache is
 untouched: nothing here grows with the tile count.
 
+**The quays keep their calls, and the leftover gets a pin.** Uwe, reading the above: *"Weshalb
+Fähren über OSM und SSR und nehmen dort nicht auch Entur?"* The answer is that a quay is a place
+even without a timetable — six of the 49 have no scheduled call and are still drawn as anchors,
+because a mole is somewhere a private boat can put you ashore, where a bus stop with no bus is a
+sign — and that both quay registers place the mole while Entur places the stop.
+
+**But the question found a hole, and measuring it is what closed it.** Of the 35 water stops in
+the box, 34 have a quay within 150 m and **one does not**: Strandbukta hurtigbåtkai, on line
+18-167 to Visten, **2.76 km** from the park boundary, with the nearest quay 2.6 km away. It was on
+no layer at all. So `hand_water_to_the_quays` now takes the call off every stop a quay claimed,
+and whatever survives that is drawn on the stop place itself — one pin today, in Entur's slate
+with the ship of a served quay. **The count in the legend is the check**: *Boat stops [Entur] (1)*
+says exactly how many scheduled sailings neither register knows a quay for, and it grows on its
+own if Entur adds a stop or SSR loses a quay, instead of going quiet. Handing the call over rather
+than dropping the row is what keeps Visthus, which a bus also calls at, on the bus layer after its
+boat call has moved to the quay.
+
 **Norway only, again.** Abisko's six stations and halts are outside Entur and keep their OSM layer
 unchanged. The Swedish equivalent would be Trafiklab or Resrobot, and whether either is keyless has
 not been checked.
@@ -2695,6 +2713,9 @@ A line per change to this document or to the decisions in it, newest first.
   by mode, with the 288 bus stops switched off and the two stations, two airports and their lines
   on. OSM tags a pole per direction — 628 stops to Entur's 430 — and every one of them stands
   within 136 m of a stop place, so nothing is lost by the swap and a departure board is gained.
+  Then *"Weshalb Fähren über OSM und SSR und nehmen dort nicht auch Entur?"* — because a quay is a
+  place even without a timetable; but the question found one scheduled call neither quay register
+  knows a quay for, 2.76 km from the boundary, and a fourth layer now draws it.
 
 - **2026-09-17, seventh of the day** — a quay's glyph is its timetable (§9.32), after Uwe asked
   what separates the anchor from the ship and found that nothing did. Entur, the national

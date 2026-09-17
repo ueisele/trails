@@ -284,16 +284,25 @@ OSM_STOP_GLYPHS = {"station": "train", "halt": "train", "bus_stop": "bus"}
 #:
 #: **A stop goes in the first of these it is served under**, so Mosjøen stasjon,
 #: which four bus lines also call at, is a train station and not a bus stop, and
-#: its popup names all five lines either way. Water is not a layer here: a boat
-#: call is drawn on the quay it puts in at, which is a place a walker can stand.
+#: its popup names all five lines either way.
 #:
-#: **The buses start switched off.** There are 401 of them around this park
+#: **The water layer holds what the quays did not take.** A boat call belongs on
+#: the quay it puts in at -- that is a place a walker can stand, and the register
+#: draws the mole rather than the stop -- so :func:`hand_water_to_the_quays`
+#: takes the call off any stop a quay claimed. What is left is a scheduled
+#: sailing neither quay register knows about, and drawing it here is the only
+#: way it is on the map at all. Measured 2026-09-17: one, Strandbukta
+#: hurtigbåtkai, on line 18-167 to Visten, 2.76 km from the park boundary and
+#: 2.6 km from the nearest quay. The count in the legend is the check.
+#:
+#: **The buses start switched off.** There are 288 of them around this park
 #: against two stations -- the whole of Helgeland's network, most of it a
 #: settlement's own stop rather than a way to the boundary -- and the map opens
 #: on the park. The switch is in the legend, beside the stations.
 ENTUR_STOP_LAYERS = (
     ("rail", "Train stations", "station", "train", True),
     ("air", "Airports", "airport", "plane", True),
+    ("water", "Boat stops", "boat stop", "ship", True),
     ("bus", "Bus stops", "bus stop", "bus", False),
 )
 
@@ -386,6 +395,37 @@ def attach_boat_calls(quays: gpd.GeoDataFrame, stops: gpd.GeoDataFrame, within_m
     attached["glyph"] = pd.Series(QUAY_UNSERVED_GLYPH, index=attached.index)
     attached.loc[served, "glyph"] = QUAY_SERVED_GLYPH
     return attached
+
+
+def hand_water_to_the_quays(stops: gpd.GeoDataFrame, *quays: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Take a boat call off every stop place a quay already draws it for.
+
+    **A boat call belongs on the quay it puts in at.** Both quay registers place
+    the mole, which is where a walker stands and where a boat comes alongside;
+    Entur places the stop. Drawing both would be one place twice -- Anddalsvågen
+    and Anddalsvåg already are, 12 m apart -- so the quay keeps the call and the
+    stop place gives it up.
+
+    What is left over is a scheduled sailing neither register knows a quay for,
+    and that is worth a pin of its own: measured over Lomsdal-Visten on
+    2026-09-17, 34 of the 35 water stops in the box have a quay within 150 m and
+    Strandbukta hurtigbåtkai does not, though line 18-167 to Visten calls there
+    and the park boundary is 2.76 km away.
+
+    Args:
+        stops: What :meth:`entur.Source.scheduled_stops` returned
+        quays: Frames :func:`attach_boat_calls` has been over, carrying the
+            ``boat_stop`` each quay was matched to
+
+    Returns:
+        A copy whose water lines are emptied wherever a quay claimed the stop.
+        Every other mode is untouched, so Visthus, which a bus also calls at,
+        keeps its bus pin after its boat call has moved to the quay.
+    """
+    claimed = {stop for quay in quays if "boat_stop" in quay for stop in quay["boat_stop"].dropna()}
+    handed = stops.copy()
+    handed.loc[handed["stop_id"].isin(claimed), entur.lines_column(entur.WATER_MODE)] = None
+    return handed
 
 
 def stops_of_mode(stops: gpd.GeoDataFrame, mode: str, taken_by: tuple[str, ...]) -> gpd.GeoDataFrame:
@@ -2711,6 +2751,10 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         for name in frame.loc[frame["glyph"] == QUAY_UNSERVED_GLYPH, "name"].dropna()
     ]
     print(f"  quays with no scheduled call within {args.boat_stop_m:g} m: {len(unserved)} ({', '.join(unserved) if unserved else 'none'})")
+    afloat = scheduled[entur.lines_column(entur.WATER_MODE)].notna().sum()
+    scheduled = hand_water_to_the_quays(scheduled, terminals, ssr_quays)
+    stranded = scheduled.loc[scheduled[entur.lines_column(entur.WATER_MODE)].notna(), "name"].tolist()
+    print(f"  boat calls no quay draws, so drawn on the stop place: {len(stranded)} of {afloat} ({', '.join(stranded) if stranded else 'none'})")
 
     # Farms and sæters are the actual starting points here (Bønnåa, Strompdalen,
     # Stavassgården), but the region has over a thousand of them, so they are
@@ -2723,8 +2767,9 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     print(f"  Settlements: {len(places)}")
     print(f"  Trailheads (<{args.trailhead_km:g} km from boundary): {len(trailheads)}")
     print(f"  Ferry and express-boat quays: {len(terminals)}")
-    served = {mode: int(scheduled[entur.lines_column(mode)].notna().sum()) for mode in entur.MODES}
-    print(f"  Stop places a line calls at: {len(scheduled)} ({served})")
+    # Water reads 1 here and not 27: the quays took the rest, above.
+    drawn = {mode: int(scheduled[entur.lines_column(mode)].notna().sum()) for mode in entur.MODES}
+    print(f"  Stop places a line calls at: {len(scheduled)} ({drawn})")
     print(f"  Camp sites: {len(camp_sites)}")
 
     approach_label = f"≤{args.approach_km:g} km"

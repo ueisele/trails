@@ -1790,10 +1790,10 @@ with the question that turned out to matter: is public transport already a switc
 
 **It was, and it was the wrong switch.** *Stations and bus stops [OSM]* was one layer holding
 both, so hiding four hundred bus stops would have hidden Trofors and Mosjøen with them. It is
-three layers now, one per mode, each with its own checkbox: **Train stations [Entur]** (2),
-**Airports [Entur]** (2) and **Bus stops [Entur]** (288, switched off at load). A stop goes in
-the first layer it is served under, so Mosjøen stasjon is a station although four bus lines call
-there — and its popup names all five.
+four layers now, one per mode, each with its own checkbox: **Train stations [Entur]** (2),
+**Airports [Entur]** (2), **Boat stops [Entur]** (1) and **Bus stops [Entur]** (288, switched off
+at load). A stop goes in the first layer it is served under, so Mosjøen stasjon is a station
+although four bus lines call there — and its popup names all five.
 
 **The stops come from the register now, not from OSM.** Over this box OSM holds 628 of them
 against Entur's 430, because OSM tags a pole per direction and only 414 of its names are
@@ -1809,6 +1809,19 @@ down to the last two kilometres. 313 stop places are drawn in all, under 45 line
 for a bus that no longer calls, so the §9.32 rule would have dropped them; they carry Avinor's
 flights instead — Bodø–Brønnøysund, Oslo–Brønnøysund, Trondheim–Mosjøen — and that is a way in.
 Thirty-one stop places in the box carry a mode and no line at all and are left out by name.
+
+**And why do the quays still come from OSM and SSR?** — *"Weshalb Fähren über OSM und SSR und
+nehmen dort nicht auch Entur?"* Because a quay is a place even without a timetable: six of the 49
+have no scheduled call and are drawn as anchors all the same, since a mole is somewhere a private
+boat can put you ashore, where a bus stop with no bus is a sign. And both quay registers place the
+mole, while Entur places the stop.
+
+The question found a hole, though. Of the 35 water stops in the box, 34 have a quay within 150 m
+and one does not: **Strandbukta hurtigbåtkai**, line 18-167 to Visten, **2.76 km** from the park
+boundary, nearest quay 2.6 km away. It was on no layer at all. `hand_water_to_the_quays` now takes
+the call off every stop place a quay already draws, and whatever survives gets a pin of its own.
+The count in the legend is the check: *Boat stops [Entur] (1)* is how many scheduled sailings
+neither quay register knows a quay for.
 
 ## Licence: in the file, not in the interface
 
