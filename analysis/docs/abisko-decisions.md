@@ -2777,6 +2777,24 @@ So a station carries two links: **Trafikverket's** first, because a station is w
 the question and that page is drawn properly, and **Resrobot's** under it, because that is the one
 that also knows buses 91 and 950 call at Abisko turiststation.
 
+**A board is one stop's, except where the register pairs two.** Uwe, reading the Abisko Östra bus
+stop: *"was mich etwas wundert ist zum Beispiel das in der Bushaltestelle in Abisko auch Züge
+abfahren … In Björkliden ist es korrekt getrennt."* Measured on 2026-09-17:
+
+| | | |
+|---|---|---|
+| Abisko Östra station `740000151` and Abisko Östra E10 `740023825` | **0 m apart** — identical coordinates in the register | one *Common information* board, a **Station** column per row, the neighbour listed as *approx. 30 minutes* on foot |
+| Björkliden station `740000059` and Björkliden stationshuset `740073040` | **115 m apart** | two separate boards, no Station column |
+| Abisko turiststation `740000114` | the station and both OSM bus poles are **one** stop | one board, which simply is the place |
+
+So it is a flag in Samtrafiken's register and not a rule of distance: the pair that shares a point
+is merged and told it is half an hour's walk apart, and the pair 115 m apart is not merged at all.
+Nothing here is ours to fix, and nothing is wrong on the map — the two Abisko Östra pins lead to
+the same combined board, which is more than either stop alone has. **What makes the link worth
+having is not its scope but its reach**: one address per stop, every operator in Sweden, train and
+bus on one page. Trafikverket would never show bus 91, and Länstrafiken would never show InterCity
+98.
+
 **The second one is called *All departures at Resrobot*, after the first name failed.** It read
 *every line*, and Uwe asked what that meant — fairly: beside Trafikverket's row it was a contrast,
 and alone on a bus stop it was a riddle. Naming the modes instead would have promised a bus at
