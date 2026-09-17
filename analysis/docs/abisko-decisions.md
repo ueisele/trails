@@ -2725,30 +2725,42 @@ same line. So the data is structural only: Entur knows which lines call, not whe
 board, which is exactly the failure §9.32 rejected the short link form for, and a reader cannot
 tell it from a station with no trains today.
 
-**Trafikverket publishes one that works, and it wants the name exactly.**
-`trafikverket.se/trafikinformation/tag/?Station=<name>` draws a board; a name it does not know
-renders a page with nothing on it — the same indistinguishable failure. Measured in Firefox on
-this box:
+**Trafikverket was the first answer, and it was withdrawn**, on Uwe's question: *"Wir können in
+Schweden for Bus also keine Fahrpläne verlinken?"* `trafikverket.se/trafikinformation/tag/` draws a
+board, but Trafikverket runs the railway and its board is trains only — so it had nothing to offer
+the four bus stops, and the answer to the question would have been no.
 
-| asked for | answer |
+**Resrobot answers it yes.** It is Samtrafiken's own planner — the national hub Trafiklab belongs
+to — its data is **CC0**, and its deep links are a documented API that says *"No key required"*.
+At Abisko turiststation the board lists *Länstrafik buss 91* to Riksgränsen vändplan and
+*Expressbuss buss 950* to Kiruna flygplats beside *InterCity tåg 98* to Narvik. So both layers
+link, and the bus stops carry a timetable after all.
+
+| measured in Firefox on this box, 2026-09-17 | |
 |---|---|
-| `Abisko turiststation` (Entur's name) | board |
-| `Abisko Turiststation` (OSM's name) | **nothing** — the match is case-sensitive |
-| `Låktatjåkka` (OSM's name) | board |
-| `Låktatjåkko` (Entur's name) | **nothing** |
-| `Abk`, `Abö`, `Bln`, `Kjå` (station signatures) | nothing |
-| `Nonsuch station` (a control) | nothing |
+| `stboard.exe?input=<id>&start=1` | board — but *"No trains in this space of time"* even where buses run |
+| the same with `productsFilter=1111111111` | the buses appear; **this is the difference** |
+| an id Resrobot does not know | *"Your input cannot be interpreted"* — visible, not a blank board |
+| a name it finds twice (`Låktatjåkka`) | *"Your input is ambiguous"* — also visible |
+| the SPA's own URL (`index.html#!P|SQ!H|661824`) | a session token, not a stop: nothing to link |
 
-**So the name is not taken from either register — both get one of the six wrong.**
-`TRAFIKVERKET_BOARD_NAMES` is a table of six, keyed by the national stop id, each entry opened in
-a browser and seen to draw a board. A stop place absent from it gets no link, and the build prints
-how many were linked and names any that were not. Six of six today.
+**Asked for by the national stop id, because a name is not enough.** Two of the ten are ambiguous
+by name, and one register spells its stop wrong — Entur has *Låktatjåkko* where Sweden has
+*Låktatjåkka*. The ids were resolved once through Resrobot's own stop lookup and then **matched by
+position**, which is what settled *Björkliden, Lanthandel*: Resrobot calls it *Björkliden
+stationshuset* and places it **2 m** away. The furthest of the ten is Abisko Östra at 239 m. Each
+of the eight distinct boards was then opened and seen to draw. A pin with no entry gets no link,
+and the build prints how many were linked and names any that were not — six of six stations and
+four of four bus stops today.
 
-**The buses stay OSM's, and say nothing they cannot back up.** Länstrafiken Norrbotten's 91 runs
-up the E10 past all of this, and it is in no keyless source — not Entur, and Trafiklab needs an
-account. So the four roadside stops keep their OpenStreetMap pins in OpenStreetMap's blue, with no
-line and no board, beside the six stations in Entur's slate. That the stop is 54 m to 228 m from
-the station it belongs to is the register's doing and the ground's, not an error.
+**No credit entry, deliberately.** CC0 waives attribution, and what the page carries is eight
+identifiers and a link; the link text names Resrobot, which is where the provenance belongs. The
+lines are Entur's and that credit is in the panel.
+
+**The bus stops stay OpenStreetMap's pins.** Entur has no Swedish bus line and Resrobot gives a
+board rather than a line list, so the four roadside stops say nothing about which bus calls — they
+say where it stops and where to look. That they stand 54 m to 228 m from the station they belong
+to is the register's doing and the ground's, not an error.
 
 **Same code on both sides.** `entur_stop_layers` builds the per-mode layers for either country;
 what differs is one argument, which board a pin links to. Abisko draws one of the four layers —
@@ -2772,9 +2784,9 @@ A line per change to this document or to the decisions in it, newest first.
 - **2026-09-17, ninth of the day** — Abisko's stations get the same treatment (§9.34): *"Jetzt das
   ganze für Schweden."* The note saying they were outside Entur was wrong — it holds all six, with
   SJ's Stockholm–Narvik at every one — but it holds no departure for them or for Narvik, so the
-  board is Trafikverket's, under a table of six names each opened in a browser, because the match
-  is case-sensitive and Entur and OSM each get one wrong. The four bus stops stay OpenStreetMap's:
-  Länstrafiken's 91 is in no keyless source.
+  board is somebody else's. Trafikverket's was the first answer and was withdrawn on *"Wir können
+  in Schweden for Bus also keine Fahrpläne verlinken?"* — it carries trains only. Resrobot's
+  carries both, needs no key and is CC0, so all ten pins link, bus stops included.
 
 - **2026-09-17, eighth of the day** — every scheduled stop around Lomsdal-Visten is drawn, from
   Entur rather than from OSM (§9.33): *"Kannst du alle Bushaltestellen und Bahnhöfe einzeichnen
