@@ -58,22 +58,32 @@ and Overpass and takes considerably longer. Re-fetch on purpose with
 `--force-download`; `command make cache-clean` throws the cache away entirely,
 which is rarely what you want.
 
-**The Abisko ground** is four more targets. `command make tiles` copies the base-map
-tiles for the box out of Lantmäteriet's open download over FTP (no login), and
-`command make dem` builds z8–z13 height tiles from the 1 m height model, which
-needs the Geotorget login in the environment — run it from `home/trails-map` as
-`sops exec-env secrets.sops.env 'cd ../../trails && command make dem'`.
+**The ground under a map** is three more targets, and **both maps have all three**.
+`command make dem` builds z8–z13 height tiles from the country's height model,
 `command make shade` cuts the relief shadow the page lays under the contours out of the
-same cached model, z8–z15, and needs no login once `make dem` has cached it, and
-`command make slope` colours how steep that ground is, in classes, cut exactly as the
-relief is. All four resume, all four write under `analysis/output/`, and
-`make deploy ARGS="--tree …"` uploads what they wrote. `analysis/docs/abisko-decisions.md` carries every figure.
+same cached model, z8–z15, and `command make slope` colours how steep that ground is,
+in classes, cut exactly as the relief is. All three take `PARK=<map>` — default
+`lomsdal-visten`, as `make map` and `make graph` default — and which box each is cut to
+and out of which model is `trails.processing.trees.TREES`, written once and read by the
+scripts and by `maps.PROVIDERS` alike. All three resume, all three write under
+`analysis/output/<tree>/<provider>/<version>/`, and `make deploy ARGS="--tree …"` uploads
+what they wrote. `analysis/docs/abisko-decisions.md` carries every figure — §6.3, §6.6 and
+§6.7 for the shapes, §6.10 for the Norwegian model and its box.
+
+**The one asymmetry is the sheet and the login.** Abisko draws Lantmäteriet's tiles out of
+our own bucket, so it has a fourth target: `command make tiles` copies them for the box out
+of Lantmäteriet's open download over FTP (no login) — and its height model does need the
+Geotorget login, so run that from `home/trails-map` as
+`sops exec-env secrets.sops.env 'cd ../../trails && command make dem PARK=abisko'`.
+Lomsdal-Visten draws Kartverket's cache live, copies no sheet, and reads its height model
+off `hoydedata.no` with no login, no order and no key at all.
 
 **Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, slope, the graph
 with its report and the page, in that order, and from `home/trails-map`
-`just abisko` is the same with the login supplied. Every step resumes or reads
-the cache, so a rerun costs a few minutes of checking and the page; it builds
-and does not publish.
+`just abisko` is the same with the login supplied. `command make lomsdal-visten` is the same
+chain without the tiles step and without any credential. Every step resumes or reads
+the cache, so a rerun costs a few minutes of checking and the page; both build
+and neither publishes.
 
 Both targets pass `ARGS` through, so `command make map ARGS="--approach-km 10"`
 works; the script itself is `analysis/scripts/lomsdal_visten.py`. Which map is
@@ -135,9 +145,16 @@ login, read by box out of the country GeoPackage), Naturvårdsverket's nightly
 files — the protected areas and the trail register, `io/sources/naturvardsregistret.py`,
 no login — and OSM. Heights come off the cached 1 m model rather than a point
 service; the place names are Lantmäteriet's *Ortnamn* (`io/sources/ortnamn.py`, the
-country file fetched once with the login); and the page reads the same model off the height tiles `make dem` cut
-(`maps.HeightTiles`, beside the provider's map tiles; the worker keeps them and
-the offline panel counts them). **The relief is shaded from that same model**
+country file fetched once with the login).
+
+**Both pages read their heights off tiles, and both draw the relief and the slope classes.**
+The page reads the model off the height tiles `make dem` cut (`maps.HeightTiles`, beside the
+provider's map tiles; the worker keeps them and the offline panel counts them), so a leg
+planned with no network still has a profile and a tap anywhere is told its own height.
+Sweden's model is Lantmäteriet's 1 m *Markhöjdmodell* (`io/sources/markhojd.py`, Geotorget
+login); Norway's is Kartverket's national model off `hoydedata.no`'s image service
+(`io/sources/hoydedata_dtm.py`, no login), where what the model leaves empty is open sea and
+is read as nought metres. **The relief is shaded from that same model**
 (`maps.ShadeTiles`, `processing/shade_tiles.py`): neither Lantmäteriet's sheet nor
 Kartverket's carries shading, so the page draws its own over the base and under
 everything it draws itself, black with an alpha channel so level ground stays the

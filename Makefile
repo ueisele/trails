@@ -19,7 +19,7 @@ ifneq ($(MISE),)
 export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
 endif
 
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy tiles dem abisko
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy tiles dem shade slope abisko lomsdal-visten
 
 # Default target
 help:
@@ -48,8 +48,10 @@ help:
 	@echo "  make graph         Build a park's routing graph and report it (--park likewise)"
 	@echo "                     both take ARGS=\"...\", e.g. make map ARGS=\"--approach-km 10\""
 	@echo "  make tiles         Copy the Abisko base-map tiles out of Lantmäteriet's open download"
-	@echo "  make dem           Build the Abisko height tiles from Lantmäteriet's height model (needs the Geotorget login)"
-	@echo "  make abisko        The whole Abisko chain: tiles, dem, graph, map (needs the Geotorget login; resumable)"
+	@echo "  make dem           Build a map's height tiles; make shade its relief, make slope its steepness"
+	@echo "                     all three take PARK=<map> (default lomsdal-visten) and are resumable"
+	@echo "  make abisko        The whole Abisko chain: tiles, dem, shade, slope, graph, map (needs the Geotorget login)"
+	@echo "  make lomsdal-visten  The whole Lomsdal-Visten chain: dem, shade, slope, graph, map (no login)"
 	@echo "  make deploy        Publish the built map and purge the edge (needs .env)"
 	@echo "                     ARGS=\"--tree tiles\" mirrors a tile tree instead; --tree dem the heights"
 	@echo "  make fixtures      Generate/update test fixtures from real data"
@@ -195,31 +197,36 @@ tiles:
 	@echo "🧩 Copying Lantmäteriet's tiles for the Abisko box (resumable)..."
 	uv run python analysis/scripts/lantmateriet_tiles.py $(ARGS)
 
-# Reads the 1 m height model's squares over the box by range request with the Geotorget login
-# (GEOTORGET_USERNAME/PASSWORD in the environment; run it under sops exec-env from home/trails-map),
-# caches the mosaic and cuts z8–z13 height tiles. Resumable; the deploy uploads with --tree dem.
-# See analysis/docs/abisko-decisions.md §6.3.
+# **Which map the three tile trees are cut for.** `dem`, `shade` and `slope` all cut from one height
+# model over one box, and which model and which box that is, is named per map in
+# `trails.processing.trees.TREES` — so they take PARK the way `map` and `graph` take `--park`, and
+# default to the same map those two default to. The two chains below set it; nothing else needs to.
+PARK ?= lomsdal-visten
+
+# Reads the height model over the map's box — Lantmäteriet's 1 m squares by range request with the
+# Geotorget login (GEOTORGET_USERNAME/PASSWORD in the environment; run it under sops exec-env from
+# home/trails-map), or Kartverket's national model off hoydedata.no's image service, which needs no
+# login at all — caches the mosaic and cuts z8–z13 height tiles. Resumable; the deploy uploads with
+# --tree dem. See analysis/docs/abisko-decisions.md §6.3 and §6.10.
 dem:
-	@echo "⛰️  Building the Abisko height tiles (resumable)..."
-	uv run python analysis/scripts/dem_tiles.py $(ARGS)
-	@echo "✅ analysis/output/dem/lantmateriet/1/"
+	@echo "⛰️  Building the $(PARK) height tiles (resumable)..."
+	uv run python analysis/scripts/dem_tiles.py --park $(PARK) $(ARGS)
 
 # Cuts the relief shadow the page draws under the contours from the same cached mosaic the height
-# tiles come from, z8-z15. Needs no login once `make dem` has cached the mosaic. Resumable; the
-# deploy uploads with --tree shade. See analysis/docs/abisko-decisions.md §6.6.
+# tiles come from, z8-z15. Needs no login once `make dem` has cached the mosaic, and none at all for
+# Norway. Resumable; the deploy uploads with --tree shade. See analysis/docs/abisko-decisions.md
+# §6.6 and §6.10.
 shade:
-	@echo "🌄 Building the Abisko hillshade tiles (resumable)..."
-	uv run python analysis/scripts/shade_tiles.py $(ARGS)
-	@echo "✅ analysis/output/shade/lantmateriet/1/"
+	@echo "🌄 Building the $(PARK) hillshade tiles (resumable)..."
+	uv run python analysis/scripts/shade_tiles.py --park $(PARK) $(ARGS)
 
 # Colours how steep the ground is, in the SLF's classes with one of our own below them, from the
 # same cached mosaic, z8-z15, cut exactly as the relief is. Needs no login once `make dem` has
-# cached the mosaic. Resumable; the deploy uploads with --tree slope. See
-# analysis/docs/abisko-decisions.md §6.7.
+# cached the mosaic, and none at all for Norway. Resumable; the deploy uploads with --tree slope.
+# See analysis/docs/abisko-decisions.md §6.7 and §6.10.
 slope:
-	@echo "📐 Building the Abisko slope-class tiles (resumable)..."
-	uv run python analysis/scripts/slope_tiles.py $(ARGS)
-	@echo "✅ analysis/output/slope/lantmateriet/1/"
+	@echo "📐 Building the $(PARK) slope-class tiles (resumable)..."
+	uv run python analysis/scripts/slope_tiles.py --park $(PARK) $(ARGS)
 
 # The whole Abisko chain in one run, in the order the pieces depend on each other: the base-map
 # tiles off the FTP, the height mosaic and tiles with the login, the hillshade and the slope classes
@@ -230,12 +237,27 @@ slope:
 # or cached, so a second run is a few minutes of checking and a rebuild of the page. It builds and
 # does not publish: `just deploy --map abisko --tree tiles --tree dem --tree shade --tree slope` from
 # home/trails-map is that, and `just abisko` there is this target with the login supplied.
-abisko: tiles dem shade slope
+abisko:
+	$(MAKE) tiles PARK=abisko
+	$(MAKE) dem shade slope PARK=abisko
 	@echo "🕸️  Building and reporting the Abisko routing graph..."
 	uv run python analysis/scripts/route_graph.py --park abisko
 	@echo "🗺️  Building the Abisko map..."
 	uv run python analysis/scripts/lomsdal_visten.py --park abisko
 	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem --tree shade --tree slope (from home/trails-map)"
+
+# The whole Lomsdal-Visten chain, in the same order and with the same properties: the height model
+# off hoydedata.no (no login, no order), the heights, the relief and the slope classes off the one
+# cached mosaic, then the graph and the page. There is no `tiles` step here — Kartverket serves its
+# own sheet and we copy none of it — and nothing in this chain needs a credential, which is the one
+# way it differs from `abisko`. See analysis/docs/abisko-decisions.md §6.10.
+lomsdal-visten:
+	$(MAKE) dem shade slope PARK=lomsdal-visten
+	@echo "🕸️  Building and reporting the Lomsdal-Visten routing graph..."
+	uv run python analysis/scripts/route_graph.py --park lomsdal-visten
+	@echo "🗺️  Building the Lomsdal-Visten map..."
+	uv run python analysis/scripts/lomsdal_visten.py --park lomsdal-visten
+	@echo "✅ analysis/output/lomsdal-visten.html — publish with: just deploy --tree dem --tree shade --tree slope (from home/trails-map)"
 
 # **Pinned, because the browser is not.** `--with playwright` takes the newest release, and each
 # one wants a Firefox build of its own: the newest asks for `firefox-1543` and dies with

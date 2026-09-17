@@ -17,13 +17,25 @@ leg across a tarn is as much a fiction as one across a fjord. The outlines
 simplified to ten metres would have been 5.5 MB in memory and 0.94 MB in the
 page, and slower to ask.
 
-**What it is for and what it is not for.** The bits decide a *price*, and a
-price is allowed to be a cell out: a connector that touches one cell of sea
-because the shore is 25 m from where the reader tapped costs one cell's worth
-more than it should, and every connector from that point pays the same,
-so nothing between them is decided by it. Nothing is drawn from the grid. What
-a straight leg shows as water on the profile still comes from the height
-service, which classifies each sample by what it is standing on.
+**What it is for.** The bits decide a *price*, and a price is allowed to be a
+cell out: a connector that touches one cell of sea because the shore is 25 m
+from where the reader tapped costs one cell's worth more than it should, and
+every connector from that point pays the same, so nothing between them is
+decided by it. Nothing is drawn from the grid.
+
+**And since §6.10, what a straight leg *says* about the water it crosses.**
+That used to come from the height service, which classified each sample by what
+it was standing on; when both maps moved to height tiles the service went, and
+with it the `terreng` field the classification hung on — so a leg over a fjord
+came back as walked ground with a profile along it. The grid answers the same
+question better: it is what the leg was *priced* by, so the way drawn and the
+way described are one opinion rather than two; it answers offline; and a price
+being a cell out is a cell of shoreline in a figure given to the nearest ten
+metres of a kilometre. **A river is the exception**: Lantmäteriet draws a
+watercourse wide enough to have two banks as a water surface, so Abiskojåkka
+sits in the grid exactly as Torneträsk does -- and a ford is walked, not
+crossed. The page drops the grid's say where a river outline covers the sample,
+because the outlines are carried for that question and answer it to the metre.
 
 The cells are laid out in degrees rather than metres, so that the page can ask
 about a longitude and a latitude without projecting either. A cell is

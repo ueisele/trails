@@ -26,7 +26,7 @@ import pandas as pd
 from branca.element import Element, Figure, MacroElement
 from jinja2 import Template
 
-from trails.processing import slope_tiles
+from trails.processing import slope_tiles, trees
 from trails.processing.dem_tiles import TERRARIUM_OFFSET, TERRARIUM_STEP
 from trails.routing import elevation
 
@@ -153,7 +153,7 @@ class HeightTiles:
     Terrarium-packed PNGs cut by :mod:`trails.processing.dem_tiles`
     (analysis/docs/abisko-decisions.md §6.3), addressed like the map tiles and
     kept like them. The page reads them for the legs of a planned route the
-    network cannot carry, where a map without them asks a point service; the
+    network cannot carry, and for a tap anywhere on the map; the
     worker keeps them beside the map tiles, under the same switch, so a leg
     planned offline over kept ground has a profile.
     """
@@ -338,28 +338,53 @@ class Provider:
     cap: int
     #: Bytes a kept tile weighs, per zoom, for every size estimate on the panel.
     weight: dict[int, int]
-    #: Height tiles cut beside the map tiles, where the map has them. None
-    #: for a map whose heights come from a point service.
+    #: Height tiles cut beside the map tiles, where the map has them. None for
+    #: a map that asks a point service for its heights instead -- which since
+    #: §6.10 is neither of them.
     heights: HeightTiles | None = None
     #: Hillshade tiles cut beside the map tiles, where the map has them. None
-    #: for a sheet with no height model of its own behind it -- Kartverket's,
-    #: today -- and then the page draws no relief overlay at all.
+    #: for a sheet with no height model behind it, and then the page draws no
+    #: relief overlay at all.
     shade: ShadeTiles | None = None
     #: Slope-class tiles cut beside the map tiles, where the map has them
     #: (§6.7): the same condition as the relief's, and None with it.
     slope: SlopeTiles | None = None
-    #: Where the tiles end, west, south, east, north in degrees -- the box a
-    #: tree in our own bucket was cut to. None for a source that answers the
-    #: whole world, which is what a third party's cache does.
+    #: Where the tiles end, west, south, east, north in degrees -- the box the
+    #: trees in our own bucket were cut to, :data:`trails.processing.trees.TREES`.
+    #: None for a source none of whose tiles are ours.
     #:
     #: **The offline panel's margin stops here.** Every scope lays a ring of
     #: tiles round what it keeps, and against a tree cut exactly to its box
     #: that ring is a row of 404s: measured on the Abisko page, *the whole map*
     #: met twelve refusals in a row inside its first sixty tiles, read that as
     #: the connection giving out, and switched offline on over 34 tiles
-    #: (analysis/docs/abisko-decisions.md §8.2). Kartverket answers the ring,
-    #: so a source without an extent keeps it.
+    #: (analysis/docs/abisko-decisions.md §8.2).
+    #:
+    #: **It is the box of the trees, and not of the sheet, where the two differ.**
+    #: Kartverket's cache answers the whole world and would answer the ring; the
+    #: heights, the relief and the slope classes drawn on it are ours and stop at
+    #: the box (§6.10). Holding the sheet to the same box costs one row of tiles
+    #: nobody was going to walk on, and is what keeps the run from asking the
+    #: three trees for ground they do not have.
     extent: tuple[float, float, float, float] | None = None
+
+
+#: What a tile of each of Lomsdal-Visten's three trees weighs, per zoom, for
+#: every size estimate on the offline panel: the mean over the whole tree of
+#: the first build, 2026-09-17 (§6.10). Measured rather than sampled, because
+#: unlike a provider's cache these are ours and every one of them is on disk.
+#: Kartverket's national model as tiles, z8 to z13: 2,475 tiles, 224.0 MB.
+_WEIGHT_LV_DEM = {8: 48907, 9: 88226, 10: 93729, 11: 101108, 12: 95688, 13: 88436}
+#: The relief shadow, z8 to z15: 37,915 tiles, 477.1 MB.
+_WEIGHT_LV_SHADE = {8: 13071, 9: 22789, 10: 24516, 11: 26800, 12: 26208, 13: 22598, 14: 16377, 15: 10672}
+#: The slope classes, z8 to z15: 37,915 tiles, 141.8 MB.
+_WEIGHT_LV_SLOPE = {8: 2453, 9: 4296, 10: 5038, 11: 5849, 12: 6186, 13: 5764, 14: 4604, 15: 3339}
+
+
+#: Where each map's own trees are cut, written once and read here so the page,
+#: its worker, the offline panel and the three build scripts all name one box.
+_LOMSDAL_VISTEN = trees.TREES["lomsdal-visten"]
+_ABISKO = trees.TREES["abisko"]
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -373,6 +398,31 @@ PROVIDERS: dict[str, Provider] = {
         # the park: the sea tiles a bounding box is full of are a fraction of
         # the size and would make every estimate optimistic.
         weight={11: 73914, 12: 73914, 13: 73914, 14: 70170, 15: 45898, 16: 51295, 17: 28637, 18: 37037},
+        # **Kartverket's sheet answers the world; these three trees are ours and
+        # do not.** The extent is theirs, not the sheet's -- see the field.
+        extent=_LOMSDAL_VISTEN.box,
+        # Kartverket's national height model as tiles (§6.10), z8 to z13; the
+        # weights are the mean per zoom of the first build's 2,475 tiles,
+        # 2026-09-17.
+        heights=HeightTiles(
+            tiles=_LOMSDAL_VISTEN.prefix("dem"),
+            top=_LOMSDAL_VISTEN.dem_max_zoom,
+            weight=_WEIGHT_LV_DEM,
+        ),
+        # The relief shadow the page draws under the contours (§6.6, §6.10),
+        # z8 to z15, off the same mosaic.
+        shade=ShadeTiles(
+            tiles=_LOMSDAL_VISTEN.prefix("shade"),
+            top=_LOMSDAL_VISTEN.ground_max_zoom,
+            weight=_WEIGHT_LV_SHADE,
+        ),
+        # And the slope classes over it (§6.7, §6.10), cut exactly as the
+        # relief is. Version 1: this tree has no earlier stand to be told from.
+        slope=SlopeTiles(
+            tiles=_LOMSDAL_VISTEN.prefix("slope"),
+            top=_LOMSDAL_VISTEN.ground_max_zoom,
+            weight=_WEIGHT_LV_SLOPE,
+        ),
     ),
     "lantmateriet": Provider(
         key="lantmateriet",
@@ -389,12 +439,12 @@ PROVIDERS: dict[str, Provider] = {
         # The box the tree was cut to, as `index.json` beside it records
         # (§2 of the decisions): the copy holds every tile of the box at
         # every zoom and not one outside it.
-        extent=(18.15, 68.139, 19.10, 68.46),
+        extent=_ABISKO.box,
         # The 1 m height model as tiles (§6.3), z8 to z13; the weights are
         # the mean per zoom of the first build's 540 tiles, 2026-09-12.
         heights=HeightTiles(
-            tiles="/dem/lantmateriet/1/",
-            top=13,
+            tiles=_ABISKO.prefix("dem"),
+            top=_ABISKO.dem_max_zoom,
             weight={8: 29019, 9: 35677, 10: 65806, 11: 93498, 12: 93117, 13: 92693},
         ),
         # The relief shadow the page draws under the contours (§6.6), z8 to
@@ -403,8 +453,8 @@ PROVIDERS: dict[str, Provider] = {
         # holds less relief the closer in it is, and the whole tree weighs less
         # than the height tiles' 55 MB twice over.
         shade=ShadeTiles(
-            tiles="/shade/lantmateriet/1/",
-            top=15,
+            tiles=_ABISKO.prefix("shade"),
+            top=_ABISKO.ground_max_zoom,
             weight={8: 9528, 9: 10633, 10: 18582, 11: 26043, 12: 25044, 13: 20474, 14: 14404, 15: 9415},
         ),
         # The slope classes the page colours over the relief (§6.7), z8 to
@@ -413,8 +463,8 @@ PROVIDERS: dict[str, Provider] = {
         # build's 9,330 tiles. Flat colour in a palette: a quarter of the
         # relief's 104 MB.
         slope=SlopeTiles(
-            tiles="/slope/lantmateriet/2/",
-            top=15,
+            tiles=_ABISKO.prefix("slope"),
+            top=_ABISKO.ground_max_zoom,
             weight={8: 2328, 9: 2547, 10: 3646, 11: 4586, 12: 4470, 13: 4010, 14: 3213, 15: 2424},
         ),
     ),
@@ -2839,7 +2889,10 @@ def create_map(
     center: tuple[float, float] | None = None,
     zoom: int = 10,
     base: BaseMap = BaseMap.KARTVERKET_TOPO,
-    extra_bases: tuple[BaseMap, ...] = (BaseMap.KARTVERKET_GRAYSCALE,),
+    # No second sheet unless one is asked for. Kartverket's grey one stood here
+    # from the first build and neither map offers it now (§6.10): a default that
+    # puts a sheet in the picker is a default that decides what the picker is for.
+    extra_bases: tuple[BaseMap, ...] = (),
     title: str | None = None,
     companions: Companions = ROOT,
 ) -> folium.Map:
@@ -12177,7 +12230,9 @@ class _PlanMode(MacroElement):
             }
 
             // ---- heights off the tiles, where the map carries them ----------
-            // Lantmäteriet's map has no point service to ask. What it has is
+            // Both maps carry them and neither asks a service: Abisko has none
+            // to ask, and Lomsdal-Visten stopped asking Geonorge's when it got
+            // a tree of its own (decisions §6.10). What they read is
             // the height tiles the build cut (decisions §6.3): Terrarium-packed
             // PNGs at `PLAN.heightsTiles.url`, addressed like the map tiles and
             // kept like them by the worker, so a straight leg planned offline
@@ -12461,12 +12516,47 @@ class _PlanMode(MacroElement):
                 // shape a disagreement takes.
                 var standing = new Array(count);
                 for (var s = 0; s < count; s += 1) { standing[s] = graph.areasAt(laid.lon[s], laid.lat[s]); }
+                // **Whether a sample is on water is the graph's water grid's
+                // answer, not the height source's.** It used to be the point
+                // service's `terreng` field, which is where it came from rather
+                // than where it belonged — and when both maps moved to height
+                // tiles (§6.10) that field went with the service, so a leg over
+                // a fjord came back as walked ground with a profile along it.
+                // The grid is a better answer in three ways: it is what the
+                // *router* already prices this leg by, so the way drawn and the
+                // way described stop being two opinions; it holds lakes as well
+                // as sea, because a straight leg across a tarn is as much a
+                // fiction as one across a fjord; and it is in the page, so it
+                // answers with no network. `points[i].sea` is still honoured,
+                // for a page whose heights do come from a service.
+                //
+                // **A river is waded and not crossed, so a river is not wet
+                // here.** Lantmäteriet draws a watercourse wide enough to have
+                // two banks as a water surface, so Abiskojåkka is in the grid
+                // exactly as Torneträsk is, and classifying by the grid alone
+                // cut the leg in two at the bank. That is wrong twice over: a
+                // ford leaves the walked distance and the profile to be
+                // reported as a crossing, which reads as a boat; and the width
+                // sentence, which is measured per land part, then measures a
+                // run the grid truncated rather than the river — Abiskojåkka
+                // came back 14 m wide where the outline says 22. The outlines
+                // are carried for this question and answer it to the metre
+                // (`riverCrossings` below), so the grid's say is dropped where
+                // they apply. Measured: Abisko 14 m → 22 m, Lomsdal-Visten's
+                // Storelva unchanged at 27, since no Norwegian river of this
+                // build is in the grid at all.
+                var wet = new Array(count);
+                for (var w = 0; w < count; w += 1) {
+                    wet[w] = !!points[w].sea
+                        || (!!graph.waterAt(laid.lon[w], laid.lat[w])
+                            && !graph.riverAt(laid.lon[w], laid.lat[w]).length);
+                }
                 // Where the samples change their mind about what is under them.
                 // Named for what it is: in this file `edges` means edges of the
                 // graph, and these are the ends of the runs.
                 var changes = [0];
                 for (var i = 1; i < count; i += 1) {
-                    if (points[i].sea !== points[i - 1].sea) { changes.push(i); }
+                    if (wet[i] !== wet[i - 1]) { changes.push(i); }
                 }
                 changes.push(count);
 
@@ -12481,7 +12571,7 @@ class _PlanMode(MacroElement):
                     var began = run === 0 ? 0 : (laid.along[first - 1] + laid.along[first]) / 2;
                     var ended = last === count ? laid.length : (laid.along[last - 1] + laid.along[last]) / 2;
                     var head = positionAt(began), tail = positionAt(ended);
-                    if (points[first].sea) {
+                    if (wet[first]) {
                         parts.push({kind: 'water', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
                                     along: [0, ended - began], length: ended - began,
                                     height: null, distance: null, read: false, tally: blankTally()});
@@ -17794,13 +17884,14 @@ class _OfflinePanel(MacroElement):
                 // map carries none, and then nothing here changes.
                 var HEIGHTS = {{ this.heights_json }};
                 // The relief overlay's tiles, kept with the map's. Null where
-                // the sheet has no height model behind it.
+                // no height model has been cut over the map's ground.
                 var SHADE = {{ this.shade_json }};
                 // And the slope classes' tiles, kept with them, on the same
-                // condition. Null where the sheet has no model behind it.
+                // condition.
                 var SLOPE = {{ this.slope_json }};
-                // Where the source's tiles end, or null for one that answers
-                // everywhere. A margin is clipped to it: see `padded`.
+                // Where *our* tiles end -- the box the three trees were cut to,
+                // which is not the sheet's reach where the sheet is somebody
+                // else's cache (§6.10). A margin is clipped to it: see `padded`.
                 var EXTENT = {{ this.extent_json }};
 
                 // **Four scopes, and only one of them follows the paths.** In

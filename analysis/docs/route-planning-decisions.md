@@ -168,6 +168,23 @@ question to the reader, and a leg that crosses a strait sorts itself out — its
 samples alternate, so it splits at the shoreline into walked stretches and
 crossed ones.
 
+> **Superseded 2026-09-17 — the grid classifies it, and the shape is unchanged.**
+> `terreng` came with the point service, and both maps now read their heights off
+> height tiles, which carry the ground and nothing else: a tile reader answers
+> `sea: false` everywhere, correctly, because there is no sea in a model of the
+> ground. So the page briefly reported a plan across Vistenfjorden as walked, with
+> a profile drawn along the bottom of it. The classifier is now the graph's own
+> water grid — `graph.waterAt(lon, lat)`, the same grid the router prices a
+> straight leg by, which also holds lakes, and which is in the page and so answers
+> with no network. `terreng` is still honoured beside it for a map whose heights
+> do come from a service. Everything below — the four kinds of leg, the split at
+> the shoreline, the two groups reported apart — is exactly as it was; only the
+> question "is this sample wet" is asked somewhere else. **A river is not wet**:
+> a wide watercourse is a water surface in Lantmäteriet's data and so sits in the
+> grid, but a ford is walked and the page has a sentence for how wide it is, so
+> the grid's say is dropped where a river outline covers the sample.
+> `abisko-decisions.md` §6.10.
+
 That leaves four kinds of leg, and only two ways of reporting them:
 
 | leg | distance counts as | profile | in the GPX |
@@ -325,6 +342,17 @@ This also degrades well. Without a network the map has no tiles and is unusable
 anyway, but a route that stays on existing paths still shows its full profile
 from what was baked in; only a freshly drawn free leg comes up empty, and it
 should say so rather than report flat ground.
+
+> **Superseded for the page, 2026-09-17 — the build is unchanged.** "Without a
+> network the map has no tiles and is unusable anyway" stopped being true when
+> the offline pack arrived, and a free leg that came up empty in a valley was
+> the consequence. The page now reads its heights off z13 height tiles cut here
+> and kept beside the map tiles, so a straight leg planned with no network has a
+> profile and a tap anywhere is told its own height: `abisko-decisions.md` §6.3,
+> §6.8 and §6.10. The build still samples the point service for every graph
+> vertex, exactly as this section says, and the two agree to a median of 0.10 m,
+> measured. Everything below about *why the point endpoint and not the raster*
+> is about the build and still holds.
 
 #### Use the point endpoint, not the raster
 

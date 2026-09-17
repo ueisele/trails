@@ -43,6 +43,7 @@ from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, reproject
 
 from ..utils.tiles import TILE_PX, Bounds, tile_bounds, tile_count, tile_range, tile_resolution
+from . import warp
 
 #: The tiles' projection.
 TILE_CRS = "EPSG:3857"
@@ -240,17 +241,25 @@ def cut(
     grown = (east - west) / TILE_PX * level.margin
     side = level.side
     patch = np.full((side, side), np.nan, dtype=np.float32)
-    reproject(
-        source=model,
-        destination=patch,
-        src_transform=transform,
-        src_crs=source_crs,
-        src_nodata=nodata,
-        dst_transform=from_bounds(west - grown, south - grown, east + grown, north + grown, side, side),
-        dst_crs=TILE_CRS,
-        dst_nodata=np.nan,
-        resampling=level.how,
-    )
+    # **Out of a view of the model over this patch's ground, margin and all.** A
+    # warp costs what its source is big and not what its destination is -- 346 ms
+    # against 12 ms for one tile off the two mosaics this project holds, measured
+    # in :mod:`trails.processing.warp`, which over a tree of 37,915 tiles is the
+    # difference between an afternoon and a coffee.
+    wide = (west - grown, south - grown, east + grown, north + grown)
+    near = warp.window(model, transform, source_crs, wide, side)
+    if near is not None:
+        reproject(
+            source=near[0],
+            destination=patch,
+            src_transform=near[1],
+            src_crs=source_crs,
+            src_nodata=nodata,
+            dst_transform=from_bounds(*wide, side, side),
+            dst_crs=TILE_CRS,
+            dst_nodata=np.nan,
+            resampling=level.how,
+        )
     blank = ~np.isfinite(patch)
     if blank.all():
         # No ground here at all: level, so the map beneath is drawn exactly

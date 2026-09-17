@@ -198,7 +198,12 @@ PARKS: dict[str, Park] = {
         country="NO",
         kind="nasjonalpark",
         base=maps.BaseMap.KARTVERKET_TOPO,
-        extras=(maps.BaseMap.KARTVERKET_GRAYSCALE,),
+        # The colour sheet only. The grey one was offered from the first build
+        # and never chosen -- and since §6.10 the panel's second control is the
+        # relief, which is what a reader actually reaches for when the sheet is
+        # too busy. A radio pair where one side is never picked is a choice the
+        # page asks for and nobody has (as Abisko's has been since §6.1).
+        extras=(),
         companions=maps.Companions.of("lomsdal-visten"),
         bounds=None,
         ut_routes="lomsdal-visten-ut-routes.toml",
@@ -1409,15 +1414,18 @@ MATCH_MAX_TURN_DEG = 60.0
 MATCH_ANCHOR_M = 250.0
 
 
-#: Where a straight leg's heights come from, per country. Norway asks
-#: Kartverket's point service, in degrees, at the service's own cap on points
-#: per request and the build's own concurrency -- somebody else's endpoint,
-#: and one number rather than two -- and reads each answer by the two rules
-#: the build reads it by. Sweden reads the height tiles the build cut
-#: (decisions §6.3) and asks no service at all; the service's settings are
-#: then handed over empty, because the page insists on the keys and reads
-#: none of them once it has tiles.
-NORWAY_PLAN_HEIGHTS: dict[str, object] = {
+#: What a page that has no height tiles asks instead: Kartverket's point
+#: service, in degrees, at the service's own cap on points per request and the
+#: build's own concurrency -- somebody else's endpoint, and one number rather
+#: than two -- read by the two rules the build reads it by.
+#:
+#: **Nothing uses it today**, and it is kept because it is the shape of the
+#: answer for a map whose ground no tree of ours covers. Both maps now carry
+#: height tiles: Abisko since decisions §6.3, Lomsdal-Visten since §6.10. What
+#: the tiles buy over this is not accuracy -- 182 posts of the model agree with
+#: this service to a median of 0.10 m -- but that they answer at all with no
+#: network, which is the whole of why a leg planned in a valley has a profile.
+SERVICE_PLAN_HEIGHTS: dict[str, object] = {
     "heightsUrl": hoydedata.SERVICE_URL,
     "heightsCrs": hoydedata.WGS84_COORDINATE_SYSTEM,
     "heightsBatch": hoydedata.MAX_POINTS,
@@ -1428,8 +1436,14 @@ NORWAY_PLAN_HEIGHTS: dict[str, object] = {
 }
 
 
-def sweden_plan_heights(base: maps.BaseMap) -> dict[str, object]:
-    """The Swedish page's height source: the tiles beside the sheet it draws.
+def tile_plan_heights(base: maps.BaseMap) -> dict[str, object]:
+    """A page's height source: the tiles beside the sheet it draws.
+
+    The same for both maps, and it has to be: a leg's profile and a tapped
+    place's height are one reading of one surface, and the page has exactly one
+    reader for them (§6.8). The service's settings are handed over empty,
+    because the page insists on the keys and reads none of them once it has
+    tiles.
 
     Args:
         base: The sheet, whose provider carries the height tiles
@@ -1470,7 +1484,8 @@ def plan_settings(params: graphs.Params, layers: list[TrailLayer], heights: dict
         layers: The line layers this map draws, which is what the route's own
             width is measured against
         heights: Where a straight leg's heights come from:
-            :data:`NORWAY_PLAN_HEIGHTS` or :func:`sweden_plan_heights`
+            :func:`tile_plan_heights`, or :data:`SERVICE_PLAN_HEIGHTS`
+            for a map with no tree of its own
 
     Returns:
         The ``plan`` argument of :func:`~trails.visualization.maps.add_plan_mode`
@@ -2751,7 +2766,7 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         costs=norway.edge_costs(loaded.sources, params),
         areas=norway.protected_table(loaded.protected),
         credits=credits,
-        heights=NORWAY_PLAN_HEIGHTS,
+        heights=tile_plan_heights(which.base),
         boundary_label="National park boundary [Naturbase]",
         exports=exports,
     )
@@ -3146,7 +3161,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         costs=sweden.edge_costs(loaded.sources, params),
         areas=sweden.protected_table(loaded.protected),
         credits=credits,
-        heights=sweden_plan_heights(which.base),
+        heights=tile_plan_heights(which.base),
         boundary_label="National park boundary [Naturvårdsregistret]",
         exports=exports,
     )

@@ -972,6 +972,270 @@ reload** for both (a reload is 20 s of a suite that already takes ten minutes), 
 and put where they were found. On the Abisko page there is one sheet and the check says so instead
 of passing on a choice it never made.
 
+### 6.10 Lomsdal-Visten gets all three trees, off Kartverket's own model
+
+Uwe, 2026-09-17, from the phone: the relief and the slope overlays Abisko has should be on
+Lomsdal-Visten too; the grey sheet should come off there as it came off Abisko; and — a second
+message, and the one that decides the shape — the **height tiles** belong with them, *"die dann
+auch zum Offline-Paket mit dazugehören, sodass wir auch im Offline-Modus beim Routenplan Höhendaten
+zuweisen können und wie in Abisko mittlerweile auch mit dem Höhenpicker"*.
+
+**This section is the promise three earlier ones made.** §6.6 said the relief is cut from the model
+the profile already reads and that Kartverket's sheet had none behind it; §6.8 said a tap is told
+its own height *where the page carries height tiles* and that "when Norway gets one this follows";
+§6.3's own address line named "a second source (Kartverket DTM10 for Norway)" as the reason the
+trees carry a directory per source. Nothing here is a new design. What was missing was a Norwegian
+model read as an **area** rather than as a thread of points, and that is the only thing that had to
+be found.
+
+#### The model, and that it is the same one
+
+`hoydedata.no/arcgis/rest/services/DTM/ImageServer/exportImage` — Kartverket's own height portal,
+the national terrain model as one mosaic, **no login, no order, no key**. Measured 2026-09-17: it
+answers a georeferenced **float32 GeoTIFF in EPSG:25833** at whatever pixel size is asked for, up
+to 15,000 px a side (its own `maxImageWidth`), and the transform that comes back is exactly the
+grid that was asked for. A 10 × 10 km square is 6.6 MB in 2.7 s at 8 m posts and 26 MB in 13 s at
+4 m.
+
+That it is the same model `trails.io.sources.hoydedata` already asks point by point was measured
+rather than assumed: **182 posts** of an 8 m read, asked of `ws.geonorge.no/hoydedata/v1/punkt` at
+their own coordinates, agree to a **median of 0.10 m**, p95 0.47 m, worst 1.02 m. That matters for
+the reason §6.8 gives — the profile and the picker may not be two numbers — and it is why the
+Norwegian build keeps sampling the point service for its graph vertices while the page reads
+tiles: the two are one surface, measured, and switching the build as well would buy nothing and
+move every ascent figure on the page.
+
+`trails.io.sources.hoydedata_dtm` reads it, and answers with the same pair `markhojd` answers
+with — an array and its transform — so `dem_tiles`, `shade_tiles` and `slope_tiles` cut a Norwegian
+tree without knowing it is one.
+
+#### The sea is nought metres, and the model says so first
+
+**This is the one thing that had to be got right, and it is not a detail.** `shade_tiles.cut`
+fills a blank patch with the median of its neighbours; over a coastline that would have drawn a
+cliff along every kilometre of shore and classed it as the steepest ground on the map.
+
+Measured 2026-09-17, so it is settled rather than guarded against: the model already writes a flat
+**0.0** over the fjords — 7.4 % of an inland square, and forty of those cells sampled against the
+point service come back `terreng: "Havflate"` with depths of −87 m to −360 m beneath them. Past the
+model's own edge, out at sea, it writes −9999 instead; **98 of 100** of *those* cells sample as
+`Havflate` too, and the other two are `dtm1` on the shoreline itself.
+
+So what the model leaves empty is sea, and sea is at nought metres. `Source.mosaic` fills it with
+0.0 and the mosaic carries no no-data at all. Three things fall out of that and all three are
+wanted: the coast draws its real slope rather than a false cliff; a leg drawn across a fjord has a
+profile instead of a gap; and a tap on the water is answered — **0 m**, which is true, where the
+point service hands back a *depth* from the depth-contour model and the page has to throw it away.
+The drive's *off the network* reading on this page is exactly that tap, and it is Torneträsk's
+flat 341.85 m again in a different key.
+
+#### The box
+
+**12.00–13.75 E, 65.15–65.95 N.** The Norwegian map is built over a band 15 km round the park
+rather than over a box; that band measured 12.056–13.695 E and 65.175–65.921 N on the build of
+2026-09-17, and this is it rounded outwards to quarter and twentieth degrees. 78 × 86 km of ground,
+about 7,700 km², four times the Abisko box.
+
+**13.5 % of it is sea** — 84.2 million of the box's 625 million posts are outside the model's own
+edge, which is the Helgeland coast and the open water west of it. They cost almost nothing: a tile
+of flat nought metres packs to a few hundred bytes, and the relief and the slope draw nothing at
+all over it.
+
+Rounded **out**, and the band strictly inside it, for §8.2's reason and no other: the offline
+panel lays a ring of tiles round everything it keeps, and a ring past the tree is a row of 404s
+that the run reads as the connection giving out. A box that merely matched the band would put the
+ring outside the tiles at every edge; a box smaller than the band would put the *map* outside its
+own tiles. The park boundary also moves when Naturbase redraws it, and the band with it — the box
+must not have to.
+
+It is written once, in `trails.processing.trees.TREES`, and read from there by the three build
+scripts and by `maps.PROVIDERS`, whose `extent` is the same box. That is new: Kartverket's `extent`
+was `None`, because its cache answers the world. It is the *trees'* box now, and holding the sheet
+to it as well costs one row of tiles nobody was going to walk on.
+
+#### Four-metre posts, and the measurement that settles it against eight
+
+The service will answer at any spacing, so the choice is free and had to be made on evidence.
+Eight metres is tempting: at 65.5° N a z13 pixel is **7.91 m**, so 8 m posts are almost exactly
+one post per pixel, and the mosaic is a quarter of the memory and a quarter of the download.
+
+Measured over one 10 × 10 km square, the same ground read twice:
+
+| | 4 m against 8 m posts |
+|---|---|
+| a z13 height tile | median 0.59 m, p95 **4.62 m**, worst 26.5 m |
+| a z14 relief tile, alpha | median 8/255, 24.8 % of pixels differ by more than 16 |
+| a z15 relief tile, alpha | median 12/255, **35.9 %** differ by more than 16 |
+
+The worst of the height differences are cliffs, where seven metres of pixel is the whole
+difference — the same figure §6.8 measured on Abisko from the other side. But a third of a z15
+relief tile is not a rounding difference; it is texture the 8 m read does not have. **So 4 m, as
+Abisko**, and with it Abisko's ceilings unchanged: heights to z13, relief and slope to z15.
+
+The cost of that choice, and it is the whole cost of this section: the mosaic over the box is
+**25,000 × 25,000 posts, 2.5 GB in memory**, read as 100 squares of 10 km. §6.3 said "a box four
+times the size would want the squares warped one at a time instead"; this is that box, and on this
+machine — 15 GB, 11 free — it fits whole, which is why it is still read whole. A larger one would
+not, and that is the line at which this gets rewritten.
+
+#### A tile is cut from a window of the model, not from the model
+
+**This box is where the cutter stopped scaling, and §6.3 said it would.** "A box four times the
+size would want the squares warped one at a time instead" — this is that box, and what went wrong
+was not memory but time. Measured 2026-09-17, the same 256 × 256 tile warped out of three models:
+
+| model | one `reproject` |
+|---|---|
+| 2,500 × 2,500, 25 MB | 12 ms |
+| 10,000 × 8,750, 350 MB — the Abisko mosaic | 51 ms |
+| 25,000 × 25,000, 2.5 GB — this one | **346 ms** |
+
+The destination is identical in all three. Packing the PNG afterwards is 2–15 ms, so the warp is
+the whole of the cost, and it is the *source* that sets it. At 346 ms a tile the relief tree alone
+is **four hours**, and the slope tree another four.
+
+**Decided: warp each tile out of a view of the model over its own ground.** The view is a numpy
+slice, so it costs nothing to take, and a warp reads nothing outside it. `trails.processing.warp`
+is the whole of it, and the two cutters call it.
+
+Two things had to be measured rather than reasoned, and both bit:
+
+- **Four posts of margin is not enough where a pixel is fifteen posts.** A warp reaches past the
+  pixel it is filling by something that scales with how far it is downsampling, so a z10 tile —
+  fifteen posts to the pixel — came out with fourteen of its 65,536 pixels different, by up to
+  0.57 m. The margin is therefore **two destination pixels' worth of posts** plus four, which at
+  z15 is six posts on a window of a hundred and forty and at z10 thirty-four on nearly four
+  thousand: nothing, either way.
+- **Where the tile hangs over the model's edge, a window may not be taken at all.** Shrinking a
+  source from 4,000 × 4,000 to 2,000 × 2,000 changes nothing about a tile that sits inside both.
+  Shrink it until the tile overhangs and the numbers move — by up to 4.4 m, over *every* pixel of
+  the tile and not only the ones near the edge, and by less and less as the margin grows without
+  ever settling. What a warp does past its own source is not something an optimisation may quietly
+  change, so a window that would have to be clipped is not taken and the model goes in whole. That
+  is a few hundred tiles at the rim of a tree against thirty-seven thousand inside it.
+
+**Checked on the ground and not on a fixture**, because a tile tree is not a thing to make faster
+on an argument: over the cached Abisko mosaic, 210 height tiles from z8 to z13 came out
+**byte-identical as PNGs**, and 240 relief patches from z8 to z15, margin and all, identical as
+numbers. `test_warp.py` holds the same comparison as a test.
+
+This is Abisko's gain as much as Lomsdal-Visten's; it is simply that Abisko's mosaic was small
+enough that nobody had to notice.
+
+**Measured on the built tree, because the profile and the picker must not be two numbers.** The
+page's own bilinear rule re-implemented over the z13 tiles on disk, at 300 uniform random points of
+the box (226 of them on ground the point service answers for; the rest sea or off its coverage),
+against `ws.geonorge.no/hoydedata/v1/punkt` at the same coordinates:
+
+| | |
+|---|---|
+| half the points agree within | **0.19 m** |
+| nine in ten | 0.83 m |
+| ninety-nine in a hundred | 2.71 m |
+| worst of the 226 | 4.79 m |
+| over 1 m | 8.0 % of points |
+
+Larger than §6.8's Abisko figures (0.07 m median, 0.9 % over a metre) and for a reason worth
+saying: that comparison was the page against *the mosaic its own tiles were cut from*, one surface
+read twice. This is the page against **DTM1 at one metre**, which is the model itself — so it
+carries the whole cost of the 4 m read and the 7.9 m pixel, not just the rendering. Against the
+0.80 m that horizontal uncertainty costs (`atlas` §6.3), it is nothing.
+
+#### What changed on the page
+
+- **The height tiles replace the point service outright.** `heightsTiles` is set and
+  `PLAN.heightsUrl` is then never asked, exactly as on Abisko: a straight leg's profile is read off
+  the z13 tiles and a tap anywhere is answered by the same reader (§6.8). The service settings are
+  handed over empty and kept in the build as `SERVICE_PLAN_HEIGHTS`, which nothing uses now — it
+  is the shape of the answer for a map no tree of ours covers.
+- **The relief is on when the page opens, the slope classes are off until asked**, both switched
+  under the sheet in the base-map panel, both remembered across a reload (§6.6, §6.7, §6.9). None
+  of that is new code; it was written for a provider that carries the trees and this provider now
+  does.
+- **0.55 was re-measured on Kartverket's palette rather than assumed to carry over**, because §6.6
+  tuned it over Lantmäteriet's cream. Three tiles of the Topo sheet, z12, z14 and z15 over the park,
+  composited with their own relief tiles the way the browser composites them:
+
+  | | z12 | z14 | z15 |
+  |---|---|---|---|
+  | alpha over 0.5, share of the tile | 3.8 % | 2.8 % | 4.8 % |
+  | shaded ground darker, at 0.55 | 63 % | 65 % | 63 % |
+  | lettering against its ground, plain | 1.82:1 | 1.78:1 | 1.55:1 |
+  | the same, at 0.55 | **2.60:1** | **2.30:1** | **2.35:1** |
+
+  63–65 % against Abisko's 68 %, and the lettering's contrast *rises* rather than falls: the ink is
+  darker than the ground, so multiplying both by the same shadow spreads them. The number stays.
+- **The grey sheet is gone.** It was offered from the first build and never chosen, and the panel
+  it sat in now has two controls that are actually reached for. Abisko has had one sheet since
+  §6.1; `create_map`'s own default stopped adding one, because a default that puts a sheet in the
+  picker decides what the picker is for.
+- **`make dem`, `make shade` and `make slope` take `PARK`**, the way `map` and `graph` take
+  `--park`, and default to the same map the others default to. `make lomsdal-visten` is the whole
+  chain, and unlike `make abisko` it needs no credential of any kind.
+- **A straight leg asks the water grid what is water, not the height service.** This is the one
+  thing the switch broke, and it was the browser drive that said so rather than a test: the page
+  reported a plan across Vistenfjorden as **0.00 km over water** where it had recorded 0.39 km.
+  `straightParts` split a leg into wet and dry runs from `points[i].sea`, and that flag only ever
+  had a value because the point service answered `terreng: Havflate`; the tile reader pushes
+  `sea: false` for every sample, correctly — there is no sea in a model of the ground. So a fjord
+  crossing came back as walked ground, with a profile drawn along the bottom of it. It now
+  classifies from `graph.waterAt(lon, lat)`, the grid the router already prices the leg by, which
+  holds lakes as well as sea and answers offline; `points[i].sea` is kept as an `||` so a map still
+  on the service is unchanged. Abisko never showed it because its box is inland — worth saying
+  plainly, because it means the Abisko drive could not have caught this and did not.
+- **And a river is waded, not crossed, so a river is not water here.** The Abisko drive caught the
+  overreach the same afternoon: Lantmäteriet draws a watercourse wide enough to have two banks as
+  a water surface, so Abiskojåkka is in the grid exactly as Torneträsk is, and classifying by the
+  grid alone cut the leg in two at the bank. Wrong twice over — a ford leaves the walked distance
+  and the profile to be reported as a crossing, which reads as a boat; and the width sentence is
+  measured per land part, so it then measured the run the grid had truncated rather than the
+  river: **Abiskojåkka came back 14 m wide where the outline says 22.** The page already carries
+  the river outlines for exactly that question, so the grid's say is dropped where one covers the
+  sample. Measured after: Abisko back to 22 m, and Lomsdal-Visten's Storelva unchanged at 27 — no
+  Norwegian river of this build is in the grid at all, which is why only the Swedish page showed
+  it.
+
+**The credit is unchanged, and that is not an oversight.** An exported file's `<ele>` still comes
+from the graph, which is still DTM1 sampled point by point every 5 m, and its `ascentMethod` still
+says so. A straight leg's samples now come from the tiles instead — the same national model at 4 m
+posts, the same Kartverket, the same CC BY 4.0 — and the difference between the two is the 0.10 m
+measured above. Naming a second source for that would say there are two models here. There are not.
+
+**What it costs, said plainly: this page no longer works off the disk.** All three trees are
+addressed from the root, and a `file://` page has no root — so opened as a file it now draws
+Kartverket's sheet with no relief, no slope classes and, worse, no heights at all, where before it
+asked the point service and got them. The Abisko page has been in exactly that position since §6.1
+and it has never mattered, because the page that is used is the published one, served over HTTPS
+from the bucket. It is written down rather than discovered: the drive serves this page now instead
+of opening it, which is the line in `drive_map` that says so.
+
+#### What the build cost
+
+The mosaic first: **25,000 × 25,000 posts at 4 m, 100 squares, 510 s, 1,534.7 MB cached** — one
+GeoTIFF the three cutters then read over and over, which is why it is worth keeping on disk rather
+than asking the ImageServer again per tree. Then, all three off that one file:
+
+| tree | z | tiles | weight | time | per tile |
+|---|---|---|---|---|---|
+| `dem/kartverket/1/` | 8–13 | 2,475 | 224.0 MB | 37 s | 90.5 kB |
+| `shade/kartverket/1/` | 8–15 | 37,915 | 477.1 MB | 1,967 s | 12.6 kB |
+| `slope/kartverket/1/` | 8–15 | 37,915 | 141.8 MB | 914 s | 3.7 kB |
+
+**842.9 MB in 3,428 s**, mosaic included — a little under an hour, once, on this box, with no
+credential asked for at any point.
+
+The per-tile weights are the ones Abisko measured, which is the check that the two maps are being
+cut the same way and not merely by the same code: 90.5 kB against Abisko's 91.3 kB for a lossless
+RGB height tile, 12.6 against 11.1 for black-with-alpha relief, 3.7 against 2.7 for six flat
+classes. Relief and slope run a little heavier here because Lomsdal-Visten's ground is steeper and
+more broken than the Abisko box's, so fewer tiles compress to nearly nothing.
+
+**The counts are not comparable, and should not be.** This box is 1.75° × 0.80° against Abisko's
+0.95° × 0.321°, so the finest level holds 28,320 tiles here against 6,960 there — the tile count is
+the box, not the map. What the counts do say is where the time goes: the relief is 57 % of the
+weight and two thirds of the cutting time on its own — 1,967 s of 2,918 s — because it is the only
+one of the three that has to warp a margin wider than the tile it draws.
+
 ---
 
 ## 7. The order of work
@@ -2276,6 +2540,32 @@ car parks over Abisko against Topografi 50's 3 were not added.
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-17, seventh of the day** — Lomsdal-Visten gets all three tile trees off Kartverket's
+  own model (§6.10), asked for from the phone: *"Diese Overlays möchte ich jetzt auch noch für
+  Lomsdal-Visten haben … berechnen und in R2 ablegen und darauf zugreifen"*, and then the height
+  tiles too, *"die dann auch zum Offline-Paket mit dazugehören"*. Relief, slope classes and z13
+  height tiles, cut here from one 25,000² mosaic of hoydedata.no's DTM at 4 m posts — keyless,
+  1,534.7 MB cached, 100 squares in 510 s — and the three trees 842.9 MB in 2,918 s more. The
+  grey sheet is gone, as it went on Abisko; `create_map` stopped adding one by default. The page
+  no longer asks the point service for a height at all, and so no longer works from `file://`,
+  which Abisko has not since §6.1.
+
+  Two things were found by measurement rather than reasoned about. **The warp was O(source), not
+  O(destination)**: every tile reprojected the whole mosaic, so `warp.window` now hands the cutter
+  a padded slice — and it refuses to window at all where the window would be clipped or would be
+  most of the model, because either changes the numbers. Verified byte-identical against the
+  cached Abisko build. **And the browser drive found a real regression, twice.** Switching Norway
+  to height tiles silently took away the page's ability to say how much water a straight leg
+  crosses — a plan across Vistenfjorden read 0.00 km where it had recorded 0.39 — because
+  `straightParts` classified from the point service's `terreng` field and a tile reader has none.
+  It classifies from the graph's own water grid now, which the router already prices the leg by.
+  That overreached in turn, and the Abisko drive caught it the same afternoon: Lantmäteriet draws
+  a wide watercourse as a water surface, so Abiskojåkka was cut in two at the bank and its width
+  sentence measured the truncated run — 14 m where the outline says 22. A river is waded, not
+  crossed, so a river outline now overrides the grid. Both pages driven clean afterwards, 720
+  readings each, no broken invariant and no figure moved, and **published**. The offline pack for
+  Lomsdal-Visten is 200,052 tiles and 7.46 GB, against 131,033 and 6.76 for the sheet alone.
 
 - **2026-09-17, sixth of the day** — the pins say what a place is for (§9.31), on Uwe's question
   whether the symbols fit and whether anything is missing or unnecessary. Thirteen Font Awesome

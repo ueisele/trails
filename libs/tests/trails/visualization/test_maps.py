@@ -93,25 +93,28 @@ class TestCreateMap:
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         assert "cache.kartverket.no" in fmap.get_root().render()
 
+    # **Base layers only.** Since §6.10 a map on Kartverket's sheet also carries
+    # the relief and the slope classes, which are tile layers too -- but they are
+    # overlays, drawn over whichever sheet is chosen rather than instead of it.
+    @staticmethod
+    def sheets(fmap):
+        """The base layers of a map, which is what the picker chooses between."""
+        return [child for child in fmap._children.values() if isinstance(child, folium.TileLayer) and not child.overlay]
+
     def test_adds_extra_base_layers(self):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), extra_bases=(maps.BaseMap.OPENSTREETMAP,))
-        tile_layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
-        assert len(tile_layers) == 2
+        assert len(self.sheets(fmap)) == 2
 
     def test_base_layers_are_named_not_labelled_with_urls(self):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), extra_bases=(maps.BaseMap.KARTVERKET_GRAYSCALE,))
-        tile_layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
-
-        names = sorted(layer.layer_name for layer in tile_layers)
+        names = sorted(layer.layer_name for layer in self.sheets(fmap))
         assert names == ["Kartverket Grayscale", "Kartverket Topo"]
 
     def test_only_the_primary_base_is_displayed_on_load(self):
         # Leaflet stacks every base layer it is given, so a visible extra would
         # cover the primary one entirely.
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), extra_bases=(maps.BaseMap.OPENSTREETMAP,))
-        tile_layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
-
-        shown = [layer for layer in tile_layers if layer.show]
+        shown = [layer for layer in self.sheets(fmap) if layer.show]
         assert len(shown) == 1
         assert "kartverket" in shown[0].tiles.lower()
 
@@ -123,8 +126,7 @@ class TestCreateMap:
 
     def test_does_not_duplicate_the_primary_base(self):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), base=maps.BaseMap.OPENSTREETMAP, extra_bases=(maps.BaseMap.OPENSTREETMAP,))
-        tile_layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
-        assert len(tile_layers) == 1
+        assert len(self.sheets(fmap)) == 1
 
 
 class TestWhatThePageFetches:
@@ -2047,10 +2049,12 @@ class TestTwoMapsOnOneOrigin:
         assert lantmateriet.tiles.startswith("/tiles/lantmateriet/")
         assert "://" not in lantmateriet.tiles
         assert kartverket.tiles == "https://cache.kartverket.no/"
-        # Our tree ends at its box and the panel's margin must end there too;
-        # Kartverket answers everywhere, so it has no edge to clip to.
+        # Our trees end at their box and the panel's margin must end there too.
+        # Kartverket's own cache answers everywhere, but the heights, the relief
+        # and the slope classes drawn on it are ours and stop at the box (§6.10),
+        # so the extent is the trees' and the sheet is held to it with them.
         assert lantmateriet.extent == (18.15, 68.139, 19.10, 68.46)
-        assert kartverket.extent is None
+        assert kartverket.extent == (12.0, 65.15, 13.75, 65.95)
 
     def test_a_kept_tile_of_an_older_stand_answers_until_keep_replaces_it(self, tmp_path):
         """A new stand is a new prefix; the panel writes down which prefixes
@@ -2091,8 +2095,10 @@ class TestTwoMapsOnOneOrigin:
             maps.tile_tree_version("kartverket", 2)
 
     def test_the_panel_hands_the_page_the_extent_of_its_tree(self, tmp_path):
-        """The Swedish page carries the box as ``EXTENT``; the Norwegian one
-        carries null, and both carry the clipping `padded` that reads it."""
+        """Each page carries the box its own trees were cut to as ``EXTENT``,
+        and both carry the clipping `padded` that reads it. Kartverket's sheet
+        answers the world, but the heights, the relief and the slope classes
+        drawn on it are ours and stop at the box (§6.10)."""
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
         assert 'var EXTENT = {"w": 18.15, "s": 68.139, "e": 19.1, "n": 68.46};' in html
@@ -2101,7 +2107,7 @@ class TestTwoMapsOnOneOrigin:
         fmap = maps.create_map(bounds=(12.0, 65.0, 13.0, 66.0), companions=maps.Companions.of("lomsdal-visten"))
         maps.add_chrome(fmap)
         maps.save_map(fmap, norway)
-        assert "var EXTENT = null;" in norway.read_text(encoding="utf-8")
+        assert 'var EXTENT = {"w": 12.0, "s": 65.15, "e": 13.75, "n": 65.95};' in norway.read_text(encoding="utf-8")
 
     def test_a_trailing_slash_is_dropped_before_the_companions_are_linked(self, tmp_path):
         """`/abisko/` draws the map at the edge, but `abisko-sw.js` linked
@@ -2148,9 +2154,13 @@ class TestTwoMapsOnOneOrigin:
         # earlier, which is where the height model stops having anything to add.
         relief = getattr(fmap, maps.MAP_SHADE_ATTR)
         assert (relief.options["max_zoom"], relief.options["max_native_zoom"]) == (17, 15)
+        # Kartverket's own cache goes to z18, and the two overlays cut over it
+        # stop at z15 exactly as Lantmäteriet's do.
         norwegian = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
-        layers = [child for child in norwegian._children.values() if isinstance(child, folium.TileLayer)]
-        assert {(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in layers} == {(18, 18)}
+        sheets = [child for child in norwegian._children.values() if isinstance(child, folium.TileLayer) and not child.overlay]
+        assert {(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in sheets} == {(18, 18)}
+        over = getattr(norwegian, maps.MAP_SHADE_ATTR)
+        assert (over.options["max_zoom"], over.options["max_native_zoom"]) == (18, 15)
 
     def test_the_page_registers_its_own_worker_at_its_own_scope(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
@@ -2213,8 +2223,11 @@ class TestTwoMapsOnOneOrigin:
         assert 'var DB = "trails";' in script
         assert 'var TILES = "trails-tiles";' in script
         assert 'var TILE_PREFIX = new URL("https://cache.kartverket.no/", self.location.href).href;' in script
-        # Kartverket's map has no height tiles, so the worker matches none.
-        assert 'var HEIGHT_PREFIX = "" ? new URL("", self.location.href).href : null;' in script
+        # And since §6.10 it keeps this map's three trees beside them, which sit
+        # in our own bucket and are therefore addressed from the root.
+        assert 'var HEIGHT_PREFIX = "/dem/kartverket/1/" ? new URL("/dem/kartverket/1/", self.location.href).href : null;' in script
+        assert 'var SHADE_PREFIX = "/shade/kartverket/1/" ? new URL("/shade/kartverket/1/", self.location.href).href : null;' in script
+        assert 'var SLOPE_PREFIX = "/slope/kartverket/1/" ? new URL("/slope/kartverket/1/", self.location.href).href : null;' in script
         assert not re.search(r"__[A-Z_]+__", script)
 
     def test_the_second_maps_worker_keeps_the_height_tiles_too(self, tmp_path):
@@ -2265,10 +2278,11 @@ class TestTwoMapsOnOneOrigin:
         assert "word.textContent = 'Relief shading';" in html
         assert "picked.appendChild(shading);" in html
         # And a map with no relief says so in the same place, rather than
-        # drawing a checkbox that switches nothing.
-        first = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
-        maps.add_legend(first, "Lomsdal", [maps.LegendRow("a line", "#000", None)])
-        assert "var relief = null;" in first.get_root().render()
+        # drawing a checkbox that switches nothing. Both of this project's maps
+        # carry one since §6.10, so the case is a sheet no tree of ours covers.
+        bare = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), base=maps.BaseMap.OPENSTREETMAP)
+        maps.add_legend(bare, "Somewhere", [maps.LegendRow("a line", "#000", None)])
+        assert "var relief = null;" in bare.get_root().render()
 
     def test_the_relief_credits_the_body_whose_model_it_is(self, tmp_path):
         """It is cut from Lantmäteriet's height model and laid over Lantmäteriet's
@@ -2353,9 +2367,9 @@ class TestTwoMapsOnOneOrigin:
         assert "the profile grades the path" in html
         # Drawn under the relief's checkbox, in the same block.
         assert html.index("picked.appendChild(shading);") < html.index("picked.appendChild(classing);")
-        first = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
-        maps.add_legend(first, "Lomsdal", [maps.LegendRow("a line", "#000", None)])
-        assert "var slope = null;" in first.get_root().render()
+        bare = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), base=maps.BaseMap.OPENSTREETMAP)
+        maps.add_legend(bare, "Somewhere", [maps.LegendRow("a line", "#000", None)])
+        assert "var slope = null;" in bare.get_root().render()
 
     def test_the_two_ground_switches_are_remembered_across_a_reload(self, tmp_path):
         """Reported from the phone, 2026-09-17: *"Nach jedem Neuladen wird Slope
@@ -2473,27 +2487,30 @@ class TestTwoMapsOnOneOrigin:
         assert "slope: SLOPE ? new URL(SLOPE.url.split('{z}')[0], location.href).href : null" in html
         assert "(next.kind === 'slope' ? slopeWeight(next.z) : (WEIGHT[next.z] || 45000))" in html
 
-    def test_the_first_map_carries_no_relief(self, tmp_path):
-        """Kartverket's sheet has no height model of this project's behind it,
-        so there is nothing to cut a shadow from and the page draws none."""
+    def test_the_first_map_carries_the_relief_too(self, tmp_path):
+        """Since §6.10 Kartverket's sheet has a height model of this project's
+        behind it as well, cut off hoydedata.no, so this page draws the shadow
+        and the slope classes exactly as the second one does."""
         page = tmp_path / "lomsdal-visten.html"
         fmap = maps.create_map(bounds=(12.0, 65.0, 13.0, 66.0), companions=maps.Companions.of("lomsdal-visten"))
-        assert getattr(fmap, maps.MAP_SHADE_ATTR, None) is None
+        assert getattr(fmap, maps.MAP_SHADE_ATTR, None) is not None
+        assert getattr(fmap, maps.MAP_SLOPE_ATTR, None) is not None
         maps.add_chrome(fmap)
         maps.save_map(fmap, page)
         html = page.read_text(encoding="utf-8")
-        assert "var SHADE = null;" in html
-        assert "var SLOPE = null;" in html
-        assert getattr(fmap, maps.MAP_SLOPE_ATTR, None) is None
+        assert '"url": "/shade/kartverket/1/{z}/{x}/{y}.png"' in html
+        assert '"url": "/slope/kartverket/1/{z}/{x}/{y}.png"' in html
         script = maps.write_service_worker(page, maps.PROVIDERS["kartverket"], maps.Companions.of("lomsdal-visten")).read_text(encoding="utf-8")
-        assert 'var SHADE_PREFIX = "" ? new URL' in script
+        assert 'var SHADE_PREFIX = "/shade/kartverket/1/" ? new URL' in script
 
-    def test_the_first_map_carries_no_height_tiles(self, tmp_path):
+    def test_the_first_map_carries_height_tiles_too(self, tmp_path):
+        """And reads them rather than a point service, which is what makes a leg
+        planned with no network have a profile and a tap have a height (§6.10)."""
         page = tmp_path / "lomsdal-visten.html"
         fmap = maps.create_map(bounds=(12.0, 65.0, 13.0, 66.0), companions=maps.Companions.of("lomsdal-visten"))
         maps.add_chrome(fmap)
         maps.save_map(fmap, page)
-        assert "var HEIGHTS = null;" in page.read_text(encoding="utf-8")
+        assert '"url": "/dem/kartverket/1/{z}/{x}/{y}.png"' in page.read_text(encoding="utf-8")
 
     def test_the_manifest_and_the_icons_are_the_maps_own(self, tmp_path):
         page, companions = self.abisko(tmp_path)
@@ -2529,12 +2546,30 @@ class TestTwoMapsOnOneOrigin:
 class TestHeightTiles:
     """The height tiles beside a provider's map tiles, and what the page is told about them."""
 
-    def test_lantmateriet_has_them_and_kartverket_does_not(self):
-        assert maps.PROVIDERS["kartverket"].heights is None
-        tiles = maps.PROVIDERS["lantmateriet"].heights
-        assert tiles is not None
-        assert tiles.template == "/dem/lantmateriet/1/{z}/{x}/{y}.png"
-        assert tiles.top == 13
+    def test_both_providers_carry_them_each_under_its_own_directory(self):
+        """A directory per source, because the two are stacked and never mixed
+        (§6.3's address line, kept when Norway got its own tree in §6.10)."""
+        swedish = maps.PROVIDERS["lantmateriet"].heights
+        norwegian = maps.PROVIDERS["kartverket"].heights
+        assert swedish is not None and norwegian is not None
+        assert swedish.template == "/dem/lantmateriet/1/{z}/{x}/{y}.png"
+        assert norwegian.template == "/dem/kartverket/1/{z}/{x}/{y}.png"
+        # One ceiling, because a z13 pixel is 7.1 m at Abisko and 7.9 m here and
+        # neither model has more to give past it.
+        assert swedish.top == norwegian.top == 13
+
+    def test_the_ground_trees_are_cut_over_the_same_box_the_extent_names(self):
+        """The three trees and the panel's margin are one box, or the margin is
+        a row of 404s (§8.2). Written once in `processing.trees` and read here."""
+        from trails.processing import trees as tree_table
+
+        for key, park in (("lantmateriet", "abisko"), ("kartverket", "lomsdal-visten")):
+            provider, tree = maps.PROVIDERS[key], tree_table.TREES[park]
+            assert provider.extent == tree.box
+            assert provider.heights is not None and provider.heights.tiles == tree.prefix("dem")
+            assert provider.shade is not None and provider.shade.tiles == tree.prefix("shade")
+            assert provider.slope is not None and provider.slope.tiles == tree.prefix("slope")
+            assert provider.shade.top == provider.slope.top == tree.ground_max_zoom
 
     def test_the_settings_carry_the_packing_the_tiles_were_written_with(self):
         """The page unpacks a pixel by the same two numbers `dem_tiles` packed
@@ -5916,6 +5951,32 @@ class TestPlanMode:
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "graph.areasAt(laid.lon[s], laid.lat[s])" in planning
 
+    def test_a_leg_drawn_straight_asks_the_water_grid_what_is_water(self):
+        """The regression the first Lomsdal-Visten drive found (§6.10): the runs
+        were split on `points[i].sea`, which only ever had a value because the
+        point service answered `terreng: Havflate`. Both maps read height tiles
+        now, and a tile reader pushes `sea: false` for every sample -- correctly,
+        there is no sea in a model of the ground -- so a leg over Vistenfjorden
+        came back as 0.00 km of water and a profile along the bottom of it. The
+        grid is what the router already prices the leg by, it holds lakes too,
+        and it answers offline. The service's flag stays honoured beside it."""
+        fmap, _ = self.drawn()
+        maps.add_plan_mode(fmap, self.planned())
+
+        planning = fmap.get_root().render().split("var PLAN =")[-1]
+        parts = planning.split("function straightParts(")[1].split("\n            function ")[0]
+        assert "wet[w] = !!points[w].sea" in parts
+        assert "|| (!!graph.waterAt(laid.lon[w], laid.lat[w])" in parts
+        # And a river is waded, not crossed: Lantmateriet draws a wide
+        # watercourse as a water surface, so the grid alone cut the leg at
+        # Abiskojakka's bank and the width sentence then measured the truncated
+        # run -- 14 m where the outline says 22.
+        assert "&& !graph.riverAt(laid.lon[w], laid.lat[w]).length);" in parts
+        # And the runs are cut from that reading, not from the flag again.
+        assert "if (wet[i] !== wet[i - 1]) { changes.push(i); }" in parts
+        assert "if (wet[first]) {" in parts
+        assert "points[first].sea" not in parts
+
     def test_the_wheel_still_reaches_the_map(self):
         """disableClickPropagation, and deliberately not the scroll one: a
         control that swallows the wheel reads as a map that has frozen."""
@@ -7662,7 +7723,9 @@ class TestLegend:
         folium hands every base layer to the map and left the unwanted ones to
         the control's template. Which one is asked for is the reader's last
         choice where they made one, and the build's otherwise."""
-        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        # Two sheets, asked for: neither map offers a second one now (§6.10), and
+        # what is being driven here is the control rather than either map's choice.
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), extra_bases=(maps.BaseMap.KARTVERKET_GRAYSCALE,))
         maps.add_legend(fmap, "Legend", {"x": "#000000"})
 
         html = fmap.get_root().render()

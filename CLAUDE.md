@@ -213,6 +213,10 @@ command make notebook-clean       # Clear all notebook outputs
 # The map
 command make map                  # Build the Lomsdal-Visten map into analysis/output/
 command make graph                # Build the routing graph and report its numbers
+command make dem                  # Cut a map's height tiles; shade its relief, slope its steepness
+command make shade PARK=abisko    # ...all three take PARK=<map>, default lomsdal-visten, all resumable
+command make lomsdal-visten       # The whole chain: dem, shade, slope, graph, map (no credential)
+command make abisko               # The same for Abisko, plus tiles (needs the Geotorget login)
 command make drive                # Drive the built page in a real browser (278 readings, ~400 s)
 command make drive ARGS="--only the_plan_bar"   # ...or one check while working on it
 command make deploy               # Publish the map make map last built, and purge the edge cache

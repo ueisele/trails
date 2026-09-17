@@ -235,26 +235,39 @@ SCENES: dict[str, Scene] = {
         view=(65.60, 13.20),
         off_route=(66.10, 12.40),
         nowhere=(65.75, 12.10),
+        # And the sea's own surface, which the height tiles carry there: the
+        # model stops at the coast and what lies beyond it is water at nought
+        # metres (§6.10). The point service calls the same spot `dybdekurver` /
+        # `Havflate` and hands back -19.8 m, which is the depth and not a height
+        # -- so this reading is also what says the tiles are not that.
+        nowhere_height=0.0,
         open_water=((65.905, 12.180), (65.907, 12.183)),
         walk=((65.4279, 13.0335), (65.4288, 13.0355), (65.4297, 13.0375)),
         standing=(65.4400, 13.0400),
         a_step=(65.44002, 13.04002),
         a_walk=(65.4418, 13.0400),
-        # Kartverket's sheet has no height model of this project's behind it, so
-        # there is nothing to cut a relief shadow from and the page draws none
-        # (§6.6). Chosen, not forced: when Norway gets its own shade tree this
-        # line comes out and the check runs here too.
-        skips=("the relief under the map", "the slope classes over the relief"),
         # 176 tiles at z14 and 416 at z15.
         kept_area=((65.528, 12.955), (65.572, 12.955), (65.572, 13.145), (65.528, 13.145)),
         unkept=(65.30, 12.40),
         far_off_the_map=(66.3128, 14.1428),
-        heights_path="hoydedata",
-        base_maps=2,
+        # The z13 Terrarium tiles under `dem/`, read for a straight leg and for
+        # a tapped place alike since §6.10 -- where this page asked Geonorge's
+        # point service per leg and could answer no tap at all off a path.
+        heights_path="/dem/",
+        # The relief shadow the page draws under the contours (§6.6, §6.10).
+        relief_path="/shade/",
+        # And the slope classes it colours over that, off until asked.
+        slope_path="/slope/",
+        # One sheet since §6.10: the grey one came out.
+        base_maps=1,
         borrowed_name=("trail-group-fkb", "trail-group-turrutebasen"),
         search_for="Gåsvatnet",
         typed=(65.44000, 13.04000),
-        over_http=False,
+        # Served rather than opened off the disk since §6.10: the sheet is
+        # Kartverket's own host, but the heights, the relief and the slope
+        # classes are addressed from the root, and a root is what `file://`
+        # has not got.
+        over_http=True,
         figures={
             # Re-recorded 2026-09-01, from 11,589 and 11,290: the source cache
             # was cleared and the map regenerated, so Turrutebasen was fetched
@@ -312,9 +325,11 @@ SCENES: dict[str, Scene] = {
             # The Rundtur's page on ut.no and its GPX; it is the one route
             # without a lomsdalvisten.no counterpart.
             "links to pages published elsewhere": 2,
-            # The box from z11 to z16 on Kartverket's sheet, 6.76 GB; no height
-            # tiles on this page.
-            "tiles the whole map holds at its cap": 131033,
+            # The box from z11 to z16 on Kartverket's sheet, and since §6.10 the
+            # z13 height tiles and the relief and slope of every level to z15
+            # beside it. The three trees add 69,019 tiles and 0.70 GB to what
+            # the sheet alone held: 200,052 and 7.46 GB against 131,033 and 6.76.
+            "tiles the whole map holds at its cap": 200052,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -5645,7 +5660,7 @@ def the_relief_under_the_map(page: Any) -> Check:
         What the overlay drew, and what the checkbox did to it
     """
     if SCENE.relief_path is None:
-        return Check("the relief under the map", skipped="this page's sheet has no height model behind it")
+        return Check("the relief under the map", skipped="no height model has been cut over this page's ground")
     page.set_viewport_size({"width": 390, "height": 844})
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
     page.wait_for_timeout(1200)
@@ -5769,7 +5784,7 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
         What the checkbox drew, and what the panel counts for it
     """
     if SCENE.slope_path is None:
-        return Check("the slope classes over the relief", skipped="this page's sheet has no height model behind it")
+        return Check("the slope classes over the relief", skipped="no height model has been cut over this page's ground")
     page.set_viewport_size({"width": 390, "height": 844})
     page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
     page.wait_for_timeout(800)

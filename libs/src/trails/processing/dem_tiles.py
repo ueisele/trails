@@ -29,6 +29,7 @@ from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, reproject
 
 from ..utils.tiles import TILE_PX, Bounds, tile_bounds, tile_count, tile_range
+from . import warp
 
 #: The tiles' projection.
 TILE_CRS = "EPSG:3857"
@@ -136,17 +137,24 @@ def build_tiles(
                     size += target.stat().st_size
                     continue
                 tile = np.full((TILE_PX, TILE_PX), fill, dtype=np.float32)
-                reproject(
-                    source=model,
-                    destination=tile,
-                    src_transform=transform,
-                    src_crs=source_crs,
-                    src_nodata=nodata,
-                    dst_transform=from_bounds(*tile_bounds(zoom, x, y), TILE_PX, TILE_PX),
-                    dst_crs=TILE_CRS,
-                    dst_nodata=fill,
-                    resampling=Resampling.bilinear,
-                )
+                # **Out of a view of the model over this tile's ground, not out
+                # of the model.** A warp costs what its source is big, not what
+                # its destination is: 346 ms against 12 ms for the same tile
+                # (:mod:`trails.processing.warp`).
+                where = tile_bounds(zoom, x, y)
+                near = warp.window(model, transform, source_crs, where, TILE_PX)
+                if near is not None:
+                    reproject(
+                        source=near[0],
+                        destination=tile,
+                        src_transform=near[1],
+                        src_crs=source_crs,
+                        src_nodata=nodata,
+                        dst_transform=from_bounds(*where, TILE_PX, TILE_PX),
+                        dst_crs=TILE_CRS,
+                        dst_nodata=fill,
+                        resampling=Resampling.bilinear,
+                    )
                 if np.all(tile == fill):
                     empty += 1
                 partial = target.with_suffix(".part")
