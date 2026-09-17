@@ -812,7 +812,15 @@ second mockup (`~/mockups/slope-multiply`, since deleted) over Latnjajávri and 
 where the blend and the seven classes were looked at against the first palette. Uwe: *"Ja, setze
 das so um."* The test holds every colour to 7:1 or better under the blend. The tree is **version 2**
 (`slope/lantmateriet/2/`) for the reason §6.3 gives: the tiles changed, so the address changes,
-and a phone that kept version 1 reads it as *moved* rather than mixing the two.
+rather than being overwritten at version 1's. Uwe asked whether one version could simply replace
+the other, nobody having kept the first — and the answer is that *kept* is not the only cache.
+A tree is served `max-age=31536000, immutable` and the deploy purges pages and never trees,
+precisely because a versioned address has nothing stale to purge; the phone that had spent the
+morning looking at the first build held those tiles in its ordinary browser cache, at exactly
+the addresses a replacement would reuse, and would have drawn the old opaque classes over
+Latnjajávri for a year beside new ones everywhere else. So the address moved and **version 1 was
+deleted from the bucket instead** (9,331 objects, 24.7 MB) once both pages pointed at version 2
+and the edge had been read back.
 
 **On the page** it is a tile layer over the relief, `zIndex` 260 against the relief's 250 and the
 overlay pane's 400, with the class name the theme's one blend rule hangs on. It carries a
@@ -2103,10 +2111,17 @@ A line per change to this document or to the decisions in it, newest first.
   the names had fallen to 3:1 under the opaque classes and stand at 10:1 or better under every
   class now. A class over 55°, ours, parts the walls no path crosses from the steps one does.
   Chosen on a mockup with both palettes and the blend switchable. The tree is **version 2**
-  (`slope/lantmateriet/2/`, 9,330 tiles, 25.0 MB, 12 minutes); version 1 stays in the bucket for
-  any phone that kept it, which reads the new address as *moved*. 708 readings on Abisko (two
+  (`slope/lantmateriet/2/`, 9,330 tiles, 25.0 MB, 12 minutes). 708 readings on Abisko (two
   new: seven classes with ours at both ends, and the blend on the layer's container), 683 on
-  Lomsdal-Visten. A band costs the same as before, the whole map 0.3 MB more. Not yet published.
+  Lomsdal-Visten. A band costs the same as before, the whole map 0.3 MB more.
+  **Published** the same morning: the tree first, then both pages — `abisko.html` 3,581,542 B and
+  `lomsdal-visten.html` 17,137,711 B, byte-identical from the edge, both workers with them
+  (`abisko-sw.js` naming `/slope/lantmateriet/2/`), three sampled class tiles byte-identical and
+  the index naming seven classes. **Then version 1 was deleted from the bucket**, 9,331 objects
+  and 24.7 MB, at Uwe's word that nobody held it — after the new pages were live, so the layer
+  was never without tiles; the edge now answers 404 for every version 1 address and 200 for
+  version 2. The address stays at 2 rather than moving back: see §6.7 on why a replacement in
+  place would have left the first build's tiles in an ordinary browser cache for a year.
 
 - **2026-09-16, fifth of the day** — the slope is classed over the relief (§6.7), asked for from
   the phone the same evening: *"Ließe sich ein ähnliches Overlay auch für die Steigung bauen?"*
