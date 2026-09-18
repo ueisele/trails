@@ -58,6 +58,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from trails.processing.packs import PackReader
 from trails.visualization.maps import Companions
 
 #: What the object is served as. Without it R2 answers with the S3 default and the map downloads.
@@ -104,6 +105,7 @@ TREES = {
     "slope": "the slope-class tiles, slope/<provider>/<version>/{z}/{x}/{y}.png",
     "vegetation": "the vegetation tiles, vegetation/<provider>/<version>/{z}/{x}/{y}.png",
     "forest": "the forest tiles, forest/<provider>/<version>/{z}/{x}/{y}.png",
+    "packs": "the PMTiles packs, packs/<tree>/<provider>[/<sheet>]/<version>/{z}/{x}/{y}.pmtiles",
 }
 
 #: How long an edge may hold an object of a tree. A year is the ceiling browsers honour.
@@ -414,21 +416,37 @@ def check_tree(root: Path, name: str) -> tuple[list[Path], int]:
         apart from them.
 
     Raises:
-        SystemExit: If it is missing or empty.
+        SystemExit: If it is missing, empty, or contains a pack that cannot be opened.
     """
     if not root.is_dir():
         sys.exit(f"{root} is not a directory — {TREES[name]} — nothing has built it yet.")
     files = 0
+    tiles = 0
     indexes: list[Path] = []
     for path in root.rglob("*"):
         if not path.is_file():
             continue
         if path.name == TREE_INDEX:
+            if name == "packs":
+                try:
+                    if json.loads(path.read_text(encoding="utf-8")).get("complete") is not True:
+                        raise ValueError("pack inventory is not complete")
+                except (OSError, ValueError) as error:
+                    sys.exit(f"{path}: {error}")
             indexes.append(path)
         elif path.suffix != ".part":
+            if name == "packs":
+                try:
+                    if path.suffix != ".pmtiles":
+                        raise ValueError("unexpected file in pack tree")
+                    tiles += len(PackReader(path).entries)
+                except (OSError, ValueError) as error:
+                    sys.exit(f"Cannot open pack {path}: {error}")
             files += 1
     if files == 0:
         sys.exit(f"{root} is empty.")
+    if name == "packs":
+        print(f"Validated {files:,} packs containing {tiles:,} tile entries", flush=True)
     return sorted(indexes), files
 
 
@@ -607,7 +625,8 @@ def main() -> None:
     if name is None:
         # A tree has no page to point at -- `/tiles/` answers 404 -- so what
         # is said is what was done.
-        print("✅ " + ", ".join(f"{tree}/ synced to the bucket" for tree in trees))
+        outcome = "dry-run finished" if args.dry_run else "synced to the bucket"
+        print("✅ " + ", ".join(f"{tree}/ {outcome}" for tree in trees))
         return
     companions = Companions.of(name)
     riders = beside(companions)

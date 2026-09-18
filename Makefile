@@ -19,7 +19,7 @@ ifneq ($(MISE),)
 export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
 endif
 
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive drive-both deploy tiles dem shade slope nmd vegetation abisko lomsdal-visten
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive drive-both deploy tiles packs dem shade slope nmd vegetation abisko lomsdal-visten
 
 # Default target
 help:
@@ -203,6 +203,10 @@ tiles:
 # `trails.processing.trees.TREES` — so they take PARK the way `map` and `graph` take `--park`, and
 # default to the same map those two default to. The two chains below set it; nothing else needs to.
 PARK ?= lomsdal-visten
+
+packs:
+	@echo "📦 Packing the $(PARK) tile trees (resumable)..."
+	uv run python analysis/scripts/pack_tiles.py --park $(PARK) $(ARGS)
 
 # Reads the height model over the map's box — Lantmäteriet's 1 m squares by range request with the
 # Geotorget login (GEOTORGET_USERNAME/PASSWORD in the environment; run it under sops exec-env from
