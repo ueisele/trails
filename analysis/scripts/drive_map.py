@@ -9641,9 +9641,13 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         line = page.evaluate("() => window.trailsOffline.holder.querySelector('.trails-offline-overview').textContent")
         page.evaluate("""() => {
             window.trailsOverviewFetches = [];
+            window.trailsOverviewRanges = [];
             const fetch = window.fetch;
             window.fetch = function (url, options) {
-                if (options && options.cache === 'reload') window.trailsOverviewFetches.push(url);
+                if (options && options.cache === 'reload') {
+                    window.trailsOverviewFetches.push(url);
+                    if (new Headers(options.headers).has('Range')) window.trailsOverviewRanges.push(url);
+                }
                 return fetch.apply(this, arguments);
             };
         }""")
@@ -9735,6 +9739,7 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
                     True,
                     note=f"{len(fetched)} requests, {len(complete_before)} complete rows reused",
                 ),
+                Reading("Keep asks only for whole packs across both runs", page.evaluate("() => window.trailsOverviewRanges"), []),
                 Reading("and keeps every one in the store", held == sorted(expected), True, note=f"{len(held)} rows, {first['failed']} refused"),
                 Reading("the repeat finds the old scope already kept", repeat["held"], len(old_scope)),
                 Reading("and fetches only the missing overview", refetched == extra, True, note=f"{len(refetched)} fetched, {repeat['added']} added"),
@@ -10255,8 +10260,14 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                     switched=null;transactions.length=0;gets.length=0;
                     const answers=await Promise.all([url,url,second,url+'absent'].map(key=>lookup(key,{expired:false,off:false})));
                     out.lookup={transactions:transactions.length,gets:gets.slice(),paths:answers.map(a=>a&&a.path)};
-                    // Promotion removes browse bytes and changes the kept ledger atomically.
-                    await PackIO.put(db,url,row.pack,15);out.afterKeep=await state();
+                    // Keep replaces the partial archive, including locally present bytes.
+                    const replacement=PackIO.write(new Map([[id,new Uint8Array(8).fill(7).buffer]]));
+                    out.keepRequests=[];
+                    const completed=await PackIO.complete(row,async(...args)=>{out.keepRequests.push(args);return new Response(replacement);});
+                    await PackIO.put(db,url,completed,15);out.afterKeep=await state();
+                    const replaced=await read('packs',url), archive=PackIO.unpack(replaced.pack);
+                    out.replaced={kept:replaced.kept,complete:replaced.complete,entries:archive.entries.size,
+                        bytes:[...new Uint8Array(PackIO.slice(archive,id))]};
                     await browsePut(url,bytes,other);out.keptPreserved=(await read('packs',url)).kept;
                     await browsePut(url+'browse',bytes,id);
                     const beforeForget=await state();
@@ -10334,6 +10345,12 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
             Reading("one tick of lookups uses one transaction", lookup["transactions"], 1),
             Reading("one get per distinct pack", sum(g[0] == "packs" for g in lookup["gets"]), 3),
             Reading("the row determines the tally path", lookup["paths"], ["seen", "seen", "db", None]),
+            Reading("Keep replaces a partial row with one whole request", result["keepRequests"], [[]]),
+            Reading(
+                "the replacement is complete and kept, with only the fetched bytes",
+                result["replaced"],
+                {"kept": True, "complete": True, "entries": 1, "bytes": [7] * 8},
+            ),
             Reading("Keep moves bytes out of browse", result["afterKeep"]["browse"]["bytes"], 0, note=str(result["afterKeep"])),
             Reading("browsing preserves kept", result["keptPreserved"], True),
             Reading(

@@ -1344,7 +1344,7 @@
                     });
                 }
 
-                function fetchTile(url, attempt, waited, start, end) {
+                function fetchTile(url, attempt, waited) {
                     var away = putAway;
                     function again(answer) {
                         // **A failure across a suspension costs no try.** The app
@@ -1354,7 +1354,7 @@
                         if (putAway !== away || document.hidden) {
                             if (waited >= WAITS) { return null; }
                             return whenInFront().then(function () {
-                                return fetchTile(url, attempt, waited + 1, start, end);
+                                return fetchTile(url, attempt, waited + 1);
                             });
                         }
                         var worth = !answer || answer.status === 429 || answer.status >= 500;
@@ -1364,7 +1364,7 @@
                         // and not the first.
                         if (!worth || attempt >= TRIES) { return answer && answer.status === 404 ? false : null; }
                         return later(400 * attempt).then(function () {
-                            return fetchTile(url, attempt + 1, waited, start, end);
+                            return fetchTile(url, attempt + 1, waited);
                         });
                     }
                     return whenInFront().then(function () {
@@ -1381,8 +1381,7 @@
                         // mattering. A no-op while the lock is held, which is
                         // every tile but the first after a glance elsewhere.
                         keepAwake();
-                        return fetch(url, {cache: 'reload', mode: 'cors',
-                            headers: start === undefined ? {} : {Range: 'bytes=' + start + '-' + end}});
+                        return fetch(url, {cache: 'reload', mode: 'cors'});
                     }).then(function (answer) {
                         if (answer && answer.ok) { return answer; }
                         return again(answer);
@@ -1435,8 +1434,8 @@
                             var kept = false, size = 0;
                             return dbRead(KEPT, next.url).then(function (there) {
                                 if (there && there.kept && there.complete) { missed = 0; state.held += 1; kept = true; size = there.size; return null; }
-                                return PackIO.complete(there, function (start, end) {
-                                    return fetchTile(next.url, 1, 0, start, end);
+                                return PackIO.complete(there, function () {
+                                    return fetchTile(next.url, 1, 0);
                                 }).then(function (answer) {
                                     if (answer) {
                                         missed = 0;

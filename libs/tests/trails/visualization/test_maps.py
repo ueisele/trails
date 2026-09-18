@@ -1100,7 +1100,7 @@ class TestOfflinePanel:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "keepAwake();\n                        return fetch(url, {cache: 'reload', mode: 'cors'," in html
+        assert "keepAwake();\n                        return fetch(url, {cache: 'reload', mode: 'cors'});" in html
         # The poll behind the event, which is what the run already leaned on.
         assert "var poll = window.setInterval(go, 1000);" in html
 
@@ -1563,7 +1563,7 @@ class TestATileIsAskedForMoreThanOnce:
         one a tile the run simply gave up on."""
         html = self.rendered()
         assert "var TRIES = 3;" in html
-        assert "return fetchTile(next.url, 1, 0, start, end);" in html
+        assert "return fetchTile(next.url, 1, 0);" in html
         # The wait grows with the attempt, because what this exists for is a
         # server briefly out of patience and coming straight back is what made
         # it so.
@@ -9829,35 +9829,27 @@ class TestPackWorker:
         assert result["merged"] and result["slices"] and result["count"] == 85
 
     @pytest.mark.parametrize("present", [0, 1, 2, 3, 4])
-    def test_keep_completes_only_missing_ranges_or_fetches_whole(self, tmp_path, present):
+    def test_keep_replaces_every_incomplete_row_whole_and_reuses_complete_rows(self, tmp_path, present):
         result = self.run_worker(
             tmp_path,
             f"""
             (async () => {{
                 const bytes = new Uint8Array(8).fill(9).buffer, ids = [0, 1, 2, 3];
                 const full = PackIO.write(new Map(ids.map(id => [id, bytes]))), requests = [];
-                const request = async (start, end) => {{
-                    requests.push(start === undefined ? 'whole' : [start, end]);
-                    if (start === undefined) return new Response(full);
-                    end = Math.min(end, full.byteLength - 1);
-                    return new Response(full.slice(start, end + 1), {{status:206, headers:{{
-                        'content-range': 'bytes ' + start + '-' + end + '/' + full.byteLength}}}});
-                }};
-                const row = {present} ? PackIO.row(PackIO.write(new Map(ids.slice(0, {present}).map(id => [id, bytes]))), false, false, 'p') : null;
+                const request = async (...args) => {{ requests.push(args); return new Response(full); }};
+                const localBytes = new Uint8Array(8).fill(1).buffer;
+                const row = {present} ?
+                    PackIO.row(PackIO.write(new Map(ids.slice(0, {present}).map(id => [id, localBytes]))), false, false, 'p') : null;
                 const body = await PackIO.complete(row, request);
                 const at = requests.length;
-                await PackIO.complete(PackIO.row(body, true, true, 'p'), request);
+                for (const kept of [false, true]) await PackIO.complete(PackIO.row(body, kept, true, 'p'), request);
                 console.log(JSON.stringify({{requests, skipped: at === requests.length,
                     same: Buffer.from(body).equals(Buffer.from(full))}}));
             }})().catch(e => {{console.error(e);process.exitCode=1;}});
         """,
         )
         assert result["same"] and result["skipped"]
-        requests = result["requests"]
-        assert len(requests) == (1 if present == 0 else 2 if present == 1 else 5 - present)
-        assert ("whole" in requests) == (present < 2)
-        if present:
-            assert requests[0] == [0, 16383]
+        assert result["requests"] == [[]], "even an archive containing every tile is replaced if complete is false"
 
     def test_merge_replaces_bytes_without_duplicating_ids(self, tmp_path):
         result = self.run_worker(
@@ -9918,22 +9910,36 @@ class TestPackWorker:
         assert result["indexes"] == [["browsed-at", "browsedAt"], ["kept", "keptAt"]]
         assert result["flags"] == ["held", "stand", "browse-bytes", ["browse-size:", "browse-size:\uffff"]]
 
-    def test_keep_accepts_an_ignored_range_and_rejects_a_truncated_one(self, tmp_path):
+    @pytest.mark.parametrize("failure", ["partial response", "truncated body", "HTTP error"])
+    def test_keep_rejects_failed_or_incomplete_whole_responses(self, tmp_path, failure):
         result = self.run_worker(
             tmp_path,
             """
             (async () => {
                 const bytes=new Uint8Array(8).buffer,body=PackIO.write(new Map([[0,bytes],[1,bytes]]));
                 const row=PackIO.row(PackIO.write(new Map([[0,bytes]])),false,false,'url');
-                const whole=await PackIO.complete(row,async()=>new Response(body));
                 let refused=false;
-                try {await PackIO.complete(row,async()=>new Response(body.slice(0,128),{status:206,
-                    headers:{'content-range':'bytes 0-1000/1001'}}));}catch(e){refused=true;}
-                console.log(JSON.stringify({refused,same:Buffer.from(whole).equals(Buffer.from(body))}));
+                const response=FAILURE==='partial response'?new Response(body,{status:206}):
+                    FAILURE==='truncated body'?new Response(body.slice(0,128)):new Response('failed',{status:503});
+                try {await PackIO.complete(row,async()=>response);}catch(e){refused=true;}
+                console.log(JSON.stringify({refused,unchanged:!row.complete && PackIO.unpack(row.pack).entries.size===1}));
             })().catch(e=>{console.error(e);process.exitCode=1;});
-        """,
+        """.replace("FAILURE", json.dumps(failure)),
         )
-        assert result == {"refused": True, "same": True}
+        assert result == {"refused": True, "unchanged": True}
+
+    @pytest.mark.parametrize("answer", [False, None])
+    def test_keep_preserves_absent_and_refused_request_results(self, tmp_path, answer):
+        result = self.run_worker(
+            tmp_path,
+            """
+            (async () => {
+                const row=PackIO.row(PackIO.write(new Map([[0,new Uint8Array(8).buffer]])),false,false,'url');
+                console.log(JSON.stringify(await PackIO.complete(row,async()=>ANSWER)));
+            })().catch(e=>{console.error(e);process.exitCode=1;});
+        """.replace("ANSWER", json.dumps(answer)),
+        )
+        assert result is answer
 
     def test_local_complete_archive_never_seeds_remote_range_offsets(self, tmp_path, full_pack_fixture):
         tile, tiles, _ = full_pack_fixture

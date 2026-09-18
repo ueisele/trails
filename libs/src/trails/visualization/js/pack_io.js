@@ -212,43 +212,17 @@ async function forget(open, tree) {
         });
     }
 }
-async function responsePart(answer, start, end) {
-    if (!answer || !answer.ok) { throw Error('pack request failed'); }
-    var body = await answer.arrayBuffer();
-    if (answer.status === 200) { unpack(body); return {whole: body}; }
-    var match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(answer.headers.get('content-range') || '');
-    if (answer.status !== 206 || !match || Number(match[1]) !== start ||
-            Number(match[2]) !== Math.min(end, Number(match[3]) - 1) || body.byteLength !== Number(match[2]) - start + 1) {
-        throw Error('invalid pack range');
-    }
-    return {body: body};
-}
+// Keep replaces incomplete archives; the worker alone reads tile ranges.
 async function complete(row, request) {
     if (row && row.complete) { return row.pack; }
-    if (!row) { var whole = await request(); if (!whole) { return whole; } return (await responsePart(whole)).whole; }
-    var answer = await request(0, 16383);
+    var answer = await request();
     if (!answer) { return answer; }
-    var part = await responsePart(answer, 0, 16383);
-    if (part.whole) { return part.whole; }
-    var header = packHeader(part.body);
-    var remote = packDirectory(header, part.body.slice(header.root, header.root + header.rootLen));
-    var local = unpack(row.pack), missing = [];
-    remote.forEach(function (entry, id) { if (!local.entries.has(id)) { missing.push([id, entry]); } });
-    if (missing.length > remote.size / 2) {
-        answer = await request(); if (!answer) { return answer; } return (await responsePart(answer)).whole;
-    }
-    var tiles = new Map();
-    for (var i = 0; i < missing.length; i++) {
-        var id = missing[i][0], entry = missing[i][1];
-        answer = await request(entry.offset, entry.offset + entry.length - 1);
-        if (!answer) { return answer; }
-        part = await responsePart(answer, entry.offset, entry.offset + entry.length - 1);
-        if (part.whole) { return part.whole; }
-        tiles.set(id, part.body);
-    }
-    return missing.length ? merge(row.pack, tiles) : row.pack;
+    if (!answer.ok || answer.status !== 200) { throw Error('whole pack request failed'); }
+    var body = await answer.arrayBuffer();
+    unpack(body);
+    return body;
 }
 return {tileId: tileId, header: packHeader, directory: packDirectory, unpack: unpack, slice: sliceTile,
     write: writePack, merge: merge, row: row, upgrade: upgrade, account: account, totals: totals,
-    saveTotals: saveTotals, put: put, forget: forget, responsePart: responsePart, complete: complete};
+    saveTotals: saveTotals, put: put, forget: forget, complete: complete};
 })();
