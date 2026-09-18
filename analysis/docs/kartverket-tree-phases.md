@@ -594,6 +594,28 @@ built* is a recorded drive figure now, 1,228 ms Lomsdal-Visten / 263 ms Abisko o
 forge (`173b19a`). The lesson of the last one: a handler on a map-wide event runs once per
 layer of a page with twelve thousand of them, and the drive did not record build time.
 
+#### Phase 6g — One store, one row: the pack, kept or browsed
+
+Decided 2026-09-18, 20:45 (Uwe): after 6b's fix `7a265e0` the browse store held tile rows for
+range-fetched tiles and pack rows for whole packs, beside a kept store of packs — two stores
+and two row shapes, and browsing let the row count grow with the tiles again, up to 15,000 at
+the 150 MB cap. Instead, **one store, `packs`, one row shape**: a pack under its address, an
+`ArrayBuffer` in PMTiles form that may be partial (its directory says which tiles are there),
+with `kept` (yes/no), `at` and `size` beside it, and nothing else.
+
+- **Browsing** merges a range-fetched tile into its pack's row — the tiles of one tick for one
+  pack in one write — and a whole pack replaces the row. The worker gains a PMTiles writer
+  for the subset it already reads (one root directory, uncompressed), about forty lines.
+- **Keep** marks the scope's packs `kept` and completes what is partial, fetching only the
+  missing tiles' ranges — or the whole pack when most is missing; a pack already whole costs
+  nothing. `forget` deletes the kept rows (so it frees storage), and the browse rows stay.
+- **Eviction** takes only rows without `kept`, oldest `at` first, until the browse bytes are
+  under the 150 MB cap; kept bytes and browse bytes are two sums in the flags, no walk.
+- **The lookup** is memory → the one row → blank offline or network online.
+- **The row count is the pack count** whatever is browsed — the property the phone asked for.
+- `DB_AT` 5 drops the `browse` store (a cache; nothing to migrate). The tally's `seen` path
+  counts a tile out of a browse row, `db` out of a kept row, `mem` out of memory.
+
 #### 6, as first written — Norway moves to the tree
 
 1. `PROVIDERS["kartverket"]`: `tiles="/tiles/kartverket/topo/1/"`, `top=17`, `cap=17` if
