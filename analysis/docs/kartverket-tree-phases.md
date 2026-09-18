@@ -659,6 +659,12 @@ Decided 2026-09-18, 21:00 (Uwe). Two things, both in the worker's and the panel'
    phone may move. The promotion rule of `57f25e2` ("a further tile after the window") becomes
    this, rather than living beside it.
 
+3. **Keep replaces.** Decided 2026-09-18, 22:00 (Uwe): 6g's rule that Keep completes a partial
+   row by fetching the missing tiles' ranges goes. A row that is not `complete` is fetched
+   whole and replaces the row, `kept` set; a complete row costs no request. Keep fetches every
+   pack of its scope whole anyway, and a range path beside that is a second code path for a few
+   kilobytes. Built in 6h, in the same run.
+
 #### 6, as first written — Norway moves to the tree
 
 1. `PROVIDERS["kartverket"]`: `tiles="/tiles/kartverket/topo/1/"`, `top=17`, `cap=17` if
