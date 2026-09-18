@@ -456,7 +456,70 @@ only; none was seen cut. z17 started the same afternoon, resuming the tree (abou
 tiles at the rate above, under two hours). Stand `7544749480db8ba3`, 189 leaves (the plan's
 188 was one short).
 
-### Phase 6 — Norway moves to the tree
+### Phase 6 — Both maps move to packs
+
+Rewritten 2026-09-18 after phase 1's phone readings and Uwe's word: the box at z17 and, later,
+whole countries must stay possible, so the unit on R2 and in the store becomes the **pack**, and
+Norway's move to its own tree (the phase as first written, kept below as *6, as first written*)
+happens as part of it rather than before it. Two halves: 6a is pipeline and deploy and can run
+now; 6b is the worker and the page and waits for phase 1b's four readings on the phone.
+
+**The pack.** One parent tile with its three levels of children — 1 + 4 + 16 + 64 = 85 tiles at
+most — as a valid PMTiles archive: one root directory, no leaf directories, directory and tiles
+uncompressed (the tiles are PNG already), tile type PNG, addressed by the parent's `z/x/y`. The
+parent level follows the layer's top: a layer to z17 has packs at z14, z10 and z6; to z15 at z12
+and z8; to z13 at z10 and z6. Each layer is its own archive series, because PMTiles carries one
+tile type per archive and the overlays are switched and blended on their own. About 800 kB for
+a base pack at z14, a few hundred kB for an overlay pack, well under the 512 MB the edge caches
+(phase 1b). The Lomsdal-Visten box with every layer to its top is about 9,500 packs against
+600,000 tiles for the base alone; the deploy's listing question from phase 5 disappears with it.
+
+#### Phase 6a — Packs, pipeline and deploy
+
+1. `trails.processing.packs`: from a finished tile tree under `analysis/output/<tree>/…/<version>/`
+   write the packs under `analysis/output/packs/<tree>/<provider>[/<sheet>]/<version>/{z}/{x}/{y}.pmtiles`,
+   one file per parent at every pack level of that layer, resumable per pack, with an
+   `index.json` beside them (`bounds`, `levels` — the pack levels — `per_level` with
+   packs/written/skipped/bytes, `tiles`, the source tree's `stand`/`source_modified`, and
+   `source_index` naming the tree's own index). A writer for the PMTiles subset above and a
+   reader that opens a pack and hands back one tile by `z/x/y`, both in Python, the reader
+   used by the tests and later by the deploy's check. A test that a written pack is opened by
+   an independent reader (the `pmtiles` package if it is already in `pyproject.toml`, else a
+   second, minimal reader written from the spec, not from the writer).
+2. `analysis/scripts/pack_tiles.py` and `make packs PARK=…`: every tree of the map (`tiles`,
+   `dem`, `shade`, `slope`, `vegetation`, `forest`) in one run, each to its own levels.
+3. `deploy_map.py`: `--tree packs` mirrors `packs/` with the same immutable cache header, and
+   the check before upload opens every pack's directory rather than counting PNGs.
+4. Weights per pack level from `per_level`, for phase 6b's panel.
+
+Run over both maps once phase 5's z17 render is complete (it is being resumed today), deploy
+`--tree packs`, and read the object count and the bytes.
+
+#### Phase 6b — Packs, worker and page
+
+Waits for phase 1b's four readings. Then, in `worker.js`, `offline_panel.js`, `chrome.js` and
+the Python that emits the layers:
+
+1. **The worker reads packs.** A tile request is resolved to its pack (parent at the layer's
+   pack level) and an offset inside it: online a range request into the pack's object — the
+   directory first, cached per pack in a bounded memory of a few packs, then the tile — or the
+   whole pack when the reader is zooming into that ground (a heuristic of a few lines: the
+   second tile asked from the same pack fetches the pack). Offline the pack is one row in the
+   kept store and the tile is a slice of it. The minimal PMTiles reader in the worker is about
+   sixty lines: header, one root directory, varints; no library.
+2. **The store holds packs.** Kept rows are packs keyed by the pack's address; the browse
+   store keeps what online reading fetched, by pack or by tile range, under the same byte cap.
+   `DB_AT` moves if the row shape needs it. Ground kept before this phase is not the same
+   picture and is dropped by the migration; one reader, Keep once (phase 7 writes that down).
+3. **The panel counts packs.** Scope, overview and whole map are counted in parents at the
+   pack levels per layer, weights are pack weights from 6a, the estimate line says packs and
+   megabytes. `cap` goes if the readings say the rows hold at the box's pack count.
+4. Everything of *6, as first written* below that is still true: Norway's provider names its
+   pack tree, `bounds` on both sheets, `maxNativeZoom 17`/`maxZoom 18` on both, the magnified
+   mark on the zoom line, the "answers everywhere" special cases removed, the drive on both
+   pages, a look on the phone at the relief.
+
+#### 6, as first written — Norway moves to the tree
 
 1. `PROVIDERS["kartverket"]`: `tiles="/tiles/kartverket/topo/1/"`, `top=17`, `cap=17` if
    phase 1 allowed it and 16 otherwise, `weight` from phase 5. The sheet gets `bounds` and
