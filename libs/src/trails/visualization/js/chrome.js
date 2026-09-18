@@ -664,18 +664,22 @@
             window.trailsOpened.cost = openCost;
 
             // The scratch rows live beside the kept ground, but never in it.
-            // Only a fixed batch is held in memory; even 600,000 rows cost one
-            // body and 250 pending puts here. Version 3 keeps the empty store.
+            // Bounded writes: 250 single tiles, three packs, or one 8 MB chunk.
+            // Version 3 keeps the empty store, including after a failed run.
             var BENCH_DB = {{ (this._parent._trails_companions.database if this._parent._trails_companions is defined else 'trails')|tojson }};
             var benchRunning = false;
             var benchBox = document.createElement('details');
             benchBox.className = 'trails-store-bench';
             benchBox.innerHTML = '<summary>Measure this device’s tile store</summary>' +
-                '<p>Temporary 1 kB rows in the map’s database. Rows are cleared before and after each run. ' +
+                '<p>Temporary tiles of 1 kB in the map’s database. Rows are cleared before and after each run. ' +
                 'Open measures a new connection to an already open database. Screen repeats the current visible ' +
-                'tiles through the worker, including the network on a miss. Keep this page open until it finishes.</p>' +
-                '<label>Rows <select><option value="150000">150,000</option>' +
-                '<option value="600000">600,000</option></select></label> <button type="button">Measure</button>' +
+                'map tiles through the worker, including the network on a miss, while the scratch rows are present. ' +
+                'Storage is the estimated change in bytes for this origin. Keep this page open until it finishes.</p>' +
+                '<label>Tiles <select class="trails-bench-tiles"><option value="150000">150,000</option>' +
+                '<option value="600000">600,000</option></select></label> ' +
+                '<label>Row shape <select class="trails-bench-shape"><option>blob-url</option>' +
+                '<option>blob-number</option><option>pack</option><option>archive</option></select></label> ' +
+                '<button type="button">Measure</button>' +
                 '<p class="trails-store-bench-said" role="status"></p>';
             var benchButton = benchBox.querySelector('button');
             var benchSaid = benchBox.querySelector('.trails-store-bench-said');
@@ -699,7 +703,8 @@
                     var deal = db.transaction('bench', mode);
                     deal.oncomplete = function () { done(); };
                     deal.onabort = function () { fail(deal.error || new Error('The measurement was aborted.')); };
-                    deal.onerror = function () { fail(deal.error); };
+                    // A request error bubbles before deal.error is populated.
+                    // Let it abort, then report that error and start cleanup.
                     try { work(deal.objectStore('bench')); }
                     catch (error) { deal.abort(); fail(error); }
                 });
@@ -722,53 +727,176 @@
                 return Array.from(urls);
             }
 
-            async function measureStore(rows) {
+            async function measureStore(tiles, variant) {
                 if (benchRunning) { throw new Error('A store measurement is already running.'); }
-                if (!Number.isInteger(rows) || rows < 1 || rows > 600000) {
-                    throw new Error('Choose between 1 and 600,000 rows.');
+                variant = variant || 'blob-url';
+                if (['blob-url', 'blob-number', 'pack', 'archive'].indexOf(variant) < 0) {
+                    throw new Error('Choose a row shape.');
+                }
+                if (!Number.isInteger(tiles) || tiles < 1 || tiles > 600000) {
+                    throw new Error('Choose between 1 and 600,000 tiles.');
                 }
                 if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
                     throw new Error('Wait for the map’s worker, then try again.');
                 }
-                var urls = benchScreen(), db = null, began, result;
+                var urls = benchScreen(), db = null, began, fillBegan, stage = 'open for fill';
+                var rows = variant === 'pack' ? Math.ceil(tiles / 85) : variant === 'archive' ? 1 : tiles;
+                var result = {variant: variant, tiles: tiles, rows: 0, writes: 0, cleared: false,
+                    usageBefore: null, usageAfter: null, bytes: null};
+                async function usage() {
+                    try {
+                        if (navigator.storage && navigator.storage.estimate) {
+                            var estimate = await navigator.storage.estimate();
+                            return Number.isFinite(estimate.usage) ? estimate.usage : null;
+                        }
+                    } catch (_) { /* Storage estimates are optional, not a failed measurement. */ }
+                    return null;
+                }
+                // Arithmetic, not bitwise: the packed z/x/y id is an exact
+                // integer below 2^53, and bitwise operators truncate to 32 bits.
+                function key(i) {
+                    var x = 69000 + Math.floor(i / 1000), y = 32000 + i % 1000;
+                    if (variant === 'blob-url') { return 'bench/tiles/17/' + x + '/' + y + '.png'; }
+                    if (variant === 'pack') {
+                        var parent = Math.floor(i / 85);
+                        return 14 * 2 ** 36 + (8700 + Math.floor(parent / 100)) * 2 ** 18 + 4100 + parent % 100;
+                    }
+                    return variant === 'archive' ? 0 : 17 * 2 ** 36 + x * 2 ** 18 + y;
+                }
                 benchRunning = true;
                 benchButton.disabled = true;
                 try {
                     db = await benchOpen();
+                    stage = 'clear before fill';
                     await benchDeal(db, 'readwrite', function (store) { store.clear(); });
+                    result.usageBefore = await usage();
+                    stage = 'fill';
+                    fillBegan = performance.now();
                     var body = new Blob([new Uint8Array(1024)], {type: 'application/octet-stream'});
-                    function key(i) { return 'bench/tiles/17/' + i + '.png'; }
-                    for (var start = 0; start < rows; start += 250) {
+                    if (variant === 'archive') {
+                        var totalBytes = tiles * 1024, chunkBytes = 8 * 1024 * 1024;
+                        for (var offset = 0; offset < totalBytes; offset += chunkBytes) {
+                            await benchDeal(db, 'readwrite', function (store) {
+                                store.put(new Blob([new Uint8Array(Math.min(chunkBytes, totalBytes - offset))]), 'bench/chunks/' + offset);
+                            });
+                            result.writes += 1;
+                            result.rows += 1;
+                            benchSaid.textContent = variant + ' · filling ' + Math.min(offset + chunkBytes, totalBytes) + ' bytes…';
+                        }
+                        stage = 'assemble archive';
+                        var archive = new Blob([]);
+                        // Read stored Blobs, never their bytes. Fold each into
+                        // the composite so even the JS list of handles is bounded.
+                        for (var part = 0; part < totalBytes; part += chunkBytes) {
+                            var chunk;
+                            await benchDeal(db, 'readonly', function (store) {
+                                var ask = store.get('bench/chunks/' + part);
+                                ask.onsuccess = function () { chunk = ask.result; };
+                            });
+                            if (!(chunk instanceof Blob) || chunk.size !== Math.min(chunkBytes, totalBytes - part)) {
+                                throw new Error('A stored archive chunk is missing or has the wrong size.');
+                            }
+                            archive = new Blob([archive, chunk]);
+                            chunk = null;
+                        }
+                        stage = 'write archive';
+                        await benchDeal(db, 'readwrite', function (store) { store.put(archive, key(0)); });
+                        result.writes += 1;
+                        result.rows += 1;
+                        archive = null;
+                        stage = 'delete archive chunks';
                         await benchDeal(db, 'readwrite', function (store) {
-                            for (var i = start; i < Math.min(start + 250, rows); i += 1) { store.put(body, key(i)); }
+                            store.delete(IDBKeyRange.bound('bench/chunks/', 'bench/chunks/\uffff'));
                         });
-                        benchSaid.textContent = 'Filling: ' + Math.min(start + 250, rows).toLocaleString() +
-                            ' / ' + rows.toLocaleString() + ' rows.';
+                        result.rows = 1;
+                    } else {
+                        var batch = variant === 'pack' ? 3 : 250;
+                        for (var start = 0; start < rows; start += batch) {
+                            await benchDeal(db, 'readwrite', function (store) {
+                                if (variant === 'pack') {
+                                    for (var row = start; row < Math.min(start + batch, rows); row += 1) {
+                                        var pack = new ArrayBuffer(340 + 85 * 1024), table = new Uint32Array(pack, 0, 85);
+                                        for (var slot = 0; slot < 85; slot += 1) { table[slot] = 340 + slot * 1024; }
+                                        store.put(pack, key(row * 85));
+                                    }
+                                } else {
+                                    for (var i = start; i < Math.min(start + batch, rows); i += 1) { store.put(body, key(i)); }
+                                }
+                            });
+                            result.rows += Math.min(batch, rows - start);
+                            result.writes = result.rows;
+                            benchSaid.textContent = variant + ' · filling ' + result.rows.toLocaleString() +
+                                ' / ' + rows.toLocaleString() + ' rows…';
+                        }
                     }
+                    result.fill = performance.now() - fillBegan;
+                    stage = 'verify row count';
                     await benchDeal(db, 'readonly', function (store) {
                         var ask = store.count();
                         ask.onsuccess = function () { if (ask.result !== rows) { store.transaction.abort(); } };
                     });
+                    result.usageAfter = await usage();
+                    if (result.usageBefore !== null && result.usageAfter !== null) {
+                        result.bytes = result.usageAfter - result.usageBefore;
+                    }
                     db.close();
                     db = null;
+                    stage = 'open';
                     began = performance.now();
                     db = await benchOpen();
-                    result = {rows: rows, open: performance.now() - began};
-                    function get(store, i) {
+                    result.open = performance.now() - began;
+                    function get(store, i, receive) {
                         var ask = store.get(key(i));
                         ask.onsuccess = function () {
-                            if (!(ask.result instanceof Blob) || ask.result.size !== 1024) { store.transaction.abort(); }
+                            try {
+                                var value = ask.result;
+                                if (variant === 'pack') {
+                                    if (!(value instanceof ArrayBuffer) || value.byteLength !== 340 + 85 * 1024) {
+                                        throw new Error('Invalid pack.');
+                                    }
+                                    var at = new Uint32Array(value, 0, 85)[i % 85];
+                                    if (at !== 340 + (i % 85) * 1024) { throw new Error('Invalid offset.'); }
+                                    receive(value.slice(at, at + 1024));
+                                } else {
+                                    if (!(value instanceof Blob) || value.size !== (variant === 'archive' ? tiles * 1024 : 1024)) {
+                                        throw new Error('Invalid tile Blob.');
+                                    }
+                                    receive(variant === 'archive' ? value.slice(i * 1024, (i + 1) * 1024).arrayBuffer() : value);
+                                }
+                            } catch (_) { store.transaction.abort(); }
                         };
                     }
+                    async function readTiles(count) {
+                        // Fixed at fifty requests, as in phase 1. Archive byte
+                        // reads outlive the transaction; include them in timing.
+                        var reads = [];
+                        await benchDeal(db, 'readonly', function (store) {
+                            for (var i = 0; i < count; i += 1) {
+                                get(store, count === 1 ? Math.floor(tiles / 2) : Math.floor(i * tiles / count), function (tile) {
+                                    reads.push(Promise.resolve(tile).then(function (bytes) {
+                                        if ((bytes instanceof Blob ? bytes.size : bytes.byteLength) !== 1024) {
+                                            throw new Error('A tile is not 1 kB.');
+                                        }
+                                        return true;
+                                    }).catch(function () { return false; }));
+                                });
+                            }
+                        });
+                        var read = await Promise.all(reads);
+                        if (read.length !== count || read.some(function (answer) { return !answer; })) {
+                            throw new Error('A tile could not be read.');
+                        }
+                    }
+                    stage = 'one get';
                     began = performance.now();
-                    await benchDeal(db, 'readonly', function (store) { get(store, Math.floor(rows / 2)); });
+                    await readTiles(1);
                     result.get = performance.now() - began;
+                    stage = 'fifty gets';
                     began = performance.now();
-                    await benchDeal(db, 'readonly', function (store) {
-                        for (var i = 0; i < 50; i += 1) { get(store, Math.floor(i * rows / 50)); }
-                    });
+                    await readTiles(50);
                     result.fifty = performance.now() - began;
-                    benchSaid.textContent = 'Measuring ' + urls.length + ' visible tiles through the worker…';
+                    stage = 'screen';
+                    benchSaid.textContent = variant + ' · measuring ' + urls.length + ' visible tiles through the worker…';
                     began = performance.now();
                     // allSettled keeps cleanup behind every answer, even if one
                     // fetch fails. The list is bounded by the screen, not rows.
@@ -783,26 +911,43 @@
                     }
                     result.screenTiles = urls.length;
                     result.screenErrors = answers.filter(function (answer) { return answer.value >= 400; }).length;
+                } catch (error) {
+                    result.error = stage + ': ' + error.name + ': ' + error.message;
+                    if (fillBegan !== undefined && result.fill === undefined) { result.fill = performance.now() - fillBegan; }
+                    result.usageAfter = await usage();
+                    if (result.usageBefore !== null && result.usageAfter !== null) {
+                        result.bytes = result.usageAfter - result.usageBefore;
+                    }
                 } finally {
                     try {
                         // Reopen if the measured open failed after closing the
                         // filling connection; cleanup is also owed on failure.
                         if (!db) { db = await benchOpen(); }
                         await benchDeal(db, 'readwrite', function (store) { store.clear(); });
+                        result.cleared = true;
+                    } catch (error) {
+                        result.error = (result.error ? result.error + '; ' : '') + 'cleanup: ' + error.name + ': ' + error.message;
                     } finally {
                         if (db) { db.close(); }
                         benchRunning = false;
                         benchButton.disabled = false;
                     }
                 }
-                benchSaid.textContent = result.rows.toLocaleString() + ' rows · open ' + result.open.toFixed(1) +
-                    ' ms · one get ' + result.get.toFixed(1) + ' ms · fifty gets ' + result.fifty.toFixed(1) +
-                    ' ms · screen ' + result.screen.toFixed(1) + ' ms (' + result.screenTiles + ' tiles, ' +
-                    result.screenErrors + ' HTTP errors). Scratch rows cleared.';
+                function ms(name) { return result[name] === undefined ? '—' : result[name].toFixed(1) + ' ms'; }
+                benchSaid.textContent = variant + ' · ' + tiles.toLocaleString() + ' tiles · ' + result.rows.toLocaleString() +
+                    ' rows (' + result.writes.toLocaleString() + ' writes including chunks) · fill ' + ms('fill') +
+                    ' · open ' + ms('open') + ' · one get ' + ms('get') + ' · fifty gets ' + ms('fifty') +
+                    ' · screen ' + ms('screen') + (result.screenTiles === undefined ? '' : ' (' + result.screenTiles +
+                    ' tiles, ' + result.screenErrors + ' HTTP errors)') + ' · storage ' +
+                    (result.bytes === null ? 'unavailable' : result.bytes.toLocaleString() + ' bytes (' +
+                        result.usageBefore.toLocaleString() + ' → ' + result.usageAfter.toLocaleString() + ')') +
+                    (result.error ? '. Measurement failed: ' + result.error + '.' : '.') +
+                    (result.cleared ? ' Scratch rows cleared.' : ' Scratch cleanup failed; run again to retry.');
                 return result;
             }
             benchButton.addEventListener('click', function () {
-                measureStore(Number(benchBox.querySelector('select').value)).catch(function (error) {
+                measureStore(Number(benchBox.querySelector('.trails-bench-tiles').value),
+                    benchBox.querySelector('.trails-bench-shape').value).catch(function (error) {
                     benchSaid.textContent = 'Measurement failed: ' + error.message;
                 });
             });

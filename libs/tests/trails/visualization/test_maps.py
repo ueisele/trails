@@ -1696,10 +1696,16 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         assert 'var BENCH_DB = "trails";' in html
         assert "sourcesHolder.appendChild(benchBox);" in html
         assert "measureStore: measureStore" in html
-        helper = html.split("async function measureStore(rows)")[1].split("benchButton.addEventListener")[0]
+        for variant in ("blob-url", "blob-number", "pack", "archive"):
+            assert f"<option>{variant}</option>" in html
+        assert 'class="trails-bench-tiles"' in html and 'class="trails-bench-shape"' in html
+        helper = html.split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
         assert "new Uint8Array(1024)" in helper
-        assert "start += 250" in helper
-        assert "i < 50" in helper
+        assert "variant === 'pack' ? 3 : 250" in helper
+        assert "row < Math.min(start + batch, rows)" in helper
+        assert "store.put(pack, key(row * 85))" in helper
+        assert "readTiles(50)" in helper
+        assert "Math.floor(i * tiles / count)" in helper
         assert "ask.result !== rows" in helper
         assert "Promise.allSettled" in helper
         assert "fetch(url, {cache: 'no-store'})" in helper
@@ -1709,8 +1715,28 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         assert "deleteObjectStore" not in helper
         assert "getAll" not in helper
         assert "'tiles', 'readwrite'" not in helper and "'browse', 'readwrite'" not in helper
-        for figure in ("rows", "open", "get", "fifty", "screen"):
+        for figure in ("rows", "writes", "fill", "open", "get", "fifty", "screen", "usageBefore", "usageAfter", "bytes"):
             assert f"result.{figure}" in helper
+
+    def test_store_shapes_read_one_tile_and_report_failed_archive_writes(self):
+        helper = self.rendered().split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
+        assert "'bench/tiles/17/' + x + '/' + y + '.png'" in helper
+        assert "17 * 2 ** 36 + x * 2 ** 18 + y" in helper
+        assert "Math.ceil(tiles / 85)" in helper
+        assert "new ArrayBuffer(340 + 85 * 1024)" in helper
+        assert "new Uint32Array(value, 0, 85)[i % 85]" in helper
+        assert "receive(value.slice(at, at + 1024))" in helper
+        assert "chunkBytes = 8 * 1024 * 1024" in helper
+        assert "store.get('bench/chunks/' + part)" in helper
+        assert "archive = new Blob([archive, chunk])" in helper
+        assert "store.put(archive, key(0))" in helper
+        assert "store.delete(IDBKeyRange.bound('bench/chunks/'" in helper
+        assert "value.slice(i * 1024, (i + 1) * 1024).arrayBuffer()" in helper
+        assert "await Promise.all(reads)" in helper
+        assert "navigator.storage.estimate()" in helper
+        assert "result.error = stage" in helper
+        assert "result.cleared ? ' Scratch rows cleared.'" in helper
+        assert "return result;" in helper
 
     def test_the_measurement_uses_this_maps_database(self):
         fmap = maps.create_map(bounds=(18, 68, 19, 69), companions=maps.Companions.named("abisko"))

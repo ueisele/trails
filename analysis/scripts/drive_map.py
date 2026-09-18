@@ -2280,24 +2280,116 @@ def the_theme_switch(page: Any) -> Check:
 
 
 def the_sources_measure_the_store(page: Any) -> Check:
-    """Shape at 2,000 rows; the phone owns the 150,000 and 600,000 readings."""
+    """Four shapes at 2,000 tiles; the phone owns the large-store readings."""
     viewport = page.viewport_size
     page.set_viewport_size({"width": 430, "height": 932})
     try:
         page.wait_for_function("() => navigator.serviceWorker && navigator.serviceWorker.controller", timeout=60_000)
         page.evaluate("() => window.trailsChrome.open('info')")
-        measured = page.evaluate("() => window.trailsChrome.measureStore(2000)")
-        count = page.evaluate(
-            in_db("""() => new Promise((done, fail) => {
+        scratch = in_db("""seed => new Promise((done, fail) => {
                 const ask = indexedDB.open('__DB__', 3);
                 ask.onerror = () => fail(ask.error);
                 ask.onsuccess = () => {
-                    const db = ask.result, deal = db.transaction('bench', 'readonly');
-                    const count = deal.objectStore('bench').count();
+                    const db = ask.result, deal = db.transaction('bench', seed ? 'readwrite' : 'readonly');
+                    const store = deal.objectStore('bench');
+                    if (seed) {
+                        store.put(new Blob(['leftover chunk']), 'bench/chunks/interrupted');
+                        store.put(new Blob(['leftover tile']), -100);
+                    }
+                    const count = store.count();
                     deal.oncomplete = () => { db.close(); done(count.result); };
                     deal.onabort = () => { db.close(); fail(deal.error); };
                 };
             })""")
+        readings = []
+        for variant, rows, writes in (("blob-url", 2000, 2000), ("blob-number", 2000, 2000), ("pack", 24, 24), ("archive", 1, 2)):
+            # An interrupted run may leave either kind of key. The helper must
+            # remove both before verifying its new row count, as well as after.
+            page.evaluate(scratch, True)
+            measured = page.evaluate("variant => window.trailsChrome.measureStore(2000, variant)", variant)
+            count = page.evaluate(scratch, False)
+            said = page.locator(".trails-store-bench-said").text_content() or ""
+            numbers = all(
+                isinstance(measured.get(key), (int, float)) and math.isfinite(measured[key]) and measured[key] >= 0
+                for key in ("rows", "writes", "fill", "open", "get", "fifty", "screen", "screenTiles", "screenErrors")
+            )
+            storage = (
+                measured["bytes"] == measured["usageAfter"] - measured["usageBefore"]
+                if measured["usageBefore"] is not None and measured["usageAfter"] is not None
+                else measured["bytes"] is None
+            )
+            readings.extend(
+                [
+                    Reading(
+                        f"{variant}: figures for 2,000 tiles",
+                        numbers and storage and "error" not in measured and measured["tiles"] == 2000 and measured["variant"] == variant,
+                        True,
+                        note=json.dumps(measured),
+                    ),
+                    Reading(f"{variant}: rows and writes", [measured["rows"], measured["writes"]], [rows, writes]),
+                    Reading(f"{variant}: scratch store is empty", count, 0),
+                    Reading(
+                        f"{variant}: Sources displays the figures",
+                        said.startswith(variant + " · ")
+                        and all(word in said for word in ("fill", "open", "one get", "fifty gets", "screen", "storage", "Scratch rows cleared.")),
+                        True,
+                        note=said,
+                    ),
+                ]
+            )
+        # Fail after the stored chunk exists. Quota or WebKit's composite-Blob
+        # limit must become a result, and must leave neither chunks nor a row.
+        failed = page.evaluate("""async () => {
+            const put = IDBObjectStore.prototype.put;
+            IDBObjectStore.prototype.put = function (value, key) {
+                if (this.name === 'bench' && key === 0) {
+                    throw new DOMException('Simulated archive quota', 'QuotaExceededError');
+                }
+                return put.call(this, value, key);
+            };
+            try { return await window.trailsChrome.measureStore(2000, 'archive'); }
+            finally { IDBObjectStore.prototype.put = put; }
+        }""")
+        readings.extend(
+            [
+                Reading(
+                    "archive: failed write is a result",
+                    "write archive: QuotaExceededError" in failed.get("error", "") and failed["cleared"],
+                    True,
+                    note=json.dumps(failed),
+                ),
+                Reading("archive: failed write leaves no chunks or rows", page.evaluate(scratch, False), 0),
+                Reading(
+                    "archive: failure is visible and another run is allowed",
+                    "Measurement failed: write archive: QuotaExceededError" in (page.locator(".trails-store-bench-said").text_content() or "")
+                    and page.locator(".trails-store-bench button").is_enabled(),
+                    True,
+                ),
+            ]
+        )
+        # A real IndexedDB request fails asynchronously. Its error bubbles
+        # before transaction.error is set; cleanup must wait for the abort.
+        failed_request = page.evaluate("""async () => {
+            const put = IDBObjectStore.prototype.put;
+            IDBObjectStore.prototype.put = function (value, key) {
+                if (this.name === 'bench' && key === 0) {
+                    return this.add(value, 'bench/chunks/0');
+                }
+                return put.call(this, value, key);
+            };
+            try { return await window.trailsChrome.measureStore(2000, 'archive'); }
+            finally { IDBObjectStore.prototype.put = put; }
+        }""")
+        readings.extend(
+            [
+                Reading(
+                    "archive: asynchronous request failure is a result",
+                    "write archive: ConstraintError" in failed_request.get("error", "") and failed_request["cleared"],
+                    True,
+                    note=json.dumps(failed_request),
+                ),
+                Reading("archive: aborted transaction leaves no chunks or rows", page.evaluate(scratch, False), 0),
+            ]
         )
         # The unchanged trailing write takes 400 ms. Wait for its data, not an
         # arbitrary sleep, then reopen Sources to read it out beside the counts.
@@ -2312,24 +2404,12 @@ def the_sources_measure_the_store(page: Any) -> Check:
         told = page.evaluate("() => window.trailsOffline.dbRead('flags', 'tiles-said')")
         page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.open('info'); }")
         page.wait_for_function("() => document.querySelector('.trails-open-tiles').textContent.includes('peak in flight:')")
-        said = page.locator(".trails-store-bench-said").text_content()
-        numbers = all(
-            isinstance(measured.get(key), (int, float)) and math.isfinite(measured[key]) and measured[key] >= 0
-            for key in ("rows", "open", "get", "fifty", "screen")
-        )
         tally = all(
             isinstance(told[path], int) and told[path] >= 0 and 0 <= told["time"][path]["worst"] <= told["time"][path]["total"]
             for path in ("db", "seen", "net", "blank")
         ) and 0 <= told["deadlines"] <= sum(told[path] for path in ("db", "seen", "net", "blank"))
-        return Check(
-            "the sources measure the store",
-            [
-                Reading("the helper reports its five figures", numbers and measured["rows"] == 2000, True, note=json.dumps(measured)),
-                Reading("the scratch store is empty afterwards", count, 0),
-                Reading("Sources displays the result", bool(said and "Scratch rows cleared." in said), True, note=said or ""),
-                Reading("the worker tally has counts, times, deadlines and peak concurrency", tally and told["peak"] > 0, True),
-            ],
-        )
+        readings.append(Reading("the worker tally has counts, times, deadlines and peak concurrency", tally and told["peak"] > 0, True))
+        return Check("the sources measure the store", readings)
     finally:
         page.evaluate("() => window.trailsChrome.close()")
         if viewport:
