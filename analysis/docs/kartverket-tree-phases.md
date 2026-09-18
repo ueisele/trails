@@ -500,6 +500,17 @@ a base pack at z14, a few hundred kB for an overlay pack, well under the 512 MB 
 Run over both maps once phase 5's z17 render is complete (it is being resumed today), deploy
 `--tree packs`, and read the object count and the bytes.
 
+**Run 2026-09-18, both maps, 3 minutes in all:** Lomsdal-Visten 9,162 packs, 5.57 GB — the base
+7,163 packs (z14 7,120 at 638 kB mean, z10 42, z6 1; 600,665 tiles, 4.58 GB, 125 s), the four
+overlays 489 each at z12 and z8 (relief 477 MB, slope 142, vegetation 129, forest 24), the
+heights 43 packs at z10 and z6 (224 MB — a z10 height pack is 5.3 MB, the heaviest row there
+will be). Abisko 2,274 packs, 1.07 GB (base 1,773 packs, 866 MB). 11,436 objects, 6.3 GB on
+disk, every pack opened and counted by the deploy's check before upload (939,725 tile
+entries). The Python `pmtiles` package cannot read them — it assumes gzip-compressed
+directories regardless of the header — while the reference `pmtiles.js` reads header,
+metadata and tiles byte-identical to the source PNGs; the subset is the spec's, the package
+is not.
+
 #### Phase 6b — Packs, worker and page
 
 Waits for phase 1b's four readings. Then, in `worker.js`, `offline_panel.js`, `chrome.js` and
