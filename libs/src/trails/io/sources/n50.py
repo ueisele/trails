@@ -129,6 +129,7 @@ def labelled(values: pd.Series, table: dict[Any, str]) -> pd.Series:
         UNTRANSLATED.add(str(value))
     return known.fillna(values)
 
+
 #: Who owns a hut, by N50's ``hytteeier`` code -- SOSI's *Hytteeier* list, which
 #: the product specification carries and the data does not. Read as a number the
 #: popup said *Owner code: 4* about every Statskog hut on the map; the word is

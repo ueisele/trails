@@ -393,7 +393,7 @@ def importance_label(value: object) -> str:
     is the column's name and says nothing a reader needs.
     """
     text = str(value)
-    return text[len("viktighet"):] if text.startswith("viktighet") and len(text) > len("viktighet") else text
+    return text[len("viktighet") :] if text.startswith("viktighet") and len(text) > len("viktighet") else text
 
 
 #: Places people live in, from a town down to a cluster of houses.

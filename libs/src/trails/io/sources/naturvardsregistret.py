@@ -157,6 +157,8 @@ def marking_label(value: object) -> str:
     if not isinstance(value, str) or not value.strip():
         return ""
     return MARKING_LABELS.get(value.strip(), value.strip())
+
+
 TRAIL_DESCRIPTION = "BESKRIVN"
 #: The state trail a segment belongs to, as ``Abisko - Abiskojaure (BD 21)``,
 #: and its number alone. The number is the key the county's brochures, the

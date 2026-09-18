@@ -721,6 +721,7 @@ REMAIN_POPUP_FIELDS = {
 }
 REMAIN_LINK_FIELDS = {"url": "\u2192 This remain on Fornsök"}
 
+
 def humanized(values: pd.Series) -> pd.Series:
     """OSM's tag values as words: ``wilderness_hut`` reads *wilderness hut*.
 
@@ -763,6 +764,7 @@ def untranslated_words() -> list[str]:
     for module in (stedsnavn, n50, naturvardsregistret, kulturmiljoregistret):
         found |= getattr(module, "UNTRANSLATED", set())
     return sorted(found)
+
 
 #: How close a dot from another register has to stand to a former-settlement
 #: pin to be the same place. The six OSM farms inside the park sit within a
