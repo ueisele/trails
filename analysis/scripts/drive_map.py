@@ -438,21 +438,24 @@ SCENES: dict[str, Scene] = {
             # for one evening, when the feed's own coordinates put a station on
             # top of a bus stop and the two drew as one pin; the register moved
             # the station 251 m to where it is and they are two again.
-            "things in the marker pane": 183,
+            # 233 with §9.40: 50 remains off Norrbotten's Kulturmiljöregistret
+            # file -- 26 house foundations and 24 kåta sites -- as pins and on.
+            "things in the marker pane": 233,
             # Nineteen: the relief shadow had a row here for a day and is a
             # checkbox under the sheet in the base-map panel since (§6.6).
             # Twenty-two since §9.31: stations, camp sites, private cabins.
             # Twenty-three since §9.33, which split the stops into the six
             # stations Entur knows the lines of and the four bus stops it does
             # not -- the same ten pins, under two switches.
-            "checkboxes in the legend": 23,
+            # Twenty-four with the former dwellings (§9.40).
+            "checkboxes in the legend": 24,
             "of them switched off": 5,
             "zoom before": 10,
             "zoom after": 12,
             "desktop: map free with nothing asked for": 97.7,
             "upright: map free with nothing asked for": 97.8,
             "sideways: map free with nothing asked for": 97.7,
-            "and the legend is what is in it": 23,
+            "and the legend is what is in it": 24,
             "px of map left above it": 562,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 189,

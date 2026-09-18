@@ -102,6 +102,7 @@ from trails.io.sources import (
     entur,
     geonorge,
     hoydedata,
+    kulturmiljoregistret,
     lantmateriet,
     markhojd,
     n50,
@@ -179,6 +180,10 @@ class Park:
     #: The catalogue of Naturkartan pages for the register's state trails under
     #: ``analysis/routes``, if there is one -- links only, nothing drawn.
     naturkartan: str | None = None
+    #: The Swedish county whose file of the Kulturmiljöregistret holds the
+    #: box, as the file names it (``norrbotten``); None for a Norwegian map,
+    #: whose places people left come out of SSR (§9.39).
+    county: str | None = None
 
     @property
     def app_name(self) -> str:
@@ -232,6 +237,7 @@ PARKS: dict[str, Park] = {
         ut_routes=None,
         # The county's pages for its state trails, one per BD number (§9.22).
         naturkartan="abisko-naturkartan.toml",
+        county="norrbotten",
     ),
 }
 
@@ -255,6 +261,7 @@ TRAILHEAD_PLACE_TYPES = ("farm", "isolated_dwelling")
 
 #: The pin colour of each source, by the names :data:`maps.PIN_COLOURS` knows.
 PIN_COLOUR_OF = {
+    "KMR": "purple",
     "N50": "darkred",
     "Topografi 50": "darkred",
     "OSM": "darkblue",
@@ -703,6 +710,16 @@ STATSKOG_REGION_BY_COUNTY = {
 }
 STATSKOG_REGION_URL = "https://www.statskog.no/hytter-og-friluftsliv/{region}"
 STATSKOG_LINK_FIELDS = {"statskog_url": "\u2192 Statskog's huts and open shelters in this region"}
+
+#: The Swedish register's own words for a place people left, and its page.
+KMR = "KMR"
+REMAIN_POPUP_FIELDS = {
+    "name": "Name",
+    "kind": "Remains type",
+    "assessment": "Assessment",
+    "description": "Description",
+}
+REMAIN_LINK_FIELDS = {"url": "\u2192 This remain on Fornsök"}
 
 #: What the register says about a place people left, and why the pin is there.
 FORMER_SETTLEMENT_POPUP_FIELDS = {
@@ -3548,6 +3565,18 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     huts, private_cabins = cabins[~is_private].copy(), cabins[is_private].copy()
     print(f"  of which huts: {len(huts)} ({huts['glyph'].value_counts(dropna=False).to_dict()}); private: {len(private_cabins)}")
 
+    print("\nLoading the places people left (Kulturmiljöregistret)...")
+    # **Sweden's word for a place people left is the heritage register's, not
+    # the name file's** (§9.39, §9.40): a fäbod, a farmstead, a kåta, a house
+    # foundation from historic time. One row per remain, over the box.
+    remains = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    if which.county:
+        remains_source = kulturmiljoregistret.Source(which.county, cache_dir=args.cache_dir)
+        remains = remains_source.remains(bounds, force_download=args.force_download)
+        loaded.versions[KMR] = remains_source.version
+        by_kind = remains["kind"].value_counts().to_dict() if len(remains) else {}
+        print(f"  {len(remains)} remains of {len(kulturmiljoregistret.DWELLING_TYPES)} dwelling types: {by_kind}")
+
     print("\nLoading the register's facilities (Leder)...")
     facilities = gpd.clip(register.facilities(bounds, force_download=args.force_download), inside).reset_index(drop=True)
     facilities["name"] = facilities[naturvardsregistret.FACILITY_NAME]
@@ -3639,6 +3668,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     osm_pin, osm_hex = pin_colour("OSM")
     t50_pin, t50_hex = pin_colour("Topografi 50")
     leder_pin, leder_hex = pin_colour("Leder")
+    kmr_pin, kmr_hex = pin_colour(KMR)
     # The way in first: Abisko is reached by train, and the stations and stops
     # of the box were on no layer until 2026-09-17.
     points = stop_layers(scheduled, TRAFIKLAB, STATION_LINK_FIELDS) + [
@@ -3648,6 +3678,20 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         ),
         PointLayer(shelters, "Huts and shelters [OSM]", osm_hex, SHELTER_POPUP_FIELDS, "shelter", "OSM", color=osm_pin, icon_field="glyph"),
         PointLayer(camp_sites, "Camp sites [OSM]", osm_hex, CAMP_SITE_POPUP_FIELDS, "camp site", "OSM", color=osm_pin, icon="tent"),
+        # The same pin as Norway's former settlements, for the same claim: a
+        # homestead stood here and nobody lives in it (§9.40).
+        PointLayer(
+            remains,
+            "Former dwellings and settlements [KMR]",
+            kmr_hex,
+            REMAIN_POPUP_FIELDS,
+            "old homestead",
+            KMR,
+            color=kmr_pin,
+            icon="house-chimney-crack",
+            link_fields=REMAIN_LINK_FIELDS,
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
+        ),
         PointLayer(
             facilities,
             "Bridges, shelters and privies [Leder]",
@@ -3719,6 +3763,25 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
                 )
                 for described in (trafiklab.METADATA, trafiklab.REGISTER_METADATA)
             ],
+            # Cited the way the publisher asks -- *Riksantikvarieämbetets
+            # Kulturmiljöregister. ÅÅÅÅ-MM-DD* -- with the day the county's
+            # file was written, which is the day it is rebuilt.
+            **(
+                {
+                    KMR: [
+                        credit(
+                            f"{KMR} ({kulturmiljoregistret.METADATA.name})",
+                            kulturmiljoregistret.METADATA.license,
+                            "",
+                            f"{kulturmiljoregistret.METADATA.attribution}. {loaded.versions[KMR]}",
+                            kulturmiljoregistret.METADATA.url,
+                            f"file of {loaded.versions[KMR]}",
+                        )
+                    ]
+                }
+                if loaded.versions.get(KMR)
+                else {}
+            ),
         },
         heights=height_credit(markhojd.METADATA),
         protected=protected_credit(naturvardsregistret.METADATA),

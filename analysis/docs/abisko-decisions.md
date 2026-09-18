@@ -3322,11 +3322,53 @@ not in this.
 Strompdalen's DNT hut *DNT · Ulåst*, and the register's Strompdalen *a farm inside Lomsdal-Visten
 nasjonalpark*.
 
+### 9.40 Sweden's places people left come from the heritage register — settled, 2026-09-18
+
+*"Schweden wartet auf eine Antwort … Das kläre ich, bevor dort etwas gezeichnet wird. → wie meinst
+du das? Was klärst du?"* A lookup, not a negotiation: the catalogue said *Villkor okända* and the
+catalogue was not the publisher.
+
+**The terms, from the three places that state them.** The Länsstyrelsen catalogue and the INSPIRE
+metadata record: *"Villkor för åtkomst och användning okänd"*, a placeholder, beside *"Inga
+begränsningar för allmänhetens tillgång"*. The service itself: *Fees: NONE, AccessConstraints:
+NONE*, and the ATOM feed *"No Limitations"*. The publisher, in its Fornsök FAQ: *"Dataseten som går
+att ladda ner eller visa via Öppna data är fria att använda men ange gärna Riksantikvarieämbetet som
+källa"*, cited as *Riksantikvarieämbetets Kulturmiljöregister. ÅÅÅÅ-MM-DD*. And the portal's own
+DCAT catalogue marks the county and national downloads **CC0 1.0**. The Sources panel cites it the
+way the FAQ asks, with the day the county's file was written.
+
+**The INSPIRE feed is the wrong file, and it took reading it to know.** 62 MB, 348,377 sites, and
+the *Protected Sites* schema: a name, a date, no remains type. The register's own files are the
+GeoPackages per county under `pub.raa.se/nedladdning/datauttag/lamningar_v1/lan/`, rebuilt nightly
+— Norrbotten 113 MB, written 03:14 that morning — with all 169 remains types, a description, the
+antiquarian assessment and each remain's page on Fornsök. All of Sweden is one 2.3 GB file; a park
+needs its county, so `Park.county` names it.
+
+**What a dwelling is, in the register's vocabulary.** Seven of the 169 types are a place somebody
+lived at and nobody does now: *Bytomt/gårdstomt*, *Fäbod*, *Lägenhetsbebyggelse*, *Husgrund,
+historisk tid*, *Kåta*, *Viste*, *Stalotomt*. *Boplats* is left out: it is a Stone Age site. Over
+the Abisko box that is **50 remains — 26 house foundations and 24 kåta sites**; not one fäbod or
+farmstead, which Norrbotten has 44 and 199 of further south. The point layer holds a geometry per
+`geometrinummer`, so a house foundation can be fifteen rows — 219 rows for 178 remains over the
+box — and the loader keeps one per `uuid`.
+
+**The same pin as Norway's, for the same claim.** A house with a crack through it: a homestead
+stood here and nobody lives in it. The popup carries the register's type, its assessment, its
+description and a link to the remain's page. Measured on the built page: 50 pins, 233 things in the
+marker pane against 183, 24 rows in the legend against 23.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-18, fifth** — Sweden's places people left are drawn from Riksantikvarieämbetet's
+  Kulturmiljöregistret (§9.40), after the terms turned out to be CC0 in the publisher's own
+  catalogue and *"fria att använda"* in its FAQ — the *Villkor okända* was the Länsstyrelsen
+  catalogue's placeholder. The INSPIRE feed carries no remains type; the county GeoPackages do,
+  rebuilt nightly. Seven dwelling types, one row per remain: 50 over the Abisko box, house
+  foundations and kåta sites, with each remain's Fornsök page linked.
 
 - **2026-09-18, fourth** — places people left are a pin layer of their own, and a hut's owner is a
   word (§9.39). SSR's `gammelBosettingsplass` turned out to be the abandonment signal I had said no
