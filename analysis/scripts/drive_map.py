@@ -2311,7 +2311,7 @@ def the_sources_measure_the_store(page: Any) -> Check:
             said = page.locator(".trails-store-bench-said").text_content() or ""
             numbers = all(
                 isinstance(measured.get(key), (int, float)) and math.isfinite(measured[key]) and measured[key] >= 0
-                for key in ("rows", "writes", "fill", "open", "get", "fifty", "screen", "screenTiles", "screenErrors")
+                for key in ("rows", "writes", "fill", "clear", "open", "get", "fifty", "screen", "screenTiles", "screenErrors")
             )
             storage = (
                 measured["bytes"] == measured["usageAfter"] - measured["usageBefore"]
@@ -2331,11 +2331,107 @@ def the_sources_measure_the_store(page: Any) -> Check:
                     Reading(
                         f"{variant}: Sources displays the figures",
                         said.startswith(variant + " · ")
-                        and all(word in said for word in ("fill", "open", "one get", "fifty gets", "screen", "storage", "Scratch rows cleared.")),
+                        and all(
+                            word in said for word in ("fill", "clear", "open", "one get", "fifty gets", "screen", "storage", "Scratch rows cleared.")
+                        ),
                         True,
                         note=said,
                     ),
                 ]
+            )
+        # Keep both clear transactions alive long enough to see their clocks.
+        # Repeated requests are bounded in time and count, and touch only bench.
+        page.evaluate(scratch, True)
+        slow_clear = page.evaluate("""async () => {
+            const clear = IDBObjectStore.prototype.clear, stages = [], counts = [];
+            const said = document.querySelector('.trails-store-bench-said');
+            const observer = new MutationObserver(() => stages.push(said.textContent));
+            observer.observe(said, {childList: true});
+            IDBObjectStore.prototype.clear = function () {
+                if (this.name !== 'bench') { return clear.call(this); }
+                counts.push(said.textContent);
+                const request = clear.call(this), until = performance.now() + 2100;
+                let requests = 0;
+                const hold = () => {
+                    if (performance.now() >= until) { return; }
+                    if (++requests > 100000) { this.transaction.abort(); throw new Error('Clear test request bound'); }
+                    this.count().onsuccess = hold;
+                };
+                hold();
+                return request;
+            };
+            try {
+                const result = await window.trailsChrome.measureStore(3, 'blob-number');
+                return {result, stages, counts, said: said.textContent};
+            } finally { observer.disconnect(); IDBObjectStore.prototype.clear = clear; }
+        }""")
+        readings.extend(
+            [
+                Reading(
+                    "both clears show their row count and elapsed seconds",
+                    slow_clear["counts"] == [f"blob-number · clearing {count} scratch rows…" for count in (2, 3)]
+                    and all(f"blob-number · clearing {count} scratch rows… 1 s" in slow_clear["stages"] for count in (2, 3)),
+                    True,
+                    note=json.dumps(slow_clear),
+                ),
+                Reading(
+                    "clear time includes both transactions and appears in seconds",
+                    slow_clear["result"]["clear"] >= 4200
+                    and f" · clear {slow_clear['result']['clear'] / 1000:.1f} s" in slow_clear["said"]
+                    and slow_clear["result"]["cleared"],
+                    True,
+                ),
+            ]
+        )
+        # Empty initial scratch needs no write. A blocked count, before fill or
+        # during cleanup, must report the diagnosis and release the controls.
+        for blocked_read in (0, 1, 5):
+            blocked = page.evaluate(
+                """async blockedRead => {
+                const transaction = IDBDatabase.prototype.transaction, clear = IDBObjectStore.prototype.clear;
+                let reads = 0, clears = 0, aborted = false;
+                IDBDatabase.prototype.transaction = function (name, mode, ...rest) {
+                    if (name === 'bench' && mode === 'readonly' && ++reads === blockedRead) {
+                        const deal = {
+                            objectStore: () => ({transaction: deal, count: () => ({})}),
+                            abort: () => { aborted = true; queueMicrotask(() => deal.onabort()); }
+                        };
+                        return deal;
+                    }
+                    return transaction.call(this, name, mode, ...rest);
+                };
+                IDBObjectStore.prototype.clear = function () {
+                    if (this.name === 'bench') { clears++; }
+                    return clear.call(this);
+                };
+                const began = performance.now();
+                try {
+                    const result = await window.trailsChrome.measureStore(3, 'blob-number');
+                    return {result, clears, aborted, elapsed: performance.now() - began,
+                        said: document.querySelector('.trails-store-bench-said').textContent};
+                } finally {
+                    IDBDatabase.prototype.transaction = transaction;
+                    IDBObjectStore.prototype.clear = clear;
+                }
+            }""",
+                blocked_read,
+            )
+            readings.append(
+                Reading(
+                    f"scratch count: {'empty skips the initial clear' if not blocked_read else f'read {blocked_read} times out'}",
+                    (
+                        blocked["clears"] == 1 and blocked["result"]["cleared"] and "error" not in blocked["result"]
+                        if not blocked_read
+                        else blocked["clears"] == 0
+                        and blocked["aborted"]
+                        and 15000 <= blocked["elapsed"] < 20000
+                        and "the database is held by another transaction" in blocked["result"].get("error", "")
+                        and "the database is held by another transaction" in blocked["said"]
+                        and page.locator(".trails-store-bench button").is_enabled()
+                    ),
+                    True,
+                    note=json.dumps(blocked),
+                )
             )
         # Fail after the stored chunk exists. Quota or WebKit's composite-Blob
         # limit must become a result, and must leave neither chunks nor a row.

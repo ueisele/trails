@@ -751,8 +751,41 @@
                 benchSaid.textContent = variant + ' · finding visible tiles…';
                 var urls = benchScreen(), db = null, began, fillBegan, stage = 'open for fill', estimateSkipped = false;
                 var rows = variant === 'pack' ? Math.ceil(tiles / 85) : variant === 'archive' ? 1 : tiles;
-                var result = {variant: variant, tiles: tiles, rows: 0, writes: 0, cleared: false,
+                var countBlocked = false;
+                var result = {variant: variant, tiles: tiles, rows: 0, writes: 0, cleared: false, clear: 0,
                     usageBefore: null, usageAfter: null, bytes: null};
+                async function clearScratch() {
+                    if (countBlocked) { return false; }
+                    benchSaid.textContent = variant + ' · counting scratch rows…';
+                    var count, timer, transaction;
+                    try {
+                        await Promise.race([benchDeal(db, 'readonly', function (store) {
+                            transaction = store.transaction;
+                            var ask = store.count();
+                            ask.onsuccess = function () { count = ask.result; };
+                        }), new Promise(function (_, fail) {
+                            timer = setTimeout(function () {
+                                countBlocked = true;
+                                fail(new Error('the database is held by another transaction'));
+                                transaction.abort();
+                            }, 15000);
+                        })]);
+                    } finally { clearTimeout(timer); }
+                    if (count === 0) { return true; }
+                    var label = variant + ' · clearing ' + count.toLocaleString() + ' scratch rows…';
+                    benchSaid.textContent = label;
+                    var clearBegan = performance.now();
+                    timer = setInterval(function () {
+                        benchSaid.textContent = label + ' ' + Math.floor((performance.now() - clearBegan) / 1000) + ' s';
+                    }, 1000);
+                    try {
+                        await benchDeal(db, 'readwrite', function (store) { store.clear(); });
+                    } finally {
+                        clearInterval(timer);
+                        result.clear += performance.now() - clearBegan;
+                    }
+                    return true;
+                }
                 async function usage() {
                     benchSaid.textContent = variant + ' · estimating storage…';
                     var timer;
@@ -787,8 +820,7 @@
                     benchSaid.textContent = variant + ' · opening the database…';
                     db = await benchOpen();
                     stage = 'clear before fill';
-                    benchSaid.textContent = variant + ' · clearing scratch rows…';
-                    await benchDeal(db, 'readwrite', function (store) { store.clear(); });
+                    await clearScratch();
                     result.usageBefore = await usage();
                     stage = 'fill';
                     benchSaid.textContent = variant + ' · filling…';
@@ -942,7 +974,7 @@
                 } catch (error) {
                     result.error = stage + ': ' + error.name + ': ' + error.message;
                     if (fillBegan !== undefined && result.fill === undefined) { result.fill = performance.now() - fillBegan; }
-                    result.usageAfter = await usage();
+                    result.usageAfter = countBlocked ? null : await usage();
                     if (result.usageBefore !== null && result.usageAfter !== null) {
                         result.bytes = result.usageAfter - result.usageBefore;
                     }
@@ -954,9 +986,7 @@
                             benchSaid.textContent = variant + ' · opening the database for cleanup…';
                             db = await benchOpen();
                         }
-                        benchSaid.textContent = variant + ' · clearing scratch rows…';
-                        await benchDeal(db, 'readwrite', function (store) { store.clear(); });
-                        result.cleared = true;
+                        result.cleared = await clearScratch();
                     } catch (error) {
                         result.error = (result.error ? result.error + '; ' : '') + 'cleanup: ' + error.name + ': ' + error.message;
                     } finally {
@@ -968,6 +998,7 @@
                 function ms(name) { return result[name] === undefined ? '—' : result[name].toFixed(1) + ' ms'; }
                 benchSaid.textContent = variant + ' · ' + tiles.toLocaleString() + ' tiles · ' + result.rows.toLocaleString() +
                     ' rows (' + result.writes.toLocaleString() + ' writes including chunks) · fill ' + ms('fill') +
+                    ' · clear ' + (result.clear / 1000).toFixed(1) + ' s' +
                     ' · open ' + ms('open') + ' · one get ' + ms('get') + ' · fifty gets ' + ms('fifty') +
                     ' · screen ' + ms('screen') + (result.screenTiles === undefined ? '' : ' (' + result.screenTiles +
                     ' tiles, ' + result.screenErrors + ' HTTP errors)') + ' · storage ' +

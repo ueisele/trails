@@ -1710,12 +1710,13 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         assert "Promise.allSettled" in helper
         assert "fetch(url, {cache: 'no-store'})" in helper
         assert "store.put(body, key(i))" in helper
-        assert helper.count("store.clear()") == 2
+        assert helper.count("store.clear()") == 1
+        assert helper.count("await clearScratch()") == 2
         assert "finally" in helper.split("store.clear()")[1]
         assert "deleteObjectStore" not in helper
         assert "getAll" not in helper
         assert "'tiles', 'readwrite'" not in helper and "'browse', 'readwrite'" not in helper
-        for figure in ("rows", "writes", "fill", "open", "get", "fifty", "screen", "usageBefore", "usageAfter", "bytes"):
+        for figure in ("rows", "writes", "fill", "clear", "open", "get", "fifty", "screen", "usageBefore", "usageAfter", "bytes"):
             assert f"result.{figure}" in helper
 
     def test_store_shapes_read_one_tile_and_report_failed_archive_writes(self):
@@ -1769,7 +1770,6 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         assert helper.index("estimating storage…") < helper.index("await Promise.race([navigator.storage.estimate()")
         for before, after, text in (
             ("benchButton.disabled = true;", "db = await benchOpen()", "opening the database…"),
-            ("stage = 'clear before fill'", "await benchDeal", "clearing scratch rows…"),
             ("stage = 'fill'", "await benchDeal", "filling…"),
             ("stage = 'assemble archive'", "await benchDeal", "assembling archive…"),
             ("stage = 'write archive'", "await benchDeal", "writing archive…"),
@@ -1782,8 +1782,25 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         ):
             section = helper.split(before)[1].split(after)[0]
             assert f"benchSaid.textContent = variant + ' · {text}';" in section
-        cleanup = helper.split("if (!db) {")[1].split("await benchDeal")[0]
-        assert "benchSaid.textContent = variant + ' · clearing scratch rows…';" in cleanup
+        assert "stage = 'clear before fill';\n                    await clearScratch();" in helper
+        assert "result.cleared = await clearScratch();" in helper
+
+    def test_store_clears_count_first_bound_the_wait_and_show_elapsed_seconds(self):
+        helper = self.rendered().split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
+        clearing = helper.split("async function clearScratch()")[1].split("async function usage()")[0]
+        assert "if (countBlocked) { return false; }" in clearing
+        assert clearing.index("counting scratch rows…") < clearing.index("await Promise.race([benchDeal(db, 'readonly'")
+        assert "var ask = store.count();" in clearing
+        assert "fail(new Error('the database is held by another transaction'));" in clearing
+        assert "transaction.abort();\n                            }, 15000);" in clearing
+        assert "finally { clearTimeout(timer); }" in clearing
+        assert clearing.index("if (count === 0) { return true; }") < clearing.index("benchDeal(db, 'readwrite'")
+        assert "count.toLocaleString() + ' scratch rows…'" in clearing
+        assert "Math.floor((performance.now() - clearBegan) / 1000) + ' s'" in clearing
+        assert "}, 1000);" in clearing
+        assert "clearInterval(timer);" in clearing
+        assert "result.clear += performance.now() - clearBegan;" in clearing
+        assert "' · clear ' + (result.clear / 1000).toFixed(1) + ' s'" in helper
 
 
 class TestNothingGrowsWithTheDownload:
