@@ -62,6 +62,60 @@ DWELLING_TYPES = (
     "Stalotomt",
 )
 
+#: What the register's words mean, in English. The types a walking map draws
+#: and the ones it meets beside them; a type not here passes through as the
+#: register spells it, visible rather than hidden.
+TYPE_LABELS = {
+    "Bytomt/gårdstomt": "farmstead site",
+    "Fäbod": "summer farm (fäbod)",
+    "Lägenhetsbebyggelse": "croft site",
+    "Husgrund, historisk tid": "house foundation, historic",
+    "Husgrund, förhistorisk/medeltida": "house foundation, prehistoric or medieval",
+    "Kåta": "Sámi hut site (kåta)",
+    "Viste": "Sámi settlement site (viste)",
+    "Stalotomt": "stalo foundation",
+    "Boplats": "Stone Age site",
+    "Härd": "hearth",
+    "Fångstgrop": "trapping pit",
+    "Förvaringsanläggning": "storage structure",
+    "Renvall": "reindeer pen site",
+    "Samlingsplats": "gathering place",
+    "Offerplats": "offering place",
+    "Fyndplats": "find spot",
+}
+
+#: The register's antiquarian assessment, in English. *Fornlämning* is the
+#: legally protected kind; the rest are recorded and not protected.
+ASSESSMENT_LABELS = {
+    "Fornlämning": "ancient monument, protected",
+    "Möjlig fornlämning": "possible ancient monument",
+    "Övrig kulturhistorisk lämning": "other cultural remain",
+    "Ingen antikvarisk bedömning": "not assessed",
+    "Ej kulturhistorisk lämning": "not a cultural remain",
+    "Uppgift om lämning, ej bekräftad i fält": "reported, not confirmed in the field",
+}
+
+
+#: The values the tables did not know, as they passed through.
+UNTRANSLATED: set[str] = set()
+
+
+def type_label(value: object) -> str:
+    """Say what a remains type is, in English; the register's word where none is known."""
+    text = str(value)
+    if text not in TYPE_LABELS:
+        UNTRANSLATED.add(text)
+    return TYPE_LABELS.get(text, text)
+
+
+def assessment_label(value: object) -> str:
+    """Say what an assessment means, in English; the register's word where none is known."""
+    text = str(value)
+    if text not in ASSESSMENT_LABELS:
+        UNTRANSLATED.add(text)
+    return ASSESSMENT_LABELS.get(text, text)
+
+
 #: Seconds the download may take: a county is a hundred megabytes.
 TIMEOUT_S = 600
 
@@ -150,9 +204,10 @@ class Source:
 
         Returns:
             Points in WGS 84 with ``remain_id``, ``name`` (None where the
-            register has none), ``kind`` (the remains type, in Swedish),
-            ``description``, ``assessment`` (the register's antiquarian
-            assessment) and ``url`` (the remain's own page on Fornsök)
+            register has none), ``kind`` (the remains type as the register
+            spells it) and ``kind_label`` (in English), ``description`` (the
+            register's own text, Swedish), ``assessment`` and
+            ``assessment_label``, and ``url`` (the remain's own page on Fornsök)
         """
         path = self.fetch(force_download)
         box = project_bounds(bounds, "EPSG:4326", CRS)
@@ -168,6 +223,8 @@ class Source:
         # remain with no name has None, the one value JSON and the page agree on.
         out["name"] = pd.Series([text if isinstance(text, str) and text.strip() else None for text in out[NAME]], index=out.index, dtype=object)
         out["kind"] = out[TYPE].astype(str)
+        out["kind_label"] = out["kind"].map(type_label)
         out["description"] = out[DESCRIPTION]
         out["assessment"] = out[ASSESSMENT]
-        return out[["remain_id", "name", "kind", "description", "assessment", URL, "geometry"]]
+        out["assessment_label"] = out["assessment"].map(assessment_label)
+        return out[["remain_id", "name", "kind", "kind_label", "description", "assessment", "assessment_label", URL, "geometry"]]

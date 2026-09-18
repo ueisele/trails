@@ -129,6 +129,24 @@ class TestNameTypeGroups:
         assert not former & set(stedsnavn.SETTLEMENT_NAME_TYPES)
 
 
+class TestLabels:
+    """What a popup shows for the register's words."""
+
+    def test_every_type_the_map_reads_has_an_english_word(self):
+        drawn = set(stedsnavn.TERRAIN_NAME_TYPES + stedsnavn.SETTLEMENT_NAME_TYPES + stedsnavn.FARM_NAME_TYPES)
+        drawn |= set(stedsnavn.FORMER_SETTLEMENT_NAME_TYPES + stedsnavn.HUT_NAME_TYPES + stedsnavn.QUAY_NAME_TYPES)
+        assert drawn <= set(stedsnavn.NAME_TYPE_LABELS)
+        assert stedsnavn.type_label("gammelBosettingsplass") == "former settlement place"
+        assert stedsnavn.type_label("noe nytt") == "noe nytt"
+        # And the word that passed through is remembered, so a build can say so.
+        assert "noe nytt" in stedsnavn.UNTRANSLATED
+
+    def test_the_importance_is_its_letter(self):
+        assert stedsnavn.importance_label("viktighetB") == "B"
+        assert stedsnavn.importance_label("viktighet") == "viktighet"
+        assert stedsnavn.importance_label(None) == "None"
+
+
 class TestLoadRoadNames:
     """Tests for load_road_names."""
 

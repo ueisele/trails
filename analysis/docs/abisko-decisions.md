@@ -3377,11 +3377,66 @@ stood here and nobody lives in it. The popup carries the register's type, its as
 description and a link to the remain's page. Measured on the built page: 50 pins, 233 things in the
 marker pane against 183, 24 rows in the legend against 23.
 
+### 9.41 What the page shows is English — settled, 2026-09-18
+
+*"Mindestens für Schweden haben wir schwedischen Text direkt in das Panel übernommen. Bitte
+übersetze alles auf Englisch was direkt in die Anwendung kommt und angezeigt wird."*
+
+**It was far more than Sweden, and the way to know was to read the built pages.** Every popup
+value on both pages, counted by field: SSR's `gard`, `bruk`, `gammelBosettingsplass` and
+`viktighetB`; N50's `Ubetjent`, `Gapahuk`, `Rastebu`, `Låst`, `Ulåst`, `sti`, `traktorveg`, `JA`,
+`NEI`, `T`, `L`, `Andre`, `Kommunal veg`, `Fylkesveg`, `Privat veg`, `bilferje`; FKB's `sti`; the
+Leder's `Vandringsled`, `Vinterled`, *Målade fläckar på stenar och rösen*; the heritage register's
+*Husgrund, historisk tid* and *Övrig kulturhistorisk lämning*; and OSM's `wilderness_hut`,
+`isolated_dwelling`, `mountain_hiking`, `fine_gravel` with their underscores. Even the legend named
+the terrain layers by the register's words — *fjell, fjellområde, li, bakke*. Column values, quoted
+at a reader.
+
+**A table per source, applied where the source is read.** `stedsnavn.NAME_TYPE_LABELS` and
+`importance_label` (*viktighetB* reads *B*, the column's name said nothing), `n50.SERVICE_LABELS`,
+`DOOR_LABELS`, `ROAD_TYPE_LABELS`, `WAYMARK_LABELS`, `MEDIUM_LABELS`, English `ROAD_CATEGORIES`
+and `HUT_OWNERS`, `naturvardsregistret.TRAIL_TYPE_LABELS` (every one of the fifteen words `LTYP`
+uses nationwide) and `MARKING_LABELS` for the phrases that recur, `kulturmiljoregistret.TYPE_LABELS`
+and `ASSESSMENT_LABELS`. The register's own word stays in the frame — `kind` — because glyph tables
+and legends key on it, and the popup reads `kind_label` beside it. OSM's tag values are English
+with underscores and lose them. A club's name, a line's name, a trail's official name and a
+publisher's requested citation are names and stay as written.
+
+**What happens when the source changes.** *"Was passiert wenn sich der Text in der Quelle
+ändert?"* A value no table knows passes through as the register spells it — visibly, by design; a
+table that mapped the unknown to *other* or to nothing would hide a change. But visible only means
+visible to someone looking, so every table remembers what it could not say, the build prints the
+list, the page carries it as `window.trailsUntranslated`, and the drive keeps its length as a
+recorded figure: **0 on both pages today**. A register that renames a type is then a moved figure
+with the word in the note, not a stray word somebody may notice. The stable keys are SOSI code
+lists (SSR name types, N50's category letters and owner numbers); the Leder's types are words from
+a fixed list; the heritage register's types are words too, and the county file carries no type
+number to key on — that lives only in Fornsök's API.
+
+**Free text is not translated, and the register's description came out of the panel.** Measured
+over the 47 remains drawn at Abisko: 23 descriptions are the register's own disclaimer — *"Beskrivningen
+är inte kvalitetssäkrad …"* — and 24 are survey notes of 169 characters in the median. Nothing in
+the panel is now in a language the page is not written in; the note stays behind the link to the
+remain's page. Translating it at build time — a local model, cached per remain and version, marked
+as machine-translated — is a step of its own, offered and not taken.
+
+**Measured after the rebuild:** the same count over both pages finds one value left and it is
+English — *Sámi hut site (kåta)* — and the legend's name layers read *valley, pass* and *slope,
+mountain, mountain area, hillside*. The N50 hut popup lost a row that had said the service level
+twice, once in each language.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-18, sixth** — what the page shows is English (§9.41): a label table per source
+  module for every column value a popup or the legend showed in Norwegian or Swedish, the
+  register's word kept beside the label, OSM's underscores gone. An unknown value passes through
+  as spelt and is counted — the build prints it, the page carries it, and the drive records the
+  count, 0 on both pages — so a register renaming a type is a moved figure. The heritage
+  register's free-text description left the panel; half of it was the register's own disclaimer.
 
 - **2026-09-18, fifth** — Sweden's places people left are drawn from Riksantikvarieämbetet's
   Kulturmiljöregistret (§9.40), after the terms turned out to be CC0 in the publisher's own

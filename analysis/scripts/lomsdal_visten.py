@@ -55,7 +55,7 @@ import argparse
 import dataclasses
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -678,11 +678,10 @@ FERRY_POPUP_FIELDS = {
 CABIN_POPUP_FIELDS = {
     "navn": "Name",
     "kind": "Type",
-    "betjeningsgrad": "Service level",
     # The word and not the code: *Owner code: 4* told a reader nothing, and
     # *Statskog* with *Låst* beside it is a hut to rent (§9.39).
     "owner": "Owner",
-    "tilgjengelighet": "Door",
+    "door": "Door",
     "kommune": "Municipality",
 }
 
@@ -713,13 +712,57 @@ STATSKOG_LINK_FIELDS = {"statskog_url": "\u2192 Statskog's huts and open shelter
 
 #: The Swedish register's own words for a place people left, and its page.
 KMR = "KMR"
+#: The register's description is Swedish free text and stays behind the link:
+#: nothing the page shows is in a language the page is not written in.
 REMAIN_POPUP_FIELDS = {
     "name": "Name",
-    "kind": "Remains type",
-    "assessment": "Assessment",
-    "description": "Description",
+    "kind_label": "Remains type",
+    "assessment_label": "Assessment",
 }
 REMAIN_LINK_FIELDS = {"url": "\u2192 This remain on Fornsök"}
+
+def humanized(values: pd.Series) -> pd.Series:
+    """OSM's tag values as words: ``wilderness_hut`` reads *wilderness hut*.
+
+    **What the page shows is English; a tag is a key.** The values are English
+    already, joined with underscores because a tag is machine-read; a popup is
+    not. ``lean_to`` keeps its hyphen, because that is how the word is written.
+    """
+    return values.map(lambda v: v.replace("lean_to", "lean-to").replace("_", " ") if isinstance(v, str) else v)
+
+
+def in_english(frame: gpd.GeoDataFrame, columns: tuple[str, ...]) -> gpd.GeoDataFrame:
+    """The same frame with OSM's tag values in those columns humanized."""
+    out = frame.copy()
+    for column in columns:
+        if column in out.columns:
+            out[column] = humanized(out[column])
+    return out
+
+
+#: The OSM columns a popup shows as words.
+OSM_WORD_COLUMNS = ("kind", "shelter_type", "highway", "surface", "sac_scale", "trail_visibility")
+
+#: The joined values the build's own tables did not know, beside what the
+#: source modules record for themselves.
+UNTRANSLATED: set[str] = set()
+
+
+def known(values: pd.Series, labels: Mapping[str, str]) -> pd.Series:
+    """`translate_joined`, remembering every part no table had a word for."""
+    for value in values.dropna().unique():
+        for part in str(value).split(IDENTITY_SEPARATOR):
+            if part.strip() and part.strip() not in labels:
+                UNTRANSLATED.add(part.strip())
+    return translate_joined(values, labels)
+
+
+def untranslated_words() -> list[str]:
+    """Every value that reached the page as the register spelt it, across every table."""
+    found = set(UNTRANSLATED)
+    for module in (stedsnavn, n50, naturvardsregistret, kulturmiljoregistret):
+        found |= getattr(module, "UNTRANSLATED", set())
+    return sorted(found)
 
 #: How close a dot from another register has to stand to a former-settlement
 #: pin to be the same place. The six OSM farms inside the park sit within a
@@ -730,9 +773,9 @@ SAME_PLACE_M = 150.0
 #: What the register says about a place people left, and why the pin is there.
 FORMER_SETTLEMENT_POPUP_FIELDS = {
     "name": "Name",
-    "kind": "Type",
+    "kind_label": "Type",
     "why": "Drawn because",
-    "importance": "Importance",
+    "importance_label": "Importance (A–K)",
     "kommune": "Municipality",
 }
 
@@ -1007,8 +1050,8 @@ PLACE_POPUP_FIELDS = {
 #: Popup for anything read straight out of the place-name register.
 SSR_POINT_POPUP_FIELDS = {
     "name": "Name",
-    "kind": "Type",
-    "importance": "Importance",
+    "kind_label": "Type",
+    "importance_label": "Importance (A–K)",
     "kommune": "Municipality",
 }
 
@@ -2412,9 +2455,19 @@ def describe_norway(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDat
 
     paths = frames[N50_PATHS]
     paths["survey_method"] = translate_joined(paths["malemetode"], SURVEY_METHOD_LABELS)
+    # **The register's codes as words.** *sti*, *JA*, *T* and *Andre* were
+    # column values quoted at a reader; a chain can join several of each.
+    paths["typeveg"] = known(paths["typeveg"], n50.ROAD_TYPE_LABELS)
+    paths["rutemerking"] = known(paths["rutemerking"], n50.WAYMARK_LABELS)
+    paths["medium"] = known(paths["medium"], n50.MEDIUM_LABELS)
+    # A club's name is not a word a table should know; only the register's
+    # placeholders are looked up, and a name passes through as a name.
+    paths["vedlikeholdsansvarlig"] = translate_joined(paths["vedlikeholdsansvarlig"], n50.MAINTAINER_LABELS)
+    if FKB in frames:
+        frames[FKB]["typeveg"] = known(frames[FKB]["typeveg"], n50.ROAD_TYPE_LABELS)
 
     roads = frames[N50_ROADS]
-    roads["road_category"] = translate_joined(roads["vegkategori"], n50.ROAD_CATEGORIES)
+    roads["road_category"] = known(roads["vegkategori"], n50.ROAD_CATEGORIES)
     roads["survey_method"] = translate_joined(roads["malemetode"], SURVEY_METHOD_LABELS)
     # Private only where the whole chain is: the colour encodes who may drive
     # it, and a road that is public for half its run is not a private road. The
@@ -2427,7 +2480,9 @@ def describe_norway(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDat
 
     ferries = frames[FERRIES]
     ferries["survey_method"] = translate_joined(ferries["malemetode"], SURVEY_METHOD_LABELS)
+    ferries["typeveg"] = known(ferries["typeveg"], n50.ROAD_TYPE_LABELS)
 
+    frames[OSM] = in_english(frames[OSM], OSM_WORD_COLUMNS)
     return frames
 
 
@@ -2469,8 +2524,8 @@ def describe_sweden(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDat
     leder["route_id"] = leder[naturvardsregistret.TRAIL_ROUTE_ID]
     leder["trail_name"] = leder[naturvardsregistret.TRAIL_NAME].fillna(leder["identity"])
     leder["track_name"] = leder["trail_name"]
-    leder["trail_type"] = leder[naturvardsregistret.TRAIL_TYPE]
-    leder["marking"] = leder[naturvardsregistret.TRAIL_MARKING]
+    leder["trail_type"] = leder[naturvardsregistret.TRAIL_TYPE].map(naturvardsregistret.trail_type_label)
+    leder["marking"] = leder[naturvardsregistret.TRAIL_MARKING].map(naturvardsregistret.marking_label)
     leder["description"] = leder[naturvardsregistret.TRAIL_DESCRIPTION]
     leder["protected_area"] = leder[naturvardsregistret.TRAIL_PROTECTED]
 
@@ -2491,6 +2546,7 @@ def describe_sweden(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDat
     roads["track_name"] = roads["road_name"]
 
     frames[OSM]["name"] = frames[OSM]["identity"]
+    frames[OSM] = in_english(frames[OSM], OSM_WORD_COLUMNS)
     return frames
 
 
@@ -2934,8 +2990,15 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     all_names = names_source.load_places(codes, name_types=None, force_download=args.force_download)
 
     def of_kind(types: tuple[str, ...], where: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        """Names of certain feature types, clipped to an area."""
-        return gpd.clip(all_names[all_names["kind"].isin(types)], where)
+        """Names of certain feature types, clipped to an area, said in English.
+
+        `kind` keeps the register's word -- the legend and the glyph tables key
+        on it -- and `kind_label` and `importance_label` are what a popup shows.
+        """
+        found = gpd.clip(all_names[all_names["kind"].isin(types)], where).copy()
+        found["kind_label"] = found["kind"].map(stedsnavn.type_label)
+        found["importance_label"] = found["importance"].map(stedsnavn.importance_label)
+        return found
 
     terrain_names = of_kind(stedsnavn.TERRAIN_NAME_TYPES, norway.zone_around(park, args.names_km))
     settlements = of_kind(stedsnavn.SETTLEMENT_NAME_TYPES, zone)
@@ -3000,7 +3063,7 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     region = huts["kommune"].astype(str).str[:2].map(STATSKOG_REGION_BY_COUNTY)
     statskogs = huts["owner"] == "Statskog"
     huts["statskog_url"] = region.where(statskogs).map(lambda slug: STATSKOG_REGION_URL.format(region=slug) if isinstance(slug, str) else None)
-    locked = statskogs & (huts["tilgjengelighet"] == "Låst")
+    locked = statskogs & (huts["door"] == "locked")
     print(f"  Statskog's: {int(statskogs.sum())}, of them locked: {int(locked.sum())}")
     print(f"  of which huts: {len(huts)} ({huts['glyph'].value_counts(dropna=False).to_dict()}); buildings by type: {len(private_cabins)}")
 
@@ -3028,9 +3091,9 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     osm_source = overpass.Source(cache_dir=args.cache_dir)
     search_bounds = bounds_of(zone)
     # Shelters and settlements matter inside the park and along the way in.
-    shelters = gpd.clip(osm_source.fetch_shelters(search_bounds, force_download=args.force_download), zone)
+    shelters = in_english(gpd.clip(osm_source.fetch_shelters(search_bounds, force_download=args.force_download), zone), OSM_WORD_COLUMNS)
     shelters["glyph"] = shelter_glyphs(shelters)
-    places = gpd.clip(osm_source.fetch_places(search_bounds, force_download=args.force_download), zone)
+    places = in_english(gpd.clip(osm_source.fetch_places(search_bounds, force_download=args.force_download), zone), OSM_WORD_COLUMNS)
     terminals = gpd.clip(osm_source.fetch_ferry_terminals(search_bounds, force_download=args.force_download), zone)
     camp_sites = gpd.clip(osm_source.fetch_camp_sites(search_bounds, force_download=args.force_download), zone)
 
@@ -3070,9 +3133,12 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     # Farms and sæters are the actual starting points here (Bønnåa, Strompdalen,
     # Stavassgården), but the region has over a thousand of them, so they are
     # limited to a narrow band around the boundary.
-    trailheads = gpd.clip(
-        osm_source.fetch_places(search_bounds, place_types=TRAILHEAD_PLACE_TYPES, force_download=args.force_download),
-        norway.zone_around(park, args.trailhead_km),
+    trailheads = in_english(
+        gpd.clip(
+            osm_source.fetch_places(search_bounds, place_types=TRAILHEAD_PLACE_TYPES, force_download=args.force_download),
+            norway.zone_around(park, args.trailhead_km),
+        ),
+        OSM_WORD_COLUMNS,
     )
     # **And once across sources.** OSM knows six of the park's farms as
     # `place=farm` and drew a dot under each pin -- Strompdalen stood three
@@ -3216,7 +3282,8 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             # Types can share a colour but differ in glyph (fjell vs li), so
             # show every glyph the group actually draws.
             glyphs = dict.fromkeys(TERRAIN_NAME_SYMBOLS.get(kind, TERRAIN_NAME_DEFAULT_SYMBOL) for kind in present)
-            names.append(NameLayer(part, f"Name {' '.join(glyphs)} {label} — {', '.join(present)} [SSR]", TERRAIN_NAME_COLORS[present[0]]))
+            said = ", ".join(stedsnavn.type_label(kind) for kind in present)
+            names.append(NameLayer(part, f"Name {' '.join(glyphs)} {label} — {said} [SSR]", TERRAIN_NAME_COLORS[present[0]]))
     points.extend(
         [
             # Two of these have no N50 building at all, so the join above cannot
@@ -3472,6 +3539,9 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     print(f"    numbered: {int(roads['road_number'].notna().sum()):,} of {len(roads):,} chains ({roads['road_number'].dropna().unique().tolist()})")
     summarize("Ferry crossings", ferries)
     winter = loaded.winter
+    if len(winter) and "kind" in winter.columns:
+        winter = winter.copy()
+        winter["kind"] = winter["kind"].map(naturvardsregistret.trail_type_label)
     print(f"  winter-only lines kept apart: {len(winter):,} ({winter['kind'].value_counts().to_dict()})")
 
     bounds = bounds_of(zone)
@@ -3519,9 +3589,9 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
 
     print("\nLoading OpenStreetMap points...")
     osm_source = overpass.Source(cache_dir=args.cache_dir)
-    shelters = gpd.clip(osm_source.fetch_shelters(bounds, force_download=args.force_download), zone)
+    shelters = in_english(gpd.clip(osm_source.fetch_shelters(bounds, force_download=args.force_download), zone), OSM_WORD_COLUMNS)
     shelters["glyph"] = shelter_glyphs(shelters)
-    places = gpd.clip(osm_source.fetch_places(bounds, force_download=args.force_download), zone)
+    places = in_english(gpd.clip(osm_source.fetch_places(bounds, force_download=args.force_download), zone), OSM_WORD_COLUMNS)
     terminals = gpd.clip(osm_source.fetch_ferry_terminals(bounds, force_download=args.force_download), zone)
     camp_sites = gpd.clip(osm_source.fetch_camp_sites(bounds, force_download=args.force_download), zone)
 
@@ -4061,7 +4131,13 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
     # of them has to exist by the time it runs. What it buys is a map that opens
     # showing a map — measured on the built page, the legend alone left 23 % of
     # a 390 px screen and 74 % of a desktop one before anything was clicked.
-    maps.add_chrome(fmap, credits=built.credits.sources)
+    # **What no table could say, said out loud and handed to the page.** A
+    # register that renames a type puts its own word in a popup -- visibly,
+    # by design -- and the drive keeps this count as a recorded figure, so a
+    # change at the source is a moved figure and not a stray word (§9.41).
+    stray = untranslated_words()
+    print(f"  Words the label tables did not know: {len(stray)}" + (f" -- {', '.join(stray)}" if stray else ""))
+    maps.add_chrome(fmap, credits=built.credits.sources, untranslated=stray)
 
     map_path = output_dir / f"{which.stem}.html"
     # Not `fmap.save`: that renders and writes in one step, and the page is

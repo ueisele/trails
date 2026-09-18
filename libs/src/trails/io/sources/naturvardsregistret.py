@@ -82,6 +82,81 @@ TRAIL_NAME = "LNAMN"
 TRAIL_SEASON = "LKATEGORI"
 TRAIL_TYPE = "LTYP"
 TRAIL_MARKING = "LMARKERING"
+
+#: Every word ``LTYP`` uses, nationwide (read 2026-09-18), in English. A cell
+#: joins several with a comma -- *Skidled, Skoterled* -- so a label is made
+#: word by word.
+TRAIL_TYPE_LABELS = {
+    "Vandringsled": "hiking trail",
+    "Vinterled": "winter trail",
+    "Skidled": "ski trail",
+    "Skoterled": "snowmobile trail",
+    "Omarkerad stig": "unmarked path",
+    "Naturstig": "nature trail",
+    "Cykelled": "cycle trail",
+    "Ridled": "bridle trail",
+    "Elljusspår": "lit track",
+    "Preparerat skidspår": "groomed ski track",
+    "Båttrafikled": "boat route",
+    "Kanotled": "canoe trail",
+    "Båtpassage längs vandringsled": "boat passage along a hiking trail",
+    "Roddpassage längs vandringsled": "rowing passage along a hiking trail",
+    "Snorkelled": "snorkel trail",
+}
+
+#: ``LMARKERING`` is free text -- a colour, a phrase, sometimes a sentence per
+#: trail. The words and phrases that recur are translated; a sentence the
+#: county wrote for one trail passes through as written.
+MARKING_LABELS = {
+    "Orange": "orange",
+    "orange": "orange",
+    "Orange markering": "orange marks",
+    "Orange färg": "orange",
+    "Målad orange": "painted orange",
+    "Orange markering på stolpar och träd": "orange marks on posts and trees",
+    "Blå": "blue",
+    "blå": "blue",
+    "Gul": "yellow",
+    "gul": "yellow",
+    "Röd": "red",
+    "röd": "red",
+    "Grön": "green",
+    "grön": "green",
+    "Vit": "white",
+    "vit": "white",
+    "Kryss": "cross-marked",
+    "Kryssmarkerad": "cross-marked",
+    "Kryssmarkering": "cross-marked",
+    "Röse": "cairns",
+    "Färgmarkering": "colour marks",
+    "Målning på träd och stolp": "paint on trees and posts",
+    "Målade fläckar på stenar och rösen": "painted marks on stones and cairns",
+    "Omarkerad": "unmarked",
+    "Omärkt": "unmarked",
+    "omärkt": "unmarked",
+}
+
+
+#: The trail types the table did not know, as they passed through. The
+#: marking is free text and is not counted: a sentence a county wrote for one
+#: trail is not a word a table should have known.
+UNTRANSLATED: set[str] = set()
+
+
+def trail_type_label(value: object) -> str:
+    """Say what a trail type is, word by word, in English."""
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    words = [word.strip() for word in value.split(",")]
+    UNTRANSLATED.update(word for word in words if word not in TRAIL_TYPE_LABELS)
+    return ", ".join(TRAIL_TYPE_LABELS.get(word, word) for word in words)
+
+
+def marking_label(value: object) -> str:
+    """Say how a trail is marked, in English where the register used a word it uses often."""
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    return MARKING_LABELS.get(value.strip(), value.strip())
 TRAIL_DESCRIPTION = "BESKRIVN"
 #: The state trail a segment belongs to, as ``Abisko - Abiskojaure (BD 21)``,
 #: and its number alone. The number is the key the county's brochures, the

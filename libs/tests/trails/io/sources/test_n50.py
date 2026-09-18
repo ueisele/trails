@@ -182,7 +182,7 @@ class TestLoadCabins:
             without = source.load_cabins(["1824"])
         owners = dict(zip(without["navn"].fillna("unnamed"), without["owner"], strict=True))
         assert owners["Eiteråfjellet"] == "Statskog"
-        assert owners["Litjvasshytta"] == "Andre"
+        assert owners["Litjvasshytta"] == "others"
         assert pd.isna(owners["unnamed"])
         assert "tilgjengelighet" in without.columns
         assert without["tilgjengelighet"].isna().all()
@@ -191,9 +191,9 @@ class TestLoadCabins:
         locked["tilgjengelighet"] = ["Låst", "Ulåst", None, None]
         with patch.object(source, "load_layers", return_value=locked):
             with_door = source.load_cabins(["1824"])
-        doors = dict(zip(with_door["navn"].fillna("unnamed"), with_door["tilgjengelighet"], strict=True))
-        assert doors["Litjvasshytta"] == "Låst"
-        assert doors["Eiteråfjellet"] == "Ulåst"
+        doors = dict(zip(with_door["navn"].fillna("unnamed"), with_door["door"], strict=True))
+        assert doors["Litjvasshytta"] == "locked"
+        assert doors["Eiteråfjellet"] == "open"
 
     def test_keeps_buildings_with_a_service_level(self, tmp_path, buildings):
         source = n50.Source(cache_dir=str(tmp_path))
@@ -211,7 +211,7 @@ class TestLoadCabins:
             cabins = source.load_cabins(["1824"])
 
         assert len(cabins) == 3
-        assert "Skogs- og utmarkskoie, gamme" in set(cabins["kind"])
+        assert "forest or wilderness hut, or turf hut" in set(cabins["kind"])
 
     def test_excludes_ordinary_buildings(self, tmp_path, buildings):
         source = n50.Source(cache_dir=str(tmp_path))
@@ -229,8 +229,8 @@ class TestLoadCabins:
             cabins = source.load_cabins(["1824"])
 
         kinds = dict(zip(cabins["navn"].fillna("unnamed"), cabins["kind"], strict=True))
-        assert kinds["Litjvasshytta"] == "Ubetjent"
-        assert kinds["unnamed"] == "Skogs- og utmarkskoie, gamme"
+        assert kinds["Litjvasshytta"] == "unstaffed"
+        assert kinds["unnamed"] == "forest or wilderness hut, or turf hut"
 
     def test_outlines_are_reduced_to_points(self, tmp_path, buildings):
         source = n50.Source(cache_dir=str(tmp_path))
@@ -381,8 +381,8 @@ class TestLoadRoads:
         with patch.object(source, "load_transport", return_value=transport_with_roads):
             roads = source.load_roads(["1824"])
 
-        assert roads.loc[roads["vegkategori"] == "P", "road_category"].iloc[0] == "Privat veg"
-        assert roads.loc[roads["vegkategori"] == "F", "road_category"].iloc[0] == "Fylkesveg"
+        assert roads.loc[roads["vegkategori"] == "P", "road_category"].iloc[0] == "private road"
+        assert roads.loc[roads["vegkategori"] == "F", "road_category"].iloc[0] == "county road"
 
     def test_unknown_category_keeps_its_raw_code(self, tmp_path, transport_with_roads):
         """Better an unexplained code than a silently blank column."""

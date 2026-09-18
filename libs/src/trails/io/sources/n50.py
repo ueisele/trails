@@ -16,6 +16,7 @@ with Geonorge. Orders are skipped entirely when every file is already cached.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 import geopandas as gpd
 import pandas as pd
@@ -57,16 +58,77 @@ RIVER_COVER_TYPES = ("Elv",)
 #: Wilderness huts often carry neither a name nor a service level in N50, so the
 #: type code is the only thing marking them as something a hiker can shelter in.
 WILDERNESS_BUILDING_TYPES = {
-    171.0: "Seterhus, sel, rorbu",
-    172.0: "Skogs- og utmarkskoie, gamme",
+    171.0: "sæter house, sel or rorbu",
+    172.0: "forest or wilderness hut, or turf hut",
 }
+
+#: What ``betjeningsgrad`` says about a hut, in English.
+SERVICE_LABELS = {
+    "Betjent": "staffed",
+    "Selvbetjent": "self-service",
+    "Ubetjent": "unstaffed",
+    "Rastebu": "rest hut",
+    "Gapahuk": "lean-to",
+}
+
+#: What ``tilgjengelighet`` says about its door.
+DOOR_LABELS = {"Låst": "locked", "Ulåst": "open"}
+
+#: What ``typeveg`` names, on foot and afloat.
+ROAD_TYPE_LABELS = {
+    "sti": "path",
+    "traktorveg": "tractor road",
+    "gangOgSykkelveg": "pedestrian and cycle path",
+    "barmarksløype": "bare-ground trail",
+    "bilferje": "car ferry",
+    "passasjerferje": "passenger ferry",
+    "bilveg": "road",
+    "enkelBilveg": "single-lane road",
+}
+
+#: What ``rutemerking`` says: whether the route is waymarked.
+WAYMARK_LABELS = {"JA": "yes", "NEI": "no"}
+
+#: What ``medium`` says about where the line runs, by SOSI's code list.
+MEDIUM_LABELS = {
+    "T": "on the ground",
+    "L": "on a bridge or elevated",
+    "U": "underground",
+    "B": "through a building",
+    "S": "on the sea bed",
+    "V": "in water",
+}
+
+#: What ``vedlikeholdsansvarlig`` says when it does not name a club.
+MAINTAINER_LABELS = {"Andre": "others", "Ukjent": "unknown"}
+
+#: The values the tables did not know, as they passed through.
+UNTRANSLATED: set[str] = set()
+
+
+def labelled(values: pd.Series, table: dict[Any, str]) -> pd.Series:
+    """Say a column's values by a table, keeping what the table does not know.
+
+    Args:
+        values: The register's column
+        table: Its words, in English
+
+    Returns:
+        The English word where the table has one, the register's own where it
+        does not -- and every such pass-through is remembered in
+        :data:`UNTRANSLATED`. Missing values stay missing.
+    """
+    known = values.map(table)
+    for value in values[known.isna() & values.notna()].unique():
+        UNTRANSLATED.add(str(value))
+    return known.fillna(values)
 
 #: Who owns a hut, by N50's ``hytteeier`` code -- SOSI's *Hytteeier* list, which
 #: the product specification carries and the data does not. Read as a number the
 #: popup said *Owner code: 4* about every Statskog hut on the map; the word is
 #: what a reader can act on, because Statskog's locked huts are the ones that
 #: can be rented and DNT's are the ones a key opens.
-HUT_OWNERS = {1.0: "DNT", 2.0: "Andre", 3.0: "Fjellstyre", 4.0: "Statskog"}
+HUT_OWNERS = {1.0: "DNT", 2.0: "others", 3.0: "Fjellstyre", 4.0: "Statskog"}
 
 #: ``typeveg`` values that a walker can actually use.
 WALKABLE_ROAD_TYPES = ("sti", "traktorveg", "gangOgSykkelveg", "barmarksløype")
@@ -82,11 +144,11 @@ CAR_ROAD_TYPES = ("enkelBilveg",)
 #: is P against the rest: a private road is the last stretch to a trailhead,
 #: everything else is a public road the topographic backdrop already draws.
 ROAD_CATEGORIES = {
-    "E": "Europaveg",
-    "R": "Riksveg",
-    "F": "Fylkesveg",
-    "K": "Kommunal veg",
-    "P": "Privat veg",
+    "E": "European route",
+    "R": "national road",
+    "F": "county road",
+    "K": "municipal road",
+    "P": "private road",
 }
 
 #: The ``vegkategori`` code for privately maintained roads.
@@ -342,17 +404,21 @@ class Source:
         is_cabin = buildings["betjeningsgrad"].notna() | buildings["bygningstype"].isin(WILDERNESS_BUILDING_TYPES)
         cabins = buildings[is_cabin].copy()
         cabins["geometry"] = cabins.geometry.representative_point()
-        cabins["kind"] = cabins["betjeningsgrad"].fillna(cabins["bygningstype"].map(WILDERNESS_BUILDING_TYPES))
-        cabins["owner"] = cabins["hytteeier"].map(HUT_OWNERS)
+        # In English, both ways round: the service level where there is one,
+        # the building type where there is not.
+        service = labelled(cabins["betjeningsgrad"], SERVICE_LABELS)
+        cabins["kind"] = service.fillna(cabins["bygningstype"].map(WILDERNESS_BUILDING_TYPES))
+        cabins["owner"] = labelled(cabins["hytteeier"], HUT_OWNERS)
         # Whether a door is locked is the other thing a reader asks of a hut,
         # and N50 says it for the ones that carry a service level. Older
         # extracts leave the column out altogether, so it is made rather than
         # assumed.
         if "tilgjengelighet" not in cabins.columns:
             cabins["tilgjengelighet"] = None
+        cabins["door"] = labelled(cabins["tilgjengelighet"], DOOR_LABELS)
 
         result = gpd.GeoDataFrame(
-            cabins[["navn", "kind", "betjeningsgrad", "hytteeier", "owner", "tilgjengelighet", "kommune", "geometry"]].reset_index(drop=True),
+            cabins[["navn", "kind", "betjeningsgrad", "hytteeier", "owner", "tilgjengelighet", "door", "kommune", "geometry"]].reset_index(drop=True),
             geometry="geometry",
             crs="EPSG:4326",
         )

@@ -63,6 +63,68 @@ TERRAIN_NAME_TYPES = (
     "mo",
 )
 
+#: What each name type the map reads means, in English. **What the page shows
+#: is English; what the register said is kept beside it.** Uwe, 2026-09-18:
+#: *"Bitte übersetze alles auf Englisch was direkt in die Anwendung kommt"* --
+#: a popup that read *gammelBosettingsplass* or *viktighetB* was quoting the
+#: register's column values at a reader. A type not listed here passes through
+#: as the register spells it, so a new type is visible rather than hidden.
+NAME_TYPE_LABELS = {
+    "dal": "valley",
+    "skar": "pass",
+    "fjell": "mountain",
+    "fjellområde": "mountain area",
+    "vann": "lake",
+    "tjern": "tarn",
+    "seter": "summer farm",
+    "isbre": "glacier",
+    "foss": "waterfall",
+    "elv": "river",
+    "bekk": "stream",
+    "li": "hillside",
+    "myr": "marsh",
+    "bakke": "slope",
+    "mo": "sandy flat",
+    "by": "town",
+    "tettbebyggelse": "built-up area",
+    "grend": "hamlet",
+    "boligfelt": "housing estate",
+    "gard": "farm",
+    "bruk": "holding",
+    "gammelBosettingsplass": "former settlement place",
+    "turisthytte": "tourist cabin",
+    "hytte": "cabin",
+    "koie": "wilderness hut",
+    "ferjekai": "ferry quay",
+    "kai": "quay",
+    "havn": "harbour",
+    "veg": "road",
+}
+
+
+#: The values the tables did not know, as they passed through. Read by the
+#: build after loading and handed to the page, where a drive counts them.
+UNTRANSLATED: set[str] = set()
+
+
+def type_label(value: object) -> str:
+    """Say what a name type is, in English; the register's word where none is known."""
+    text = str(value)
+    if text not in NAME_TYPE_LABELS:
+        UNTRANSLATED.add(text)
+    return NAME_TYPE_LABELS.get(text, text)
+
+
+def importance_label(value: object) -> str:
+    """The register's importance rank as its letter: ``viktighetB`` reads *B*.
+
+    The rank runs from A, the most prominent, to K; the word before the letter
+    is the column's name and says nothing a reader needs.
+    """
+    text = str(value)
+    return text[len("viktighet"):] if text.startswith("viktighet") and len(text) > len("viktighet") else text
+
+
 #: Places people live in, from a town down to a cluster of houses.
 SETTLEMENT_NAME_TYPES = ("by", "tettbebyggelse", "grend", "boligfelt")
 

@@ -48,6 +48,20 @@ class TestOnDisk:
         assert got["name"].tolist() == ["Vuolip Njuorajávri", "Gammelvallen", None]
         assert got[kmr.URL].tolist()[1] == "https://pub.raa.se/visa/objekt/lamning/b"
 
+    def test_the_words_a_reader_sees_are_english(self, tmp_path):
+        """The register's own words stay in `kind` and `assessment`; the popup
+        reads the labels beside them, and a type the table does not know
+        passes through as spelt rather than vanishing."""
+        _file_on_disk(tmp_path)
+        got = kmr.Source("norrbotten", cache_dir=tmp_path).remains(ABISKO, types=None)
+        by = dict(zip(got["kind"], got["kind_label"], strict=True))
+        assert by["Kåta"] == "Sámi hut site (kåta)"
+        assert by["Fäbod"] == "summer farm (fäbod)"
+        assert by["Härd"] == "hearth"
+        assert set(got["assessment_label"]) == {"other cultural remain"}
+        assert kmr.type_label("Något nytt") == "Något nytt"
+        assert "Något nytt" in kmr.UNTRANSLATED
+
     def test_every_type_can_be_asked_for(self, tmp_path):
         _file_on_disk(tmp_path)
         got = kmr.Source("norrbotten", cache_dir=tmp_path).remains(ABISKO, types=None)

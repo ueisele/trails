@@ -304,6 +304,7 @@ SCENES: dict[str, Scene] = {
             # Then 186 with §9.39: 55 former settlement places off the register
             # and the 8 farms inside the park, drawn as pins and on.
             "things in the marker pane": 186,
+            "words the label tables did not know": 0,
             # Thirty-six since §9.33, which split one stop layer into four;
             # thirty-seven with the former settlements (§9.39).
             "checkboxes in the legend": 37,
@@ -443,6 +444,7 @@ SCENES: dict[str, Scene] = {
             # 233 with §9.40: 50 remains off Norrbotten's Kulturmiljöregistret
             # file -- 26 house foundations and 24 kåta sites -- as pins and on.
             "things in the marker pane": 233,
+            "words the label tables did not know": 0,
             # Nineteen: the relief shadow had a row here for a day and is a
             # checkbox under the sheet in the base-map panel since (§6.6).
             # Twenty-two since §9.31: stations, camp sites, private cabins.
@@ -829,7 +831,8 @@ FURNITURE = with_map(
     // `<svg>` around `undefined`, so the row goes out with a blank column and
     // nothing anywhere says so. Counting the strokes is what notices.
     offlineStrokes: document.querySelectorAll('.trails-rail [data-tool=offline] svg path').length,
-    layerControls: document.querySelectorAll('.leaflet-control-layers').length}; }"""
+    layerControls: document.querySelectorAll('.leaflet-control-layers').length,
+    untranslated: window.trailsUntranslated || []}; }"""
 )
 
 # The scale, read so that neither axis takes part in proving the other: the
@@ -1275,6 +1278,10 @@ def furniture(page: Any) -> Check:
             # second one means something else stopped answering clicks.
             Reading("paths deaf to the pointer", seen["deaf"], 1),
             stands("things in the marker pane", seen["markers"]),
+            # **A register that renames a type shows up here**, as a moved
+            # figure with the words in the note -- the build's label tables
+            # let an unknown value through as spelt, on purpose (§9.41).
+            stands("words the label tables did not know", len(seen["untranslated"]), note=", ".join(seen["untranslated"][:8])),
             stands("checkboxes in the legend", seen["boxes"]),
             stands("of them switched off", seen["off"]),
             Reading("base maps offered", seen["radios"], SCENE.base_maps),

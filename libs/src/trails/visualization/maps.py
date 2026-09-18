@@ -21154,6 +21154,8 @@ class _Chrome(MacroElement):
             // here can refuse anything.
             var DRAWN = {{ this.extent_json }};
             var CREDITS = {{ this.credits_json }};
+            var UNTRANSLATED = {{ this.untranslated_json }};
+            window.trailsUntranslated = UNTRANSLATED;
             // What a tile's address starts with, resolved against the page --
             // a third party's server, or our own bucket's prefix.
             var TILE_PREFIX = new URL({{ this.tile_prefix_json }}, location.href).href;
@@ -24631,6 +24633,7 @@ class _Chrome(MacroElement):
         credits: dict[str, list[dict[str, str]]] | None,
         extent: Bounds | None = None,
         provider: Provider = PROVIDERS["kartverket"],
+        untranslated: list[str] | None = None,
     ) -> None:
         """Initialize the chrome.
 
@@ -24645,6 +24648,9 @@ class _Chrome(MacroElement):
                 on a blank.
             provider: Whose sheets the base-map picker offers, for its hint, and
                 what a tile's address starts with, for the timing readout.
+            untranslated: The values the build's label tables did not know,
+                handed to the page as ``window.trailsUntranslated`` so a check
+                can count them.
         """
         super().__init__()
         self._name = "Chrome"
@@ -24652,12 +24658,17 @@ class _Chrome(MacroElement):
         self.provider_label = provider.label
         self.tile_prefix_json = _script_json(provider.tiles)
         self.credits_json = _script_json(credits or {})
+        # **The words the build's label tables did not know**, handed to the
+        # page so a browser check can count them. A register that renames a
+        # type puts its own word on the map -- visibly, by design -- and this
+        # is how that becomes a reading rather than something a reader notices.
+        self.untranslated_json = _script_json(sorted(untranslated or []))
         # What this map draws, so the page can tell a reader standing outside it
         # that there is nothing here to show them. `null` where nobody said.
         self.extent_json = _script_json(None if extent is None else [[extent[1], extent[0]], [extent[3], extent[2]]])
 
 
-def add_chrome(fmap: folium.Map, credits: dict[str, list[dict[str, str]]] | None = None) -> None:
+def add_chrome(fmap: folium.Map, credits: dict[str, list[dict[str, str]]] | None = None, untranslated: list[str] | None = None) -> None:
     """Put every control behind one way in, and let the map open showing a map.
 
     **Add this last.** It adopts the containers of the search, the legend, the
@@ -24674,4 +24685,4 @@ def add_chrome(fmap: folium.Map, credits: dict[str, list[dict[str, str]]] | None
     # folium renders a map's children in the order they were added.
     provider = provider_of_map(fmap)
     _OfflinePanel(provider, companions_of_map(fmap)).add_to(fmap)
-    _Chrome(credits, getattr(fmap, MAP_BOUNDS_ATTR, None), provider).add_to(fmap)
+    _Chrome(credits, getattr(fmap, MAP_BOUNDS_ATTR, None), provider, untranslated).add_to(fmap)
