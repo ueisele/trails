@@ -291,7 +291,9 @@ No behaviour changes. Two figures this plan needs and does not have.
    it back to 500 on the next network tile — and not the kept store, which is the reader's
    ground and its count: a store of its own, `bench`, which means `DB_AT` goes from 2 to 3 in
    the worker *and* in the page (the test at `test_maps.py:1535` is what notices if only one
-   moves), and the helper deletes the store when it is done. Bodies of 1 kB, because it is
+   moves), and the helper clears the store when it is done. Clears, not deletes: IndexedDB drops a
+   store only inside another version upgrade, so the empty store stays at version 3 and costs
+   nothing (found 2026-09-18 when the phase was built). Bodies of 1 kB, because it is
    the row count under test and not the bytes — 600,000 realistic rows would be 6 GB of
    synthetic ground on the phone. Run on the phone at 150,000 and 600,000 rows. This is what
    decides whether `cap` goes to 17 on Norway in phase 6. The helper stays; it is how the next
@@ -364,8 +366,12 @@ Pipeline only; the published page does not change.
    capabilities order, `FORMAT=image/png8`, `CRS=EPSG:3857`, then quantises to a palette and
    writes optimised PNG, one file per tile, resumable per tile, with the same `index.json`
    shape (`bounds`, `zooms`, `per_zoom` with tiles/written/skipped/missing/bytes, `source`, and
-   `source_modified` — for a WMS, the capabilities' update date plus the layer list, hashed,
-   so a changed layer set is a new stand).
+   `source_modified`). **The stand is the configuration, not the data** (decided 2026-09-18
+   when the phase was built: the capabilities carry no update date, no `updateSequence`, no
+   `Last-Modified`): the stand is a hash of the service URL, WMS version, CRS, format and the
+   ordered layer list, `source_modified` is the UTC date the copy was started, a new version
+   directory opens when the stand differs or the operator asks, and a re-render for new map
+   content is a decision, never detected.
 2. `analysis/scripts/kartverket_tiles.py` and `make tiles PARK=lomsdal-visten`, `tiles`
    taking `PARK` the way `dem`, `shade` and `slope` do, dispatching on `Tree.provider`.
 3. **First run z8–z16 as a transient unit** (`systemd-run --user`, `/usr/bin/mise exec --`,
