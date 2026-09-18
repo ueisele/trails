@@ -276,8 +276,8 @@ SCENES: dict[str, Scene] = {
         # has not got.
         over_http=True,
         figures={
-            # Phase 6e, 2026-09-18: Firefox-on-forge time, not a phone budget.
-            "map built in ms (Firefox on forge)": 1228,
+            # A regression ceiling for two parallel drives, not an idle-box baseline.
+            "map build ceiling in ms (Firefox on forge)": 4000,
             # Re-recorded 2026-09-01, from 11,589 and 11,290: the source cache
             # was cleared and the map regenerated, so Turrutebasen was fetched
             # again and came back with twelve more chains. This is the movement
@@ -424,8 +424,8 @@ SCENES: dict[str, Scene] = {
         # Recorded 2026-09-12 from the first build of the page: 813 chains,
         # 19 legend rows, one base map.
         figures={
-            # Phase 6e, 2026-09-18: Firefox-on-forge time, not a phone budget.
-            "map built in ms (Firefox on forge)": 263,
+            # A regression ceiling for two parallel drives, not an idle-box baseline.
+            "map build ceiling in ms (Firefox on forge)": 1500,
             # Clipped to the box since the review (§9.15): one point chain and
             # three markers fewer than the first build drew. Twenty chains more
             # since §9.26, where a name stopped running on past the ground the
@@ -637,8 +637,9 @@ def noted(what: str, got: Any, note: str = "") -> Reading:
     faster machine, a slower one, or two pages driven at once into a red line,
     and the one thing they never say is that the page changed.
 
-    So they are normally printed and not compared. The explicitly recorded
-    Firefox-on-forge map build is an exception, to catch startup regressions.
+    So they are normally printed and not compared. Map construction has a broad
+    ceiling instead: 4 s for Lomsdal-Visten, 1.5 s for Abisko in parallel Firefox
+    drives on forge, to catch the former 8.3 s startup regression.
     A reader who wants to know what the page costs reads the number; this helper
     never fails because of it. Where the duration
     really is the subject -- a timeout that has to fire, a retry that has to
@@ -2312,11 +2313,17 @@ def the_sources_measure_the_store(page: Any) -> Check:
             IDBObjectStore.prototype.clear = function () {
                 if (this.name !== 'bench') { return clear.call(this); }
                 counts.push(said.textContent);
-                const request = clear.call(this), until = performance.now() + 2100;
+                const label = said.textContent, began = performance.now();
+                const request = clear.call(this);
                 let requests = 0;
                 const hold = () => {
-                    if (performance.now() >= until) { return; }
-                    if (++requests > 100000) { this.transaction.abort(); throw new Error('Clear test request bound'); }
+                    // Keep the transaction alive until its clock has actually painted.
+                    // Even any-tick matching cannot see a tick after the stage has ended.
+                    const elapsed = performance.now() - began;
+                    if (elapsed >= 2100 && stages.some(s => s.startsWith(label + ' ') && /[0-9]+ s$/.test(s))) { return; }
+                    if (++requests > 100000 || elapsed > 30000) {
+                        this.transaction.abort(); throw new Error('Clear test request bound');
+                    }
                     this.count().onsuccess = hold;
                 };
                 hold();
@@ -2357,6 +2364,10 @@ def the_sources_measure_the_store(page: Any) -> Check:
             blocked = page.evaluate(
                 """async blockedRead => {
                 const transaction = IDBDatabase.prototype.transaction, clear = IDBObjectStore.prototype.clear;
+                const timeout = window.setTimeout, fired = [];
+                window.setTimeout = function (fn, ms, ...args) {
+                    return timeout(() => { fired.push(ms); fn(...args); }, ms);
+                };
                 let reads = 0, clears = 0, aborted = false;
                 IDBDatabase.prototype.transaction = function (name, mode, ...rest) {
                     if (name === 'bench' && mode === 'readonly' && ++reads === blockedRead) {
@@ -2375,11 +2386,12 @@ def the_sources_measure_the_store(page: Any) -> Check:
                 const began = performance.now();
                 try {
                     const result = await window.trailsChrome.measureStore(3, 'blob-number');
-                    return {result, clears, aborted, elapsed: performance.now() - began,
+                    return {result, clears, aborted, fired, elapsed: performance.now() - began,
                         said: document.querySelector('.trails-store-bench-said').textContent};
                 } finally {
                     IDBDatabase.prototype.transaction = transaction;
                     IDBObjectStore.prototype.clear = clear;
+                    window.setTimeout = timeout;
                 }
             }""",
                 blocked_read,
@@ -2392,7 +2404,7 @@ def the_sources_measure_the_store(page: Any) -> Check:
                         if not blocked_read
                         else blocked["clears"] == 0
                         and blocked["aborted"]
-                        and 15000 <= blocked["elapsed"] < 20000
+                        and blocked["fired"].count(15000) == 1
                         and "the database is held by another transaction" in blocked["result"].get("error", "")
                         and "the database is held by another transaction" in blocked["said"]
                         and page.locator(".trails-store-bench button").is_enabled()
@@ -2457,15 +2469,15 @@ def the_sources_measure_the_store(page: Any) -> Check:
         )
         # The unchanged trailing write takes 400 ms. Wait for its data, not an
         # arbitrary sleep, then reopen Sources to read it out beside the counts.
-        page.wait_for_function(
+        told = wait_for_async(
+            page,
             """async () => {
                 const told = await window.trailsOffline.dbRead('flags', 'tiles-said');
                 return told && told.time && told.peak > 0 &&
-                    ['mem', 'db', 'seen', 'net', 'blank'].some(path => told[path] > 0);
+                    ['mem', 'db', 'seen', 'net', 'blank'].some(path => told[path] > 0) && told;
             }""",
-            timeout=10_000,
+            timeout_ms=30_000,
         )
-        told = page.evaluate("() => window.trailsOffline.dbRead('flags', 'tiles-said')")
         page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.open('info'); }")
         page.wait_for_function("() => document.querySelector('.trails-open-tiles').textContent.includes('peak in flight:')")
         tally = all(
@@ -6397,7 +6409,14 @@ def the_vegetation_over_the_relief(page: Any) -> Check:
     rows_before = page.evaluate(rows_shown)
     switched = flip("Vegetation")
     wooded = flip("Forest")
-    page.wait_for_timeout(1500)
+    page.wait_for_function(
+        """paths => paths.every(path => {
+            const imgs = [...document.querySelectorAll('img')].filter(i => i.src.includes(path));
+            return imgs.length > 0 && imgs.every(i => i.complete);
+        })""",
+        arg=[SCENE.vegetation_path, SCENE.forest_path],
+        timeout=60_000,
+    )
     asked, answered = drawn(SCENE.vegetation_path)
     asked_forest, answered_forest = drawn(SCENE.forest_path)
     rows_on = page.evaluate(rows_shown)
@@ -9299,6 +9318,33 @@ def wait_until(page: Any, expr: str, timeout_ms: int = 60_000) -> bool:
     return False
 
 
+def wait_for_async(page: Any, expr: str, timeout_ms: int = 30_000, arg: Any = None) -> Any:
+    """Poll an asynchronous reading and return the snapshot that satisfied it.
+
+    Playwright 1.62's wait_for_function treats the Promise itself as truthy.
+    evaluate awaits its result, so a false database answer is polled again.
+
+    Args:
+        page: The page to ask.
+        expr: An async predicate returning the reading, or a falsy value to retry.
+        timeout_ms: Maximum polling duration.
+        arg: The predicate's argument.
+
+    Returns:
+        The first truthy resolved reading.
+
+    Raises:
+        TimeoutError: No truthy reading arrived within the bound.
+    """
+    until = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < until:
+        result = page.evaluate(expr, arg)
+        if result:
+            return result
+        page.wait_for_timeout(100)
+    raise TimeoutError(f"Asynchronous reading did not arrive within {timeout_ms} ms: {expr}")
+
+
 def zoom_out_requests(page: Any) -> Check:
     """Compare the §3.1 pinch with a direct jump, and read what survives pruning.
 
@@ -9322,7 +9368,16 @@ def zoom_out_requests(page: Any) -> Check:
             timeout=60_000,
         )
         # Loaded tiles become active after Leaflet's fade; retention uses active.
-        page.wait_for_timeout(300)
+        page.wait_for_function(
+            with_map("""() => {
+                let fading = false;
+                __MAP__.eachLayer(l => {
+                    if (l.getTileUrl && Object.values(l._tiles).some(t => t.current && t.loaded && !t.active)) fading = true;
+                });
+                return !fading;
+            }"""),
+            timeout=30_000,
+        )
 
     def reset() -> None:
         page.evaluate("""() => {
@@ -9406,6 +9461,7 @@ def zoom_out_requests(page: Any) -> Check:
         readings.append(Reading("z15 ground was drawn before zooming out three levels", retained["before"] > 0, True))
         readings.append(Reading("all z15 children stay until coarse tiles load", retained["kept"], retained["before"]))
         settle()
+        page.wait_for_function("() => Object.values(window.trailsZoomOutProbe.base._tiles).every(t => t.coords.z !== 15)", timeout=30_000)
         remaining = page.evaluate("() => Object.values(window.trailsZoomOutProbe.base._tiles).filter(t => t.coords.z === 15).length")
         readings.append(Reading("z15 children are pruned once coarse tiles are active", remaining, 0))
         return Check("zoom out asks only for the level it lands on", readings)
@@ -9458,8 +9514,8 @@ def the_zoom_the_scale_says(page: Any) -> Check:
     # A metres-per-pixel figure, because that is what this whole map argues in.
     said = page.evaluate("() => (document.querySelector('.trails-scale-zoom') || {}).textContent")
     readings.append(Reading("and it says the ground it is drawing at", "m/px" in (said or ""), True, note=said or ""))
+    # With animation disabled, zoomend updates the scale before setZoom returns.
     page.evaluate(with_map("() => { __MAP__.setZoom(18, {animate: false}); }"))
-    page.wait_for_timeout(400)
     mark = page.locator(".trails-scale-zoom").text_content() or ""
     readings.append(Reading("at z18 the scale names the magnified z17 sheet", "· tiles z17" in mark, True, note=mark))
     page.evaluate(with_map("(v) => { __MAP__.setView(v.at, v.z); }"), was)
@@ -10151,13 +10207,12 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
             parent_url,
         )
         # The tile's range need not wait for the background whole-pack body.
-        assert wait_until(
+        wait_for_async(
             page,
             """async () => {
             const db = window.trailsOffline;
             return (await db.dbRead('browse', window.promotedPack))?.body instanceof ArrayBuffer;
         }""",
-            30_000,
         )
         settled = list(_Quiet.pack_requests)
         promoted = settled[len(initial) :]
@@ -10173,7 +10228,7 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         readings.append(Reading("the settled base pack is available", any("/packs/tiles/" in row[0] and row[1] is None for row in settled), True))
         per_tile = [path for path in _Quiet.asked if re.match(r"/(tiles|dem|shade|slope|vegetation|forest)/.*\.png", path)]
         readings.append(Reading("no per-tile object reaches the server", per_tile, []))
-        before = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
+        before = wait_for_async(page, "async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
         page.evaluate(
             with_map("""() => {
             window.packSheet.setUrl(window.packSheet._url.split('?')[0] + '?pack-screen=2');
@@ -10181,16 +10236,14 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         }""")
         )
         page.wait_for_function(loaded, timeout=30_000)
-        page.wait_for_function(
+        after = wait_for_async(
+            page,
             """async (before) => {
             const told = await window.trailsOffline.dbRead('flags', 'tiles-said');
-            return told && told.mem > before;
+            return told && told.mem > before && told;
         }""",
             arg=before["mem"],
-            timeout=10_000,
         )
-        page.wait_for_timeout(500)  # Include the tally's trailing 400 ms write.
-        after = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
         readings.append(Reading("a second screen in the same pack makes no request", len(_Quiet.pack_requests) - len(settled), 0))
         readings.append(
             Reading(
@@ -10220,6 +10273,7 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
                     row.continue();
                 };
                 tx.objectStore('flags').put('on', 'offline');
+                tx.objectStore('flags').delete('tiles-said');
                 tx.oncomplete = () => done({count, bytes}); tx.onerror = () => fail(tx.error);
             }); db.close(); return result;
         }""")
@@ -10231,15 +10285,13 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         context.set_offline(True)
         page.evaluate("() => { window.packSheet.setUrl(window.packSheet._url.split('?')[0] + '?pack-screen=offline'); }")
         page.wait_for_function(loaded, timeout=30_000)
-        page.wait_for_function(
+        offline = wait_for_async(
+            page,
             """async () => {
             const told = await window.trailsOffline.dbRead('flags', 'tiles-said');
-            return told && told.db > 0;
+            return told && told.db > 0 && told;
         }""",
-            timeout=10_000,
         )
-        page.wait_for_timeout(500)
-        offline = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
         readings.append(
             Reading(
                 "a cold offline worker draws the kept screen",
@@ -10338,18 +10390,25 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 // Every answer settles in its own request callback, not at commit.
                 const originalGet = IDBObjectStore.prototype.get;
                 let release = null;
+                let sawRequest;
+                const requestReady = new Promise(done => { sawRequest = done; });
                 IDBObjectStore.prototype.get = function (key) {
                     const ask = originalGet.call(this, key);
                     if (this.name !== KEPT || key !== m) return ask;
                     const proxy = {result: undefined};
-                    Object.defineProperty(proxy, 'onsuccess', {set(fn) { ask.onsuccess = () => { release = fn; }; }});
+                    Object.defineProperty(proxy, 'onsuccess', {set(fn) { ask.onsuccess = () => { release = fn; sawRequest(); }; }});
                     return proxy;
                 };
                 let fast = false, slow = false;
                 const one = lookup(k, {expired: false, off: true}).then(() => { fast = true; });
                 const waiting = {expired: false, off: true};
                 const two = lookup(m, waiting).then(() => { slow = true; });
-                await new Promise(done => setTimeout(done, 100));
+                let limit;
+                try {
+                    await Promise.race([Promise.all([one, requestReady]), new Promise((_, fail) => {
+                        limit = setTimeout(() => fail(Error('lookup callbacks did not arrive')), 30000);
+                    })]);
+                } finally { clearTimeout(limit); }
                 out.independent = fast && !slow && !!release;
                 // An expired tile must not start a browse get after a late miss.
                 waiting.expired = true;
@@ -10571,10 +10630,9 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         )
         first = context.new_page()
         first.goto(address, timeout=180_000)
-        # **Waiting rather than sleeping**, which this suite says about itself
-        # and had stopped doing twice already. Two settles of twenty seconds took
-        # the run from 180 to 315; the page says when it is ready.
-        first.wait_for_function("() => window.trailsWorker", timeout=120_000)
+        # The object is made before registration starts. Wait for the promise's
+        # success or failure report, then preserve either answer in the reading.
+        first.wait_for_function("() => window.trailsWorker && (window.trailsWorker.kept || window.trailsWorker.why)", timeout=120_000)
         registered = first.evaluate("() => window.trailsWorker")
         kept = wait_until(first, in_db(CACHED_PAGE), 60_000)
         # What the sheet was built with, read before the switch holds it down:
@@ -10586,9 +10644,36 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # of it. The tiles the first paint fetched went out before it took over
         # -- **a level in from wherever it opened**, because a page that opens
         # at the level asked for here would ask for nothing new.
-        first.evaluate(with_map("() => { __MAP__.setZoom(__MAP__.getZoom() + 1); }"))
-        first.wait_for_timeout(4000)
-        tiles = first.evaluate(in_db(ROWS), "browse")
+        first.wait_for_function("() => navigator.serviceWorker.controller", timeout=30_000)
+        first.evaluate(with_map("() => { __MAP__.setZoom(__MAP__.getZoom() + 1, {animate: false}); }"))
+        first.wait_for_function(
+            """() => {
+                const tiles = [...document.querySelectorAll('img.leaflet-tile')];
+                return tiles.length > 0 && tiles.every(t => t.complete);
+            }""",
+            timeout=60_000,
+        )
+        # First-screen ranges deliberately keep no whole pack. A further tile
+        # after the two-second directory window triggers promotion; sitting still
+        # for four seconds does not. Wait for its store commit before counting.
+        tile_url = first.evaluate(
+            with_map("""() => {
+                let url = null;
+                __MAP__.eachLayer(l => {
+                    if (!l.getTileUrl || l.options.trailsShade || l.options.trailsSlope ||
+                            l.options.trailsVegetation || l.options.trailsForest) return;
+                    const tile = Object.values(l._tiles).find(t => t.current && t.el.naturalWidth > 1);
+                    if (tile) url = tile.el.src;
+                });
+                return url;
+            }""")
+        )
+        if not tile_url:
+            raise RuntimeError("No drawn sheet tile to revisit for browse promotion")
+        first.wait_for_timeout(2200)
+        first.evaluate("async url => { await (await fetch(url + '?drive-browse=1')).arrayBuffer(); }", tile_url)
+        wait_for_async(first, "async () => (await window.trailsOffline.dbRead('flags', 'browse-bytes'))?.bytes > 0")
+        browsed = first.evaluate(in_db(ROWS), "browse")
         # **What the first visit paid**, read off the server rather than the
         # page: the worker keeps the map by asking for it a second time, and if
         # that second ask crossed the wire the first visit would cost twice.
@@ -10824,8 +10909,9 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # device this map is carried on -- an installed app reported ten to
         # twenty seconds where this run measures under two -- so the page keeps
         # its own account and `Sources` reads it out. Driven for the shape of the
-        # sentence and for a recorded Firefox-on-forge build time. The latter
-        # catches construction regressions; it makes no claim about the phone.
+        # sentence and a broad Firefox-on-forge build ceiling. The latter allows
+        # contention from drive-both while catching the former 8.3 s regression;
+        # it makes no claim about the phone. See also the Makefile's drive-both rule.
         said_cost = first.evaluate("() => (document.querySelector('.trails-dock .trails-open-cost') || {}).textContent || ''")
         cost = first.evaluate("() => window.trailsOpened.cost()")
         newer.append(
@@ -10844,12 +10930,13 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 note=f"{cost['build']} ms building, {cost['parse']} ms parsing, {cost['bytes'] / 1e6:.1f} MB",
             )
         )
+        build_ceiling = SCENE.figures["map build ceiling in ms (Firefox on forge)"]
         newer.append(
-            stands(
+            Reading(
                 "map built in ms (Firefox on forge)",
-                cost["build"],
-                within=500,
-                note="Firefox-on-forge time; ±500 ms for run-to-run variation, not a phone budget",
+                cost["build"] is not None and 0 < cost["build"] < build_ceiling,
+                True,
+                note=f"{cost['build']} ms; under {build_ceiling} ms with two pages driven at once, not a phone budget",
             )
         )
         first.evaluate("() => window.trailsChrome.close()")
@@ -11212,8 +11299,12 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # the terrain above was drawn as a rectangle round the scene's position, and
         # looking somewhere else asks for ground nobody kept and is answered,
         # correctly, with blanks.
-        second.evaluate(with_map("(at) => { __MAP__.setView(at, 14); }"), list(SCENE.position))
-        second.wait_for_timeout(3000)
+        second.evaluate(with_map("(at) => { __MAP__.setView(at, 14, {animate: false}); }"), list(SCENE.position))
+        tiles_answered = """() => {
+            const tiles = [...document.querySelectorAll('img.leaflet-tile')];
+            return tiles.length > 0 && tiles.every(t => t.complete);
+        }"""
+        second.wait_for_function(tiles_answered, timeout=60_000)
         drawn_terrain = second.evaluate(
             """() => {
                 let good = 0, blank = 0;
@@ -11252,7 +11343,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             }"""),
             list(SCENE.position),
         )
-        second.wait_for_timeout(3000)
+        second.wait_for_function(tiles_answered, timeout=60_000)
         unkept = second.evaluate(
             """() => {
                 let blank = 0, broken = 0, tiles = 0;
@@ -11294,7 +11385,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 # The browser's own cache already keeps a tile five days --
                 # `max-age=432000`, measured -- so this is for the walk somebody
                 # plans a fortnight out, not for the next minute.
-                Reading("terrain it was shown is kept too", tiles > 0, True, note=f"{tiles} tiles"),
+                Reading("terrain visited again is kept as packs", browsed > 0, True, note=f"{browsed} packs"),
                 Reading("nothing threw with the network off", len(thrown), 0, note="; ".join(thrown[:2])),
                 # The whole map, not a shell of one: every line, every marker, and
                 # the graph that routes over them.
