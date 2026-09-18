@@ -52,7 +52,10 @@ function base() {
             var made = ask.result;
             if (!made.objectStoreNames.contains(PAGES)) { made.createObjectStore(PAGES); }
             if (!made.objectStoreNames.contains(FLAGS)) { made.createObjectStore(FLAGS); }
-            if (!made.objectStoreNames.contains("tiles")) { made.createObjectStore("tiles"); }
+            if (made.objectStoreNames.contains("tiles")) {
+                made.deleteObjectStore("tiles");
+                ask.transaction.objectStore(FLAGS).delete("held");
+            }
             if (!made.objectStoreNames.contains(KEPT)) { made.createObjectStore(KEPT); }
             if (!made.objectStoreNames.contains("bench")) { made.createObjectStore("bench"); }
             if (!made.objectStoreNames.contains(SEEN)) {
@@ -510,6 +513,10 @@ function tileId(z, x, y) {
 var LAYERS = [[TILE_PREFIX, __TILE_TOP__], [HEIGHT_PREFIX, __HEIGHT_TOP__],
     [SHADE_PREFIX, __SHADE_TOP__], [SLOPE_PREFIX, __SLOPE_TOP__],
     [VEGETATION_PREFIX, __VEGETATION_TOP__], [FOREST_PREFIX, __FOREST_TOP__]];
+function packLevel(top, z) {
+    return Math.max(0, top - 3 - 4 * Math.floor((top - z) / 4));
+}
+
 function packFor(plain) {
     var layer = LAYERS.find(function (entry) { return entry[0] && plain.indexOf(entry[0]) === 0; });
     if (!layer) { throw Error("unknown tile tree"); }
@@ -517,7 +524,7 @@ function packFor(plain) {
     if (!match) { throw Error("invalid tile path"); }
     var z = Number(match[1]), x = Number(match[2]), y = Number(match[3]), id = tileId(z, x, y);
     if (z > layer[1]) { throw Error("tile above layer top"); }
-    var level = Math.max(0, layer[1] - 3 - 4 * Math.floor((layer[1] - z) / 4));
+    var level = packLevel(layer[1], z);
     var prefix = new URL(layer[0]);
     prefix.pathname = '/packs' + prefix.pathname;
     return {url: prefix.href + level + '/' + (x >> (z - level)) + '/' + (y >> (z - level)) + '.pmtiles', id: id};

@@ -39,10 +39,16 @@
                     var zoom = map.getZoom();
                     line.textContent = 'z' + (Math.round(zoom * 100) / 100) + ' · ' +
                         (across >= 10 ? Math.round(across) : Math.round(across * 100) / 100) + ' m/px';
+                    map.eachLayer(function (layer) {
+                        var options = layer.options || {};
+                        if (!layer.getTileUrl || options.trailsShade || options.trailsSlope ||
+                                options.trailsVegetation || options.trailsForest) { return; }
+                        if (zoom > options.maxNativeZoom) { line.textContent += ' · tiles z' + options.maxNativeZoom; }
+                    });
                     line.title = 'Zoom ' + zoom + ' at ' + middle.lat.toFixed(2) + '° N';
                 }
 
-                map.on('zoomend moveend', said);
+                map.on('zoomend moveend layeradd layerremove trailsnativezoom', said);
                 map.whenReady(said);
                 said();
             })();

@@ -638,14 +638,14 @@
                     return window.trailsOffline.dbRead('flags', 'tiles-said');
                 }).then(function (told) {
                     if (!told) { return; }
-                    tileLine.textContent += ' Tiles: ' + told.db + ' from the store, ' +
+                    tileLine.textContent += ' Tiles: ' + (told.mem || 0) + ' from memory, ' + told.db + ' from the store, ' +
                         told.seen + ' seen before, ' + told.legacy + ' from the old cache, ' +
                         told.net + ' fetched, ' + told.blank + ' blank' +
                         (told.why ? ' · ' + told.why : '') + '.';
                     if (told.time) {
-                        ['db', 'seen', 'net', 'blank'].forEach(function (path, i) {
-                            var spent = told.time[path];
-                            tileLine.textContent += ' ' + ['Store', 'Seen', 'Network', 'Blank'][i] + ': ' +
+                        ['mem', 'db', 'seen', 'net', 'blank'].forEach(function (path, i) {
+                            var spent = told.time[path] || {total: 0, worst: 0};
+                            tileLine.textContent += ' ' + ['Memory', 'Store', 'Seen', 'Network', 'Blank'][i] + ': ' +
                                 told[path] + ', total ' + spent.total.toFixed(1) + ' ms, worst ' +
                                 spent.worst.toFixed(1) + ' ms.';
                         });
@@ -687,7 +687,7 @@
             async function benchOpen() {
                 var timer, failed = false;
                 var opening = new Promise(function (done, fail) {
-                    var ask = indexedDB.open(BENCH_DB, 3);
+                    var ask = indexedDB.open(BENCH_DB, 4);
                     ask.onblocked = function () { failed = true; fail(new Error('The database is blocked.')); };
                     ask.onerror = function () { fail(ask.error); };
                     ask.onsuccess = function () {

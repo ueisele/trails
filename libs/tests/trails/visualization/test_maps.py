@@ -159,6 +159,13 @@ class TestCreateMap:
         names = sorted(layer.layer_name for layer in self.sheets(fmap))
         assert names == ["Kartverket Grayscale", "Kartverket Topo"]
 
+    def test_grayscale_uses_the_same_pack_backed_sheet(self):
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7), extra_bases=(maps.BaseMap.KARTVERKET_GRAYSCALE,))
+        colour, gray = self.sheets(fmap)
+        assert gray.tiles == colour.tiles == "/tiles/kartverket/topo/1/{z}/{x}/{y}.png"
+        assert gray.options["class_name"] == "trails-grayscale"
+        assert ".trails-grayscale { filter: grayscale(1); }" in fmap.get_root().render()
+
     def test_only_the_primary_base_is_displayed_on_load(self):
         # Leaflet stacks every base layer it is given, so a visible extra would
         # cover the primary one entirely.
@@ -700,23 +707,15 @@ class TestOfflinePanel:
         assert "level > here.ceiling" in panel
 
     def test_the_whole_map_fills_a_box_rather_than_following_a_band(self):
-        """Which is the entire point of replacing *everything drawn*: the band
-        was 1,722 tiles at z16 and the box is 131,033, and the difference is the
-        ground between the paths -- which in this park is the ground somebody is
-        standing on."""
+        """The whole finite tree includes ground between and beyond the paths."""
         panel = self.panel()
-        filled = panel.split("function boxAt(box, z) {")[1].split("\n                }")[0]
-        assert "for (x = Math.floor(a.x); x <= Math.floor(b.x); x += 1)" in filled
-        assert "for (y = Math.floor(a.y); y <= Math.floor(b.y); y += 1)" in filled
-        # Not a walk along anything, which is what it would be if this had been
-        # left as a corridor round the box's own edge.
-        assert "walk(" not in filled
-        assert "if (which === 'all') { return boxAt(mapBox(), z); }" in panel
-        # And the box is read off the layers rather than written down, or it goes
-        # stale the first time the sources move.
-        box = panel.split("function mapBox() {")[1].split("\n                }")[0]
-        assert "drawnLines().forEach" in box
-        assert "n = Math.max(n, at[0]); s = Math.min(s, at[0]);" in box
+        assert "if (which === 'all') { return null; }" in panel
+        levels = panel.split("function levelsFor(coreAt, top, pad) {")[1].split("\n                }")[0]
+        assert "if (!coreAt)" in levels
+        assert "for (z = OVERVIEW; z <= top; z += 1) { out[z] = overviewAt(z); }" in levels
+        overview = panel.split("function overviewAt(z, core) {")[1].split("\n                }")[0]
+        assert "var box = EXTENT;" in overview
+        assert "new Set" not in overview
 
     def test_the_selection_is_measured_once_and_halved_down_to_z11(self):
         """A tile at z-1 is the tile at z with both coordinates shifted right, so
@@ -726,7 +725,7 @@ class TestOfflinePanel:
         tile is eight kilometres across."""
         panel = self.panel()
         levels = panel.split("function levelsFor(coreAt, top, pad) {")[1].split("\n                }")[0]
-        assert "var out = {}, below = coreAt(top), z;" in levels
+        assert "var below = coreAt(top);" in levels
         assert "out[top] = padded(below, pad, top);" in levels
         assert "out[z] = padded(up, pad, z);" in levels
         assert "below = up;" in levels
@@ -743,15 +742,15 @@ class TestOfflinePanel:
         assert "var OVERVIEW = 8;" in panel
         assert "for (z = OVERVIEW; z <= BOTTOM; z += 1) { out[z] = overviewAt(z, out[z]); }" in panel
         overview = panel.split("function overviewAt(z, core) {")[1].split("function overviewCost()")[0]
-        assert "var box = EXTENT || mapBox();" in overview
+        assert "var box = EXTENT;" in overview
         assert "var size = (x1 - x0 + 1) * (y1 - y0 + 1);" in overview
         assert "if (!inside(v)) { size += 1; }" in overview
         assert "if (!core || !core.has(v))" in overview
         assert "while (x <= x1)" in overview
         assert "new Set" not in overview and ".push(" not in overview
-        assert "var z = OVERVIEW, it = null, pass = 'map';" in panel
+        assert "var layers = packLayers(), at = 0, z = OVERVIEW, parents = null, level;" in panel
         bounds = panel.split("bounds: function () {")[1].split("},")[0]
-        assert "var box = EXTENT || mapBox();" in bounds
+        assert "var box = EXTENT;" in bounds
         assert "return [[box.s, box.w], [box.n, box.e]];" in bounds
 
     def test_the_overview_is_priced_separately_without_charging_the_overlap_twice(self):
@@ -760,9 +759,9 @@ class TestOfflinePanel:
         assert "levels[z] = overviewAt(z);" in panel
         assert "overview: overviewCost()" in panel
         assert "trails-offline-overview" in panel
-        assert "count(counted.tiles - counted.overview.tiles)" in panel
+        assert "count(counted.packs - counted.overview.packs)" in panel
         assert "megabytes(counted.bytes - counted.overview.bytes)" in panel
-        assert "'overview, ' + count(counted.overview.tiles)" in panel
+        assert "'overview, ' + count(counted.overview.packs)" in panel
         assert "counted.bytes > free * 0.9" in panel
 
     def test_a_straight_run_between_two_vertices_is_walked_and_not_skipped(self):
@@ -777,8 +776,7 @@ class TestOfflinePanel:
         assert "Math.abs(dx), Math.abs(dy)) * 2" in panel
 
     def test_the_zooms_offered_stop_where_the_source_does(self):
-        """Kartverket's topo cache ends at z18: z19 and z20 answer 400. The
-        ceiling is the provider's, injected -- Lantmäteriet's file ends at z17."""
+        """Both providers' tile trees end at z17; the ceiling is injected."""
         assert "var TOP = {{ this.top }};" in self.panel()
         assert "var FLOOR = 14;" in self.panel()
         norwegian = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
@@ -790,17 +788,15 @@ class TestOfflinePanel:
 
     def test_the_budget_is_measured_at_load_rather_than_written_down(self):
         """It is what the whole map costs at the zoom that scope is capped at --
-        6.76 GB on this build -- and every other scope is held to it, so nothing
+        using the measured pack weights -- and every other scope is held to it, so nothing
         on this panel can quietly cost more than the choice that keeps
         everything. Worked out at load, because a figure typed in here is a
         figure that goes stale the first time the sources move."""
         panel = self.panel()
         assert "cap = cost('all', CAP_ZOOM).bytes;" in panel
-        # The source's own figure, not one typed in here: z16 on Kartverket,
-        # where z17 would be four times 6.76 GB, and z17 -- the whole copy,
-        # 700 MB -- on Lantmäteriet.
+        # Both finite trees are offered through their native z17.
         assert "var CAP_ZOOM = {{ this.cap }};" in panel
-        assert maps.PROVIDERS["kartverket"].cap == 16
+        assert maps.PROVIDERS["kartverket"].cap == 17
         assert maps.PROVIDERS["lantmateriet"].cap == 17 == maps.PROVIDERS["lantmateriet"].top
         assert all(provider.cap <= provider.top for provider in maps.PROVIDERS.values())
         assert maps._OfflinePanel(maps.PROVIDERS["lantmateriet"], maps.Companions.named("abisko")).cap == 17
@@ -826,27 +822,12 @@ class TestOfflinePanel:
         assert "drawn.length" not in sig
         # And the buffer is what the zoom row reads, or every repaint prices five
         # levels of a turned rectangle to draw a row of buttons.
-        assert "memo[at] = guess || weigh(levelsFor(coreOf(which), level, scopeOf(which).pad));" in panel
+        assert "memo[at] = weigh(levelsFor(coreOf(which), level, scopeOf(which).pad));" in panel
 
-    def test_a_ring_too_large_to_price_is_refused_before_it_is_built(self):
-        """An area drawn round the whole park, priced at z18, is 1.5 million
-        tiles at the top level alone -- a few hundred megabytes of arrays and
-        about a second, to work out a figure that was always going to be a
-        refusal. And the chooser prices every level it offers, so drawing that
-        area would spend it without anybody asking for z18.
-
-        **The estimate is the ring's own area and not its bounding box**, which
-        is the one place that distinction matters: the box round the route is
-        deliberately diagonal, and refusing z18 for a rectangle that fits the
-        budget would take away the reason it is turned at all."""
+    def test_a_ring_is_clipped_to_the_finite_tree_before_testing_tiles(self):
         panel = self.panel()
-        assert "function ringTiles(ring, level)" in panel
-        area = panel.split("function ringTiles(ring, level) {")[1].split("\n                }")[0]
-        assert "sum += (b.x + a.x) * (b.y - a.y);" in area
-        assert "Math.abs(sum / 2)" in area
-        assert "bytes > budget() * 2" in panel
-        # And the same refusal is held where the selection is built, because
-        # switching scope keeps the zoom it was on.
+        assert "fracTile(Math.min(n, EXTENT.n), Math.max(w, EXTENT.w), z)" in panel
+        assert "fracTile(Math.max(s, EXTENT.s), Math.min(e, EXTENT.e), z)" in panel
         assert "while (zoom > FLOOR && cost(scope, zoom).bytes > budget()) { zoom -= 1; }" in panel
 
     def test_the_preview_paints_kept_tiles_inside_the_screen_tile(self):
@@ -1063,17 +1044,10 @@ class TestOfflinePanel:
         assert "geometry: function () {" in planning
         assert "return {lon: shape.lon, lat: shape.lat};" in planning
 
-    def test_a_figure_that_was_never_built_is_not_quoted_as_one(self):
-        """A level far over the budget is priced from the ring's area instead of
-        by building its tile set — and that number lands in the button's own
-        sentence, where a reader reads it. Three significant figures is a claim
-        the panel cannot support about an estimate."""
-        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
-        # The panel is only on the page when the chrome puts it there.
-        maps.add_chrome(fmap)
-        html = fmap.get_root().render()
-        assert "return bytes > budget() * 2 ? {tiles: Math.round(tiles), bytes: bytes, guessed: true} : null;" in html
-        assert "(known.guessed ? 'roughly ' : '')" in html
+    def test_pack_estimates_are_exact_counts_with_measured_mean_weights(self):
+        panel = self.panel()
+        assert "while ((next = walk.next())) { packs += 1; bytes += next.bytes; }" in panel
+        assert "guessed:" not in panel
 
     def test_the_box_follows_the_legend(self):
         """`mapBox` walks 11,303 rings, so it is remembered — but the legend can
@@ -1169,7 +1143,7 @@ class TestOfflinePanel:
         # the cache before it is asked of the network, so a stopped run costs
         # nothing to pick up.
         assert "return dbRead(KEPT, next.url).then(function (there) {" in html
-        assert "if (there) { missed = 0; state.held += 1; kept = true; return null; }" in html
+        assert "if (there) { missed = 0; state.held += 1; kept = true; size = there.byteLength; return null; }" in html
 
     def test_a_run_never_holds_more_than_one_tile(self):
         """The pre-scan that let a resumed run open at the figure it had reached
@@ -1256,7 +1230,7 @@ class TestOfflinePanel:
         assert "if (missed >= 12) { state.stop = true; state.stalled = true; }" in html
         # Reset on every success, so bad tiles arriving in ones and twos never
         # trip it — twelve rather than three because six requests run at once.
-        assert "missed = 0;" in html and "return dbWrite(KEPT, next.url, body);" in html
+        assert "missed = 0;" in html and "return answer.arrayBuffer().then(function (body) {" in html
         # A run the connection stopped still switches on for what arrived; only
         # a run the reader stopped leaves the chooser where it was.
         assert "if (state.stop && !state.stalled) { return refresh(); }" in html
@@ -1701,10 +1675,11 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
 
     def test_sources_reads_the_tally_and_owns_the_bounded_store_measurement(self):
         html = self.rendered()
-        assert "['db', 'seen', 'net', 'blank'].forEach" in html
+        assert "['mem', 'db', 'seen', 'net', 'blank'].forEach" in html
         assert "spent.total.toFixed(1)" in html and "spent.worst.toFixed(1)" in html
         assert "told.deadlines" in html and "told.peak" in html
         assert 'var BENCH_DB = "trails";' in html
+        assert "indexedDB.open(BENCH_DB, 4)" in html
         assert "sourcesHolder.appendChild(benchBox);" in html
         assert "measureStore: measureStore" in html
         for variant in ("blob-url", "blob-number", "pack", "archive"):
@@ -1836,7 +1811,7 @@ class TestNothingGrowsWithTheDownload:
         # Every producer of a level makes a Set, and every consumer asks it.
         assert "var out = new Set(), x, y;" in html
         assert "out.add(key(x, y));" in html
-        assert "var n = levels[z].size;" in html
+        assert "while ((next = walk.next())) { packs += 1; bytes += next.bytes; }" in html
         assert "var n = set.size;" in html
         assert "if (set.has(key(x0 + i, y0 + j)))" in html
         # And nothing builds a keys array out of a level any more. Read as code
@@ -1851,10 +1826,10 @@ class TestNothingGrowsWithTheDownload:
         was."""
         html = self.rendered()
         assert "function walker(picked) {" in html
-        assert "it = set.values();" in html
-        assert "var step = it.next();" in html
+        assert "var parent = parents.next();" in html
+        assert "var layer = base(), walk = packWalk(picked.levels);" in html
         # The count comes from the weights, which already had it.
-        assert "return {tiles: base() ? picked.tiles : 0, bytes: picked.bytes};" in html
+        assert "return {packs: base() ? picked.packs : 0, bytes: picked.bytes};" in html
         run = html.split("function walker(picked) {")[1].split("\n                function ")[0]
         assert "urls.push(" not in run
         # **And the move off the old store is gone with the store.** It ran
@@ -1884,19 +1859,19 @@ class TestNothingGrowsWithTheDownload:
         # Written as the run goes, so a run the phone interrupts still leaves a
         # figure behind — which is exactly the run that used to leave the panel
         # saying nothing was kept.
-        assert "note(state.held + state.added, state.bytes, state.top);" in html
+        assert "var tx = open.transaction([KEPT, 'flags'], 'readwrite');" in html
 
     def test_no_record_is_not_the_same_as_nothing_kept(self):
         """A cache from before this map kept a figure has ground and no number,
         and answering *0 tiles kept* is the one wrong answer that costs bytes —
         it invites a reader with everything to download it again."""
         html = self.rendered()
-        assert "var none = {tiles: 0, bytes: 0, top: 0, known: false, stale: null};" in html
-        assert "kept tiles not counted" in html
+        assert "var none = {packs: 0, bytes: 0, top: 0, known: false, stale: null};" in html
+        assert "kept packs not counted" in html
         # And the switch's guard asks for a tile rather than for a count, because
         # what it wants to know is whether there is anything at all.
         assert "function anyKept() {" in html
-        assert "if (there.known) { return there.tiles > 0; }" in html
+        assert "if (there.known) { return there.packs > 0; }" in html
         assert "var first = walker().next();" in html
 
 
@@ -1946,12 +1921,12 @@ class TestTheSheetCarriesAToken:
         token never orphans a tile."""
         html = self.rendered()
         assert "layer.options.trailsUrl = layer._url.split('?')[0];" in html
-        assert "var made = plainUrl(layer).replace('{z}', z)" in html
+        assert "url: packPrefix(layer.prefix) + level + '/'" in html
         # **And absolute.** The worker looks a tile up by the request's
         # address, which is absolute; a sheet from our own bucket is
         # addressed root-relative, and keyed as written every tile of it
         # would be kept under a name the worker never asks for.
-        assert "return new URL(made, location.href).href;" in html
+        assert "var url = new URL(prefix, location.href);" in html
 
     def test_a_sheet_switched_in_gets_the_token_without_moving_it(self):
         """A base layer arrives with no token at all, and switching sheets is
@@ -2030,8 +2005,8 @@ class TestNativeZoomFollowsWhatIsKept:
         """Asking the cache a second time for one number is a second walk over a
         hundred thousand keys, in the panel that already pays for one."""
         html = self.rendered()
-        assert "if (next.z > state.top) { state.top = next.z; }" in html
-        assert "top: Math.max((was && was.top) || 0, top)" in html
+        assert "if (next.kind === 'map') { state.top = Math.max(state.top, Math.min(state.requested, next.z + 3)); }" in html
+        assert "top: Math.max(was.top, top)" in html
         assert "fitNativeZoom(both[0].top);" in html
 
     def test_a_sheet_switched_under_the_reader_gets_the_same_ceiling(self):
@@ -2332,9 +2307,6 @@ class TestTwoMapsOnOneOrigin:
         assert "://" not in lantmateriet.tiles
         assert kartverket.tiles == "/tiles/kartverket/topo/1/"
         # Our trees end at their box and the panel's margin must end there too.
-        # Kartverket's own cache answers everywhere, but the heights, the relief
-        # and the slope classes drawn on it are ours and stop at the box (§6.10),
-        # so the extent is the trees' and the sheet is held to it with them.
         assert lantmateriet.extent == (18.15, 68.139, 19.10, 68.46)
         assert kartverket.extent == (12.0, 65.15, 13.75, 65.95)
 
@@ -2369,9 +2341,7 @@ class TestTwoMapsOnOneOrigin:
 
     def test_the_panel_hands_the_page_the_extent_of_its_tree(self, tmp_path):
         """Each page carries the box its own trees were cut to as ``EXTENT``,
-        and both carry the clipping `padded` that reads it. Kartverket's sheet
-        answers the world, but the heights, the relief and the slope classes
-        drawn on it are ours and stop at the box (§6.10)."""
+        and all six layers end at that same box."""
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
         assert 'var EXTENT = {"w": 18.15, "s": 68.139, "e": 19.1, "n": 68.46};' in html
@@ -2410,7 +2380,6 @@ class TestTwoMapsOnOneOrigin:
         html = page.read_text(encoding="utf-8")
         assert "/tiles/lantmateriet/topowebb/1/{z}/{x}/{y}.png" in html
         # The comments still tell Kartverket's story; no address or literal does.
-        assert "cache.kartverket.no" not in html
         assert "'kartverket'" not in html
         assert "Lantmäteriet" in html
         assert "hint: 'Which Lantmäteriet sheet is drawn underneath.'" in html
@@ -2427,8 +2396,7 @@ class TestTwoMapsOnOneOrigin:
         # earlier, which is where the height model stops having anything to add.
         relief = getattr(fmap, maps.MAP_SHADE_ATTR)
         assert (relief.options["max_zoom"], relief.options["max_native_zoom"]) == (18, 15)
-        # Kartverket's own cache goes to z18, and the two overlays cut over it
-        # stop at z15 exactly as Lantmäteriet's do.
+        # Norway uses the same native z17 sheet and z15 overlays.
         norwegian = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         sheets = [child for child in norwegian._children.values() if isinstance(child, folium.TileLayer) and not child.overlay]
         assert {(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in sheets} == {(18, 17)}
@@ -2473,7 +2441,7 @@ class TestTwoMapsOnOneOrigin:
         assert "var TILES = 'trails-abisko-tiles';" in html
         assert "var KEY = 'trails-abisko-offline';" in html
         assert "var TOP = 17;" in html
-        assert '"17": 4587' in html and '"18"' not in html.split("var WEIGHT = ")[1].split(";")[0]
+        assert '"14": 483317' in html and '"18"' not in html.split("var PACK_WEIGHT = ")[1].split(";")[0]
 
     def test_the_worker_matches_the_page(self, tmp_path):
         """The two are separate scripts and share nothing but what the build
@@ -2519,8 +2487,8 @@ class TestTwoMapsOnOneOrigin:
         assert '"zoom": 13' in heights
         assert '"13": 92693' in heights
         # Over the same set the map is kept over, after the map tiles of it.
-        assert "if (pass === 'map' && HEIGHTS && z === HEIGHTS.zoom) {" in html
-        assert "state.bytes += next.kind === 'height' ? heightWeight(next.z)" in html
+        assert "[HEIGHTS, 'height']" in html
+        assert "state.bytes += size;" in html
 
     def test_the_relief_is_drawn_over_the_sheet_and_is_on_when_the_page_opens(self, tmp_path):
         """What the paper map has and ours had not: a shadow under the contours.
@@ -2610,9 +2578,8 @@ class TestTwoMapsOnOneOrigin:
         shade = html.split("var SHADE = ")[1].split(";\n")[0]
         assert '"url": "/shade/lantmateriet/1/{z}/{x}/{y}.png"' in shade
         assert '"top": 15' in shade
-        assert "if (Number(z) > SHADE.top) { return; }" in html
-        assert "if ((pass === 'map' || pass === 'height') && SHADE && z <= SHADE.top) {" in html
-        assert "kind: 'shade'" in html
+        assert "if (z > layer.top) { at += 1; z = OVERVIEW; continue; }" in html
+        assert "[SHADE, 'shade']" in html
 
     def test_the_slope_classes_are_drawn_over_the_relief_and_start_off(self, tmp_path):
         """How steep the ground is, off the paths, in the SLF's classes with one
@@ -2770,19 +2737,19 @@ class TestTwoMapsOnOneOrigin:
         slope = html.split("var SLOPE = ")[1].split(";\n")[0]
         assert '"url": "/slope/lantmateriet/2/{z}/{x}/{y}.png"' in slope
         assert '"top": 15' in slope
-        assert "if (Number(z) > SLOPE.top) { return; }" in html
-        assert "if ((pass === 'map' || pass === 'height' || pass === 'shade') && SLOPE && z <= SLOPE.top) {" in html
+        assert "if (z > layer.top) { at += 1; z = OVERVIEW; continue; }" in html
+        assert "[SLOPE, 'slope']" in html
         # And the vegetation and the forest walk after it, each once (§6.11).
-        assert "if (pass !== 'vegetation' && pass !== 'forest' && VEGETATION && z <= VEGETATION.top) {" in html
-        assert "if (pass !== 'forest' && FOREST && z <= FOREST.top) {" in html
+        assert "[VEGETATION, 'vegetation']" in html
+        assert "[FOREST, 'forest']" in html
         # And the relief is not walked again after the classes.
-        assert "if ((pass === 'map' || pass === 'height') && SHADE && z <= SHADE.top) {" in html
-        assert "kind: 'slope'" in html
+        assert "[SHADE, 'shade']" in html
+        assert "[SLOPE, 'slope']" in html
         assert "slope: SLOPE ? new URL(SLOPE.url.split('{z}')[0], location.href).href : null," in html
         assert "vegetation: VEGETATION ? new URL(VEGETATION.url.split('{z}')[0], location.href).href : null," in html
         assert "forest: FOREST ? new URL(FOREST.url.split('{z}')[0], location.href).href : null" in html
-        assert "(next.kind === 'slope' ? slopeWeight(next.z)" in html
-        assert "(next.kind === 'forest' ? forestWeight(next.z) : (WEIGHT[next.z] || 45000))" in html
+        assert "state.bytes += size;" in html
+        assert "size = body.byteLength;" in html
 
     def test_the_first_map_carries_the_relief_too(self, tmp_path):
         """Since §6.10 Kartverket's sheet has a height model of this project's
@@ -2880,6 +2847,7 @@ class TestHeightTiles:
             "offset": dem_tiles.TERRARIUM_OFFSET,
             "step": dem_tiles.TERRARIUM_STEP,
             "weight": {"12": 100},
+            "pack_weight": {},
         }
 
     def test_a_plan_with_tiles_needs_no_service_and_one_with_neither_is_refused(self):
@@ -9840,21 +9808,37 @@ class TestPackWorker:
             """
             var vm = require('node:vm'), results = [];
             for (var scenario of ['insecure', 'controlled', 'control', 'timeout']) {
-                var added = [], timer, handler, delay = null;
+                var added = [], active = new Set(), timer, arm, handler, delay = null;
                 function Tile() {}
                 var layer = new Tile(); layer.id = 1;
                 var cancelled = new Tile(); cancelled.id = 2;
-                var map = {addLayer: function (l) { added.push(l.id); return this; }, removeLayer: function () { return this; }};
+                var map = {
+                    addLayer: function (l) { active.add(l.id); added.push(l.id); return this; },
+                    removeLayer: function (l) { active.delete(l.id); return this; },
+                    hasLayer: function (l) { return active.has(typeof l === 'number' ? l : l.id); }
+                };
+                var originalHas = map.hasLayer;
                 var sw = {controller: scenario === 'controlled' ? {} : null,
                     addEventListener: function (_, fn) { handler = fn; }, removeEventListener: function () { handler = null; }};
                 vm.runInNewContext(__GATE__, {namedMap: map, L: {TileLayer: Tile, stamp: l => l.id},
                     location: {protocol: scenario === 'insecure' ? 'http:' : 'https:', hostname: 'atlas.test'},
+                    Promise: {resolve: () => ({then: fn => { arm = fn; }})},
                     navigator: {serviceWorker: sw}, setTimeout: (fn, ms) => { timer = fn; delay = ms; }, clearTimeout: () => {}});
                 map.addLayer(layer);
                 var before = added.length;
+                var requested = map.hasLayer(layer) && map.hasLayer(layer.id);
+                if (arm) {
+                    if (delay !== null) throw Error('construction consumed the control deadline');
+                    arm();
+                }
                 if (timer) {
-                    map.addLayer(layer); map.addLayer(cancelled); map.removeLayer(cancelled);
+                    map.addLayer(layer); map.addLayer(cancelled);
+                    // The legend removes a switched-off layer only if hasLayer says it is present.
+                    if (map.hasLayer(cancelled)) map.removeLayer(cancelled);
                     if (scenario === 'control') { sw.controller = {}; handler(); } else { timer(); }
+                }
+                if (!requested || map.hasLayer(cancelled) || map.hasLayer !== originalHas) {
+                    throw Error('the gate lost the requested layer state');
                 }
                 results.push({scenario, before, added, delay, listening: !!handler});
             }
@@ -9867,3 +9851,105 @@ class TestPackWorker:
             {"scenario": "control", "before": 0, "added": [1], "delay": 3000, "listening": False},
             {"scenario": "timeout", "before": 0, "added": [1], "delay": 3000, "listening": False},
         ]
+
+
+class TestPackPanel:
+    @staticmethod
+    def function(name):
+        panel = files("trails.visualization").joinpath("js", "offline_panel.js").read_text(encoding="utf-8")
+        return "function " + name + "(" + panel.split("function " + name + "(", 1)[1].split("\n                }", 1)[0] + "\n}"
+
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    def test_worker_and_panel_use_the_same_level_rule_at_every_zoom(self, tmp_path, provider):
+        panel_rule = self.function("packLevel")
+        own = maps.PROVIDERS[provider]
+        layers = [own, own.heights, own.shade, own.slope, own.vegetation, own.forest]
+        addresses = [(layer.top, z) for layer in layers for z in range(8, layer.top + 1)]
+        result = TestPackWorker.run_worker(
+            tmp_path,
+            f"""
+            var workerRule = packLevel;
+            var panelRule = ({panel_rule});
+            console.log(JSON.stringify({json.dumps(addresses)}.map(a => [workerRule(...a), panelRule(...a)])));
+        """,
+            provider,
+        )
+        for (top, z), (worker, panel) in zip(addresses, result, strict=True):
+            expected = max(level for level in packs.pack_levels(range(8, top + 1)) if level <= z)
+            assert worker == panel == expected
+
+    def setup(self, provider):
+        own = maps.PROVIDERS[provider]
+        west, south, east, north = own.extent
+        settings = {"HEIGHTS": own.heights, "SHADE": own.shade, "SLOPE": own.slope, "VEGETATION": own.vegetation, "FOREST": own.forest}
+        setup = f"var location = {{href: 'https://atlas.test/map.html'}}, TOP = {own.top}, OVERVIEW = 8, SPAN = 262144;"
+        setup += "var EXTENT = " + json.dumps({"w": west, "s": south, "e": east, "n": north}) + ";"
+        setup += "var PACK_WEIGHT = " + json.dumps(own.pack_weight) + ";"
+        for name, layer in settings.items():
+            assert layer is not None
+            setup += f"var {name} = {json.dumps(layer.as_settings())};"
+            assert set(layer.pack_weight) == set(packs.pack_levels(range(8, layer.top + 1)))
+        setup += "function key(x,y) {return x*SPAN+y;} function keyX(v){return Math.floor(v/SPAN);} function keyY(v){return v%SPAN;}"
+        for name in ["fracTile", "edgeAt", "overviewAt", "packPrefix", "packLayers", "parentsAt", "packWalk", "weigh"]:
+            setup += self.function(name)
+        return setup
+
+    @pytest.mark.parametrize("provider,count", [("kartverket", 9162), ("lantmateriet", 2274)])
+    def test_whole_box_iterator_counts_packs_once_with_measured_weights(self, tmp_path, provider, count):
+        setup = self.setup(provider)
+        setup += """
+            var levels = {}; for (var z=8; z<=17; z++) levels[z]=overviewAt(z);
+            var walk=packWalk(levels), row, urls=new Set(), total=0, bytes=0;
+            while ((row=walk.next())) { urls.add(row.url); total++; bytes+=row.bytes; }
+            console.log(JSON.stringify({total:total, unique:urls.size, bytes:bytes, weighed:weigh(levels)}));
+        """
+        result = TestPackWorker.run_worker(tmp_path, setup, provider)
+        assert result["total"] == result["unique"] == count
+        assert result["weighed"] == {"packs": count, "bytes": result["bytes"]}
+
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    def test_sparse_scope_addresses_match_worker_at_every_zoom(self, tmp_path, provider):
+        script = (
+            self.setup(provider)
+            + """
+            var results = [];
+            for (var selected = 8; selected <= TOP; selected++) {
+                var levels = {}, expected = new Set();
+                for (var z = 8; z <= selected; z++) {
+                    var edge = edgeAt(z);
+                    levels[z] = new Set([key(edge.x0, edge.y0), key(edge.x1, edge.y1)]);
+                    packLayers().forEach(function (layer) {
+                        if (z > layer.top) return;
+                        levels[z].forEach(function (v) {
+                            expected.add(packFor(new URL(layer.prefix, location.href).href + z + '/' +
+                                keyX(v) + '/' + keyY(v) + '.png').url);
+                        });
+                    });
+                }
+                var walk = packWalk(levels), actual = [], next;
+                while ((next = walk.next())) {
+                    actual.push(next.url);
+                    if (actual.length > 1000) throw Error('pack iterator did not terminate');
+                }
+                results.push({actual: actual.sort(), expected: Array.from(expected).sort()});
+            }
+            console.log(JSON.stringify(results));
+        """
+        )
+        for result in TestPackWorker.run_worker(tmp_path, script, provider):
+            assert result["actual"] == result["expected"]
+
+    def test_both_upgrade_handlers_drop_tiles_and_its_obsolete_count(self):
+        panel = files("trails.visualization").joinpath("js", "offline_panel.js").read_text(encoding="utf-8")
+        worker = files("trails.visualization").joinpath("js", "worker.js").read_text(encoding="utf-8")
+        assert "made.deleteObjectStore('tiles')" in panel
+        assert 'made.deleteObjectStore("tiles")' in worker
+        assert "ask.transaction.objectStore('flags').delete(HELD)" in panel
+        assert 'ask.transaction.objectStore(FLAGS).delete("held")' in worker
+        assert "answer.blob()" not in panel
+
+    def test_the_scale_reads_the_current_sheet_ceiling(self):
+        scale = files("trails.visualization").joinpath("js", "scale_zoom.js").read_text(encoding="utf-8")
+        assert "zoom > options.maxNativeZoom" in scale
+        assert "' · tiles z' + options.maxNativeZoom" in scale
+        assert "trailsnativezoom" in scale

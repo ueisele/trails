@@ -7,8 +7,7 @@
                 var TERRAIN = '{{ this.cache }}-terrain';
                 var TILES = '{{ this.cache }}-tiles';
                 var KEY = '{{ this.cache }}-offline';
-                // The finest level the source answers -- Kartverket's cache ends
-                // at z18, where z19 answers 400; Lantmäteriet's file at z17.
+                // The finest tile zoom in the provider's tree.
                 var TOP = {{ this.top }};
                 // The coarsest zoom a reader may *pick*.
                 var FLOOR = 14;
@@ -22,20 +21,12 @@
                 var OVERVIEW = 8;
                 // Where the whole map stops being a download and starts being an
                 // archive -- and with it the budget every other scope is held to.
-                // The source's own figure: z16 on Kartverket, z17 -- the top of
-                // the copy -- on Lantmäteriet (see `Provider.cap`).
+                // Both trees are offered to z17 (see `Provider.cap`).
                 var CAP_ZOOM = {{ this.cap }};
-                // What a kept tile weighs, per zoom, measured on the provider's
-                // own tiles -- see `PROVIDERS` for how each table was taken.
-                var WEIGHT = {{ this.weight_json }};
-                // The height tiles beside the map's, where the map has them
-                // (see `HeightTiles` in Python). Kept at the one zoom the page
-                // reads them at, over the same set of tiles the map is kept
-                // over, so a straight leg planned offline over kept ground has
-                // heights and one planned off it says it has none. Not the
-                // whole box: measured, that is 380 tiles and 35 MB at z13, a
-                // third again on a band along a day's walk. `null` where the
-                // map carries none, and then nothing here changes.
+                // Mean pack bytes at each parent level, measured from index.json.
+                var PACK_WEIGHT = {{ this.pack_weight_json }};
+                // Heights use the same pack iterator as the other layers. Their
+                // z10 overview packs also carry z13, the level the page reads.
                 var HEIGHTS = {{ this.heights_json }};
                 // The relief overlay's tiles, kept with the map's. Null where
                 // no height model has been cut over the map's ground.
@@ -47,9 +38,7 @@
                 // condition, kept with the rest whether or not they are on.
                 var VEGETATION = {{ this.vegetation_json }};
                 var FOREST = {{ this.forest_json }};
-                // Where *our* tiles end -- the box the three trees were cut to,
-                // which is not the sheet's reach where the sheet is somebody
-                // else's cache (§6.10). A margin is clipped to it: see `padded`.
+                // Every layer ends at this tree box. Both scope and margin are clipped.
                 var EXTENT = {{ this.extent_json }};
 
                 // **Four scopes, and only one of them follows the paths.** In
@@ -61,7 +50,7 @@
                 // underfoot, which is the right shape rather than a compromise.
                 var SCOPES = [
                     {key: 'all', label: 'The whole map', pad: 1, ceiling: CAP_ZOOM,
-                     hint: 'Every tile in the box this map draws paths in, including the ground no path crosses.'},
+                     hint: 'Every pack in the map’s tree box, including the ground no path crosses.'},
                     {key: 'band', label: 'Along the route', pad: 2, ceiling: TOP,
                      hint: 'A band along the line, wider at the coarse zooms and narrow underfoot.'},
                     {key: 'rect', label: 'A box round it', pad: 1, ceiling: TOP,
@@ -170,7 +159,8 @@
                         n = Math.max(n, ring[i][0]); s = Math.min(s, ring[i][0]);
                         e = Math.max(e, ring[i][1]); w = Math.min(w, ring[i][1]);
                     }
-                    var a = fracTile(n, w, z), b = fracTile(s, e, z);
+                    var a = fracTile(Math.min(n, EXTENT.n), Math.max(w, EXTENT.w), z);
+                    var b = fracTile(Math.max(s, EXTENT.s), Math.min(e, EXTENT.e), z);
                     for (x = Math.floor(a.x); x <= Math.floor(b.x); x += 1) {
                         for (y = Math.floor(a.y); y <= Math.floor(b.y); y += 1) {
                             var probes = [[x + 0.5, y + 0.5], [x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]], p;
@@ -360,8 +350,8 @@
                 // The one function that says what a scope *is*, handed to
                 // `levelsFor` to be asked once at the finest zoom.
                 function coreOf(which) {
+                    if (which === 'all') { return null; }
                     return function (z) {
-                        if (which === 'all') { return boxAt(mapBox(), z); }
                         if (which === 'band') {
                             var from = source();
                             return from ? bandAt(from.line, z) : new Set();
@@ -376,10 +366,8 @@
                 // our own tree, cut exactly to its box, *the whole map* asked
                 // for the box plus one tile round it, met twelve 404s in a row
                 // in its first sixty tiles and gave up on a connection that was
-                // fine. The core is never clipped -- a box drawn past the tiles
-                // is the reader's to draw -- only what this function adds to it.
+                // fine. Both the core and its margin stop at the tree box.
                 function edgeAt(z) {
-                    if (!EXTENT) { return null; }
                     var a = fracTile(EXTENT.n, EXTENT.w, z), b = fracTile(EXTENT.s, EXTENT.e, z);
                     return {x0: Math.floor(a.x), y0: Math.floor(a.y), x1: Math.floor(b.x), y1: Math.floor(b.y)};
                 }
@@ -393,7 +381,7 @@
                             for (dy = -pad; dy <= pad; dy += 1) {
                                 var x = cx + dx, y = cy + dy;
                                 if (x < 0 || y < 0) { continue; }
-                                if (edge && (dx || dy) && (x < edge.x0 || x > edge.x1 || y < edge.y0 || y > edge.y1)) { continue; }
+                                if (x < edge.x0 || x > edge.x1 || y < edge.y0 || y > edge.y1) { continue; }
                                 out.add(key(x, y));
                             }
                         }
@@ -405,7 +393,7 @@
                 // outside the box at z11; keep that ground once, and price the
                 // overlap once. Each iterator holds only its current position.
                 function overviewAt(z, core) {
-                    var box = EXTENT || mapBox();
+                    var box = EXTENT;
                     var a = fracTile(box.n, box.w, z), b = fracTile(box.s, box.e, z);
                     var x0 = Math.floor(a.x), y0 = Math.floor(a.y);
                     var x1 = Math.floor(b.x), y1 = Math.floor(b.y);
@@ -455,7 +443,12 @@
                 // out several tiles wider on each side than the ground it was
                 // asked for -- which at z11 is 8 km a tile.
                 function levelsFor(coreAt, top, pad) {
-                    var out = {}, below = coreAt(top), z;
+                    var out = {}, z;
+                    if (!coreAt) {
+                        for (z = OVERVIEW; z <= top; z += 1) { out[z] = overviewAt(z); }
+                        return out;
+                    }
+                    var below = coreAt(top);
                     out[top] = padded(below, pad, top);
                     for (z = top - 1; z >= BOTTOM; z -= 1) {
                         var up = new Set();
@@ -469,78 +462,86 @@
                     return out;
                 }
 
+                // Mirrored exactly in worker.js, with a test over every layer's
+                // levels. Zooms remain tile zooms; addresses use the parent level.
+                function packLevel(top, z) {
+                    return Math.max(0, top - 3 - 4 * Math.floor((top - z) / 4));
+                }
+
+                function packPrefix(prefix) {
+                    if (!prefix) { return null; }
+                    var url = new URL(prefix, location.href);
+                    url.pathname = '/packs' + url.pathname;
+                    return url.href;
+                }
+
+                function packLayers() {
+                    return [{kind: 'map', top: TOP, weight: PACK_WEIGHT, prefix: TILE_PREFIX}].concat(
+                        [[HEIGHTS, 'height'], [SHADE, 'shade'], [SLOPE, 'slope'],
+                         [VEGETATION, 'vegetation'], [FOREST, 'forest']].filter(function (pair) { return pair[0]; })
+                        .map(function (pair) {
+                            var layer = pair[0];
+                            return {kind: pair[1], top: layer.top || layer.zoom,
+                                    weight: layer.pack_weight, prefix: layer.url.split('{z}')[0]};
+                        }));
+                }
+
+                // Scan parents, testing their children against the selection.
+                // Only the current rectangle position survives a next(): no set
+                // of parents, addresses or requests grows with the download.
+                function parentsAt(levels, top, level) {
+                    var edge = edgeAt(level);
+                    var first = Math.max(OVERVIEW, level), last = Math.min(top, level + 3);
+                    function wanted(x, y) {
+                        for (var z = first; z <= last; z += 1) {
+                            if (!levels[z]) { continue; }
+                            var side = Math.pow(2, z - level);
+                            for (var dx = 0; dx < side; dx += 1) {
+                                for (var dy = 0; dy < side; dy += 1) {
+                                    if (levels[z].has(key(x * side + dx, y * side + dy))) { return true; }
+                                }
+                            }
+                        }
+                        return false;
+                    }
+                    var x = edge.x0, y = edge.y0;
+                    return {next: function () {
+                        while (x <= edge.x1) {
+                            var cx = x, cy = y;
+                            y += 1;
+                            if (y > edge.y1) { y = edge.y0; x += 1; }
+                            if (wanted(cx, cy)) { return {x: cx, y: cy}; }
+                        }
+                        return null;
+                    }};
+                }
+
+                function packWalk(levels) {
+                    var layers = packLayers(), at = 0, z = OVERVIEW, parents = null, level;
+                    return {next: function () {
+                        while (at < layers.length) {
+                            var layer = layers[at];
+                            if (z > layer.top) { at += 1; z = OVERVIEW; continue; }
+                            if (!parents) {
+                                level = packLevel(layer.top, z);
+                                parents = parentsAt(levels, layer.top, level);
+                            }
+                            var parent = parents.next();
+                            if (parent) {
+                                return {url: packPrefix(layer.prefix) + level + '/' + parent.x + '/' + parent.y + '.pmtiles',
+                                        z: level, kind: layer.kind, bytes: layer.weight[level]};
+                            }
+                            parents = null;
+                            z = level + 4;
+                        }
+                        return null;
+                    }};
+                }
+
                 function weigh(levels) {
-                    var tiles = 0, bytes = 0;
-                    Object.keys(levels).forEach(function (z) {
-                        var n = levels[z].size;
-                        tiles += n;
-                        bytes += n * (WEIGHT[z] || 45000);
-                    });
-                    if (HEIGHTS && levels[HEIGHTS.zoom]) {
-                        tiles += levels[HEIGHTS.zoom].size;
-                        bytes += levels[HEIGHTS.zoom].size * heightWeight(HEIGHTS.zoom);
-                    }
-                    // **Every level of the shadow, not one.** The heights are
-                    // read at a single zoom and so are kept at one; the relief
-                    // is *drawn*, so a reader who keeps ground to z16 and pans
-                    // out to z12 wants it there too. It is cheap enough for that
-                    // to be the obvious answer: over a band to z17 the whole
-                    // shadow is a few megabytes against the sheet's hundreds.
-                    if (SHADE) {
-                        Object.keys(levels).forEach(function (z) {
-                            if (Number(z) > SHADE.top) { return; }
-                            tiles += levels[z].size;
-                            bytes += levels[z].size * shadeWeight(z);
-                        });
-                    }
-                    // The slope classes likewise, at every level they are
-                    // drawn at -- and whether or not they are switched on
-                    // now, because the switch is the reader's to flip in the
-                    // field and a class that was never kept is a blank tile
-                    // where a wall is.
-                    if (SLOPE) {
-                        Object.keys(levels).forEach(function (z) {
-                            if (Number(z) > SLOPE.top) { return; }
-                            tiles += levels[z].size;
-                            bytes += levels[z].size * slopeWeight(z);
-                        });
-                    }
-                    // And the vegetation and the forest, on the same terms.
-                    if (VEGETATION) {
-                        Object.keys(levels).forEach(function (z) {
-                            if (Number(z) > VEGETATION.top) { return; }
-                            tiles += levels[z].size;
-                            bytes += levels[z].size * vegetationWeight(z);
-                        });
-                    }
-                    if (FOREST) {
-                        Object.keys(levels).forEach(function (z) {
-                            if (Number(z) > FOREST.top) { return; }
-                            tiles += levels[z].size;
-                            bytes += levels[z].size * forestWeight(z);
-                        });
-                    }
-                    return {tiles: tiles, bytes: bytes};
-                }
-
-                function heightWeight(z) {
-                    return (HEIGHTS && HEIGHTS.weight[z]) || 90000;
-                }
-
-                function shadeWeight(z) {
-                    return (SHADE && SHADE.weight[z]) || 30000;
-                }
-
-                function slopeWeight(z) {
-                    return (SLOPE && SLOPE.weight[z]) || 5000;
-                }
-
-                function vegetationWeight(z) {
-                    return (VEGETATION && VEGETATION.weight[z]) || 4000;
-                }
-
-                function forestWeight(z) {
-                    return (FOREST && FOREST.weight[z]) || 1200;
+                    var walk = packWalk(levels), next, packs = 0, bytes = 0;
+                    while ((next = walk.next())) { packs += 1; bytes += next.bytes; }
+                    return {packs: packs, bytes: bytes};
                 }
 
                 // **Buffered, because the zoom row prices every level it draws.**
@@ -570,52 +571,14 @@
                 function cost(which, level) {
                     var at = sig(which, level);
                     if (!memo[at]) {
-                        var guess = guessed(which, level);
-                        memo[at] = guess || weigh(levelsFor(coreOf(which), level, scopeOf(which).pad));
+                        memo[at] = weigh(levelsFor(coreOf(which), level, scopeOf(which).pad));
                     }
                     return memo[at];
                 }
 
-                // **What a ring would cost, without building it.** The shoelace
-                // area of the ring in tile space is what the set is about to be,
-                // exact to its own perimeter and O(4) rather than a
-                // point-in-polygon test per tile. The levels below add a third
-                // -- each is a quarter of the one above -- and the margin a
-                // little more, which is what the 1.4 is.
-                //
-                // **A bounding box would not do**, and this is the one place it
-                // matters: the turned rectangle is deliberately diagonal, and
-                // its north-up box is up to twice itself. Refusing z18 for a
-                // rectangle that fits the budget would take away the scope's
-                // whole reason for turning.
-                function ringTiles(ring, level) {
-                    var sum = 0, i, j;
-                    for (i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
-                        var a = fracTile(ring[i][0], ring[i][1], level);
-                        var b = fracTile(ring[j][0], ring[j][1], level);
-                        sum += (b.x + a.x) * (b.y - a.y);
-                    }
-                    return Math.abs(sum / 2) * 1.4;
-                }
-
-                // **Refused on the estimate rather than built and then refused.**
-                // An area drawn round the whole park, priced at z18, is 1.5
-                // million tiles at the top level alone: a few hundred megabytes
-                // of arrays and about a second, spent working out a figure that
-                // was always going to be a refusal -- and the chooser prices
-                // every level it offers, so simply drawing that area would do it
-                // without anybody asking for z18. Twice the budget is the line,
-                // so the largest set ever actually built is about 490,000 tiles.
-                function guessed(which, level) {
-                    var ring = ringFor(which);
-                    if (!ring) { return null; }
-                    var tiles = ringTiles(ring, level), bytes = tiles * (WEIGHT[level] || 45000);
-                    return bytes > budget() * 2 ? {tiles: Math.round(tiles), bytes: bytes, guessed: true} : null;
-                }
-
                 // **The budget is measured, not written down.** It is what the
-                // whole map costs at the zoom that scope is capped at -- 6.76 GB
-                // on this build -- and every other scope is held to it, so no
+                // whole map costs at z17, using measured pack weights,
+                // and every other scope is held to it, so no
                 // choice on this panel can quietly cost more than the one that
                 // keeps everything.
                 var cap = null;
@@ -640,7 +603,7 @@
                     var sum = weigh(levels);
                     memo[at] = sum;
                     chosen = {at: at, levels: levels, top: zoom, scope: scope, zoom: zoom,
-                              tiles: sum.tiles, bytes: sum.bytes, overview: overviewCost()};
+                              packs: sum.packs, bytes: sum.bytes, overview: overviewCost()};
                     return chosen;
                 }
 
@@ -677,120 +640,11 @@
                     return layer.options.trailsUrl;
                 }
 
-                // Built by hand rather than through `getTileUrl`, which takes
-                // its zoom from the map rather than from the tile it is given.
-                // **And absolute**, because the worker looks a tile up by the
-                // address of the request, which is always absolute, and a
-                // sheet served from our own bucket is addressed root-relative:
-                // keyed as written, every tile of it would be kept under a
-                // name the worker never asks for. Kartverket's addresses are
-                // absolute already and come back unchanged.
-                function urlFor(layer, x, y, z) {
-                    var made = plainUrl(layer).replace('{z}', z).replace('{y}', y).replace('{x}', x)
-                        .replace('{s}', (layer.options.subdomains || 'abc')[0])
-                        .replace('{r}', '');
-                    return new URL(made, location.href).href;
-                }
-
-                function heightUrlFor(x, y, z) {
-                    return new URL(HEIGHTS.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
-                }
-
-                function shadeUrlFor(x, y, z) {
-                    return new URL(SHADE.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
-                }
-
-                function slopeUrlFor(x, y, z) {
-                    return new URL(SLOPE.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
-                }
-
-                function vegetationUrlFor(x, y, z) {
-                    return new URL(VEGETATION.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
-                }
-
-                function forestUrlFor(x, y, z) {
-                    return new URL(FOREST.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
-                }
-
                 function walker(picked) {
                     picked = picked || recount();
-                    var layer = base();
-                    // Which of the four trees this level is being walked
-                    // for: the sheet, then its heights where that level carries
-                    // them, then its relief, then its slope classes. Each pass
-                    // is the same set of tiles, so the level is walked up to
-                    // four times and the set is built once.
-                    var z = OVERVIEW, it = null, pass = 'map';
-                    return {
-                        total: layer ? picked.tiles : 0,
-                        bytes: picked.bytes,
-                        next: function () {
-                            if (!layer) { return null; }
-                            while (z <= picked.top) {
-                                if (!it) {
-                                    var set = picked.levels[z];
-                                    if (!set) { z += 1; continue; }
-                                    it = set.values();
-                                }
-                                var step = it.next();
-                                if (step.done) {
-                                    it = null;
-                                    if (pass === 'map' && HEIGHTS && z === HEIGHTS.zoom) {
-                                        pass = 'height';
-                                        it = picked.levels[z].values();
-                                        continue;
-                                    }
-                                    if ((pass === 'map' || pass === 'height') && SHADE && z <= SHADE.top) {
-                                        pass = 'shade';
-                                        it = picked.levels[z].values();
-                                        continue;
-                                    }
-                                    if ((pass === 'map' || pass === 'height' || pass === 'shade') && SLOPE && z <= SLOPE.top) {
-                                        pass = 'slope';
-                                        it = picked.levels[z].values();
-                                        continue;
-                                    }
-                                    // Then the vegetation and the forest (§6.11),
-                                    // each once, after whichever of the others
-                                    // this level carried.
-                                    if (pass !== 'vegetation' && pass !== 'forest' && VEGETATION && z <= VEGETATION.top) {
-                                        pass = 'vegetation';
-                                        it = picked.levels[z].values();
-                                        continue;
-                                    }
-                                    if (pass !== 'forest' && FOREST && z <= FOREST.top) {
-                                        pass = 'forest';
-                                        it = picked.levels[z].values();
-                                        continue;
-                                    }
-                                    pass = 'map';
-                                    z += 1;
-                                    continue;
-                                }
-                                // The level travels with the address because the
-                                // run weighs what it keeps, and parsing it back
-                                // out of the URL would be the third time this
-                                // page had written that particular guess down.
-                                if (pass === 'height') {
-                                    return {url: heightUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'height'};
-                                }
-                                if (pass === 'shade') {
-                                    return {url: shadeUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'shade'};
-                                }
-                                if (pass === 'slope') {
-                                    return {url: slopeUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'slope'};
-                                }
-                                if (pass === 'vegetation') {
-                                    return {url: vegetationUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'vegetation'};
-                                }
-                                if (pass === 'forest') {
-                                    return {url: forestUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'forest'};
-                                }
-                                return {url: urlFor(layer, keyX(step.value), keyY(step.value), z), z: z, kind: 'map'};
-                            }
-                            return null;
-                        }
-                    };
+                    var layer = base(), walk = packWalk(picked.levels);
+                    return {total: layer ? picked.packs : 0, bytes: picked.bytes,
+                            next: function () { return layer ? walk.next() : null; }};
                 }
 
                 // ---- what it would keep, drawn on the map ----------------------
@@ -986,11 +840,10 @@
                 var HELD = 'held';
                 var TIMING = 'timing';
                 // The two tile stores, named as the worker names them.
-                var KEPT = 'tiles';
+                var KEPT = 'packs';
                 var SEEN = 'browse';
-                // Under which prefixes the kept tiles were fetched; the worker
-                // reads it to answer a miss under a newer stand with the old
-                // tile of the same place (decisions §9.21).
+                // Tile prefixes identify the stand; Keep derives pack prefixes
+                // from them when a completed run removes an older stand.
                 var STAND = 'stand';
                 var TILE_PREFIX = new URL({{ this.tile_prefix_json }}, location.href).href;
 
@@ -1011,6 +864,10 @@
                                 var made = ask.result;
                                 if (!made.objectStoreNames.contains('pages')) { made.createObjectStore('pages'); }
                                 if (!made.objectStoreNames.contains('flags')) { made.createObjectStore('flags'); }
+                                if (made.objectStoreNames.contains('tiles')) {
+                                    made.deleteObjectStore('tiles');
+                                    ask.transaction.objectStore('flags').delete(HELD);
+                                }
                                 if (!made.objectStoreNames.contains('packs')) { made.createObjectStore('packs'); }
                                 if (!made.objectStoreNames.contains('bench')) { made.createObjectStore('bench'); }
                                 if (!made.objectStoreNames.contains(KEPT)) { made.createObjectStore(KEPT); }
@@ -1061,31 +918,28 @@
                     }).catch(function () { return false; });
                 }
 
-                function dbDelete(store, key) {
-                    return db().then(function (open) {
-                        return new Promise(function (done) {
-                            var deal = open.transaction(store, 'readwrite');
-                            deal.objectStore(store).delete(key);
-                            deal.oncomplete = function () { done(true); };
-                            deal.onerror = function () { done(false); };
-                        });
-                    }).catch(function () { return false; });
-                }
-
                 // Every key under a prefix, gone: what is left of an older
                 // stand once a run has replaced the tiles it wanted.
                 function dbSweep(store, prefix) {
-                    if (!prefix) { return Promise.resolve(0); }
+                    if (!prefix) { return Promise.resolve(); }
                     return db().then(function (open) {
-                        return new Promise(function (done) {
-                            var gone = 0;
-                            var deal = open.transaction(store, 'readwrite');
-                            var walk = deal.objectStore(store).delete(IDBKeyRange.bound(prefix, prefix + '￿', false, true));
-                            walk.onsuccess = function () { gone = 1; };
-                            deal.oncomplete = function () { done(gone); };
-                            deal.onerror = function () { done(gone); };
+                        return new Promise(function (done, fail) {
+                            var tx = open.transaction([store, 'flags'], 'readwrite');
+                            var flags = tx.objectStore('flags'), held = flags.get(HELD);
+                            held.onsuccess = function () {
+                                var was = held.result, part = was && was.layers && was.layers[prefix];
+                                tx.objectStore(store).delete(IDBKeyRange.bound(prefix, prefix + '￿', false, true));
+                                if (part) {
+                                    was.packs -= part.packs; was.bytes -= part.bytes;
+                                    delete was.layers[prefix];
+                                    flags.put(was, HELD);
+                                }
+                            };
+                            tx.oncomplete = done;
+                            tx.onerror = function () { fail(tx.error); };
+                            tx.onabort = function () { fail(tx.error); };
                         });
-                    }).catch(function () { return 0; });
+                    });
                 }
 
                 // The prefixes the page names now, one per kind of tile.
@@ -1135,7 +989,7 @@
                 // the one wrong answer that costs bytes: it invites a reader with
                 // a full cache to download it again.
                 function kept() {
-                    var none = {tiles: 0, bytes: 0, top: 0, known: false, stale: null};
+                    var none = {packs: 0, bytes: 0, top: 0, known: false, stale: null};
                     if (!window.caches) { return Promise.resolve(none); }
                     return Promise.all([dbRead('flags', HELD), dbRead('flags', STAND)]).then(function (both) {
                         var held = both[0], stand = both[1];
@@ -1144,28 +998,35 @@
                         // are the page's own stand, which is written down now so
                         // a later stand can tell them apart.
                         if (!stand) { stand = prefixes(); dbWrite('flags', STAND, stand); }
-                        return {tiles: held.tiles || 0, bytes: held.bytes || 0,
+                        return {packs: held.packs || 0, bytes: held.bytes || 0,
                                 top: held.top || 0, known: true, stale: staleOf(stand)};
                     }).catch(function () { return none; });
                 }
 
-                // **Maintained by the run, which is the only thing that puts a
-                // tile here.** Every tile it fetched, plus every tile of its own
-                // selection it found already there. Exact for one selection;
-                // a reader who kept two that do not overlap is undercounted until
-                // either is run again, which is the safe way to be wrong -- it
-                // never claims ground that is not there.
-                function note(tiles, bytes, top, afresh) {
-                    return dbRead('flags', HELD).then(function (was) {
-                        // A run that replaces an older stand is the whole
-                        // figure, not the larger of two stands.
-                        if (afresh) { was = null; }
-                        return dbWrite('flags', HELD, {
-                            tiles: Math.max((was && was.tiles) || 0, tiles),
-                            bytes: Math.max((was && was.bytes) || 0, bytes),
-                            top: Math.max((was && was.top) || 0, top)
+                // A pack and its count commit together. A stopped run, overlapping
+                // scopes and a repeated Keep all leave the same exact held figure.
+                function putPack(url, body, top, prefix) {
+                    return db().then(function (open) {
+                        return new Promise(function (done, fail) {
+                            var tx = open.transaction([KEPT, 'flags'], 'readwrite');
+                            var store = tx.objectStore(KEPT), flags = tx.objectStore('flags');
+                            var old = store.get(url), held = flags.get(HELD);
+                            held.onsuccess = function () {
+                                var was = held.result || {packs: 0, bytes: 0, top: 0};
+                                store.put(body, url);
+                                var count = old.result ? 0 : 1;
+                                var bytes = body.byteLength - (old.result ? old.result.byteLength : 0);
+                                // One scalar per tree/stand, never one per pack.
+                                var layers = was.layers || {}, part = layers[prefix] || {packs: 0, bytes: 0};
+                                part.packs += count; part.bytes += bytes; layers[prefix] = part;
+                                flags.put({packs: was.packs + count, bytes: was.bytes + bytes,
+                                           top: Math.max(was.top, top), layers: layers}, HELD);
+                            };
+                            tx.oncomplete = function () { done(); };
+                            tx.onerror = function () { fail(tx.error); };
+                            tx.onabort = function () { fail(tx.error); };
                         });
-                    }).catch(function () { return null; });
+                    });
                 }
 
                 function room() {
@@ -1281,6 +1142,7 @@
                         layer.options.maxNativeZoom = want;
                         layer.redraw();
                     });
+                    map.fire('trailsnativezoom');
                 }
 
                 // **A token on the sheet's URL, moved whenever what the worker
@@ -1582,21 +1444,9 @@
                     // number: it is the same figure arriving a few seconds later,
                     // and it is not a re-download.
                     var state = {total: walk.total, done: 0, counted: true, failed: 0, absent: 0,
-                                 held: 0, added: 0, bytes: 0, top: 0,
+                                 held: 0, added: 0, bytes: 0, top: 0, requested: zoom,
                                  stop: false, done_: null, stale: null};
                     working = state;
-                    // **An older stand is replaced tile by tile.** Every tile
-                    // this run fetches under the page's prefix takes the place
-                    // of the one kept under the old, so the store never holds
-                    // two stands of the same ground; what the run did not ask
-                    // for is swept once it has completed.
-                    function replacing(next) {
-                        var stood = prefixes();
-                        var was = state.stale && state.stale[next.kind];
-                        if (!was) { return Promise.resolve(false); }
-                        var now = stood[next.kind];
-                        return dbDelete(KEPT, was + next.url.slice(now.length));
-                    }
                     state.done_ = kept().then(function (had) {
                         state.stale = had.stale;
                         // How many have refused in a row. Shared by all six
@@ -1607,17 +1457,18 @@
                             if (state.stop) { return Promise.resolve(); }
                             var next = walk.next();
                             if (!next) { return Promise.resolve(); }
-                            var kept = false;
+                            var kept = false, size = 0;
                             return dbRead(KEPT, next.url).then(function (there) {
-                                if (there) { missed = 0; state.held += 1; kept = true; return null; }
+                                if (there) { missed = 0; state.held += 1; kept = true; size = there.byteLength; return null; }
                                 return fetchTile(next.url, 1, 0).then(function (answer) {
                                     if (answer) {
                                         missed = 0;
-                                        state.added += 1;
-                                        kept = true;
-                                        return answer.blob().then(function (body) {
-                                            return dbWrite(KEPT, next.url, body);
-                                        }).then(function () { return replacing(next); });
+                                        return answer.arrayBuffer().then(function (body) {
+                                            return putPack(next.url, body, next.kind === 'map' ? Math.min(state.requested, next.z + 3) : 0,
+                                                packPrefix(prefixes()[next.kind])).then(function () {
+                                                state.added += 1; kept = true; size = body.byteLength;
+                                            });
+                                        });
                                     }
                                     // **Not there is not refused.** A 404 is the
                                     // source's answer, given at once and the same
@@ -1645,12 +1496,8 @@
                                 // as a kept one made a stalled run's figure
                                 // overstate what it had.
                                 if (kept) {
-                                    if (next.z > state.top) { state.top = next.z; }
-                                    state.bytes += next.kind === 'height' ? heightWeight(next.z)
-                                        : (next.kind === 'shade' ? shadeWeight(next.z)
-                                        : (next.kind === 'slope' ? slopeWeight(next.z)
-                                        : (next.kind === 'vegetation' ? vegetationWeight(next.z)
-                                        : (next.kind === 'forest' ? forestWeight(next.z) : (WEIGHT[next.z] || 45000)))));
+                                    if (next.kind === 'map') { state.top = Math.max(state.top, Math.min(state.requested, next.z + 3)); }
+                                    state.bytes += size;
                                 }
                                 // **Give up on the connection, not on the tile.**
                                 // One tile that will not come is a tile, and the
@@ -1669,25 +1516,27 @@
                                 // interrupts still leaves a figure behind -- which
                                 // is exactly the run that used to leave the panel
                                 // saying nothing was kept.
-                                if (state.done % 2000 === 0) {
-                                    note(state.held + state.added, state.bytes, state.top);
-                                }
                                 return one();
                             });
                         }
                         var runners = [], i;
                         for (i = 0; i < 6; i += 1) { runners.push(one()); }
                         return Promise.all(runners).then(function () {
-                            return note(state.held + state.added, state.bytes, state.top, !!state.stale);
+                            return dbRead('flags', HELD).then(function (held) {
+                                if (!held) { return; }
+                                held.top = state.stale && !state.stop ? state.top : Math.max(held.top, state.top);
+                                return dbWrite('flags', HELD, held);
+                            });
                         }).then(function () {
                             // Completed, not stopped: the kept tiles are the
                             // page's stand now, and what the old stand still
                             // holds beyond this selection goes with it. A run
-                            // that stopped leaves the old stand written down,
-                            // so the worker goes on answering from it.
+                            // that stopped leaves the old stand written down
+                            // so the next Keep can finish removing it.
                             if (state.stop || !state.stale) { return null; }
-                            return Promise.all([dbSweep(KEPT, state.stale.tiles), dbSweep(KEPT, state.stale.heights)])
-                                .then(function () { return dbWrite('flags', STAND, prefixes()); });
+                            return Promise.all(['tiles', 'heights', 'shade', 'slope', 'vegetation', 'forest'].map(function (kind) {
+                                return dbSweep(KEPT, packPrefix(state.stale[kind]));
+                            })).then(function () { return dbWrite('flags', STAND, prefixes()); });
                         });
                     }).then(function () {
                         working = null;
@@ -2165,16 +2014,7 @@
                             if (level > here.ceiling) {
                                 why = 'Too much ground at this zoom \u2014 that is an archive, not a download.';
                             } else if (cap !== null && known && known.bytes > cap) {
-                                // **`roughly` where the figure was never built.**
-                                // A level far over the budget is priced from the
-                                // ring's area rather than by building its tile
-                                // set -- that is the whole point of `guessed` --
-                                // and the number lands here, in a sentence the
-                                // reader gets to read. Quoting an estimate to
-                                // three significant figures is a claim the panel
-                                // cannot support.
-                                why = 'Over the budget: ' + (known.guessed ? 'roughly ' : '') +
-                                    megabytes(known.bytes) + ' against ' + megabytes(cap) +
+                                why = 'Over the budget: ' + megabytes(known.bytes) + ' against ' + megabytes(cap) +
                                     ', which is what the whole map costs at z' + CAP_ZOOM + '.';
                             }
                             if (why) {
@@ -2215,7 +2055,7 @@
                             // this is and not merely that there is one. What
                             // reads it is a check that has to tell a figure from
                             // before a drag from the figure after it.
-                            counted = {tiles: picking.tiles, bytes: picking.bytes,
+                            counted = {packs: picking.packs, bytes: picking.bytes,
                                        scope: scope, zoom: zoom, at: picking.at, overview: picking.overview};
                             budget();
                             var level;
@@ -2223,9 +2063,9 @@
                             refresh();
                         }, 0);
                     } else {
-                        said.says.textContent = count(counted.tiles - counted.overview.tiles) + ' tiles \u00b7 about ' +
+                        said.says.textContent = count(counted.packs - counted.overview.packs) + ' packs \u00b7 about ' +
                             megabytes(counted.bytes - counted.overview.bytes) + ' \u00b7 ' + hint;
-                        said.overview.textContent = 'overview, ' + count(counted.overview.tiles) + ' tiles, ' +
+                        said.overview.textContent = 'overview, ' + count(counted.overview.packs) + ' packs, ' +
                             megabytes(counted.overview.bytes) + ' \u00b7 the whole box at z8\u2013z11';
                         var share = cap ? counted.bytes / cap : 0;
                         said.fill.style.width = Math.min(100, share * 100) + '%';
@@ -2251,7 +2091,7 @@
 
                     said.go.textContent = working ? 'Stop' : 'Keep it';
                     said.go.className = working ? 'trails-offline-stop' : 'trails-offline-go';
-                    said.go.disabled = !working && (counted === null || counted.tiles === counted.overview.tiles || tooMuch);
+                    said.go.disabled = !working && (counted === null || counted.packs === counted.overview.packs || tooMuch);
                     said.go.style.opacity = said.go.disabled ? '0.5' : '1';
 
                     paint();
@@ -2322,10 +2162,8 @@
                             : 'Checking what is already kept\u2026';
                     } else if (have.kept && have.kept.stale) {
                         // **Said before the figures, because the figures are of
-                        // the old stand.** The map still draws offline from it;
-                        // Keep is what brings the new ground in.
-                        said.figures.textContent = 'Kept from an older stand of the map \u2014 it still draws offline, ' +
-                            'with the old ground. Keep loads the new tiles and drops the old as it goes.';
+                        // the old stand.** Keep brings the current ground in.
+                        said.figures.textContent = 'Kept from an older stand of the map \u2014 Keep loads the new packs and drops the old when it completes.';
                     } else if (lastRun && lastRun.offline) {
                         said.figures.textContent = 'No connection \u2014 nothing was tried, and nothing ' +
                             'was spent looking. Try again where there is signal.';
@@ -2336,7 +2174,7 @@
                         // difference is whether pressing Keep again is worth
                         // anything.
                         said.figures.textContent = 'The connection gave out \u2014 ' + count(lastRun.kept) +
-                            ' tiles are kept and nothing further was tried. Keep again picks up where it stopped.';
+                            ' packs are kept and nothing further was tried. Keep again picks up where it stopped.';
                     } else if (lastRun && !lastRun.kept && lastRun.total) {
                         // **Said, rather than left to be discovered.** A run
                         // where nothing arrived looks exactly like a run that
@@ -2354,8 +2192,8 @@
                         // space used is exact either way; it comes from the
                         // browser and not from a count.
                         var lines = [have.kept && have.kept.known
-                            ? count(have.kept.tiles) + ' tiles kept'
-                            : 'kept tiles not counted \u2014 the next download says how many'];
+                            ? count(have.kept.packs) + ' packs kept'
+                            : 'kept packs not counted \u2014 the next download says how many'];
                         if (lastRun && lastRun.failed) { lines.push(count(lastRun.failed) + ' refused'); }
                         if (have.storage && have.storage.usage !== null) {
                             lines.push(megabytes(have.storage.usage) + ' of ' + megabytes(have.storage.quota) + ' used');
@@ -2366,7 +2204,7 @@
                     // Offered whenever there may be something to delete, which
                     // includes not knowing: a reader who cannot count what they
                     // hold is the one most likely to want it gone.
-                    var maybe = have.kept && (have.kept.tiles || !have.kept.known);
+                    var maybe = have.kept && (have.kept.packs || !have.kept.known);
                     said.forget.disabled = !maybe;
                     said.forget.style.opacity = maybe ? '1' : '0.5';
                     // **Said, because otherwise it is found the hard way.** Only
@@ -2410,7 +2248,7 @@
                 // which is what the guard is actually asking.
                 function anyKept() {
                     return kept().then(function (there) {
-                        if (there.known) { return there.tiles > 0; }
+                        if (there.known) { return there.packs > 0; }
                         var first = walker().next();
                         if (!first) { return false; }
                         return dbRead(KEPT, first.url).then(function (one) { return !!one; })
@@ -2454,10 +2292,9 @@
                     freshness: freshRow,
                     refresh: refresh,
                     state: function () { return snapshot; },
-                    // The overview's box, including where the sheet itself
-                    // answers beyond it. Return fresh corners to keep it ours.
+                    // The finite tree box. Return fresh corners to keep it ours.
                     bounds: function () {
-                        var box = EXTENT || mapBox();
+                        var box = EXTENT;
                         return [[box.s, box.w], [box.n, box.e]];
                     },
                     scopes: SCOPES.map(function (each) { return each.key; }),
@@ -2496,7 +2333,7 @@
                     // most expensive way to ask.
                     needed: function () {
                         var picked = recount();
-                        return {tiles: base() ? picked.tiles : 0, bytes: picked.bytes};
+                        return {packs: base() ? picked.packs : 0, bytes: picked.bytes};
                     },
                     toggle: toggle,
                     keep: keep,

@@ -210,9 +210,8 @@ class Scene:
     #: the path is straight. Per scene rather than loosened for both.
     way_over_flight: float = 1.3
     #: The zoom *the whole map* is capped at on this page's sheet -- the
-    #: provider's own figure (`maps.Provider.cap`): z16 on Kartverket's, z17,
-    #: the top of the copy, on Lantmäteriet's.
-    cap: int = 16
+    #: provider's own figure (`maps.Provider.cap`): z17 on both trees.
+    cap: int = 17
 
     #: What a relief tile's address has in it, where this page draws one. None
     #: for a sheet with no height model of this project's behind it, and then
@@ -342,15 +341,8 @@ SCENES: dict[str, Scene] = {
             # The Rundtur's page on ut.no and its GPX; it is the one route
             # without a lomsdalvisten.no counterpart.
             "links to pages published elsewhere": 2,
-            # The box from z11 to z16 on Kartverket's sheet, and since §6.10 the
-            # z13 height tiles and the relief and slope of every level to z15
-            # beside it. The three trees add 69,019 tiles and 0.70 GB to what
-            # the sheet alone held: 200,052 and 7.46 GB against 131,033 and 6.76.
-            # 267,400 since §6.11: the 200,052 of §6.10 plus the vegetation and
-            # forest tiles of every level up to z15 over the same ground.
-            # Phase 4 adds the z8–z10 overview: 60 tiles over five layers,
-            # 300 more than 267,400; the whole-map scope already held z11.
-            "tiles the whole map holds at its cap": 267700,
+            # All six pack trees, including the overview, at the z17 cap.
+            "packs the whole map holds at its cap": 9162,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -493,15 +485,8 @@ SCENES: dict[str, Scene] = {
             # The long chain is BD 21, BD 92, BD 16 and BD 91 run together, and
             # Naturkartan has a page for each.
             "links to pages published elsewhere": 4,
-            # The tree from z11 to z17 (146,975 tiles), the 440 height tiles and,
-            # since §6.6 and §6.7, the 9,310 relief tiles and the 9,310 slope
-            # tiles of every level up to z15, over the box widened on
-            # 2026-09-13 (§9.24). 1,032 MB against 903.
-            # 184,655 since §6.11: the 166,035 of §6.7 plus 9,310 each of
-            # vegetation and forest, z8 to z15.
-            # Phase 4 adds the z8–z10 overview: 20 tiles over five layers,
-            # 100 more than 184,655; the whole-map scope already held z11.
-            "tiles the whole map holds at its cap": 184755,
+            # All six pack trees, including the overview, at the z17 cap.
+            "packs the whole map holds at its cap": 2274,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -2462,7 +2447,7 @@ def the_sources_measure_the_store(page: Any) -> Check:
             """async () => {
                 const told = await window.trailsOffline.dbRead('flags', 'tiles-said');
                 return told && told.time && told.peak > 0 &&
-                    ['db', 'seen', 'net', 'blank'].some(path => told[path] > 0);
+                    ['mem', 'db', 'seen', 'net', 'blank'].some(path => told[path] > 0);
             }""",
             timeout=10_000,
         )
@@ -2471,9 +2456,11 @@ def the_sources_measure_the_store(page: Any) -> Check:
         page.wait_for_function("() => document.querySelector('.trails-open-tiles').textContent.includes('peak in flight:')")
         tally = all(
             isinstance(told[path], int) and told[path] >= 0 and 0 <= told["time"][path]["worst"] <= told["time"][path]["total"]
-            for path in ("db", "seen", "net", "blank")
-        ) and 0 <= told["deadlines"] <= sum(told[path] for path in ("db", "seen", "net", "blank"))
+            for path in ("mem", "db", "seen", "net", "blank")
+        ) and 0 <= told["deadlines"] <= sum(told[path] for path in ("mem", "db", "seen", "net", "blank"))
         readings.append(Reading("the worker tally has counts, times, deadlines and peak concurrency", tally and told["peak"] > 0, True))
+        line = page.locator(".trails-open-tiles").text_content() or ""
+        readings.append(Reading("Sources shows memory counts and timings", "from memory" in line and "Memory:" in line, True, note=line))
         return Check("the sources measure the store", readings)
     finally:
         page.evaluate("() => window.trailsChrome.close()")
@@ -9457,6 +9444,10 @@ def the_zoom_the_scale_says(page: Any) -> Check:
     # A metres-per-pixel figure, because that is what this whole map argues in.
     said = page.evaluate("() => (document.querySelector('.trails-scale-zoom') || {}).textContent")
     readings.append(Reading("and it says the ground it is drawing at", "m/px" in (said or ""), True, note=said or ""))
+    page.evaluate(with_map("() => { __MAP__.setZoom(18, {animate: false}); }"))
+    page.wait_for_timeout(400)
+    mark = page.locator(".trails-scale-zoom").text_content() or ""
+    readings.append(Reading("at z18 the scale names the magnified z17 sheet", "· tiles z17" in mark, True, note=mark))
     page.evaluate(with_map("(v) => { __MAP__.setView(v.at, v.z); }"), was)
     page.wait_for_timeout(300)
     return Check("the scale bar says which zoom it is", readings)
@@ -9544,7 +9535,7 @@ COUNTED = """(was) => {
     const said = window.trailsOffline.state();
     if (!said || !said.counted) { return null; }
     if (was !== null && said.counted.at === was) { return null; }
-    return {tiles: said.counted.tiles, at: said.counted.at};
+    return {packs: said.counted.packs, at: said.counted.at};
 }"""
 
 
@@ -9563,10 +9554,10 @@ def counted_now(page: Any, after: str | None = None, timeout: int = 60_000) -> d
         timeout: How long to wait for a figure
 
     Returns:
-        ``{"tiles": int, "at": str}`` for the settled selection.
+        ``{"packs": int, "at": str}`` for the settled selection.
     """
     settled = page.wait_for_function(COUNTED, arg=after, timeout=timeout).json_value()
-    return {"tiles": int(settled["tiles"]), "at": str(settled["at"])}
+    return {"packs": int(settled["packs"]), "at": str(settled["at"])}
 
 
 def what_the_chooser_draws(page: Any) -> list[Reading]:
@@ -9668,14 +9659,14 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
         # smaller would read the same as a drag that did nothing at all.
         page.mouse.move(spot["x"] - 120, spot["y"] + 90, steps=12)
         page.mouse.up()
-        dragged = counted_now(page, after=before["at"])["tiles"]
+        dragged = counted_now(page, after=before["at"])["packs"]
     out.append(Reading("a corner has a handle to drag", bool(spot), True))
     out.append(
         Reading(
             "and dragging it is a different piece of ground",
-            bool(dragged and dragged > before["tiles"]),
+            bool(dragged and dragged > before["packs"]),
             True,
-            note=f"{before['tiles']} tiles then {dragged}",
+            note=f"{before['packs']} packs then {dragged}",
         )
     )
 
@@ -9690,7 +9681,13 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
         timeout=120_000,
     )
     whole = page.evaluate("() => window.trailsOffline.state().counted")
-    out.append(stands("tiles the whole map holds at its cap", whole.get("tiles"), note=f"z{cap}, {whole.get('bytes', 0) / 1e6:,.0f} MB"))
+    out.append(
+        stands(
+            "packs the whole map holds at its cap",
+            whole.get("packs"),
+            note=f"z{cap}, {whole.get('bytes', 0):,} bytes ({whole.get('bytes', 0) / 1e6:,.0f} MB)",
+        )
+    )
     locks = page.evaluate(
         """() => {
             const out = {};
@@ -9764,13 +9761,10 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
             return url;
         }""")
         )
-        trees = [(base_url, 8, provider.top, provider.weight)]
-        if provider.heights:
-            h = provider.heights
-            trees.append((origin + h.template, h.top, h.top, h.weight))
-        for overlay in (provider.shade, provider.slope, provider.vegetation, provider.forest):
-            if overlay:
-                trees.append((origin + overlay.template, 8, overlay.top, overlay.weight))
+        trees = [(base_url, 8, provider.top, provider.pack_weight)]
+        for layer in (provider.heights, provider.shade, provider.slope, provider.vegetation, provider.forest):
+            if layer:
+                trees.append((origin + layer.template, 8, layer.top, layer.pack_weight))
         overview: dict[str, int] = {}
         old_scope: dict[str, int] = {}
         for z in range(8, 15):
@@ -9785,7 +9779,9 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
                     for y in range(upper, lower + 1):
                         for template, bottom, top, weight in trees:
                             if bottom <= z <= top:
-                                target[template.replace("{z}", str(z)).replace("{x}", str(x)).replace("{y}", str(y))] = weight[z]
+                                parent = max(level for level in weight if level <= z)
+                                prefix = template.split("{z}")[0].replace(origin, origin + "/packs", 1)
+                                target[f"{prefix}{parent}/{x >> (z - parent)}/{y >> (z - parent)}.pmtiles"] = weight[parent]
         expected = old_scope | overview
         extra = sorted(overview.keys() - old_scope.keys())
         page.evaluate("async () => await window.trailsOffline.open(true)")
@@ -9813,9 +9809,23 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
                 ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
             });
             const keys = await new Promise((done, fail) => {
-                const deal = db.transaction('packs', 'readwrite'), store = deal.objectStore('packs');
+                const deal = db.transaction(['packs', 'flags'], 'readwrite'), store = deal.objectStore('packs');
+                const flags = deal.objectStore('flags'), held = flags.get('held');
                 const ask = store.getAllKeys();
-                for (const url of extra) store.delete(url);
+                held.onsuccess = () => {
+                    const value = held.result;
+                    for (const url of extra) {
+                        const body = store.get(url);
+                        body.onsuccess = () => {
+                            if (!body.result) return;
+                            const prefix = url.split('/').slice(0, -3).join('/') + '/';
+                            value.packs--; value.bytes -= body.result.byteLength;
+                            value.layers[prefix].packs--; value.layers[prefix].bytes -= body.result.byteLength;
+                            flags.put(value, 'held');
+                        };
+                        store.delete(url);
+                    }
+                };
                 deal.oncomplete = () => done(ask.result.sort()); deal.onerror = () => fail(deal.error);
             });
             db.close();
@@ -9827,26 +9837,138 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         page.evaluate("() => window.trailsOffline.keep()")
         repeat = page.evaluate("() => window.trailsOffline.state().run")
         refetched = page.evaluate("() => window.trailsOverviewFetches.slice().sort()")
+        stored = page.evaluate(
+            in_db("""async () => {
+            const db = await new Promise(done => {
+                const ask = indexedDB.open('__DB__', 4); ask.onsuccess = () => done(ask.result);
+            });
+            const result = await new Promise(done => {
+                const tx = db.transaction(['packs', 'flags']);
+                let packs = 0, bytes = 0;
+                const held = tx.objectStore('flags').get('held');
+                const rows = tx.objectStore('packs').openCursor();
+                rows.onsuccess = () => {
+                    const row = rows.result;
+                    if (row) { packs++; bytes += row.value.byteLength; row.continue(); }
+                };
+                tx.oncomplete = () => done({packs, bytes, held: {packs: held.result.packs, bytes: held.result.bytes}});
+            }); db.close(); return result;
+        }""")
+        )
         return Check(
             "the overview is kept with a small scope and fills an older one",
             [
-                Reading("the estimate counts the union once", estimate["tiles"], len(expected)),
+                Reading("the estimate counts the union once", estimate["packs"], len(expected)),
                 Reading("the estimate weighs the union once", estimate["bytes"], sum(expected.values())),
                 Reading(
                     "the overview has its own count and weight",
                     estimate["overview"],
-                    {"tiles": len(overview), "bytes": sum(overview.values())},
+                    {"packs": len(overview), "bytes": sum(overview.values())},
                     note=line,
                 ),
-                Reading("the overview line names its tiles", line.startswith(f"overview, {len(overview):,} tiles, "), True),
+                Reading("the overview line names its packs", line.startswith(f"overview, {len(overview):,} packs, "), True),
                 Reading("the first run fetches the exact scope and z8–z11 box", fetched == sorted(expected), True, note=f"{len(fetched)} fetched"),
                 Reading("and keeps every one in the store", held == sorted(expected), True, note=f"{len(held)} rows, {first['failed']} refused"),
                 Reading("the repeat finds the old scope already kept", repeat["held"], len(old_scope)),
                 Reading("and fetches only the missing overview", refetched == extra, True, note=f"{len(refetched)} fetched, {repeat['added']} added"),
+                Reading(
+                    "held records the actual packs and bytes after repeating Keep",
+                    stored["held"],
+                    {"packs": stored["packs"], "bytes": stored["bytes"]},
+                ),
                 Reading("both runs finish without refusals", first["failed"] + repeat["failed"], 0),
                 Reading("nothing threw during the overview check", errors, []),
             ],
         )
+
+
+def the_pack_upgrade(browser: Any, page_path: pathlib.Path) -> Check:
+    """Either opener drops version-3 tile rows, retaining unrelated records."""
+    panel = (pathlib.Path(maps.__file__).parent / "js" / "offline_panel.js").read_text()
+    opener = "function db(" + panel.split("function db(", 1)[1].split("\n                function dbRead", 1)[0]
+    opener = opener.replace("{{ this.database }}", "pack-upgrade")
+    worker_name = "sw.js" if page_path.stem == "lomsdal-visten" else "abisko-sw.js"
+    worker = (page_path.parent / worker_name).read_text()
+    worker = re.sub(r'var DB = "[^"]+";', 'var DB = "pack-upgrade";', worker, count=1)
+    ledger = ""
+    for name in ["putPack", "dbSweep"]:
+        ledger += "function " + name + "(" + panel.split("function " + name + "(", 1)[1].split("\n                }", 1)[0] + "\n}\n"
+    readings = []
+    with served(page_path.parent) as origin:
+        for who, script in [
+            ("page", "var KEPT='packs', SEEN='browse', HELD='held';" + opener + "return db();"),
+            ("worker", worker + "\nreturn base();"),
+        ]:
+            with browser.new_context() as context:
+                page = context.new_page()
+                page.goto(origin + "/missing-upgrade-test", timeout=30_000)
+                result = page.evaluate(
+                    """async (script) => {
+                    await new Promise((done, fail) => {
+                        const ask = indexedDB.open('pack-upgrade', 3);
+                        ask.onupgradeneeded = () => {
+                            const db = ask.result;
+                            db.createObjectStore('tiles').put(new Blob(['old terrain']), 'old-tile');
+                            const flags = db.createObjectStore('flags');
+                            flags.put({tiles: 1, bytes: 11, top: 16}, 'held');
+                            flags.put({tiles: 'old-prefix/'}, 'stand');
+                            db.createObjectStore('pages').put('kept page', 'page');
+                            db.createObjectStore('browse').createIndex('at', 'at');
+                        };
+                        ask.onsuccess = () => { ask.result.close(); done(); };
+                        ask.onerror = () => fail(ask.error);
+                    });
+                    const db = await new Function('self', script)({location: location, addEventListener: () => {}});
+                    const get = (store, key) => new Promise(done => {
+                        const ask = db.transaction(store).objectStore(store).get(key);
+                        ask.onsuccess = () => done(ask.result);
+                    });
+                    const answer = {version: db.version, tiles: db.objectStoreNames.contains('tiles'),
+                                    packs: db.objectStoreNames.contains('packs'), held: !!(await get('flags', 'held')),
+                                    page: await get('pages', 'page'), stand: await get('flags', 'stand')};
+                    db.close(); return answer;
+                }""",
+                    script,
+                )
+                readings.append(
+                    Reading(
+                        who + " upgrades and drops tiles without losing the page or stand",
+                        result,
+                        {"version": 4, "tiles": False, "packs": True, "held": False, "page": "kept page", "stand": {"tiles": "old-prefix/"}},
+                    )
+                )
+                counted = page.evaluate(
+                    """async (script) => {
+                    const open = await new Promise(done => {
+                        const ask = indexedDB.open('pack-upgrade', 4); ask.onsuccess = () => done(ask.result);
+                    });
+                    const read = () => new Promise(done => {
+                        const ask = open.transaction('flags').objectStore('flags').get('held');
+                        ask.onsuccess = () => done({packs: ask.result.packs, bytes: ask.result.bytes, top: ask.result.top});
+                    });
+                    const run = new Function('open', "var KEPT='packs', HELD='held'; function db(){return Promise.resolve(open);}" +
+                        script + "return {put:putPack, sweep:dbSweep};")(open);
+                    await run.put('https://atlas.test/packs/old/1/2/3.pmtiles', new ArrayBuffer(100), 14, 'https://atlas.test/packs/old/');
+                    await run.put('https://atlas.test/packs/new/1/2/3.pmtiles', new ArrayBuffer(200), 16, 'https://atlas.test/packs/new/');
+                    await run.put('https://atlas.test/packs/old/1/2/3.pmtiles', new ArrayBuffer(150), 14, 'https://atlas.test/packs/old/');
+                    const before = await read();
+                    await run.sweep('packs', 'https://atlas.test/packs/old/');
+                    const after = await read();
+                    const count = await new Promise(done => {
+                        const ask = open.transaction('packs').objectStore('packs').count(); ask.onsuccess = () => done(ask.result);
+                    });
+                    open.close(); return {before, after, count};
+                }""",
+                    ledger,
+                )
+                readings.append(
+                    Reading(
+                        who + " counts overlaps and removes an old stand exactly",
+                        counted,
+                        {"before": {"packs": 2, "bytes": 350, "top": 16}, "after": {"packs": 1, "bytes": 200, "top": 16}, "count": 1},
+                    )
+                )
+    return Check("both openers discard the old tile store on upgrade", readings)
 
 
 def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
@@ -9863,7 +9985,7 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         }"""
         page.wait_for_function(loaded, timeout=60_000)
         initial = list(_Quiet.pack_requests)
-        readings.append(Reading("first visit draws after control", True, True, note=f"{len(initial)} pack requests"))
+        readings.append(Reading("first visit draws after control", bool(initial), True, note=f"{len(initial)} pack requests"))
         # A phone screen centred well inside one z14 parent, with just its base
         # shown, so a small pan stays inside the very same pack.
         page.evaluate(
@@ -10587,7 +10709,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
         starved = first.evaluate("() => window.trailsOffline.state()")
         terrain.append(Reading("with no connection the run is not begun", "No connection" in first.evaluate(SAID), True))
-        terrain.append(Reading("and it keeps nothing", starved["kept"]["tiles"], 0))
+        terrain.append(Reading("and it keeps nothing", starved["kept"]["packs"], 0))
         terrain.append(Reading("and switches nothing on", starved["on"], False))
 
         # **And now the case the flag gets wrong.** `navigator.onLine` reports
@@ -10611,7 +10733,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 note="twelve refusals in a row, not a hundred thousand attempts",
             )
         )
-        terrain.append(Reading("and it too keeps nothing", stalled["kept"]["tiles"], 0))
+        terrain.append(Reading("and it too keeps nothing", stalled["kept"]["packs"], 0))
         terrain.append(Reading("and switches nothing on either", stalled["on"], False))
 
         # **What the chooser draws, before anything is downloaded.** It needs the
@@ -10642,7 +10764,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
         after = first.evaluate("() => window.trailsOffline.state()")
-        terrain.append(Reading("what it said it would keep is what it kept", after["kept"]["tiles"], first_ask["tiles"]))
+        terrain.append(Reading("what it said it would keep is what it kept", after["kept"]["packs"], first_ask["packs"]))
         terrain.append(Reading("and the switch is on once it is there", after["on"], True))
         # **And the row says so without being opened.** The switch is thrown
         # inside this panel, which on a phone is covering the menu at the time,
@@ -10657,7 +10779,15 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # with a blank -- unless it lets `cache: 'reload'` past. Without that
         # branch every one of these is 68 bytes of transparent PNG written into
         # the terrain cache as terrain, and the panel reports success.
-        first.evaluate("async () => await window.trailsOffline.choose('draw', 15)")
+        first.evaluate(
+            """async (ring) => {
+            const center = ring.reduce((a, p) => [a[0] + p[0] / ring.length, a[1] + p[1] / ring.length], [0, 0]);
+            await window.trailsOffline.area(ring.map(p => [center[0] + (p[0] - center[0]) * 2,
+                                                         center[1] + (p[1] - center[1]) * 2]));
+            await window.trailsOffline.choose('draw', 15);
+        }""",
+            [list(corner) for corner in SCENE.kept_area],
+        )
         second_ask = first.evaluate("() => window.trailsOffline.needed()")
         # **The panel has to be on the screen to be read.** Its holder is left
         # detached until the dock puts it somewhere — the same seam `Where I am`
@@ -10693,7 +10823,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             Reading(
                 "a resumed run fetches nothing it already holds",
                 resumed["held"],
-                first_ask["tiles"],
+                first_ask["packs"],
                 note=f"{resumed['added']} fetched, {resumed['held']} found already there",
             )
         )
@@ -10719,12 +10849,12 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         terrain.append(
             Reading(
                 "the second ask is more ground than the first",
-                second_ask["tiles"] > first_ask["tiles"],
+                second_ask["packs"] > first_ask["packs"],
                 True,
-                note=f"{first_ask['tiles']} then {second_ask['tiles']}",
+                note=f"{first_ask['packs']} then {second_ask['packs']}",
             )
         )
-        terrain.append(Reading("keeping more while it is on keeps all of it", weighed["kept"], second_ask["tiles"]))
+        terrain.append(Reading("keeping more while it is on keeps all of it", weighed["kept"], second_ask["packs"]))
         # A blank tile is 68 bytes. Anything Kartverket drew is thousands.
         terrain.append(
             Reading(
@@ -10794,6 +10924,8 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 note=f"the sheet's own is {sheet_top}",
             )
         )
+        mark = first.locator(".trails-scale-zoom").text_content() or ""
+        terrain.append(Reading("offline the scale names the magnified kept top", "· tiles z15" in mark, True, note=mark))
         context.set_offline(False)
         first.evaluate(with_map("(at) => { __MAP__.setView(at, 14); }"), list(SCENE.position))
         first.wait_for_timeout(1500)
@@ -10828,9 +10960,9 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # is the kind of thing a later tidy-up breaks silently: somebody frees
         # the space on the way out, and a reader who switched off in a hotel to
         # see live terrain walks out with nothing.
-        held = first.evaluate("() => window.trailsOffline.state().kept.tiles")
+        held = first.evaluate("() => window.trailsOffline.state().kept.packs")
         parked = first.evaluate("async () => { await window.trailsOffline.toggle(false); return window.trailsOffline.state(); }")
-        terrain.append(Reading("switching it off keeps every tile", parked["kept"]["tiles"], held))
+        terrain.append(Reading("switching it off keeps every tile", parked["kept"]["packs"], held))
         terrain.append(Reading("and it really is off", parked["on"], False))
         # And the ceiling goes back to what the sheet was built with, so a reader
         # who switched off for live terrain gets the real fine levels again.
@@ -10906,7 +11038,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # terrain cache because it is stopped and started around single fetches.
         reloaded = second.evaluate("async () => await window.trailsOffline.refresh()")
         terrain.append(Reading("the switch survives a reload", reloaded["on"], True))
-        terrain.append(Reading("and so does the terrain", reloaded["kept"]["tiles"], second_ask["tiles"]))
+        terrain.append(Reading("and so does the terrain", reloaded["kept"]["packs"], second_ask["packs"]))
 
         terrain.append(Reading("offline, the kept ground draws", drawn_terrain["good"] > 0, True, note=f"{drawn_terrain['good']} tiles"))
         terrain.append(Reading("and every kept layer draws terrain rather than a blank", drawn_terrain["blank"], 0))
@@ -10951,8 +11083,9 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         context.set_offline(True)
         # And the reader can have the space back from inside the thing that took
         # it, which is the last of the four this panel is for.
-        emptied = second.evaluate("async () => { var s = await window.trailsOffline.forget(); return {tiles: s.kept.tiles, on: s.on}; }")
-        terrain.append(Reading("and it can all be deleted again", emptied["tiles"], 0))
+        emptied = second.evaluate("async () => { var s = await window.trailsOffline.forget(); return {packs: s.kept.packs, on: s.on}; }")
+        terrain.append(Reading("and it can all be deleted again", emptied["packs"], 0))
+        terrain.append(Reading("forget empties the pack store", second.evaluate(in_db(ROWS), "packs"), 0))
         terrain.append(Reading("which switches offline mode back off", emptied["on"], False))
 
         context.set_offline(False)
@@ -11671,6 +11804,10 @@ def main() -> int:
             checks.append(the_worker_reads_packs(browser, page_path))
         if wanted(the_worker_store_path):
             checks.append(the_worker_store_path(browser, page_path))
+        if wanted(the_pack_upgrade):
+            page.close()
+            serving.close()
+            checks.append(timed(the_pack_upgrade, browser, page_path))
         if wanted(the_overview_is_kept):
             page.close()
             serving.close()

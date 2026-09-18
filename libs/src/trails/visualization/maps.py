@@ -169,8 +169,10 @@ class HeightTiles:
     #: the model at the tile's own resolution, and the coarser levels are the
     #: same numbers averaged.
     top: int
-    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    #: Mean bytes per tile, retained beside the pack estimate weights.
     weight: dict[int, int]
+    #: Mean bytes per pack at each parent level, measured from the pack index.
+    pack_weight: dict[int, int] = dataclasses.field(default_factory=dict)
 
     @property
     def template(self) -> str:
@@ -191,6 +193,7 @@ class HeightTiles:
             "offset": TERRARIUM_OFFSET,
             "step": TERRARIUM_STEP,
             "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()},
+            "pack_weight": {str(level): size for level, size in self.pack_weight.items()},
         }
 
 
@@ -215,8 +218,10 @@ class ShadeTiles:
     #: The finest zoom cut. Past it Leaflet draws the same tile magnified,
     #: which is what the ceiling is chosen to be invisible at.
     top: int
-    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    #: Mean bytes per tile, retained beside the pack estimate weights.
     weight: dict[int, int]
+    #: Mean bytes per pack at each parent level, measured from the pack index.
+    pack_weight: dict[int, int] = dataclasses.field(default_factory=dict)
     #: How dark the shadow is drawn, 0 to 1. The tiles carry the full range, so
     #: this is the one number that tunes the look and it costs no rebuild.
     #:
@@ -243,6 +248,7 @@ class ShadeTiles:
             "url": self.template,
             "top": self.top,
             "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()},
+            "pack_weight": {str(level): size for level, size in self.pack_weight.items()},
         }
 
 
@@ -273,8 +279,10 @@ class SlopeTiles:
     #: The finest zoom cut: the relief's, since the classes are read off the
     #: same smoothed heights and the model has no more to give past it.
     top: int
-    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    #: Mean bytes per tile, retained beside the pack estimate weights.
     weight: dict[int, int]
+    #: Mean bytes per pack at each parent level, measured from the pack index.
+    pack_weight: dict[int, int] = dataclasses.field(default_factory=dict)
 
     @property
     def template(self) -> str:
@@ -291,6 +299,7 @@ class SlopeTiles:
             "url": self.template,
             "top": self.top,
             "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()},
+            "pack_weight": {str(level): size for level, size in self.pack_weight.items()},
         }
 
     @staticmethod
@@ -332,8 +341,10 @@ class VegetationTiles:
     tiles: str
     #: The finest zoom cut: the relief's, since a 10 m cell has no more to give past it.
     top: int
-    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    #: Mean bytes per tile, retained beside the pack estimate weights.
     weight: dict[int, int]
+    #: Mean bytes per pack at each parent level, measured from the pack index.
+    pack_weight: dict[int, int] = dataclasses.field(default_factory=dict)
 
     @property
     def template(self) -> str:
@@ -346,7 +357,12 @@ class VegetationTiles:
         Returns:
             ``url``, ``top`` and ``weight`` per zoom, for the offline panel.
         """
-        return {"url": self.template, "top": self.top, "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()}}
+        return {
+            "url": self.template,
+            "top": self.top,
+            "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()},
+            "pack_weight": {str(level): size for level, size in self.pack_weight.items()},
+        }
 
     @staticmethod
     def classes() -> list[dict[str, object]]:
@@ -378,8 +394,10 @@ class ForestTiles:
     tiles: str
     #: The finest zoom cut.
     top: int
-    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    #: Mean bytes per tile, retained beside the pack estimate weights.
     weight: dict[int, int]
+    #: Mean bytes per pack at each parent level, measured from the pack index.
+    pack_weight: dict[int, int] = dataclasses.field(default_factory=dict)
 
     @property
     def template(self) -> str:
@@ -392,7 +410,12 @@ class ForestTiles:
         Returns:
             ``url``, ``top`` and ``weight`` per zoom, for the offline panel.
         """
-        return {"url": self.template, "top": self.top, "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()}}
+        return {
+            "url": self.template,
+            "top": self.top,
+            "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()},
+            "pack_weight": {str(level): size for level, size in self.pack_weight.items()},
+        }
 
     @staticmethod
     def colour() -> str:
@@ -421,19 +444,16 @@ class Provider:
     #: server; root-relative for our own bucket, so the page carries no host
     #: and the same page works served locally over the same tree.
     tiles: str
-    #: The finest zoom the source answers. Kartverket's cache ends at z18 (z19
-    #: answers 400); Lantmäteriet's file ends at z17.
+    #: The finest tile zoom in the provider's tree.
     top: int
-    #: Where *the whole map* stops being a download and starts being an
-    #: archive -- and with it the budget every other scope on the offline panel
-    #: is held to. Per source, because the same zoom is not the same weight:
-    #: Kartverket's whole box costs 6.76 GB at z16 and four times that at z17;
-    #: Lantmäteriet's tree over the Abisko box is 118,967 tiles and about
-    #: 700 MB at z17, which is everything the copy holds, so its cap is its top
-    #: (analysis/docs/abisko-decisions.md §9.23).
+    #: The whole map is offered to z17 on both providers. Packs reduce the
+    #: larger box to 9,162 rows, below the phone's phase-1b measured pack load;
+    #: the old per-tile row limit no longer requires a z16 cap.
     cap: int
-    #: Bytes a kept tile weighs, per zoom, for every size estimate on the panel.
+    #: Mean bytes per tile, retained beside the pack estimate weights.
     weight: dict[int, int]
+    #: Mean bytes per pack at each parent level, measured from the pack index.
+    pack_weight: dict[int, int] = dataclasses.field(default_factory=dict)
     #: Height tiles cut beside the map tiles, where the map has them. None for
     #: a map that asks a point service for its heights instead -- which since
     #: §6.10 is neither of them.
@@ -449,24 +469,8 @@ class Provider:
     #: country has a laser survey to cut them from (§6.11); None where not.
     vegetation: VegetationTiles | None = None
     forest: ForestTiles | None = None
-    #: Where the tiles end, west, south, east, north in degrees -- the box the
-    #: trees in our own bucket were cut to, :data:`trails.processing.trees.TREES`.
-    #: None for a source none of whose tiles are ours.
-    #:
-    #: **The offline panel's margin stops here.** Every scope lays a ring of
-    #: tiles round what it keeps, and against a tree cut exactly to its box
-    #: that ring is a row of 404s: measured on the Abisko page, *the whole map*
-    #: met twelve refusals in a row inside its first sixty tiles, read that as
-    #: the connection giving out, and switched offline on over 34 tiles
-    #: (analysis/docs/abisko-decisions.md §8.2).
-    #:
-    #: **It is the box of the trees, and not of the sheet, where the two differ.**
-    #: Kartverket's cache answers the whole world and would answer the ring; the
-    #: heights, the relief and the slope classes drawn on it are ours and stop at
-    #: the box (§6.10). Holding the sheet to the same box costs one row of tiles
-    #: nobody was going to walk on, and is what keeps the run from asking the
-    #: three trees for ground they do not have.
-    extent: tuple[float, float, float, float] | None = None
+    #: The finite tree box, west, south, east, north in degrees.
+    extent: tuple[float, float, float, float] = dataclasses.field(kw_only=True)
 
 
 #: What a tile of each of Lomsdal-Visten's three trees weighs, per zoom, for
@@ -504,9 +508,10 @@ PROVIDERS: dict[str, Provider] = {
         label="Kartverket",
         tiles="/tiles/kartverket/topo/1/",
         top=17,
-        cap=16,
+        cap=17,
         # Mean PNG bytes per zoom of the finished flat WMS tree, phase 5.
         weight={8: 11417, 9: 15036, 10: 18338, 11: 19503, 12: 14311, 13: 12905, 14: 13584, 15: 8107, 16: 11135, 17: 6567},
+        pack_weight={6: 249162, 10: 797726, 14: 637947},
         extent=_LOMSDAL_VISTEN.box,
         # Kartverket's national height model as tiles (§6.10), z8 to z13; the
         # weights are the mean per zoom of the first build's 2,475 tiles,
@@ -515,6 +520,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_LOMSDAL_VISTEN.prefix("dem"),
             top=_LOMSDAL_VISTEN.dem_max_zoom,
             weight=_WEIGHT_LV_DEM,
+            pack_weight={6: 1352412, 10: 5302544},
         ),
         # The relief shadow the page draws under the contours (§6.6, §6.10),
         # z8 to z15, off the same mosaic.
@@ -522,6 +528,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_LOMSDAL_VISTEN.prefix("shade"),
             top=_LOMSDAL_VISTEN.ground_max_zoom,
             weight=_WEIGHT_LV_SHADE,
+            pack_weight={8: 820241, 12: 978170},
         ),
         # And the slope classes over it (§6.7, §6.10), cut exactly as the
         # relief is. Version 1: this tree has no earlier stand to be told from.
@@ -529,6 +536,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_LOMSDAL_VISTEN.prefix("slope"),
             top=_LOMSDAL_VISTEN.ground_max_zoom,
             weight=_WEIGHT_LV_SLOPE,
+            pack_weight={8: 175384, 12: 291936},
         ),
         # And what stands on the ground, off Kartverket's surface model less
         # its terrain model (§6.11), z8 to z15, cut as the slope classes are.
@@ -536,11 +544,13 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_LOMSDAL_VISTEN.prefix("vegetation"),
             top=_LOMSDAL_VISTEN.ground_max_zoom,
             weight=_WEIGHT_LV_VEGETATION,
+            pack_weight={8: 315133, 12: 262436},
         ),
         forest=ForestTiles(
             tiles=_LOMSDAL_VISTEN.prefix("forest"),
             top=_LOMSDAL_VISTEN.ground_max_zoom,
             weight=_WEIGHT_LV_FOREST,
+            pack_weight={8: 60763, 12: 49852},
         ),
     ),
     "lantmateriet": Provider(
@@ -557,6 +567,7 @@ PROVIDERS: dict[str, Provider] = {
         # z8–z10: the same per_zoom bytes / tiles from index.json, read
         # 2026-09-18 and rounded to whole bytes.
         weight={8: 16066, 9: 14279, 10: 12273, 11: 31747, 12: 22166, 13: 25719, 14: 15290, 15: 13783, 16: 7958, 17: 4587},
+        pack_weight={6: 117982, 10: 1249660, 14: 483317},
         # The box the tree was cut to, as `index.json` beside it records
         # (§2 of the decisions): the copy holds every tile of the box at
         # every zoom and not one outside it.
@@ -567,6 +578,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_ABISKO.prefix("dem"),
             top=_ABISKO.dem_max_zoom,
             weight={8: 29019, 9: 35677, 10: 65806, 11: 93498, 12: 93117, 13: 92693},
+            pack_weight={6: 272299, 10: 4621156},
         ),
         # The relief shadow the page draws under the contours (§6.6), z8 to
         # z15; the weights are the mean per zoom of the first build's 9,330
@@ -577,6 +589,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_ABISKO.prefix("shade"),
             top=_ABISKO.ground_max_zoom,
             weight={8: 9528, 9: 10633, 10: 18582, 11: 26043, 12: 25044, 13: 20474, 14: 14404, 15: 9415},
+            pack_weight={8: 543912, 12: 858106},
         ),
         # The slope classes the page colours over the relief (§6.7), z8 to
         # z15. Version 2 since the seven classes and the light palette drawn
@@ -587,6 +600,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_ABISKO.prefix("slope"),
             top=_ABISKO.ground_max_zoom,
             weight={8: 2328, 9: 2547, 10: 3646, 11: 4586, 12: 4470, 13: 4010, 14: 3213, 15: 2424},
+            pack_weight={8: 100986, 12: 207487},
         ),
         # And what stands on the ground, off NMD 2018's laser classes (§6.11),
         # z8 to z15, cut as the slope classes are.
@@ -594,11 +608,13 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_ABISKO.prefix("vegetation"),
             top=_ABISKO.ground_max_zoom,
             weight=_WEIGHT_AB_VEGETATION,
+            pack_weight={8: 110916, 12: 163661},
         ),
         forest=ForestTiles(
             tiles=_ABISKO.prefix("forest"),
             top=_ABISKO.ground_max_zoom,
             weight=_WEIGHT_AB_FOREST,
+            pack_weight={8: 13850, 12: 22138},
         ),
     ),
 }
@@ -1726,6 +1742,7 @@ class _Theme(MacroElement):
            lines carry a rule along the bottom that *is* the measured distance;
            this one says a zoom, so it gets the box and no bar. Anything else in
            that corner with a rule under it is claiming to be a length. */
+        .trails-grayscale { filter: grayscale(1); }
         .trails-scale-zoom {
             padding: 2px 5px 1px;
             font-size: 11px;
@@ -1828,7 +1845,7 @@ _BASE_LAYERS: dict[BaseMap, dict[str, str | None]] = {
         "provider": "kartverket",
     },
     BaseMap.KARTVERKET_GRAYSCALE: {
-        "tiles": "https://cache.kartverket.no/v1/wmts/1.0.0/topograatone/default/webmercator/{z}/{y}/{x}.png",
+        "tiles": "/tiles/kartverket/topo/1/{z}/{x}/{y}.png",
         "attr": _KARTVERKET_ATTRIBUTION,
         "name": "Kartverket Grayscale",
         "provider": "kartverket",
@@ -2158,12 +2175,11 @@ def create_map(
             # padded size rather than its own. Kartverket answers
             # `access-control-allow-origin: *` -- measured, not assumed.
             cross_origin=True,
+            class_name="trails-grayscale" if source is BaseMap.KARTVERKET_GRAYSCALE else "",
             update_when_zooming=False,
             error_tile_url=_ERROR_TILE_URL,
             # The same index.json box as the overlays, for both countries.
-            bounds=[[own.extent[1], own.extent[0]], [own.extent[3], own.extent[2]]]
-            if own is not None and own.tiles.startswith("/") and own.extent is not None
-            else None,
+            bounds=[[own.extent[1], own.extent[0]], [own.extent[3], own.extent[2]]] if own is not None else None,
         ).add_to(fmap)
 
     # **The relief shadow, where the provider has one.** It is a tile layer like
@@ -2209,7 +2225,7 @@ def create_map(
             # a 404, and the offline panel reads a run of those as the
             # connection giving out (§8.2) -- so the layer is told where the
             # ground ends rather than finding out one refusal at a time.
-            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]] if provider.extent else None,
+            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]],
         )
         shade.add_to(fmap)
         setattr(fmap, MAP_SHADE_ATTR, shade)
@@ -2244,7 +2260,7 @@ def create_map(
             class_name="trails-slope-tiles",
             # Over the relief, whatever order they are switched in.
             z_index=260,
-            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]] if provider.extent else None,
+            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]],
         )
         slope.add_to(fmap)
         setattr(fmap, MAP_SLOPE_ATTR, slope)
@@ -2271,7 +2287,7 @@ def create_map(
             trails_vegetation=True,
             class_name="trails-vegetation-tiles",
             z_index=262,
-            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]] if provider.extent else None,
+            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]],
         )
         vegetation.add_to(fmap)
         setattr(fmap, MAP_VEGETATION_ATTR, vegetation)
@@ -2292,7 +2308,7 @@ def create_map(
             trails_forest=True,
             class_name="trails-forest-tiles",
             z_index=264,
-            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]] if provider.extent else None,
+            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]],
         )
         forest.add_to(fmap)
         setattr(fmap, MAP_FOREST_ATTR, forest)
@@ -4100,34 +4116,19 @@ class _OfflinePanel(MacroElement):
     - *Delete*, because a gigabyte somebody cannot get rid of from inside the
       thing that took it is a gigabyte taken without asking.
 
-    **Four pieces of ground, and one of them is a box on purpose.** The chooser
-    used to offer a band along the route, the viewport, and a band along
-    *everything drawn*. The last was the wrong shape for the ground it was for:
-    in Lomsdal-Visten one walks off the path, and a band along the paths puts a
-    white tile under anybody who leaves one. So *the whole map* is now every tile
-    in the box this map draws paths in -- read off the layers rather than written
-    down here, so it cannot go stale when the sources move -- and the viewport,
-    which was never a piece of terrain so much as a piece of screen, is gone in
-    favour of an area the reader draws.
+    **Four scopes, all counted in packs.** The whole map is the finite tree box,
+    offered to z17 on both providers: 9,162 packs for Lomsdal-Visten and 2,274 for
+    Abisko. The phone's phase-1b pack readings remove the old per-tile row cap.
+    The other scopes are a band along the route, a turned rectangle round it,
+    and an area the reader draws. Each includes the whole box's z8–z11 overview.
 
-    - *The whole map*: the bounding box, north-up, capped at z16.
-    - *Along the route*: the band, kept, because it is still the cheapest useful
-      shape by a long way. Measured on a real 42.3 km loop, 1,722 tiles at z16
-      against 131,033 for the box.
-    - *A box round it*: the smallest enclosing rectangle, **turned** -- a convex
-      hull and rotating calipers, worked in metres about the line's own centre,
-      because an angle in degrees of latitude and longitude is not an angle on
-      the ground. A north-up box round a diagonal walk is mostly ground nobody
-      is near.
-    - *Drawn*: corners tapped on the map, which is the only one of the four that
-      can say *this valley and the ridge behind it*.
-
-    **One budget, and it is a measured thing rather than a written one.** What
-    *the whole map* costs at z16 -- 6.76 GB, and the panel works it out at load
-    rather than quoting that figure -- is the ceiling every scope is held to. Any
-    zoom whose result would go over it is disabled with the reason on it, and
-    ``choose()`` clamps down to the finest level that fits, because disabling a
-    button is what the screen does and not what is true.
+    The estimate uses per-level mean pack bytes from the built indexes. The
+    whole box at z17 sets the budget. A lazy parent iterator resolves each
+    layer's selected tiles into packs, visits each parent once, and supplies
+    both the estimate and the six concurrent downloaders. No pack address list
+    is retained. The store holds ArrayBuffers; its count and actual byte total
+    commit with each new row. A scalar ledger per tree/stand lets an old stand
+    be deleted without walking the store.
 
     **The selection is drawn on the map, and drawing it is where two obvious
     implementations are wrong.** It is a ``GridLayer`` whose tiles are canvases,
@@ -4177,7 +4178,7 @@ class _OfflinePanel(MacroElement):
         self._name = "OfflinePanel"
         self.top = provider.top
         self.cap = provider.cap
-        self.weight_json = _script_json({str(zoom): bytes_ for zoom, bytes_ in provider.weight.items()})
+        self.pack_weight_json = _script_json({str(level): size for level, size in provider.pack_weight.items()})
         self.heights_json = _script_json(provider.heights.as_settings() if provider.heights else None)
         self.shade_json = _script_json(provider.shade.as_settings() if provider.shade else None)
         self.slope_json = _script_json(provider.slope.as_settings() if provider.slope else None)
@@ -4185,7 +4186,7 @@ class _OfflinePanel(MacroElement):
         self.forest_json = _script_json(provider.forest.as_settings() if provider.forest else None)
         self.tile_prefix_json = _script_json(provider.tiles)
         extent = provider.extent
-        self.extent_json = _script_json({"w": extent[0], "s": extent[1], "e": extent[2], "n": extent[3]} if extent else None)
+        self.extent_json = _script_json({"w": extent[0], "s": extent[1], "e": extent[2], "n": extent[3]})
         self.database = companions.database
         self.cache = companions.cache
 
