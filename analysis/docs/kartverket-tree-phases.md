@@ -580,6 +580,20 @@ sheet's native zoom. Tile layers wait up to three seconds for the worker to cont
 first visit. Driven in Firefox: a first z17 view is 6–14 pack requests, a second view in the same
 packs none, no per-tile object request at all; full drives 827 readings a page, all green.
 
+**Three fixes the phone asked for the same evening**, after the deploy of 19:15: the panel's
+figures line said *kept packs not counted* for a missing record, a wording from before counts
+were exact — a missing or null record is zero packs (`beb83d1`). The first screen fetched
+whole packs because every tile of a burst counted as "the second tile within two seconds":
+15–20 MB over 5G, 6.5 s a tile, 24 lookups past the deadline; now ranges first, a whole pack
+only for a tile asked from a pack whose directory is older than two seconds, at most two in
+flight, never a height pack — Lomsdal-Visten's first screen 2.3 MB → 205 kB (`57f25e2`). And
+the page built in 8.3 s instead of 1.0 in Firefox (ten seconds on the phone): the magnified
+mark's scale handler was registered on `layeradd`, so each of the 12,477 vector layers added at
+construction rebuilt the scale line, 7.2 s in all; filtered to tile layers, 12 ms, and *map
+built* is a recorded drive figure now, 1,228 ms Lomsdal-Visten / 263 ms Abisko on Firefox on
+forge (`173b19a`). The lesson of the last one: a handler on a map-wide event runs once per
+layer of a page with twelve thousand of them, and the drive did not record build time.
+
 #### 6, as first written — Norway moves to the tree
 
 1. `PROVIDERS["kartverket"]`: `tiles="/tiles/kartverket/topo/1/"`, `top=17`, `cap=17` if
