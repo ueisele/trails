@@ -622,6 +622,25 @@ bytes alone cannot tell, since a source pack may itself be sparse at the box's e
   they were going to do after 6b anyway. The tally's `seen` path
   counts a tile out of a browse row, `db` out of a kept row, `mem` out of memory.
 
+**Built 2026-09-18, 21:30 (codex, gpt-6-astra; `ea0f9b8`).** As specified, with these choices
+made on the way: the row is `{pack, kept, complete, at, size}` plus one of two index keys —
+`keptAt = [url, size]` for kept rows, `browsedAt = [at, size]` for browse rows — so the two
+indexes (`kept`, `browsed-at`) are disjoint, the eviction cursor never meets a kept row, and
+`forget` and the trim read the size off the index key and never open a row. The codec, the
+row ledger, the upgrade and the two deletions live in one file, `js/pack_io.js`, embedded in
+the worker and the page alike, so Keep and the worker write the same bytes. Keep completes a
+partial row by fetching the missing tiles' ranges (or the whole pack when more than half is
+missing), and a complete row costs no request. After Keep and after Forget the page tells the
+worker `packs-changed` and the worker drops its memory copies. A locally merged archive has
+its own offsets, so only bodies from the bucket seed the range directory cache. Measured on
+Firefox on forge: the first z17 screen stores two rows — 53,655 bytes on Abisko, 172,210 on
+Lomsdal-Visten, 86,095 / 204,646 bytes transferred, no whole pack; the first Keep 246 packs /
+143.9 MB (Abisko) and 247 / 192.8 MB (Lomsdal-Visten); Forget leaves the browse rows (15 /
+377 kB and 24 / 688 kB); the trim probe holds under 148.1 MB across several fifty-key batches;
+the worker's writer and Python's agree on all 6,251 bytes of an 85-tile pack. 853 readings a
+page, hooks 1,783 + 97 tests. Reviewed: the `DB_AT` 5 upgrade recreates `packs` empty, as
+decided — the phone keeps once more.
+
 #### Phase 6h — After 6g: the measurement helper goes, and packs arrive in the background
 
 Decided 2026-09-18, 21:00 (Uwe). Two things, both in the worker's and the panel's files, after
