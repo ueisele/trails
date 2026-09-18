@@ -1,11 +1,11 @@
 """Tests for Folium map building."""
 
-import inspect
 import json
 import pathlib
 import re
 import struct
 import tempfile
+from importlib.resources import files
 
 import folium
 import geopandas as gpd
@@ -515,18 +515,17 @@ class TestOfflinePanel:
 
     @staticmethod
     def panel():
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        return source.split("class _OfflinePanel")[1].split("\nclass ")[0]
+        return files("trails.visualization").joinpath("js", "offline_panel.js").read_text(encoding="utf-8")
 
     @staticmethod
     def script():
-        """The template alone, without the docstring above it.
+        """The panel's script file.
 
         Every figure this panel quotes is worked out at load, and the way to hold
         it to that is to be able to look at the code without the prose that
         explains it: the prose is allowed to name 6.76 GB, and the script is not.
         """
-        return TestOfflinePanel.panel().split("_template = Template(")[1]
+        return TestOfflinePanel.panel()
 
     def test_the_page_says_whether_this_browser_can_keep_it_at_all(self):
         """The page has computed `window.trailsWorker.why` since the worker was
@@ -916,8 +915,7 @@ class TestOfflinePanel:
         this: it is read on every check and by the chrome, and two million
         coordinates is not a status."""
         assert "window.trailsPlan.geometry" in self.panel()
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
         assert "geometry: function () {" in planning
         assert "return {lon: shape.lon, lat: shape.lat};" in planning
 
@@ -1005,8 +1003,7 @@ class TestOfflinePanel:
         """The API is absent on older iOS and refused off a secure origin. A run
         without it wants babysitting; a run that threw on the way to asking for
         it would keep nothing at all."""
-        panel = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        panel = panel.split("class _OfflinePanel")[1].split("\nclass ")[0]
+        panel = files("trails.visualization").joinpath("js", "offline_panel.js").read_text(encoding="utf-8")
         assert "if (awake || !navigator.wakeLock || !navigator.wakeLock.request) { return; }" in panel
         assert "}).catch(function () { awake = null; });" in panel
         # The run can end while the request is in flight, and a lock nobody
@@ -1241,8 +1238,7 @@ class TestTheFurnitureStaysInsideTheScreen:
         inset and under the rail."""
         # Read off the element rather than a rendered page: the profile panel
         # is added by a chain, not by `add_chrome`.
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        panel = source.split("class _ProfilePanel")[1].split("\nclass ")[0]
+        panel = files("trails.visualization").joinpath("js", "profile_panel.js").read_text(encoding="utf-8")
         assert "var railRoom = narrow ? 0 : 66;" in panel
         assert "env(safe-area-inset-left)" in panel
         assert "env(safe-area-inset-right)" in panel
@@ -1351,8 +1347,7 @@ class TestTheWideLayoutNeedsRoomInBothDirections:
         """It worked the answer out again from the width, and the two have just
         stopped agreeing — so the chrome would show the burger while the profile
         still left room for a rail that was not there."""
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        panel = source.split("class _ProfilePanel")[1].split("\nclass ")[0]
+        panel = files("trails.visualization").joinpath("js", "profile_panel.js").read_text(encoding="utf-8")
         assert "var said = window.trailsChrome && window.trailsChrome.state();" in panel
         assert "var narrow = said ? said.narrow : mapRoom().x < NARROW;" in panel
 
@@ -1370,6 +1365,7 @@ class TestTheWideLayoutNeedsRoomInBothDirections:
         keeps it passing is not writing one.
         """
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        source += "".join(path.read_text(encoding="utf-8") for path in files("trails.visualization").joinpath("js").iterdir())
         live = [(number, line) for number, line in enumerate(source.splitlines(), 1) if "map.getSize()" in line and not line.strip().startswith("//")]
         assert live == [], live
 
@@ -1430,8 +1426,7 @@ class TestNothingInThePanelIsDeclaredTwice:
         caught by reading; the second reached the browser and the driven run
         stopped with *awake is not a function*. It is one script, one scope, and
         several thousand lines — so the check is mechanical rather than careful."""
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        panel = source.split("class _OfflinePanel")[1].split("\nclass ")[0]
+        panel = files("trails.visualization").joinpath("js", "offline_panel.js").read_text(encoding="utf-8")
         # **Only the panel's own scope**, which is exactly one indentation. A
         # name inside a function may repeat as often as it likes; these are the
         # ones that share a namespace several thousand lines wide.
@@ -1819,8 +1814,7 @@ class TestSourcesFreshness:
         """`draw` returns early when the offline panel has no holder — a row
         handed to `Sources` has to stay true whether or not anybody has opened
         the offline tool."""
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        panel = source.split("class _OfflinePanel")[1].split("\nclass ")[0]
+        panel = files("trails.visualization").joinpath("js", "offline_panel.js").read_text(encoding="utf-8")
         fresh = panel.split("function drawFresh() {")[1].split("\n                }")[0]
         assert "if (!holder)" not in fresh
 
@@ -2218,7 +2212,7 @@ class TestTwoMapsOnOneOrigin:
     def test_the_worker_takes_over_without_waiting_for_every_tab_to_close(self):
         """Asking is only half of it. Without these two a new worker installs and
         then waits, and the page goes on being served by the one it had."""
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        source = maps.SERVICE_WORKER
         assert "self.skipWaiting();" in source
         assert "self.clients.claim()" in source
 
@@ -2757,7 +2751,9 @@ class TestPopupShape:
         # A chain without a page says nothing under the heading, as before.
         assert maps._popup_values(gdf.iloc[1], shape) == []
         # And the page writes each pair as a link of its own, with its own text.
-        assert "values[at].forEach(function (pair) { link(pair[1], pair[0]); })" in inspect.getsource(maps._PopupText)
+        assert "values[at].forEach(function (pair) { link(pair[1], pair[0]); })" in files("trails.visualization").joinpath(
+            "js", "popup_text.js"
+        ).read_text(encoding="utf-8")
 
     def test_what_somebody_else_states_travels_in_its_own_group(self, trails):
         """A route's own site saying *23,4 km, 2 d, +1088 m* is their claim, not
@@ -3201,7 +3197,7 @@ class TestAFingerCanHitALine:
         """It takes every click before Leaflet sees one, so it decides this for
         itself -- and a 3 px test of its own would drop a five-pixel roll that
         moved nothing, which is a tap that does nothing at all."""
-        planning = pathlib.Path(maps.__file__).read_text(encoding="utf-8").split("class _PlanMode")[1].split("\nclass ")[0]
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
         assert "var slop = window.trailsReach ? window.trailsReach.slop() : 3;" in planning
         assert "Math.abs(event.clientX - pressed.x) + Math.abs(event.clientY - pressed.y) >= slop" in planning
 
@@ -5263,8 +5259,7 @@ class TestPlanMode:
         matcher then matched **3.6 %** of a track that lies exactly on the
         network, and nothing threw, nothing logged, and the page looked right.
         """
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
         read = set(re.findall(r"PLAN\.([A-Za-z_][A-Za-z0-9_]*)", planning)) - {"gpx"}
         assert read - set(maps.PLAN_SETTINGS) == set()
         assert set(maps.PLAN_SETTINGS) - read - {"gpx"} == set()
@@ -5342,8 +5337,7 @@ class TestPlanMode:
         it; a kind naming a mode that does not exist is a sentence no reader can
         ever reach. That asymmetry cost this page an hour once already.
         """
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
         modes = set(re.findall(r"\{key: '([a-z]+)', label:", planning))
         assert modes
 
@@ -5382,8 +5376,7 @@ class TestPlanMode:
         touch nothing -- one place puts a file on the map, and it is the one the
         reader reaches through an answer.
         """
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
 
         assert planning.count("points = pointsForLoaded(graph);") == 1
         assert planning.count("loaded = read;") == 1
@@ -5414,8 +5407,7 @@ class TestPlanMode:
         restored leg may well sit on a node, so a routing branch reached first
         would replace a recorded stretch with whatever path lies there.
         """
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
         deciding = planning.split("function resolve(graph, from, to, mayAsk, partly) {")[1]
 
         assert deciding.index("from.restore") < deciding.index("from.track === loaded.id")
@@ -5448,8 +5440,7 @@ class TestPlanMode:
         own line -- which is exact and costs the edges underneath, and is what
         ``drifted`` then says out loud.
         """
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
         laying = planning.split("function restoredWalked(")[1].split("\n            function agrees")[0]
 
         assert laying.count("agrees(") == 2
@@ -5474,8 +5465,7 @@ class TestPlanMode:
         improve on that, and a leg from a point off the network reaches it by a
         connector anyway.
         """
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
         placing = planning.split("if (restoring()) {")[1].split("if (loaded.mode === 'align')")[0]
 
         assert "<= 1.0" in placing
@@ -5577,14 +5567,13 @@ class TestPlanMode:
         Driven: three stages of a 32,175.4 m tour come to 12,351.6, 12,403.9 and
         7,419.9 m, which is the walk exactly.
         """
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        planning = source.split("class _PlanMode")[1].split("\nclass ")[0]
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
 
         assert "composeRoute(stage.from, stage.to)" in planning
         assert planning.count("function composeRoute(fromLeg, toLeg, over)") == 1
         # And the writer works its runs and its crossings out from the shape it
         # is handed, which is what makes a stage's file its own.
-        panelling = source.split("class _ProfilePanel")[1].split("class _PlanMode")[0]
+        panelling = files("trails.visualization").joinpath("js", "profile_panel.js").read_text(encoding="utf-8")
         writing = panelling.split("routeFile: function")[1].split("routeName:")[0]
         assert "runsOf(shape)" in writing
         assert "crossingsOf(shape, runs)" in writing
@@ -8409,8 +8398,7 @@ class TestTheme:
 
     @staticmethod
     def chrome():
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
-        return source.split("class _Chrome")[1].split("\nclass ")[0]
+        return files("trails.visualization").joinpath("js", "chrome.js").read_text(encoding="utf-8")
 
     def test_the_panels_say_their_own_ink(self):
         """Not one of them set a `color`: they inherited the document's black,
@@ -8867,6 +8855,7 @@ class TestWhereTheReaderIs:
         # source rather than listed here, because a pane added later would
         # otherwise pass this quietly — as 465 did, on the run that added it.
         source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        source += "".join(path.read_text(encoding="utf-8") for path in files("trails.visualization").joinpath("js").iterdir())
         made = [int(z) for z in re.findall(r"\.style\.zIndex = (\d+);", source)]
         assert made, "no pane z-index was found at all"
         # The popup pane is the exception and is meant to be: a popup is an
@@ -9218,7 +9207,7 @@ class TestWhereTheReaderIs:
         assert "'Add to the plan'" in offers
         assert "'Add a waypoint'" not in offers
         assert "function planStanding() { return !!(planState && planState.points > 0); }" in html
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        source = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
         placing = source[source.index("function place(lat, lon, exact) {") : source.index("function planFromPlaces(places) {")]
         assert "switchTo(" not in placing
         # None of the three snaps: a press on a page is not a finger on the map.
@@ -9231,7 +9220,7 @@ class TestWhereTheReaderIs:
         A second green would read as a second thing."""
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(fmap)
-        source = pathlib.Path(maps.__file__).read_text(encoding="utf-8")
+        source = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
 
         assert "var HERE_GOAL = '#00a152';" in fmap.get_root().render()
         assert "var GOAL_COLOUR = '#00a152';" in source
