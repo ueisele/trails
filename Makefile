@@ -19,7 +19,7 @@ ifneq ($(MISE),)
 export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
 endif
 
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive drive-both deploy tiles dem shade slope abisko lomsdal-visten
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive drive-both deploy tiles dem shade slope nmd vegetation abisko lomsdal-visten
 
 # Default target
 help:
@@ -231,6 +231,22 @@ slope:
 	@echo "📐 Building the $(PARK) slope-class tiles (resumable)..."
 	uv run python analysis/scripts/slope_tiles.py --park $(PARK) $(ARGS)
 
+# Fetches Naturvårdsverket's NMD 2018 object rasters -- 5.8 GB of zips, 10 GB each unpacked -- and
+# converts them once into .cache/vegetation/nmd2018/ as deflated GeoTIFFs, after which every Swedish
+# box is a window read. `make vegetation PARK=abisko` does this itself if it finds them missing; this
+# target does it ahead of time, and is safe to run again. See analysis/docs/abisko-decisions.md §6.11.
+nmd:
+	@echo "🌿 Fetching and converting NMD 2018 into the cache (resumable)..."
+	uv run python analysis/scripts/nmd_convert.py $(ARGS)
+
+# Colours how much stands between knee and head height in six steps, and where trees over 5 m are,
+# as two trees off the laser survey: NMD 2018's classes for Sweden, Kartverket's surface model less
+# its terrain model for Norway, z8-z15, both without a login. Resumable; the deploy uploads with
+# --tree vegetation --tree forest. See analysis/docs/abisko-decisions.md §6.11.
+vegetation:
+	@echo "🌿 Building the $(PARK) vegetation and forest tiles (resumable)..."
+	uv run python analysis/scripts/vegetation_tiles.py --park $(PARK) $(ARGS)
+
 # The whole Abisko chain in one run, in the order the pieces depend on each other: the base-map
 # tiles off the FTP, the height mosaic and tiles with the login, the hillshade and the slope classes
 # off the same mosaic,
@@ -242,25 +258,25 @@ slope:
 # home/trails-map is that, and `just abisko` there is this target with the login supplied.
 abisko:
 	$(MAKE) tiles PARK=abisko
-	$(MAKE) dem shade slope PARK=abisko
+	$(MAKE) dem shade slope vegetation PARK=abisko
 	@echo "🕸️  Building and reporting the Abisko routing graph..."
 	uv run python analysis/scripts/route_graph.py --park abisko
 	@echo "🗺️  Building the Abisko map..."
 	uv run python analysis/scripts/lomsdal_visten.py --park abisko
-	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem --tree shade --tree slope (from home/trails-map)"
+	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem --tree shade --tree slope --tree vegetation --tree forest (from home/trails-map)"
 
 # The whole Lomsdal-Visten chain, in the same order and with the same properties: the height model
 # off hoydedata.no (no login, no order), the heights, the relief and the slope classes off the one
-# cached mosaic, then the graph and the page. There is no `tiles` step here — Kartverket serves its
+# cached mosaic, the vegetation and forest off its surface model (§6.11), then the graph and the page. There is no `tiles` step here — Kartverket serves its
 # own sheet and we copy none of it — and nothing in this chain needs a credential, which is the one
 # way it differs from `abisko`. See analysis/docs/abisko-decisions.md §6.10.
 lomsdal-visten:
-	$(MAKE) dem shade slope PARK=lomsdal-visten
+	$(MAKE) dem shade slope vegetation PARK=lomsdal-visten
 	@echo "🕸️  Building and reporting the Lomsdal-Visten routing graph..."
 	uv run python analysis/scripts/route_graph.py --park lomsdal-visten
 	@echo "🗺️  Building the Lomsdal-Visten map..."
 	uv run python analysis/scripts/lomsdal_visten.py --park lomsdal-visten
-	@echo "✅ analysis/output/lomsdal-visten.html — publish with: just deploy --tree dem --tree shade --tree slope (from home/trails-map)"
+	@echo "✅ analysis/output/lomsdal-visten.html — publish with: just deploy --tree dem --tree shade --tree slope --tree vegetation --tree forest (from home/trails-map)"
 
 # **Pinned, because the browser is not.** `--with playwright` takes the newest release, and each
 # one wants a Firefox build of its own: the newest asks for `firefox-1543` and dies with

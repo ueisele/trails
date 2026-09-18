@@ -220,6 +220,10 @@ class Scene:
     #: What a slope-class tile's address has in it, where this page draws
     #: them: the same condition as the relief, and None with it.
     slope_path: str | None = None
+    #: And what a vegetation tile's and a forest tile's have in it (§6.11),
+    #: where the map's country has a laser survey; None where not.
+    vegetation_path: str | None = None
+    forest_path: str | None = None
 
     @property
     def companions(self) -> maps.Companions:
@@ -258,6 +262,9 @@ SCENES: dict[str, Scene] = {
         relief_path="/shade/",
         # And the slope classes it colours over that, off until asked.
         slope_path="/slope/",
+        # And what stands on the ground, off Kartverket's surface model (§6.11).
+        vegetation_path="/vegetation/",
+        forest_path="/forest/",
         # One sheet since §6.10: the grey one came out.
         base_maps=1,
         borrowed_name=("trail-group-fkb", "trail-group-turrutebasen"),
@@ -329,7 +336,9 @@ SCENES: dict[str, Scene] = {
             # z13 height tiles and the relief and slope of every level to z15
             # beside it. The three trees add 69,019 tiles and 0.70 GB to what
             # the sheet alone held: 200,052 and 7.46 GB against 131,033 and 6.76.
-            "tiles the whole map holds at its cap": 200052,
+            # 267,400 since §6.11: the 200,052 of §6.10 plus the vegetation and
+            # forest tiles of every level up to z15 over the same ground.
+            "tiles the whole map holds at its cap": 267400,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -391,6 +400,9 @@ SCENES: dict[str, Scene] = {
         relief_path="/shade/",
         # And the slope classes it colours over that, off until asked (§6.7).
         slope_path="/slope/",
+        # And what stands on the ground, off NMD 2018 (§6.11).
+        vegetation_path="/vegetation/",
+        forest_path="/forest/",
         base_maps=1,
         borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
         search_for="Abiskojaure",
@@ -469,7 +481,9 @@ SCENES: dict[str, Scene] = {
             # since §6.6 and §6.7, the 9,310 relief tiles and the 9,310 slope
             # tiles of every level up to z15, over the box widened on
             # 2026-09-13 (§9.24). 1,032 MB against 903.
-            "tiles the whole map holds at its cap": 166035,
+            # 184,655 since §6.11: the 166,035 of §6.7 plus 9,310 each of
+            # vegetation and forest, z8 to z15.
+            "tiles the whole map holds at its cap": 184655,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -773,10 +787,14 @@ FURNITURE = with_map(
     boxes: legend.filter(i => i.type === 'checkbox').length,
     off: legend.filter(i => i.type === 'checkbox' && !i.checked).length,
     radios: bases.filter(i => i.type === 'radio').length,
-    tiles: Object.values(__MAP__._layers).filter(l => l._url && !(l.options || {}).trailsShade && !(l.options || {}).trailsSlope).length,
+    tiles: Object.values(__MAP__._layers).filter(l => l._url && !(l.options || {}).trailsShade && !(l.options || {}).trailsSlope
+        && !(l.options || {}).trailsVegetation && !(l.options || {}).trailsForest).length,
     relief: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsShade).length,
     // The slope classes start off, so a page that draws them holds none here.
     slope: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsSlope).length,
+    // And so do the vegetation and the forest (§6.11).
+    vegetation: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsVegetation).length,
+    forest: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsForest).length,
     // The rail takes the top-left corner and the zoom steps aside for it. Left
     // rather than top, because both stand at 10 from the top and only the one
     // that moved says whether the corner made room.
@@ -1259,6 +1277,8 @@ def furniture(page: Any) -> Check:
             Reading("tile layers actually on the map", seen["tiles"], 1),
             Reading("and the relief over it", seen["relief"], 1 if SCENE.relief_path else 0),
             Reading("and no slope classes until they are asked for", seen["slope"], 0),
+            Reading("nor vegetation", seen["vegetation"], 0),
+            Reading("nor forest", seen["forest"], 0),
             Reading("separate layer controls", seen["layerControls"], 0),
             # **One bar and not two.** A bare `L.control.scale()` draws metric
             # and imperial, one above the other, and with the zoom line under
@@ -6091,6 +6111,146 @@ def the_slope_classes_over_the_relief(page: Any) -> Check:
     )
 
 
+def the_vegetation_over_the_relief(page: Any) -> Check:
+    """What stands on the ground, coloured over the shadow when the reader asks (§6.11).
+
+    Two switches under the slope classes: the vegetation between knee and
+    head height in six teal steps, and the forest over 5 m in one sepia. Both
+    start off, both are multiplied over the sheet, both are priced by the
+    offline panel whether on or off, and both stand after a reload -- the same
+    things that went wrong for the slope classes, checked the same way.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the two checkboxes drew, and what the panel counts for them
+    """
+    if SCENE.vegetation_path is None or SCENE.forest_path is None:
+        return Check("the vegetation over the relief", skipped="no laser survey has been cut over this page's ground")
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(800)
+
+    def drawn(path: str) -> tuple[int, int]:
+        """How many tiles of one tree the page asked for, and how many answered."""
+        return tuple(
+            page.evaluate(
+                """(path) => {
+                    const imgs = [...document.querySelectorAll('img')].filter(i => (i.src || '').indexOf(path) >= 0);
+                    return [imgs.length, imgs.filter(i => i.naturalWidth > 0).length];
+                }""",
+                path,
+            )
+        )
+
+    def flip(word: str) -> Any:
+        return page.evaluate(
+            """(word) => {
+                const row = [...document.querySelectorAll('.trails-basemap label')].find(r => (r.textContent || '').indexOf(word) >= 0);
+                if (!row) { return 'no row'; }
+                const box = row.querySelector('input[type=checkbox]');
+                if (!box) { return 'no checkbox'; }
+                box.click();
+                return box.checked;
+            }""",
+            word,
+        )
+
+    rows_shown = "() => { const r = document.querySelector('.trails-vegetation-classes'); return r ? getComputedStyle(r).display : 'none'; }"
+    before = drawn(SCENE.vegetation_path)[0] + drawn(SCENE.forest_path)[0]
+    rows_before = page.evaluate(rows_shown)
+    switched = flip("Vegetation")
+    wooded = flip("Forest")
+    page.wait_for_timeout(1500)
+    asked, answered = drawn(SCENE.vegetation_path)
+    asked_forest, answered_forest = drawn(SCENE.forest_path)
+    rows_on = page.evaluate(rows_shown)
+    classes = page.evaluate(
+        "() => [...document.querySelectorAll('.trails-vegetation-classes > div')].map(d => d.textContent.trim()).filter(t => /%/.test(t))"
+    )
+    blends = page.evaluate(
+        with_map("""(paths) => {
+            const out = [];
+            __MAP__.eachLayer(layer => {
+                if (!layer._url) { return; }
+                paths.forEach(path => {
+                    if (String(layer._url).indexOf(path) >= 0 && layer.getContainer) {
+                        out.push({path: path, blend: getComputedStyle(layer.getContainer()).mixBlendMode, above: layer.options.zIndex,
+                                  top: layer.options.maxNativeZoom});
+                    }
+                });
+            });
+            return out;
+        }"""),
+        [SCENE.vegetation_path, SCENE.forest_path],
+    )
+    relief_at = page.evaluate(
+        with_map("""() => {
+            let z = null;
+            __MAP__.eachLayer(l => { if (l.options && l.options.trailsShade) { z = l.options.zIndex; } });
+            return z;
+        }""")
+    )
+    priced = page.evaluate(
+        """(paths) => {
+            const p = window.trailsOffline.prefixes();
+            return !!(p && p.vegetation && p.vegetation.indexOf(paths[0]) >= 0 && p.forest && p.forest.indexOf(paths[1]) >= 0);
+        }""",
+        [SCENE.vegetation_path, SCENE.forest_path],
+    )
+    stands = with_map(
+        """(paths) => {
+            let veg = false, wood = false;
+            __MAP__.eachLayer(l => {
+                if (l._url && String(l._url).indexOf(paths[0]) >= 0) { veg = true; }
+                if (l._url && String(l._url).indexOf(paths[1]) >= 0) { wood = true; }
+            });
+            const rows = document.querySelector('.trails-vegetation-classes');
+            return {vegetation: veg, forest: wood, rows: rows ? getComputedStyle(rows).display : 'none'}; }"""
+    )
+    page.reload(timeout=120_000)
+    ready(page)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(1200)
+    reloaded = page.evaluate(stands, [SCENE.vegetation_path, SCENE.forest_path])
+    if switched is True:
+        flip("Vegetation")
+    if wooded is True:
+        flip("Forest")
+    page.wait_for_timeout(800)
+    after = drawn(SCENE.vegetation_path)[1] + drawn(SCENE.forest_path)[1]
+    page.reload(timeout=120_000)
+    ready(page)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(1200)
+    off_again = page.evaluate(stands, [SCENE.vegetation_path, SCENE.forest_path])
+
+    return Check(
+        "the vegetation over the relief",
+        [
+            Reading("nothing of either is drawn until it is asked for", before, 0),
+            Reading("and the vegetation's rows are folded away with it", rows_before, "none"),
+            Reading("the vegetation checkbox switches it on", switched, True),
+            Reading("and the forest's", wooded, True),
+            Reading("the vegetation asks for tiles", asked > 0, True, note=f"{asked} asked"),
+            Reading("and every one of them answers", answered, asked),
+            Reading("the forest asks for tiles", asked_forest > 0, True, note=f"{asked_forest} asked"),
+            Reading("and every one of them answers", answered_forest, asked_forest),
+            Reading("the rows explain the colours while it is on", rows_on, "block"),
+            Reading("six classes", len(classes), 6, note="; ".join(classes)),
+            Reading("both are multiplied over the sheet", all(b["blend"] == "multiply" for b in blends) and len(blends) == 2, True),
+            Reading("and sit over the relief", all(relief_at is not None and b["above"] > relief_at for b in blends), True),
+            Reading("and stop at the relief's top", all(b["top"] == 15 for b in blends), True),
+            Reading("the offline panel prices both trees", priced, True),
+            Reading("both stand after a reload", reloaded["vegetation"] and reloaded["forest"], True),
+            Reading("with the rows still shown", reloaded["rows"], "block"),
+            Reading("switched off, nothing of either is drawn", after, 0),
+            Reading("and off is remembered too", off_again["vegetation"] or off_again["forest"], False),
+        ],
+    )
+
+
 def what_the_panel_remembers(page: Any) -> Check:
     """A layer put away and a sheet chosen are still that way after a reload.
 
@@ -7670,11 +7830,16 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
     if crossing["at"]:
         tap_at(crossing["at"])
         busy = page.evaluate(THE_CHOICES)
-        # The second chip pressed, which is the whole of the point: another
-        # source for the same stretch, without a second tap on the map.
+        # Another chip pressed, which is the whole of the point: a different
+        # source for the same stretch, without a second tap on the map. **The
+        # first one that is not lit, and not the second in the row**: which
+        # source nearest paint gives the tap is the ground's business, and on
+        # 2026-09-18 it gave the second chip -- pressing that again changed
+        # nothing and the reading called the row broken when it was not.
         page.evaluate(
             """() => { const chips = [...document.querySelectorAll('.trails-profile-pick')];
-            if (chips[1]) { chips[1].click(); } }"""
+            const other = chips.find(c => c.getAttribute('aria-pressed') !== 'true');
+            if (other) { other.click(); } }"""
         )
         page.wait_for_timeout(1500)
         switched = page.evaluate(THE_CHOICES)
@@ -10427,6 +10592,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(the_relief_under_the_map, page))
     if wanted(the_slope_classes_over_the_relief):
         checks.append(timed(the_slope_classes_over_the_relief, page))
+    if wanted(the_vegetation_over_the_relief):
+        checks.append(timed(the_vegetation_over_the_relief, page))
     if wanted(what_the_panel_remembers):
         checks.append(timed(what_the_panel_remembers, page))
     if wanted(a_tap_beside_a_path_in_plan_mode):

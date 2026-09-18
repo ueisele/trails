@@ -67,35 +67,48 @@ class Tree:
     dem_version: int = 1
     shade_version: int = 1
     slope_version: int = 1
+    vegetation_version: int = 1
+    forest_version: int = 1
+    #: The module that reads the laser's word on what stands on the ground,
+    #: by name: a key of :data:`STRUCTURES`. The vegetation and forest trees
+    #: (§6.11) are cut from it rather than from the height model; None for a
+    #: map that has no such source, and then those two trees are not cut.
+    structure: str | None = None
 
     def prefix(self, tree: str) -> str:
         """Where one of the trees is addressed from, root-relative.
 
         Args:
-            tree: ``dem``, ``shade`` or ``slope``
+            tree: ``dem``, ``shade``, ``slope``, ``vegetation`` or ``forest``
 
         Returns:
             The address every tile of it starts with
 
         Raises:
-            KeyError: If ``tree`` is not one of the three
+            KeyError: If ``tree`` is not one of the five
         """
-        version = {"dem": self.dem_version, "shade": self.shade_version, "slope": self.slope_version}[tree]
+        version = {
+            "dem": self.dem_version, "shade": self.shade_version, "slope": self.slope_version,
+            "vegetation": self.vegetation_version, "forest": self.forest_version,
+        }[tree]  # fmt: skip
         return f"/{tree}/{self.provider}/{version}/"
 
     def zooms(self, tree: str) -> range:
         """The levels one of the trees is cut over.
 
         Args:
-            tree: ``dem``, ``shade`` or ``slope``
+            tree: ``dem``, ``shade``, ``slope``, ``vegetation`` or ``forest``
 
         Returns:
             The levels, coarsest first
 
         Raises:
-            KeyError: If ``tree`` is not one of the three
+            KeyError: If ``tree`` is not one of the five
         """
-        top = {"dem": self.dem_max_zoom, "shade": self.ground_max_zoom, "slope": self.ground_max_zoom}[tree]
+        top = {
+            "dem": self.dem_max_zoom, "shade": self.ground_max_zoom, "slope": self.ground_max_zoom,
+            "vegetation": self.ground_max_zoom, "forest": self.ground_max_zoom,
+        }[tree]  # fmt: skip
         return range(self.min_zoom, top + 1)
 
 
@@ -105,6 +118,14 @@ class Tree:
 MODELS = {
     "markhojd": "trails.io.sources.markhojd",
     "hoydedata-dtm": "trails.io.sources.hoydedata_dtm",
+}
+
+#: And what reads the vegetation codes, the same way: Sweden's are published
+#: classed, Norway's are computed from its two height models, and both answer
+#: with NMD's three code bands at 10 m (§6.11).
+STRUCTURES = {
+    "nmd": "trails.io.sources.nmd",
+    "hoydedata-vegetation": "trails.io.sources.hoydedata_vegetation",
 }
 
 
@@ -131,6 +152,28 @@ def read_model(tree: Tree, cache_dir: str | Path, force_download: bool = False) 
     return heights, transform, module.CRS, module.NODATA
 
 
+def read_structure(tree: Tree, cache_dir: str | Path, force_download: bool = False) -> tuple[np.ndarray, Affine, str]:
+    """The vegetation codes over one map's box, and what cutting them needs.
+
+    Args:
+        tree: The map's trees
+        cache_dir: Where the source's cache lives
+        force_download: Read the source again rather than its cache
+
+    Returns:
+        The three code bands (rows from the north), their georeferencing, and
+        the projection they are in
+
+    Raises:
+        ValueError: If the map names no structure source
+    """
+    if tree.structure is None:
+        raise ValueError(f"{tree.park} names no vegetation source; nothing to cut")
+    module: Any = importlib.import_module(STRUCTURES[tree.structure])
+    codes, transform = module.Source(cache_dir=cache_dir).structure(tree.box, force_download=force_download)
+    return codes, transform, module.CRS
+
+
 #: One entry per map that carries trees of its own.
 TREES: dict[str, Tree] = {
     # The band the Norwegian map draws -- 15 km round the park, measured
@@ -143,6 +186,9 @@ TREES: dict[str, Tree] = {
         provider="kartverket",
         box=(12.0, 65.15, 13.75, 65.95),
         model="hoydedata-dtm",
+        # Kartverket's surface model less its terrain model, classed to NMD's
+        # codes (§6.11).
+        structure="hoydedata-vegetation",
     ),
     # The Abisko box itself (§2, widened §9.24): the sheet was copied for it and
     # the height mosaic read over it, so the graph, the water grid, the page and
@@ -155,5 +201,7 @@ TREES: dict[str, Tree] = {
         # Two since the classes went to seven and the palette to the light one
         # drawn multiplied (§6.7).
         slope_version=2,
+        # Naturvårdsverket's NMD 2018 object height and cover (§6.11).
+        structure="nmd",
     ),
 }

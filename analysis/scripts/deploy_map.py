@@ -102,6 +102,8 @@ TREES = {
     "dem": "the height tiles, dem/<provider>/<version>/{z}/{x}/{y}.png",
     "shade": "the hillshade tiles, shade/<provider>/<version>/{z}/{x}/{y}.png",
     "slope": "the slope-class tiles, slope/<provider>/<version>/{z}/{x}/{y}.png",
+    "vegetation": "the vegetation tiles, vegetation/<provider>/<version>/{z}/{x}/{y}.png",
+    "forest": "the forest tiles, forest/<provider>/<version>/{z}/{x}/{y}.png",
 }
 
 #: How long an edge may hold an object of a tree. A year is the ceiling browsers honour.

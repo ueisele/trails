@@ -1236,6 +1236,119 @@ the box, not the map. What the counts do say is where the time goes: the relief 
 weight and two thirds of the cutting time on its own — 1,967 s of 2,918 s — because it is the only
 one of the three that has to warp a margin wider than the tile it draws.
 
+### 6.11 What stands on the ground: the laser's vegetation, in six steps, and the forest apart
+
+Uwe, 2026-09-17: *"Für Wanderungen ist es aber oft auch sehr relevant zu wissen, wie dicht der
+Bewuchs in der Gegend ist, um entscheiden zu können, ob ich da noch durchkomme oder nicht. Gibt es
+dazu zum Beispiel Satellitendaten …?"* Then, on the mockup: *"Glaube blau grün ist ganz gut … 6
+Stufen fände ich am besten"*, the forest *"als eigenen Layer und in einer etwas anderen Farbe"*, and
+*"wir sollten das gleich so bauen, dass es später für die ganzen Länder nutzbar ist."*
+
+**The right quantity is not biomass and not satellites.** What decides whether a valley is crossed
+in an hour or a day is the height and cover of what stands between knee and head — willow, dwarf
+birch, young mountain birch — and that is a laser measurement, not an optical one. Every global
+product looked at either stops short of the maps (GEDI's biomass ends at 51.6° N) or sees only the
+canopy (Copernicus tree-cover density, ESA WorldCover's *shrubland* at 10 m with the weakest
+accuracy of its classes, Meta's canopy-height model at 1 m off 2019 imagery, which reads 0 m over
+91 % of the Abisko box). Sweden has the laser's answer published: Naturvårdsverket's *Nationella
+marktäckedata 2018*, supplementary layer *objekthöjd och objekttäckning*, four nationwide 10 m
+rasters off Lantmäteriet's scanning of 2009–2017 — the height class of what stands between 0.5 and
+5 m (0.5–1, 1–3, 3–5), the share of the cell it stands on in eleven classes, and the same pair for
+what stands above 5 m. Norway publishes nothing derived, but publishes the two models the Swedish
+classes were computed from, and `hoydedata.no` serves the surface model exactly as it serves the
+terrain model the height tiles already read (§6.10). So the Norwegian side computes NMD's codes
+from DOM1 − DTM1 at 2 m, twenty-five posts to a cell, and the tiles are cut from one vocabulary on
+both sides of the border.
+
+**Newer is not available, and it would not help.** NMD 2018 is the newest laser there is over the
+Abisko box: the terrain-model squares under it date 2013, 2016, 2017 and 2020, Lantmäteriet's
+second national scan covers forest land and not the fjäll (0 squares of *Laserdata skog* in the box;
+NMD 2023's object layers are empty over it), and the point clouds and the photogrammetric surface
+model that do exist are priced. Whether newer would matter was measured rather than assumed, with
+Sentinel-2 over the whole box in July 2018, July 2023 and July 2024, per NMD 2018 class:
+
+| NMD 2018 class | July 2018 | 1 July 2023 | 28 July 2023 | July 2024 |
+|---|---|---|---|---|
+| mountain birch forest, median NDVI | 0.84 | 0.76 | 0.74 | 0.86 |
+| open land with vegetation | 0.72 | 0.65 | 0.66 | 0.76 |
+| bare land, as the reference | 0.28 | 0.24 | 0.25 | 0.30 |
+
+The 2023 moth outbreak SVT reported from the park on 28 June 2023 is there — a third of the birch
+cells lost more than 0.15 of NDVI by late July 2023, twice what the open land lost, in clusters of
+130–260 ha — and a year later 70 % of those cells were back within 0.05 of 2018 and the lasting
+loss was 0.9 % of the birch. **Leaves are not the obstacle; stems are.** A defoliated stand stops a
+walker exactly as a leafy one does, so vitality is not a passability input, and the 2016/2017
+structure stands. Sentinel-2 keeps one role, as a check and not a layer: the same afternoon's
+computation, repeated after a future outbreak, is what would say whether the laser layer needs
+looking at again.
+
+**Two trees, because they answer two questions, and both in NMD's own codes.** *Vegetation* is the
+cover of what stands between 0.5 and 5 m, six classes from a tenth of the cell to all of it; the
+laser's height class turned out to matter less than its cover once the box was looked at — 26 % of
+the ground carries something in the band, 11.6 % at 10–40 % cover and only 4 % at more — and a
+single measure reads better than two. Under a tenth is not drawn: a few bushes are not an
+obstacle. *Forest* is where trees over 5 m stand on at least 30 % of a cell, 1.7 % of the box,
+switched on its own in its own colour: high forest is usually easy ground, and the sheet draws its
+own idea of it, so this is the laser's word on where the sheet is right. The mockup offered a
+three-step *Durchkommen* class and a three-step height class beside the six-step cover; the six
+steps were chosen.
+
+**The colours were validated, not eyeballed.** Green — the natural hue — vanished into the sheet's
+own forest green at z13, measured on the mockup; blue-green did not. The ramp is one hue, OKLCH 190
+at chroma 0.10, six lightness steps from 0.72 to 0.37, at least 0.06 apart and the light end over
+2:1 on the sheet's cream (`#fffff2`); the forest is a sepia at hue 62, chroma 0.115, lightness
+0.62. Olive, the natural forest hue, was tried and refused: ΔE 13.0 from the ramp's light step for a
+full-colour reader, under the 15 floor. The sepia stands at ΔE 21.8 in full colour and 15.6 under
+simulated deuteranopia, and gold, which also passed, was set aside because it sits beside the
+slope classes' yellows. Both layers are drawn as the slope classes are — palette PNG, alpha 150 in
+the palette, `mix-blend-mode: multiply` — so the lettering stays black under them, and both start
+off and are remembered (§6.9).
+
+**Two kinds of nothing, told apart.** NMD writes 255 both where the laser found nothing and where
+nobody has flown — 13 % of the Abisko box, the corner at Riksgränsen — and the delivery's own
+metadata raster names the flight strip of every scanned cell. The source reads it and keeps 0
+(*scanned, nothing there*) apart from 255 (*not scanned*); the tiles draw neither, but the codes
+say which is which, and a Norwegian cell no model has a post for is the same 255. The
+rasters are not on one grid, either — 153,936 rows for the low ones, 154,001 for the tall cover,
+153,903 for the flight strips — so a box is cut on the ground in metres and each file read over
+that ground on its own grid.
+
+**Built for the countries, not for the boxes.** The Swedish source fetches the four nationwide
+rasters once (5.8 GB of zips, 10 GB each unpacked, converted to deflate GeoTIFFs of about a tenth
+and thrown away), and every box in Sweden is then a window read; the Norwegian source asks
+`hoydedata.no` for 5 km squares of both models at 2 m — 26 MB and 8 s a square, measured — classes
+each to 500 × 500 cells and caches the cells, so a box is its squares and a second box that overlaps
+it reads what the first left. Neither needs a login. `trees.TREES` names the source per map beside
+the height model, and the cutter, the page, the worker and the deploy know two more trees and no
+more than that.
+
+**Offline they are kept whether or not they are on**, exactly as the slope classes are: two more
+prefixes in the worker, two more passes of the walker after the slope, two more weights on the
+panel, two more entries in the stand row.
+
+**What they weigh, and why the palette is short.** A palette PNG that draws nothing still carries
+its palette, and the slope classes' is written out in full: 1,189 bytes for a blank tile. With
+only the entries a tree uses it is 163, a tile of a few patches 248 against 1,296, and a busy one
+within a tenth either way -- measured, then the two trees cut both ways:
+
+| tree | z | tiles | full palette | palette of its classes | time |
+|---|---|---|---|---|---|
+| `vegetation/lantmateriet/1/` | 8–15 | 9,330 | 27.5 MB | **19.7 MB** | 121 s |
+| `forest/lantmateriet/1/` | 8–15 | 9,330 | 12.7 MB | **2.6 MB** | 111 s |
+| `vegetation/kartverket/1/` | 8–15 | 37,915 | — | **128.2 MB** | 505 s |
+| `forest/kartverket/1/` | 8–15 | 37,915 | — | **24.1 MB** | 476 s |
+
+The Norwegian trees were cut with the short palette only, after 342 squares of the two models
+were read and classed in 31 minutes. The forest is mostly blank, and four fifths of it was palette. The vegetation tree is the slope
+tree's shape -- 9,330 tiles, z8 to z15, cut exactly as those are -- and weighs 19.7 MB against the
+slope classes' 25.0; its tiles are busier per zoom (7.5 kB at z12 against the slope's 4.5) because
+the ground it draws is the valleys, where a tile is all edges, and it stops earlier up the hill.
+
+**What the whole map costs offline now.** The drive's reading of *the whole map at its cap* moved
+from 166,035 tiles to **184,655** -- the two trees' 9,310 tiles each -- and from 1,031.9 MB at z17
+to **1,054 MB**: 22 MB for both, which is the trees' weight and nothing else, since a blank tile
+is 163 bytes and the panel prices what it would keep.
+
 ---
 
 ## 7. The order of work
@@ -3115,6 +3228,20 @@ finds — which would have been the next false alarm.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-18, second** — the several-lines check presses the first chip that is not lit rather
+  than the second in the row, after the Lomsdal-Visten drive found nearest paint giving the tap
+  the second source at the busiest crossing: pressing it again changed nothing and two readings
+  called the row broken while the page behaved. Found on the page built from the committed code
+  too, so the vegetation trees were not the cause.
+
+- **2026-09-18** — what stands on the ground is coloured over the relief, from the laser (§6.11):
+  the cover of what is between 0.5 and 5 m in six blue-green steps, and the forest over 5 m apart
+  in sepia, both off until asked and both kept offline. Sweden's classes are NMD 2018's, read off
+  the nationwide rasters converted once; Norway's are computed to the same codes from Kartverket's
+  surface model less its terrain model. Newer data was looked for and does not exist over the
+  fjäll; whether it would matter was measured with Sentinel-2 and it would not, because a
+  defoliated stand is as impassable as a leafy one.
+
 - **2026-09-17, thirteenth of the day** — no check compares elapsed time any more (§9.38), on
   Uwe's rule that a test must not fail because the machine is faster or because we parallelise.
   Five readings went: one was an invariant on 12 ms ± 12. Where the duration is the subject the
@@ -3628,3 +3755,10 @@ A line per change to this document or to the decisions in it, newest first.
 | that the blend is on the layer | Playwright Firefox against the mockup through the tunnel: `getComputedStyle` of every `.leaflet-layer` container read as `mixBlendMode`, once with the switch on and once off |
 | the ground over 55° | the whole-model histogram of §6.7 read at 50, 55, 60 and 70 |
 | the licensed text layer's price | Lantmäteriet's *Avgifter och leveransinformation för geodata* v2.31 (2026-05-29), the *Visning* rows and the transaction table, converted at 0.0885 EUR/SEK |
+| what stands on the ground, per source | NMD 2018's four object rasters clipped to the Abisko box with `rasterio` and their codes counted; Kartverket's DOM and DTM read over a 400 m window at 1 m and over the whole Lomsdal-Visten box at 100 m through the WCS, differenced; Meta's CHMv2 10 m tile read by window over `/vsicurl/`; SR16 and Copernicus tree-cover density as WMS images over the box, opaque pixels counted |
+| that newer Swedish laser does not exist over the fjäll | the `stac-hojd` catalogue searched over the box for `dsm-skoglig-copc` (0 items) and `dtm-cog` (20 items, dated 2013–2020); NMD 2023's WMS layers over the box (empty); Lantmäteriet's fee document v2.29 for the point clouds and the photogrammetric model |
+| whether newer would matter | Sentinel-2 L2A collection 1 off Earth Search, tile 34WDA, 29 July 2018, 1 and 28 July 2023 and 15 July 2024, warped to 10 m SWEREF 99 TM over the box with `WarpedVRT`, SCL classes 4–7 kept, NDVI per NMD 2018 base class read off Naturvårdsverket's WMS at 10 m, drop clusters labelled with `scipy.ndimage` |
+| the vegetation and forest colours | candidate ramps stepped in OKLCH with `coloraide` and run through the dataviz palette validator with `--ordinal` against `#fffff2`; the forest candidates against the ramp's light and dark steps with `--pairs all`; green against blue-green judged on a 390 px crop of the mockup at z13 |
+| what the vegetation trees weigh | both trees built with `make vegetation PARK=abisko` and their `index.json` read per zoom, once with the slope classes' full palette and once with the palette of the classes; the palette sizes on a blank, a patched and a random tile written with Pillow in memory |
+| the NMD rasters' grids | the row counts of the converted GeoTIFFs, read with `rasterio` |
+| the surface model service | `hoydedata.no/arcgis/rest/services?f=json` for the service list, `DOM/ImageServer?f=json` for its limits, and one 5 km `exportImage` at 2 m timed with `curl` |

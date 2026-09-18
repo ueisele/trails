@@ -58,17 +58,22 @@ and Overpass and takes considerably longer. Re-fetch on purpose with
 `--force-download`; `command make cache-clean` throws the cache away entirely,
 which is rarely what you want.
 
-**The ground under a map** is three more targets, and **both maps have all three**.
+**The ground under a map** is four more targets, and **both maps have all four**.
 `command make dem` builds z8–z13 height tiles from the country's height model,
 `command make shade` cuts the relief shadow the page lays under the contours out of the
-same cached model, z8–z15, and `command make slope` colours how steep that ground is,
-in classes, cut exactly as the relief is. All three take `PARK=<map>` — default
+same cached model, z8–z15, `command make slope` colours how steep that ground is,
+in classes, cut exactly as the relief is, and `command make vegetation` colours what
+stands on it off the country's laser survey — the cover of bushes and low trees in six
+steps, and the forest over 5 m as a tree of its own. All four take `PARK=<map>` — default
 `lomsdal-visten`, as `make map` and `make graph` default — and which box each is cut to
 and out of which model is `trails.processing.trees.TREES`, written once and read by the
-scripts and by `maps.PROVIDERS` alike. All three resume, all three write under
+scripts and by `maps.PROVIDERS` alike. All four resume, all write under
 `analysis/output/<tree>/<provider>/<version>/`, and `make deploy ARGS="--tree …"` uploads
-what they wrote. `analysis/docs/abisko-decisions.md` carries every figure — §6.3, §6.6 and
-§6.7 for the shapes, §6.10 for the Norwegian model and its box.
+what they wrote. `analysis/docs/abisko-decisions.md` carries every figure — §6.3, §6.6,
+§6.7 and §6.11 for the shapes, §6.10 for the Norwegian model and its box. The Swedish
+vegetation comes off Naturvårdsverket's nationwide NMD 2018 rasters, fetched and converted
+once into the cache by `command make nmd` (5.8 GB down, no login); the Norwegian off
+`hoydedata.no`'s surface model, no login either.
 
 **The one asymmetry is the sheet and the login.** Abisko draws Lantmäteriet's tiles out of
 our own bucket, so it has a fourth target: `command make tiles` copies them for the box out
@@ -78,7 +83,7 @@ Geotorget login, so run that from `home/trails-map` as
 Lomsdal-Visten draws Kartverket's cache live, copies no sheet, and reads its height model
 off `hoydedata.no` with no login, no order and no key at all.
 
-**Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, slope, the graph
+**Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, slope, vegetation, the graph
 with its report and the page, in that order, and from `home/trails-map`
 `just abisko` is the same with the login supplied. `command make lomsdal-visten` is the same
 chain without the tiles step and without any credential. Every step resumes or reads
@@ -163,7 +168,14 @@ sheet's own colour. It is a checkbox under the sheet in the base-map panel and s
 steep the ground is down its fall line, in the SLF's avalanche classes with one of our
 own at 25° below them and one over 55° above, one light colour each, multiplied over the
 sheet so its lettering stays black; a second checkbox under the relief's, off until asked,
-with the class colours listed under it while it is on. A state trail's popup links to the county's page
+with the class colours listed under it while it is on. **And what stands on the ground is
+coloured over both** (`maps.VegetationTiles`, `maps.ForestTiles`,
+`processing/vegetation_tiles.py`): the laser's reading of the cover of what is between 0.5
+and 5 m — willow, dwarf birch, young mountain birch — in six blue-green steps, and the forest
+over 5 m apart in sepia, two more checkboxes under the slope's, both off until asked. Sweden's
+classes are NMD 2018's (`io/sources/nmd.py`); Norway's are computed to the same codes from
+Kartverket's surface model less its terrain model (`io/sources/hoydedata_vegetation.py`).
+A state trail's popup links to the county's page
 for it on Naturkartan, one link per *BD* number on the chain, out of a hand-kept
 catalogue (`analysis/routes/abisko-naturkartan.toml`, `io/sources/naturkartan.py`):
 links only, since Naturkartan's terms allow private use alone and the line itself
@@ -358,8 +370,9 @@ A map named `<name>` is uploaded as `<name>.html` and is then readable at `https
 Publishing a second map needs nothing but a second upload.
 
 **Tile trees** are the other thing it uploads — the base-map tiles `command make tiles` copied,
-the height tiles `command make dem` built, the relief `command make shade` cut and the slope
-classes `command make slope` coloured — and they go up
+the height tiles `command make dem` built, the relief `command make shade` cut, the slope
+classes `command make slope` coloured and the vegetation and forest `command make vegetation`
+coloured — and they go up
 by `aws s3 sync` rather than one `cp` each:
 
 ```bash

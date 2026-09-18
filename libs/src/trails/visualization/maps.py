@@ -26,7 +26,7 @@ import pandas as pd
 from branca.element import Element, Figure, MacroElement
 from jinja2 import Template
 
-from trails.processing import slope_tiles, trees
+from trails.processing import slope_tiles, trees, vegetation_tiles
 from trails.processing.dem_tiles import TERRARIUM_OFFSET, TERRARIUM_STEP
 from trails.routing import elevation
 
@@ -57,6 +57,10 @@ MAP_SHADE_ATTR = "_trails_shade"
 #: provider has one -- for the legend's checkbox under the relief's, and the
 #: class rows it explains the colours with.
 MAP_SLOPE_ATTR = "_trails_slope"
+
+#: And the vegetation and forest overlays' (§6.11), for the same reason.
+MAP_VEGETATION_ATTR = "_trails_vegetation"
+MAP_FOREST_ATTR = "_trails_forest"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -309,6 +313,92 @@ class SlopeTiles:
 
 
 @dataclasses.dataclass(frozen=True)
+class VegetationTiles:
+    """Vegetation tiles beside a provider's map tiles: how much stands between knee and head height.
+
+    Palette PNGs cut by :mod:`trails.processing.vegetation_tiles`
+    (analysis/docs/abisko-decisions.md §6.11): the laser's reading of what
+    stands between 0.5 and 5 m -- dwarf birch, willow, young mountain birch
+    -- as the share of each 10 m cell it covers, in six steps of one teal,
+    drawn multiplied over the sheet like the slope classes and off until the
+    reader asks. It answers the question the sheet does not: whether the open
+    ground off the path is walked across or pushed through.
+    """
+
+    #: What every vegetation tile's address starts with, root-relative.
+    tiles: str
+    #: The finest zoom cut: the relief's, since a 10 m cell has no more to give past it.
+    top: int
+    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    weight: dict[int, int]
+
+    @property
+    def template(self) -> str:
+        """The address of a tile, with ``{z}``, ``{x}`` and ``{y}`` to fill."""
+        return f"{self.tiles}{{z}}/{{x}}/{{y}}.png"
+
+    def as_settings(self) -> dict[str, object]:
+        """What the page is handed: where the tiles are, how deep they go, what they weigh.
+
+        Returns:
+            ``url``, ``top`` and ``weight`` per zoom, for the offline panel.
+        """
+        return {"url": self.template, "top": self.top, "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()}}
+
+    @staticmethod
+    def classes() -> list[dict[str, object]]:
+        """The legend's rows: each class's span of the cell in per cent, and its colour.
+
+        Returns:
+            One row per class, sparsest first, ``from``, ``to`` and ``colour``
+        """
+        return [
+            {"from": span[0], "to": span[1], "colour": colour}
+            for span, colour in zip(vegetation_tiles.DENSITY_SPANS, vegetation_tiles.COLOURS, strict=True)
+        ]
+
+
+@dataclasses.dataclass(frozen=True)
+class ForestTiles:
+    """Forest tiles beside a provider's map tiles: where trees over 5 m stand on a third of the ground or more.
+
+    The other tree :mod:`trails.processing.vegetation_tiles` cuts (§6.11), one
+    class in a sepia, switched on its own: high forest is a different thing
+    from willow, usually easy ground, and the sheet draws its own idea of it,
+    so this is the laser's word on where the sheet is right.
+    """
+
+    #: What every forest tile's address starts with, root-relative.
+    tiles: str
+    #: The finest zoom cut.
+    top: int
+    #: Bytes a tile weighs, per zoom, for the offline panel's estimate.
+    weight: dict[int, int]
+
+    @property
+    def template(self) -> str:
+        """The address of a tile, with ``{z}``, ``{x}`` and ``{y}`` to fill."""
+        return f"{self.tiles}{{z}}/{{x}}/{{y}}.png"
+
+    def as_settings(self) -> dict[str, object]:
+        """What the page is handed: where the tiles are, how deep they go, what they weigh.
+
+        Returns:
+            ``url``, ``top`` and ``weight`` per zoom, for the offline panel.
+        """
+        return {"url": self.template, "top": self.top, "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()}}
+
+    @staticmethod
+    def colour() -> str:
+        """The one colour the forest is drawn in.
+
+        Returns:
+            ``#rrggbb``
+        """
+        return vegetation_tiles.FOREST_COLOUR
+
+
+@dataclasses.dataclass(frozen=True)
 class Provider:
     """Whose tiles a map draws, and the three things the page needs to know about them.
 
@@ -349,6 +439,10 @@ class Provider:
     #: Slope-class tiles cut beside the map tiles, where the map has them
     #: (§6.7): the same condition as the relief's, and None with it.
     slope: SlopeTiles | None = None
+    #: Vegetation and forest tiles cut beside the map tiles, where the map's
+    #: country has a laser survey to cut them from (§6.11); None where not.
+    vegetation: VegetationTiles | None = None
+    forest: ForestTiles | None = None
     #: Where the tiles end, west, south, east, north in degrees -- the box the
     #: trees in our own bucket were cut to, :data:`trails.processing.trees.TREES`.
     #: None for a source none of whose tiles are ours.
@@ -379,6 +473,14 @@ _WEIGHT_LV_DEM = {8: 48907, 9: 88226, 10: 93729, 11: 101108, 12: 95688, 13: 8843
 _WEIGHT_LV_SHADE = {8: 13071, 9: 22789, 10: 24516, 11: 26800, 12: 26208, 13: 22598, 14: 16377, 15: 10672}
 #: The slope classes, z8 to z15: 37,915 tiles, 141.8 MB.
 _WEIGHT_LV_SLOPE = {8: 2453, 9: 4296, 10: 5038, 11: 5849, 12: 6186, 13: 5764, 14: 4604, 15: 3339}
+#: The vegetation and forest trees (§6.11), z8 to z15, 37,915 tiles each:
+#: 128.2 MB and 24.1 MB, the mean per zoom of the first build, 2026-09-18.
+_WEIGHT_LV_VEGETATION = {8: 3591, 9: 6881, 10: 8196, 11: 10901, 12: 14144, 13: 11068, 14: 5120, 15: 2227}
+_WEIGHT_LV_FOREST = {8: 1037, 9: 1770, 10: 1803, 11: 1962, 12: 2153, 13: 1683, 14: 914, 15: 467}
+#: The same two over the Abisko box, 9,330 tiles each: 19.7 MB and 2.6 MB,
+#: the mean per zoom of the first build, 2026-09-18.
+_WEIGHT_AB_VEGETATION = {8: 1154, 9: 1589, 10: 3262, 11: 5624, 12: 7535, 13: 6090, 14: 3040, 15: 1520}
+_WEIGHT_AB_FOREST = {8: 262, 9: 312, 10: 486, 11: 625, 12: 718, 13: 581, 14: 358, 15: 232}
 
 
 #: Where each map's own trees are cut, written once and read here so the page,
@@ -423,6 +525,18 @@ PROVIDERS: dict[str, Provider] = {
             top=_LOMSDAL_VISTEN.ground_max_zoom,
             weight=_WEIGHT_LV_SLOPE,
         ),
+        # And what stands on the ground, off Kartverket's surface model less
+        # its terrain model (§6.11), z8 to z15, cut as the slope classes are.
+        vegetation=VegetationTiles(
+            tiles=_LOMSDAL_VISTEN.prefix("vegetation"),
+            top=_LOMSDAL_VISTEN.ground_max_zoom,
+            weight=_WEIGHT_LV_VEGETATION,
+        ),
+        forest=ForestTiles(
+            tiles=_LOMSDAL_VISTEN.prefix("forest"),
+            top=_LOMSDAL_VISTEN.ground_max_zoom,
+            weight=_WEIGHT_LV_FOREST,
+        ),
     ),
     "lantmateriet": Provider(
         key="lantmateriet",
@@ -466,6 +580,18 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_ABISKO.prefix("slope"),
             top=_ABISKO.ground_max_zoom,
             weight={8: 2328, 9: 2547, 10: 3646, 11: 4586, 12: 4470, 13: 4010, 14: 3213, 15: 2424},
+        ),
+        # And what stands on the ground, off NMD 2018's laser classes (§6.11),
+        # z8 to z15, cut as the slope classes are.
+        vegetation=VegetationTiles(
+            tiles=_ABISKO.prefix("vegetation"),
+            top=_ABISKO.ground_max_zoom,
+            weight=_WEIGHT_AB_VEGETATION,
+        ),
+        forest=ForestTiles(
+            tiles=_ABISKO.prefix("forest"),
+            top=_ABISKO.ground_max_zoom,
+            weight=_WEIGHT_AB_FOREST,
         ),
     ),
 }
@@ -925,6 +1051,9 @@ var SHADE_PREFIX = "__SHADE_PREFIX__" ? new URL("__SHADE_PREFIX__", self.locatio
 // reader who switched the classes on and then lost the connection would
 // otherwise see them stop at the edge of the last view.
 var SLOPE_PREFIX = "__SLOPE_PREFIX__" ? new URL("__SLOPE_PREFIX__", self.location.href).href : null;
+// And the vegetation and forest tiles', kept with the others on the same terms.
+var VEGETATION_PREFIX = "__VEGETATION_PREFIX__" ? new URL("__VEGETATION_PREFIX__", self.location.href).href : null;
+var FOREST_PREFIX = "__FOREST_PREFIX__" ? new URL("__FOREST_PREFIX__", self.location.href).href : null;
 
 // **Where the offline switch is kept, and why it is kept at all.** A service
 // worker is not a process that stays alive: the browser starts it for a fetch
@@ -1279,6 +1408,8 @@ function prefixOf(plain) {
     if (HEIGHT_PREFIX && plain.indexOf(HEIGHT_PREFIX) === 0) { return HEIGHT_PREFIX; }
     if (SHADE_PREFIX && plain.indexOf(SHADE_PREFIX) === 0) { return SHADE_PREFIX; }
     if (SLOPE_PREFIX && plain.indexOf(SLOPE_PREFIX) === 0) { return SLOPE_PREFIX; }
+    if (VEGETATION_PREFIX && plain.indexOf(VEGETATION_PREFIX) === 0) { return VEGETATION_PREFIX; }
+    if (FOREST_PREFIX && plain.indexOf(FOREST_PREFIX) === 0) { return FOREST_PREFIX; }
     return null;
 }
 
@@ -1287,7 +1418,10 @@ function prefixOf(plain) {
 function olderPrefix(stand, now) {
     if (!stand || !now) { return null; }
     var was = now === TILE_PREFIX ? stand.tiles
-        : (now === HEIGHT_PREFIX ? stand.heights : (now === SHADE_PREFIX ? stand.shade : stand.slope));
+        : (now === HEIGHT_PREFIX ? stand.heights
+        : (now === SHADE_PREFIX ? stand.shade
+        : (now === SLOPE_PREFIX ? stand.slope
+        : (now === VEGETATION_PREFIX ? stand.vegetation : stand.forest))));
     return was && was !== now ? was : null;
 }
 
@@ -1372,7 +1506,9 @@ self.addEventListener("fetch", function (event) {
     if (request.cache === "reload") { return; }
     if (request.url.indexOf(TILE_PREFIX) === 0 || (HEIGHT_PREFIX && request.url.indexOf(HEIGHT_PREFIX) === 0)
             || (SHADE_PREFIX && request.url.indexOf(SHADE_PREFIX) === 0)
-            || (SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)) {
+            || (SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)
+            || (VEGETATION_PREFIX && request.url.indexOf(VEGETATION_PREFIX) === 0)
+            || (FOREST_PREFIX && request.url.indexOf(FOREST_PREFIX) === 0)) {
         event.respondWith(tileFor(request));
     }
 });
@@ -1440,6 +1576,8 @@ def write_service_worker(beside: pathlib.Path, provider: Provider = PROVIDERS["k
         .replace("__HEIGHT_PREFIX__", provider.heights.tiles if provider.heights else "")
         .replace("__SHADE_PREFIX__", provider.shade.tiles if provider.shade else "")
         .replace("__SLOPE_PREFIX__", provider.slope.tiles if provider.slope else "")
+        .replace("__VEGETATION_PREFIX__", provider.vegetation.tiles if provider.vegetation else "")
+        .replace("__FOREST_PREFIX__", provider.forest.tiles if provider.forest else "")
         .replace("__DB__", companions.database)
         .replace("__CACHE__", companions.cache)
     )
@@ -2252,7 +2390,7 @@ class _Theme(MacroElement):
         /* The slope classes overprint the sheet rather than cover it: black
            lettering multiplied by any colour is still black. The layer's
            own alpha keeps the darkening partial -- see SlopeTiles. */
-        .leaflet-layer.trails-slope-tiles { mix-blend-mode: multiply; }
+        .leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles, .leaflet-layer.trails-forest-tiles { mix-blend-mode: multiply; }
         :root {
             color-scheme: light;
             --trails-panel: rgba(255,255,255,0.94);
@@ -3109,6 +3247,50 @@ def create_map(
         )
         slope.add_to(fmap)
         setattr(fmap, MAP_SLOPE_ATTR, slope)
+
+    # **What stands on the ground, where the map's country has a laser survey
+    # to say.** Two layers cut the same way as the slope classes and drawn the
+    # same way -- multiplied, off until asked -- one for the vegetation between
+    # knee and head height and one for the trees above it, switched apart
+    # because they answer different questions (§6.11).
+    if provider is not None and provider.vegetation is not None:
+        vegetation = folium.TileLayer(
+            tiles=provider.vegetation.template,
+            attr=_BASE_LAYERS[base]["attr"] or "",
+            name="Vegetation",
+            overlay=True,
+            control=False,
+            show=False,
+            opacity=1.0,
+            max_zoom=provider.top,
+            max_native_zoom=provider.vegetation.top,
+            cross_origin=True,
+            trails_vegetation=True,
+            class_name="trails-vegetation-tiles",
+            z_index=262,
+            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]] if provider.extent else None,
+        )
+        vegetation.add_to(fmap)
+        setattr(fmap, MAP_VEGETATION_ATTR, vegetation)
+    if provider is not None and provider.forest is not None:
+        forest = folium.TileLayer(
+            tiles=provider.forest.template,
+            attr=_BASE_LAYERS[base]["attr"] or "",
+            name="Forest",
+            overlay=True,
+            control=False,
+            show=False,
+            opacity=1.0,
+            max_zoom=provider.top,
+            max_native_zoom=provider.forest.top,
+            cross_origin=True,
+            trails_forest=True,
+            class_name="trails-forest-tiles",
+            z_index=264,
+            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]] if provider.extent else None,
+        )
+        forest.add_to(fmap)
+        setattr(fmap, MAP_FOREST_ATTR, forest)
 
     # Every page gets the colours, chrome or no chrome: the panels carry them
     # as inline styles, and an inline style resolves its variables against the
@@ -17935,6 +18117,10 @@ class _OfflinePanel(MacroElement):
                 // And the slope classes' tiles, kept with them, on the same
                 // condition.
                 var SLOPE = {{ this.slope_json }};
+                // And the vegetation and forest tiles' (§6.11), on the same
+                // condition, kept with the rest whether or not they are on.
+                var VEGETATION = {{ this.vegetation_json }};
+                var FOREST = {{ this.forest_json }};
                 // Where *our* tiles end -- the box the three trees were cut to,
                 // which is not the sheet's reach where the sheet is somebody
                 // else's cache (§6.10). A margin is clipped to it: see `padded`.
@@ -18350,6 +18536,21 @@ class _OfflinePanel(MacroElement):
                             bytes += levels[z].size * slopeWeight(z);
                         });
                     }
+                    // And the vegetation and the forest, on the same terms.
+                    if (VEGETATION) {
+                        Object.keys(levels).forEach(function (z) {
+                            if (Number(z) > VEGETATION.top) { return; }
+                            tiles += levels[z].size;
+                            bytes += levels[z].size * vegetationWeight(z);
+                        });
+                    }
+                    if (FOREST) {
+                        Object.keys(levels).forEach(function (z) {
+                            if (Number(z) > FOREST.top) { return; }
+                            tiles += levels[z].size;
+                            bytes += levels[z].size * forestWeight(z);
+                        });
+                    }
                     return {tiles: tiles, bytes: bytes};
                 }
 
@@ -18363,6 +18564,14 @@ class _OfflinePanel(MacroElement):
 
                 function slopeWeight(z) {
                     return (SLOPE && SLOPE.weight[z]) || 5000;
+                }
+
+                function vegetationWeight(z) {
+                    return (VEGETATION && VEGETATION.weight[z]) || 4000;
+                }
+
+                function forestWeight(z) {
+                    return (FOREST && FOREST.weight[z]) || 1200;
                 }
 
                 // **Buffered, because the zoom row prices every level it draws.**
@@ -18482,7 +18691,8 @@ class _OfflinePanel(MacroElement):
                         // and is not the sheet. Switching the base map off and
                         // on again re-adds it behind this one in the map's own
                         // order, so "the first tile layer" is not enough.
-                        if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope)) { return; }
+                        if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope
+                                || layer.options.trailsVegetation || layer.options.trailsForest)) { return; }
                         found = layer;
                     });
                     return found;
@@ -18525,6 +18735,14 @@ class _OfflinePanel(MacroElement):
                     return new URL(SLOPE.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
                 }
 
+                function vegetationUrlFor(x, y, z) {
+                    return new URL(VEGETATION.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
+                }
+
+                function forestUrlFor(x, y, z) {
+                    return new URL(FOREST.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), location.href).href;
+                }
+
                 function walker(picked) {
                     picked = picked || recount();
                     var layer = base();
@@ -18558,8 +18776,21 @@ class _OfflinePanel(MacroElement):
                                         it = picked.levels[z].values();
                                         continue;
                                     }
-                                    if (pass !== 'slope' && SLOPE && z <= SLOPE.top) {
+                                    if ((pass === 'map' || pass === 'height' || pass === 'shade') && SLOPE && z <= SLOPE.top) {
                                         pass = 'slope';
+                                        it = picked.levels[z].values();
+                                        continue;
+                                    }
+                                    // Then the vegetation and the forest (§6.11),
+                                    // each once, after whichever of the others
+                                    // this level carried.
+                                    if (pass !== 'vegetation' && pass !== 'forest' && VEGETATION && z <= VEGETATION.top) {
+                                        pass = 'vegetation';
+                                        it = picked.levels[z].values();
+                                        continue;
+                                    }
+                                    if (pass !== 'forest' && FOREST && z <= FOREST.top) {
+                                        pass = 'forest';
                                         it = picked.levels[z].values();
                                         continue;
                                     }
@@ -18579,6 +18810,12 @@ class _OfflinePanel(MacroElement):
                                 }
                                 if (pass === 'slope') {
                                     return {url: slopeUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'slope'};
+                                }
+                                if (pass === 'vegetation') {
+                                    return {url: vegetationUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'vegetation'};
+                                }
+                                if (pass === 'forest') {
+                                    return {url: forestUrlFor(keyX(step.value), keyY(step.value), z), z: z, kind: 'forest'};
                                 }
                                 return {url: urlFor(layer, keyX(step.value), keyY(step.value), z), z: z, kind: 'map'};
                             }
@@ -18891,7 +19128,9 @@ class _OfflinePanel(MacroElement):
                         height: HEIGHTS ? new URL(HEIGHTS.url.split('{z}')[0], location.href).href : null,
                         heights: HEIGHTS ? new URL(HEIGHTS.url.split('{z}')[0], location.href).href : null,
                         shade: SHADE ? new URL(SHADE.url.split('{z}')[0], location.href).href : null,
-                        slope: SLOPE ? new URL(SLOPE.url.split('{z}')[0], location.href).href : null
+                        slope: SLOPE ? new URL(SLOPE.url.split('{z}')[0], location.href).href : null,
+                        vegetation: VEGETATION ? new URL(VEGETATION.url.split('{z}')[0], location.href).href : null,
+                        forest: FOREST ? new URL(FOREST.url.split('{z}')[0], location.href).href : null
                     };
                 }
 
@@ -18904,8 +19143,9 @@ class _OfflinePanel(MacroElement):
                     }
                     var was = {map: moved(now.map, stand.tiles), tiles: moved(now.tiles, stand.tiles),
                                height: moved(now.height, stand.heights), heights: moved(now.heights, stand.heights),
-                               shade: moved(now.shade, stand.shade), slope: moved(now.slope, stand.slope)};
-                    if (was.tiles || was.heights || was.shade || was.slope) { out = was; }
+                               shade: moved(now.shade, stand.shade), slope: moved(now.slope, stand.slope),
+                               vegetation: moved(now.vegetation, stand.vegetation), forest: moved(now.forest, stand.forest)};
+                    if (was.tiles || was.heights || was.shade || was.slope || was.vegetation || was.forest) { out = was; }
                     return out;
                 }
 
@@ -19437,7 +19677,9 @@ class _OfflinePanel(MacroElement):
                                     if (next.z > state.top) { state.top = next.z; }
                                     state.bytes += next.kind === 'height' ? heightWeight(next.z)
                                         : (next.kind === 'shade' ? shadeWeight(next.z)
-                                        : (next.kind === 'slope' ? slopeWeight(next.z) : (WEIGHT[next.z] || 45000)));
+                                        : (next.kind === 'slope' ? slopeWeight(next.z)
+                                        : (next.kind === 'vegetation' ? vegetationWeight(next.z)
+                                        : (next.kind === 'forest' ? forestWeight(next.z) : (WEIGHT[next.z] || 45000)))));
                                 }
                                 // **Give up on the connection, not on the tile.**
                                 // One tile that will not come is a tile, and the
@@ -20301,6 +20543,8 @@ class _OfflinePanel(MacroElement):
         self.heights_json = _script_json(provider.heights.as_settings() if provider.heights else None)
         self.shade_json = _script_json(provider.shade.as_settings() if provider.shade else None)
         self.slope_json = _script_json(provider.slope.as_settings() if provider.slope else None)
+        self.vegetation_json = _script_json(provider.vegetation.as_settings() if provider.vegetation else None)
+        self.forest_json = _script_json(provider.forest.as_settings() if provider.forest else None)
         self.tile_prefix_json = _script_json(provider.tiles)
         extent = provider.extent
         self.extent_json = _script_json({"w": extent[0], "s": extent[1], "e": extent[2], "n": extent[3]} if extent else None)
@@ -20547,6 +20791,79 @@ class _Legend(MacroElement):
                         keepGround('slope', slopeTick.checked);
                     });
                 }
+                // **What stands on the ground, under the slope classes (§6.11).**
+                // The same kind of thing again -- how the ground is drawn -- with
+                // colours that mean something, so the rows sit under the
+                // checkbox and show only while it is on. Two switches, because
+                // the willow and the forest answer different questions.
+                var vegetation = {{ this.vegetation_name }};
+                var vegetationClasses = {{ this.vegetation_classes_json }};
+                if (vegetation) {
+                    var growing = document.createElement('label');
+                    growing.className = 'trails-vegetation';
+                    growing.style.cssText = 'display:flex;align-items:center;gap:6px;margin:3px 0;cursor:pointer';
+                    var vegetationTick = document.createElement('input');
+                    vegetationTick.type = 'checkbox';
+                    vegetationTick.style.cssText = 'flex:none;margin:0';
+                    vegetationTick.checked = groundKept('vegetation', map.hasLayer(vegetation));
+                    standAs(vegetation, vegetationTick.checked);
+                    var vegetationWord = document.createElement('span');
+                    vegetationWord.textContent = 'Vegetation 0.5–5 m';
+                    growing.appendChild(vegetationTick);
+                    growing.appendChild(vegetationWord);
+                    picked.appendChild(growing);
+                    var vegetationRows = document.createElement('div');
+                    vegetationRows.className = 'trails-vegetation-classes';
+                    vegetationRows.style.cssText = 'margin:0 0 4px 22px;font-size:12px;line-height:1.5';
+                    vegetationClasses.forEach(function (row) {
+                        var line = document.createElement('div');
+                        line.style.cssText = 'display:flex;align-items:center;gap:6px';
+                        var swatch = document.createElement('span');
+                        swatch.style.cssText = 'display:inline-block;width:18px;height:11px;flex:none;border:1px solid #999;'
+                            + 'background:' + row.colour + ';opacity:0.6';
+                        var text = document.createElement('span');
+                        text.textContent = row.from + '–' + row.to + ' % of the ground';
+                        line.appendChild(swatch);
+                        line.appendChild(text);
+                        vegetationRows.appendChild(line);
+                    });
+                    var vegetationNote = document.createElement('div');
+                    vegetationNote.style.cssText = 'color:#666;margin-top:2px';
+                    vegetationNote.textContent = 'How much of each 10 m cell carries bushes and low trees, by laser; under a tenth is not drawn.';
+                    vegetationRows.appendChild(vegetationNote);
+                    vegetationRows.style.display = vegetationTick.checked ? '' : 'none';
+                    picked.appendChild(vegetationRows);
+                    vegetationTick.addEventListener('change', function () {
+                        standAs(vegetation, vegetationTick.checked);
+                        vegetationRows.style.display = vegetationTick.checked ? '' : 'none';
+                        keepGround('vegetation', vegetationTick.checked);
+                    });
+                }
+                var forest = {{ this.forest_name }};
+                var forestColour = {{ this.forest_colour_json }};
+                if (forest) {
+                    var wooded = document.createElement('label');
+                    wooded.className = 'trails-forest';
+                    wooded.style.cssText = 'display:flex;align-items:center;gap:6px;margin:3px 0;cursor:pointer';
+                    var forestTick = document.createElement('input');
+                    forestTick.type = 'checkbox';
+                    forestTick.style.cssText = 'flex:none;margin:0';
+                    forestTick.checked = groundKept('forest', map.hasLayer(forest));
+                    standAs(forest, forestTick.checked);
+                    var forestSwatch = document.createElement('span');
+                    forestSwatch.style.cssText = 'display:inline-block;width:18px;height:11px;flex:none;border:1px solid #999;'
+                        + 'background:' + forestColour + ';opacity:0.6';
+                    var forestWord = document.createElement('span');
+                    forestWord.textContent = 'Forest over 5 m';
+                    wooded.appendChild(forestTick);
+                    wooded.appendChild(forestSwatch);
+                    wooded.appendChild(forestWord);
+                    picked.appendChild(wooded);
+                    forestTick.addEventListener('change', function () {
+                        standAs(forest, forestTick.checked);
+                        keepGround('forest', forestTick.checked);
+                    });
+                }
                 if (bases.length) { body.appendChild(picked); }
 
                 // A row is a label where it switches something and a plain div
@@ -20701,6 +21018,11 @@ class _Legend(MacroElement):
         # And the slope overlay's, with the rows that explain its colours.
         self.slope_name = "null"
         self.slope_classes_json = "[]"
+        # And the vegetation and forest overlays' (§6.11), likewise.
+        self.vegetation_name = "null"
+        self.vegetation_classes_json = "[]"
+        self.forest_name = "null"
+        self.forest_colour_json = _script_json(ForestTiles.colour())
         # What the two switches above the layers remember themselves under,
         # filled in at render from the map's own companions: the same name the
         # caches and the offline switch carry, so two maps on one origin do not
@@ -20735,6 +21057,11 @@ class _Legend(MacroElement):
         slope = getattr(self._parent, MAP_SLOPE_ATTR, None) if self._parent is not None else None
         self.slope_name = slope.get_name() if slope is not None else "null"
         self.slope_classes_json = _script_json(SlopeTiles.classes()) if slope is not None else "[]"
+        vegetation = getattr(self._parent, MAP_VEGETATION_ATTR, None) if self._parent is not None else None
+        self.vegetation_name = vegetation.get_name() if vegetation is not None else "null"
+        self.vegetation_classes_json = _script_json(VegetationTiles.classes()) if vegetation is not None else "[]"
+        forest = getattr(self._parent, MAP_FOREST_ATTR, None) if self._parent is not None else None
+        self.forest_name = forest.get_name() if forest is not None else "null"
         companions = getattr(self._parent, MAP_COMPANIONS_ATTR, ROOT) if self._parent is not None else ROOT
         self.ground_key_json = _script_json(f"{companions.cache}-ground-")
         return super().render(**kwargs)

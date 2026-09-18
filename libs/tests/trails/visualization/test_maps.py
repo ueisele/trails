@@ -2329,7 +2329,8 @@ class TestTwoMapsOnOneOrigin:
         fetch the shadow and call it the map."""
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
-        assert "if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope)) { return; }" in html
+        assert "if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope" in html
+        assert "|| layer.options.trailsVegetation || layer.options.trailsForest)) { return; }" in html
         assert '"trailsShade": true' in html or '"trails_shade": true' in html
 
     def test_the_worker_answers_the_relief_from_what_was_kept(self, tmp_path):
@@ -2370,7 +2371,8 @@ class TestTwoMapsOnOneOrigin:
         # name is what the theme's one rule hangs on.
         assert slope.options["class_name"] == "trails-slope-tiles"
         html = fmap.get_root().render()
-        assert ".leaflet-layer.trails-slope-tiles { mix-blend-mode: multiply; }" in html
+        blend = ".leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles, .leaflet-layer.trails-forest-tiles"
+        assert blend + " { mix-blend-mode: multiply; }" in html
         assert (slope.options["max_zoom"], slope.options["max_native_zoom"]) == (17, 15)
         assert slope.options["bounds"] == [[68.139, 18.15], [68.46, 19.10]]
         assert slope.options["attribution"] == maps._LANTMATERIET_ATTRIBUTION
@@ -2489,7 +2491,8 @@ class TestTwoMapsOnOneOrigin:
     def test_the_slope_classes_are_never_taken_for_the_sheet(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
-        assert "if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope)) { return; }" in html
+        assert "if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope" in html
+        assert "|| layer.options.trailsVegetation || layer.options.trailsForest)) { return; }" in html
         assert '"trailsSlope": true' in html or '"trails_slope": true' in html
 
     def test_the_worker_answers_the_slope_classes_from_what_was_kept(self, tmp_path):
@@ -2498,7 +2501,8 @@ class TestTwoMapsOnOneOrigin:
         assert 'var SLOPE_PREFIX = "/slope/lantmateriet/2/" ? new URL("/slope/lantmateriet/2/", self.location.href).href : null;' in script
         assert "(SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)" in script
         assert "if (SLOPE_PREFIX && plain.indexOf(SLOPE_PREFIX) === 0) { return SLOPE_PREFIX; }" in script
-        assert "(now === SHADE_PREFIX ? stand.shade : stand.slope)" in script
+        assert "(now === SLOPE_PREFIX ? stand.slope" in script
+        assert "(now === VEGETATION_PREFIX ? stand.vegetation : stand.forest)" in script
 
     def test_the_offline_panel_keeps_the_slope_classes_whether_or_not_they_are_on(self, tmp_path):
         """The switch is the reader's to flip in the field, and a class that
@@ -2510,12 +2514,18 @@ class TestTwoMapsOnOneOrigin:
         assert '"url": "/slope/lantmateriet/2/{z}/{x}/{y}.png"' in slope
         assert '"top": 15' in slope
         assert "if (Number(z) > SLOPE.top) { return; }" in html
-        assert "if (pass !== 'slope' && SLOPE && z <= SLOPE.top) {" in html
+        assert "if ((pass === 'map' || pass === 'height' || pass === 'shade') && SLOPE && z <= SLOPE.top) {" in html
+        # And the vegetation and the forest walk after it, each once (§6.11).
+        assert "if (pass !== 'vegetation' && pass !== 'forest' && VEGETATION && z <= VEGETATION.top) {" in html
+        assert "if (pass !== 'forest' && FOREST && z <= FOREST.top) {" in html
         # And the relief is not walked again after the classes.
         assert "if ((pass === 'map' || pass === 'height') && SHADE && z <= SHADE.top) {" in html
         assert "kind: 'slope'" in html
-        assert "slope: SLOPE ? new URL(SLOPE.url.split('{z}')[0], location.href).href : null" in html
-        assert "(next.kind === 'slope' ? slopeWeight(next.z) : (WEIGHT[next.z] || 45000))" in html
+        assert "slope: SLOPE ? new URL(SLOPE.url.split('{z}')[0], location.href).href : null," in html
+        assert "vegetation: VEGETATION ? new URL(VEGETATION.url.split('{z}')[0], location.href).href : null," in html
+        assert "forest: FOREST ? new URL(FOREST.url.split('{z}')[0], location.href).href : null" in html
+        assert "(next.kind === 'slope' ? slopeWeight(next.z)" in html
+        assert "(next.kind === 'forest' ? forestWeight(next.z) : (WEIGHT[next.z] || 45000))" in html
 
     def test_the_first_map_carries_the_relief_too(self, tmp_path):
         """Since §6.10 Kartverket's sheet has a height model of this project's

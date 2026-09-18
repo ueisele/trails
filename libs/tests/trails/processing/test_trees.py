@@ -15,7 +15,7 @@ class TestPrefix:
 
     def test_the_two_maps_are_stacked_and_never_mixed(self):
         """A directory per source, which is what §6.3's address line is for."""
-        for tree in ("dem", "shade", "slope"):
+        for tree in ("dem", "shade", "slope", "vegetation", "forest"):
             swedish = trees.TREES["abisko"].prefix(tree)
             norwegian = trees.TREES["lomsdal-visten"].prefix(tree)
             assert swedish != norwegian
@@ -23,7 +23,13 @@ class TestPrefix:
 
     def test_a_tree_nobody_cuts_is_a_named_failure(self):
         with pytest.raises(KeyError):
-            trees.TREES["abisko"].prefix("vegetation")
+            trees.TREES["abisko"].prefix("heather")
+
+    def test_both_maps_name_a_vegetation_source(self):
+        """Sweden's classes come published, Norway's are computed; both are cut (§6.11)."""
+        assert trees.TREES["abisko"].structure == "nmd"
+        assert trees.TREES["lomsdal-visten"].structure == "hoydedata-vegetation"
+        assert set(trees.STRUCTURES) == {"nmd", "hoydedata-vegetation"}
 
 
 class TestZooms:

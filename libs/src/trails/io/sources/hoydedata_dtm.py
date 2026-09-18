@@ -192,11 +192,13 @@ def squares_over(bounds: Bounds, posts_m: float, chunk_m: float = CHUNK_M) -> tu
     return sorted(found, key=lambda square: (square.bounds[1], square.bounds[0])), transform, across, down
 
 
-def request_url(square: Square) -> str:
+def request_url(square: Square, service: str = SERVICE_URL) -> str:
     """The address one square is read from.
 
     Args:
         square: The square
+        service: Which ``exportImage`` endpoint answers; the terrain model by
+            default, the surface model for :mod:`~trails.io.sources.hoydedata_vegetation`
 
     Returns:
         The ``exportImage`` call, asking for exactly the square's post grid
@@ -217,7 +219,7 @@ def request_url(square: Square) -> str:
             "f": "image",
         }
     )
-    return f"{SERVICE_URL}?{query}"
+    return f"{service}?{query}"
 
 
 class Source:
