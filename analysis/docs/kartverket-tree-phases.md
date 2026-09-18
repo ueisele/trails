@@ -455,6 +455,11 @@ Labels are placed per metatile, so a name near a seam can appear once on each si
 only; none was seen cut. z17 started the same afternoon, resuming the tree (about 450,000
 tiles at the rate above, under two hours). Stand `7544749480db8ba3`, 189 leaves (the plan's
 188 was one short).
+**z17 done the same day**, 449,790 tiles, 2.95 GB, 6.6 kB a tile, mean weight 6,567; the tree
+is complete at 4.57 GB over z8–z17 (5.5 GB on disk). One run died on a dropped TLS connection
+after 26 minutes — the request retried only HTTP statuses — and was resumed after the fix that
+retries connection errors too (`3a2e621`); one 503 in the whole render, retried once. The tree
+is not deployed tile by tile: phase 6a packs it and deploys the packs.
 
 ### Phase 6 — Both maps move to packs
 
