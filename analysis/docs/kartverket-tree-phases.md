@@ -384,6 +384,18 @@ Pipeline only; the published page does not change.
    and gets its own review.
 5. Weights per zoom from the tree's `per_zoom`, as Lantmäteriet's were.
 
+**Run 2026-09-18, z8–z16 as unit `kartverket-tiles`:** 150,875 tiles in 2,030 s — about 4,450
+tiles a minute at two requests in flight, one 2560 px metatile in 1–2 s — with no 429 and no
+5xx in the whole run. Sizes, mean bytes a tile: z8 11.4 k, z9 15.0 k, z10 18.3 k, z11 19.5 k,
+z12 14.3 k, z13 12.9 k, z14 13.6 k, z15 8.1 k, z16 11.1 k; z16 alone 1.26 GB, z8–z16 1.62 GB.
+Seams: at z14 the mean absolute difference between the touching columns of adjacent tiles is
+5.8 across a metatile boundary (130 pairs) against 4.8 inside one (897 pairs) — continuous to
+the pixel; a four-tile look across a seam shows depth contours and soundings running through.
+Labels are placed per metatile, so a name near a seam can appear once on each side or on one
+only; none was seen cut. z17 started the same afternoon, resuming the tree (about 450,000
+tiles at the rate above, under two hours). Stand `7544749480db8ba3`, 189 leaves (the plan's
+188 was one short).
+
 ### Phase 6 — Norway moves to the tree
 
 1. `PROVIDERS["kartverket"]`: `tiles="/tiles/kartverket/topo/1/"`, `top=17`, `cap=17` if
