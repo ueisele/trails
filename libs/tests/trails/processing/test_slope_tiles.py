@@ -71,12 +71,20 @@ class TestSlope:
 
 @pytest.fixture
 def ridge():
-    """The relief tests' model: a ridge in SWEREF 99 TM over the Abisko box."""
+    """The relief tests' model: a ridge in SWEREF 99 TM over the Abisko box.
+
+    **The run is 450 m and not more, because the flanks have to clear the
+    classes and not graze them.** At 900 m this model's steepest ground read
+    25.2° against a first edge of 25.0°: the classes were reached on the crest
+    lines alone, three of the fifteen z14 tiles held no coloured pixel at all,
+    and which tile a test looked at decided whether it passed. Halving the run
+    puts the flanks at 43°, so every tile carries classes 1 to 5 and the
+    trough and crest are still level enough to leave clear."""
     transform = Affine(50.0, 0.0, 600_000.0, 0.0, -50.0, 7_620_000.0)
     rows, cols = 1_200, 1_400
     east = (np.arange(cols) + 0.5) * 50.0
     north = -(np.arange(rows) + 0.5) * 50.0
-    heights = (300.0 * np.sin((east[None, :] + north[:, None]) / 900.0)).astype(np.float32)
+    heights = (300.0 * np.sin((east[None, :] + north[:, None]) / 450.0)).astype(np.float32)
     return heights, transform, "EPSG:3006"
 
 
@@ -93,24 +101,29 @@ class TestBuildTiles:
         assert written["alpha"] == slope_tiles.ALPHA
         assert written["smooth_m"] == 50.0, "one post of this model, as the relief is"
 
-        tile = next((tmp_path / "slope" / "14").rglob("*.png"))
-        image = Image.open(tile)
-        assert image.mode == "P", "a palette, not four channels: flat colour compresses"
-        rgba = np.asarray(image.convert("RGBA"))
-        assert rgba.shape == (TILE_PX, TILE_PX, 4)
-        assert set(np.unique(rgba[..., 3]).tolist()) <= {0, slope_tiles.ALPHA}
-        # The ridge is 300 m over 900 m of run, so its flanks reach the classes.
-        assert rgba[..., 3].max() == slope_tiles.ALPHA, "a steep flank is coloured"
-        assert rgba[..., 3].min() == 0, "and the ridge top and valley floor are left clear"
-        coloured = rgba[rgba[..., 3] > 0][..., :3]
-        assert {tuple(int(v) for v in row) for row in coloured} <= {slope_tiles.rgb(c) for c in slope_tiles.COLOURS}
+        # Every tile of the level, and not whichever one the filesystem hands
+        # back first: the ridge crosses all fifteen, so the same holds of each,
+        # and a test that reads one reads a different one on another machine.
+        tiles = sorted((tmp_path / "slope" / "14").rglob("*.png"))
+        assert len(tiles) == index["tiles"]
+        for tile in tiles:
+            image = Image.open(tile)
+            assert image.mode == "P", "a palette, not four channels: flat colour compresses"
+            rgba = np.asarray(image.convert("RGBA"))
+            assert rgba.shape == (TILE_PX, TILE_PX, 4)
+            assert set(np.unique(rgba[..., 3]).tolist()) <= {0, slope_tiles.ALPHA}
+            # The ridge is 300 m over 450 m of run, so its flanks reach the classes.
+            assert rgba[..., 3].max() == slope_tiles.ALPHA, f"a steep flank is coloured ({tile.parent.name}/{tile.name})"
+            assert rgba[..., 3].min() == 0, "and the ridge top and valley floor are left clear"
+            coloured = rgba[rgba[..., 3] > 0][..., :3]
+            assert {tuple(int(v) for v in row) for row in coloured} <= {slope_tiles.rgb(c) for c in slope_tiles.COLOURS}
 
     def test_ground_outside_the_model_colours_nothing(self, ridge, tmp_path):
         heights, transform, crs = ridge
         bounds = (17.0, 68.30, 17.05, 68.33)  # west of the model
         index = slope_tiles.build_tiles(heights, transform, crs, bounds, zooms=[12], out_dir=tmp_path / "slope")
         assert index["per_zoom"]["12"]["empty"] == index["tiles"]
-        rgba = np.asarray(Image.open(next((tmp_path / "slope" / "12").rglob("*.png"))).convert("RGBA"))
+        rgba = np.asarray(Image.open(sorted((tmp_path / "slope" / "12").rglob("*.png"))[0]).convert("RGBA"))
         assert rgba[..., 3].max() == 0
 
     def test_it_is_cut_where_the_relief_is_cut(self, ridge, tmp_path):
@@ -121,7 +134,7 @@ class TestBuildTiles:
         bounds = (18.40, 68.30, 18.45, 68.33)
         slope_tiles.build_tiles(heights, transform, crs, bounds, zooms=[14], out_dir=tmp_path / "slope")
         shade_tiles.build_tiles(heights, transform, crs, bounds, zooms=[14], out_dir=tmp_path / "shade")
-        tile = next((tmp_path / "slope" / "14").rglob("*.png"))
+        tile = sorted((tmp_path / "slope" / "14").rglob("*.png"))[0]
         classes = np.asarray(Image.open(tile))
         shadow = np.asarray(Image.open(tmp_path / "shade" / "14" / tile.parent.name / tile.name).convert("RGBA"))[..., 3]
         # Where the ridge's north-west flank is steep enough to be classed it

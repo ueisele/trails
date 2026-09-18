@@ -92,12 +92,15 @@ class TestShadow:
 @pytest.fixture
 def ridge():
     """A model in SWEREF 99 TM over the Abisko box: a ridge running north-east,
-    steep enough that its two flanks cannot shade alike."""
+    steep enough that its two flanks cannot shade alike.
+
+    One model with the slope tests, which read the same ridge and need it
+    steeper than this file does -- see the fixture there for the run."""
     transform = Affine(50.0, 0.0, 600_000.0, 0.0, -50.0, 7_620_000.0)
     rows, cols = 1_200, 1_400
     east = (np.arange(cols) + 0.5) * 50.0
     north = -(np.arange(rows) + 0.5) * 50.0
-    heights = (300.0 * np.sin((east[None, :] + north[:, None]) / 900.0)).astype(np.float32)
+    heights = (300.0 * np.sin((east[None, :] + north[:, None]) / 450.0)).astype(np.float32)
     return heights, transform, "EPSG:3006"
 
 
@@ -114,7 +117,7 @@ class TestBuildTiles:
         assert written["smooth_m"] == 50.0, "one post of this model"
         assert written["steps"] == shade_tiles.STEPS
 
-        tile = next((tmp_path / "shade" / "14").rglob("*.png"))
+        tile = sorted((tmp_path / "shade" / "14").rglob("*.png"))[0]
         rgba = np.asarray(Image.open(tile).convert("RGBA"))
         assert rgba.shape == (TILE_PX, TILE_PX, 4)
         assert rgba[..., :3].max() == 0, "the colour is black everywhere; only the alpha varies"
@@ -126,7 +129,7 @@ class TestBuildTiles:
         bounds = (17.0, 68.30, 17.05, 68.33)  # west of the model
         index = shade_tiles.build_tiles(heights, transform, crs, bounds, zooms=[12], out_dir=tmp_path / "shade")
         assert index["per_zoom"]["12"]["empty"] == index["tiles"]
-        rgba = np.asarray(Image.open(next((tmp_path / "shade" / "12").rglob("*.png"))).convert("RGBA"))
+        rgba = np.asarray(Image.open(sorted((tmp_path / "shade" / "12").rglob("*.png"))[0]).convert("RGBA"))
         assert rgba.max() == 0, "wholly transparent, so the sheet beneath is drawn exactly as it would be"
 
     def test_neighbouring_tiles_meet_without_a_seam(self, ridge, tmp_path):
