@@ -3638,6 +3638,14 @@ def files_from_the_page(page: Any) -> Check:
     page.evaluate("() => { window.trailsPlan.toggle(false); window.trailsPlan.toggle(true); }")
     page.wait_for_timeout(700)
     page.set_input_files(".trails-plan-file", str(route))
+    # **Wait for the file to have been read, not for plan mode to be idle.**
+    # Reading a file is asynchronous and plan mode is not *working* while it
+    # happens, so `settled` returned at once and this read `pending` before
+    # the page had produced it -- on an idle box the read had won the race,
+    # with a second browser driving beside it, not always. Eight readings went
+    # red in one run for this: the four here, and four in the check after it,
+    # which drove into a plan mode left half-opened. Asked for by name now.
+    wait_until(page, "window.trailsPlan.state().pending !== null", 60_000)
     settled(page)
     offer = page.evaluate("() => window.trailsPlan.state().pending")
     restored = None

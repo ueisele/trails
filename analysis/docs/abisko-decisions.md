@@ -3261,6 +3261,18 @@ reaches on the Abisko page runs past Abisko Östra, and the stop pins drawn ther
 evening (§9.35, §9.36) sit on top of it — so this check turned red at the moment those pins
 arrived, on a page that was behaving perfectly.
 
+**And a second one the next morning, found only because two pages were driven at once.** Eight
+readings went red on the Abisko page in one parallel run and green on the same page driven alone:
+four in *files from the page*, four in the several-lines check after it. The picker check handed
+the page a file and then waited with `settled` — for plan mode to stop *working* — but reading a
+file is asynchronous and plan mode is not working while it happens, so `settled` returned at once
+and the check read `pending` before the page had produced it. On an idle box the read had always
+won that race; with a second browser beside it, not always. The check after it then drove into a
+plan mode left half-opened. It waits for `pending` by name now. The first suspicion was the other
+session working in the same checkout, because both pages' files had been rewritten mid-run — and
+that was the drive's own `touch()`, by which the offline check plays a newer map. Read the code
+before naming a culprit.
+
 Three things came out of it, and the first is the one that matters: **a check must read its own
 premise.** *The tap took the line* is now a reading of its own, so *the tap missed* and *a row was
 drawn that should not have been* can never again be one red line. The search skips any point with
