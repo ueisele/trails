@@ -622,6 +622,24 @@ bytes alone cannot tell, since a source pack may itself be sparse at the box's e
   they were going to do after 6b anyway. The tally's `seen` path
   counts a tile out of a browse row, `db` out of a kept row, `mem` out of memory.
 
+#### Phase 6h — After 6g: the measurement helper goes, and packs arrive in the background
+
+Decided 2026-09-18, 21:00 (Uwe). Two things, both in the worker's and the panel's files, after
+6g lands:
+
+1. **The measurement helper is removed** — from Sources, from the drive, from the tests — and
+   the `bench` store with it (the version-5 upgrade of 6g drops it). Its question is answered
+   in phase 1b; the question after 6g, whether a request costs less with 9,500 rows, is read
+   from the Sources tally of real use (store total and worst per path), which is the better
+   instrument and needs no scratch rows.
+2. **Live by range, whole in the background.** The view stays on ranges. Once the reader has
+   stayed two seconds on the same ground, the worker fetches the packs under the screen whole
+   in the background — the sheet first, then the overlays, at most two in flight, never the
+   heights — into the one store as browse rows. Panning through fetches nothing whole; staying
+   makes the ground free to pan and zoom afterwards. The two seconds are the one figure the
+   phone may move. The promotion rule of `57f25e2` ("a further tile after the window") becomes
+   this, rather than living beside it.
+
 #### 6, as first written — Norway moves to the tree
 
 1. `PROVIDERS["kartverket"]`: `tiles="/tiles/kartverket/topo/1/"`, `top=17`, `cap=17` if
