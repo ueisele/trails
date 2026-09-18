@@ -3268,11 +3268,73 @@ something in the marker pane on top of it. And the route is cleared before it lo
 planned route along the same road is offered by the tap handler on top of what `trailsReach.near`
 finds — which would have been the next false alarm.
 
+### 9.39 Places people left, and who owns a hut — settled, 2026-09-18
+
+*"Farms and Holdings aus SSR werden standardmäßig nicht angezeigt. Allerdings können diese relevante
+Informationen halten, zum Beispiel eine verlassene Farm … als guter Camping Spot."* Then: *"ist dies
+auch später für ganz Norwegen und Schweden verallgemeinerbar?"* — and Gardsjorda, a hut he took for
+Statskog's, drawn on the base map and in none of our layers.
+
+**The register has the word, and I had said it did not.** SSR's name type `gammelBosettingsplass`
+— a former settlement place — is national and says exactly what was asked for. Measured around
+Lomsdal-Visten: 119 in the box, 55 in the zone, 8 inside the park, **Gardsjorda among them**, which
+no hut register and no OSM node names at all. OSM has not one `abandoned` tag in the whole box; its
+26 `historic=shieling` are sæters. The register is not complete either — Strompdalen, abandoned
+1954, is still a `gard` to it — so a farm the park boundary encloses is drawn the same way: 8 of
+them here. **The popup says which of the two put the pin there**, because the first is a record and
+the second an inference, and *inside a national park* does not mean *nobody lives here*: Norway has
+admitted private land to its parks since 2009, reindeer herding and its huts are lawful in every
+one, and the Sámi summer settlements of Padjelanta — Staloluokta, Árasluokta — are lived in. The
+glyph is a house with a crack through it, and it asserts one thing: a homestead stood here and is
+not lived in.
+
+**The hut's owner was a number, and the door was not there.** N50 codes `hytteeier` by SOSI's list
+— 1 DNT, 2 Andre, 3 Fjellstyre, 4 Statskog — and the popup printed *Owner code: 4*. It also carries
+`tilgjengelighet`, *Låst* or *Ulåst*, which the loader dropped. Both are words now: 10 Statskog huts
+in the zone, 3 of them locked, and a locked Statskog hut is one to rent. Kartverket's Turrutebasen
+agrees from the other side — 37 huts and shelters in the box with a maintainer, Statskog 17 — but
+names none of them, so N50 stays the source and the route base a check.
+
+**Statskog publishes no positions.** Its site lists huts by region with a page each and not one
+coordinate; inatur, where the locked ones are booked, answers its own search with county and
+municipality and nothing finer (1,463 hut offers read, 125 of them Statskog SF's, none with a
+position, none named Gardsjorda). So the link from a Statskog hut goes to Statskog's regional
+listing, keyed on the county in the municipality number — five regions, not fifteen counties,
+because that is how Statskog files them, and Finnmark has none because its state land is
+Finnmarkseiendommen's.
+
+**And Gardsjorda is not Statskog's.** Not on Statskog's Nordland page (37 open shelters, 12 rental
+cabins), not among the 125 offers on inatur, not Vefsn JFF's, not in the park board's own list of
+who keeps what open, not in OSM. What the base map draws there is an unnamed N50 koie 12 m from the
+register's name. It has its pin now, for the reason the register gives.
+
+**What generalises and what does not.** Norway: both layers come from national registers already
+loaded, so every Norwegian map gets them for free. Sweden: the open Ortnamn has thirteen coarse
+classes and no word for a place left — 38 `BEBTX` and 0 `KULTURTX` in the Abisko box — and the
+counterpart is Riksantikvarieämbetet's Kulturmiljöregister, ~160 remains types with *Bytomt/gårdstomt*
+and *Fäbod* among them, a weekly national GML feed, and terms the catalogue lists as *Villkor okända*.
+Not drawn until those are known. Swedish huts: Naturvårdsverket's *Anordningar* (already drawn) has
+the types and no owner. The park board's pages and its named tent spots stay per-park work and are
+not in this.
+
+**Measured on the built page:** 63 pins in the new layer, 186 things in the marker pane against
+123, 37 rows in the legend against 36; Bustadmoen reads *Statskog · Låst* with the Nordland link,
+Strompdalen's DNT hut *DNT · Ulåst*, and the register's Strompdalen *a farm inside Lomsdal-Visten
+nasjonalpark*.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-18, fourth** — places people left are a pin layer of their own, and a hut's owner is a
+  word (§9.39). SSR's `gammelBosettingsplass` turned out to be the abandonment signal I had said no
+  register carried: 55 in the zone, 8 inside the park, Gardsjorda among them; the 8 farms the park
+  encloses join them with the boundary as their stated reason. N50's owner code is decoded and its
+  lock status kept, so a Statskog hut says *Låst* and links to Statskog's regional listing — the
+  nearest thing to a booking link there is, since neither Statskog nor inatur publishes a position.
+  Gardsjorda itself is nobody's rental hut in any list read.
 
 - **2026-09-18, third** — the vegetation tree draws the ground the laser has no word on in a light
   grey, a seventh class with its own legend row, after Uwe asked whether a blank meant *nothing

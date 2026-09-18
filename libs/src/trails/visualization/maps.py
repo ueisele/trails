@@ -629,6 +629,18 @@ PROVIDERS: dict[str, Provider] = {
 #: Icons: CC BY 4.0. Copyright 2022 Fonticons, Inc. The notice travels with the
 #: outlines into every built page, as it does in the stylesheet this replaces.
 MARKER_ICONS: dict[str, tuple[str, str]] = {
+    # **A house with a crack through it, for a place people left.** The
+    # register's *gammelBosettingsplass* -- a former settlement place -- and a
+    # farm the national park boundary now encloses are drawn with it: what
+    # the glyph asserts is that a homestead stood here and is not lived in,
+    # which is the one fact a planner reads off it (§9.39).
+    "house-chimney-crack": (
+        "0 0 576 512",
+        "M575.8 255.5c0 18-15 32.1-32 32.1h-32l.7 160.2c.2 35.5-28.5 64.3-64 64.3H326.4L288 448l80.8-67.3c7.8-6.5 7.6-18.6"
+        "-.4-24.9L250.6 263.2c-14.6-11.5-33.8 7-22.8 22L288 368l-85.5 71.2c-6.1 5-7.5 13.8-3.5 20.5L230.4 512H128.1"
+        "c-35.3 0-64-28.7-64-64V287.6H32c-18 0-32-14-32-32.1c0-9 3-17 10-24L266.4 8c7-7 15-8 22-8s15 2 21 7L416 100.7V64"
+        "c0-17.7 14.3-32 32-32h32c17.7 0 32 14.3 32 32V185l52.8 46.4c8 7 12 15 11 24z",
+    ),
     "house-chimney": (
         "0 0 576 512",
         "M543.8 287.6c17 0 32-14 32-32.1c1-9-3-17-11-24L512 185V64c0-17.7-14.3-32-32-32H448c-17.7 0-32 14.3-32 32"

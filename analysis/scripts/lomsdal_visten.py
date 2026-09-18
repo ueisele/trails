@@ -672,7 +672,44 @@ CABIN_POPUP_FIELDS = {
     "navn": "Name",
     "kind": "Type",
     "betjeningsgrad": "Service level",
-    "hytteeier": "Owner code",
+    # The word and not the code: *Owner code: 4* told a reader nothing, and
+    # *Statskog* with *Låst* beside it is a hut to rent (§9.39).
+    "owner": "Owner",
+    "tilgjengelighet": "Door",
+    "kommune": "Municipality",
+}
+
+#: Statskog lists its huts and open shelters by region, and a hut's own page
+#: carries no position and no stable address a build could derive -- so the
+#: link goes to the region, keyed on the county in the municipality number.
+#: Five regions and not fifteen counties, because that is how Statskog files
+#: them; Finnmark's state land is Finnmarkseiendommen's, not Statskog's, and
+#: has no page here. Read off statskog.no on 2026-09-18.
+STATSKOG_REGION_BY_COUNTY = {
+    "55": "troms",
+    "18": "nordland",
+    "50": "midt-norge",
+    "15": "midt-norge",
+    "03": "ostlandet",
+    "31": "ostlandet",
+    "32": "ostlandet",
+    "33": "ostlandet",
+    "34": "ostlandet",
+    "39": "ostlandet",
+    "40": "ostlandet",
+    "11": "sorvestlandet",
+    "42": "sorvestlandet",
+    "46": "sorvestlandet",
+}
+STATSKOG_REGION_URL = "https://www.statskog.no/hytter-og-friluftsliv/{region}"
+STATSKOG_LINK_FIELDS = {"statskog_url": "\u2192 Statskog's huts and open shelters in this region"}
+
+#: What the register says about a place people left, and why the pin is there.
+FORMER_SETTLEMENT_POPUP_FIELDS = {
+    "name": "Name",
+    "kind": "Type",
+    "why": "Drawn because",
+    "importance": "Importance",
     "kommune": "Municipality",
 }
 
@@ -2880,10 +2917,22 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     terrain_names = of_kind(stedsnavn.TERRAIN_NAME_TYPES, norway.zone_around(park, args.names_km))
     settlements = of_kind(stedsnavn.SETTLEMENT_NAME_TYPES, zone)
     farms = of_kind(stedsnavn.FARM_NAME_TYPES, zone)
+    # **Places people left, from two kinds of evidence.** The register's own
+    # word is `gammelBosettingsplass`; Strompdalen, abandoned 1954, is still a
+    # `gard` to it, so a farm the national park now encloses is read the same
+    # way from the boundary. The popup says which of the two put the pin
+    # there, because the second is an inference and the first is a record
+    # -- and a Sámi summer settlement inside a park is neither.
+    former = of_kind(stedsnavn.FORMER_SETTLEMENT_NAME_TYPES, zone).copy()
+    former["why"] = "the register calls it a former settlement place"
+    enclosed = farms[farms.within(park.geometry.union_all())].copy()
+    enclosed["why"] = f"a farm inside {which.name} {which.kind}"
+    left = pd.concat([former, enclosed], ignore_index=True)
     ssr_huts = of_kind(stedsnavn.HUT_NAME_TYPES, zone)
     ssr_quays = of_kind(stedsnavn.QUAY_NAME_TYPES, zone)
     hut_names = all_names[all_names["kind"].isin(stedsnavn.HUT_NAME_TYPES)]
     print(f"  settlements: {len(settlements)} | farms and holdings: {len(farms)}")
+    print(f"  places people left: {len(former)} former settlement places + {len(enclosed)} farms inside the park")
     print(f"  named huts: {len(ssr_huts)} | quays: {len(ssr_quays)}")
 
     highlighted = highlight(terrain_names, args.highlight)
@@ -2919,6 +2968,13 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     cabins.loc[is_hut & cabins["glyph"].isna(), "glyph"] = "house"
     huts, private_cabins = cabins[is_hut].copy(), cabins[~is_hut].copy()
     private_cabins["name"] = private_cabins["navn"]
+    # A Statskog hut links to Statskog's own listing for its region: the locked
+    # ones are rented there, the open ones are described there.
+    region = huts["kommune"].astype(str).str[:2].map(STATSKOG_REGION_BY_COUNTY)
+    statskogs = huts["owner"] == "Statskog"
+    huts["statskog_url"] = region.where(statskogs).map(lambda slug: STATSKOG_REGION_URL.format(region=slug) if isinstance(slug, str) else None)
+    locked = statskogs & (huts["tilgjengelighet"] == "Låst")
+    print(f"  Statskog's: {int(statskogs.sum())}, of them locked: {int(locked.sum())}")
     print(f"  of which huts: {len(huts)} ({huts['glyph'].value_counts(dropna=False).to_dict()}); buildings by type: {len(private_cabins)}")
 
     print("\nLoading N50 water...")
@@ -3094,7 +3150,17 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             link_heading=PUBLISHED_ELSEWHERE_HEADING,
         ),
         PointLayer(
-            huts, "Huts and shelters [N50]", n50_hex, CABIN_POPUP_FIELDS, "cabin", "N50", color=n50_pin, icon_field="glyph", label_field="navn"
+            huts,
+            "Huts and shelters [N50]",
+            n50_hex,
+            CABIN_POPUP_FIELDS,
+            "cabin",
+            "N50",
+            color=n50_pin,
+            icon_field="glyph",
+            label_field="navn",
+            link_fields=STATSKOG_LINK_FIELDS,
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
         ),
     ]
     # **One layer per kind of name rather than one for all of them.** They are
@@ -3118,6 +3184,19 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             # Two of these have no N50 building at all, so the join above cannot
             # reach them; as their own layer none of the register's huts is lost.
             PointLayer(ssr_huts, "Named huts [SSR]", ssr_hex, SSR_POINT_POPUP_FIELDS, "hut", "SSR", color=ssr_pin),
+            # A pin and on, unlike the thousand farms: a homestead nobody
+            # lives at is level ground, often a cellar or a hut, and the park
+            # board's own advice on where to pitch a tent (§9.39).
+            PointLayer(
+                left,
+                "Former settlements and park farms [SSR]",
+                ssr_hex,
+                FORMER_SETTLEMENT_POPUP_FIELDS,
+                "old homestead",
+                "SSR",
+                color=ssr_pin,
+                icon="house-chimney-crack",
+            ),
             PointLayer(
                 ssr_quays,
                 "Quays [SSR]",

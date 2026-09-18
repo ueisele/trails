@@ -115,6 +115,20 @@ class TestLoadPlaces:
         assert result["rank"].iloc[0] == stedsnavn.importance_rank("viktighetB")
 
 
+class TestNameTypeGroups:
+    """The groups a build reads the register by."""
+
+    def test_a_former_settlement_is_neither_a_farm_nor_a_hut(self):
+        """`gammelBosettingsplass` is the register's own word for a place people
+        left, and the one type that says so. It must not be swept up as a farm
+        (which reads as somewhere lived in) or a hut (somewhere to sleep)."""
+        former = set(stedsnavn.FORMER_SETTLEMENT_NAME_TYPES)
+        assert former == {"gammelBosettingsplass"}
+        assert not former & set(stedsnavn.FARM_NAME_TYPES)
+        assert not former & set(stedsnavn.HUT_NAME_TYPES)
+        assert not former & set(stedsnavn.SETTLEMENT_NAME_TYPES)
+
+
 class TestLoadRoadNames:
     """Tests for load_road_names."""
 

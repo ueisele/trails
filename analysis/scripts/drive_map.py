@@ -299,16 +299,19 @@ SCENES: dict[str, Scene] = {
             # 122, and 123 once the one scheduled boat call no quay register
             # knows about got a pin of its own. Its 288 bus stops are a layer
             # that starts off, so the pane does not hold them until asked.
-            "things in the marker pane": 123,
-            # Thirty-six since §9.33, which split one stop layer into four.
-            "checkboxes in the legend": 36,
+            # Then 186 with §9.39: 55 former settlement places off the register
+            # and the 8 farms inside the park, drawn as pins and on.
+            "things in the marker pane": 186,
+            # Thirty-six since §9.33, which split one stop layer into four;
+            # thirty-seven with the former settlements (§9.39).
+            "checkboxes in the legend": 37,
             "of them switched off": 9,
             "zoom before": 9,
             "zoom after": 11,
             "desktop: map free with nothing asked for": 96,
             "upright: map free with nothing asked for": 96,
             "sideways: map free with nothing asked for": 96,
-            "and the legend is what is in it": 36,
+            "and the legend is what is in it": 37,
             "px of map left above it": 565,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 186,

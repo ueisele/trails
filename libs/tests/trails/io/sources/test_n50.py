@@ -3,6 +3,7 @@
 from unittest.mock import Mock, patch
 
 import geopandas as gpd
+import pandas as pd
 import pytest
 import requests
 from shapely.geometry import LineString, Point, Polygon
@@ -169,6 +170,30 @@ def buildings() -> gpd.GeoDataFrame:
 
 class TestLoadCabins:
     """Tests for Source.load_cabins."""
+
+    def test_the_owner_is_a_word_and_the_door_is_reported(self, tmp_path, buildings):
+        """N50 codes the owner -- SOSI's *Hytteeier*: 1 DNT, 2 Andre, 3
+        Fjellstyre, 4 Statskog -- and the popup used to print the number. The
+        word is what a reader acts on: a locked Statskog hut is one to rent.
+        `tilgjengelighet` is carried where the extract has it and made empty
+        where it does not, so the column is always there to read."""
+        source = n50.Source(cache_dir=str(tmp_path))
+        with patch.object(source, "load_layers", return_value=buildings):
+            without = source.load_cabins(["1824"])
+        owners = dict(zip(without["navn"].fillna("unnamed"), without["owner"], strict=True))
+        assert owners["Eiteråfjellet"] == "Statskog"
+        assert owners["Litjvasshytta"] == "Andre"
+        assert pd.isna(owners["unnamed"])
+        assert "tilgjengelighet" in without.columns
+        assert without["tilgjengelighet"].isna().all()
+
+        locked = buildings.copy()
+        locked["tilgjengelighet"] = ["Låst", "Ulåst", None, None]
+        with patch.object(source, "load_layers", return_value=locked):
+            with_door = source.load_cabins(["1824"])
+        doors = dict(zip(with_door["navn"].fillna("unnamed"), with_door["tilgjengelighet"], strict=True))
+        assert doors["Litjvasshytta"] == "Låst"
+        assert doors["Eiteråfjellet"] == "Ulåst"
 
     def test_keeps_buildings_with_a_service_level(self, tmp_path, buildings):
         source = n50.Source(cache_dir=str(tmp_path))

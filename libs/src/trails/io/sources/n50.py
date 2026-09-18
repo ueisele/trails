@@ -61,6 +61,13 @@ WILDERNESS_BUILDING_TYPES = {
     172.0: "Skogs- og utmarkskoie, gamme",
 }
 
+#: Who owns a hut, by N50's ``hytteeier`` code -- SOSI's *Hytteeier* list, which
+#: the product specification carries and the data does not. Read as a number the
+#: popup said *Owner code: 4* about every Statskog hut on the map; the word is
+#: what a reader can act on, because Statskog's locked huts are the ones that
+#: can be rented and DNT's are the ones a key opens.
+HUT_OWNERS = {1.0: "DNT", 2.0: "Andre", 3.0: "Fjellstyre", 4.0: "Statskog"}
+
 #: ``typeveg`` values that a walker can actually use.
 WALKABLE_ROAD_TYPES = ("sti", "traktorveg", "gangOgSykkelveg", "barmarksløype")
 
@@ -325,8 +332,10 @@ class Source:
 
         Returns:
             GeoDataFrame in EPSG:4326 with Point geometries and the columns
-            ``navn``, ``kind``, ``betjeningsgrad``, ``hytteeier`` and ``kommune``.
-            ``kind`` falls back to the building type when no service level is set.
+            ``navn``, ``kind``, ``betjeningsgrad``, ``hytteeier``, ``owner`` (the
+            code as a word, see :data:`HUT_OWNERS`), ``tilgjengelighet``
+            (*Låst* or *Ulåst*, where N50 says) and ``kommune``. ``kind`` falls
+            back to the building type when no service level is set.
         """
         buildings = self.load_layers(kommune_codes, BUILDING_LAYERS, force_download=force_download)
 
@@ -334,9 +343,16 @@ class Source:
         cabins = buildings[is_cabin].copy()
         cabins["geometry"] = cabins.geometry.representative_point()
         cabins["kind"] = cabins["betjeningsgrad"].fillna(cabins["bygningstype"].map(WILDERNESS_BUILDING_TYPES))
+        cabins["owner"] = cabins["hytteeier"].map(HUT_OWNERS)
+        # Whether a door is locked is the other thing a reader asks of a hut,
+        # and N50 says it for the ones that carry a service level. Older
+        # extracts leave the column out altogether, so it is made rather than
+        # assumed.
+        if "tilgjengelighet" not in cabins.columns:
+            cabins["tilgjengelighet"] = None
 
         result = gpd.GeoDataFrame(
-            cabins[["navn", "kind", "betjeningsgrad", "hytteeier", "kommune", "geometry"]].reset_index(drop=True),
+            cabins[["navn", "kind", "betjeningsgrad", "hytteeier", "owner", "tilgjengelighet", "kommune", "geometry"]].reset_index(drop=True),
             geometry="geometry",
             crs="EPSG:4326",
         )

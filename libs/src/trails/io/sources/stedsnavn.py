@@ -70,6 +70,15 @@ SETTLEMENT_NAME_TYPES = ("by", "tettbebyggelse", "grend", "boligfelt")
 #: around one national park — and the usual starting point of a walk here.
 FARM_NAME_TYPES = ("gard", "bruk")
 
+#: Places people left. ``gammelBosettingsplass`` is the register's own word for
+#: a former settlement place -- a farm, a croft or a sæter nobody lives at --
+#: and it is the one name type here that says so. Measured around
+#: Lomsdal-Visten on 2026-09-18: 119 in the box, 8 inside the park, and it
+#: names Gardsjorda, which no hut register and no OSM node does. It is not
+#: complete: Strompdalen, abandoned 1954, is still a ``gard`` to the register,
+#: so a farm inside a national park is read the same way from the boundary.
+FORMER_SETTLEMENT_NAME_TYPES = ("gammelBosettingsplass",)
+
 #: Huts a walker can head for. ``turisthytte`` is the staffed or self-service
 #: kind an association runs; the rest are private.
 HUT_NAME_TYPES = ("turisthytte", "hytte", "koie")
