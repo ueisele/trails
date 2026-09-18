@@ -285,9 +285,11 @@ SCENES: dict[str, Scene] = {
             # a road number that used to carry into whatever unnumbered lane
             # left the junction straightest -- FKB 6,201 to 6,306, OSM 1,515 to
             # 1,531, Turrutebasen's own 244 either way.
-            "paths in the overlay pane": 12263,
+            # Nine fewer since §9.39 drew each place once: the OSM farm dots
+            # under a former-settlement pin gave way to it.
+            "paths in the overlay pane": 12254,
             "of them chains drawn as lines": 11964,
-            "and chains drawn as circle markers": 298,
+            "and chains drawn as circle markers": 289,
             # Of the sixty longest FKB chains (§9.26).
             "chains named after a register trail": 9,
             # 198 until §9.31 (abisko decisions): 104 N50 buildings and 36 OSM

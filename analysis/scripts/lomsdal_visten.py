@@ -721,6 +721,12 @@ REMAIN_POPUP_FIELDS = {
 }
 REMAIN_LINK_FIELDS = {"url": "\u2192 This remain on Fornsök"}
 
+#: How close a dot from another register has to stand to a former-settlement
+#: pin to be the same place. The six OSM farms inside the park sit within a
+#: few metres of the register's points; the nearest dot that is a different
+#: place is far beyond this.
+SAME_PLACE_M = 150.0
+
 #: What the register says about a place people left, and why the pin is there.
 FORMER_SETTLEMENT_POPUP_FIELDS = {
     "name": "Name",
@@ -2945,6 +2951,10 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     enclosed = farms[farms.within(park.geometry.union_all())].copy()
     enclosed["why"] = f"a farm inside {which.name} {which.kind}"
     left = pd.concat([former, enclosed], ignore_index=True)
+    # **Drawn once.** A farm the pin has taken comes out of the dot layer: it
+    # is one register entry read two ways, and Uwe found Lomsdalen under a pin
+    # and a dot at once, with the tap landing on whichever was on top.
+    farms = farms.drop(enclosed.index)
     ssr_huts = of_kind(stedsnavn.HUT_NAME_TYPES, zone)
     ssr_quays = of_kind(stedsnavn.QUAY_NAME_TYPES, zone)
     hut_names = all_names[all_names["kind"].isin(stedsnavn.HUT_NAME_TYPES)]
@@ -3064,6 +3074,17 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         osm_source.fetch_places(search_bounds, place_types=TRAILHEAD_PLACE_TYPES, force_download=args.force_download),
         norway.zone_around(park, args.trailhead_km),
     )
+    # **And once across sources.** OSM knows six of the park's farms as
+    # `place=farm` and drew a dot under each pin -- Strompdalen stood three
+    # times. A dot within a pin's reach of a place people left is the same
+    # place from a second register and gives way; measured 2026-09-18, 17 of
+    # 1,351 dots, every one of them a name the register's pin already carries.
+    if len(trailheads) and len(left):
+        pins = left.to_crs(norway.METRIC_CRS)
+        dots = trailheads.to_crs(norway.METRIC_CRS)
+        taken = gpd.sjoin_nearest(dots, pins[["geometry"]], how="inner", max_distance=SAME_PLACE_M).index.unique()
+        trailheads = trailheads.drop(taken)
+        print(f"  Trailhead dots under a former-settlement pin, dropped: {len(taken)}")
     print(f"  Shelters and huts: {len(shelters)} ({shelters['glyph'].value_counts().to_dict()})")
     print(f"  Settlements: {len(places)}")
     print(f"  Trailheads (<{args.trailhead_km:g} km from boundary): {len(trailheads)}")

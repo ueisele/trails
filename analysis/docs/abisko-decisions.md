@@ -3322,6 +3322,14 @@ not in this.
 Strompdalen's DNT hut *DNT · Ulåst*, and the register's Strompdalen *a farm inside Lomsdal-Visten
 nasjonalpark*.
 
+**Drawn once, the same morning.** *"Bei lomsdalen werden jetzt Farms im Park doppelt gezeichnet …
+Es gibt ja nur eine Quelle. Wir interpretieren es nur anders."* The eight enclosed farms had
+stayed in the *Farms and holdings* dot layer as well as becoming pins, and Lomsdalen sat under a
+pin and a dot with the tap landing on whichever was on top; Strompdalen stood three times, the
+third an OSM `place=farm` dot. A farm the pin takes leaves the dot layer, and an OSM dot within
+150 m of a former-settlement pin is the same place from a second register and gives way: 9 of the
+71 in the trailhead band, every one a name the pin already carries.
+
 ### 9.40 Sweden's places people left come from the heritage register — settled, 2026-09-18
 
 *"Schweden wartet auf eine Antwort … Das kläre ich, bevor dort etwas gezeichnet wird. → wie meinst
