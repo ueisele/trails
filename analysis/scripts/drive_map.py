@@ -9894,6 +9894,56 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         )
 
 
+def the_empty_pack_count(page: Any) -> Check:
+    """Missing and null held records both say zero, beside the storage estimate."""
+    page.wait_for_function("() => navigator.serviceWorker.controller && window.trailsOffline", timeout=60_000)
+    page.evaluate("async () => await window.trailsOffline.open(true)")
+    readings = []
+    for state in ["missing", "kept", "forgotten"]:
+        if state == "forgotten":
+            snapshot = page.evaluate("async () => await window.trailsOffline.forget()")
+        else:
+            page.evaluate(
+                in_db("""async (state) => {
+                    const db = await new Promise((done, fail) => {
+                        const ask = indexedDB.open('__DB__', 4);
+                        ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
+                    });
+                    await new Promise((done, fail) => {
+                        const tx = db.transaction(['packs', 'flags'], 'readwrite');
+                        tx.objectStore('packs').clear();
+                        if (state === 'missing') { tx.objectStore('flags').delete('held'); }
+                        else {
+                            tx.objectStore('packs').put(new ArrayBuffer(100), 'count-fixture');
+                            tx.objectStore('flags').put({packs: 1, bytes: 100, top: 14}, 'held');
+                        }
+                        tx.oncomplete = done; tx.onabort = () => fail(tx.error);
+                    });
+                    db.close();
+                }"""),
+                state,
+            )
+            snapshot = page.evaluate("async () => await window.trailsOffline.refresh()")
+        kept = state == "kept"
+        readings.append(
+            Reading(
+                state + " record has an exact count",
+                {key: snapshot["kept"][key] for key in ["packs", "bytes", "known"]},
+                {"packs": int(kept), "bytes": 100 if kept else 0, "known": True},
+            )
+        )
+        figures = page.evaluate("() => window.trailsOffline.holder.querySelector('.trails-offline-figures').textContent")
+        readings.append(Reading(state + " figures name the pack count", figures.split(" · ")[0], f"{int(kept)} packs kept", note=figures))
+        readings.append(Reading(state + " figures retain the browser storage estimate", " used" in figures, True))
+        disabled = page.evaluate("() => window.trailsOffline.holder.querySelector('.trails-offline-forget').disabled")
+        readings.append(Reading(state + " enables Forget only with packs", disabled, not kept))
+        if not kept:
+            asked = page.evaluate("async () => await window.trailsOffline.toggle(true)")
+            readings.append(Reading(state + " cannot switch on an empty store", [asked["on"], asked["chooser"]], [False, True]))
+    readings.append(Reading("Forget clears the fixture pack", page.evaluate(in_db(ROWS), "packs"), 0))
+    return Check("an empty pack store has a known zero count", readings)
+
+
 def the_pack_upgrade(browser: Any, page_path: pathlib.Path) -> Check:
     """Either opener drops version-3 tile rows, retaining unrelated records."""
     panel = (pathlib.Path(maps.__file__).parent / "js" / "offline_panel.js").read_text()
@@ -11462,6 +11512,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(the_sources_measure_the_store, page))
     if wanted(the_zoom_the_scale_says):
         checks.append(timed(the_zoom_the_scale_says, page))
+    if wanted(the_empty_pack_count):
+        checks.append(timed(the_empty_pack_count, page))
     # Before anything is selected and before plan mode, which takes every click
     # on the container and would answer this one itself.
     if wanted(a_finger_can_hit_a_line):

@@ -1861,18 +1861,19 @@ class TestNothingGrowsWithTheDownload:
         # saying nothing was kept.
         assert "var tx = open.transaction([KEPT, 'flags'], 'readwrite');" in html
 
-    def test_no_record_is_not_the_same_as_nothing_kept(self):
-        """A cache from before this map kept a figure has ground and no number,
-        and answering *0 tiles kept* is the one wrong answer that costs bytes —
-        it invites a reader with everything to download it again."""
+    def test_no_record_means_zero_packs_kept(self):
+        """The upgrade dropped old tiles; every pack now commits with its count.
+        A missing record after upgrade or null after Forget means zero packs."""
         html = self.rendered()
-        assert "var none = {packs: 0, bytes: 0, top: 0, known: false, stale: null};" in html
-        assert "kept packs not counted" in html
-        # And the switch's guard asks for a tile rather than for a count, because
-        # what it wants to know is whether there is anything at all.
-        assert "function anyKept() {" in html
-        assert "if (there.known) { return there.packs > 0; }" in html
-        assert "var first = walker().next();" in html
+        assert "var none = {packs: 0, bytes: 0, top: 0, known: true, stale: null};" in html
+        assert "if (!held) { return none; }" in html
+        assert "known: false" not in html
+        assert "kept packs not counted" not in html
+        assert "var lines = [count(have.kept ? have.kept.packs : 0) + ' packs kept'];" in html
+        assert "var maybe = have.kept && have.kept.packs;" in html
+        guard = html.split("function anyKept() {")[1].split("function toggle(")[0]
+        assert "return there.packs > 0;" in guard
+        assert "dbRead" not in guard
 
 
 class TestTheSheetCarriesAToken:

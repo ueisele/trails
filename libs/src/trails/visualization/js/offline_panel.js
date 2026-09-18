@@ -990,12 +990,10 @@
                 // made an installed app hang and take the rest of the phone with
                 // it, and it is why this asks for one entry instead.
                 //
-                // **`known` is false rather than zero when there is no record.**
-                // The old code turned every failure into *nothing kept*, which is
-                // the one wrong answer that costs bytes: it invites a reader with
-                // a full cache to download it again.
+                // Packs and their count commit together; the version-4 upgrade
+                // dropped the old tiles. A missing or null record means zero packs.
                 function kept() {
-                    var none = {packs: 0, bytes: 0, top: 0, known: false, stale: null};
+                    var none = {packs: 0, bytes: 0, top: 0, known: true, stale: null};
                     if (!window.caches) { return Promise.resolve(none); }
                     return Promise.all([dbRead('flags', HELD), dbRead('flags', STAND)]).then(function (both) {
                         var held = both[0], stand = both[1];
@@ -2190,27 +2188,16 @@
                             ' were refused three times over, so offline mode is still off. ' +
                             'Check the connection and try again.';
                     } else {
-                        // **Not counted rather than none, when there is no
-                        // record.** A cache from before this map kept a figure
-                        // has ground and no number, and answering *0 tiles kept*
-                        // is the one wrong answer that costs bytes -- it invites
-                        // a reader with everything to download it again. The
-                        // space used is exact either way; it comes from the
-                        // browser and not from a count.
-                        var lines = [have.kept && have.kept.known
-                            ? count(have.kept.packs) + ' packs kept'
-                            : 'kept packs not counted \u2014 the next download says how many'];
+                        var lines = [count(have.kept ? have.kept.packs : 0) + ' packs kept'];
                         if (lastRun && lastRun.failed) { lines.push(count(lastRun.failed) + ' refused'); }
+                        // The browser's storage estimate can lag WebKit's deferred reclaim after Forget.
                         if (have.storage && have.storage.usage !== null) {
                             lines.push(megabytes(have.storage.usage) + ' of ' + megabytes(have.storage.quota) + ' used');
                         }
                         if (have.storage && have.storage.persisted) { lines.push('storage is persistent'); }
                         said.figures.textContent = lines.join(' \u00b7 ');
                     }
-                    // Offered whenever there may be something to delete, which
-                    // includes not knowing: a reader who cannot count what they
-                    // hold is the one most likely to want it gone.
-                    var maybe = have.kept && (have.kept.packs || !have.kept.known);
+                    var maybe = have.kept && have.kept.packs;
                     said.forget.disabled = !maybe;
                     said.forget.style.opacity = maybe ? '1' : '0.5';
                     // **Said, because otherwise it is found the hard way.** Only
@@ -2247,18 +2234,9 @@
 
                 // **On, with nothing kept, opens the chooser instead.** A switch
                 // that answers with a blank map is a switch that lied.
-                // **A tile, not a count, when there is no record.** The guard
-                // exists to stop the switch handing over a blank map, and a reader
-                // whose cache predates the record has ground but no figure. One
-                // `match` answers whether this selection has anything at all,
-                // which is what the guard is actually asking.
                 function anyKept() {
                     return kept().then(function (there) {
-                        if (there.known) { return there.packs > 0; }
-                        var first = walker().next();
-                        if (!first) { return false; }
-                        return dbRead(KEPT, first.url).then(function (one) { return !!one; })
-                            .catch(function () { return false; });
+                        return there.packs > 0;
                     });
                 }
 
