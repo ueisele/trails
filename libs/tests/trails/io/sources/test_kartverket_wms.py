@@ -210,8 +210,9 @@ def test_interruption_records_date_and_resumes(source, monkeypatch, tmp_path):
         raise requests.ConnectionError("interrupted")
 
     monkeypatch.setattr(wms.requests, "get", fail)
+    monkeypatch.setattr(wms.time, "sleep", Mock())
     bounds = _box(x1=135, y1=63)
-    with pytest.raises(requests.ConnectionError, match="interrupted"):
+    with pytest.raises(RuntimeError, match="ConnectionError: interrupted"):
         source.copy_tiles(bounds, [8], tmp_path)
     previous = json.loads((tmp_path / "index.json").read_text())
     assert not previous["complete"]
@@ -258,6 +259,43 @@ def test_retry_backoff(monkeypatch, status):
     monkeypatch.setattr(wms.time, "sleep", sleep)
     assert wms._request({"REQUEST": "GetMap"}) == b"answer"
     assert [call.args[0] for call in sleep.call_args_list] == [1, 2]
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [requests.exceptions.ConnectionError, requests.exceptions.SSLError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError],
+)
+@pytest.mark.parametrize("recover", [True, False])
+def test_connection_failures_retry_with_bounded_backoff(monkeypatch, error_type, recover):
+    errors = [error_type(f"dropped connection {attempt + 1}") for attempt in range(wms.ATTEMPTS)]
+    get = Mock(side_effect=[*errors[:-1], _response(b"answer") if recover else errors[-1]])
+    sleep = Mock()
+    monkeypatch.setattr(wms.requests, "get", get)
+    monkeypatch.setattr(wms.time, "sleep", sleep)
+    if recover:
+        assert wms._request({"REQUEST": "GetMap"}) == b"answer"
+    else:
+        with pytest.raises(RuntimeError, match=f"WMS GetMap failed: {error_type.__name__}: dropped connection {wms.ATTEMPTS}") as caught:
+            wms._request({"REQUEST": "GetMap"})
+        assert caught.value.__cause__ is errors[-1]
+    assert get.call_count == wms.ATTEMPTS
+    assert [call.args[0] for call in sleep.call_args_list] == [1, 2, 4]
+
+
+@pytest.mark.parametrize("last_is_connection_error", [True, False])
+def test_connection_and_http_failures_share_retry_budget(monkeypatch, last_is_connection_error):
+    error = requests.exceptions.SSLError("connection dropped")
+    failure = _response(b"service unavailable", status=503, headers={"Retry-After": "3"})
+    replies = [failure, error, failure, error] if last_is_connection_error else [error, failure, error, failure]
+    get = Mock(side_effect=replies)
+    sleep = Mock()
+    monkeypatch.setattr(wms.requests, "get", get)
+    monkeypatch.setattr(wms.time, "sleep", sleep)
+    expected = "SSLError: connection dropped" if last_is_connection_error else "HTTP 503: service unavailable"
+    with pytest.raises(RuntimeError, match=expected):
+        wms._request({"REQUEST": "GetMap"})
+    assert get.call_count == wms.ATTEMPTS
+    assert [call.args[0] for call in sleep.call_args_list] == ([3, 2, 4] if last_is_connection_error else [1, 3, 4])
 
 
 @pytest.mark.parametrize("retry_after,expected", [("12", 12), ("Fri, 18 Sep 2026 00:00:10 GMT", 10), ("bad", 1)])

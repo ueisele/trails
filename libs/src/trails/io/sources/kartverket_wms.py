@@ -55,25 +55,31 @@ _NS = "{http://www.opengis.net/wms}"
 
 
 def _request(params: dict[str, str]) -> bytes:
-    """Read one WMS answer, backing off on throttling and server failures."""
+    """Read one WMS answer, backing off on connection, throttling and server failures."""
     for attempt in range(ATTEMPTS):
-        with requests.get(URL, params={"SERVICE": "WMS", "VERSION": VERSION, **params}, timeout=(15, 120), allow_redirects=False) as response:
-            if response.status_code == 200:
-                return response.content
-            if (response.status_code == 429 or 500 <= response.status_code < 600) and attempt < ATTEMPTS - 1:
-                delay = float(2**attempt)
-                retry_after = response.headers.get("Retry-After")
-                if retry_after:
-                    try:
-                        delay = max(delay, float(retry_after))
-                    except ValueError:
+        try:
+            with requests.get(URL, params={"SERVICE": "WMS", "VERSION": VERSION, **params}, timeout=(15, 120), allow_redirects=False) as response:
+                if response.status_code == 200:
+                    return response.content
+                if (response.status_code == 429 or 500 <= response.status_code < 600) and attempt < ATTEMPTS - 1:
+                    delay = float(2**attempt)
+                    retry_after = response.headers.get("Retry-After")
+                    if retry_after:
                         try:
-                            delay = max(delay, parsedate_to_datetime(retry_after).timestamp() - time.time())
-                        except ValueError, TypeError, OverflowError:
-                            pass
-                print(f"WMS HTTP {response.status_code}; retry {attempt + 1}/{ATTEMPTS - 1} in {delay:g} s", flush=True)
-            else:
-                raise RuntimeError(f"WMS {params['REQUEST']} failed: HTTP {response.status_code}: {response.text[:500]}")
+                            delay = max(delay, float(retry_after))
+                        except ValueError:
+                            try:
+                                delay = max(delay, parsedate_to_datetime(retry_after).timestamp() - time.time())
+                            except ValueError, TypeError, OverflowError:
+                                pass
+                    print(f"WMS HTTP {response.status_code}; retry {attempt + 1}/{ATTEMPTS - 1} in {delay:g} s", flush=True)
+                else:
+                    raise RuntimeError(f"WMS {params['REQUEST']} failed: HTTP {response.status_code}: {response.text[:500]}")
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError) as error:
+            if attempt == ATTEMPTS - 1:
+                raise RuntimeError(f"WMS {params['REQUEST']} failed: {type(error).__name__}: {error}") from error
+            delay = float(2**attempt)
+            print(f"WMS {type(error).__name__}: {error}; retry {attempt + 1}/{ATTEMPTS - 1} in {delay:g} s", flush=True)
         time.sleep(delay)
     raise AssertionError("retry loop exhausted")  # pragma: no cover
 
