@@ -18,6 +18,8 @@
                 // with, and the coarse levels are almost free: the whole box at
                 // z11 is 168 tiles against 97,000 at z16.
                 var BOTTOM = 11;
+                // The whole box is always kept below the scope's fine ground.
+                var OVERVIEW = 8;
                 // Where the whole map stops being a download and starts being an
                 // archive -- and with it the budget every other scope is held to.
                 // The source's own figure: z16 on Kartverket, z17 -- the top of
@@ -399,6 +401,48 @@
                     return out;
                 }
 
+                // Four rectangles, not a tile list. The scope may also reach
+                // outside the box at z11; keep that ground once, and price the
+                // overlap once. Each iterator holds only its current position.
+                function overviewAt(z, core) {
+                    var box = EXTENT || mapBox();
+                    var a = fracTile(box.n, box.w, z), b = fracTile(box.s, box.e, z);
+                    var x0 = Math.floor(a.x), y0 = Math.floor(a.y);
+                    var x1 = Math.floor(b.x), y1 = Math.floor(b.y);
+                    function inside(v) {
+                        return keyX(v) >= x0 && keyX(v) <= x1 && keyY(v) >= y0 && keyY(v) <= y1;
+                    }
+                    var size = (x1 - x0 + 1) * (y1 - y0 + 1);
+                    if (core) { core.forEach(function (v) { if (!inside(v)) { size += 1; } }); }
+                    return {
+                        size: size,
+                        has: function (v) { return inside(v) || !!(core && core.has(v)); },
+                        values: function () {
+                            var x = x0, y = y0, it = core ? core.values() : null;
+                            return {next: function () {
+                                if (it) {
+                                    var step = it.next();
+                                    if (!step.done) { return step; }
+                                    it = null;
+                                }
+                                while (x <= x1) {
+                                    var v = key(x, y);
+                                    y += 1;
+                                    if (y > y1) { y = y0; x += 1; }
+                                    if (!core || !core.has(v)) { return {value: v, done: false}; }
+                                }
+                                return {done: true};
+                            }};
+                        }
+                    };
+                }
+
+                function overviewCost() {
+                    var levels = {}, z;
+                    for (z = OVERVIEW; z <= BOTTOM; z += 1) { levels[z] = overviewAt(z); }
+                    return weigh(levels);
+                }
+
                 // **Computed once at the finest zoom and halved down.** A tile
                 // at z-1 is the tile at z with both coordinates shifted right,
                 // so one pass answers every level below it as well; walking the
@@ -421,6 +465,7 @@
                         out[z] = padded(up, pad, z);
                         below = up;
                     }
+                    for (z = OVERVIEW; z <= BOTTOM; z += 1) { out[z] = overviewAt(z, out[z]); }
                     return out;
                 }
 
@@ -595,7 +640,7 @@
                     var sum = weigh(levels);
                     memo[at] = sum;
                     chosen = {at: at, levels: levels, top: zoom, scope: scope, zoom: zoom,
-                              tiles: sum.tiles, bytes: sum.bytes};
+                              tiles: sum.tiles, bytes: sum.bytes, overview: overviewCost()};
                     return chosen;
                 }
 
@@ -675,7 +720,7 @@
                     // them, then its relief, then its slope classes. Each pass
                     // is the same set of tiles, so the level is walked up to
                     // four times and the set is built once.
-                    var z = BOTTOM, it = null, pass = 'map';
+                    var z = OVERVIEW, it = null, pass = 'map';
                     return {
                         total: layer ? picked.tiles : 0,
                         bytes: picked.bytes,
@@ -798,7 +843,7 @@
                         canvas.width = side;
                         canvas.height = side;
                         if (!chooser || !chosen) { return canvas; }
-                        var z = Math.min(chosen.top, Math.max(BOTTOM, coords.z));
+                        var z = Math.min(chosen.top, Math.max(OVERVIEW, coords.z));
                         var set = chosen.levels[z];
                         if (!set) { return canvas; }
                         var ink = canvas.getContext('2d');
@@ -1964,6 +2009,11 @@
                     said.says.style.cssText = 'margin:0 0 6px;color:var(--trails-ink-3);font-size:12px';
                     said.chooser.appendChild(said.says);
 
+                    said.overview = document.createElement('p');
+                    said.overview.className = 'trails-offline-overview';
+                    said.overview.style.cssText = 'margin:0 0 6px;color:var(--trails-ink-3);font-size:12px';
+                    said.chooser.appendChild(said.overview);
+
                     said.bar = document.createElement('div');
                     said.bar.className = 'trails-offline-bar';
                     said.bar.style.cssText = 'height:8px;border-radius:4px;background:var(--trails-rule);' +
@@ -2037,7 +2087,7 @@
                 // grew when the reader zoomed out.
                 function sayLayer() {
                     if (!chosen || !chooser) { said.layer.textContent = ''; return; }
-                    var z = Math.min(chosen.top, Math.max(BOTTOM, map.getZoom()));
+                    var z = Math.min(chosen.top, Math.max(OVERVIEW, map.getZoom()));
                     var set = chosen.levels[z];
                     if (!set) { said.layer.textContent = ''; return; }
                     var seen = mapBox();
@@ -2149,6 +2199,7 @@
                     var hint = here.hint + (from ? ' Drawn round ' + from.from + '.' : '');
                     if (counted === null) {
                         said.says.textContent = 'Working out how much that is\u2026';
+                        said.overview.textContent = '';
                         said.fill.style.width = '0';
                         said.budget.textContent = '';
                         // **Off the paint, and every level of the row with it.**
@@ -2164,15 +2215,17 @@
                             // reads it is a check that has to tell a figure from
                             // before a drag from the figure after it.
                             counted = {tiles: picking.tiles, bytes: picking.bytes,
-                                       scope: scope, zoom: zoom, at: picking.at};
+                                       scope: scope, zoom: zoom, at: picking.at, overview: picking.overview};
                             budget();
                             var level;
                             for (level = FLOOR; level <= here.ceiling; level += 1) { cost(scope, level); }
                             refresh();
                         }, 0);
                     } else {
-                        said.says.textContent = count(counted.tiles) + ' tiles \u00b7 about ' +
-                            megabytes(counted.bytes) + ' \u00b7 ' + hint;
+                        said.says.textContent = count(counted.tiles - counted.overview.tiles) + ' tiles \u00b7 about ' +
+                            megabytes(counted.bytes - counted.overview.bytes) + ' \u00b7 ' + hint;
+                        said.overview.textContent = 'overview, ' + count(counted.overview.tiles) + ' tiles, ' +
+                            megabytes(counted.overview.bytes) + ' \u00b7 the whole box at z8\u2013z11';
                         var share = cap ? counted.bytes / cap : 0;
                         said.fill.style.width = Math.min(100, share * 100) + '%';
                         said.fill.style.background = share > 1 ? 'var(--trails-bad, #e07a6a)' : 'var(--trails-accent)';
@@ -2197,7 +2250,7 @@
 
                     said.go.textContent = working ? 'Stop' : 'Keep it';
                     said.go.className = working ? 'trails-offline-stop' : 'trails-offline-go';
-                    said.go.disabled = !working && (counted === null || !counted.tiles || tooMuch);
+                    said.go.disabled = !working && (counted === null || counted.tiles === counted.overview.tiles || tooMuch);
                     said.go.style.opacity = said.go.disabled ? '0.5' : '1';
 
                     paint();
@@ -2400,6 +2453,12 @@
                     freshness: freshRow,
                     refresh: refresh,
                     state: function () { return snapshot; },
+                    // The overview's box, including where the sheet itself
+                    // answers beyond it. Return fresh corners to keep it ours.
+                    bounds: function () {
+                        var box = EXTENT || mapBox();
+                        return [[box.s, box.w], [box.n, box.e]];
+                    },
                     scopes: SCOPES.map(function (each) { return each.key; }),
                     open: function (want) { chooser = want === undefined ? true : !!want; return refresh(); },
                     choose: function (which, level) {

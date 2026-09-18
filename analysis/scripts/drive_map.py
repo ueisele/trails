@@ -347,7 +347,9 @@ SCENES: dict[str, Scene] = {
             # the sheet alone held: 200,052 and 7.46 GB against 131,033 and 6.76.
             # 267,400 since §6.11: the 200,052 of §6.10 plus the vegetation and
             # forest tiles of every level up to z15 over the same ground.
-            "tiles the whole map holds at its cap": 267400,
+            # Phase 4 adds the z8–z10 overview: 60 tiles over five layers,
+            # 300 more than 267,400; the whole-map scope already held z11.
+            "tiles the whole map holds at its cap": 267700,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -496,7 +498,9 @@ SCENES: dict[str, Scene] = {
             # 2026-09-13 (§9.24). 1,032 MB against 903.
             # 184,655 since §6.11: the 166,035 of §6.7 plus 9,310 each of
             # vegetation and forest, z8 to z15.
-            "tiles the whole map holds at its cap": 184655,
+            # Phase 4 adds the z8–z10 overview: 20 tiles over five layers,
+            # 100 more than 184,655; the whole-map scope already held z11.
+            "tiles the whole map holds at its cap": 184755,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -9547,6 +9551,135 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
     return out
 
 
+def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
+    """Keep a tiny scope, then repeat with only its pre-overview ground in store.
+
+    Args:
+        browser: The browser for a fresh, isolated store.
+        page_path: The built page, served beside its trees.
+
+    Returns:
+        Exact coverage, estimate and fetch counts for the two runs.
+    """
+    with served(page_path.parent) as origin, browser.new_context() as context:
+        page = context.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.goto(f"{origin}/{page_path.name}", timeout=120_000)
+        ready(page)
+        page.wait_for_function("() => navigator.serviceWorker.controller && window.trailsOffline", timeout=60_000)
+        prefixes = page.evaluate("() => window.trailsOffline.prefixes()")
+        provider = next(p for p in maps.PROVIDERS.values() if prefixes["map"].endswith(p.tiles))
+        assert provider.extent is not None
+        west, south, east, north = provider.extent
+
+        def tile(lat: float, lon: float, z: int) -> tuple[int, int]:
+            return math.floor((lon + 180) / 360 * 2**z), math.floor((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * 2**z)
+
+        def corner(x: float, y: float) -> list[float]:
+            return [math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / 2**14)))), x / 2**14 * 360 - 180]
+
+        # A ring wholly inside one z14 tile, including its centre: its old
+        # pyramid is exactly the parent tile plus one clipped row at each level.
+        cx, cy = tile(*SCENE.position, 14)
+        ring = [corner(cx + dx, cy + dy) for dx, dy in [(0.4, 0.4), (0.6, 0.4), (0.6, 0.6), (0.4, 0.6)]]
+        base_url = page.evaluate(
+            with_map("""() => {
+            let url;
+            __MAP__.eachLayer(l => {
+                if (l._url && l._url.startsWith(window.trailsOffline.prefixes().map)) url = l._url.split('?')[0];
+                else if (l._url && new URL(l._url, location.href).href.startsWith(window.trailsOffline.prefixes().map)) {
+                    url = decodeURI(new URL(l._url.split('?')[0], location.href).href);
+                }
+            });
+            return url;
+        }""")
+        )
+        trees = [(base_url, 8, provider.top, provider.weight)]
+        if provider.heights:
+            h = provider.heights
+            trees.append((origin + h.template, h.top, h.top, h.weight))
+        for overlay in (provider.shade, provider.slope, provider.vegetation, provider.forest):
+            if overlay:
+                trees.append((origin + overlay.template, 8, overlay.top, overlay.weight))
+        overview: dict[str, int] = {}
+        old_scope: dict[str, int] = {}
+        for z in range(8, 15):
+            x0, y0 = tile(north, west, z)
+            x1, y1 = tile(south, east, z)
+            sx, sy = cx >> (14 - z), cy >> (14 - z)
+            for target, left, right, upper, lower in [
+                (overview, x0, x1, y0, y1) if z <= 11 else (overview, 1, 0, 1, 0),
+                (old_scope, max(x0, sx - 1), min(x1, sx + 1), max(y0, sy - 1), min(y1, sy + 1)) if z >= 11 else (old_scope, 1, 0, 1, 0),
+            ]:
+                for x in range(left, right + 1):
+                    for y in range(upper, lower + 1):
+                        for template, bottom, top, weight in trees:
+                            if bottom <= z <= top:
+                                target[template.replace("{z}", str(z)).replace("{x}", str(x)).replace("{y}", str(y))] = weight[z]
+        expected = old_scope | overview
+        extra = sorted(overview.keys() - old_scope.keys())
+        page.evaluate("async () => await window.trailsOffline.open(true)")
+        page.evaluate(KEEP_AREA, ring)
+        counted_now(page)
+        estimate = page.evaluate("() => window.trailsOffline.state().counted")
+        line = page.evaluate("() => window.trailsOffline.holder.querySelector('.trails-offline-overview').textContent")
+        page.evaluate("""() => {
+            window.trailsOverviewFetches = [];
+            const fetch = window.fetch;
+            window.fetch = function (url, options) {
+                if (options && options.cache === 'reload') window.trailsOverviewFetches.push(url);
+                return fetch.apply(this, arguments);
+            };
+        }""")
+        page.evaluate("() => window.trailsOffline.keep()")
+        first = page.evaluate("() => window.trailsOffline.state().run")
+        fetched = page.evaluate("() => window.trailsOverviewFetches.slice().sort()")
+        # Remove only the overview the old scope did not include. The remaining
+        # rows are exactly what the same scope kept before phase 4, including z11.
+        held = page.evaluate(
+            in_db("""async (extra) => {
+            const db = await new Promise((done, fail) => {
+                const ask = indexedDB.open('__DB__', 3);
+                ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
+            });
+            const keys = await new Promise((done, fail) => {
+                const deal = db.transaction('tiles', 'readwrite'), store = deal.objectStore('tiles');
+                const ask = store.getAllKeys();
+                for (const url of extra) store.delete(url);
+                deal.oncomplete = () => done(ask.result.sort()); deal.onerror = () => fail(deal.error);
+            });
+            db.close();
+            window.trailsOverviewFetches = [];
+            return keys;
+        }"""),
+            extra,
+        )
+        page.evaluate("() => window.trailsOffline.keep()")
+        repeat = page.evaluate("() => window.trailsOffline.state().run")
+        refetched = page.evaluate("() => window.trailsOverviewFetches.slice().sort()")
+        return Check(
+            "the overview is kept with a small scope and fills an older one",
+            [
+                Reading("the estimate counts the union once", estimate["tiles"], len(expected)),
+                Reading("the estimate weighs the union once", estimate["bytes"], sum(expected.values())),
+                Reading(
+                    "the overview has its own count and weight",
+                    estimate["overview"],
+                    {"tiles": len(overview), "bytes": sum(overview.values())},
+                    note=line,
+                ),
+                Reading("the overview line names its tiles", line.startswith(f"overview, {len(overview):,} tiles, "), True),
+                Reading("the first run fetches the exact scope and z8–z11 box", fetched == sorted(expected), True, note=f"{len(fetched)} fetched"),
+                Reading("and keeps every one in the store", held == sorted(expected), True, note=f"{len(held)} rows, {first['failed']} refused"),
+                Reading("the repeat finds the old scope already kept", repeat["held"], len(old_scope)),
+                Reading("and fetches only the missing overview", refetched == extra, True, note=f"{len(refetched)} fetched, {repeat['added']} added"),
+                Reading("both runs finish without refusals", first["failed"] + repeat["failed"], 0),
+                Reading("nothing threw during the overview check", errors, []),
+            ],
+        )
+
+
 def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) -> list[Check]:
     """The map, served by its own worker, with the network switched off.
 
@@ -10232,26 +10365,18 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # other half of the same design: offline the worker answers an unkept
         # tile with a 1x1 transparent PNG so Leaflet draws the page's own ground
         # instead of a torn image over it.
-        # The z11 blanks were the ring outside the sheet; bounds now removes
-        # that ring, so look inside its far corner, beyond the kept rectangle.
+        # Every run now keeps the z11 overview, even on an unbounded sheet.
+        # Read the panel's box on both maps and look inside its far corner at
+        # z14, beyond the kept rectangle and above the overview.
         second.evaluate(
             with_map("""(at) => {
                 const map = __MAP__;
-                let sheet = null;
-                map.eachLayer(layer => {
-                    if (layer.getTileUrl && !layer.options.trailsShade && !layer.options.trailsSlope &&
-                        !layer.options.trailsVegetation && !layer.options.trailsForest) sheet = layer;
-                });
-                if (sheet && sheet.options.bounds) {
-                    const box = L.latLngBounds(sheet.options.bounds), center = box.getCenter();
-                    const latInset = (box.getNorth() - box.getSouth()) * 0.1;
-                    const lngInset = (box.getEast() - box.getWest()) * 0.1;
-                    const lat = at[0] > center.lat ? box.getSouth() + latInset : box.getNorth() - latInset;
-                    const lng = at[1] > center.lng ? box.getWest() + lngInset : box.getEast() - lngInset;
-                    map.setView([lat, lng], 14, {animate: false});
-                } else {
-                    map.setView(at, 11, {animate: false});
-                }
+                const box = L.latLngBounds(window.trailsOffline.bounds()), center = box.getCenter();
+                const latInset = (box.getNorth() - box.getSouth()) * 0.1;
+                const lngInset = (box.getEast() - box.getWest()) * 0.1;
+                const lat = at[0] > center.lat ? box.getSouth() + latInset : box.getNorth() - latInset;
+                const lng = at[1] > center.lng ? box.getWest() + lngInset : box.getEast() - lngInset;
+                map.setView([lat, lng], 14, {animate: false});
             }"""),
             list(SCENE.position),
         )
@@ -11032,6 +11157,10 @@ def main() -> int:
         # costs about 590 MB settled, and a second one beside it took the browser
         # down mid-load -- `TargetClosedError` at the first wait, with nothing
         # said about why. Two 42 MB documents at once is not a thing to ask for.
+        if wanted(the_overview_is_kept):
+            page.close()
+            serving.close()
+            checks.append(timed(the_overview_is_kept, browser, page_path))
         if wanted(the_map_opens_with_the_network_off):
             page.close()
             serving.close()

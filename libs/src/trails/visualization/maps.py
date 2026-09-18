@@ -508,7 +508,9 @@ PROVIDERS: dict[str, Provider] = {
         # Twelve samples per zoom taken on the trail network rather than over
         # the park: the sea tiles a bounding box is full of are a fraction of
         # the size and would make every estimate optimistic.
-        weight={11: 73914, 12: 73914, 13: 73914, 14: 70170, 15: 45898, 16: 51295, 17: 28637, 18: 37037},
+        # z8–z10: five cache topo tiles per zoom at the box's corners and
+        # centre, 2026-09-18; rounded mean bytes, not the flat WMS tree.
+        weight={8: 37246, 9: 99511, 10: 96923, 11: 73914, 12: 73914, 13: 73914, 14: 70170, 15: 45898, 16: 51295, 17: 28637, 18: 37037},
         # **Kartverket's sheet answers the world; these three trees are ours and
         # do not.** The extent is theirs, not the sheet's -- see the field.
         extent=_LOMSDAL_VISTEN.box,
@@ -558,7 +560,9 @@ PROVIDERS: dict[str, Provider] = {
         # 2026-09-12 (analysis/docs/abisko-decisions.md §3): indexed PNG, and
         # a box that is mountain and lake rather than sea, so the whole-box
         # mean is close to what a route crosses.
-        weight={11: 31747, 12: 22166, 13: 25719, 14: 15290, 15: 13783, 16: 7958, 17: 4587},
+        # z8–z10: the same per_zoom bytes / tiles from index.json, read
+        # 2026-09-18 and rounded to whole bytes.
+        weight={8: 16066, 9: 14279, 10: 12273, 11: 31747, 12: 22166, 13: 25719, 14: 15290, 15: 13783, 16: 7958, 17: 4587},
         # The box the tree was cut to, as `index.json` beside it records
         # (§2 of the decisions): the copy holds every tile of the box at
         # every zoom and not one outside it.

@@ -685,6 +685,34 @@ class TestOfflinePanel:
         assert "for (z = top - 1; z >= BOTTOM; z -= 1)" in levels
         assert "var BOTTOM = 11;" in panel
 
+    def test_every_scope_adds_the_overview_without_listing_its_tiles(self):
+        """The overview is a lazy rectangle union, including the z11 overlap."""
+        panel = self.panel()
+        assert "var OVERVIEW = 8;" in panel
+        assert "for (z = OVERVIEW; z <= BOTTOM; z += 1) { out[z] = overviewAt(z, out[z]); }" in panel
+        overview = panel.split("function overviewAt(z, core) {")[1].split("function overviewCost()")[0]
+        assert "var box = EXTENT || mapBox();" in overview
+        assert "var size = (x1 - x0 + 1) * (y1 - y0 + 1);" in overview
+        assert "if (!inside(v)) { size += 1; }" in overview
+        assert "if (!core || !core.has(v))" in overview
+        assert "while (x <= x1)" in overview
+        assert "new Set" not in overview and ".push(" not in overview
+        assert "var z = OVERVIEW, it = null, pass = 'map';" in panel
+        bounds = panel.split("bounds: function () {")[1].split("},")[0]
+        assert "var box = EXTENT || mapBox();" in bounds
+        assert "return [[box.s, box.w], [box.n, box.e]];" in bounds
+
+    def test_the_overview_is_priced_separately_without_charging_the_overlap_twice(self):
+        """Scope and overview add to the same total the run and quota use."""
+        panel = self.panel()
+        assert "levels[z] = overviewAt(z);" in panel
+        assert "overview: overviewCost()" in panel
+        assert "trails-offline-overview" in panel
+        assert "count(counted.tiles - counted.overview.tiles)" in panel
+        assert "megabytes(counted.bytes - counted.overview.bytes)" in panel
+        assert "'overview, ' + count(counted.overview.tiles)" in panel
+        assert "counted.bytes > free * 0.9" in panel
+
     def test_a_straight_run_between_two_vertices_is_walked_and_not_skipped(self):
         """The drawn geometry is simplified at 8 m, so a straight across a
         plateau can be hundreds of metres between two vertices -- and a tile at
@@ -2160,8 +2188,10 @@ class TestTwoMapsOnOneOrigin:
         every level the panel can offer has one."""
         kartverket, lantmateriet = maps.PROVIDERS["kartverket"], maps.PROVIDERS["lantmateriet"]
         assert kartverket.top == 18 and lantmateriet.top == 17
-        assert set(kartverket.weight) == set(range(11, 19))
-        assert set(lantmateriet.weight) == set(range(11, 18))
+        assert set(kartverket.weight) == set(range(8, 19))
+        assert set(lantmateriet.weight) == set(range(8, 18))
+        assert [kartverket.weight[z] for z in range(8, 11)] == [37246, 99511, 96923]
+        assert [lantmateriet.weight[z] for z in range(8, 11)] == [16066, 14279, 12273]
         assert lantmateriet.weight[13] == 25719
         # Our own bucket, root-relative: no host in the page, and the same page
         # served locally over the same tree draws the same tiles.
