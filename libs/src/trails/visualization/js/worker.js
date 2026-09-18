@@ -527,14 +527,14 @@ function packFor(plain) {
     var level = packLevel(layer[1], z);
     var prefix = new URL(layer[0]);
     prefix.pathname = '/packs' + prefix.pathname;
-    return {url: prefix.href + level + '/' + (x >> (z - level)) + '/' + (y >> (z - level)) + '.pmtiles', id: id};
+    return {url: prefix.href + level + '/' + (x >> (z - level)) + '/' + (y >> (z - level)) + '.pmtiles', id: id, height: layer[0] === HEIGHT_PREFIX};
 }
 
 // 48 directories are small (85 entries at most); eight bodies cover nearby
-// screens, bounded to eight packs even for the ~5.3 MB height packs. Two seconds
-// distinguishes settling on a screen from passing the same parent much later.
-var DIRECTORY_LIMIT = 48, PACK_LIMIT = 8, SETTLE_MS = 2000;
-var directories = new Map(), packs = new Map(), opening = new Map(), filling = new Map(), visits = new Map();
+// screens. Only a new request after two seconds on that ground can promote a
+// directory to a whole pack; a first-screen burst stays on ranges.
+var DIRECTORY_LIMIT = 48, PACK_LIMIT = 8, SETTLE_MS = 2000, FILL_LIMIT = 2;
+var directories = new Map(), packs = new Map(), opening = new Map(), filling = new Map();
 function recent(cache, key) {
     var value = cache.get(key);
     if (value !== undefined) { cache.delete(key); cache.set(key, value); }
@@ -601,7 +601,7 @@ function holdPack(url, body) {
     var h = packHeader(body);
     if (body.byteLength !== h.data + h.size) { throw Error("truncated pack"); }
     var entries = packDirectory(h, body.slice(h.root, h.root + h.rootLen));
-    remember(directories, url, entries, DIRECTORY_LIMIT);
+    remember(directories, url, {entries: entries, at: Date.now()}, DIRECTORY_LIMIT);
     return remember(packs, url, {body: body, entries: entries}, PACK_LIMIT);
 }
 function sliceTile(pack, id) {
@@ -629,6 +629,7 @@ function keepNetworkPack(url, body, event) {
 }
 function wholePack(url, event) {
     if (!filling.has(url)) {
+        if (filling.size >= FILL_LIMIT) { return null; }
         var work = fetch(url).then(function (answer) {
             if (!answer.ok) { throw Error("pack HTTP " + answer.status); }
             return answer.arrayBuffer();
@@ -639,7 +640,7 @@ function wholePack(url, event) {
 }
 function directoryFor(url, event) {
     var held = recent(directories, url);
-    if (held) { return Promise.resolve(held); }
+    if (held) { return Promise.resolve(held.entries); }
     if (!opening.has(url)) {
         var work = range(url, 0, 16383).then(async function (part) {
             if (part.whole) { return keepNetworkPack(url, part.whole, event).entries; }
@@ -650,22 +651,30 @@ function directoryFor(url, event) {
                 if (more.whole) { return keepNetworkPack(url, more.whole, event).entries; }
                 root = more.body;
             }
-            return remember(directories, url, packDirectory(h, root), DIRECTORY_LIMIT);
+            var entries = packDirectory(h, root);
+            remember(directories, url, {entries: entries, at: Date.now()}, DIRECTORY_LIMIT);
+            return entries;
         }).finally(function () { opening.delete(url); });
         opening.set(url, work);
     }
     return opening.get(url);
 }
-async function networkTile(address, event) {
-    var url = address.url, held = recent(packs, url), last = visits.get(url), now = Date.now();
+async function networkTile(address, event, asked = Date.now()) {
+    var url = address.url, held = recent(packs, url), directory = recent(directories, url);
     if (held) { return sliceTile(held, address.id); }
-    remember(visits, url, now, DIRECTORY_LIMIT);
-    if (filling.has(url) || (last !== undefined && now - last <= SETTLE_MS)) {
-        return sliceTile(await wholePack(url, event), address.id);
+    // Height packs are ~5.3 MB at z10 (the plan's phase 6 built-note), far too
+    // much speculative traffic for a phone. Keep still downloads them whole.
+    // Use arrival time: waiting on the store cannot turn a burst into a later visit.
+    if (!address.height && directory && asked - directory.at > SETTLE_MS) {
+        var fill = wholePack(url, event);
+        if (fill) {
+            // A failed promotion must not fail the tile, nor delay its range.
+            var background = fill.catch(function () {});
+            if (event) { event.waitUntil(background); }
+        }
     }
     var entries = await directoryFor(url, event), pack = recent(packs, url);
     if (pack) { return sliceTile(pack, address.id); }
-    if (filling.has(url)) { return sliceTile(await filling.get(url), address.id); }
     var entry = entries.get(address.id);
     if (!entry) { return null; }
     var part = await range(url, entry.offset, entry.offset + entry.length - 1);
@@ -723,7 +732,7 @@ function flushLookups() {
 }
 
 function tileFor(request, event) {
-    var began = performance.now(), missed = false;
+    var began = performance.now(), asked = Date.now(), missed = false;
     inFlight += 1;
     told.peak = Math.max(told.peak, inFlight);
     var state = {expired: false, off: false};
@@ -740,6 +749,7 @@ function tileFor(request, event) {
             var body = sliceTile(held, address.id);
             answered(body ? "mem" : "blank"); return body ? png(body) : blank();
         }
+        // The deadline bounds the store only; even a slow network answer is awaited below.
         return within(2500, lookup(address.url, state), null, late).then(async function (found) {
             if (found) {
                 var cached = recent(packs, address.url);
@@ -754,7 +764,7 @@ function tileFor(request, event) {
             }
             var off = state.off;
             if (off) { answered("blank"); return blank(); }
-            var body = await networkTile(address, event);
+            var body = await networkTile(address, event, asked);
             answered(body ? "net" : "blank"); return body ? png(body) : blank();
         });
     }).catch(function (gone) { answered("blank", gone); return blank(); })

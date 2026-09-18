@@ -9672,6 +9672,7 @@ class TestPackWorker:
                         {
                             "url": f"https://atlas.test/packs{layer.tiles}{level}/{x >> (zoom - level)}/{y >> (zoom - level)}.pmtiles",
                             "id": packs.tile_id(zoom, x, y),
+                            "height": layer is own.heights,
                         }
                     )
         assert self.run_worker(tmp_path, f"console.log(JSON.stringify({json.dumps(addresses)}.map(packFor)));", provider) == expected
@@ -9779,14 +9780,18 @@ class TestPackWorker:
                 }};
                 var a = packFor(TILE_PREFIX + '14/1/1.png'), b = packFor(TILE_PREFIX + '15/2/2.png');
                 var one = await networkTile(a), rangeWrites = writes;
-                visits.set(a.url, Date.now() - SETTLE_MS - 1);
-                await networkTile(a);
-                var beforeSettle = requests.length;
+                var fetchedAt = directories.get(a.url).at;
+                Date.now = () => fetchedAt + SETTLE_MS;
                 await Promise.all([networkTile(b), networkTile(a), networkTile(b)]);
+                Date.now = () => fetchedAt + SETTLE_MS + 1;
+                await networkTile(b, undefined, fetchedAt);  // An original burst tile delayed by the store.
+                var beforeSettle = requests.slice();
+                await Promise.all([networkTile(b), networkTile(a), networkTile(b)]);
+                await Promise.all(filling.values());
                 var afterSettle = requests.length;
                 await networkTile(a);
                 var afterMemory = requests.length;
-                packs.clear(); directories.clear(); visits.clear(); ignoreRange = true;
+                packs.clear(); directories.clear(); ignoreRange = true;
                 var whole = await networkTile(a);
                 console.log(JSON.stringify({{requests, rangeWrites, writes, beforeSettle, afterSettle, afterMemory,
                     same: Buffer.from(one).equals(Buffer.from(whole))}}));
@@ -9794,12 +9799,95 @@ class TestPackWorker:
         """,
         )
         assert result["requests"][0] == "bytes=0-16383"
-        assert result["requests"][1] == result["requests"][2], "a later visit reuses its directory but stays ranged"
+        assert len(result["beforeSettle"]) == 6, "burst tiles stay ranged, even after a slow store lookup or at the two-second boundary"
+        assert all(request.startswith("bytes=") for request in result["beforeSettle"])
         assert result["rangeWrites"] == 0
-        assert result["beforeSettle"] == 3
-        assert result["afterSettle"] == result["afterMemory"] == 4
-        assert result["requests"][3:] == ["whole", "bytes=0-16383"]
+        assert result["afterSettle"] == result["afterMemory"]
+        assert result["requests"].count("whole") == 1
+        assert result["requests"][-1] == "bytes=0-16383"
         assert result["same"] and result["writes"] == 2
+
+    def test_promotions_are_bounded_do_not_block_ranges_and_never_include_heights(self, tmp_path):
+        tile = tmp_path / "tile.png"
+        tile.write_bytes(base64.b64decode(maps._ERROR_TILE_URL.split(",")[1]))
+        path = tmp_path / "fixture.pmtiles"
+        packs.write_pack({(14, 1, 1): tile}, path)
+        encoded = base64.b64encode(path.read_bytes()).decode()
+        result = self.run_worker(
+            tmp_path,
+            f"""
+            (async function () {{
+                var bytes = Uint8Array.from(Buffer.from('{encoded}', 'base64')).buffer;
+                var now = 1000, active = 0, peak = 0, whole = [], releases = [], ranges = 0;
+                Date.now = () => now;
+                browsePut = async () => {{}};
+                fetch = async function (url, options) {{
+                    var range = options && options.headers.Range;
+                    if (!range) {{
+                        whole.push(url); peak = Math.max(peak, ++active);
+                        await new Promise((done, fail) => releases.push(ok => {{ active--; ok ? done() : fail(Error('gone')); }}));
+                        return new Response(bytes);
+                    }}
+                    ranges++;
+                    var ends = range.slice(6).split('-').map(Number), end = Math.min(ends[1], bytes.byteLength - 1);
+                    return new Response(bytes.slice(ends[0], end + 1), {{status: 206, headers: {{
+                        'content-range': 'bytes ' + ends[0] + '-' + end + '/' + bytes.byteLength
+                    }}}});
+                }};
+                var base = packFor(TILE_PREFIX + '14/1/1.png');
+                var addresses = [0, 1, 2, 3].map(i => ({{...base, url: base.url + '?ground=' + i}}));
+                var height = {{...packFor(HEIGHT_PREFIX + '13/1/1.png'), id: base.id}};
+                addresses.push(height);
+                await Promise.all(addresses.map(a => networkTile(a)));
+                var first = {{ranges, whole: whole.length}};
+                now += SETTLE_MS + 1;
+                // All tiles must finish while both whole bodies are still held.
+                var answers = await Promise.all([...addresses, addresses[0]].map(a => networkTile(a)));
+                var pending = {{active, filling: filling.size, whole: whole.length, bytes: answers.map(a => a.byteLength)}};
+                var work = [...filling.values()]; releases[0](true); releases[1](false);
+                await Promise.allSettled(work);
+                var released = filling.size;
+                await networkTile(addresses[2]);
+                var retry = [...filling.values()]; releases[2](true); await Promise.all(retry);
+                // Losing a directory loses its age as well: a fresh range starts the window again.
+                directories.delete(addresses[3].url);
+                await networkTile(addresses[3]);
+                await networkTile(height);
+                console.log(JSON.stringify({{first, pending, released, peak, whole: whole.length,
+                    heightWhole: whole.includes(height.url), refreshed: directories.get(addresses[3].url).at === now}}));
+            }})().catch(e => {{ console.error(e); process.exitCode = 1; }});
+        """,
+        )
+        assert result == {
+            "first": {"ranges": 10, "whole": 0},
+            "pending": {"active": 2, "filling": 2, "whole": 2, "bytes": [68] * 6},
+            "released": 0,
+            "peak": 2,
+            "whole": 3,
+            "heightWhole": False,
+            "refreshed": True,
+        }
+
+    def test_slow_network_is_awaited_outside_the_store_deadline(self, tmp_path):
+        result = self.run_worker(
+            tmp_path,
+            """
+            (async function () {
+                tally = () => {};
+                switched = Promise.resolve(false);
+                lookup = async () => null;
+                networkTile = async () => {
+                    await new Promise(done => setTimeout(done, 2700));
+                    return new Uint8Array([1, 2, 3]).buffer;
+                };
+                var began = performance.now();
+                var response = await tileFor(new Request(TILE_PREFIX + '14/1/1.png'));
+                console.log(JSON.stringify({bytes: (await response.arrayBuffer()).byteLength,
+                    deadlines: told.deadlines, waited: performance.now() - began >= 2500, inFlight}));
+            })().catch(e => { console.error(e); process.exitCode = 1; });
+            """,
+        )
+        assert result == {"bytes": 3, "deadlines": 0, "waited": True, "inFlight": 0}
 
     def test_first_control_gate_releases_on_control_or_timeout(self, tmp_path):
         gate = files("trails.visualization").joinpath("js", "tile_start.js").read_text(encoding="utf-8")

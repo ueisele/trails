@@ -10038,6 +10038,22 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
     readings: list[Reading] = []
     with served(page_path.parent) as origin:
         context = browser.new_context(viewport={"width": 430, "height": 932})
+        # Start at z17 on a fresh origin, with the page's default overlays.
+        # Override only its initial fitBounds, before any tile layer is added.
+        context.add_init_script(
+            """(() => {
+            let leaflet;
+            Object.defineProperty(window, 'L', {configurable: true, get: () => leaflet, set: value => {
+                leaflet = value;
+                const fit = value.Map.prototype.fitBounds;
+                value.Map.prototype.fitBounds = function (...args) {
+                    value.Map.prototype.fitBounds = fit;
+                    const p = this.project(__STANDING__, 14).divideBy(256).floor();
+                    return this.setView(this.unproject(p.add([0.5, 0.5]).multiplyBy(256), 14), 17, {animate: false});
+                };
+            }});
+        })();""".replace("__STANDING__", json.dumps(SCENE.standing))
+        )
         page = context.new_page()
         page.goto(f"{origin}/{page_path.name}", timeout=180_000)
         page.wait_for_function("() => navigator.serviceWorker.controller", timeout=30_000)
@@ -10047,34 +10063,49 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         }"""
         page.wait_for_function(loaded, timeout=60_000)
         initial = list(_Quiet.pack_requests)
-        readings.append(Reading("first visit draws after control", bool(initial), True, note=f"{len(initial)} pack requests"))
-        # A phone screen centred well inside one z14 parent, with just its base
-        # shown, so a small pan stays inside the very same pack.
-        page.evaluate(
-            with_map("""(at) => {
+        initial_bytes = sum(row[2] for row in initial)
+        readings.append(Reading("first visit draws at z17 after control", page.evaluate(with_map("() => __MAP__.getZoom()")), 17))
+        readings.append(
+            Reading(
+                "first z17 screen transfers at most 2 MB", initial_bytes <= 2_000_000, True, note=f"{initial_bytes} bytes, {len(initial)} requests"
+            )
+        )
+        readings.append(Reading("first z17 screen requests no whole pack", sum(row[1] is None for row in initial), 0))
+        readings.append(Reading("the online reader uses ranges too", any(row[1] is not None for row in initial), True))
+        page.wait_for_timeout(2200)
+        readings.append(Reading("staying on the first screen starts no request", len(_Quiet.pack_requests) - len(initial), 0))
+        # Once the directory is older than the window, one further tile asks
+        # for its pack. Keep only the base for the following warm/offline views.
+        tile_url = page.evaluate(
+            with_map("""() => {
             const layers = []; __MAP__.eachLayer(l => { if (l.getTileUrl) layers.push(l); });
             window.packSheet = layers.find(l => !l.options.trailsShade && !l.options.trailsSlope &&
                 !l.options.trailsVegetation && !l.options.trailsForest);
             layers.filter(l => l !== window.packSheet).forEach(l => __MAP__.removeLayer(l));
-            const p = __MAP__.project(at, 14).divideBy(256).floor();
-            __MAP__.setView(__MAP__.unproject(p.add([0.5, 0.5]).multiplyBy(256), 14), 17, {animate: false});
-        }"""),
-            list(SCENE.standing),
+            return Object.values(window.packSheet._tiles)[0].el.src;
+        }""")
         )
-        page.wait_for_function(loaded, timeout=60_000)
-        page.wait_for_timeout(2200)  # Measure after the documented two-second settling window.
+        page.evaluate("async url => { await (await fetch(url + '?pack-dwell=1')).arrayBuffer(); }", tile_url)
+        # The tile's range need not wait for the background whole-pack body.
+        page.wait_for_function(
+            """async () => {
+            const db = window.trailsOffline;
+            return (await db.dbRead('flags', 'browse-bytes'))?.bytes > 0;
+        }""",
+            timeout=30_000,
+        )
         settled = list(_Quiet.pack_requests)
-        whole = [row for row in settled if row[1] is None]
-        whole_paths = {row[0] for row in whole}
+        promoted = settled[len(initial) :]
+        whole = [row for row in promoted if row[1] is None]
         readings.append(
             Reading(
-                "settling fetches each whole pack once",
-                len(whole),
-                len(whole_paths),
-                note=f"{len(settled)} requests, {len(whole)} whole, {sum(r[2] for r in settled)} bytes",
+                "one tile after the window fetches at most one whole pack",
+                len(whole) <= 1,
+                True,
+                note=f"{len(whole)} whole, {sum(r[2] for r in promoted)} bytes",
             )
         )
-        readings.append(Reading("the online reader uses ranges too", any(row[1] is not None for row in settled), True))
+        readings.append(Reading("the settled base pack is available", any("/packs/tiles/" in row[0] and row[1] is None for row in settled), True))
         per_tile = [path for path in _Quiet.asked if re.match(r"/(tiles|dem|shade|slope|vegetation|forest)/.*\.png", path)]
         readings.append(Reading("no per-tile object reaches the server", per_tile, []))
         before = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
@@ -10337,7 +10368,17 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                     out[off ? 'deadlineOn' : 'deadlineOff'] = {ms: performance.now() - began,
                         deadlines: told.deadlines - before, bytes: (await response.blob()).size, network};
                 }
-                opened = openedBefore; networkTile = networkBefore; setTimeout = timeoutBefore;
+                opened = openedBefore; setTimeout = timeoutBefore;
+                // A fast store miss followed by a slow network is not a store deadline.
+                networkTile = async () => {
+                    await new Promise(done => setTimeout(done, 2700));
+                    return buffer('network');
+                };
+                const beforeSlow = told.deadlines, slowBegan = performance.now();
+                const slowResponse = await tileFor(new Request(TILE_PREFIX + '14/1/3.png'));
+                out.slowNetwork = {ms: performance.now() - slowBegan, deadlines: told.deadlines - beforeSlow,
+                    bytes: (await slowResponse.arrayBuffer()).byteLength};
+                networkTile = networkBefore;
                 out.limits = limits;
                 out.tally = {deadlines: told.deadlines, peak: told.peak, time: told.time};
                 IDBDatabase.prototype.transaction = transaction;
@@ -10402,6 +10443,12 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
             ),
             Reading("offline deadline returns blank without network", [result["deadlineOn"]["bytes"], result["deadlineOn"]["network"]], [68, 0]),
             Reading("online deadline reaches network", [result["deadlineOff"]["bytes"], result["deadlineOff"]["network"]], [7, 1]),
+            Reading(
+                "slow network is awaited without a store deadline",
+                [result["slowNetwork"]["bytes"], result["slowNetwork"]["deadlines"], result["slowNetwork"]["ms"] >= 2500],
+                [7, 0, True],
+                note=f"{result['slowNetwork']['ms']:.0f} ms",
+            ),
             Reading("each whole lookup counts one deadline", [result["deadlineOn"]["deadlines"], result["deadlineOff"]["deadlines"]], [1, 1]),
             Reading(
                 "each lookup arms exactly one 2.5-second timer",
