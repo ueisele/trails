@@ -317,6 +317,50 @@ grows with the store, so more transactions per lookup (phase 3) cannot buy it ba
 for phase 6: `cap` stays 16 on Norway** (the box at z16 is 150,875 tiles, exactly the 150,000
 measured); z17 remains a scope for a route or a view, and the whole box at z17 is not offered.
 
+### Phase 1b — Which row shape keeps a get cheap at 600,000 tiles
+
+Added 2026-09-18 after phase 1's phone readings, and Uwe's word that the box at z17 and, later,
+whole countries must stay possible: the read cost has to become independent of the number of
+tiles kept. A row per tile cannot give that on WebKit — the measured cost is per get and grows
+with the store, the primary key's B-tree is not the part that grows, and IndexedDB offers no
+hash index. What can: fewer, bigger rows, or a direct offset into one big blob.
+
+The measurement helper behind Sources gains a second select, the row shape, and one run
+measures one of four at the same tile equivalent (150,000 or 600,000 tiles of 1 kB):
+
+1. `blob-url` — today's row: one `Blob` per tile, a URL-shaped key. The baseline.
+2. `blob-number` — the same, with an integer tile id as key. How much the long key costs.
+3. `pack` — one row per 85 tiles (a parent with its three levels of children: 1 + 4 + 16 +
+   64), an `ArrayBuffer` with a fixed 85-entry offset table in front, the parent's id as key.
+   600,000 tiles are 7,059 rows. A get is get + slice.
+4. `archive` — one big `Blob` in one row standing in for a PMTiles-style archive, a get is
+   `blob.slice()` to an `ArrayBuffer`. Filled from 8 MB chunk rows without holding it in
+   memory; a phone that cannot write it reports that as the result.
+
+Each reports fill time, open, one get, fifty gets in one transaction, the screen through the
+worker, and bytes on disk. Uwe runs the four at 600,000 on the phone, `blob-url` first.
+
+**How this meets the successor's design** (`atlas/docs/decisions.md` §3.1, §3.6): atlas puts
+tile packs as PMTiles on R2, one file per country, range-requested online, tiles extracted into
+the offline store — and says nothing about the store's row shape or its read cost on the phone,
+which is exactly what this measures. A pack can itself be a valid small PMTiles archive: a z10
+parent with z11–z13, or a z14 parent with z15–z17, is 85 tiles either way, about 800 kB, one
+immutable object addressed by the parent's `z/x/y`. The unit on R2 and in the store is then the
+pack, and the format and the single addressing scheme survive.
+
+**One archive per country cannot be served through the edge — measured 2026-09-18.** Two
+random objects uploaded to the bucket and range-requested through `atlas.cairn.zone`:
+
+| object | first range request | second and later | middle range |
+|---|---|---|---|
+| 100 MB | `MISS`, 341 ms | `HIT`, 46–65 ms | `HIT` |
+| 600 MB | `BYPASS`, 21.4 s (answered 200, not 206) | `BYPASS`, 119–133 ms | `BYPASS` |
+
+Cloudflare's cacheable object size on this plan is 512 MB; above it every byte range goes to R2
+at 120 ms and a class B operation, below it the edge holds the whole object and answers ranges
+from it. So whatever the row shape, objects on R2 stay well under 512 MB — packs do; a country
+archive does not. Both objects were deleted after the reading.
+
 ### Phase 2 — Fewer requests, page only
 
 1. `updateWhenZooming: false` on every tile layer, in the Python that emits them, so a
