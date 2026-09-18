@@ -168,6 +168,19 @@ def buildings() -> gpd.GeoDataFrame:
     )
 
 
+class TestCodeLists:
+    """The register's code lists, whole, as read off register.geonorge.no on 2026-09-18."""
+
+    def test_every_code_has_a_word(self):
+        road_types = {"gangveg", "annet", "rundkjøring", "rampe", "gangOgSykkelveg", "barmarksløype"}
+        road_types |= {"kanalisertVeg", "traktorveg", "passasjerferje", "bilferje", "sti", "enkelBilveg"}
+        assert set(n50.ROAD_TYPE_LABELS) == road_types
+        assert set(n50.ROAD_CATEGORIES) == {"E", "R", "F", "K", "P"}
+        assert set(n50.SERVICE_LABELS) == {"Gapahuk", "Ubetjent", "Betjent", "Selvbetjent", "Rastebu", "Serveringshytte"}
+        assert set(n50.HUT_OWNERS) == {1.0, 2.0, 3.0, 4.0}
+        assert set(n50.DOOR_LABELS) == {"Låst", "Ulåst", "Udefinert"}
+
+
 class TestLoadCabins:
     """Tests for Source.load_cabins."""
 

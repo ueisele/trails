@@ -613,7 +613,7 @@ TERRAIN_NAME_COLORS = {
     "bakke": "#263238",
     "myr": "#2e7d32",  # marsh, dark green
     "mo": "#8d6e63",  # sandy flats, pale brown
-    "seter": "#7b1fa2",  # summer farms are cultural, not terrain
+    "seterStøl": "#7b1fa2",  # summer farms are cultural, not terrain
 }
 
 #: Used for any type without an entry above.
@@ -638,7 +638,7 @@ TERRAIN_NAME_SYMBOLS = {
     "bakke": "◢",
     "myr": "≋",  # wet ground hatching
     "mo": "▭",  # flat open ground
-    "seter": "⌂",  # a hut
+    "seterStøl": "⌂",  # a hut
 }
 
 #: Used for any type without a glyph above.
@@ -652,7 +652,7 @@ TERRAIN_NAME_LEGEND = (
     ("mountains and slopes", {"fjell", "fjellområde", "li", "bakke"}),
     ("marsh", {"myr"}),
     ("sandy flats", {"mo"}),
-    ("summer farms", {"seter"}),
+    ("summer farms", {"seterStøl"}),
 )
 
 FKB_POPUP_FIELDS = {
@@ -1107,6 +1107,14 @@ PATH_CLASS_LABELS = {
     "Elljusspår": "lit track",
     "Lämplig färdväg": "suitable route across the fell",
     "Svårorienterad gångstig": "path hard to follow",
+    # The rest of `transportled_fjall`, nationwide (read 2026-09-18), so a
+    # park whose network takes one of them says it in English too.
+    "Skidspår": "ski track",
+    "Rennäringsled": "reindeer herding trail",
+    "Båtdrag": "boat portage",
+    "Roddled": "rowing route",
+    "Trafikerad båtled": "boat route, served",
+    "Fångstarm till led": "guide fence to a trail",
 }
 
 #: How its road classes read. The product grades roads by width and surface
@@ -1122,6 +1130,9 @@ ROAD_CLASS_LABELS = {
     "Lokalgata stor": "local street",
     "Lokalgata liten": "local street, small",
     "Gata": "street",
+    "Huvudgata": "main street",
+    "Mötesfri väg": "road with no oncoming traffic",
+    "Övergripande länk": "connecting link",
 }
 
 #: What ``vagutforande`` says about the ground a path runs over. *Normal* is
@@ -2531,14 +2542,14 @@ def describe_sweden(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDat
 
     for name in (T50_TRAILS, T50_PATHS):
         frame = frames[name]
-        frame["path_class"] = translate_joined(frame[topografi50.TYPE], PATH_CLASS_LABELS)
+        frame["path_class"] = known(frame[topografi50.TYPE], PATH_CLASS_LABELS)
         frame["over"] = translate_joined(frame["vagutforande"], BRIDGE_LABELS)
         frame["snowmobiles"] = translate_joined(frame["skoterkorning_tillaten"], SNOWMOBILE_LABELS)
         frame["brush"] = translate_joined(frame["ruskmarkering"], BRUSH_LABELS)
     frames[T50_TRAILS]["route_name"] = frames[T50_TRAILS]["identity"]
 
     roads = frames[T50_ROADS]
-    roads["road_class"] = translate_joined(roads[topografi50.TYPE], ROAD_CLASS_LABELS)
+    roads["road_class"] = known(roads[topografi50.TYPE], ROAD_CLASS_LABELS)
     roads["road_number"] = roads["identity"]
     # A street name where the product has one, the number otherwise: the
     # track is written under whichever the road is known by.

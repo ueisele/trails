@@ -69,10 +69,12 @@ SERVICE_LABELS = {
     "Ubetjent": "unstaffed",
     "Rastebu": "rest hut",
     "Gapahuk": "lean-to",
+    "Serveringshytte": "serving cabin, seasonal",
 }
 
 #: What ``tilgjengelighet`` says about its door.
-DOOR_LABELS = {"Låst": "locked", "Ulåst": "open"}
+#: *Udefinert* is the register's "not applicable" and makes no row.
+DOOR_LABELS = {"Låst": "locked", "Ulåst": "open", "Udefinert": ""}
 
 #: What ``typeveg`` names, on foot and afloat.
 ROAD_TYPE_LABELS = {
@@ -82,8 +84,12 @@ ROAD_TYPE_LABELS = {
     "barmarksløype": "bare-ground trail",
     "bilferje": "car ferry",
     "passasjerferje": "passenger ferry",
-    "bilveg": "road",
-    "enkelBilveg": "single-lane road",
+    "gangveg": "footpath",
+    "enkelBilveg": "road",
+    "kanalisertVeg": "dual carriageway",
+    "rampe": "slip road",
+    "rundkjøring": "roundabout",
+    "annet": "connecting link",
 }
 
 #: What ``rutemerking`` says: whether the route is waymarked.

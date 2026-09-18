@@ -141,6 +141,12 @@ class TestLabels:
         # And the word that passed through is remembered, so a build can say so.
         assert "noe nytt" in stedsnavn.UNTRANSLATED
 
+    def test_the_whole_code_list_has_a_word(self):
+        """Kartverket's Navneobjekttype list had 291 codes on 2026-09-18; a
+        table shorter than that has lost one."""
+        assert len(stedsnavn.NAME_TYPE_LABELS) == 291
+        assert all(value for value in stedsnavn.NAME_TYPE_LABELS.values())
+
     def test_the_importance_is_its_letter(self):
         assert stedsnavn.importance_label("viktighetB") == "B"
         assert stedsnavn.importance_label("viktighet") == "viktighet"

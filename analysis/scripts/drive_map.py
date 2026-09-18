@@ -306,15 +306,18 @@ SCENES: dict[str, Scene] = {
             "things in the marker pane": 186,
             "words the label tables did not know": 0,
             # Thirty-six since §9.33, which split one stop layer into four;
-            # thirty-seven with the former settlements (§9.39).
-            "checkboxes in the legend": 37,
-            "of them switched off": 9,
+            # thirty-seven with the former settlements (§9.39); thirty-eight
+            # since §9.41, when the summer-farm names were filtered by the
+            # register's own code and drew for the first time -- a name layer,
+            # and off like the other six, so the switched-off count rose too.
+            "checkboxes in the legend": 38,
+            "of them switched off": 10,
             "zoom before": 9,
             "zoom after": 11,
             "desktop: map free with nothing asked for": 96,
             "upright: map free with nothing asked for": 96,
             "sideways: map free with nothing asked for": 96,
-            "and the legend is what is in it": 37,
+            "and the legend is what is in it": 38,
             "px of map left above it": 565,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 186,

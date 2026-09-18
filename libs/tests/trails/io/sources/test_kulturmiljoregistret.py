@@ -62,6 +62,15 @@ class TestOnDisk:
         assert kmr.type_label("Något nytt") == "Något nytt"
         assert "Något nytt" in kmr.UNTRANSLATED
 
+    def test_the_whole_vocabulary_has_a_word(self):
+        """Fornsök's domain list had 169 remains types and 5 assessments on
+        2026-09-18; every one has an English word, the dwelling types among them."""
+        assert len(kmr.TYPE_LABELS) == 169
+        assert set(kmr.DWELLING_TYPES) <= set(kmr.TYPE_LABELS)
+        assessments = {"Fornlämning", "Övrig kulturhistorisk lämning", "Möjlig fornlämning"}
+        assessments |= {"Ej kulturhistorisk lämning", "Ingen antikvarisk bedömning"}
+        assert assessments <= set(kmr.ASSESSMENT_LABELS)
+
     def test_every_type_can_be_asked_for(self, tmp_path):
         _file_on_disk(tmp_path)
         got = kmr.Source("norrbotten", cache_dir=tmp_path).remains(ABISKO, types=None)

@@ -3425,11 +3425,36 @@ English — *Sámi hut site (kåta)* — and the legend's name layers read *vall
 mountain, mountain area, hillside*. The N50 hut popup lost a row that had said the service level
 twice, once in each language.
 
+**Then the whole lists, the same day.** *"Ja vervollständige jetzt die gesamte Wortliste."* The
+tables had covered what two boxes happened to show; the vocabularies are finite and published, so
+they are read whole: all **291** codes of Kartverket's *Navneobjekttype* list, the **12** of
+*TypeVeg*, **5** of *Vegkategori*, **6** of *Betjeningsgrad*, **4** of *Hytteeier* and **3** of
+*Tilgjengelighet*, off register.geonorge.no; all **169** remains types and **5** assessments off
+Fornsök's own domain list; the **15** words the Leder's `LTYP` uses nationwide; and the classes of
+Topografi 50's nationwide `transportled_fjall` and `vaglinje` that the network had not met yet.
+Tests hold the counts, so a table that loses an entry says so. The runtime model for the gaps was
+weighed and set aside: with the lists whole there is no gap for it to fill, and the count of
+pass-throughs stays as the net for a register that renames something.
+
+**The completeness test found three codes the map had been reading since the first day that the
+register does not have.** `seter`, `hytte` and `koie` sat in the type groups the build filters by
+— and matched nothing, ever: the code list has no such values and neither did the 172 kinds cached
+over eight municipalities. The summer farms are `seterStøl`, and are drawn now; a cabin to head for
+is `turisthytte`, and `fritidsbolig` is a private holiday cabin the map has no business pointing a
+walker at. A filter on a word the register never writes is a filter that silently draws nothing.
+
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-18, seventh** — the label tables are whole (§9.41): every code of Kartverket's
+  Navneobjekttype, TypeVeg, Vegkategori, Betjeningsgrad, Hytteeier and Tilgjengelighet lists, every
+  remains type and assessment of the heritage register, the Leder's fifteen trail-type words and
+  Topografi 50's nationwide classes, with tests holding the counts. The completeness test turned
+  up three codes the build had filtered on since the first day that the register does not have —
+  `seter`, `hytte`, `koie` — so the summer farms are `seterStøl` now and are drawn.
 
 - **2026-09-18, sixth** — what the page shows is English (§9.41): a label table per source
   module for every column value a popup or the legend showed in Norwegian or Swedish, the
