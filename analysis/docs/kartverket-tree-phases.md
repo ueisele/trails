@@ -563,6 +563,23 @@ the Python that emits the layers:
    mark on the zoom line, the "answers everywhere" special cases removed, the drive on both
    pages, a look on the phone at the relief.
 
+**Built 2026-09-18, 17:00–18:41, three commits by codex on `phase-6b`** (`f19d56f`, `14a4c43`,
+`cca1e94`; one session crashed mid-way when `/tmp` ran out of quota and a fresh one picked the diff
+up). What it is: the page keeps asking per tile; the worker maps a tile to its pack, reads the
+pack's directory by one 16 kB range and the tile by a second, and fetches the whole pack when a
+second tile of it is asked within two seconds — 48 directories and eight whole packs in memory,
+least recently used out. The store has a `packs` store (`DB_AT` 4) of `ArrayBuffer` rows keyed by
+the pack's address, the `tiles` store is dropped in the version-4 upgrade, the stand migration is
+gone, the browse store holds whole packs under the same 150 MB cap. Keep fetches whole packs;
+the estimate counts packs with `pack_weight` per level in `PROVIDERS`; `cap` is 17 on both
+providers (the whole Lomsdal-Visten box 9,162 packs, 5.57 GB; Abisko 2,274, 1.07 GB); the
+overview is the sheet and the four overlays, not the heights (Lomsdal-Visten 67 packs, 42 MB;
+Abisko 21, 17 MB). Norway's provider names its own tree (`/tiles/kartverket/topo/1/`, top 17,
+per-tile objects not in the bucket — only packs are). The zoom line says `· tiles z17` above the
+sheet's native zoom. Tile layers wait up to three seconds for the worker to control the page on a
+first visit. Driven in Firefox: a first z17 view is 6–14 pack requests, a second view in the same
+packs none, no per-tile object request at all; full drives 827 readings a page, all green.
+
 #### 6, as first written — Norway moves to the tree
 
 1. `PROVIDERS["kartverket"]`: `tiles="/tiles/kartverket/topo/1/"`, `top=17`, `cap=17` if
