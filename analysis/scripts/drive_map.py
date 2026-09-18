@@ -9068,6 +9068,128 @@ def wait_until(page: Any, expr: str, timeout_ms: int = 60_000) -> bool:
     return False
 
 
+def zoom_out_requests(page: Any) -> Check:
+    """Compare the §3.1 pinch with a direct jump, and read what survives pruning.
+
+    Args:
+        page: A page already loaded and settled.
+
+    Returns:
+        Requests per layer and zoom, sheet errors, bounds and retained children.
+    """
+    was = page.evaluate(with_map("() => ({at: __MAP__.getCenter(), z: __MAP__.getZoom()})"))
+    viewport = page.viewport_size
+    page.set_viewport_size({"width": 430, "height": 932})
+
+    def settle() -> None:
+        page.wait_for_function(
+            with_map("""() => {
+                let loading = false;
+                __MAP__.eachLayer(l => { if (l.isLoading && l.isLoading()) loading = true; });
+                return !loading;
+            }"""),
+            timeout=60_000,
+        )
+        # Loaded tiles become active after Leaflet's fade; retention uses active.
+        page.wait_for_timeout(300)
+
+    def reset() -> None:
+        page.evaluate("""() => {
+            for (const c of window.trailsZoomOutProbe.counts) {
+                c.start = {}; c.errors = 0; c.outside = 0;
+            }
+        }""")
+
+    def counts() -> Any:
+        return page.evaluate("() => window.trailsZoomOutProbe.counts")
+
+    try:
+        page.evaluate(with_map("(at) => { __MAP__.setView(at, 15, {animate: false}); }"), SCENE.position)
+        settle()
+        page.evaluate(
+            with_map("""() => {
+            const probe = window.trailsZoomOutProbe = {counts: [], handlers: [], base: null};
+            __MAP__.eachLayer(layer => {
+                if (!layer.getTileUrl || !layer._url) return;
+                const c = {layer: layer._url, bounded: !!layer.options.bounds, start: {}, errors: 0, outside: 0};
+                const start = e => {
+                    c.start[e.coords.z] = (c.start[e.coords.z] || 0) + 1;
+                    if (layer.options.bounds &&
+                        !L.latLngBounds(layer.options.bounds).overlaps(layer._tileCoordsToBounds(e.coords))) c.outside++;
+                };
+                const error = () => { c.errors++; };
+                layer.on('tileloadstart', start).on('tileerror', error);
+                probe.counts.push(c);
+                probe.handlers.push({layer, start, error});
+                if (!layer.options.trailsShade && !layer.options.trailsSlope &&
+                    !layer.options.trailsVegetation && !layer.options.trailsForest) probe.base = layer;
+            });
+        }""")
+        )
+        page.evaluate(
+            with_map("""() => {
+            const map = __MAP__, center = map.getCenter();
+            for (let z = 15; z >= 10; z -= 0.1) {
+                map._move(center, Math.round(z * 10) / 10, {pinch: true, round: false});
+            }
+            map._moveEnd(true);
+        }""")
+        )
+        settle()
+        pinch = counts()
+        page.evaluate(with_map("() => { __MAP__.setZoom(15, {animate: false}); }"))
+        settle()
+        reset()
+        page.evaluate(with_map("() => { __MAP__.setZoom(10, {animate: false}); }"))
+        settle()
+        direct = counts()
+        readings = []
+        base_url = page.evaluate("() => window.trailsZoomOutProbe.base._url")
+        for p, d in zip(pinch, direct, strict=True):
+            name = p["layer"].split("/")[1] or "sheet"
+            readings.append(Reading(f"{name}: pinch requests equal direct, per zoom", p["start"], d["start"], note=f"direct: {d['start']}"))
+            if p["bounded"]:
+                readings.append(Reading(f"{name}: requests outside its box", p["outside"] + d["outside"], 0))
+            if p["layer"] == base_url:
+                readings.append(Reading("sheet errors on the pinch to z10", p["errors"], 0))
+                readings.append(Reading("sheet errors on the direct jump to z10", d["errors"], 0))
+        readings.append(Reading("the zoom out actually requested tiles", all(sum(d["start"].values()) > 0 for d in direct), True))
+
+        page.evaluate(with_map("() => { __MAP__.setZoom(15, {animate: false}); }"))
+        settle()
+        retained = page.evaluate(
+            with_map("""() => {
+            const base = window.trailsZoomOutProbe.base;
+            const fine = () => Object.values(base._tiles).filter(t => t.coords.z === 15);
+            const before = fine().length;
+            // A nonanimated setZoom invalidates every tile before pruning.
+            // Read retention on the pinch path, while coarse requests are pending.
+            const map = __MAP__, center = map.getCenter();
+            for (let z = 15; z >= 12; z -= 0.1) {
+                map._move(center, Math.round(z * 10) / 10, {pinch: true, round: false});
+            }
+            map._moveEnd(true);
+            return {before, kept: fine().filter(t => t.retain).length};
+        }""")
+        )
+        readings.append(Reading("z15 ground was drawn before zooming out three levels", retained["before"] > 0, True))
+        readings.append(Reading("all z15 children stay until coarse tiles load", retained["kept"], retained["before"]))
+        settle()
+        remaining = page.evaluate("() => Object.values(window.trailsZoomOutProbe.base._tiles).filter(t => t.coords.z === 15).length")
+        readings.append(Reading("z15 children are pruned once coarse tiles are active", remaining, 0))
+        return Check("zoom out asks only for the level it lands on", readings)
+    finally:
+        page.evaluate("""() => {
+            const probe = window.trailsZoomOutProbe;
+            if (probe) probe.handlers.forEach(h => h.layer.off('tileloadstart', h.start).off('tileerror', h.error));
+            delete window.trailsZoomOutProbe;
+        }""")
+        if viewport is not None:
+            page.set_viewport_size(viewport)
+        page.evaluate(with_map("(v) => { __MAP__.setView(v.at, v.z, {animate: false}); }"), was)
+        settle()
+
+
 def the_zoom_the_scale_says(page: Any) -> Check:
     """The map saying which zoom it is drawing at.
 
@@ -10053,21 +10175,45 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # other half of the same design: offline the worker answers an unkept
         # tile with a 1x1 transparent PNG so Leaflet draws the page's own ground
         # instead of a torn image over it.
-        second.evaluate(with_map("(at) => { __MAP__.setView(at, 11); }"), list(SCENE.position))
+        # The z11 blanks were the ring outside the sheet; bounds now removes
+        # that ring, so look inside its far corner, beyond the kept rectangle.
+        second.evaluate(
+            with_map("""(at) => {
+                const map = __MAP__;
+                let sheet = null;
+                map.eachLayer(layer => {
+                    if (layer.getTileUrl && !layer.options.trailsShade && !layer.options.trailsSlope &&
+                        !layer.options.trailsVegetation && !layer.options.trailsForest) sheet = layer;
+                });
+                if (sheet && sheet.options.bounds) {
+                    const box = L.latLngBounds(sheet.options.bounds), center = box.getCenter();
+                    const latInset = (box.getNorth() - box.getSouth()) * 0.1;
+                    const lngInset = (box.getEast() - box.getWest()) * 0.1;
+                    const lat = at[0] > center.lat ? box.getSouth() + latInset : box.getNorth() - latInset;
+                    const lng = at[1] > center.lng ? box.getWest() + lngInset : box.getEast() - lngInset;
+                    map.setView([lat, lng], 14, {animate: false});
+                } else {
+                    map.setView(at, 11, {animate: false});
+                }
+            }"""),
+            list(SCENE.position),
+        )
         second.wait_for_timeout(3000)
         unkept = second.evaluate(
             """() => {
-                let blank = 0, tiles = 0;
+                let blank = 0, broken = 0, tiles = 0;
                 document.querySelectorAll('img.leaflet-tile').forEach(img => {
                     tiles += 1;
-                    if (img.naturalWidth <= 1) { blank += 1; }
+                    if (img.naturalWidth === 1 && img.naturalHeight === 1) { blank += 1; }
+                    if (img.naturalWidth === 0) { broken += 1; }
                 });
-                return {tiles: tiles, blank: blank};
+                return {tiles: tiles, blank: blank, broken: broken};
             }"""
         )
         terrain.append(
             Reading("ground that was not kept comes back blank", unkept["blank"] > 0, True, note=f"{unkept['blank']} of {unkept['tiles']}")
         )
+        terrain.append(Reading("and no unkept tile is a broken image", unkept["broken"], 0))
         terrain.append(Reading("and still threw nothing", len(thrown), 0, note="; ".join(thrown[:2])))
 
         # **A new stand of the tiles is a new prefix, and what was kept under
@@ -10475,6 +10621,8 @@ def drive(page: Any) -> list[Check]:
         for check in (furniture, the_icons_are_there, map_wheel, chrome_layout, a_turn_no_resize_event_describes, the_profile_tool)
         if wanted(check)
     ]
+    if wanted(zoom_out_requests):
+        checks.append(timed(zoom_out_requests, page))
     if wanted(the_zoom_the_scale_says):
         checks.append(timed(the_zoom_the_scale_says, page))
     # Before anything is selected and before plan mode, which takes every click

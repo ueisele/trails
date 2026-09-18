@@ -1353,6 +1353,24 @@ def _pin(colour: str, icon: str) -> str:
     )
 
 
+class _TileRetention(MacroElement):
+    """Keep loaded children across a three-level zoom out, using Leaflet's pruning."""
+
+    _template = Template(
+        """
+        {% macro script(this, kwargs) %}
+"""
+        + files("trails.visualization").joinpath("js", "tile_retention.js").read_text(encoding="utf-8")
+        + """        {% endmacro %}
+    """
+    )
+
+    def __init__(self) -> None:
+        """Initialize the retention override."""
+        super().__init__()
+        self._name = "TileRetention"
+
+
 class _PinSize(MacroElement):
     """How large the pins are drawn, which depends on how far out the reader is.
 
@@ -1771,6 +1789,9 @@ class BaseMap(Enum):
     OPENSTREETMAP = "openstreetmap"
 
 
+#: A missing tile shows the map's background, without another network request.
+_ERROR_TILE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNgAAIAAAUAAen63NgAAAAASUVORK5CYII="
+
 _KARTVERKET_ATTRIBUTION = '&copy; <a href="https://www.kartverket.no/">Kartverket</a>'
 
 _LANTMATERIET_ATTRIBUTION = '&copy; <a href="https://www.lantmateriet.se/">Lantmäteriet</a>'
@@ -2089,6 +2110,8 @@ def create_map(
     if title is not None:
         header.add_child(_Head(title, companions), name="head")
 
+    _TileRetention().add_to(fmap)
+
     for index, source in enumerate((base, *(extra for extra in extra_bases if extra is not base))):
         layer = _BASE_LAYERS[source]
         own = provider_of(source)
@@ -2111,6 +2134,13 @@ def create_map(
             # padded size rather than its own. Kartverket answers
             # `access-control-allow-origin: *` -- measured, not assumed.
             cross_origin=True,
+            update_when_zooming=False,
+            error_tile_url=_ERROR_TILE_URL,
+            # The same index.json box as the overlays. Norway's base remains
+            # unbounded until it moves from Kartverket's cache to its own tree.
+            bounds=[[own.extent[1], own.extent[0]], [own.extent[3], own.extent[2]]]
+            if own is not None and own.tiles.startswith("/") and own.extent is not None
+            else None,
         ).add_to(fmap)
 
     # **The relief shadow, where the provider has one.** It is a tile layer like
@@ -2140,6 +2170,8 @@ def create_map(
             max_zoom=provider.top,
             max_native_zoom=provider.shade.top,
             cross_origin=True,
+            update_when_zooming=False,
+            error_tile_url=_ERROR_TILE_URL,
             # **Named, so the offline panel does not take it for the base map.**
             # That panel finds the sheet by walking the map's layers for the
             # first one with tiles, and a reader who switches the base off and on
@@ -2177,6 +2209,8 @@ def create_map(
             max_zoom=provider.top,
             max_native_zoom=provider.slope.top,
             cross_origin=True,
+            update_when_zooming=False,
+            error_tile_url=_ERROR_TILE_URL,
             # Named for the same reason the relief is: the offline panel must
             # never take it for the sheet, and the drive counts it apart.
             trails_slope=True,
@@ -2209,6 +2243,8 @@ def create_map(
             max_zoom=provider.top,
             max_native_zoom=provider.vegetation.top,
             cross_origin=True,
+            update_when_zooming=False,
+            error_tile_url=_ERROR_TILE_URL,
             trails_vegetation=True,
             class_name="trails-vegetation-tiles",
             z_index=262,
@@ -2228,6 +2264,8 @@ def create_map(
             max_zoom=provider.top,
             max_native_zoom=provider.forest.top,
             cross_origin=True,
+            update_when_zooming=False,
+            error_tile_url=_ERROR_TILE_URL,
             trails_forest=True,
             class_name="trails-forest-tiles",
             z_index=264,

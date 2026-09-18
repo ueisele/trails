@@ -1,10 +1,12 @@
 """Tests for Folium map building."""
 
+import base64
 import json
 import pathlib
 import re
 import struct
 import tempfile
+import zlib
 from importlib.resources import files
 
 import folium
@@ -92,6 +94,48 @@ class TestCreateMap:
     def test_uses_kartverket_tiles_by_default(self):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         assert "cache.kartverket.no" in fmap.get_root().render()
+
+    @pytest.mark.parametrize("base", list(maps.BaseMap))
+    def test_every_tile_layer_waits_for_the_pinch_and_has_a_transparent_error_tile(self, base):
+        fmap = maps.create_map(center=(68.30, 18.70), base=base, extra_bases=tuple(maps.BaseMap))
+        layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
+        assert len(layers) == (4 if base is maps.BaseMap.OPENSTREETMAP else 8)
+        for layer in layers:
+            assert layer.options["update_when_zooming"] is False
+            uri = layer.options["error_tile_url"]
+            assert uri.startswith("data:image/png;base64,")
+            png = base64.b64decode(uri.split(",", 1)[1])
+            assert png[:8] == b"\x89PNG\r\n\x1a\n"
+            assert struct.unpack(">IIBB", png[16:26]) == (1, 1, 8, 6), "one RGBA pixel"
+            start = png.index(b"IDAT")
+            size = struct.unpack(">I", png[start - 4 : start])[0]
+            assert zlib.decompress(png[start + 4 : start + 4 + size]) == b"\0" * 5, "unfiltered transparent black"
+        html = ours(fmap.get_root().render())
+        assert html.count('"updateWhenZooming": false') == len(layers)
+        assert html.count('"errorTileUrl": "data:image/png;base64,') == len(layers)
+
+    def test_only_the_base_with_its_own_tree_is_bounded(self):
+        fmap = maps.create_map(center=(68.30, 18.70), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=tuple(maps.BaseMap))
+        layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
+        for layer in layers:
+            if layer.overlay or layer.layer_name == "Lantmäteriet Topo":
+                assert layer.options["bounds"] == [[68.139, 18.15], [68.46, 19.1]]
+            else:
+                assert "bounds" not in layer.options, "Kartverket and OSM still answer beyond the tree"
+
+    def test_retention_changes_only_the_child_depth_before_any_tile_layer(self):
+        html = ours(maps.create_map(center=(65.55, 13.05)).get_root().render())
+        start = html.index("L.GridLayer.include({")
+        end = html.index("L.tileLayer(", start)
+        pruning = html[start:end]
+        assert "if (!this._map) { return; }" in pruning
+        assert "zoom > this.options.maxZoom || zoom < this.options.minZoom" in pruning
+        assert "this._removeAllTiles();" in pruning
+        assert "tile.retain = tile.current;" in pruning
+        assert "if (tile.current && !tile.active)" in pruning
+        assert "if (!this._retainParent(coords.x, coords.y, coords.z, coords.z - 5))" in pruning
+        assert "this._retainChildren(coords.x, coords.y, coords.z, coords.z + 3);" in pruning
+        assert "if (!this._tiles[key].retain) { this._removeTile(key); }" in pruning
 
     # **Base layers only.** Since §6.10 a map on Kartverket's sheet also carries
     # the relief and the slope classes, which are tile layers too -- but they are
