@@ -730,7 +730,9 @@ STAGE_OLD_STAND = """async () => {
     all.onsuccess = () => { const c = all.result; if (!c) { return; } const k = c.key;
       if (k.indexOf(prefix) === 0) { store.put(c.value, old + k.slice(prefix.length)); store.delete(k); moved += 1; if (!sample) { sample = k; } }
       c.continue(); };
-    tx.objectStore('flags').put({tiles: old, heights: window.trailsOffline.prefixes().heights}, 'stand');
+    store.put(new Blob(['retired']), 'https://retired.invalid/tiles/14/1/1.png');
+    tx.objectStore('flags').put({...window.trailsOffline.prefixes(), map: old, tiles: old,
+      retired: 'https://retired.invalid/tiles/'}, 'stand');
     tx.oncomplete = () => { db.close(); done({moved: moved, sample: sample, old: old, prefix: prefix}); };
   });
 }"""
@@ -741,10 +743,10 @@ COUNT_STANDS = """async (old) => {
   const db = await new Promise((done, fail) => {
     const ask = indexedDB.open('__DB__', 3); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
   return await new Promise((done) => {
-    const tx = db.transaction(['tiles', 'flags']); const store = tx.objectStore('tiles'); const out = {old: 0, now: 0, stand: null};
+    const tx = db.transaction(['tiles', 'flags']); const store = tx.objectStore('tiles'); const out = {old: 0, now: 0, total: 0, stand: null};
     const all = store.openKeyCursor();
     all.onsuccess = () => { const c = all.result; if (!c) { return; }
-      if (c.key.indexOf(old) === 0) { out.old += 1; } else if (c.key.indexOf(prefix) === 0) { out.now += 1; }
+      out.total += 1; if (c.key.indexOf(old) === 0) { out.old += 1; } else if (c.key.indexOf(prefix) === 0) { out.now += 1; }
       c.continue(); };
     const f = tx.objectStore('flags').get('stand'); f.onsuccess = () => { out.stand = f.result || null; };
     tx.oncomplete = () => { db.close(); done(out); };
@@ -9680,6 +9682,217 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         )
 
 
+def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
+    """Exercise the built worker's functions against real Firefox IndexedDB.
+
+    A dedicated worker runs the unchanged functions with a scratch database;
+    instrumentation counts transactions/gets and forbids blob reads during trim.
+    This measures operation counts, not the phone's store latency.
+    """
+    with served(page_path.parent) as origin:
+        context = browser.new_context()
+        page = context.new_page()
+        # No map/Leaflet traffic in the scratch store or the operation counts.
+        page.goto(origin + "/")
+        result = page.evaluate(
+            r"""async (workerURL) => {
+            let source = await (await fetch(workerURL)).text();
+            source = source.replace(/var DB = "[^"]+";/, 'var DB = "phase3-store-probe";')
+                .replaceAll('self.location.href', JSON.stringify(workerURL));
+            const run = async function () {
+                const out = {}, db = await base();
+                const transaction = IDBDatabase.prototype.transaction;
+                const get = IDBObjectStore.prototype.get;
+                const cursor = IDBObjectStore.prototype.openCursor;
+                const counts = {tx: [], gets: []};
+                let forbid = false;
+                IDBDatabase.prototype.transaction = function (names, mode) {
+                    counts.tx.push({names: Array.from(typeof names === 'string' ? [names] : names), mode: mode || 'readonly'});
+                    return transaction.call(this, names, mode);
+                };
+                IDBObjectStore.prototype.get = function (key) {
+                    if (forbid && this.name === SEEN) throw Error('trim read a browse blob');
+                    counts.gets.push({store: this.name, key});
+                    return get.call(this, key);
+                };
+                IDBObjectStore.prototype.openCursor = function (...args) {
+                    if (forbid && this.name === SEEN) throw Error('trim opened a value cursor');
+                    return cursor.apply(this, args);
+                };
+                const committed = tx => new Promise((done, fail) => {
+                    tx.oncomplete = done; tx.onabort = tx.onerror = () => fail(tx.error);
+                });
+                const reset = () => { counts.tx = []; counts.gets = []; };
+                const seed = async fn => {
+                    const tx = transaction.call(db, [KEPT, SEEN, FLAGS], 'readwrite');
+                    fn(tx.objectStore(KEPT), tx.objectStore(SEEN), tx.objectStore(FLAGS));
+                    await committed(tx);
+                };
+                const k = TILE_PREFIX + '14/1/1.png', s = TILE_PREFIX + '14/1/2.png', m = TILE_PREFIX + '14/1/3.png';
+                await seed((kept, seen, flags) => {
+                    kept.put(new Blob(['kept']), k);
+                    seen.put({body: new Blob(['shadow']), size: 6, at: 1}, k);
+                    seen.put({body: new Blob(['seen']), size: 4, at: 2}, s);
+                    flags.put(prefixes(), STAND); flags.put('on', STATE);
+                });
+                reset();
+                const answers = await Promise.all([k, s, m, k].map(plain => lookup(plain, {expired: false, off: false})));
+                out.lookup = {transactions: counts.tx.length, gets: counts.gets.slice(),
+                    paths: answers.map(a => a && a.path), bodies: await Promise.all(answers.map(a => a && a.body.text()))};
+                // Every answer settles in its own request callback, not at commit.
+                const originalGet = IDBObjectStore.prototype.get;
+                let release = null;
+                IDBObjectStore.prototype.get = function (key) {
+                    const ask = originalGet.call(this, key);
+                    if (this.name !== KEPT || key !== m) return ask;
+                    const proxy = {result: undefined};
+                    Object.defineProperty(proxy, 'onsuccess', {set(fn) { ask.onsuccess = () => { release = fn; }; }});
+                    return proxy;
+                };
+                let fast = false, slow = false;
+                const one = lookup(k, {expired: false, off: true}).then(() => { fast = true; });
+                const waiting = {expired: false, off: true};
+                const two = lookup(m, waiting).then(() => { slow = true; });
+                await new Promise(done => setTimeout(done, 100));
+                out.independent = fast && !slow && !!release;
+                // An expired tile must not start a browse get after a late miss.
+                waiting.expired = true;
+                const beforeLate = counts.gets.length;
+                release();
+                out.noLateBrowse = counts.gets.length === beforeLate;
+                IDBObjectStore.prototype.get = originalGet;
+                reset();
+                await browsePut(TILE_PREFIX + '14/2/1.png', new Blob(['new']));
+                out.legacySize = (await read(SEEN, k)).size;
+                // Stage an old prefix, a collision and an unnamed tree.
+                const old = TILE_PREFIX + 'old/', removed = 'https://removed.invalid/tree/';
+                await seed((kept, seen, flags) => {
+                    kept.clear();
+                    kept.put(new Blob(['old']), old + '14/1/1.png');
+                    kept.put(new Blob(['fresh']), k);
+                    kept.put(new Blob(['move']), old + '14/1/2.png');
+                    kept.put(new Blob(['gone']), removed + '14/1/1.png');
+                    flags.put({...prefixes(), map: old, tiles: old, retired: removed}, STAND);
+                    flags.put({tiles: 99, bytes: 900, top: 14}, 'held');
+                });
+                stood = null; switched = null; reset();
+                await lookup(s, {expired: false, off: false});
+                out.migration = {held: await read(FLAGS, 'held'), stand: await read(FLAGS, STAND),
+                    old: await read(KEPT, old + '14/1/2.png'), removed: await read(KEPT, removed + '14/1/1.png'),
+                    fresh: await (await read(KEPT, k)).text(), moved: await (await read(KEPT, s)).text()};
+                reset();
+                await lookup(s, {expired: false, off: false});
+                out.migrationAgain = counts.tx.filter(t => t.mode === 'readwrite').length;
+                // Cold life with persisted current stand: still one transaction.
+                stood = null; switched = null; reset();
+                await lookup(s, {expired: false, off: false});
+                out.cold = {transactions: counts.tx.length, gets: counts.gets};
+                // 49 writes can cross the soft cap; the fiftieth trims fifty
+                // oldest keys. Use real sizes, including unlike tile weights.
+                const large = new Blob([new Uint8Array(4_000_000)]);
+                await seed((kept, seen, flags) => {
+                    seen.clear(); flags.delete(BROWSE_BYTES);
+                    for (let i = 0; i < 50; i++) {
+                        const key = TILE_PREFIX + 'old-browse/' + i;
+                        seen.put({body: large, size: large.size, at: i}, key);
+                        flags.put(large.size, BROWSE_SIZE + key);
+                    }
+                    flags.put({bytes: 50 * large.size, writes: 0}, BROWSE_BYTES);
+                });
+                forbid = true; reset();
+                await Promise.all(Array.from({length: 49}, (_, i) => browsePut(TILE_PREFIX + 'new-browse/' + i, new Blob(['small']))));
+                out.putTransactions = counts.tx.length;
+                out.beforeTrim = await read(FLAGS, BROWSE_BYTES);
+                // Simulate a new life: cadence must come from persistent metadata.
+                puts = []; putTick = null;
+                await browsePut(TILE_PREFIX + 'new-browse/49', new Blob(['small']));
+                out.afterTrim = await read(FLAGS, BROWSE_BYTES);
+                forbid = false;
+                out.oldestGone = (await read(SEEN, TILE_PREFIX + 'old-browse/0')) === null;
+                out.newestThere = (await read(SEEN, TILE_PREFIX + 'new-browse/49')).size;
+                await browsePut(TILE_PREFIX + 'new-browse/49', new Blob(['overwrite']));
+                out.overwrite = (await read(FLAGS, BROWSE_BYTES)).bytes;
+                // The exact production deadline, with both switch states. Holding
+                // open prevents all lookup work and includes cold-open time.
+                const openedBefore = opened, fetchBefore = fetch, timeoutBefore = setTimeout;
+                const limits = [];
+                setTimeout = (fn, ms, ...args) => {
+                    if (ms >= 1000) limits.push(ms);
+                    return timeoutBefore(fn, ms, ...args);
+                };
+                let network = 0;
+                fetch = async () => { network++; return new Response('network'); };
+                for (const off of [true, false]) {
+                    switched = Promise.resolve(off); opened = new Promise(() => {});
+                    const before = told.deadlines, began = performance.now();
+                    const response = await tileFor(new Request(m));
+                    out[off ? 'deadlineOn' : 'deadlineOff'] = {ms: performance.now() - began,
+                        deadlines: told.deadlines - before, bytes: (await response.blob()).size, network};
+                }
+                opened = openedBefore; fetch = fetchBefore; setTimeout = timeoutBefore;
+                out.limits = limits;
+                out.tally = {deadlines: told.deadlines, peak: told.peak, time: told.time};
+                IDBDatabase.prototype.transaction = transaction;
+                IDBObjectStore.prototype.get = get;
+                IDBObjectStore.prototype.openCursor = cursor;
+                db.close();
+                return out;
+            };
+            const blob = new Blob([source, '\nself.onmessage = async () => { try { self.postMessage({result: await (',
+                run.toString(), ')()}); } catch (e) { self.postMessage({error: String(e), stack: e.stack}); } };'],
+                {type: 'text/javascript'});
+            const url = URL.createObjectURL(blob), worker = new Worker(url);
+            try {
+                return await new Promise((done, fail) => {
+                    worker.onmessage = e => e.data.error ? fail(Error(e.data.error + '\n' + e.data.stack)) : done(e.data.result);
+                    worker.onerror = e => fail(Error(e.message)); worker.postMessage('run');
+                });
+            } finally {
+                worker.terminate(); URL.revokeObjectURL(url); indexedDB.deleteDatabase('phase3-store-probe');
+            }
+        }""",
+            origin + "/" + SCENE.companions.worker,
+        )
+        context.close()
+    gets = result["lookup"]["gets"]
+    return Check(
+        "the worker store path",
+        [
+            Reading("one tick of four lookups uses one transaction", result["lookup"]["transactions"], 1),
+            Reading("three distinct tiles get kept once each", sum(g["store"] == "tiles" for g in gets), 3),
+            Reading("only the two kept misses read browse", sum(g["store"] == "browse" for g in gets), 2),
+            Reading("kept wins and duplicate lookups share its body", result["lookup"]["bodies"], ["kept", "seen", None, "kept"]),
+            Reading("an answer does not wait for another tile", result["independent"], True),
+            Reading("an expired miss starts no browse read", result["noLateBrowse"], True),
+            Reading("old browse rows gain their byte size once", result["legacySize"], 6),
+            Reading("migration corrects the held count", result["migration"]["held"]["tiles"], 2),
+            Reading("migration removes old and unnamed keys", [result["migration"]["old"], result["migration"]["removed"]], [None, None]),
+            Reading(
+                "migration preserves current ground and renames old ground",
+                [result["migration"]["fresh"], result["migration"]["moved"]],
+                ["fresh", "move"],
+            ),
+            Reading("a later lookup does not repeat migration", result["migrationAgain"], 0),
+            Reading("a cold worker still uses one lookup transaction", result["cold"]["transactions"], 1),
+            Reading("49 puts in one tick share one transaction", result["putTransactions"], 1),
+            Reading("no trim before the fiftieth write", result["beforeTrim"]["bytes"], 200_000_245),
+            Reading("fiftieth write removes oldest fifty without blob reads", result["afterTrim"]["bytes"], 250),
+            Reading("the write cadence is persistent", result["afterTrim"]["writes"], 50),
+            Reading("oldest is gone and newest stays", [result["oldestGone"], result["newestThere"]], [True, 5]),
+            Reading("overwriting accounts for the size difference", result["overwrite"], 254),
+            Reading("offline deadline returns blank without network", [result["deadlineOn"]["bytes"], result["deadlineOn"]["network"]], [68, 0]),
+            Reading("online deadline reaches network", [result["deadlineOff"]["bytes"], result["deadlineOff"]["network"]], [7, 1]),
+            Reading("each whole lookup counts one deadline", [result["deadlineOn"]["deadlines"], result["deadlineOff"]["deadlines"]], [1, 1]),
+            Reading(
+                "each lookup arms exactly one 2.5-second timer",
+                result["limits"],
+                [2500, 2500],
+                note=f"{result['deadlineOn']['ms']:.0f}, {result['deadlineOff']['ms']:.0f} ms; {result['tally']}",
+            ),
+        ],
+    )
+
+
 def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) -> list[Check]:
     """The map, served by its own worker, with the network switched off.
 
@@ -10398,34 +10611,33 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         terrain.append(Reading("and no unkept tile is a broken image", unkept["broken"], 0))
         terrain.append(Reading("and still threw nothing", len(thrown), 0, note="; ".join(thrown[:2])))
 
-        # **A new stand of the tiles is a new prefix, and what was kept under
-        # the old one goes on answering** (decisions §9.21). Staged here on
-        # the tiles this page kept: every kept map tile is moved under a prefix
-        # the page does not name and the stand flag set to it, as a page built
-        # on the next version would find them; the panel must say so, the
-        # worker must answer a miss under the page's prefix from the old
-        # stand while offline, and a Keep run must replace them and sweep.
+        # Stage the store an updated worker encounters. A new script URL makes
+        # a new worker life: changing flags behind a memo in the same life is
+        # not a deploy. Migration replaces the old per-tile fallback entirely.
         staged = second.evaluate(in_db(STAGE_OLD_STAND))
+        context.set_offline(False)
+        second.evaluate("""async () => {
+            const reg = await navigator.serviceWorker.getRegistration();
+            const next = reg.active.scriptURL.split('?')[0] + '?phase3=migration';
+            await navigator.serviceWorker.register(next, {scope: reg.scope});
+        }""")
+        second.wait_for_function("() => navigator.serviceWorker.controller.scriptURL.includes('?phase3=migration')", timeout=60_000)
+        context.set_offline(True)
         second.reload(timeout=120_000)
-        second.wait_for_function(
-            "() => window.trailsOffline && window.trailsOffline.state().kept && window.trailsOffline.state().kept.known", timeout=60_000
-        )
-        stale = second.evaluate("() => window.trailsOffline.state().kept.stale")
+        second.wait_for_function("() => window.trailsOffline && window.trailsOffline.state().kept", timeout=60_000)
+        refreshed = second.evaluate("async () => (await window.trailsOffline.refresh()).kept")
+        migrated = second.evaluate(in_db(COUNT_STANDS), staged["old"])
         answered = second.evaluate("(url) => fetch(url).then(r => r.blob()).then(b => b.size)", staged["sample"])
-        terrain.append(
-            Reading(
-                "kept under an older stand, the panel says so",
-                (stale or {}).get("tiles"),
-                staged["old"],
-                note=f"{staged['moved']} tiles moved under it",
-            )
-        )
-        terrain.append(Reading("and offline the old stand answers for the new address", answered > 1000, True, note=f"{answered} bytes"))
+        terrain.append(Reading("the worker migration removes the older prefix", migrated["old"], 0))
+        terrain.append(Reading("the worker migration keeps every tile at its current address", migrated["now"], staged["moved"]))
+        terrain.append(Reading("the panel agrees with the migrated store count", refreshed["tiles"], migrated["total"]))
+        terrain.append(Reading("the panel no longer reports an older stand", refreshed["stale"], None))
+        terrain.append(Reading("and offline the migrated tile answers at the new address", answered > 1000, True, note=f"{answered} bytes"))
         context.set_offline(False)
         # A small selection -- a triangle two kilometres across where the
         # reader stands, a few dozen tiles with the margin -- so the run
-        # that replaces the stand is not a valley's worth from Kartverket;
-        # what the old stand held beyond it is what the sweep is for. Drawn
+        # does not fetch a valley's worth from Kartverket. The migrated tiles
+        # outside it remain kept. Drawn
         # again, because the ring did not survive the reload, and the chooser
         # floors every scope at z14.
         lat, lng = SCENE.standing
@@ -11157,6 +11369,8 @@ def main() -> int:
         # costs about 590 MB settled, and a second one beside it took the browser
         # down mid-load -- `TargetClosedError` at the first wait, with nothing
         # said about why. Two 42 MB documents at once is not a thing to ask for.
+        if wanted(the_worker_store_path):
+            checks.append(the_worker_store_path(browser, page_path))
         if wanted(the_overview_is_kept):
             page.close()
             serving.close()

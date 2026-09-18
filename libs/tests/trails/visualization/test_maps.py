@@ -309,8 +309,8 @@ class TestServiceWorker:
         assert "return kept || fresh;" in maps.SERVICE_WORKER
         assert "if (kept) { return kept; }" in maps.SERVICE_WORKER
         # Bounded, because a cache with no ceiling is a quota with no floor.
-        assert "var TILE_CAP = 500;" in maps.SERVICE_WORKER
-        assert "function trim()" in maps.SERVICE_WORKER
+        assert "var TILE_CAP = 150 * 1000 * 1000;" in maps.SERVICE_WORKER
+        assert "function trim(store, flags, total, done)" in maps.SERVICE_WORKER
 
     def test_it_is_registered_only_where_a_worker_can_exist(self):
         """A worker needs a secure origin, so a page opened off the disk gets
@@ -357,11 +357,13 @@ class TestOfflineWorker:
         assert 'var SEEN = "browse";' in maps.SERVICE_WORKER
         # Looked at in that order: what was asked for answers before what was
         # seen, so a trimmed tile never shadows a kept one.
-        tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
-        assert tile.index("keptFor(plain)") < tile.index("read(SEEN, plain)")
-        # And the trim runs over the opportunistic store and only that one.
-        trimming = maps.SERVICE_WORKER.split("function trim()")[1].split("\nfunction ")[0]
-        assert "SEEN" in trimming and "KEPT" not in trimming
+        lookup = maps.SERVICE_WORKER.split("function flushLookups()")[1].split("\nfunction ")[0]
+        assert 'open.transaction([KEPT, SEEN, FLAGS], "readonly")' in lookup
+        assert lookup.index("tx.objectStore(KEPT).get(plain)") < lookup.index("tx.objectStore(SEEN).get(plain)")
+        assert 'if (ask.result) { answer({body: ask.result, path: "db"}); return; }' in lookup
+        trimming = maps.SERVICE_WORKER.split("function trim(store, flags, total, done)")[1].split("\nfunction ")[0]
+        assert 'store.index("at").openKeyCursor()' in trimming
+        assert "store.get(" not in trimming and "openCursor(" not in trimming
 
     def test_every_cache_an_earlier_version_wrote_is_swept(self):
         """Nothing reads a cache any longer, so whatever is left in one is
@@ -394,7 +396,7 @@ class TestOfflineWorker:
         """A cache read anywhere in this path brings back the cost the whole
         change was about: the first `caches.open()` of any cache is 23.2 s on a
         phone with the ground kept, whichever cache it happens to be."""
-        tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
+        tile = maps.SERVICE_WORKER.split("function tileFor(request, event)")[1].split("\nfunction ")[0]
         assert "caches." not in tile
         assert "fromLegacy" not in maps.SERVICE_WORKER
 
@@ -405,7 +407,8 @@ class TestOfflineWorker:
         somebody: `caches.keys()` is the call measured at 23 s on a phone with
         the ground kept."""
         activate = maps.SERVICE_WORKER.split('addEventListener("activate"')[1].split("\nfunction ")[0]
-        assert "self.clients.claim().then(keepWhatIsOpen).then(sweepOldCaches)" in activate
+        assert "stood = base().then(migrateStand);" in activate
+        assert "}).then(keepWhatIsOpen).then(sweepOldCaches)" in activate
 
     def test_a_row_is_replaced_in_place_so_nothing_has_to_be_carried_over(self):
         """Fetch before you evict was a whole dance when the page lived in a
@@ -442,7 +445,7 @@ class TestOfflineWorker:
         assert "told.time[which].total += spent;" in maps.SERVICE_WORKER
         assert "told.time[which].worst = Math.max(told.time[which].worst, spent);" in maps.SERVICE_WORKER
         # HTTP errors remain uncounted, as before the timing was added.
-        assert 'if (answer && answer.ok) {\n                        answered("net");' in maps.SERVICE_WORKER
+        assert 'if (answer && answer.ok) {\n                answered("net");' in maps.SERVICE_WORKER
         assert maps.SERVICE_WORKER.count('answered("net")') == 1
 
     def test_tile_deadlines_and_concurrency_are_counted_without_changing_the_throttle(self):
@@ -454,6 +457,44 @@ class TestOfflineWorker:
         assert "clearTimeout(timer); fail(error);" in worker
         assert "}, 400);" in worker
         assert "if (Date.now() - told.at < 1000) { return; }" in worker
+
+    def test_a_lookup_has_one_deadline_and_coalesces_per_tick(self):
+        worker = maps.SERVICE_WORKER
+        tile = worker.split("function tileFor(request, event)")[1].split("\nfunction ")[0]
+        assert tile.count("within(") == 1
+        assert "within(2500, lookup(plain, state), null, late)" in tile
+        assert "state.expired = true;" in tile
+        assert "setTimeout(flushLookups, 0)" in worker
+        assert "if (items.every(function (item) { return item.state.expired; }))" in worker
+        assert "if (sameStand(ask.result)) { standCurrent = currentInDeal = true; done(true); }" in worker
+
+    def test_warm_lookups_place_a_get_before_yielding_the_new_transaction(self):
+        """WebKit can commit an empty transaction before its complete event."""
+        lookup = maps.SERVICE_WORKER.split("function flushLookups()")[1].split("\nfunction ")[0]
+        creation = lookup.split('var deal = open.transaction([KEPT, SEEN, FLAGS], "readonly");')[1]
+        warm = creation.split("} else {", 1)[0]
+        assert "if (standCurrent && ready && off) {" in warm
+        assert "readBatch(deal);" in warm
+        assert ".then(" not in warm and "await " not in warm
+        assert "new Promise" not in warm and "setTimeout" not in warm
+        # Follow the synchronous helper too: no promise before its first get.
+        first_get = lookup.split("function readBatch(tx) {", 1)[1].split("tx.objectStore(KEPT).get(plain);", 1)[0]
+        assert ".then(" not in first_get and "await " not in first_get
+        assert "new Promise" not in first_get and "setTimeout" not in first_get
+        assert "standCurrent = true; done(true);" in maps.SERVICE_WORKER
+        assert "stood = null; standCurrent = false;" in lookup
+        assert 'readBatch(currentInDeal && active ? deal : open.transaction([KEPT, SEEN], "readonly"));' in lookup
+
+    def test_browse_bytes_and_write_cadence_survive_a_worker_restart(self):
+        worker = maps.SERVICE_WORKER
+        assert "var DB_AT = 3;" in worker
+        assert "var TILE_CAP = 150 * 1000 * 1000;" in worker
+        assert "setTimeout(flushPuts, 0)" in worker
+        assert "size: item.body.size" in worker
+        assert "total.writes % 50 === 0" in worker
+        assert "flags.put(total, BROWSE_BYTES)" in worker
+        assert "removed % 50 === 0 && total.bytes <= TILE_CAP" in worker
+        assert "if (event) { event.waitUntil(keeping); }" in worker
 
     def test_a_deliberate_download_is_not_answered_by_the_worker(self):
         """The panel fetches what the reader asked to keep with `cache:
@@ -1796,12 +1837,11 @@ class TestTheSheetCarriesAToken:
         moves costs one lookup and no bytes. Driven with the network off: kept
         ground still draws under its new address."""
         assert 'var plain = request.url.split("?")[0];' in maps.SERVICE_WORKER
-        tile = maps.SERVICE_WORKER.split("function tileFor(request)")[1].split("\nfunction ")[0]
-        assert "keptFor(plain)" in tile
-        assert "read(SEEN, plain)" in tile
+        tile = maps.SERVICE_WORKER.split("function tileFor(request, event)")[1].split("\nfunction ")[0]
+        assert "lookup(plain, state)" in tile
         # Stored without it too, or a second token would orphan what the first
         # one wrote.
-        assert "write(SEEN, plain, {body: body, at: Date.now()})" in tile
+        assert "browsePut(plain, body)" in tile
         # **Stripped rather than matched with `ignoreSearch`**, which would turn
         # every one of a hundred thousand keys into a comparison.
         assert "ignoreSearch" not in tile
@@ -2205,16 +2245,21 @@ class TestTwoMapsOnOneOrigin:
         assert lantmateriet.extent == (18.15, 68.139, 19.10, 68.46)
         assert kartverket.extent == (12.0, 65.15, 13.75, 65.95)
 
-    def test_a_kept_tile_of_an_older_stand_answers_until_keep_replaces_it(self, tmp_path):
-        """A new stand is a new prefix; the panel writes down which prefixes
-        the kept tiles came from, the worker looks a miss up under the old
-        one, and a completed Keep sweeps the old stand and moves the flag."""
+    def test_a_kept_tile_of_an_older_stand_is_migrated_once(self, tmp_path):
+        """A new stand migrates the keys and count before ordinary lookups.
+
+        The page still understands an old stand while migration is pending.
+        """
         page, companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
         worker = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
         assert 'var STAND = "stand";' in worker
-        assert "return was ? read(KEPT, was + plain.slice(now.length)) : null;" in worker
-        assert "Promise.all([keptFor(plain), offlineNow()])" in worker
+        assert "function migrateStand(open)" in worker
+        assert "var walk = store.openKeyCursor();" in worker
+        assert "flags.put(now, STAND);" in worker
+        assert "value.tiles = count.result;" in worker
+        assert 'flags.put(value, "held");' in worker
+        assert "olderPrefix" not in worker and "keptFor" not in worker
         assert "var STAND = 'stand';" in html
         assert 'var TILE_PREFIX = new URL("/tiles/lantmateriet/topowebb/1/", location.href).href;' in html
         assert "if (!stand) { stand = prefixes(); dbWrite('flags', STAND, stand); }" in html, "a store from before is the page's own stand"
@@ -2635,8 +2680,8 @@ class TestTwoMapsOnOneOrigin:
         assert 'var SLOPE_PREFIX = "/slope/lantmateriet/2/" ? new URL("/slope/lantmateriet/2/", self.location.href).href : null;' in script
         assert "(SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)" in script
         assert "if (SLOPE_PREFIX && plain.indexOf(SLOPE_PREFIX) === 0) { return SLOPE_PREFIX; }" in script
-        assert "(now === SLOPE_PREFIX ? stand.slope" in script
-        assert "(now === VEGETATION_PREFIX ? stand.vegetation : stand.forest)" in script
+        assert "slope: SLOPE_PREFIX" in script
+        assert "vegetation: VEGETATION_PREFIX, forest: FOREST_PREFIX" in script
 
     def test_the_offline_panel_keeps_the_slope_classes_whether_or_not_they_are_on(self, tmp_path):
         """The switch is the reader's to flip in the field, and a class that

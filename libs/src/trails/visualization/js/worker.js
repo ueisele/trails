@@ -39,11 +39,7 @@ var FLAGS = "flags";
 // the way in and report success.
 var KEPT = "tiles";
 var SEEN = "browse";
-//: Under which prefixes the kept tiles were fetched -- the panel writes it when
-//: a run completes. A new stand of a tree is a new version segment, so after
-//: an update the page asks under a prefix nothing was kept under yet; a miss
-//: there is looked up under the old one, and the map the reader kept goes on
-//: drawing with the old ground until Keep replaces it (decisions §9.21).
+// The stand is migrated once, not consulted after every kept-store miss.
 var STAND = "stand";
 var opened = null;
 
@@ -132,10 +128,8 @@ function headerOf(row, name) {
 var TILES = "__CACHE__-tiles";
 var TERRAIN = "__CACHE__-terrain";
 
-// About 18 MB of terrain at the 37 kB a Kartverket tile measures. The browser's
-// own cache already keeps them five days -- `max-age=432000`, measured -- so
-// this is for the walk somebody plans a fortnight out, not for the next minute.
-var TILE_CAP = 500;
+// Bytes, not rows: coarse and fine tiles have very different weights.
+var TILE_CAP = 150 * 1000 * 1000;
 // What a tile's address starts with -- the provider's server, or our own
 // bucket's prefix resolved against this worker's origin. Injected per map.
 var TILE_PREFIX = new URL("__TILE_PREFIX__", self.location.href).href;
@@ -205,7 +199,10 @@ self.addEventListener("install", function () {
 // activation takes both -- and it is much the cheaper mistake.
 self.addEventListener("activate", function (event) {
     event.waitUntil(
-        self.clients.claim().then(keepWhatIsOpen).then(sweepOldCaches)
+        self.clients.claim().then(function () {
+            stood = base().then(migrateStand);
+            return stood;
+        }).then(keepWhatIsOpen).then(sweepOldCaches)
     );
 });
 
@@ -526,88 +523,282 @@ function prefixOf(plain) {
     return null;
 }
 
-// The prefix the kept tiles of this kind were fetched under, where it is not
-// the one the page names now.
-function olderPrefix(stand, now) {
-    if (!stand || !now) { return null; }
-    var was = now === TILE_PREFIX ? stand.tiles
-        : (now === HEIGHT_PREFIX ? stand.heights
-        : (now === SHADE_PREFIX ? stand.shade
-        : (now === SLOPE_PREFIX ? stand.slope
-        : (now === VEGETATION_PREFIX ? stand.vegetation : stand.forest))));
-    return was && was !== now ? was : null;
+// The aliases match the page's stand and its kept-count record.
+function prefixes() {
+    return {map: TILE_PREFIX, tiles: TILE_PREFIX, height: HEIGHT_PREFIX, heights: HEIGHT_PREFIX,
+        shade: SHADE_PREFIX, slope: SLOPE_PREFIX, vegetation: VEGETATION_PREFIX, forest: FOREST_PREFIX};
 }
 
-function keptFor(plain) {
-    return read(KEPT, plain).then(function (body) {
-        if (body) { return body; }
-        var now = prefixOf(plain);
-        return read(FLAGS, STAND).then(function (stand) {
-            var was = olderPrefix(stand, now);
-            return was ? read(KEPT, was + plain.slice(now.length)) : null;
-        });
+var stood = null, standCurrent = false;
+function sameStand(stand) {
+    var now = prefixes();
+    return !!stand && Object.keys(now).every(function (kind) { return (stand[kind] || null) === now[kind]; });
+}
+
+// Only the key cursor ranges over the store. A rename holds one blob at a
+// time; a deletion reads none. Current ground wins a collision with old ground.
+// The count and stand commit with the moves, so interruption leaves the old
+// stand intact and the next life retries it. No list grows with the kept map.
+function migrateStand(open) {
+    return new Promise(function (done, fail) {
+        var deal = open.transaction([KEPT, FLAGS], "readwrite");
+        var store = deal.objectStore(KEPT), flags = deal.objectStore(FLAGS), now = prefixes();
+        var ask = flags.get(STAND);
+        ask.onsuccess = function () {
+            var was = ask.result || {};
+            if (sameStand(was)) { return; }
+            var walk = store.openKeyCursor();
+            walk.onsuccess = function () {
+                var at = walk.result;
+                if (!at) {
+                    var count = store.count();
+                    count.onsuccess = function () {
+                        var held = flags.get("held");
+                        held.onsuccess = function () {
+                            // bytes is the page's weight-table estimate, not a
+                            // sum of blobs. Preserve it; correct the actual count.
+                            var value = held.result || {bytes: 0, top: 0};
+                            value.tiles = count.result;
+                            flags.put(value, "held");
+                            flags.put(now, STAND);
+                        };
+                    };
+                    return;
+                }
+                var key = at.key;
+                var kind = Object.keys(now).find(function (name) {
+                    return now[name] && was[name] && now[name] !== was[name] && key.indexOf(was[name]) === 0;
+                });
+                var current = prefixOf(key);
+                if (current && (!kind || current.length >= was[kind].length)) { at.continue(); return; }
+                if (!kind) {
+                    store.delete(key);
+                    at.continue(); return;
+                }
+                var target = now[kind] + key.slice(was[kind].length);
+                var exists = store.getKey(target);
+                exists.onsuccess = function () {
+                    if (exists.result !== undefined) { store.delete(key); at.continue(); return; }
+                    var body = store.get(key);
+                    body.onsuccess = function () {
+                        store.put(body.result, target);
+                        store.delete(key);
+                        at.continue();
+                    };
+                };
+            };
+        };
+        deal.oncomplete = function () { standCurrent = true; done(true); };
+        deal.onabort = deal.onerror = function () { fail(deal.error || new Error("stand migration aborted")); };
     });
 }
 
-function tileFor(request) {
+var lookups = [], lookupTick = null;
+function lookup(plain, state) {
+    return new Promise(function (done) {
+        lookups.push({plain: plain, state: state, done: done});
+        if (lookupTick === null) { lookupTick = setTimeout(flushLookups, 0); }
+    });
+}
+
+function flushLookups() {
+    var batch = lookups;
+    lookups = []; lookupTick = null;
+    base().then(function (open) {
+        batch = batch.filter(function (item) { return !item.state.expired; });
+        if (!batch.length) { return; }
+        function readBatch(tx) {
+            var pending = new Map();
+            batch.forEach(function (item) {
+                if (item.state.expired) { return; }
+                if (!pending.has(item.plain)) { pending.set(item.plain, []); }
+                pending.get(item.plain).push(item);
+            });
+            pending.forEach(function (items, plain) {
+                var ask = tx.objectStore(KEPT).get(plain);
+                function answer(value) {
+                    off.then(function () { items.forEach(function (item) { item.done(value); }); });
+                }
+                ask.onsuccess = function () {
+                    if (ask.result) { answer({body: ask.result, path: "db"}); return; }
+                    if (items.every(function (item) { return item.state.expired; })) { return; }
+                    // Do not speculatively read a browse blob on a kept hit.
+                    var seen = tx.objectStore(SEEN).get(plain);
+                    seen.onsuccess = function () {
+                        answer(seen.result && seen.result.body ? {body: seen.result.body, path: "seen"} : null);
+                    };
+                };
+            });
+            tx.onabort = tx.onerror = function () { batch.forEach(function (item) { item.done(null); }); };
+        }
+        // On iOS a life may be one fetch. Cold flags join this transaction,
+        // rather than turning "once per life" into another transaction per tile.
+        var deal = open.transaction([KEPT, SEEN, FLAGS], "readonly");
+        var flags = deal.objectStore(FLAGS), ready = stood, off = switched, active = true;
+        var currentInDeal = standCurrent && !!ready;
+        deal.addEventListener("complete", function () { active = false; });
+        deal.addEventListener("abort", function () { active = false; });
+        // WebKit may commit an empty transaction before a promise callback,
+        // before its complete event can clear active. Warm reads must start in
+        // the task that created the transaction, with no promise in between.
+        if (standCurrent && ready && off) {
+            readBatch(deal);
+        } else {
+            if (!ready) {
+                standCurrent = false;
+                stood = ready = new Promise(function (done, fail) {
+                    var ask = flags.get(STAND);
+                    ask.onsuccess = function () {
+                        if (sameStand(ask.result)) { standCurrent = currentInDeal = true; done(true); }
+                        else { migrateStand(open).then(done, fail); }
+                    };
+                    ask.onerror = function () { fail(ask.error); };
+                });
+                // No blob is asked for before a changed stand has been migrated.
+                // A current stand can proceed in this very transaction.
+                ready.catch(function () { stood = null; standCurrent = false; });
+            }
+            if (!off) {
+                switched = off = new Promise(function (done) {
+                    var ask = flags.get(STATE);
+                    ask.onsuccess = function () { done(ask.result === "on"); };
+                    ask.onerror = function () { done(false); };
+                });
+            }
+            // Promise continuations from IDB request callbacks run before this
+            // transaction becomes inactive. If migration committed, use a new one.
+            ready.then(function () {
+                // Migration, including one already pending when this batch
+                // arrived, always gets a fresh transaction in this task.
+                readBatch(currentInDeal && active ? deal : open.transaction([KEPT, SEEN], "readonly"));
+            }).catch(function () { batch.forEach(function (item) { item.done(null); }); });
+        }
+        off.then(function (value) { batch.forEach(function (item) { item.state.off = value; }); });
+    }).catch(function () { batch.forEach(function (item) { item.done(null); }); });
+}
+
+function tileFor(request, event) {
     var began = performance.now(), missed = false;
     inFlight += 1;
     told.peak = Math.max(told.peak, inFlight);
-    // Count a tile once even if both of its lookups cross their deadline.
+    var state = {expired: false, off: false};
+    // Count a tile once over the entire lookup, including open and migration.
     function late() {
+        state.expired = true;
         if (!missed) { missed = true; told.deadlines += 1; }
     }
     function answered(which, why) { tally(which, why, began); }
     var plain = request.url.split("?")[0];
-    return within(4000, Promise.all([keptFor(plain), offlineNow()]), [null, false], late)
-        .then(function (two) {
-            if (two[0]) { answered("db"); return new Response(two[0]); }
-            var off = two[1];
-            return within(4000, read(SEEN, plain), null, late).then(function (seen) {
-                if (seen && seen.body) { answered("seen"); return new Response(seen.body); }
-                if (off) { answered("blank"); return blank(); }
-                return fetch(request).then(function (answer) {
-                    if (answer && answer.ok) {
-                        answered("net");
-                        answer.clone().blob().then(function (body) {
-                            return write(SEEN, plain, {body: body, at: Date.now()});
-                        }).then(trim).catch(function () { return null; });
-                    }
-                    return answer;
-                }).catch(function (gone) { answered("blank", gone); return blank(); });
-            });
-        }).catch(function (gone) { answered("blank", gone); return blank(); })
+    // An already-known switch still governs a lookup whose database is stuck.
+    if (switched) { switched.then(function (off) { state.off = off; }); }
+    return within(2500, lookup(plain, state), null, late).then(function (found) {
+        if (found) { answered(found.path); return new Response(found.body); }
+        var off = state.off;
+        if (off) { answered("blank"); return blank(); }
+        return fetch(request).then(function (answer) {
+            if (answer && answer.ok) {
+                answered("net");
+                var keeping = answer.clone().blob().then(function (body) { return browsePut(plain, body); });
+                // iOS may stop us after answering this single fetch.
+                if (event) { event.waitUntil(keeping); }
+            }
+            return answer;
+        }).catch(function (gone) { answered("blank", gone); return blank(); });
+    }).catch(function (gone) { answered("blank", gone); return blank(); })
         .finally(function () { inFlight -= 1; });
 }
 
-// Oldest first, by when it was written. Not a true least-recently-used -- reading
-// a tile does not move it -- and saying so is cheaper than pretending. Only the
-// browse store is ever trimmed; what the reader asked for is never touched.
-//
-// **Counted, then the oldest walked off, and neither reads a tile.** `count()`
-// is one number out of the index and the cursor hands back keys, so trimming a
-// five-hundred-tile store never touches a blob.
-function trim() {
-    return base().then(function (open) {
-        return new Promise(function (done) {
-            var store = open.transaction(SEEN, "readwrite").objectStore(SEEN);
-            var counting = store.count();
-            counting.onsuccess = function () {
-                var over = counting.result - TILE_CAP;
-                if (over <= 0) { done(null); return; }
-                var walk = store.index("at").openKeyCursor();
-                walk.onsuccess = function () {
-                    var at = walk.result;
-                    if (!at || over <= 0) { done(null); return; }
-                    store.delete(at.primaryKey);
-                    over -= 1;
-                    at.continue();
-                };
-                walk.onerror = function () { done(null); };
+var BROWSE_BYTES = "browse-bytes", BROWSE_SIZE = "browse-size:";
+var puts = [], putTick = null;
+function browsePut(plain, body) {
+    return new Promise(function (done) {
+        puts.push({plain: plain, body: body, done: done});
+        if (putTick === null) { putTick = setTimeout(flushPuts, 0); }
+    });
+}
+
+// One-time accounting for rows written before size existed. A value cursor
+// holds only one row; it records Blob.size without loading its contents. The
+// trim itself below never reads a blob. No schema/index change: still DB_AT 3.
+function accountBrowse(store, flags, done) {
+    var total = {bytes: 0, writes: 0};
+    var walk = store.openCursor();
+    walk.onsuccess = function () {
+        var at = walk.result;
+        if (!at) { done(total); return; }
+        var row = at.value;
+        row.size = row.body.size;
+        at.update(row);
+        flags.put(row.size, BROWSE_SIZE + at.key);
+        total.bytes += row.size;
+        at.continue();
+    };
+}
+
+function flushPuts() {
+    var batch = puts;
+    puts = []; putTick = null;
+    base().then(function (open) {
+        var deal = open.transaction([SEEN, FLAGS], "readwrite");
+        var store = deal.objectStore(SEEN), flags = deal.objectStore(FLAGS);
+        var ask = flags.get(BROWSE_BYTES);
+        ask.onsuccess = function () {
+            function put(total) {
+                var i = 0;
+                function next() {
+                    if (i === batch.length) { flags.put(total, BROWSE_BYTES); return; }
+                    var item = batch[i++], key = BROWSE_SIZE + item.plain;
+                    // Metadata only, including on overwrite: no browse blob get.
+                    var size = flags.get(key);
+                    size.onsuccess = function () {
+                        // The panel can clear browse; stale metadata must not
+                        // subtract bytes for a row it has already removed.
+                        var exists = store.getKey(item.plain);
+                        exists.onsuccess = function () {
+                            total.bytes += item.body.size - (exists.result === undefined ? 0 : (size.result || 0));
+                            store.put({body: item.body, at: Date.now(), size: item.body.size}, item.plain);
+                            flags.put(item.body.size, key);
+                            total.writes += 1;
+                            if (total.writes % 50 === 0) { trim(store, flags, total, next); }
+                            else { next(); }
+                        };
+                    };
+                }
+                next();
+            }
+            // A page-side clear leaves flags; reset the total when empty.
+            var count = store.count();
+            count.onsuccess = function () {
+                if (!count.result) {
+                    flags.delete(IDBKeyRange.bound(BROWSE_SIZE, BROWSE_SIZE + "\uffff"));
+                    put({bytes: 0, writes: 0});
+                }
+                else if (ask.result) { put(ask.result); }
+                else { accountBrowse(store, flags, put); }
             };
-            counting.onerror = function () { done(null); };
-        });
-    }).catch(function () { return null; });
+        };
+        deal.oncomplete = deal.onabort = deal.onerror = function () { batch.forEach(function (item) { item.done(); }); };
+    }).catch(function () { batch.forEach(function (item) { item.done(); }); });
+}
+
+// Every fiftieth write, remove oldest batches of fifty until under the byte
+// budget. Only index keys and small size records are read, never tile bodies.
+function trim(store, flags, total, done) {
+    if (total.bytes <= TILE_CAP) { done(); return; }
+    var removed = 0, walk = store.index("at").openKeyCursor();
+    walk.onsuccess = function () {
+        var at = walk.result;
+        if (!at) { total.bytes = 0; done(); return; }
+        var key = BROWSE_SIZE + at.primaryKey, size = flags.get(key);
+        size.onsuccess = function () {
+            total.bytes -= size.result || 0;
+            store.delete(at.primaryKey);
+            flags.delete(key);
+            removed += 1;
+            if (removed % 50 === 0 && total.bytes <= TILE_CAP) { done(); }
+            else { at.continue(); }
+        };
+    };
 }
 
 self.addEventListener("fetch", function (event) {
@@ -631,6 +822,6 @@ self.addEventListener("fetch", function (event) {
             || (SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)
             || (VEGETATION_PREFIX && request.url.indexOf(VEGETATION_PREFIX) === 0)
             || (FOREST_PREFIX && request.url.indexOf(FOREST_PREFIX) === 0)) {
-        event.respondWith(tileFor(request));
+        event.respondWith(tileFor(request, event));
     }
 });
