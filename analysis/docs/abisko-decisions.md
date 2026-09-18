@@ -295,7 +295,7 @@ meridian, closer than Bergen, for which `atlas` §6.1 measured +0.2 %. Swedish s
 
 | role | Norway today | Sweden | standing |
 |---|---|---|---|
-| base map | Kartverket cache, live | Lantmäteriet *Topografisk webbkarta Nedladdning, raster*, free with attribution, anonymous FTP, copied into our bucket at build time | z0–z17 XYZ pyramid, measured (§3) |
+| base map | Kartverket's WMS, rendered into our own tree at build time without its hillshade (§6.12) | Lantmäteriet *Topografisk webbkarta Nedladdning, raster*, free with attribution, anonymous FTP, copied into our bucket at build time | z0–z17 XYZ pyramid, measured (§3) |
 | **the N50 role: paths, roads, water, land cover, cabins, names, contours, protected areas in one product** | N50 Kartdata, per kommune | Lantmäteriet **Topografi 50 Nedladdning, vektor** — GeoPackage, SWEREF99 TM, updated weekly, ordered for the whole country through Geotorget as a free *Abonnemang*, **CC0, no legal review**. Topografi 10 is the finer sibling and is **not orderable for Uwe**: its terms cover personal data (buildings with addresses), Geotorget puts a *juridisk prövning* in front of it, and that form wants a Swedish *personnummer* (seen 2026-09-12) | read 2026-09-12 off the product documentation, see below |
 | official marked trails with attributes | Turrutebasen | Naturvårdsverket *Leder och friluftsanordningar*, as the nightly files under `geodata.naturvardsverket.se/nedladdning/friluftsliv/` (`Leder_shp.zip`, `Anordningar_shp.zip`), SWEREF99 TM, CC0 — **not the WFS**, which was down a whole day (§9.6) | keyless; nationwide, not only in protected areas (34 of the 47 lines over the box lie outside one); `LKATEGORI` separates summer (*Barmarksled*) from winter (*Led på snö*), `STATLED` names the state trail (*Abisko - Abiskojaure (BD 21)*), `LMARKERING` the marking — the attribute source, as Turrutebasen is (`atlas` §7.2). Read by `io/sources/naturvardsregistret.py` |
 | paths nobody else draws | OSM | OSM, through Overpass, unchanged | the one source that is the same in both countries |
@@ -1397,6 +1397,82 @@ is 163 bytes and the panel prices what it would keep.
 
 ---
 
+### 6.12 Both maps draw from our own trees, as packs
+
+Decided and built 2026-09-18, in the phases of `kartverket-tree-phases.md` — the plan carries
+every measurement and a built-note per phase; this section is what stands afterwards. It began
+as a question about zooming out (a pinch from z15 to z10 sent 52 requests where a jump sends
+15, each through a worker whose miss path was five reads behind two deadlines; plan §3.1,
+§3.2) and ended with the two maps drawn the same way.
+
+**Norway has its own tree.** `tiles/kartverket/topo/1/`, z8–z17 over the Lomsdal-Visten box,
+rendered from Kartverket's WMS (`wms.geonorge.no/skwms1/wms.topo`, EPSG:3857, `image/png8`) by
+`command make tiles PARK=lomsdal-visten`: metatiles of 2048 px with a margin of one tile,
+cropped, quantised to a palette, one PNG per tile, resumable. Without `fjellskygge` — the WMS
+exposes its hillshade as a layer of its own, and the 189 other leaves in capabilities order
+give the same cartography flat, so the relief of §6.6 no longer lies on a base that already
+carries a shadow. The tree is 600,665 tiles and 4.57 GB, 6.6 kB a z17 tile against the three
+to nine times heavier RGBA tiles of the cache. The stand is a hash of the configuration
+(service, version, CRS, format, the ordered layers), because the capabilities carry no date; a
+re-render for new map content is a decision, never detected. The render measured: 4,450 tiles a
+minute at two requests in flight, no 429 and one 503 in 600,000 requests; seams continuous to
+the pixel (a mean difference of 5.8 across a metatile boundary against 4.8 inside one); labels
+placed per metatile, so a name near a seam may show on both sides, none cut.
+
+**z17 is the top on both maps, and z18 is z17 magnified.** Kartverket's z18 adds 1 m contours,
+spot heights and the smallest names for four times the tiles (24 GB of a 31 GB tree). Both
+sheets carry `maxNativeZoom: 17` with `maxZoom: 18`, and the scale's zoom line says
+`· tiles z17` whenever the view is above the sheet's native level, offline too. `Provider.cap`
+is 17 on both: the whole map may be kept to z17 (§9.23, amended).
+
+**The unit on R2 and in the store is the pack.** A parent tile with its three levels of
+children, 1 + 4 + 16 + 64 = 85 tiles at most, as a valid PMTiles archive — one root directory,
+uncompressed, PNG — addressed by the parent's `z/x/y` under
+`packs/<tree>/<provider>[/<sheet>]/<version>/{z}/{x}/{y}.pmtiles`; the pack levels are the
+layer's top less three and less seven (a sheet to z17 packs at z14, z10 and z6). `command make
+packs PARK=…` writes them from the trees; `just deploy --tree packs` uploads them and opens
+every directory first. Lomsdal-Visten is 9,162 packs, 5.57 GB (the sheet 7,163 at 638 kB
+mean); Abisko 2,274, 1.07 GB; a z10 height pack, 5.3 MB, is the heaviest object. Norway's
+per-tile objects were never uploaded, and Lantmäteriet's will be dropped once the phone has
+confirmed the packs. Why the pack, and not the tile or the country: measured on the phone
+(plan phase 1b), every IndexedDB request costs 40–70 ms whatever the row's shape, and the
+price follows the size of the database, so what scales is the request count per screen and
+not the row count; and a 600 MB object is `BYPASS` at the edge on every range request, the
+plan's limit being 512 MB. Eighty-five tiles is one to four packs a screen, well under both.
+
+**How the page reads them.** The page still asks per tile; the worker maps the tile to its
+pack. Online, ranges: the pack's directory by one 16 kB range, then the tile's bytes — a
+first z17 screen is 14 ranges, 86 kB on Abisko and 205 kB on Lomsdal-Visten, no whole pack.
+Two seconds after the last tile request the worker fetches the screen's packs whole in the
+background — the sheet first, then the overlays, at most two in flight, never a height pack —
+so panning through fetches nothing whole, and staying makes the ground free to pan and zoom
+afterwards (437 kB and 1.25 MB for Abisko's first screen, 830 kB and 1.48 MB for
+Lomsdal-Visten's). Memory holds 48 directories and eight packs, least recently used out. With
+the switch on the pack is one row and the tile a slice of it.
+
+**One store, one row shape.** `packs`, keyed by the pack's address: `{pack, kept, complete, at,
+size}`, the archive an `ArrayBuffer` — never a `Blob`, which WebKit keeps as a file per row and
+reclaims late — and possibly partial: a range-fetched tile is merged into its pack's row by a
+PMTiles writer in the worker, and `complete` says whether the whole pack is there. Kept and
+browsed ground are the same row with `kept` set or not. Two disjoint indexes whose keys carry
+the size let eviction (browse rows only, oldest first, under a 150 MB cap, fifty keys a
+transaction) and Forget (kept rows only) delete without reading a row; the kept-bytes and
+browse-bytes sums live in the flags; nothing walks a store, ever (§9.44). Keep marks the
+scope's packs kept and fetches whole any pack that is not complete; a complete one costs
+nothing. The panel counts packs and megabytes; the overview of §9.43 is 67 packs and 42 MB on
+Lomsdal-Visten, 21 and 17 MB on Abisko.
+
+**The edge keeps a pack as long as the object says.** A year, `immutable`: the zone's cache
+rule for the tree and pack paths respects the origin instead of the five minutes written for
+the page, and Tiered Cache and 0-RTT are on (`home/trails-map`, plan phase 0). Before it,
+every tile not seen at a colo in the last five minutes paid a 200 ms round trip to R2.
+
+**What it cost the phone, said plainly.** The ground kept from Kartverket's cache went with the
+sheet — a different picture under a different address — in the store's version-4 upgrade, and
+the version-5 upgrade of the same evening (one store) recreated `packs` empty. Uwe agreed to
+both; the thing to do after the deploy is Keep once, and nothing on the panel says so, because
+there is one reader and this is where it is written.
+
 ## 7. The order of work
 
 1. **Geotorget account** — done 2026-09-12 as a private person, `lantmateriet@uweeisele.eu`.
@@ -2020,6 +2096,12 @@ there, and the cache names left in the worker only clear that old store away. Th
 measured on the same phone: 59,092 rows in IndexedDB open in 107 ms and the app in 1.0 s,
 against 23.6 s with the tiles in Cache Storage. First written here as a Cache Storage cost and
 corrected at Uwe's word the same morning.
+
+**Amended 2026-09-18 (§6.12):** the cap is 17 on both maps. What made it possible over
+Lomsdal-Visten's 600,000 tiles is the pack — 9,162 rows for the whole box at 5.57 GB, against
+Abisko's 2,274 at 1.07 GB — after the phone showed that a row per tile does not scale: a get
+cost 17 ms at 150,000 rows and 60 ms at 600,000, whatever the row's shape (plan phases 1 and
+1b). The kept store of this section is the `packs` store now, one row per pack.
 
 ### 9.24 The box widened east past Lapporten and south to the tile row — settled, 2026-09-13
 
@@ -3445,9 +3527,55 @@ walker at. A filter on a word the register never writes is a filter that silentl
 
 ---
 
+### 9.42 A pinch out asked for every level it crossed — settled, 2026-09-18
+
+Uwe, from the phone: zooming out is slow, and the map goes grey. Measured in Firefox (plan
+§3.1): a pinch from z15 to z10 sent 52 requests on the sheet and 46 on the relief where a
+direct jump sends 15 and 9, because Leaflet's `updateWhenZooming` loads every integer level a
+pinch crosses and an aborted image does not stop the worker, whose fetch handler runs to
+completion; and after a zoom out of three levels nothing old stayed on screen, since
+`_pruneTiles` keeps children two levels down. Settled: `updateWhenZooming: false` on every tile
+layer, children kept three levels down, `bounds` on every sheet so nothing outside the box is
+asked for (the 404 ring of §9.13, closed on both maps), and a transparent error tile where a
+404 can still happen. The drive pinches z15 → z10 and reads the pinch count equal to the direct
+count and zero errors. The rest of the slowness was the store path, §9.44.
+
+### 9.43 Coarse ground is always kept — settled, 2026-09-18
+
+A map that cannot be zoomed out of is not a map anybody navigates with. Every Keep run keeps
+the whole box from z8 to z11 beside its scope — the sheet and the four overlays, not the
+heights — and the estimate shows it as its own line: 67 packs and 42 MB on Lomsdal-Visten, 21
+and 17 MB on Abisko. `BOTTOM` stays 11 for the scope's own pyramid; a reader who kept ground
+before this gets the overview on their next run, which skips what it holds.
+
+### 9.44 The worker's store path: one lookup, no walk, one writer — settled, 2026-09-18
+
+What a tile cost in the worker before: a kept tile one transaction; a miss five reads, a write
+and a trim behind two 4 s deadlines, the trim's read-write transaction blocking every read in
+flight (plan §3.2). Settled: the lookups of one tick share one readonly transaction, one get per
+pack; one deadline of 2.5 s over the store alone, past it blank with the switch on and the
+network with it off; what the network answers is written, coalesced per pack, and evicted fifty
+keys at a time by index. Two rules the phone taught the same evening, after the first deploy
+hung it (a 30 s check for a new version, a reload that stayed on *fetching*, a 500-row clear
+that took three minutes): **nothing walks a store in a service worker** — iOS ends the worker
+mid-transaction, a long walk never commits and repeats on the next open — and **one read-write
+transaction blocks every other store of the database**, so writes stay small and rare. Neither
+is visible in Firefox; the tally on the Sources panel (tiles per path, with the store's total
+and worst time) is the instrument, and the measurement helper that once sat beside it was
+removed once phase 1b had its answer.
+
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-18, eighth** — both maps draw from our own trees, as packs (§6.12): Norway's sheet
+  rendered from Kartverket's WMS without its hillshade into a tree of our own, z17 the top on
+  both and z18 magnified, the pack of 85 tiles as PMTiles the unit on R2 and in one store of
+  `ArrayBuffer` rows, ranges live and whole packs in the background after two seconds, the edge
+  keeping objects a year. Settled with it: the pinch cascade (§9.42), the overview floor
+  (§9.43), the worker's store path (§9.44); §9.23 amended to a cap of 17 on both. Every
+  measurement is in `kartverket-tree-phases.md`. The ground kept from the cache went with the
+  sheet; Keep once.
 
 - **2026-09-18, seventh** — the label tables are whole (§9.41): every code of Kartverket's
   Navneobjekttype, TypeVeg, Vegkategori, Betjeningsgrad, Hytteeier and Tilgjengelighet lists, every
@@ -3963,6 +4091,7 @@ A line per change to this document or to the decisions in it, newest first.
 
 | figure | how |
 |---|---|
+| the tree, the packs, the store and the edge (§6.12) | `analysis/docs/kartverket-tree-phases.md`: §3 for the probes and the edge timings, the built-note of each phase of §4 for what the render, the deploy, the drive and the phone measured (2026-09-18) |
 | place coordinates, and Rautasjaure's extent | Nominatim (`nominatim.openstreetmap.org`, `countrycodes=se,no`, the lake's bounding box from its OSM relation) and `minkarta.lantmateriet.se/api/searchservice/searchinput?searchtext=`, the latter answering in SWEREF99 TM and converted with an inverse transverse Mercator on GRS80 |
 | the border trace | Overpass, `rel(2978650)` clipped to 68.10–68.70 N, 17.6–19.3 E, `out geom`, binned at 0.05° |
 | named peaks north of Abisko | Overpass, `node["natural"="peak"]["name"]` over 68.38–68.75 N, 18.2–19.3 E |

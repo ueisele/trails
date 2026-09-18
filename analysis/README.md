@@ -75,18 +75,20 @@ vegetation comes off Naturvårdsverket's nationwide NMD 2018 rasters, fetched an
 once into the cache by `command make nmd` (7.2 GB down, no login); the Norwegian off
 `hoydedata.no`'s surface model, no login either.
 
-**The one asymmetry is the sheet and the login.** Abisko draws Lantmäteriet's tiles out of
-our own bucket, so it has a fourth target: `command make tiles` copies them for the box out
-of Lantmäteriet's open download over FTP (no login) — and its height model does need the
-Geotorget login, so run that from `home/trails-map` as
+**Both maps copy their sheet, and only Abisko needs a login.** `command make tiles PARK=abisko`
+copies Lantmäteriet's tiles for the box out of its open download over FTP (no login), and its
+height model does need the Geotorget login, so run that from `home/trails-map` as
 `sops exec-env secrets.sops.env 'cd ../../trails && command make dem PARK=abisko'`.
-Lomsdal-Visten draws Kartverket's cache live, copies no sheet, and reads its height model
-off `hoydedata.no` with no login, no order and no key at all.
+`command make tiles PARK=lomsdal-visten` renders Kartverket's sheet for the box off the WMS,
+without its hillshade (§6.12), and Lomsdal-Visten's height model comes off `hoydedata.no` with
+no login, no order and no key at all. What the page draws is neither tree tile by tile:
+`command make packs PARK=…` writes every tree of a map as packs of 85 tiles — PMTiles
+archives under `analysis/output/packs/` — and `just deploy --tree packs` uploads those.
 
 **Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, slope, vegetation, the graph
 with its report and the page, in that order, and from `home/trails-map`
 `just abisko` is the same with the login supplied. `command make lomsdal-visten` is the same
-chain without the tiles step and without any credential. Every step resumes or reads
+chain without any credential. Every step resumes or reads
 the cache, so a rerun costs a few minutes of checking and the page; both build
 and neither publishes.
 

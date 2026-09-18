@@ -256,29 +256,33 @@ vegetation:
 # the delivery API with the login and the order id, Naturvårdsverket's nightly files, OSM through
 # Overpass -- fetched once each and cached) and its report, then the page. Every step is resumable
 # or cached, so a second run is a few minutes of checking and a rebuild of the page. It builds and
-# does not publish: `just deploy --map abisko --tree tiles --tree dem --tree shade --tree slope` from
-# home/trails-map is that, and `just abisko` there is this target with the login supplied.
+# does not publish: `just deploy --map abisko --tree packs` from home/trails-map is that, and
+# `just abisko` there is this target with the login supplied.
 abisko:
 	$(MAKE) tiles PARK=abisko
 	$(MAKE) dem shade slope vegetation PARK=abisko
+	$(MAKE) packs PARK=abisko
 	@echo "🕸️  Building and reporting the Abisko routing graph..."
 	uv run python analysis/scripts/route_graph.py --park abisko
 	@echo "🗺️  Building the Abisko map..."
 	uv run python analysis/scripts/lomsdal_visten.py --park abisko
-	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree tiles --tree dem --tree shade --tree slope --tree vegetation --tree forest (from home/trails-map)"
+	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree packs (from home/trails-map)"
 
-# The whole Lomsdal-Visten chain, in the same order and with the same properties: the height model
-# off hoydedata.no (no login, no order), the heights, the relief and the slope classes off the one
-# cached mosaic, the vegetation and forest off its surface model (§6.11), then the graph and the page. There is no `tiles` step here — Kartverket serves its
-# own sheet and we copy none of it — and nothing in this chain needs a credential, which is the one
-# way it differs from `abisko`. See analysis/docs/abisko-decisions.md §6.10.
+# The whole Lomsdal-Visten chain, in the same order and with the same properties: the sheet
+# rendered off Kartverket's WMS without its hillshade into our own tree (§6.12, no login), the
+# height model off hoydedata.no (no login, no order), the heights, the relief and the slope classes
+# off the one cached mosaic, the vegetation and forest off its surface model (§6.11), the packs off
+# every tree, then the graph and the page. Nothing in this chain needs a credential, which is the
+# one way it differs from `abisko`. See analysis/docs/abisko-decisions.md §6.10 and §6.12.
 lomsdal-visten:
+	$(MAKE) tiles PARK=lomsdal-visten
 	$(MAKE) dem shade slope vegetation PARK=lomsdal-visten
+	$(MAKE) packs PARK=lomsdal-visten
 	@echo "🕸️  Building and reporting the Lomsdal-Visten routing graph..."
 	uv run python analysis/scripts/route_graph.py --park lomsdal-visten
 	@echo "🗺️  Building the Lomsdal-Visten map..."
 	uv run python analysis/scripts/lomsdal_visten.py --park lomsdal-visten
-	@echo "✅ analysis/output/lomsdal-visten.html — publish with: just deploy --tree dem --tree shade --tree slope --tree vegetation --tree forest (from home/trails-map)"
+	@echo "✅ analysis/output/lomsdal-visten.html — publish with: just deploy --tree packs (from home/trails-map)"
 
 # **Pinned, because the browser is not.** `--with playwright` takes the newest release, and each
 # one wants a Firefox build of its own: the newest asks for `firefox-1543` and dies with
