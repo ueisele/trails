@@ -2388,7 +2388,13 @@ def the_sources_measure_the_store(page: Any) -> Check:
                 Reading(
                     "both clears show their row count and elapsed seconds",
                     slow_clear["counts"] == [f"blob-number · clearing {count} scratch rows…" for count in (2, 3)]
-                    and all(f"blob-number · clearing {count} scratch rows… 1 s" in slow_clear["stages"] for count in (2, 3)),
+                    # Any elapsed reading, not the first second exactly: under two drives and a
+                    # hooks run at once the one-second tick was skipped (0 s, then 2 s) and the
+                    # clock was still shown, which is what the reading is about.
+                    and all(
+                        any(re.fullmatch(rf"blob-number · clearing {count} scratch rows… \d+ s", stage) for stage in slow_clear["stages"])
+                        for count in (2, 3)
+                    ),
                     True,
                     note=json.dumps(slow_clear),
                 ),
