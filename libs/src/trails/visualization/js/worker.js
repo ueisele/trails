@@ -200,6 +200,7 @@ self.addEventListener("install", function () {
 self.addEventListener("activate", function (event) {
     event.waitUntil(
         self.clients.claim().then(function () {
+            // Only the check is awaited; a kept-store walk continues in batches.
             stood = base().then(migrateStand);
             return stood;
         }).then(keepWhatIsOpen).then(sweepOldCaches)
@@ -529,67 +530,121 @@ function prefixes() {
         shade: SHADE_PREFIX, slope: SLOPE_PREFIX, vegetation: VEGETATION_PREFIX, forest: FOREST_PREFIX};
 }
 
-var stood = null, standCurrent = false;
+var stood = null, standCurrent = false, migrating = null;
+var STAND_WALK = "stand-walk";
 function sameStand(stand) {
     var now = prefixes();
-    return !!stand && Object.keys(now).every(function (kind) { return (stand[kind] || null) === now[kind]; });
+    return !!stand && Object.keys(now).every(function (kind) { return Object.prototype.hasOwnProperty.call(stand, kind); }) &&
+        Object.keys(Object.assign({}, stand, now)).every(function (kind) {
+            return (stand[kind] || null) === (now[kind] || null);
+        });
 }
 
-// Only the key cursor ranges over the store. A rename holds one blob at a
-// time; a deletion reads none. Current ground wins a collision with old ground.
-// The count and stand commit with the moves, so interruption leaves the old
-// stand intact and the next life retries it. No list grows with the kept map.
-function migrateStand(open) {
+// Resolves after the stand check or its small flags-only update. The walk is
+// deliberately detached: neither activation nor a tile waits for all the ground.
+function migrateStand(open, was) {
+    if (was === undefined) {
+        return new Promise(function (done, fail) {
+            var ask = open.transaction(FLAGS, "readonly").objectStore(FLAGS).get(STAND);
+            ask.onsuccess = function () { migrateStand(open, ask.result || {}).then(done, fail); };
+            ask.onerror = function () { fail(ask.error); };
+        });
+    }
+    var now = prefixes();
+    var moved = Object.keys(was).filter(function (kind) { return was[kind] && was[kind] !== now[kind]; });
+    if (!moved.length) {
+        return new Promise(function (done, fail) {
+            var deal = open.transaction(FLAGS, "readwrite");
+            deal.objectStore(FLAGS).put(now, STAND);
+            deal.objectStore(FLAGS).delete(STAND_WALK);
+            deal.oncomplete = function () { standCurrent = true; done(true); };
+            deal.onabort = deal.onerror = function () { fail(deal.error || new Error("stand update aborted")); };
+        });
+    }
+    if (!migrating) {
+        migrating = walkStand(open, was, now, moved);
+        migrating.then(function () { migrating = null; }, function () {
+            migrating = null; stood = null; standCurrent = false;
+        });
+    }
+    // Here current means checked this life: reads use the keys as they stand.
+    standCurrent = true;
+    return Promise.resolve(true);
+}
+
+// Each commit checkpoints at most 500 keys, also yielding after 50 ms of work
+// on slow devices. No transaction is held between batches. A killed life resumes
+// after its last committed key; an aborted batch retries its idempotent moves.
+// Only renamed rows read blobs, and current ground wins every collision.
+function walkStand(open, was, now, moved) {
     return new Promise(function (done, fail) {
-        var deal = open.transaction([KEPT, FLAGS], "readwrite");
-        var store = deal.objectStore(KEPT), flags = deal.objectStore(FLAGS), now = prefixes();
-        var ask = flags.get(STAND);
-        ask.onsuccess = function () {
-            var was = ask.result || {};
-            if (sameStand(was)) { return; }
-            var walk = store.openKeyCursor();
-            walk.onsuccess = function () {
-                var at = walk.result;
-                if (!at) {
-                    var count = store.count();
-                    count.onsuccess = function () {
-                        var held = flags.get("held");
-                        held.onsuccess = function () {
-                            // bytes is the page's weight-table estimate, not a
-                            // sum of blobs. Preserve it; correct the actual count.
-                            var value = held.result || {bytes: 0, top: 0};
-                            value.tiles = count.result;
-                            flags.put(value, "held");
-                            flags.put(now, STAND);
+        var lastKey = null;
+        function batch() {
+            var deal = open.transaction([KEPT, FLAGS], "readwrite");
+            var store = deal.objectStore(KEPT), flags = deal.objectStore(FLAGS);
+            var finished = false, visited = 0, began = performance.now();
+            function walkFrom() {
+                var walk = store.openKeyCursor(lastKey === null ? null : IDBKeyRange.lowerBound(lastKey, true));
+                walk.onsuccess = function () {
+                    var at = walk.result;
+                    if (!at) {
+                        finished = true;
+                        var count = store.count();
+                        count.onsuccess = function () {
+                            var held = flags.get("held");
+                            held.onsuccess = function () {
+                                // Preserve the page's byte estimate, correct the count.
+                                var value = held.result || {bytes: 0, top: 0};
+                                value.tiles = count.result;
+                                flags.put(value, "held");
+                                flags.put(now, STAND);
+                                flags.delete(STAND_WALK);
+                            };
+                        };
+                        return;
+                    }
+                    var key = at.key;
+                    visited += 1;
+                    function next() {
+                        lastKey = key;
+                        if (visited >= 500 || performance.now() - began >= 50) {
+                            flags.put({was: was, now: now, last: lastKey}, STAND_WALK);
+                        } else { at.continue(); }
+                    }
+                    var kind = moved.find(function (name) { return key.indexOf(was[name]) === 0; });
+                    var current = prefixOf(key);
+                    if (!kind || (current && current.length >= was[kind].length)) { next(); return; }
+                    if (!now[kind]) { store.delete(key); next(); return; }
+                    var target = now[kind] + key.slice(was[kind].length);
+                    var exists = store.getKey(target);
+                    exists.onsuccess = function () {
+                        if (exists.result !== undefined) { store.delete(key); next(); return; }
+                        var body = store.get(key);
+                        body.onsuccess = function () {
+                            store.put(body.result, target);
+                            store.delete(key);
+                            next();
                         };
                     };
-                    return;
-                }
-                var key = at.key;
-                var kind = Object.keys(now).find(function (name) {
-                    return now[name] && was[name] && now[name] !== was[name] && key.indexOf(was[name]) === 0;
-                });
-                var current = prefixOf(key);
-                if (current && (!kind || current.length >= was[kind].length)) { at.continue(); return; }
-                if (!kind) {
-                    store.delete(key);
-                    at.continue(); return;
-                }
-                var target = now[kind] + key.slice(was[kind].length);
-                var exists = store.getKey(target);
-                exists.onsuccess = function () {
-                    if (exists.result !== undefined) { store.delete(key); at.continue(); return; }
-                    var body = store.get(key);
-                    body.onsuccess = function () {
-                        store.put(body.result, target);
-                        store.delete(key);
-                        at.continue();
-                    };
                 };
+            }
+            if (lastKey === null) {
+                var checkpoint = flags.get(STAND_WALK);
+                checkpoint.onsuccess = function () {
+                    var saved = checkpoint.result;
+                    if (saved && JSON.stringify(saved.was) === JSON.stringify(was) && JSON.stringify(saved.now) === JSON.stringify(now)) {
+                        lastKey = saved.last;
+                    }
+                    walkFrom();
+                };
+            } else { walkFrom(); }
+            deal.oncomplete = function () {
+                if (finished) { done(true); }
+                else { setTimeout(batch, 0); }
             };
-        };
-        deal.oncomplete = function () { standCurrent = true; done(true); };
-        deal.onabort = deal.onerror = function () { fail(deal.error || new Error("stand migration aborted")); };
+            deal.onabort = deal.onerror = function () { fail(deal.error || new Error("stand migration aborted")); };
+        }
+        setTimeout(batch, 0);
     });
 }
 
@@ -650,12 +705,12 @@ function flushLookups() {
                     var ask = flags.get(STAND);
                     ask.onsuccess = function () {
                         if (sameStand(ask.result)) { standCurrent = currentInDeal = true; done(true); }
-                        else { migrateStand(open).then(done, fail); }
+                        else { migrateStand(open, ask.result || {}).then(done, fail); }
                     };
                     ask.onerror = function () { fail(ask.error); };
                 });
-                // No blob is asked for before a changed stand has been migrated.
-                // A current stand can proceed in this very transaction.
+                // Only the check and flags-only update precede a lookup.
+                // A walk runs in the background with the old stand still written.
                 ready.catch(function () { stood = null; standCurrent = false; });
             }
             if (!off) {
@@ -666,10 +721,9 @@ function flushLookups() {
                 });
             }
             // Promise continuations from IDB request callbacks run before this
-            // transaction becomes inactive. If migration committed, use a new one.
+            // transaction becomes inactive. After a stand update, use a new one.
             ready.then(function () {
-                // Migration, including one already pending when this batch
-                // arrived, always gets a fresh transaction in this task.
+                // A checked stand from another transaction needs a fresh one.
                 readBatch(currentInDeal && active ? deal : open.transaction([KEPT, SEEN], "readonly"));
             }).catch(function () { batch.forEach(function (item) { item.done(null); }); });
         }
@@ -682,7 +736,7 @@ function tileFor(request, event) {
     inFlight += 1;
     told.peak = Math.max(told.peak, inFlight);
     var state = {expired: false, off: false};
-    // Count a tile once over the entire lookup, including open and migration.
+    // Count a tile once over the entire lookup, including open and stand check.
     function late() {
         state.expired = true;
         if (!missed) { missed = true; told.deadlines += 1; }

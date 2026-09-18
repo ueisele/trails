@@ -9762,6 +9762,210 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         )
 
 
+def the_worker_stand_batches(browser: Any, page_path: pathlib.Path) -> Check:
+    """Measure the built worker on 150,000 1 kB kept rows, across real worker lives.
+
+    Like the store-path reading, this runs the emitted functions in a dedicated
+    Firefox worker with real IndexedDB. Activation's unrelated page/cache work
+    is stubbed; the activation handler and its waitUntil promise are exercised.
+    """
+    with served(page_path.parent) as origin:
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(origin + "/")
+        source = page.evaluate("async url => (await fetch(url)).text()", origin + "/" + SCENE.companions.worker)
+        source = re.sub(r'var DB = "[^"]+";', 'var DB = "phase3b-stand-probe";', source)
+        source = source.replace("self.location.href", json.dumps(origin + "/" + SCENE.companions.worker))
+        harness = r"""
+        self.onmessage = async ({data: mode}) => {
+            try {
+                const db = await base(), now = prefixes(), old = TILE_PREFIX + 'old/';
+                const key = i => '17/' + String(i).padStart(6, '0') + '/1.png';
+                const committed = tx => new Promise((done, fail) => {
+                    tx.addEventListener('complete', done);
+                    tx.addEventListener('abort', () => fail(tx.error || Error('aborted')));
+                });
+                if (mode.startsWith('seed')) {
+                    const tx = db.transaction([KEPT, SEEN, FLAGS], 'readwrite');
+                    tx.objectStore(KEPT).clear(); tx.objectStore(SEEN).clear(); tx.objectStore(FLAGS).clear();
+                    const stand = {...now};
+                    delete stand.vegetation; delete stand.forest;
+                    if (mode === 'seed-old') { stand.map = old; stand.tiles = old; }
+                    tx.objectStore(FLAGS).put(stand, STAND);
+                    tx.objectStore(FLAGS).put({tiles: 150000, bytes: 153600000, top: 17}, 'held');
+                    tx.objectStore(FLAGS).put('on', STATE);
+                    await committed(tx);
+                    const body = new Blob([new Uint8Array(1024)]);
+                    for (let start = 0; start < 150000; start += 1000) {
+                        const tx = db.transaction(KEPT, 'readwrite'), store = tx.objectStore(KEPT);
+                        for (let i = start; i < start + 1000; i++) {
+                            store.put(body, (mode === 'seed-old' ? old : TILE_PREFIX) + key(i));
+                        }
+                        await committed(tx);
+                    }
+                    db.close(); self.postMessage({result: {seeded: 150000}}); return;
+                }
+                const out = {batches: 0, maxKeys: 0, cursors: 0, writes: 0,
+                    answersDuring: 0, worstTile: 0, tiles: 0, standWrites: 0, heldWrites: 0, firstLower: null};
+                const transaction = IDBDatabase.prototype.transaction;
+                const cursor = IDBObjectStore.prototype.openKeyCursor;
+                const put = IDBObjectStore.prototype.put;
+                IDBObjectStore.prototype.put = function (value, key) {
+                    if (this.name === FLAGS && key === 'held') out.heldWrites++;
+                    if (this.name === FLAGS && key === STAND) {
+                        out.standWrites++;
+                        out.standScope = Array.from(this.transaction.objectStoreNames);
+                    }
+                    return put.call(this, value, key);
+                };
+                IDBDatabase.prototype.transaction = function (names, mode) {
+                    const tx = transaction.call(this, names, mode);
+                    if (mode === 'readwrite') out.writes++;
+                    if (mode === 'readwrite' && Array.from(tx.objectStoreNames).includes(KEPT)) {
+                        tx.addEventListener('complete', () => { out.batches++; });
+                    }
+                    return tx;
+                };
+                IDBObjectStore.prototype.openKeyCursor = function (range, ...args) {
+                    if (this.name !== KEPT) return cursor.call(this, range, ...args);
+                    if (!out.cursors) {
+                        out.firstLower = range ? range.lower : null;
+                        out.firstOpen = range ? range.lowerOpen : false;
+                    }
+                    out.cursors++;
+                    const ask = cursor.call(this, range, ...args);
+                    let keys = 0;
+                    ask.addEventListener('success', () => {
+                        if (ask.result) keys++;
+                        out.maxKeys = Math.max(out.maxKeys, keys);
+                    });
+                    return ask;
+                };
+                const checkpointBefore = await read(FLAGS, STAND_WALK);
+                out.resumeAfter = checkpointBefore ? checkpointBefore.last : null;
+                const began = performance.now();
+                if (mode === 'missing') {
+                    // Lazy check on the first tile of a reloaded worker.
+                    const tile = await tileFor(new Request(TILE_PREFIX + key(0)));
+                    out.firstTile = performance.now() - began;
+                    out.firstBytes = (await tile.blob()).size;
+                    out.standMs = performance.now() - began;
+                } else {
+                    // Exercise the real activation handler, keeping its promise.
+                    self.clients = {claim: async () => {}};
+                    keepWhatIsOpen = sweepOldCaches = async () => {};
+                    const event = new Event('activate');
+                    let activation;
+                    event.waitUntil = work => { activation = work; };
+                    self.dispatchEvent(event);
+                    await activation;
+                    out.activationMs = performance.now() - began;
+                    out.pendingAtActivation = !!migrating;
+                    // Limit this test's wait independently of the worker's walk.
+                    for (let i = 0; i < 100000 && performance.now() - began < 600000; i++) {
+                        const start = performance.now(), before = out.batches;
+                        const tile = await tileFor(new Request(TILE_PREFIX + key(0)));
+                        await tile.blob();
+                        out.worstTile = Math.max(out.worstTile, performance.now() - start);
+                        out.tiles++;
+                        if (migrating && out.batches && out.batches >= before) out.answersDuring++;
+                        if (mode === 'interrupt' && out.batches >= 5) {
+                            out.checkpoint = await read(FLAGS, STAND_WALK);
+                            out.standStillOld = (await read(FLAGS, STAND)).tiles === old;
+                            out.heldStillOld = (await read(FLAGS, 'held')).tiles === 150000;
+                            out.ms = performance.now() - began;
+                            out.deadlines = told.deadlines;
+                            self.postMessage({result: out}); return;
+                        }
+                        if (!migrating) break;
+                        await new Promise(done => setTimeout(done, 0));
+                    }
+                    if (migrating) throw Error('migration did not finish within the test limit');
+                    out.ms = performance.now() - began;
+                }
+                out.stand = sameStand(await read(FLAGS, STAND));
+                out.held = await read(FLAGS, 'held');
+                out.deadlines = told.deadlines;
+                out.checkpointGone = (await read(FLAGS, STAND_WALK)) === null;
+                const tx = db.transaction(KEPT, 'readonly'), store = tx.objectStore(KEPT);
+                const count = range => new Promise(done => { const ask = store.count(range); ask.onsuccess = () => done(ask.result); });
+                [out.total, out.old] = await Promise.all([count(), count(IDBKeyRange.bound(old, old + '\uffff'))]);
+                out.lastBytes = (await read(KEPT, TILE_PREFIX + key(149999))).size;
+                db.close(); self.postMessage({result: out});
+            } catch (e) { self.postMessage({error: String(e), stack: e.stack}); }
+        };
+        """
+        run = r"""async ({source, mode}) => {
+            const url = URL.createObjectURL(new Blob([source], {type: 'text/javascript'}));
+            const worker = new Worker(url);
+            try {
+                return await new Promise((done, fail) => {
+                    const timer = setTimeout(() => fail(Error('worker probe timed out')), 900000);
+                    worker.onmessage = e => {
+                        clearTimeout(timer);
+                        e.data.error ? fail(Error(e.data.error + '\n' + e.data.stack)) : done(e.data.result);
+                    };
+                    worker.onerror = e => { clearTimeout(timer); fail(Error(e.message)); };
+                    worker.postMessage(mode);
+                });
+            } finally { worker.terminate(); URL.revokeObjectURL(url); }
+        }"""
+        results = {}
+        for mode in ("seed-missing", "missing", "seed-old", "interrupt", "resume"):
+            print(f"  worker stand: {mode}", flush=True)
+            if not mode.startswith("seed"):
+                page.reload()
+            results[mode] = page.evaluate(run, {"source": source + harness, "mode": mode})
+        context.close()
+    missing, interrupted, moved = (results[key] for key in ("missing", "interrupt", "resume"))
+    return Check(
+        "the worker stand batches",
+        [
+            Reading("missing overlay keys rewrite the stand", missing["stand"], True),
+            Reading("the rewrite takes well under a second", missing["standMs"] < 500, True, note=f"{missing['standMs']:.1f} ms"),
+            Reading("the rewrite opens no kept cursor", [missing["cursors"], missing["batches"]], [0, 0]),
+            Reading("the rewrite uses one small write transaction", missing["standWrites"], 1),
+            Reading("the small update only locks flags", missing["standScope"], ["flags"]),
+            Reading("the first tile answers before its deadline", missing["firstTile"] < 2500, True, note=f"{missing['firstTile']:.1f} ms"),
+            Reading("the first tile is kept ground", missing["firstBytes"], 1024),
+            Reading("the rewrite preserves count and byte estimate", missing["held"], {"tiles": 150000, "bytes": 153600000, "top": 17}),
+            Reading("the rewrite preserves every row", missing["total"], 150000),
+            Reading("the rewrite never writes the count", missing["heldWrites"], 0),
+            Reading(
+                "activation finishes while the walk is pending",
+                interrupted["pendingAtActivation"],
+                True,
+                note=f"{interrupted['activationMs']:.1f} ms; resume {moved['activationMs']:.1f} ms",
+            ),
+            Reading("an interrupted walk retains its stand and count", [interrupted["standStillOld"], interrupted["heldStillOld"]], [True, True]),
+            Reading("the next life resumes after its committed checkpoint", moved["firstLower"], moved["resumeAfter"]),
+            Reading("the interrupted life saved a checkpoint", bool(interrupted["checkpoint"]), True),
+            Reading("the checkpoint bound is exclusive", moved["firstOpen"], True),
+            Reading("activation does not wait for the walk", max(interrupted["activationMs"], moved["activationMs"]) < 500, True),
+            Reading("count and stand stay unwritten between batches", [interrupted["heldWrites"], interrupted["standWrites"]], [0, 0]),
+            Reading("count and stand are written only at the end", [moved["heldWrites"], moved["standWrites"]], [1, 1]),
+            Reading("each migration transaction visits at most 500 keys", max(interrupted["maxKeys"], moved["maxKeys"]) <= 500, True),
+            Reading(
+                "the large walk needs multiple transactions",
+                moved["batches"] > 1,
+                True,
+                note=f"{interrupted['batches']} + {moved['batches']} batches; {interrupted['ms'] + moved['ms']:.1f} ms",
+            ),
+            Reading(
+                "tiles answer between migration batches",
+                moved["answersDuring"] > 1,
+                True,
+                note=f"{moved['answersDuring']} answers; worst {max(interrupted['worstTile'], moved['worstTile']):.1f} ms",
+            ),
+            Reading("tiles stay below 2.5 seconds during the walk", max(interrupted["worstTile"], moved["worstTile"]) < 2500, True),
+            Reading("no tile runs past the deadline", missing["deadlines"] + interrupted.get("deadlines", 0) + moved["deadlines"], 0),
+            Reading("the walk writes the new stand and removes its checkpoint", [moved["stand"], moved["checkpointGone"]], [True, True]),
+            Reading("all 150000 rows are renamed and counted", [moved["total"], moved["old"], moved["held"]["tiles"]], [150000, 0, 150000]),
+            Reading("the final renamed row keeps its body", moved["lastBytes"], 1024),
+        ],
+    )
+
+
 def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
     """Exercise the built worker's functions against real Firefox IndexedDB.
 
@@ -9844,6 +10048,19 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 reset();
                 await browsePut(TILE_PREFIX + '14/2/1.png', new Blob(['new']));
                 out.legacySize = (await read(SEEN, k)).size;
+                // A removed kind alone must trigger a walk, even when every
+                // currently drawn prefix is unchanged. Unrelated keys survive.
+                const retired = 'https://retired.invalid/tree/', unrelated = 'https://unrelated.invalid/row';
+                await seed((kept, seen, flags) => {
+                    kept.put(new Blob(['retired']), retired + '1.png');
+                    kept.put(new Blob(['unrelated']), unrelated);
+                    flags.put({...prefixes(), retired}, STAND);
+                });
+                stood = null;
+                await lookup(k, {expired: false, off: false});
+                await migrating;
+                out.retired = {gone: (await read(KEPT, retired + '1.png')) === null,
+                    kept: await (await read(KEPT, k)).text(), unrelated: await (await read(KEPT, unrelated)).text()};
                 // Stage an old prefix, a collision and an unnamed tree.
                 const old = TILE_PREFIX + 'old/', removed = 'https://removed.invalid/tree/';
                 await seed((kept, seen, flags) => {
@@ -9857,6 +10074,7 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 });
                 stood = null; switched = null; reset();
                 await lookup(s, {expired: false, off: false});
+                await migrating;
                 out.migration = {held: await read(FLAGS, 'held'), stand: await read(FLAGS, STAND),
                     old: await read(KEPT, old + '14/1/2.png'), removed: await read(KEPT, removed + '14/1/1.png'),
                     fresh: await (await read(KEPT, k)).text(), moved: await (await read(KEPT, s)).text()};
@@ -9945,6 +10163,7 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
             Reading("an answer does not wait for another tile", result["independent"], True),
             Reading("an expired miss starts no browse read", result["noLateBrowse"], True),
             Reading("old browse rows gain their byte size once", result["legacySize"], 6),
+            Reading("a removed kind alone is migrated", result["retired"], {"gone": True, "kept": "kept", "unrelated": "unrelated"}),
             Reading("migration corrects the held count", result["migration"]["held"]["tiles"], 2),
             Reading("migration removes old and unnamed keys", [result["migration"]["old"], result["migration"]["removed"]], [None, None]),
             Reading(
@@ -11449,6 +11668,8 @@ def main() -> int:
         # costs about 590 MB settled, and a second one beside it took the browser
         # down mid-load -- `TargetClosedError` at the first wait, with nothing
         # said about why. Two 42 MB documents at once is not a thing to ask for.
+        if wanted(the_worker_stand_batches):
+            checks.append(the_worker_stand_batches(browser, page_path))
         if wanted(the_worker_store_path):
             checks.append(the_worker_store_path(browser, page_path))
         if wanted(the_overview_is_kept):

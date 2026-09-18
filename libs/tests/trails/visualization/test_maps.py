@@ -2313,7 +2313,7 @@ class TestTwoMapsOnOneOrigin:
         assert kartverket.extent == (12.0, 65.15, 13.75, 65.95)
 
     def test_a_kept_tile_of_an_older_stand_is_migrated_once(self, tmp_path):
-        """A new stand migrates the keys and count before ordinary lookups.
+        """A new stand migrates keys in the background while lookups proceed.
 
         The page still understands an old stand while migration is pending.
         """
@@ -2321,8 +2321,17 @@ class TestTwoMapsOnOneOrigin:
         html = page.read_text(encoding="utf-8")
         worker = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
         assert 'var STAND = "stand";' in worker
-        assert "function migrateStand(open)" in worker
-        assert "var walk = store.openKeyCursor();" in worker
+        assert "function migrateStand(open, was)" in worker
+        assert "IDBKeyRange.lowerBound(lastKey, true)" in worker
+        assert "visited >= 500 || performance.now() - began >= 50" in worker
+        assert "else { setTimeout(batch, 0); }" in worker
+        assert "flags.put({was: was, now: now, last: lastKey}, STAND_WALK);" in worker
+        assert "lastKey = saved.last;" in worker
+        small = worker.split("if (!moved.length) {", 1)[1].split("if (!migrating)", 1)[0]
+        assert 'open.transaction(FLAGS, "readwrite")' in small
+        assert "KEPT" not in small and "count(" not in small and "Cursor" not in small
+        assert "migrating = walkStand(open, was, now, moved);" in worker
+        assert "return Promise.resolve(true);" in worker
         assert "flags.put(now, STAND);" in worker
         assert "value.tiles = count.result;" in worker
         assert 'flags.put(value, "held");' in worker
