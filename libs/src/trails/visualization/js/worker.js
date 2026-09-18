@@ -771,24 +771,6 @@ function browsePut(plain, body) {
     });
 }
 
-// One-time accounting for rows written before size existed. A value cursor
-// holds only one row; it records Blob.size without loading its contents. The
-// trim itself below never reads a blob. No schema/index change: still DB_AT 3.
-function accountBrowse(store, flags, done) {
-    var total = {bytes: 0, writes: 0};
-    var walk = store.openCursor();
-    walk.onsuccess = function () {
-        var at = walk.result;
-        if (!at) { done(total); return; }
-        var row = at.value;
-        row.size = row.body.size;
-        at.update(row);
-        flags.put(row.size, BROWSE_SIZE + at.key);
-        total.bytes += row.size;
-        at.continue();
-    };
-}
-
 function flushPuts() {
     var batch = puts;
     puts = []; putTick = null;
@@ -820,23 +802,37 @@ function flushPuts() {
                 }
                 next();
             }
-            // A page-side clear leaves flags; reset the total when empty.
-            var count = store.count();
-            count.onsuccess = function () {
-                if (!count.result) {
-                    flags.delete(IDBKeyRange.bound(BROWSE_SIZE, BROWSE_SIZE + "\uffff"));
+            var sizes = IDBKeyRange.bound(BROWSE_SIZE, BROWSE_SIZE + "\uffff");
+            function reset() {
+                // Browse is disposable. Rewriting old blobs can hold this
+                // transaction past an iOS worker's life and repeat forever.
+                store.clear();
+                flags.delete(sizes);
+                put({bytes: 0, writes: 0});
+            }
+            if (!ask.result) { reset(); return; }
+            // All browse keys are URLs. Ask only whether one exists, never
+            // count the store on a write. A page-side clear leaves flags.
+            var first = store.getKey(IDBKeyRange.lowerBound(""));
+            first.onsuccess = function () {
+                if (first.result === undefined) {
+                    flags.delete(sizes);
                     put({bytes: 0, writes: 0});
+                    return;
                 }
-                else if (ask.result) { put(ask.result); }
-                else { accountBrowse(store, flags, put); }
+                var size = flags.getKey(sizes);
+                size.onsuccess = function () {
+                    if (size.result === undefined) { reset(); }
+                    else { put(ask.result); }
+                };
             };
         };
         deal.oncomplete = deal.onabort = deal.onerror = function () { batch.forEach(function (item) { item.done(); }); };
     }).catch(function () { batch.forEach(function (item) { item.done(); }); });
 }
 
-// Every fiftieth write, remove oldest batches of fifty until under the byte
-// budget. Only index keys and small size records are read, never tile bodies.
+// Every fiftieth write above the byte budget, remove at most fifty oldest keys.
+// Only index keys and small size records are read, never tile bodies.
 function trim(store, flags, total, done) {
     if (total.bytes <= TILE_CAP) { done(); return; }
     var removed = 0, walk = store.index("at").openKeyCursor();
@@ -849,7 +845,7 @@ function trim(store, flags, total, done) {
             store.delete(at.primaryKey);
             flags.delete(key);
             removed += 1;
-            if (removed % 50 === 0 && total.bytes <= TILE_CAP) { done(); }
+            if (removed >= 50) { done(); }
             else { at.continue(); }
         };
     };

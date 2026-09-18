@@ -493,8 +493,24 @@ class TestOfflineWorker:
         assert "size: item.body.size" in worker
         assert "total.writes % 50 === 0" in worker
         assert "flags.put(total, BROWSE_BYTES)" in worker
-        assert "removed % 50 === 0 && total.bytes <= TILE_CAP" in worker
+        assert "if (removed >= 50) { done(); }" in worker
         assert "if (event) { event.waitUntil(keeping); }" in worker
+
+    def test_old_browse_is_cleared_without_walking_or_updating_blobs(self):
+        """A disposable cache must not be rewritten on every interrupted life."""
+        worker = maps.SERVICE_WORKER
+        assert "openCursor(" not in worker
+        assert ".update(" not in worker
+        assert "getAll(" not in worker and "getAllKeys(" not in worker
+        flush = worker.split("function flushPuts()")[1].split("\nfunction ")[0]
+        assert 'open.transaction([SEEN, FLAGS], "readwrite")' in flush
+        assert "store.clear();" in flush and "flags.delete(sizes);" in flush
+        assert "put({bytes: 0, writes: 0});" in flush
+        assert "if (!ask.result) { reset(); return; }" in flush
+        assert "if (size.result === undefined) { reset(); }" in flush
+        assert "flags.getKey(sizes)" in flush
+        assert 'store.getKey(IDBKeyRange.lowerBound(""))' in flush
+        assert ".count(" not in flush and "Cursor(" not in flush
 
     def test_a_deliberate_download_is_not_answered_by_the_worker(self):
         """The panel fetches what the reader asked to keep with `cache:

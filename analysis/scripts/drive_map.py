@@ -737,6 +737,24 @@ STAGE_OLD_STAND = """async () => {
   });
 }"""
 
+#: The background walk commits its current stand and removes its checkpoint together.
+STAND_MIGRATED = """async () => {
+  const current = window.trailsOffline.prefixes();
+  const db = await new Promise((done, fail) => {
+    const ask = indexedDB.open('__DB__', 3); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
+  return await new Promise((done, fail) => {
+    const tx = db.transaction('flags', 'readonly'), flags = tx.objectStore('flags');
+    const stand = flags.get('stand'), checkpoint = flags.get('stand-walk');
+    tx.oncomplete = () => {
+      db.close();
+      const saved = stand.result;
+      done(!!saved && checkpoint.result === undefined && Object.keys(saved).length === Object.keys(current).length &&
+        Object.keys(current).every(kind => saved[kind] === current[kind]));
+    };
+    tx.onabort = tx.onerror = () => { db.close(); fail(tx.error || Error('stand check aborted')); };
+  });
+}"""
+
 #: How many kept tiles sit under the old prefix and under the page's, and the flag.
 COUNT_STANDS = """async (old) => {
   const prefix = window.trailsOffline.prefixes().tiles;
@@ -10084,8 +10102,13 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 const transaction = IDBDatabase.prototype.transaction;
                 const get = IDBObjectStore.prototype.get;
                 const cursor = IDBObjectStore.prototype.openCursor;
+                const clear = IDBObjectStore.prototype.clear;
                 const counts = {tx: [], gets: []};
-                let forbid = false;
+                let forbid = false, browseClears = 0;
+                IDBObjectStore.prototype.clear = function () {
+                    if (this.name === SEEN) browseClears++;
+                    return clear.call(this);
+                };
                 IDBDatabase.prototype.transaction = function (names, mode) {
                     counts.tx.push({names: Array.from(typeof names === 'string' ? [names] : names), mode: mode || 'readonly'});
                     return transaction.call(this, names, mode);
@@ -10108,11 +10131,20 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                     fn(tx.objectStore(KEPT), tx.objectStore(SEEN), tx.objectStore(FLAGS));
                     await committed(tx);
                 };
+                const browseState = async () => {
+                    const tx = transaction.call(db, [SEEN, FLAGS], 'readonly');
+                    const rows = tx.objectStore(SEEN).count();
+                    const sizes = tx.objectStore(FLAGS).count(IDBKeyRange.bound(BROWSE_SIZE, BROWSE_SIZE + '\uffff'));
+                    const total = tx.objectStore(FLAGS).get(BROWSE_BYTES);
+                    await committed(tx);
+                    return {rows: rows.result, sizes: sizes.result, total: total.result, clears: browseClears};
+                };
                 const k = TILE_PREFIX + '14/1/1.png', s = TILE_PREFIX + '14/1/2.png', m = TILE_PREFIX + '14/1/3.png';
                 await seed((kept, seen, flags) => {
                     kept.put(new Blob(['kept']), k);
                     seen.put({body: new Blob(['shadow']), size: 6, at: 1}, k);
                     seen.put({body: new Blob(['seen']), size: 4, at: 2}, s);
+                    flags.put(6, BROWSE_SIZE + k);
                     flags.put(prefixes(), STAND); flags.put('on', STATE);
                 });
                 reset();
@@ -10142,8 +10174,24 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 out.noLateBrowse = counts.gets.length === beforeLate;
                 IDBObjectStore.prototype.get = originalGet;
                 reset();
+                // Flush without new puts so the reset's zero rows/bytes are
+                // visible. The following read queues behind its transaction.
+                forbid = true;
+                flushPuts();
+                await read(FLAGS, BROWSE_BYTES);
+                out.legacyCleared = await browseState();
+                // A surviving total with no size records is also old browse.
+                await seed((kept, seen, flags) => {
+                    seen.put({body: new Blob(['legacy']), at: 1}, s);
+                    flags.put({bytes: 6, writes: 17}, BROWSE_BYTES);
+                });
+                flushPuts();
+                await read(FLAGS, BROWSE_BYTES);
+                out.missingSizesCleared = await browseState();
                 await browsePut(TILE_PREFIX + '14/2/1.png', new Blob(['new']));
-                out.legacySize = (await read(SEEN, k)).size;
+                await browsePut(TILE_PREFIX + '14/2/2.png', new Blob(['next']));
+                out.browseAfterReset = await browseState();
+                forbid = false;
                 // A removed kind alone must trigger a walk, even when every
                 // currently drawn prefix is unchanged. Unrelated keys survive.
                 const retired = 'https://retired.invalid/tree/', unrelated = 'https://unrelated.invalid/row';
@@ -10206,6 +10254,22 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 out.newestThere = (await read(SEEN, TILE_PREFIX + 'new-browse/49')).size;
                 await browsePut(TILE_PREFIX + 'new-browse/49', new Blob(['overwrite']));
                 out.overwrite = (await read(FLAGS, BROWSE_BYTES)).bytes;
+                // Even when fifty removals cannot reach the soft cap, a trim
+                // must end there instead of walking the rest of the cache.
+                await seed((kept, seen, flags) => {
+                    seen.clear();
+                    flags.delete(IDBKeyRange.bound(BROWSE_SIZE, BROWSE_SIZE + '\uffff'));
+                    for (let i = 0; i < 100; i++) {
+                        const key = TILE_PREFIX + 'over-cap/' + i;
+                        seen.put({body: large, size: large.size, at: i}, key);
+                        flags.put(large.size, BROWSE_SIZE + key);
+                    }
+                    flags.put({bytes: 100 * large.size, writes: 49}, BROWSE_BYTES);
+                });
+                forbid = true;
+                await browsePut(TILE_PREFIX + 'over-cap/new', new Blob(['small']));
+                out.boundedTrim = await browseState();
+                forbid = false;
                 // The exact production deadline, with both switch states. Holding
                 // open prevents all lookup work and includes cold-open time.
                 const openedBefore = opened, fetchBefore = fetch, timeoutBefore = setTimeout;
@@ -10229,6 +10293,7 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 IDBDatabase.prototype.transaction = transaction;
                 IDBObjectStore.prototype.get = get;
                 IDBObjectStore.prototype.openCursor = cursor;
+                IDBObjectStore.prototype.clear = clear;
                 db.close();
                 return out;
             };
@@ -10258,7 +10323,21 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
             Reading("kept wins and duplicate lookups share its body", result["lookup"]["bodies"], ["kept", "seen", None, "kept"]),
             Reading("an answer does not wait for another tile", result["independent"], True),
             Reading("an expired miss starts no browse read", result["noLateBrowse"], True),
-            Reading("old browse rows gain their byte size once", result["legacySize"], 6),
+            Reading(
+                "old browse rows are cleared once",
+                result["legacyCleared"],
+                {"rows": 0, "sizes": 0, "total": {"bytes": 0, "writes": 0}, "clears": 1},
+            ),
+            Reading(
+                "old browse with a total but no size records is cleared",
+                result["missingSizesCleared"],
+                {"rows": 0, "sizes": 0, "total": {"bytes": 0, "writes": 0}, "clears": 2},
+            ),
+            Reading(
+                "later writes retain new browse without repeating the clear",
+                result["browseAfterReset"],
+                {"rows": 2, "sizes": 2, "total": {"bytes": 7, "writes": 2}, "clears": 2},
+            ),
             Reading("a removed kind alone is migrated", result["retired"], {"gone": True, "kept": "kept", "unrelated": "unrelated"}),
             Reading("migration corrects the held count", result["migration"]["held"]["tiles"], 2),
             Reading("migration removes old and unnamed keys", [result["migration"]["old"], result["migration"]["removed"]], [None, None]),
@@ -10275,6 +10354,11 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
             Reading("the write cadence is persistent", result["afterTrim"]["writes"], 50),
             Reading("oldest is gone and newest stays", [result["oldestGone"], result["newestThere"]], [True, 5]),
             Reading("overwriting accounts for the size difference", result["overwrite"], 254),
+            Reading(
+                "a trim stops at fifty even while still above the cap",
+                [result["boundedTrim"]["rows"], result["boundedTrim"]["sizes"], result["boundedTrim"]["total"]["bytes"]],
+                [51, 51, 200_000_005],
+            ),
             Reading("offline deadline returns blank without network", [result["deadlineOn"]["bytes"], result["deadlineOn"]["network"]], [68, 0]),
             Reading("online deadline reaches network", [result["deadlineOff"]["bytes"], result["deadlineOff"]["network"]], [7, 1]),
             Reading("each whole lookup counts one deadline", [result["deadlineOn"]["deadlines"], result["deadlineOff"]["deadlines"]], [1, 1]),
@@ -11020,6 +11104,10 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         context.set_offline(True)
         second.reload(timeout=120_000)
         second.wait_for_function("() => window.trailsOffline && window.trailsOffline.state().kept", timeout=60_000)
+        # Since 32b5b37, reload proceeds while the stand walk runs in background
+        # batches. Read the panel and counts only after its final commit.
+        if not wait_until(second, in_db(STAND_MIGRATED), 120_000):
+            raise TimeoutError("worker stand migration did not finish within 120 seconds")
         refreshed = second.evaluate("async () => (await window.trailsOffline.refresh()).kept")
         migrated = second.evaluate(in_db(COUNT_STANDS), staged["old"])
         answered = second.evaluate("(url) => fetch(url).then(r => r.blob()).then(b => b.size)", staged["sample"])
