@@ -19,7 +19,7 @@ ifneq ($(MISE),)
 export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
 endif
 
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive deploy tiles dem shade slope abisko lomsdal-visten
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive drive-both deploy tiles dem shade slope abisko lomsdal-visten
 
 # Default target
 help:
@@ -52,6 +52,9 @@ help:
 	@echo "                     all three take PARK=<map> (default lomsdal-visten) and are resumable"
 	@echo "  make abisko        The whole Abisko chain: tiles, dem, shade, slope, graph, map (needs the Geotorget login)"
 	@echo "  make lomsdal-visten  The whole Lomsdal-Visten chain: dem, shade, slope, graph, map (no login)"
+	@echo "  make drive         Drive one built page in a browser: ARGS=\"--page analysis/output/abisko.html\""
+	@echo "                     ARGS=\"--only <word>,<word>\" runs just those checks, which is seconds not minutes"
+	@echo "  make drive-both    Drive both pages at once; ARGS goes to both"
 	@echo "  make deploy        Publish the built map and purge the edge (needs .env)"
 	@echo "                     ARGS=\"--tree tiles\" mirrors a tile tree instead; --tree dem the heights"
 	@echo "  make fixtures      Generate/update test fixtures from real data"
@@ -265,8 +268,31 @@ lomsdal-visten:
 # holds `firefox-1538`, which is 1.62.0's. When the browser cache is refreshed, print
 # `p.firefox.executable_path` under a few releases and move this to the one that matches.
 drive:
-	@echo "🖱️  Driving the built map in a browser (about ten minutes a page; output is buffered under systemd)..."
-	uv run --with "playwright==1.62.0" python analysis/scripts/drive_map.py $(ARGS)
+	@echo "🖱️  Driving the built map in a browser (about eight minutes a page)..."
+	uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py $(ARGS)
+
+# **Both pages at once, which they may be since no reading is a wall clock.** A run
+# owns its browser and serves the page on a port the kernel picks, so two of them
+# share nothing but the machine -- and the machine has eight cores against one
+# Firefox apiece. What used to forbid this was the suite itself: four readings
+# compared elapsed seconds against figures recorded on an idle box, so two runs
+# at once reported the contention as a change in the page. Those are printed and
+# no longer compared, and what is claimed about a timeout is counted instead.
+#
+# `-u` because the output is buffered the moment it is not a terminal, and a log
+# that arrives only at the end reads exactly like a run that has hung.
+drive-both:
+	@echo "🖱️  Driving both pages at once..."
+	@uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py \
+		--page analysis/output/lomsdal-visten.html $(ARGS) > /tmp/drive-lomsdal-visten.txt 2>&1 & \
+	 lomsdal=$$!; \
+	 uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py \
+		--page analysis/output/abisko.html $(ARGS) > /tmp/drive-abisko.txt 2>&1 & \
+	 abisko=$$!; \
+	 wait $$lomsdal; lomsdal_said=$$?; \
+	 wait $$abisko; abisko_said=$$?; \
+	 cat /tmp/drive-lomsdal-visten.txt /tmp/drive-abisko.txt; \
+	 exit $$((lomsdal_said + abisko_said))
 
 cache-clean:
 	@echo "🗑️  Cleaning cache directory (.cache)..."

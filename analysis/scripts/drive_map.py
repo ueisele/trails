@@ -305,7 +305,6 @@ SCENES: dict[str, Scene] = {
             "px of map left above it": 565,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 186,
-            "seconds it took to give up": 18,
             "and it still finds a name": 3,
             # Three matches for *Gåsvatnet* are two rows: two of them are one
             # thing drawn twice in one layer (§9.27).
@@ -321,11 +320,8 @@ SCENES: dict[str, Scene] = {
             "and what width it says": 30,
             "readable in the light set": 15.1,
             "what it weighs": 549,
-            "and what writing it cost": 34,
-            "and how long it took to come back": 21,
             # 135.5 until §9.29, which was the node; the line's own foot is nearer.
             "and how far it moves on to it": 129.2,
-            "what the index over the edges cost to build": 91,
             # The Rundtur's page on ut.no and its GPX; it is the one route
             # without a lomsdalvisten.no counterpart.
             "links to pages published elsewhere": 2,
@@ -445,7 +441,6 @@ SCENES: dict[str, Scene] = {
             "px of map left above it": 562,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 189,
-            "seconds it took to give up": 16.9,
             "and it still finds a name": 16,
             # The sixteen matches for *Abiskojaure* are twelve rows: one row per
             # named thing, and Topografi 50 draws BD 26 in four chains and BD 21
@@ -455,8 +450,6 @@ SCENES: dict[str, Scene] = {
             "m shown by a quarter-width drag": 8114,
             "readable in the light set": 15.1,
             "what it weighs": 463,
-            "and what writing it cost": 16,
-            "and how long it took to come back": 20.7,
             # The bay: the road round it, dry-shod, and from the Kungsleden
             # 7 km off the same road after a connector.
             "the plan walks this far on paths": 3.4,
@@ -469,7 +462,6 @@ SCENES: dict[str, Scene] = {
             # The river where the goal's line wades it, off the outline.
             "and what width it says": 22,
             "and how far it moves on to it": 134.4,
-            "what the index over the edges cost to build": 15,
             # The long chain is BD 21, BD 92, BD 16 and BD 91 run together, and
             # Naturkartan has a page for each.
             "links to pages published elsewhere": 4,
@@ -604,6 +596,33 @@ def stands(what: str, got: Any, within: float = 0.0, note: str = "") -> Reading:
         is reported as new, with what it read, when the scene has no figure yet
     """
     return Reading(what, got, SCENE.figures.get(what), within, holds=False, note=note)
+
+
+def noted(what: str, got: Any, note: str = "") -> Reading:
+    """A number worth printing and worth nothing as a claim.
+
+    **A wall clock does not belong in a check.** How long a reload took, how
+    many milliseconds a write cost, how long one pass over a route spent -- all
+    of these say as much about the machine and what else it is running as about
+    the page. Compared against a figure recorded on *this* box they turn a
+    faster machine, a slower one, or two pages driven at once into a red line,
+    and the one thing they never say is that the page changed.
+
+    So they are printed and not compared. A reader who wants to know what the
+    page costs reads the number; nothing fails because of it. Where the duration
+    really is the subject -- a timeout that has to fire, a retry that has to
+    happen three times -- the claim is made about the **work**: what the page
+    counted, which every machine agrees on.
+
+    Args:
+        what: The reading's name
+        got: What was measured
+        note: What to print beside it
+
+    Returns:
+        A reading that always passes and carries the figure
+    """
+    return Reading(what, got, got, note=note)
 
 
 # ---------------------------------------------------------------------------
@@ -1071,8 +1090,19 @@ def timed(check: Callable[..., Check], *args: Any, **kwargs: Any) -> Check:
         What the check returned, with its seconds on it
     """
     began = time.monotonic()
+    # **Named before it runs, on the error stream.** The report is a table and
+    # a table can only be printed once everything in it is known, so a run said
+    # nothing at all for eight minutes -- and an eight-minute silence is
+    # indistinguishable from a run that has hung. Three times in one evening
+    # that silence was read as a hang, twice by me and once by Uwe, and each
+    # time the answer was a healthy browser nobody could see working.
+    #
+    # On stderr so that a log kept for its readings keeps only those, and
+    # flushed, because this is the one line whose whole value is arriving early.
+    print(f"  · {check.__name__}", file=sys.stderr, flush=True)
     ran: Check = check(*args, **kwargs)
     ran.seconds = time.monotonic() - began
+    print(f"    {ran.seconds:5.1f} s  {ran.name}", file=sys.stderr, flush=True)
     return ran
 
 
@@ -1916,6 +1946,103 @@ def narrow_sheets(page: Any) -> Check:
             # that is the difference between stepping aside and being discarded.
             Reading("but the detail is still open", over["state"]["detail"], True),
             Reading("and closing the tool gives it back", back["detail"] and not back["dock"], True),
+        ],
+    )
+
+
+def the_safe_area_keeps_the_last_row_reachable(page: Any) -> Check:
+    """A full-screen panel is as tall as the chrome, not as tall as the map.
+
+    Reported from the phone: *Farms and holdings [SSR]* -- the last row of the
+    layer list -- could not be selected upright, because the list would not
+    scroll far enough to show it. Sideways it was there.
+
+    The cause is a mismatch of coordinates. `place` measured every panel against
+    the map, which with `viewport-fit=cover` is drawn to the physical edges; the
+    panels are children of the chrome, which is held inside the safe area. So a
+    sheet given the map's height began where the chrome begins and ended that
+    much lower -- by the *top* inset, which upright is the notch and sideways is
+    nothing. Its scroller ended its scroll off the bottom of the screen, and
+    whatever was in those last pixels could not be reached by any gesture.
+
+    **The insets are set by hand here, because no browser on this box has any.**
+    `env(safe-area-inset-*)` is zero on Linux and Playwright cannot emulate it,
+    so the one condition that produces the defect would never arise in a run.
+    The chrome is inset with the figures an iPhone reports upright -- 59 at the
+    top, 34 at the foot -- which is exactly what the page would do there, and the
+    geometry under test is the page's own.
+
+    Args:
+        page: The driven page
+
+    Returns:
+        Whether the panel stays inside the chrome and its last row inside the screen
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.wait_for_timeout(900)
+    page.evaluate("() => window.trailsChrome.close()")
+    # **The layout a finger gets**, because that is the one with the problem:
+    # every row of the list is 40 px tall for a thumb and 21 px for a mouse, so
+    # with a fine pointer the whole legend nearly fits and only 75 px of it can
+    # be scrolled at all. The defect is about what falls off the end of a list
+    # that is twice the panel's height.
+    page.evaluate("() => window.trailsChrome.coarse(true)")
+    page.evaluate("() => window.trailsChrome.open('layers')")
+    page.wait_for_timeout(700)
+
+    # An iPhone's portrait insets, and the chrome told to place itself again:
+    # what re-places on this page is a `ResizeObserver` on the map container,
+    # and moving the chrome inside it changes nothing that observer watches. A
+    # dispatched `resize` is ignored for the same reason -- measured, the panel
+    # kept the height it had and the check read the defect it was meant to read
+    # after the fix was already in the page.
+    page.evaluate(
+        """() => { const chrome = document.querySelector('.trails-chrome');
+        chrome.style.top = '59px'; chrome.style.bottom = '34px';
+        window.trailsChrome.placed(); }"""
+    )
+    page.wait_for_timeout(700)
+
+    seen = page.evaluate(
+        """() => {
+      const chrome = document.querySelector('.trails-chrome');
+      const dock = document.querySelector('.trails-dock');
+      const body = dock && dock.querySelector('.trails-chrome-body');
+      // To the end of its scroll, which is as far as any finger can take it.
+      if (body) { body.scrollTop = body.scrollHeight; }
+      const rows = [...document.querySelectorAll('.trails-legend label')];
+      const last = rows[rows.length - 1];
+      const bottom = n => Math.round(n.getBoundingClientRect().bottom);
+      return {
+        rows: rows.length,
+        scrollable: body ? body.scrollHeight - body.clientHeight : 0,
+        panelBelowTheScreen: Math.max(0, bottom(dock) - window.innerHeight),
+        panelBelowTheChrome: Math.max(0, bottom(dock) - bottom(chrome)),
+        lastRowBelowTheChrome: last ? Math.max(0, bottom(last) - bottom(chrome)) : null,
+        lastRowSays: last ? last.textContent.trim() : null}; }"""
+    )
+
+    page.evaluate(
+        """() => { const chrome = document.querySelector('.trails-chrome');
+        chrome.style.removeProperty('top'); chrome.style.removeProperty('bottom');
+        window.trailsChrome.placed(); }"""
+    )
+    page.evaluate("() => window.trailsChrome.coarse(null)")
+    page.evaluate("() => window.trailsChrome.close()")
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(900)
+
+    return Check(
+        "a phone's safe area leaves the whole list reachable",
+        [
+            # The list has to be longer than the screen or nothing below is a
+            # question at all -- which is how this passed before it was fixed.
+            Reading(
+                "the list is longer than the panel", seen["scrollable"] > 0, True, note=f"{seen['scrollable']} px of scroll over {seen['rows']} rows"
+            ),
+            Reading("the panel ends above the screen's foot", seen["panelBelowTheScreen"], 0),
+            Reading("and inside the chrome that holds it", seen["panelBelowTheChrome"], 0),
+            Reading("the last row is reachable", seen["lastRowBelowTheChrome"], 0, note=seen["lastRowSays"] or ""),
         ],
     )
 
@@ -3069,6 +3196,21 @@ def a_leg_whose_heights_never_arrive(page: Any) -> Check:
     # worker makes for it never passes the browser's routing, so the server
     # this suite runs is what takes the connection and says nothing.
     held: list[Any] = []
+
+    # **What the page asked for, counted by the page.** How long it waited is
+    # this machine's answer; how many times it asked is the page's own retry
+    # policy, which is what this check is about.
+    #
+    # **And counted in the page rather than at the far end.** Counting the
+    # server's log was the obvious thing and it was wrong: with every
+    # connection held open, the second and third attempts sat behind the
+    # browser's limit of six per host and timed out where they queued. The
+    # server saw one of three -- an elapsed 16.8 s says all three happened --
+    # and a check reading that log called a working retry a failure.
+    def asked_for_heights() -> int:
+        return int(page.evaluate("() => window.trailsPlan.state().heightAsks") or 0)
+
+    before_tries = asked_for_heights()
     if SCENE.over_http:
         _Quiet.hold = SCENE.heights_path
     else:
@@ -3093,6 +3235,7 @@ def a_leg_whose_heights_never_arrive(page: Any) -> Check:
     # eighteen; this waits twice that before calling it a hang.
     gave_up = settled(page, 40_000)
     took = round(time.monotonic() - began, 1)
+    tries = asked_for_heights() - before_tries
 
     said = page.evaluate(
         """() => { const s = window.trailsPlan.state();
@@ -3125,16 +3268,15 @@ def a_leg_whose_heights_never_arrive(page: Any) -> Check:
             # The whole of it: the wait ends.
             Reading("the leg gives up rather than hanging", gave_up, True),
             Reading("and plan mode is not working any more", said["working"], False),
-            # Three attempts of five seconds and the backoff between them is
-            # 16.5 s; two would be 10.5 and one 5. The figure's band cannot
-            # tell them apart, so the invariant does.
-            Reading("and it tried three times before that", took > 12, True, note=f"{took} s; two attempts would be 10.5"),
-            stands(
-                "seconds it took to give up",
-                took,
-                within=14,
-                note=f"{took} s: three attempts of five and the backoff between them",
-            ),
+            # **Counted, not timed.** This was an elapsed 12 seconds, read off
+            # a wall clock: three attempts of five with the backoff between
+            # them is about 16.5 s, two would be 10.5 -- so a loaded or a
+            # slower machine passed by accident and a faster one could fail
+            # for no reason the page had anything to do with. The page's own
+            # `ATTEMPTS` is 3, and every one of them is a request this suite
+            # takes and never answers, so the attempts can simply be counted.
+            Reading("and it tried three times before that", tries >= 3, True, note=f"{tries} attempts at the height model"),
+            noted("seconds it took to give up", took, note="s: three attempts of five and the backoff between them"),
             # And what it becomes is a leg with no heights, which the route
             # already knows how to draw and to say.
             Reading("the leg says why", said["failed"] > 0, True, note=said["why"][:60]),
@@ -5562,7 +5704,20 @@ def the_way_to_the_next_goal(page: Any) -> Check:
             # Walked on every fix, over a route that can be tens of thousands
             # of vertices long: twice the whole of it off the route, and a
             # dozen times over the handful of segments that survive that.
-            Reading("what one fix costs to aim", aimed.get("ms", 0), 12, within=12, note=f"{aimed.get('ms')} ms"),
+            #
+            # **The claim is the handful, and it used to be 12 ms ± 12.** A
+            # duration is the machine's answer, and as an invariant it made a
+            # slow afternoon or a second page driven beside this one into a
+            # fault of the page's. What the sentence above actually says can be
+            # counted: the dozen directions are asked of what survived the
+            # first pass, not of the route again. The page counts both.
+            Reading(
+                "aiming asks a handful of segments, not the route again",
+                (aimed.get("sampled") or 0) < (aimed.get("walked") or 0),
+                True,
+                note=f"{aimed.get('sampled')} sampled against {aimed.get('walked')} walked",
+            ),
+            noted("what one fix costs to aim", aimed.get("ms"), note="ms"),
         ],
     )
 
@@ -6302,12 +6457,9 @@ def a_tap_in_the_middle_of_a_long_edge(page: Any) -> Check:
                 [2, True],
             ),
             Reading("with the merged leg still path end to end", three["legs"][0]["kinds"], ["routed"]),
-            stands(
-                "what the index over the edges cost to build",
-                round(four["indexMs"]) if four["indexMs"] is not None else None,
-                within=60,
-                note="ms",
-            ),
+            # Printed, not compared: what building the index cost in
+            # milliseconds is this machine's answer (see `noted`).
+            noted("what the index over the edges cost to build", round(four["indexMs"]) if four["indexMs"] is not None else None, note="ms"),
         ],
     )
 
@@ -7332,6 +7484,13 @@ def a_goal_the_reader_sets(page: Any) -> Check:
 
 
 #: What the row of choices says, read off the chips themselves.
+#: The zoom a tap is delivered at. One number, because a check that looks for a
+#: line at one zoom and taps it at another is asking two different questions --
+#: `trailsReach` answers in pixels, and what is within a finger's reach changes
+#: with the scale.
+TAP_ZOOM = 15
+
+
 THE_CHOICES = """() => { const row = document.querySelector('.trails-profile-picks');
   const chips = [...document.querySelectorAll('.trails-profile-pick')];
   return {shown: !!row && row.style.display !== 'none',
@@ -7474,7 +7633,7 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
         page.wait_for_timeout(1400)
         return page.evaluate(THE_CHOICES)
 
-    def tap_at(where: dict[str, float], zoom: int = 15) -> None:
+    def tap_at(where: dict[str, float], zoom: int = TAP_ZOOM) -> None:
         """Tap the map where a latitude and longitude say, not where a pixel does."""
         page.evaluate(with_map("(at) => { __MAP__.setView([at.lat, at.lng], at.zoom, {animate: false}); }"), {**where, "zoom": zoom})
         page.wait_for_timeout(700)
@@ -7520,7 +7679,36 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
         page.wait_for_timeout(1500)
         switched = page.evaluate(THE_CHOICES)
 
+    # **With no route standing**, and that is not tidiness. `trailsReach.near`
+    # walks the interactive layers; a planned route is offered by the tap
+    # handler on top of what it finds, so a line with nothing beside it but a
+    # route along the same road gets a row of two -- and the row is *right*.
+    # Whatever the checks before this one left planned was therefore deciding
+    # the answer: on the Abisko page, where an earlier route runs along the road
+    # the lonely lines are, this reading broke while the page behaved perfectly.
+    # The check lays its own route a few lines further down anyway.
+    page.evaluate(
+        """() => { const standing = window.trailsPlan.state().points.length;
+        for (let i = 0; i < standing; i += 1) { window.trailsPlan.remove(0); } }"""
+    )
+    settled(page)
+
     # A line nothing else runs beside: no row at all, because there is no choice.
+    #
+    # **And nothing drawn over it, which is what broke this.** The first line
+    # the search reached on the Abisko page runs past Abisko Östra, and the
+    # stop pins drawn there since §9.35 sit on top of it: `elementFromPoint`
+    # answers a `path` in the marker pane, so the tap took a place and the row
+    # of the tap before it was simply still standing. Every reading said
+    # something true and none of them said that.
+    #
+    # **Searched at the zoom it is tapped at, which it was not.** `trailsReach`
+    # answers in pixels, so a line alone at one zoom can have a neighbour at the
+    # next one down -- measured on the Abisko page, 1 of the first 12 lines that
+    # stand alone at 16 has company at 15. The search ran at 16 and the tap at
+    # 15, so whether this passed depended on which line the search happened to
+    # reach first, which is the map state the checks before it left behind. It
+    # failed on a run and passed on the next with nothing changed in between.
     lonely = page.evaluate(
         with_map(
             """() => { const map = __MAP__;
@@ -7528,12 +7716,23 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
             for (const line of lines) { const pts = line.getLatLngs();
               const at = pts[Math.floor(pts.length / 2)];
               if (!at || !at.lat) { continue; }
-              map.setView(at, 16, {animate: false});
-              if (window.trailsReach.near(map.latLngToLayerPoint(at)).length === 1) { return {lat: at.lat, lng: at.lng}; } }
-            return null; }"""
+              map.setView(at, ZOOM, {animate: false});
+              if (window.trailsReach.near(map.latLngToLayerPoint(at)).length !== 1) { continue; }
+              // **And nothing is standing on it.** A pin is drawn over the
+              // lines and takes the click for itself, and then this taps a
+              // place while believing it tapped a line.
+              const pt = map.latLngToContainerPoint(at);
+              const box = map.getContainer().getBoundingClientRect();
+              const top = document.elementFromPoint(box.left + pt.x, box.top + pt.y);
+              if (top && top.closest && top.closest('.leaflet-marker-pane')) { continue; }
+              return {lat: at.lat, lng: at.lng}; }
+            return null; }""".replace("ZOOM", str(TAP_ZOOM))
         )
     )
-    alone: dict[str, Any] = {"shown": True, "chips": []}
+    # **`None` and not `True` where none was found.** The default stood at the
+    # value the reading fails on, so *no line stands alone on this page* and *a
+    # row was drawn for one that does* were the same red line.
+    alone: dict[str, Any] = {"shown": None, "chips": [], "chosen": None}
     if lonely:
         tap_at(lonely)
         alone = page.evaluate(THE_CHOICES)
@@ -7639,7 +7838,15 @@ def a_tap_that_could_have_meant_several_lines(page: Any) -> Check:
             Reading("pressing another takes it", switched["lit"] and switched["lit"] != busy["lit"], True, note=", ".join(switched["lit"])),
             Reading("and the panel followed", switched["chosen"] != busy["chosen"], True, note=str(switched["chosen"])[:40]),
             # And where there is nothing to choose between, no row.
-            Reading("a lonely line gets no row", alone["shown"], False),
+            Reading("a line standing alone was found to tap", lonely is not None, True),
+            # **And the tap landed on it**, which is the premise and was not
+            # read. Reported as *a lonely line gets no row* breaking with the
+            # row carrying the four chips of the tap **before** it -- which is
+            # not a row drawn for this line at all, but the last one left
+            # standing because nothing replaced it. The two say different
+            # things about the page and were one red line.
+            Reading("and the tap took it", bool(alone["chosen"]) and alone["chosen"] != busy["chosen"], True, note=str(alone["chosen"])[:44]),
+            Reading("a lonely line gets no row", alone["shown"], False, note=", ".join(alone["chips"])),
             # The planned route, which can be reached no other way.
             Reading("a route was laid down to ask against", laid and bool(on_route), True),
             Reading("leaving plan mode leaves it on the panel", left["name"], "planned route"),
@@ -8514,7 +8721,9 @@ def a_plan_survives_a_reload(page: Any) -> Check:
             # the download button offers, `<trkpt>` and all, and those are
             # routed again on the way back in rather than read.
             stands("what it weighs", round((kept["bytes"] if kept else 0) / 1024), within=250, note="kB"),
-            stands("and what writing it cost", kept["ms"] if kept else None, within=40, note="ms"),
+            # Printed and not compared: how many milliseconds `localStorage`
+            # took is this machine's answer, not the page's (see `noted`).
+            noted("and what writing it cost", kept["ms"] if kept else None, note="ms"),
             Reading("the points come back", after.get("points"), before["points"]),
             Reading("the stage marks come back", after.get("cuts"), before["cuts"]),
             Reading("the tour's name comes back", after.get("stem"), before["stem"]),
@@ -8525,7 +8734,7 @@ def a_plan_survives_a_reload(page: Any) -> Check:
             # does not find every tap placing a point.
             Reading("still planning, as they were", after.get("on"), before["on"]),
             Reading("what the reader is told", "Back as you left it" in ((said or {}).get("said") or ""), True, note=(said or {}).get("said") or ""),
-            stands("and how long it took to come back", took, within=20, note="s, load included"),
+            noted("and how long it took to come back", took, note="s, load included"),
             Reading("starting again clears the map", cleared["points"], 0),
             Reading("and forgets what was kept", cleared["kept"], None),
             Reading("and undo brings it back", again, before["points"]),
@@ -10112,6 +10321,7 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(room_on_a_short_screen, page))
     if wanted(narrow_sheets):
         checks.append(timed(narrow_sheets, page))
+    # BISECT: temporarily out
     if wanted(the_sources_are_a_page):
         checks.append(timed(the_sources_are_a_page, page))
     if wanted(a_place_takes_the_panel):

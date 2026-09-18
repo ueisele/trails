@@ -12356,7 +12356,24 @@ class _PlanMode(MacroElement):
                 return fetching;
             }
 
+            // **How many attempts at a height were actually made.** The retry
+            // policy is a claim about this page, and a check that reads it off
+            // a clock is reading the machine instead -- so the page counts, and
+            // counts where the retrying is: these tiles are served beside the
+            // page and are what a leg's profile is read from. The height
+            // *model* over the wire is asked for by `ask` and is a different
+            // road, which is where this counter sat first and read zero.
+            //
+            // And counted here rather than at the far end: an attempt that
+            // times out need never have reached a server at all. Driven with
+            // every connection held open, the later attempts sit behind the
+            // browser's own limit per host and expire where they queue -- the
+            // server saw one of three, and a check counting its log called a
+            // working retry a failure.
+            var heightAsks = 0;
+
             function heightTile(x, y, z, attempt) {
+                heightAsks += 1;
                 return fetchHeightTile(x, y, z).catch(function (failure) {
                     if (attempt >= ATTEMPTS) { throw failure; }
                     return new Promise(function (resolve) { setTimeout(resolve, 500 * attempt); })
@@ -17515,6 +17532,9 @@ class _PlanMode(MacroElement):
                     var shape = composeRoute();
                     return {
                         on: on, working: settling > 0, chosen: chosen, dragging: !!dragging,
+                        // Every attempt at the height model since the page
+                        // opened, the retries included: a check subtracts.
+                        heightAsks: heightAsks,
                         // How many changes there are to step back through, so a
                         // check reads it rather than pressing the button to find
                         // out what pressing the button would do.
@@ -21668,6 +21688,15 @@ class _Chrome(MacroElement):
             var hereGoal = null;
             var hereAim = null, hereAimEdge = null, hereAimHead = null;
             var hereAimSaid = null, hereAimNamed = null, hereAimMs = null;
+            // **What aiming cost in work rather than in time.** The
+            // milliseconds beside these say as much about the machine as about
+            // the page; these two are the page's own and every machine agrees
+            // on them. `walked` is how many segments the passes over the route
+            // touched, `sampled` how many segment-questions the ring's dozen
+            // directions asked -- and the claim worth holding is that the
+            // second is over a handful that survived the first, not over the
+            // route again.
+            var hereAimWalked = 0, hereAimSampled = 0;
             //: How old the dot is, said under it while no fix confirms it.
             var hereLostSaid = null;
             // **Where the reader is is the last thing drawn on this map.**
@@ -21814,6 +21843,8 @@ class _Chrome(MacroElement):
             // which is exact and needs no asking.
             function aimAlong(at, spread, target) {
                 var cosine = Math.cos(at.lat * Math.PI / 180);
+                hereAimWalked = 0;
+                hereAimSampled = 0;
                 // **A point the reader set needs no asking.** It does not move,
                 // so the whole of the width is their own circle turning a
                 // bearing to a fixed thing -- `asin(r / d)`, exactly, either
@@ -21834,6 +21865,7 @@ class _Chrome(MacroElement):
                 }
                 var best = null, run = 0, whole = 0, atLeg = null, spans = {};
                 target.segments(function (aLat, aLon, bLat, bLon, which) {
+                    hereAimWalked += 1;
                     // The legs arrive one at a time and in order, so the run
                     // resets where one hands over to the next and `spans` ends
                     // up holding how long each of them was. `whole` does not
@@ -21863,11 +21895,13 @@ class _Chrome(MacroElement):
                     var reach = best.away + 2 * spread;
                     var could = [];
                     target.segments(function (aLat, aLon, bLat, bLon) {
+                        hereAimWalked += 1;
                         if (nearOnSegment(at, cosine, aLat, aLon, bLat, bLon).away <= reach) {
                             could.push([aLat, aLon, bLat, bLon]);
                         }
                     });
                     var north = spread / 111320, east = spread / (111320 * cosine);
+                    hereAimSampled = could.length * AIM_SAMPLES;
                     for (var s = 0; s < AIM_SAMPLES; s += 1) {
                         var turn = s * 2 * Math.PI / AIM_SAMPLES;
                         // Where the reader might really be, and the bearing from
@@ -23855,6 +23889,29 @@ class _Chrome(MacroElement):
                     }
                 }
 
+                // **Every figure so far is measured from the top of the map,
+                // and the panels do not stand there.** They are children of the
+                // chrome, which is held inside the safe area, so a height taken
+                // from the map's is that much too tall the moment a phone has
+                // insets -- and the overflow all lands at the bottom, where the
+                // last row of a list is.
+                //
+                // Measured with an iPhone's portrait insets simulated (top 59,
+                // bottom 34) on a 390 x 844 screen: the full-height dock ran
+                // from 59 to 903 on a screen that ends at 844, its scroll
+                // stopped at its own maximum, and the legend's last row --
+                // *Farms and holdings [SSR]* -- sat at 847, off the screen and
+                // unreachable by any gesture. Reported from the phone as a row
+                // that could not be scrolled to. Sideways the top inset is 0
+                // and nothing ran over, which is why it only happened upright.
+                //
+                // `railRoom` is the chrome's own box, and `chromeTop` is where
+                // that box begins in the map's coordinates -- the one number
+                // that turns the figures above into the panels' own.
+                var room = railRoom();
+                var chromeTop = Math.max(0, Math.round(
+                    chrome.getBoundingClientRect().top - container.getBoundingClientRect().top));
+
                 // Drawn from the three facts, in one place. On a narrow
                 // screen a tool covers the detail rather than replacing it.
                 var top = narrow ? topmost() : null;
@@ -23893,7 +23950,12 @@ class _Chrome(MacroElement):
                     // The keyboard is the one thing that still takes room:
                     // `covered` is what it hides, and both places this page
                     // asks for typing are fields inside one of these sheets.
-                    var deep = Math.max(40, size.y - covered);
+                    // **The chrome's height and not the map's**, capped by
+                    // the box these sheets actually live in: the map's height
+                    // runs past the chrome's bottom edge by whatever the phone
+                    // keeps at the top, and a scroller that tall ends its
+                    // scroll below the screen.
+                    var deep = Math.max(40, Math.min(room.y, size.y - covered - chromeTop));
                     [dock, menu, sheet].forEach(function (box) {
                         box.style.left = '0';
                         box.style.right = '0';
@@ -23914,7 +23976,7 @@ class _Chrome(MacroElement):
                         // so this one does stop where the panel starts.
                         sheet.style.right = 'auto';
                         sheet.style.width = Math.min(340, Math.round(size.x * 0.44)) + 'px';
-                        sheet.style.height = Math.max(40, floor) + 'px';
+                        sheet.style.height = Math.max(40, Math.min(room.y, floor - chromeTop)) + 'px';
                         sheet.style.borderRight = '1px solid var(--trails-edge)';
                     } else {
                         sheet.style.borderRight = '0';
@@ -23927,7 +23989,7 @@ class _Chrome(MacroElement):
                     // its floor into what is left of that 80 — at a floor of
                     // 140 it did not, and the dock hung 49 px into the panel
                     // with the profile dragged as tall as it goes.
-                    var capped = Math.max(40, floor - 18);
+                    var capped = Math.max(40, Math.min(room.y, floor - chromeTop) - 18);
                     // **Beside the rail that opened it**, which is now the right
                     // one: 46 of rail and 10 either side.
                     dock.style.right = '66px';
@@ -24170,6 +24232,7 @@ class _Chrome(MacroElement):
                             wide: hereGoal.right - hereGoal.left, away: hereGoal.away,
                             on: hereGoal.on, at: hereGoal.at, target: hereGoal.name || null,
                             goal: hereGoal.goal ? hereGoal.goal.name : null, ms: hereAimMs,
+                            walked: hereAimWalked, sampled: hereAimSampled,
                             drawn: !!(hereAim && hereAim.getAttribute('display') !== 'none')};
                 },
                 state: function () {

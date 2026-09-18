@@ -1381,14 +1381,44 @@ class TestTheWideLayoutNeedsRoomInBothDirections:
         The room there is, on a narrow screen, is the screen: the veil is over
         the panel at the foot, so a sheet has no reason to stop where the map
         does. What still takes room is the keyboard, which hides part of the
-        viewport under fields these sheets are the only ones to hold."""
+        viewport under fields these sheets are the only ones to hold.
+
+        **The screen less what the phone keeps for itself**, which is the
+        chrome's box and not the map's: a sheet as tall as the map begins where
+        the chrome begins and ends the top inset below the glass, taking the end
+        of its own scroll with it (§9.37)."""
         html = self.rendered()
-        assert "var deep = Math.max(40, size.y - covered);" in html
+        assert "var deep = Math.max(40, Math.min(room.y, size.y - covered - chromeTop));" in html
         assert "box.style.height = deep + 'px';" in html
         # Held sideways the detail is a column beside the panel rather than a
-        # sheet over it, and there the panel's top is the floor again.
-        assert "sheet.style.height = Math.max(40, floor) + 'px';" in html
+        # sheet over it, and there the panel's top is the floor again -- in the
+        # chrome's terms, like everything else here.
+        assert "sheet.style.height = Math.max(40, Math.min(room.y, floor - chromeTop)) + 'px';" in html
         assert "overflow: auto" in html or "overflow:auto" in html
+
+    def test_every_height_is_measured_in_the_chrome_s_own_terms(self):
+        """The class of the bug rather than the one panel it was reported on.
+
+        The figures `place` starts from -- the keyboard, the profile panel's top
+        -- are all measured from the top of the *map*, which with
+        `viewport-fit=cover` reaches the physical edges of the screen. The
+        panels are children of the chrome, which is held inside the safe area.
+        `chromeTop` is the one number that turns the first into the second, and
+        every height that ends up on a panel goes through it: the full-screen
+        sheets, the sideways detail column, and the dock's ceiling on a wide
+        screen, which is the one a desktop sees.
+
+        Reported as a row of the layer list that could not be reached upright
+        (§9.37), where the panel ended 59 px below the glass and its scroll
+        ended with it.
+        """
+        html = self.rendered()
+        assert "var room = railRoom();" in html
+        assert "chrome.getBoundingClientRect().top - container.getBoundingClientRect().top" in html
+        # The wide screen's ceiling. Every inset is zero on a desktop, so this
+        # says the same thing it said before -- which is why it may be written
+        # once for both.
+        assert "var capped = Math.max(40, Math.min(room.y, floor - chromeTop) - 18);" in html
 
 
 class TestNothingInThePanelIsDeclaredTwice:

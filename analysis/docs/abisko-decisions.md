@@ -2980,12 +2980,154 @@ one that had not.
 records stand 249 m apart and draw as two pins again. The rule was right about what to do with two
 pins on one point; it was the point that was wrong.
 
+### 9.37 A panel is as tall as the chrome, not as tall as the map — fixed, 2026-09-17
+
+*"Ich kann bei lomsdal Visten in der Layer Ansicht 'Farms and holdings [SSR]' nicht auswählen. Im
+Hochkant Modus kann ich nicht soweit scrollen das ich den eintrag sehe."* The last row of the layer
+list, and only upright.
+
+**The two boxes are not the same box.** The page carries `viewport-fit=cover` and `100dvh`, so the
+map is drawn to the physical edges of the screen — which is itself a fix, for the browser's own
+background showing as a black band under the map. The chrome is then held *inside* the safe area,
+at `env(safe-area-inset-*)`, so that nothing a finger wants lands under the clock or the home
+indicator. `place` sized the full-screen sheets from `map.getSize()` — the outer box — while they
+are children of the inner one. A sheet given the map's height begins where the chrome begins and
+ends that much lower: by the **top** inset.
+
+| a 390 × 844 screen, an iPhone's portrait insets (59 top, 34 foot) | before | after |
+|---|---|---|
+| the panel | 59 → **903** | 59 → **810** |
+| the screen ends at | 844 | 844 |
+| the chrome ends at | 810 | 810 |
+| *Farms and holdings [SSR]*, scrolled as far as it goes | 847 → 887 | **754 → 794** |
+
+Scrolled to its own maximum the panel had nothing left to give, and the row began 3 px past the
+bottom of the glass and ran 43 px further. Nothing was broken about the scrolling; the box was the
+wrong height.
+
+**Sideways the top inset is 0**, which is the whole of why it only happened upright — the landscape
+insets are at the sides, and the sheet overran by nothing. That is what *"Im Hochkant Modus"* was
+telling us, and it is the fastest way to recognise this class of defect again.
+
+**One number fixes it and two other places wanted it too.** `chromeTop` is where the chrome's box
+begins in the map's coordinates, and every height in `place` is now measured in the chrome's own
+terms: the full-screen sheets, the detail column a phone held sideways gets, and the dock's ceiling
+on a wide screen. On a desktop every inset is zero and nothing moves, which is the part the recorded
+figures hold.
+
+**The check sets the insets by hand, because no browser here has any.** `env(safe-area-inset-*)`
+reads zero on Linux and Playwright cannot emulate it, so the one condition that produces this would
+never arise in a run — the suite was clean throughout. `the_safe_area_keeps_the_last_row_reachable`
+insets the chrome by the figures an iPhone reports and asks three things: that the panel ends above
+the screen's foot, that it ends inside the chrome, and that the last row does too. It also asks for
+the **coarse** layout first: a row is 40 px for a thumb and 21 px for a mouse, so with a fine
+pointer the legend nearly fits and there is barely anything to fall off the end.
+
+
+### 9.38 No check owns a clock, and the two pages drive at once — settled, 2026-09-17
+
+*"Was auch nicht akzeptabel ist das die Tests für diese Maschine abgestimmt sind. Tests sollten
+unabhängig einer bestimmten Dauer sein wenn nicht das getestete wird."* Five readings compared
+elapsed time against a figure recorded on this box. They are gone.
+
+| what it claimed | how it claimed it | now |
+|---|---|---|
+| aiming one fix is cheap | **invariant, 12 ms ± 12** | the page counts `walked` and `sampled`; the claim is that the ring's dozen directions ask a handful of segments, not the route again |
+| a leg gives up after three tries | `took > 12 s`, and 18 s ± 14 beside it | the page counts its own attempts at a height tile: `tries >= 3` |
+| a plan comes back after a reload | 20.7 s ± 20 | printed |
+| writing the plan is cheap | ms ± 40 | printed |
+| the edge index is cheap to build | ms ± 60 | printed |
+
+**A duration says as much about the machine as about the page.** On a faster box, on a loaded one,
+or with a second page driven beside this one, every figure in that column moves — and the one thing
+it never means is that the page changed. The page itself had already written this down where the
+aim cost is recorded: *"Recorded rather than guarded against: the number is what says whether it
+needs guarding."* The drive had turned that record into an invariant.
+
+**Where the duration really is the subject, the work is counted instead.** A timeout that must fire
+and a retry that must happen three times are both claims about the page — and both are countable.
+The aiming's two passes and its sampling are counters the page keeps: measured, **96 sampled
+against 4,784 walked** at Lomsdal-Visten and 108 against 2,536 at Abisko, which is the sentence
+about a handful said as a number. Every machine agrees on those.
+
+**Counting the attempts took two wrong tries, and both are worth keeping.** The first counted the
+*server's* log, which is the obvious place and the wrong one: with every connection held open, the
+second and third attempts sat behind the browser's limit of six per host and expired where they
+queued, so the server saw one of three while an elapsed 16.8 s said all three had happened. A check
+built on that called a working retry a failure. The second counted in the page, in `ask` — the
+retry around the height **model** over the wire. It read zero, because the path under test is
+`/dem/`: the height **tiles** served beside the page, retried in `heightTile`. Both mistakes are
+the same mistake as the wall clock itself — measuring something adjacent to the claim instead of
+the claim. It reads 3 at Lomsdal-Visten and 6 at Abisko now: one tile and two, three attempts each.
+
+**`noted()` is the shape of the answer.** A reading that prints a figure and asserts nothing, with
+the reason in its docstring, so the next person reaching for a stopwatch finds the argument rather
+than the precedent. The four recorded figures came out of both scenes with it: what is not compared
+cannot *move*.
+
+**And then the two pages may be driven at once**, which is what the whole thing was for: *"Die
+drives dauern viel zu lange. Jede kleine Änderung dauert deswegen mindestens 20min."* A run owns
+its browser and serves its page on a port the kernel picks, so two share nothing but the machine —
+eight cores against one Firefox apiece. `make drive-both` runs both and prints both. What forbade
+it was never the browser; it was those five readings.
+
+**`-u`, because a buffered log reads exactly like a hang.** Twice in one evening a run was reported
+as stuck when it was working: Python buffers its output the moment it is not a terminal, so a file
+under `systemd-run` stays empty until the end. Both drive targets pass `-u` now.
+
+**What is left, and named rather than quietly not done.** 342 fixed waits, 278 s of the 8.2 min a
+page takes. Some are the claim itself — *coming back to the app costs no request at all* can only
+be checked by watching a quiet window — and the rest are 342 separate judgements, each able to turn
+a steady check into a flaky one. That is its own piece of work, not a tidy-up to fold into this one.
+
+**A run says what it is doing now.** The report is a table and a table can only be printed once
+everything in it is known, so a run said nothing for eight minutes — and an eight-minute silence is
+indistinguishable from a hang. It was read as one three times in a single evening. Each check now
+names itself on stderr as it starts and again with its seconds as it ends; the table is unchanged.
+
+**A flake found on the way.** `a tap that could have meant several lines` searched for a line
+standing alone at zoom 16 and tapped it at 15. `trailsReach` answers in pixels, so the two are
+different questions: measured on the Abisko page, 1 of the first 12 lines alone at 16 has company
+at 15. Which line the search reached first depended on the map state the checks before it left, so
+it broke on one run and passed on the next with nothing changed. One `TAP_ZOOM` now. Its default
+for *no line was found* was also the value the reading fails on, which made *nothing to tap* and
+*a row was drawn* the same red line; that is a reading of its own now.
+
+**And the zoom was not the whole of it. The page was right; the check was tapping a pin.** The row
+it complained about carried *OSM, Leder, Topografi 50 trails, Topografi 50 paths* — the four chips
+of the tap **before** it, still standing because nothing had replaced them. The premise was never
+read: `chosen` was `null`, so the tap on the lonely line had taken nothing at all.
+`elementFromPoint` at that spot answers a `path` in the **marker pane**. The first line the search
+reaches on the Abisko page runs past Abisko Östra, and the stop pins drawn there earlier the same
+evening (§9.35, §9.36) sit on top of it — so this check turned red at the moment those pins
+arrived, on a page that was behaving perfectly.
+
+Three things came out of it, and the first is the one that matters: **a check must read its own
+premise.** *The tap took the line* is now a reading of its own, so *the tap missed* and *a row was
+drawn that should not have been* can never again be one red line. The search skips any point with
+something in the marker pane on top of it. And the route is cleared before it looks, because a
+planned route along the same road is offered by the tap handler on top of what `trailsReach.near`
+finds — which would have been the next false alarm.
 
 ---
 
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-17, thirteenth of the day** — no check compares elapsed time any more (§9.38), on
+  Uwe's rule that a test must not fail because the machine is faster or because we parallelise.
+  Five readings went: one was an invariant on 12 ms ± 12. Where the duration is the subject the
+  work is counted instead, in the page: attempts at a height tile, and segments walked against
+  segments sampled. `make drive-both` then drives both pages at once, which those five readings
+  had forbidden — 8.2 and 6.8 minutes side by side against 15 one after the other. Each check now
+  names itself while it runs, after three silences in one evening were read as hangs.
+
+- **2026-09-17, twelfth of the day** — a full-screen panel is sized from the chrome and not from
+  the map (§9.37), after Uwe could not reach the layer list's last row upright. With an iPhone's
+  portrait insets the panel ran 59 px below the screen and its scroll ended there; the row sat at
+  847 on a screen ending at 844. Sideways the top inset is zero, which is why landscape was fine.
+  The drive now insets the chrome by hand, because no browser on this box has a safe area at all.
 
 - **2026-09-17, eleventh of the day** — Sweden's stops are placed by the national stop register and
   described by the timetable feed (§9.36), after Uwe found the Abisko Östra station pin 234 m from
