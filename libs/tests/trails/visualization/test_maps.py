@@ -712,8 +712,8 @@ class TestOfflinePanel:
         assert "if (which === 'all') { return null; }" in panel
         levels = panel.split("function levelsFor(coreAt, top, pad) {")[1].split("\n                }")[0]
         assert "if (!coreAt)" in levels
-        assert "for (z = OVERVIEW; z <= top; z += 1) { out[z] = overviewAt(z); }" in levels
-        overview = panel.split("function overviewAt(z, core) {")[1].split("\n                }")[0]
+        assert "for (z = OVERVIEW; z <= top; z += 1) { out[z] = overviewAt(z, null, true); }" in levels
+        overview = panel.split("function overviewAt(z, core, whole) {")[1].split("\n                }")[0]
         assert "var box = EXTENT;" in overview
         assert "new Set" not in overview
 
@@ -741,7 +741,7 @@ class TestOfflinePanel:
         panel = self.panel()
         assert "var OVERVIEW = 8;" in panel
         assert "for (z = OVERVIEW; z <= BOTTOM; z += 1) { out[z] = overviewAt(z, out[z]); }" in panel
-        overview = panel.split("function overviewAt(z, core) {")[1].split("function overviewCost()")[0]
+        overview = panel.split("function overviewAt(z, core, whole) {")[1].split("function overviewCost()")[0]
         assert "var box = EXTENT;" in overview
         assert "var size = (x1 - x0 + 1) * (y1 - y0 + 1);" in overview
         assert "if (!inside(v)) { size += 1; }" in overview
@@ -9882,7 +9882,7 @@ class TestPackPanel:
         own = maps.PROVIDERS[provider]
         west, south, east, north = own.extent
         settings = {"HEIGHTS": own.heights, "SHADE": own.shade, "SLOPE": own.slope, "VEGETATION": own.vegetation, "FOREST": own.forest}
-        setup = f"var location = {{href: 'https://atlas.test/map.html'}}, TOP = {own.top}, OVERVIEW = 8, SPAN = 262144;"
+        setup = f"var location = {{href: 'https://atlas.test/map.html'}}, TOP = {own.top}, OVERVIEW = 8, BOTTOM = 11, SPAN = 262144;"
         setup += "var EXTENT = " + json.dumps({"w": west, "s": south, "e": east, "n": north}) + ";"
         setup += "var PACK_WEIGHT = " + json.dumps(own.pack_weight) + ";"
         for name, layer in settings.items():
@@ -9890,7 +9890,19 @@ class TestPackPanel:
             setup += f"var {name} = {json.dumps(layer.as_settings())};"
             assert set(layer.pack_weight) == set(packs.pack_levels(range(8, layer.top + 1)))
         setup += "function key(x,y) {return x*SPAN+y;} function keyX(v){return Math.floor(v/SPAN);} function keyY(v){return v%SPAN;}"
-        for name in ["fracTile", "edgeAt", "overviewAt", "packPrefix", "packLayers", "parentsAt", "packWalk", "weigh"]:
+        for name in [
+            "fracTile",
+            "edgeAt",
+            "padded",
+            "overviewAt",
+            "overviewCost",
+            "levelsFor",
+            "packPrefix",
+            "packLayers",
+            "parentsAt",
+            "packWalk",
+            "weigh",
+        ]:
             setup += self.function(name)
         return setup
 
@@ -9898,7 +9910,7 @@ class TestPackPanel:
     def test_whole_box_iterator_counts_packs_once_with_measured_weights(self, tmp_path, provider, count):
         setup = self.setup(provider)
         setup += """
-            var levels = {}; for (var z=8; z<=17; z++) levels[z]=overviewAt(z);
+            var levels = levelsFor(null, 17, 1);
             var walk=packWalk(levels), row, urls=new Set(), total=0, bytes=0;
             while ((row=walk.next())) { urls.add(row.url); total++; bytes+=row.bytes; }
             console.log(JSON.stringify({total:total, unique:urls.size, bytes:bytes, weighed:weigh(levels)}));
@@ -9906,6 +9918,51 @@ class TestPackPanel:
         result = TestPackWorker.run_worker(tmp_path, setup, provider)
         assert result["total"] == result["unique"] == count
         assert result["weighed"] == {"packs": count, "bytes": result["bytes"]}
+
+    @pytest.mark.parametrize(
+        "provider,position,overview,tiny",
+        [
+            ("kartverket", (65.55, 13.05), {"packs": 67, "bytes": 41982780}, {"packs": 116, "bytes": 83176025}),
+            ("lantmateriet", (68.32, 18.72), {"packs": 21, "bytes": 16653230}, {"packs": 70, "bytes": 50750235}),
+        ],
+    )
+    def test_overview_keeps_the_sheet_and_overlays_but_only_scope_heights(self, tmp_path, provider, position, overview, tiny):
+        script = (
+            self.setup(provider)
+            + f"var position = {json.dumps(position)};"
+            + """
+            var centre = fracTile(position[0], position[1], 14);
+            var x = Math.floor(centre.x), y = Math.floor(centre.y);
+            var levels = levelsFor(function () { return new Set([key(x, y)]); }, 14, 1);
+            var walk = packWalk(levels), row, heights = [], expected = new Set();
+            // Independent scope pyramid, including its padded z11 ground:
+            // the overview must neither enlarge it nor erase it at that level.
+            for (var z = 11; z <= HEIGHTS.zoom; z++) {
+                var sx = x >> (14 - z), sy = y >> (14 - z), edge = edgeAt(z);
+                for (var dx = -1; dx <= 1; dx++) {
+                    for (var dy = -1; dy <= 1; dy++) {
+                        var px = sx + dx, py = sy + dy;
+                        if (px < edge.x0 || px > edge.x1 || py < edge.y0 || py > edge.y1) continue;
+                        expected.add(packFor(new URL(HEIGHTS.url.split('{z}')[0], location.href).href +
+                            z + '/' + px + '/' + py + '.png').url);
+                    }
+                }
+            }
+            while ((row = walk.next())) { if (row.kind === 'height') heights.push(row.url); }
+            var overviewLevels = {};
+            for (var z = 8; z <= 11; z++) overviewLevels[z] = overviewAt(z);
+            var overviewKinds = new Set(); walk = packWalk(overviewLevels);
+            while ((row = walk.next())) overviewKinds.add(row.kind);
+            console.log(JSON.stringify({overview: overviewCost(), tiny: weigh(levels),
+                kinds: Array.from(overviewKinds).sort(), heights: heights.sort(), expected: Array.from(expected).sort()}));
+        """
+        )
+        result = TestPackWorker.run_worker(tmp_path, script, provider)
+        assert result["overview"] == overview
+        assert result["tiny"] == tiny
+        assert result["kinds"] == ["forest", "map", "shade", "slope", "vegetation"]
+        assert len(result["heights"]) == 4
+        assert result["heights"] == result["expected"]
 
     @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
     def test_sparse_scope_addresses_match_worker_at_every_zoom(self, tmp_path, provider):

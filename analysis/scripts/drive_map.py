@@ -343,6 +343,10 @@ SCENES: dict[str, Scene] = {
             "links to pages published elsewhere": 2,
             # All six pack trees, including the overview, at the z17 cap.
             "packs the whole map holds at its cap": 9162,
+            "packs kept for the tiny scope and overview": 116,
+            "estimated bytes for the tiny scope and overview": 83176025,
+            "packs in the sheet and overlay overview": 67,
+            "estimated bytes in the sheet and overlay overview": 41982780,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -487,6 +491,10 @@ SCENES: dict[str, Scene] = {
             "links to pages published elsewhere": 4,
             # All six pack trees, including the overview, at the z17 cap.
             "packs the whole map holds at its cap": 2274,
+            "packs kept for the tiny scope and overview": 70,
+            "estimated bytes for the tiny scope and overview": 50750235,
+            "packs in the sheet and overlay overview": 21,
+            "estimated bytes in the sheet and overlay overview": 16653230,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -9761,10 +9769,10 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
             return url;
         }""")
         )
-        trees = [(base_url, 8, provider.top, provider.pack_weight)]
+        trees = [(base_url, 8, provider.top, provider.pack_weight, True)]
         for layer in (provider.heights, provider.shade, provider.slope, provider.vegetation, provider.forest):
             if layer:
-                trees.append((origin + layer.template, 8, layer.top, layer.pack_weight))
+                trees.append((origin + layer.template, 8, layer.top, layer.pack_weight, layer is not provider.heights))
         overview: dict[str, int] = {}
         old_scope: dict[str, int] = {}
         for z in range(8, 15):
@@ -9777,8 +9785,8 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
             ]:
                 for x in range(left, right + 1):
                     for y in range(upper, lower + 1):
-                        for template, bottom, top, weight in trees:
-                            if bottom <= z <= top:
+                        for template, bottom, top, weight, in_overview in trees:
+                            if bottom <= z <= top and (target is old_scope or in_overview):
                                 parent = max(level for level in weight if level <= z)
                                 prefix = template.split("{z}")[0].replace(origin, origin + "/packs", 1)
                                 target[f"{prefix}{parent}/{x >> (z - parent)}/{y >> (z - parent)}.pmtiles"] = weight[parent]
@@ -9858,6 +9866,10 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         return Check(
             "the overview is kept with a small scope and fills an older one",
             [
+                stands("packs kept for the tiny scope and overview", estimate["packs"]),
+                stands("estimated bytes for the tiny scope and overview", estimate["bytes"]),
+                stands("packs in the sheet and overlay overview", estimate["overview"]["packs"]),
+                stands("estimated bytes in the sheet and overlay overview", estimate["overview"]["bytes"]),
                 Reading("the estimate counts the union once", estimate["packs"], len(expected)),
                 Reading("the estimate weighs the union once", estimate["bytes"], sum(expected.values())),
                 Reading(

@@ -392,7 +392,9 @@
                 // Four rectangles, not a tile list. The scope may also reach
                 // outside the box at z11; keep that ground once, and price the
                 // overlap once. Each iterator holds only its current position.
-                function overviewAt(z, core) {
+                // Heights use only the scope beneath this union. For the whole
+                // map, the rectangle itself is the scope at every level.
+                function overviewAt(z, core, whole) {
                     var box = EXTENT;
                     var a = fracTile(box.n, box.w, z), b = fracTile(box.s, box.e, z);
                     var x0 = Math.floor(a.x), y0 = Math.floor(a.y);
@@ -403,6 +405,8 @@
                     var size = (x1 - x0 + 1) * (y1 - y0 + 1);
                     if (core) { core.forEach(function (v) { if (!inside(v)) { size += 1; } }); }
                     return {
+                        overview: !whole,
+                        scope: core,
                         size: size,
                         has: function (v) { return inside(v) || !!(core && core.has(v)); },
                         values: function () {
@@ -445,7 +449,7 @@
                 function levelsFor(coreAt, top, pad) {
                     var out = {}, z;
                     if (!coreAt) {
-                        for (z = OVERVIEW; z <= top; z += 1) { out[z] = overviewAt(z); }
+                        for (z = OVERVIEW; z <= top; z += 1) { out[z] = overviewAt(z, null, true); }
                         return out;
                     }
                     var below = coreAt(top);
@@ -489,16 +493,18 @@
                 // Scan parents, testing their children against the selection.
                 // Only the current rectangle position survives a next(): no set
                 // of parents, addresses or requests grows with the download.
-                function parentsAt(levels, top, level) {
+                function parentsAt(levels, top, level, kind) {
                     var edge = edgeAt(level);
                     var first = Math.max(OVERVIEW, level), last = Math.min(top, level + 3);
                     function wanted(x, y) {
                         for (var z = first; z <= last; z += 1) {
-                            if (!levels[z]) { continue; }
+                            var selected = levels[z];
+                            if (selected && kind === 'height' && selected.overview) { selected = selected.scope; }
+                            if (!selected) { continue; }
                             var side = Math.pow(2, z - level);
                             for (var dx = 0; dx < side; dx += 1) {
                                 for (var dy = 0; dy < side; dy += 1) {
-                                    if (levels[z].has(key(x * side + dx, y * side + dy))) { return true; }
+                                    if (selected.has(key(x * side + dx, y * side + dy))) { return true; }
                                 }
                             }
                         }
@@ -524,7 +530,7 @@
                             if (z > layer.top) { at += 1; z = OVERVIEW; continue; }
                             if (!parents) {
                                 level = packLevel(layer.top, z);
-                                parents = parentsAt(levels, layer.top, level);
+                                parents = parentsAt(levels, layer.top, level, layer.kind);
                             }
                             var parent = parents.next();
                             if (parent) {
