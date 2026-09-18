@@ -527,7 +527,7 @@ function packFor(plain) {
     var level = packLevel(layer[1], z);
     var prefix = new URL(layer[0]);
     prefix.pathname = '/packs' + prefix.pathname;
-    return {url: prefix.href + level + '/' + (x >> (z - level)) + '/' + (y >> (z - level)) + '.pmtiles', id: id, height: layer[0] === HEIGHT_PREFIX};
+    return {url: prefix.href + level + '/' + (x >> (z - level)) + '/' + (y >> (z - level)) + '.pmtiles', id: id, tile: plain, height: layer[0] === HEIGHT_PREFIX};
 }
 
 // 48 directories are small (85 entries at most); eight bodies cover nearby
@@ -678,13 +678,18 @@ async function networkTile(address, event, asked = Date.now()) {
     var entry = entries.get(address.id);
     if (!entry) { return null; }
     var part = await range(url, entry.offset, entry.offset + entry.length - 1);
-    return part.whole ? sliceTile(keepNetworkPack(url, part.whole, event), address.id) : part.body;
+    if (part.whole) { return sliceTile(keepNetworkPack(url, part.whole, event), address.id); }
+    // A range bought this tile, not its pack. Keep exactly those bytes so the
+    // first screen survives a cold offline visit without promoting any pack.
+    var kept = browsePut(address.tile, part.body);
+    if (event) { event.waitUntil(kept); }
+    return part.body;
 }
 
 var lookups = [], lookupTick = null;
-function lookup(plain, state) {
+function lookup(plain, state, tile) {
     return new Promise(function (done) {
-        lookups.push({plain: plain, state: state, done: done});
+        lookups.push({plain: plain, tile: tile, state: state, done: done});
         if (lookupTick === null) { lookupTick = setTimeout(flushLookups, 0); }
     });
 }
@@ -710,7 +715,29 @@ function flushLookups() {
                     if (items.every(function (item) { return item.state.expired; })) { return; }
                     var seen = tx.objectStore(SEEN).get(plain);
                     seen.onsuccess = function () {
-                        answer(seen.result && seen.result.body instanceof ArrayBuffer ? {body: seen.result.body, path: "seen"} : null);
+                        if (seen.result && seen.result.body instanceof ArrayBuffer) {
+                            answer({body: seen.result.body, path: "seen"}); return;
+                        }
+                        // Share the pack reads, then ask only for the missing
+                        // tiles. A later whole pack supersedes these rows without
+                        // a walk through browse to remove them.
+                        var tiles = new Map();
+                        items.forEach(function (item) {
+                            if (item.state.expired) { return; }
+                            if (!item.tile) { off.then(function (on) { item.state.off = on; item.done(null); }); return; }
+                            if (!tiles.has(item.tile)) { tiles.set(item.tile, []); }
+                            tiles.get(item.tile).push(item);
+                        });
+                        tiles.forEach(function (waiting, tile) {
+                            var ask = tx.objectStore(SEEN).get(tile);
+                            ask.onsuccess = function () {
+                                var value = ask.result && ask.result.body instanceof ArrayBuffer ?
+                                    {body: ask.result.body, path: "seen", tile: true} : null;
+                                off.then(function (on) {
+                                    waiting.forEach(function (item) { item.state.off = on; item.done(value); });
+                                });
+                            };
+                        });
                     };
                 };
             });
@@ -750,10 +777,11 @@ function tileFor(request, event) {
             answered(body ? "mem" : "blank"); return body ? png(body) : blank();
         }
         // The deadline bounds the store only; even a slow network answer is awaited below.
-        return within(2500, lookup(address.url, state), null, late).then(async function (found) {
+        return within(2500, lookup(address.url, state, plain), null, late).then(async function (found) {
             if (found) {
                 var cached = recent(packs, address.url);
-                var body = sliceTile(cached || holdPack(address.url, found.body), address.id);
+                var body = cached ? sliceTile(cached, address.id) :
+                    (found.tile ? found.body : sliceTile(holdPack(address.url, found.body), address.id));
                 answered(body ? (cached ? "mem" : found.path) : "blank"); return body ? png(body) : blank();
             }
             // A concurrent request may have filled memory while this get ran.

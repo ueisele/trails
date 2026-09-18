@@ -471,7 +471,7 @@ class TestOfflineWorker:
         worker = maps.SERVICE_WORKER
         tile = worker.split("function tileFor(request, event)")[1].split("\nfunction ")[0]
         assert tile.count("within(") == 1
-        assert "within(2500, lookup(address.url, state), null, late)" in tile
+        assert "within(2500, lookup(address.url, state, plain), null, late)" in tile
         assert "state.expired = true;" in tile
         assert "setTimeout(flushLookups, 0)" in worker
         assert "if (items.every(function (item) { return item.state.expired; }))" in worker
@@ -1909,7 +1909,7 @@ class TestTheSheetCarriesAToken:
         ground still draws under its new address."""
         assert 'var plain = request.url.split("?")[0];' in maps.SERVICE_WORKER
         tile = maps.SERVICE_WORKER.split("function tileFor(request, event)")[1].split("\nfunction ")[0]
-        assert "lookup(address.url, state)" in tile
+        assert "lookup(address.url, state, plain)" in tile
         # Stored without it too, or a second token would orphan what the first
         # one wrote.
         assert "browsePut(url, body)" in maps.SERVICE_WORKER
@@ -9672,6 +9672,7 @@ class TestPackWorker:
                         {
                             "url": f"https://atlas.test/packs{layer.tiles}{level}/{x >> (zoom - level)}/{y >> (zoom - level)}.pmtiles",
                             "id": packs.tile_id(zoom, x, y),
+                            "tile": addresses[-1],
                             "height": layer is own.heights,
                         }
                     )
@@ -9764,10 +9765,10 @@ class TestPackWorker:
             f"""
             (async function () {{
                 var bytes = Uint8Array.from(Buffer.from('{encoded}', 'base64')).buffer;
-                var requests = [], writes = 0, ignoreRange = false;
+                var requests = [], writes = [], ignoreRange = false;
                 browsePut = async function (url, body) {{
                     if (!(body instanceof ArrayBuffer)) throw Error('not an ArrayBuffer');
-                    writes++;
+                    writes.push({{url, size: body.byteLength}});
                 }};
                 fetch = async function (url, options) {{
                     var range = options && options.headers.Range;
@@ -9779,7 +9780,7 @@ class TestPackWorker:
                     }}}});
                 }};
                 var a = packFor(TILE_PREFIX + '14/1/1.png'), b = packFor(TILE_PREFIX + '15/2/2.png');
-                var one = await networkTile(a), rangeWrites = writes;
+                var one = await networkTile(a), rangeWrites = writes.slice();
                 var fetchedAt = directories.get(a.url).at;
                 Date.now = () => fetchedAt + SETTLE_MS;
                 await Promise.all([networkTile(b), networkTile(a), networkTile(b)]);
@@ -9801,11 +9802,14 @@ class TestPackWorker:
         assert result["requests"][0] == "bytes=0-16383"
         assert len(result["beforeSettle"]) == 6, "burst tiles stay ranged, even after a slow store lookup or at the two-second boundary"
         assert all(request.startswith("bytes=") for request in result["beforeSettle"])
-        assert result["rangeWrites"] == 0
+        assert result["rangeWrites"] == [{"url": "https://atlas.test/tiles/kartverket/topo/1/14/1/1.png", "size": 68}]
         assert result["afterSettle"] == result["afterMemory"]
         assert result["requests"].count("whole") == 1
         assert result["requests"][-1] == "bytes=0-16383"
-        assert result["same"] and result["writes"] == 2
+        assert result["same"]
+        whole_writes = [row for row in result["writes"] if row["url"].endswith(".pmtiles")]
+        assert len(whole_writes) == 2
+        assert all(row["size"] == 68 for row in result["writes"] if row not in whole_writes)
 
     def test_promotions_are_bounded_do_not_block_ranges_and_never_include_heights(self, tmp_path):
         tile = tmp_path / "tile.png"
@@ -9866,6 +9870,31 @@ class TestPackWorker:
             "whole": 3,
             "heightWhole": False,
             "refreshed": True,
+        }
+
+    @pytest.mark.parametrize("offline", [False, True])
+    def test_browse_tile_answers_without_network_or_pack_parsing(self, tmp_path, offline):
+        result = self.run_worker(
+            tmp_path,
+            """
+            (async function () {
+                var bytes = new Uint8Array([1, 2, 3]).buffer, paths = [], keys;
+                tally = path => paths.push(path);
+                switched = Promise.resolve(OFFLINE);
+                lookup = async (pack, state, tile) => {
+                    keys = [pack, tile]; state.off = OFFLINE;
+                    return {body: bytes, path: 'seen', tile: true};
+                };
+                networkTile = async () => { throw Error('browse tile reached network'); };
+                var response = await tileFor(new Request(TILE_PREFIX + '14/1/1.png?token=2'));
+                console.log(JSON.stringify({body: [...new Uint8Array(await response.arrayBuffer())], paths, keys}));
+            })().catch(e => { console.error(e); process.exitCode = 1; });
+            """.replace("OFFLINE", json.dumps(offline)),
+        )
+        assert result == {
+            "body": [1, 2, 3],
+            "paths": ["seen"],
+            "keys": ["https://atlas.test/packs/tiles/kartverket/topo/1/14/1/1.pmtiles", "https://atlas.test/tiles/kartverket/topo/1/14/1/1.png"],
         }
 
     def test_slow_network_is_awaited_outside_the_store_deadline(self, tmp_path):

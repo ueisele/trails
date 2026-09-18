@@ -10080,6 +10080,54 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         readings.append(Reading("the online reader uses ranges too", any(row[1] is not None for row in initial), True))
         page.wait_for_timeout(2200)
         readings.append(Reading("staying on the first screen starts no request", len(_Quiet.pack_requests) - len(initial), 0))
+        # A new worker loses every directory and memory pack. With no Keep
+        # and no whole pack fetched, only the tile rows can draw this screen.
+        assert wait_until(
+            page,
+            """async () => {
+            const urls = [...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')].map(t => t.src.split('?')[0]);
+            const rows = await Promise.all(urls.map(u => window.trailsOffline.dbRead('browse', u)));
+            return rows.every(r => r && r.body instanceof ArrayBuffer && r.size === r.body.byteLength);
+        }""",
+            30_000,
+        )
+        ranged = page.evaluate("""async () => {
+            const urls = [...new Set([...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')].map(t => t.src.split('?')[0]))];
+            const rows = await Promise.all(urls.map(u => window.trailsOffline.dbRead('browse', u)));
+            return {tiles: rows.length, bytes: rows.reduce((n, r) => n + r.size, 0),
+                total: (await window.trailsOffline.dbRead('flags', 'browse-bytes')).bytes};
+        }""")
+        readings.append(Reading("browse accounts for just the first screen's tile bytes", ranged["total"], ranged["bytes"]))
+        page.evaluate("""async () => {
+            const reg = await navigator.serviceWorker.getRegistration();
+            await navigator.serviceWorker.register(reg.active.scriptURL.split('?')[0] + '?browse-offline=1', {scope: reg.scope});
+        }""")
+        page.wait_for_function("() => navigator.serviceWorker.controller.scriptURL.includes('browse-offline=1')", timeout=30_000)
+        context.set_offline(True)
+        page.evaluate(
+            with_map("""() => {
+            __MAP__.eachLayer(l => { if (l.getTileUrl) l.setUrl(l._url.split('?')[0] + '?browse-screen=offline'); });
+        }""")
+        )
+        page.wait_for_function(loaded, timeout=30_000)
+        assert wait_until(
+            page,
+            """async () => (await window.trailsOffline.dbRead('flags', 'tiles-said'))?.seen >= __COUNT__""".replace(
+                "__COUNT__", str(ranged["tiles"])
+            ),
+            10_000,
+        )
+        browse_tally = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
+        readings.append(
+            Reading(
+                "a cold offline worker draws the first screen from browse tiles",
+                [browse_tally["seen"], browse_tally["mem"], browse_tally["db"]],
+                [ranged["tiles"], 0, 0],
+                note=f"{ranged['tiles']} tiles, {ranged['bytes']} bytes; seen {browse_tally['seen']}",
+            )
+        )
+        readings.append(Reading("the cold browse screen asks for no pack", len(_Quiet.pack_requests) - len(initial), 0))
+        context.set_offline(False)
         # Once the directory is older than the window, one further tile asks
         # for its pack. Keep only the base for the following warm/offline views.
         tile_url = page.evaluate(
@@ -10091,14 +10139,25 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
             return Object.values(window.packSheet._tiles)[0].el.src;
         }""")
         )
-        page.evaluate("async url => { await (await fetch(url + '?pack-dwell=1')).arrayBuffer(); }", tile_url)
+        # The visible z17 tile is now cached. Two unseen ancestors in its pack
+        # exercise directory arrival and later promotion after the cold life.
+        parent_url = re.sub(r"17/(\d+)/(\d+)\.png.*", lambda m: f"14/{int(m[1]) >> 3}/{int(m[2]) >> 3}.png", tile_url)
+        child_url = re.sub(r"14/(\d+)/(\d+)\.png", lambda m: f"15/{int(m[1]) * 2}/{int(m[2]) * 2}.png", parent_url)
+        page.evaluate("async url => { await (await fetch(url)).arrayBuffer(); }", child_url)
+        page.wait_for_timeout(2200)
+        page.evaluate("async url => { await (await fetch(url + '?pack-dwell=1')).arrayBuffer(); }", parent_url)
+        page.evaluate(
+            "url => { const u = new URL(url); u.pathname = '/packs' + u.pathname.replace('.png', '.pmtiles'); window.promotedPack = u.href; }",
+            parent_url,
+        )
         # The tile's range need not wait for the background whole-pack body.
-        page.wait_for_function(
+        assert wait_until(
+            page,
             """async () => {
             const db = window.trailsOffline;
-            return (await db.dbRead('flags', 'browse-bytes'))?.bytes > 0;
+            return (await db.dbRead('browse', window.promotedPack))?.body instanceof ArrayBuffer;
         }""",
-            timeout=30_000,
+            30_000,
         )
         settled = list(_Quiet.pack_requests)
         promoted = settled[len(initial) :]
@@ -10156,8 +10215,9 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
                 const seen = tx.objectStore('browse'), kept = tx.objectStore('packs'); let count = 0, bytes = 0;
                 const ask = seen.openCursor(); ask.onsuccess = () => {
                     const row = ask.result; if (!row) { seen.clear(); return; }
-                    if (!(row.value.body instanceof ArrayBuffer)) throw Error('browse pack is not an ArrayBuffer');
-                    kept.put(row.value.body, row.key); count++; bytes += row.value.size; row.continue();
+                    if (!(row.value.body instanceof ArrayBuffer)) throw Error('browse row is not an ArrayBuffer');
+                    if (row.key.endsWith('.pmtiles')) { kept.put(row.value.body, row.key); count++; bytes += row.value.size; }
+                    row.continue();
                 };
                 tx.objectStore('flags').put('on', 'offline');
                 tx.oncomplete = () => done({count, bytes}); tx.onerror = () => fail(tx.error);
@@ -10257,20 +10317,24 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                     await committed(tx);
                     return {rows: rows.result, sizes: sizes.result, total: total.result, clears: browseClears};
                 };
-                const k = packFor(TILE_PREFIX + '14/1/1.png').url, s = packFor(TILE_PREFIX + '14/1/2.png').url,
-                    m = packFor(TILE_PREFIX + '14/1/3.png').url;
+                const kt = TILE_PREFIX + '14/1/1.png', st = TILE_PREFIX + '14/1/2.png', mt = TILE_PREFIX + '14/1/3.png',
+                    sibling = TILE_PREFIX + '15/2/6.png', absent = TILE_PREFIX + '15/3/6.png';
+                const k = packFor(kt).url, s = packFor(st).url, m = packFor(mt).url;
                 const buffer = text => new TextEncoder().encode(text).buffer;
                 await seed((kept, seen, flags) => {
                     kept.put(buffer('kept'), k);
                     seen.put({body: buffer('shadow'), size: 6, at: 1}, k);
                     seen.put({body: buffer('seen'), size: 4, at: 2}, s);
+                    for (const tile of [kt, st, mt, sibling]) seen.put({body: buffer('tile'), size: 4, at: 3}, tile);
                     flags.put(6, BROWSE_SIZE + k);
                     flags.put('on', STATE);
                 });
                 reset();
-                const answers = await Promise.all([k, s, m, k].map(plain => lookup(plain, {expired: false, off: false})));
+                const answers = await Promise.all([kt, st, mt, kt, sibling, absent].map(tile =>
+                    lookup(packFor(tile).url, {expired: false, off: false}, tile)));
                 out.lookup = {transactions: counts.tx.length, gets: counts.gets.slice(),
-                    paths: answers.map(a => a && a.path), bodies: await Promise.all(answers.map(a => a && new TextDecoder().decode(a.body)))};
+                    paths: answers.map(a => a && a.path), tiles: answers.map(a => !!(a && a.tile)),
+                    bodies: answers.map(a => a && new TextDecoder().decode(a.body))};
                 // Every answer settles in its own request callback, not at commit.
                 const originalGet = IDBObjectStore.prototype.get;
                 let release = null;
@@ -10322,24 +10386,24 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 await seed((kept, seen, flags) => {
                     seen.clear(); flags.delete(BROWSE_BYTES);
                     for (let i = 0; i < 50; i++) {
-                        const key = TILE_PREFIX + 'old-browse/' + i;
+                        const key = i % 2 ? packFor(TILE_PREFIX + '14/' + i + '/10.png').url : TILE_PREFIX + '17/' + i + '/10.png';
                         seen.put({body: large, size: large.byteLength, at: i}, key);
                         flags.put(large.byteLength, BROWSE_SIZE + key);
                     }
                     flags.put({bytes: 50 * large.byteLength, writes: 0}, BROWSE_BYTES);
                 });
                 forbid = true; reset();
-                await Promise.all(Array.from({length: 49}, (_, i) => browsePut(TILE_PREFIX + 'new-browse/' + i, buffer('small'))));
+                await Promise.all(Array.from({length: 49}, (_, i) => browsePut(TILE_PREFIX + '17/' + i + '/11.png', buffer('small'))));
                 out.putTransactions = counts.tx.length;
                 out.beforeTrim = await read(FLAGS, BROWSE_BYTES);
                 // Simulate a new life: cadence must come from persistent metadata.
                 puts = []; putTick = null;
-                await browsePut(TILE_PREFIX + 'new-browse/49', buffer('small'));
+                await browsePut(TILE_PREFIX + '17/49/11.png', buffer('small'));
                 out.afterTrim = await read(FLAGS, BROWSE_BYTES);
                 forbid = false;
-                out.oldestGone = (await read(SEEN, TILE_PREFIX + 'old-browse/0')) === null;
-                out.newestThere = (await read(SEEN, TILE_PREFIX + 'new-browse/49')).size;
-                await browsePut(TILE_PREFIX + 'new-browse/49', buffer('overwrite'));
+                out.oldestGone = (await read(SEEN, TILE_PREFIX + '17/0/10.png')) === null;
+                out.newestThere = (await read(SEEN, TILE_PREFIX + '17/49/11.png')).size;
+                await browsePut(TILE_PREFIX + '17/49/11.png', buffer('overwrite'));
                 out.overwrite = (await read(FLAGS, BROWSE_BYTES)).bytes;
                 // Even when fifty removals cannot reach the soft cap, a trim
                 // must end there instead of walking the rest of the cache.
@@ -10414,10 +10478,12 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
     return Check(
         "the worker store path",
         [
-            Reading("one tick of four lookups uses one transaction", result["lookup"]["transactions"], 1),
+            Reading("one tick of six tile lookups uses one transaction", result["lookup"]["transactions"], 1),
             Reading("three distinct packs get kept once each", sum(g["store"] == "packs" for g in gets), 3),
-            Reading("only the two kept misses read browse", sum(g["store"] == "browse" for g in gets), 2),
-            Reading("kept wins and duplicate lookups share its body", result["lookup"]["bodies"], ["kept", "seen", None, "kept"]),
+            Reading("two pack misses and three tile fallbacks read browse", sum(g["store"] == "browse" for g in gets), 5),
+            Reading("whole packs win over their tile rows", result["lookup"]["bodies"], ["kept", "seen", "tile", "kept", "tile", None]),
+            Reading("browse tile answers count as seen", result["lookup"]["paths"], ["db", "seen", "seen", "db", "seen", None]),
+            Reading("only tile rows bypass pack slicing", result["lookup"]["tiles"], [False, False, True, False, True, False]),
             Reading("an answer does not wait for another tile", result["independent"], True),
             Reading("an expired miss starts no browse read", result["noLateBrowse"], True),
             Reading(
@@ -10438,7 +10504,7 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
             Reading("a cold worker still uses one lookup transaction", result["cold"]["transactions"], 1),
             Reading("49 puts in one tick share one transaction", result["putTransactions"], 1),
             Reading("no trim before the fiftieth write", result["beforeTrim"]["bytes"], 200_000_245),
-            Reading("fiftieth write removes oldest fifty without blob reads", result["afterTrim"]["bytes"], 250),
+            Reading("fiftieth write trims mixed pack and tile rows without body reads", result["afterTrim"]["bytes"], 250),
             Reading("the write cadence is persistent", result["afterTrim"]["writes"], 50),
             Reading("oldest is gone and newest stays", [result["oldestGone"], result["newestThere"]], [True, 5]),
             Reading("overwriting accounts for the size difference", result["overwrite"], 254),
