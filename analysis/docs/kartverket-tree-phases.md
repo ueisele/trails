@@ -601,7 +601,10 @@ range-fetched tiles and pack rows for whole packs, beside a kept store of packs 
 and two row shapes, and browsing let the row count grow with the tiles again, up to 15,000 at
 the 150 MB cap. Instead, **one store, `packs`, one row shape**: a pack under its address, an
 `ArrayBuffer` in PMTiles form that may be partial (its directory says which tiles are there),
-with `kept` (yes/no), `at` and `size` beside it, and nothing else.
+with `kept` (yes/no), `complete` (yes/no — true when the whole pack came from the bucket or
+Keep completed it against the remote directory, false for anything merged from ranges; the
+bytes alone cannot tell, since a source pack may itself be sparse at the box's edge), `at` and
+`size` beside it, and nothing else.
 
 - **Browsing** merges a range-fetched tile into its pack's row — the tiles of one tick for one
   pack in one write — and a whole pack replaces the row. The worker gains a PMTiles writer
