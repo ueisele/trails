@@ -230,9 +230,10 @@ is looked at warms on first sight and stays warm for a year.
 corrections to the text above. The tree rule sits *after* the general one, not ahead of it: when
 several cache rules match, the later rule's settings win, so a tree rule placed first would have
 been overridden back to 300 s for every tile. And Smart Tiered Cache did not apply — the token
-lacks *Cache Settings → Edit*; the resource stays in the config and applies once the token has
-the permission (laptop: the dashboard, then `just plan-out` and `just apply-plan` anywhere). The
-rule and 0-RTT are live; the measurement is in `home/trails-map/known-issues.md`.
+refuses the Smart-topology endpoint. **Resolved 20:40 the same day:** the `argo/tiered_caching`
+switch takes the token, and on this plan Smart is the only topology, so that switch is the whole
+setting — `cloudflare_argo_tiered_caching` replaces the resource, applied, Tiered Cache on
+(`home` `4510865`). Phase 0 is complete; the measurements are in `home/trails-map/known-issues.md`.
 
 ### Phase S — The JavaScript leaves `maps.py`
 
@@ -616,7 +617,9 @@ bytes alone cannot tell, since a source pack may itself be sparse at the box's e
   under the 150 MB cap; kept bytes and browse bytes are two sums in the flags, no walk.
 - **The lookup** is memory → the one row → blank offline or network online.
 - **The row count is the pack count** whatever is browsed — the property the phone asked for.
-- `DB_AT` 5 drops the `browse` store (a cache; nothing to migrate). The tally's `seen` path
+- `DB_AT` 5 drops the `browse` store (a cache; nothing to migrate) and recreates `packs` empty,
+  so no row without the fields exists afterwards — the reader keeps once more, which is what
+  they were going to do after 6b anyway. The tally's `seen` path
   counts a tile out of a browse row, `db` out of a kept row, `mem` out of memory.
 
 #### 6, as first written — Norway moves to the tree
