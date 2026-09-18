@@ -642,6 +642,16 @@
                         told.seen + ' seen before, ' + told.legacy + ' from the old cache, ' +
                         told.net + ' fetched, ' + told.blank + ' blank' +
                         (told.why ? ' · ' + told.why : '') + '.';
+                    if (told.time) {
+                        ['db', 'seen', 'net', 'blank'].forEach(function (path, i) {
+                            var spent = told.time[path];
+                            tileLine.textContent += ' ' + ['Store', 'Seen', 'Network', 'Blank'][i] + ': ' +
+                                told[path] + ', total ' + spent.total.toFixed(1) + ' ms, worst ' +
+                                spent.worst.toFixed(1) + ' ms.';
+                        });
+                        tileLine.textContent += ' Past deadline: ' + told.deadlines +
+                            ' · peak in flight: ' + told.peak + '.';
+                    }
                 }).then(function () {
                     tileLine.textContent += ' Screen: safe area top ' + inset('top') +
                         ', bottom ' + inset('bottom') +
@@ -652,6 +662,151 @@
 
             window.trailsOpened = window.trailsOpened || {};
             window.trailsOpened.cost = openCost;
+
+            // The scratch rows live beside the kept ground, but never in it.
+            // Only a fixed batch is held in memory; even 600,000 rows cost one
+            // body and 250 pending puts here. Version 3 keeps the empty store.
+            var BENCH_DB = {{ (this._parent._trails_companions.database if this._parent._trails_companions is defined else 'trails')|tojson }};
+            var benchRunning = false;
+            var benchBox = document.createElement('details');
+            benchBox.className = 'trails-store-bench';
+            benchBox.innerHTML = '<summary>Measure this device’s tile store</summary>' +
+                '<p>Temporary 1 kB rows in the map’s database. Rows are cleared before and after each run. ' +
+                'Open measures a new connection to an already open database. Screen repeats the current visible ' +
+                'tiles through the worker, including the network on a miss. Keep this page open until it finishes.</p>' +
+                '<label>Rows <select><option value="150000">150,000</option>' +
+                '<option value="600000">600,000</option></select></label> <button type="button">Measure</button>' +
+                '<p class="trails-store-bench-said" role="status"></p>';
+            var benchButton = benchBox.querySelector('button');
+            var benchSaid = benchBox.querySelector('.trails-store-bench-said');
+
+            function benchOpen() {
+                return new Promise(function (done, fail) {
+                    var ask = indexedDB.open(BENCH_DB, 3), failed = false;
+                    ask.onblocked = function () { failed = true; fail(new Error('The database is blocked.')); };
+                    ask.onerror = function () { fail(ask.error); };
+                    ask.onsuccess = function () {
+                        var db = ask.result;
+                        if (failed) { db.close(); return; }
+                        db.onversionchange = function () { db.close(); };
+                        done(db);
+                    };
+                });
+            }
+
+            function benchDeal(db, mode, work) {
+                return new Promise(function (done, fail) {
+                    var deal = db.transaction('bench', mode);
+                    deal.oncomplete = function () { done(); };
+                    deal.onabort = function () { fail(deal.error || new Error('The measurement was aborted.')); };
+                    deal.onerror = function () { fail(deal.error); };
+                    try { work(deal.objectStore('bench')); }
+                    catch (error) { deal.abort(); fail(error); }
+                });
+            }
+
+            function benchScreen() {
+                var urls = new Set(), box = map.getContainer().getBoundingClientRect();
+                map.eachLayer(function (layer) {
+                    if (!(layer instanceof L.TileLayer)) { return; }
+                    Object.keys(layer._tiles || {}).forEach(function (key) {
+                        var tile = layer._tiles[key];
+                        if (!tile.current) { return; }
+                        var r = tile.el.getBoundingClientRect();
+                        if (r.right <= box.left || r.left >= box.right || r.bottom <= box.top || r.top >= box.bottom) { return; }
+                        if (/^https?:/.test(tile.el.src)) { urls.add(tile.el.src); }
+                        if (urls.size > 512) { throw new Error('More than 512 visible tiles; use a smaller screen.'); }
+                    });
+                });
+                if (!urls.size) { throw new Error('No visible tiles to measure.'); }
+                return Array.from(urls);
+            }
+
+            async function measureStore(rows) {
+                if (benchRunning) { throw new Error('A store measurement is already running.'); }
+                if (!Number.isInteger(rows) || rows < 1 || rows > 600000) {
+                    throw new Error('Choose between 1 and 600,000 rows.');
+                }
+                if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
+                    throw new Error('Wait for the map’s worker, then try again.');
+                }
+                var urls = benchScreen(), db = null, began, result;
+                benchRunning = true;
+                benchButton.disabled = true;
+                try {
+                    db = await benchOpen();
+                    await benchDeal(db, 'readwrite', function (store) { store.clear(); });
+                    var body = new Blob([new Uint8Array(1024)], {type: 'application/octet-stream'});
+                    function key(i) { return 'bench/tiles/17/' + i + '.png'; }
+                    for (var start = 0; start < rows; start += 250) {
+                        await benchDeal(db, 'readwrite', function (store) {
+                            for (var i = start; i < Math.min(start + 250, rows); i += 1) { store.put(body, key(i)); }
+                        });
+                        benchSaid.textContent = 'Filling: ' + Math.min(start + 250, rows).toLocaleString() +
+                            ' / ' + rows.toLocaleString() + ' rows.';
+                    }
+                    await benchDeal(db, 'readonly', function (store) {
+                        var ask = store.count();
+                        ask.onsuccess = function () { if (ask.result !== rows) { store.transaction.abort(); } };
+                    });
+                    db.close();
+                    db = null;
+                    began = performance.now();
+                    db = await benchOpen();
+                    result = {rows: rows, open: performance.now() - began};
+                    function get(store, i) {
+                        var ask = store.get(key(i));
+                        ask.onsuccess = function () {
+                            if (!(ask.result instanceof Blob) || ask.result.size !== 1024) { store.transaction.abort(); }
+                        };
+                    }
+                    began = performance.now();
+                    await benchDeal(db, 'readonly', function (store) { get(store, Math.floor(rows / 2)); });
+                    result.get = performance.now() - began;
+                    began = performance.now();
+                    await benchDeal(db, 'readonly', function (store) {
+                        for (var i = 0; i < 50; i += 1) { get(store, Math.floor(i * rows / 50)); }
+                    });
+                    result.fifty = performance.now() - began;
+                    benchSaid.textContent = 'Measuring ' + urls.length + ' visible tiles through the worker…';
+                    began = performance.now();
+                    // allSettled keeps cleanup behind every answer, even if one
+                    // fetch fails. The list is bounded by the screen, not rows.
+                    var answers = await Promise.allSettled(urls.map(async function (url) {
+                        var answer = await fetch(url, {cache: 'no-store'});
+                        await answer.arrayBuffer();
+                        return answer.status;
+                    }));
+                    result.screen = performance.now() - began;
+                    if (answers.some(function (answer) { return answer.status === 'rejected'; })) {
+                        throw new Error('A screen request failed; no complete screen time.');
+                    }
+                    result.screenTiles = urls.length;
+                    result.screenErrors = answers.filter(function (answer) { return answer.value >= 400; }).length;
+                } finally {
+                    try {
+                        // Reopen if the measured open failed after closing the
+                        // filling connection; cleanup is also owed on failure.
+                        if (!db) { db = await benchOpen(); }
+                        await benchDeal(db, 'readwrite', function (store) { store.clear(); });
+                    } finally {
+                        if (db) { db.close(); }
+                        benchRunning = false;
+                        benchButton.disabled = false;
+                    }
+                }
+                benchSaid.textContent = result.rows.toLocaleString() + ' rows · open ' + result.open.toFixed(1) +
+                    ' ms · one get ' + result.get.toFixed(1) + ' ms · fifty gets ' + result.fifty.toFixed(1) +
+                    ' ms · screen ' + result.screen.toFixed(1) + ' ms (' + result.screenTiles + ' tiles, ' +
+                    result.screenErrors + ' HTTP errors). Scratch rows cleared.';
+                return result;
+            }
+            benchButton.addEventListener('click', function () {
+                measureStore(Number(benchBox.querySelector('select').value)).catch(function (error) {
+                    benchSaid.textContent = 'Measurement failed: ' + error.message;
+                });
+            });
+            sourcesHolder.appendChild(benchBox);
 
             // **How old this copy is, above the credits.** `Sources` is the
             // panel about the page rather than about the ground, and when this
@@ -3295,6 +3450,7 @@
             // Read by a browser check rather than screenshotted, the way the
             // graph, the panel and the plan are already read.
             window.trailsChrome = {
+                measureStore: measureStore,
                 narrow: function () { return narrowNow(); },
                 // Ask for the coarse layout, or hand it back to the pointer.
                 // A check drives this rather than pretending to have a finger:

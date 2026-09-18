@@ -718,7 +718,7 @@ STAGE_OLD_STAND = """async () => {
   const prefix = window.trailsOffline.prefixes().tiles;
   const old = prefix.slice(0, -1) + '-old/';
   const db = await new Promise((done, fail) => {
-    const ask = indexedDB.open('__DB__', 2); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
+    const ask = indexedDB.open('__DB__', 3); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
   return await new Promise((done) => {
     const tx = db.transaction(['tiles', 'flags'], 'readwrite'); const store = tx.objectStore('tiles');
     let moved = 0, sample = null;
@@ -735,7 +735,7 @@ STAGE_OLD_STAND = """async () => {
 COUNT_STANDS = """async (old) => {
   const prefix = window.trailsOffline.prefixes().tiles;
   const db = await new Promise((done, fail) => {
-    const ask = indexedDB.open('__DB__', 2); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
+    const ask = indexedDB.open('__DB__', 3); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
   return await new Promise((done) => {
     const tx = db.transaction(['tiles', 'flags']); const store = tx.objectStore('tiles'); const out = {old: 0, now: 0, stand: null};
     const all = store.openKeyCursor();
@@ -2271,6 +2271,63 @@ def the_theme_switch(page: Any) -> Check:
     # auto with nothing kept; this puts the panel away too.
     page.evaluate("() => window.trailsChrome.close()")
     return Check("the theme switch", readings)
+
+
+def the_sources_measure_the_store(page: Any) -> Check:
+    """Shape at 2,000 rows; the phone owns the 150,000 and 600,000 readings."""
+    viewport = page.viewport_size
+    page.set_viewport_size({"width": 430, "height": 932})
+    try:
+        page.wait_for_function("() => navigator.serviceWorker && navigator.serviceWorker.controller", timeout=60_000)
+        page.evaluate("() => window.trailsChrome.open('info')")
+        measured = page.evaluate("() => window.trailsChrome.measureStore(2000)")
+        count = page.evaluate(
+            in_db("""() => new Promise((done, fail) => {
+                const ask = indexedDB.open('__DB__', 3);
+                ask.onerror = () => fail(ask.error);
+                ask.onsuccess = () => {
+                    const db = ask.result, deal = db.transaction('bench', 'readonly');
+                    const count = deal.objectStore('bench').count();
+                    deal.oncomplete = () => { db.close(); done(count.result); };
+                    deal.onabort = () => { db.close(); fail(deal.error); };
+                };
+            })""")
+        )
+        # The unchanged trailing write takes 400 ms. Wait for its data, not an
+        # arbitrary sleep, then reopen Sources to read it out beside the counts.
+        page.wait_for_function(
+            """async () => {
+                const told = await window.trailsOffline.dbRead('flags', 'tiles-said');
+                return told && told.time && told.peak > 0 &&
+                    ['db', 'seen', 'net', 'blank'].some(path => told[path] > 0);
+            }""",
+            timeout=10_000,
+        )
+        told = page.evaluate("() => window.trailsOffline.dbRead('flags', 'tiles-said')")
+        page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.open('info'); }")
+        page.wait_for_function("() => document.querySelector('.trails-open-tiles').textContent.includes('peak in flight:')")
+        said = page.locator(".trails-store-bench-said").text_content()
+        numbers = all(
+            isinstance(measured.get(key), (int, float)) and math.isfinite(measured[key]) and measured[key] >= 0
+            for key in ("rows", "open", "get", "fifty", "screen")
+        )
+        tally = all(
+            isinstance(told[path], int) and told[path] >= 0 and 0 <= told["time"][path]["worst"] <= told["time"][path]["total"]
+            for path in ("db", "seen", "net", "blank")
+        ) and 0 <= told["deadlines"] <= sum(told[path] for path in ("db", "seen", "net", "blank"))
+        return Check(
+            "the sources measure the store",
+            [
+                Reading("the helper reports its five figures", numbers and measured["rows"] == 2000, True, note=json.dumps(measured)),
+                Reading("the scratch store is empty afterwards", count, 0),
+                Reading("Sources displays the result", bool(said and "Scratch rows cleared." in said), True, note=said or ""),
+                Reading("the worker tally has counts, times, deadlines and peak concurrency", tally and told["peak"] > 0, True),
+            ],
+        )
+    finally:
+        page.evaluate("() => window.trailsChrome.close()")
+        if viewport:
+            page.set_viewport_size(viewport)
 
 
 def the_sources_are_a_page(page: Any) -> Check:
@@ -9022,7 +9079,7 @@ def served(directory: pathlib.Path) -> Any:
 #: entries in a cache: the first `caches.open()` of any cache costs 23 s on a
 #: phone with the ground kept.
 ROWS = """async (store) => await new Promise(done => {
-    const ask = indexedDB.open('__DB__', 2);
+    const ask = indexedDB.open('__DB__', 3);
     ask.onsuccess = () => {
         const count = ask.result.transaction(store, 'readonly').objectStore(store).count();
         count.onsuccess = () => done(count.result);
@@ -9032,7 +9089,7 @@ ROWS = """async (store) => await new Promise(done => {
 })"""
 
 CACHED_PAGE = """async () => await new Promise(done => {
-    const ask = indexedDB.open('__DB__', 2);
+    const ask = indexedDB.open('__DB__', 3);
     ask.onsuccess = () => {
         const get = ask.result.transaction('pages', 'readonly').objectStore('pages').get(location.href);
         get.onsuccess = () => done(!!get.result);
@@ -9630,7 +9687,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         stamped = first.evaluate(
             in_db("""(when) => new Promise(resolve => {
                 const stamp = new Date(when).toUTCString();
-                const ask = indexedDB.open('__DB__', 2);
+                const ask = indexedDB.open('__DB__', 3);
                 ask.onsuccess = () => { const db = ask.result;
                   const store = db.transaction('pages', 'readwrite').objectStore('pages');
                   const got = store.get(location.href);
@@ -9960,7 +10017,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         )
         weighed = first.evaluate(
             in_db("""async () => await new Promise(done => {
-                const ask = indexedDB.open('__DB__', 2);
+                const ask = indexedDB.open('__DB__', 3);
                 ask.onsuccess = () => {
                     const store = ask.result.transaction('tiles', 'readonly').objectStore('tiles');
                     const all = store.getAll(undefined, 40);
@@ -10623,6 +10680,8 @@ def drive(page: Any) -> list[Check]:
     ]
     if wanted(zoom_out_requests):
         checks.append(timed(zoom_out_requests, page))
+    if wanted(the_sources_measure_the_store):
+        checks.append(timed(the_sources_measure_the_store, page))
     if wanted(the_zoom_the_scale_says):
         checks.append(timed(the_zoom_the_scale_says, page))
     # Before anything is selected and before plan mode, which takes every click

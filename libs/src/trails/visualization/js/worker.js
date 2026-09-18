@@ -29,7 +29,7 @@ var DB = "__DB__";
 // database at 1 while the worker asked for 2 and a navigation never answered at
 // all. The app would not have opened. There is a test that the two literals
 // match, because nothing else would notice.
-var DB_AT = 2;
+var DB_AT = 3;
 var PAGES = "pages";
 var FLAGS = "flags";
 // **The ground, and what was merely looked at.** Two stores because they are two
@@ -59,6 +59,7 @@ function base() {
             if (!made.objectStoreNames.contains(PAGES)) { made.createObjectStore(PAGES); }
             if (!made.objectStoreNames.contains(FLAGS)) { made.createObjectStore(FLAGS); }
             if (!made.objectStoreNames.contains(KEPT)) { made.createObjectStore(KEPT); }
+            if (!made.objectStoreNames.contains("bench")) { made.createObjectStore("bench"); }
             if (!made.objectStoreNames.contains(SEEN)) {
                 // The index is what makes the trim cheap: oldest first, without
                 // reading a row to find out how old it is.
@@ -473,11 +474,21 @@ var legacy = null;
 // gone. Written to the same small row the navigation timings use, at most once a
 // second, so a hundred thousand tiles do not become a hundred thousand writes.
 var told = {db: 0, seen: 0, legacy: 0, net: 0, blank: 0, why: null, at: 0};
+told.time = {
+    db: {total: 0, worst: 0}, seen: {total: 0, worst: 0},
+    net: {total: 0, worst: 0}, blank: {total: 0, worst: 0}
+};
+told.deadlines = 0;
+told.peak = 0;
+var inFlight = 0;
 
 var telling = null;
 
-function tally(which, why) {
+function tally(which, why, began) {
     told[which] += 1;
+    var spent = performance.now() - began;
+    told.time[which].total += spent;
+    told.time[which].worst = Math.max(told.time[which].worst, spent);
     if (why && !told.why) { told.why = String(why).slice(0, 120); }
     // **And a trailing write, or the last second is never reported.** Throttled
     // alone, the row held whatever was true a second before the tiles stopped
@@ -497,11 +508,12 @@ function tally(which, why) {
 // **Never hangs, whatever the database does.** A read that does not answer used
 // to leave `respondWith` unresolved, and an unresolved tile is one Leaflet waits
 // on for ever -- which is the difference between a slow map and a blank one.
-function within(ms, work, fallback) {
-    return Promise.race([
-        work,
-        new Promise(function (done) { setTimeout(function () { done(fallback); }, ms); })
-    ]);
+function within(ms, work, fallback, late) {
+    return new Promise(function (done, fail) {
+        var timer = setTimeout(function () { late(); done(fallback); }, ms);
+        work.then(function (value) { clearTimeout(timer); done(value); },
+            function (error) { clearTimeout(timer); fail(error); });
+    });
 }
 
 function prefixOf(plain) {
@@ -538,25 +550,34 @@ function keptFor(plain) {
 }
 
 function tileFor(request) {
+    var began = performance.now(), missed = false;
+    inFlight += 1;
+    told.peak = Math.max(told.peak, inFlight);
+    // Count a tile once even if both of its lookups cross their deadline.
+    function late() {
+        if (!missed) { missed = true; told.deadlines += 1; }
+    }
+    function answered(which, why) { tally(which, why, began); }
     var plain = request.url.split("?")[0];
-    return within(4000, Promise.all([keptFor(plain), offlineNow()]), [null, false])
+    return within(4000, Promise.all([keptFor(plain), offlineNow()]), [null, false], late)
         .then(function (two) {
-            if (two[0]) { tally("db"); return new Response(two[0]); }
+            if (two[0]) { answered("db"); return new Response(two[0]); }
             var off = two[1];
-            return within(4000, read(SEEN, plain), null).then(function (seen) {
-                if (seen && seen.body) { tally("seen"); return new Response(seen.body); }
-                if (off) { tally("blank"); return blank(); }
+            return within(4000, read(SEEN, plain), null, late).then(function (seen) {
+                if (seen && seen.body) { answered("seen"); return new Response(seen.body); }
+                if (off) { answered("blank"); return blank(); }
                 return fetch(request).then(function (answer) {
                     if (answer && answer.ok) {
-                        tally("net");
+                        answered("net");
                         answer.clone().blob().then(function (body) {
                             return write(SEEN, plain, {body: body, at: Date.now()});
                         }).then(trim).catch(function () { return null; });
                     }
                     return answer;
-                }).catch(function (gone) { tally("blank", gone); return blank(); });
+                }).catch(function (gone) { answered("blank", gone); return blank(); });
             });
-        }).catch(function (gone) { tally("blank", gone); return blank(); });
+        }).catch(function (gone) { answered("blank", gone); return blank(); })
+        .finally(function () { inFlight -= 1; });
 }
 
 // Oldest first, by when it was written. Not a true least-recently-used -- reading

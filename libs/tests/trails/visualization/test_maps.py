@@ -433,7 +433,27 @@ class TestOfflineWorker:
         is wrong; drawing nothing says the ground was not kept, which is true."""
         assert "function blank()" in maps.SERVICE_WORKER
         assert 'status: 200, headers: {"content-type": "image/png"}' in maps.SERVICE_WORKER
-        assert 'if (off) { tally("blank"); return blank(); }' in maps.SERVICE_WORKER
+        assert 'if (off) { answered("blank"); return blank(); }' in maps.SERVICE_WORKER
+        # Every path retains a count and adds only two time accumulators; no
+        # samples are retained as the number of tiles grows.
+        assert "var told = {db: 0, seen: 0, legacy: 0, net: 0, blank: 0, why: null, at: 0};" in maps.SERVICE_WORKER
+        for path in ("db", "seen", "net", "blank"):
+            assert f"{path}: {{total: 0, worst: 0}}" in maps.SERVICE_WORKER
+        assert "told.time[which].total += spent;" in maps.SERVICE_WORKER
+        assert "told.time[which].worst = Math.max(told.time[which].worst, spent);" in maps.SERVICE_WORKER
+        # HTTP errors remain uncounted, as before the timing was added.
+        assert 'if (answer && answer.ok) {\n                        answered("net");' in maps.SERVICE_WORKER
+        assert maps.SERVICE_WORKER.count('answered("net")') == 1
+
+    def test_tile_deadlines_and_concurrency_are_counted_without_changing_the_throttle(self):
+        worker = maps.SERVICE_WORKER
+        assert "if (!missed) { missed = true; told.deadlines += 1; }" in worker
+        assert "told.peak = Math.max(told.peak, inFlight);" in worker
+        assert ".finally(function () { inFlight -= 1; });" in worker
+        assert "clearTimeout(timer); done(value);" in worker
+        assert "clearTimeout(timer); fail(error);" in worker
+        assert "}, 400);" in worker
+        assert "if (Date.now() - told.at < 1000) { return; }" in worker
 
     def test_a_deliberate_download_is_not_answered_by_the_worker(self):
         """The panel fetches what the reader asked to keep with `cache:
@@ -1575,6 +1595,7 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         page = re.search(r"window\.indexedDB\.open\('trails', (\d+)\)", html)
         assert worker and page, "both sides must name a version"
         assert worker.group(1) == page.group(1)
+        assert worker.group(1) == "3"
 
     def test_neither_side_hangs_and_neither_side_blocks(self):
         """Two halves. Saying so beats waiting — blocked means somebody holds an
@@ -1588,15 +1609,45 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
 
     def test_both_sides_make_every_store(self):
         """Whichever opens first runs the upgrade, so both have to know about
-        all four — a store missing on one side is a transaction that throws on
+        all five — a store missing on one side is a transaction that throws on
         the other."""
         html = self.rendered()
-        for store in ("pages", "flags"):
+        for store in ("pages", "flags", "bench"):
             assert f"createObjectStore('{store}')" in html
             assert f"contains({store.upper()})" in maps.SERVICE_WORKER or f'"{store}"' in maps.SERVICE_WORKER
         assert "createObjectStore(KEPT)" in html and "createObjectStore(KEPT)" in maps.SERVICE_WORKER
         assert "createObjectStore(SEEN).createIndex" in html
         assert "createObjectStore(SEEN).createIndex" in maps.SERVICE_WORKER
+
+    def test_sources_reads_the_tally_and_owns_the_bounded_store_measurement(self):
+        html = self.rendered()
+        assert "['db', 'seen', 'net', 'blank'].forEach" in html
+        assert "spent.total.toFixed(1)" in html and "spent.worst.toFixed(1)" in html
+        assert "told.deadlines" in html and "told.peak" in html
+        assert 'var BENCH_DB = "trails";' in html
+        assert "sourcesHolder.appendChild(benchBox);" in html
+        assert "measureStore: measureStore" in html
+        helper = html.split("async function measureStore(rows)")[1].split("benchButton.addEventListener")[0]
+        assert "new Uint8Array(1024)" in helper
+        assert "start += 250" in helper
+        assert "i < 50" in helper
+        assert "ask.result !== rows" in helper
+        assert "Promise.allSettled" in helper
+        assert "fetch(url, {cache: 'no-store'})" in helper
+        assert "store.put(body, key(i))" in helper
+        assert helper.count("store.clear()") == 2
+        assert "finally" in helper.split("store.clear()")[1]
+        assert "deleteObjectStore" not in helper
+        assert "getAll" not in helper
+        assert "'tiles', 'readwrite'" not in helper and "'browse', 'readwrite'" not in helper
+        for figure in ("rows", "open", "get", "fifty", "screen"):
+            assert f"result.{figure}" in helper
+
+    def test_the_measurement_uses_this_maps_database(self):
+        fmap = maps.create_map(bounds=(18, 68, 19, 69), companions=maps.Companions.named("abisko"))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert 'var BENCH_DB = "trails-abisko";' in html
 
 
 class TestNothingGrowsWithTheDownload:
@@ -1662,7 +1713,7 @@ class TestNothingGrowsWithTheDownload:
         # cleared under the page would take both — and it meant that opening this
         # panel opened a Cache Storage holding tens of thousands of entries and
         # several gigabytes. Measured on an installed app at twenty seconds.
-        assert "window.indexedDB.open('trails', 2)" in html
+        assert "window.indexedDB.open('trails', 3)" in html
         # `forget` clears the row too, which is the property the first place was
         # chosen for.
         assert "dbClear(KEPT), dbClear(SEEN), dbWrite('flags', HELD, null)" in html
@@ -2263,7 +2314,7 @@ class TestTwoMapsOnOneOrigin:
     def test_the_page_opens_its_own_database_and_caches(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
-        assert "window.indexedDB.open('trails-abisko', 2)" in html
+        assert "window.indexedDB.open('trails-abisko', 3)" in html
         assert "var TERRAIN = 'trails-abisko-terrain';" in html
         assert "var TILES = 'trails-abisko-tiles';" in html
         assert "var KEY = 'trails-abisko-offline';" in html
