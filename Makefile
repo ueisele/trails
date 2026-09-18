@@ -191,14 +191,12 @@ deploy:
 	@echo "🚀 Publishing the built map..."
 	uv run python analysis/scripts/deploy_map.py $(ARGS)
 
-# Reads a 156 GB GeoPackage over FTP by byte range and writes only the box's tiles — about a
-# quarter of an hour for all of z8–z17, and it resumes, so stopping it costs nothing. A new stand of
-# the file on the server goes into the next version directory and the next `map` draws it; an
-# unchanged stand is a no-op. Like `map` it only builds; `make deploy ARGS="--tree tiles"` is what
-# uploads. See analysis/docs/abisko-decisions.md §3 and §9.20.
+# Dispatch on Tree.provider: Abisko keeps the existing GeoPackage copy; Lomsdal-Visten
+# renders Kartverket's WMS without hillshade. Both resume per tile and build only;
+# `make deploy ARGS="--tree tiles"` is what uploads.
 tiles:
-	@echo "🧩 Copying Lantmäteriet's tiles for the Abisko box (resumable)..."
-	uv run python analysis/scripts/lantmateriet_tiles.py $(ARGS)
+	@echo "🧩 Building the $(PARK) base tiles (resumable)..."
+	uv run python analysis/scripts/kartverket_tiles.py --park $(PARK) $(ARGS)
 
 # **Which map the three tile trees are cut for.** `dem`, `shade` and `slope` all cut from one height
 # model over one box, and which model and which box that is, is named per map in
