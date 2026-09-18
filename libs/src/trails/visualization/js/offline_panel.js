@@ -847,7 +847,6 @@
                 var TIMING = 'timing';
                 // The two tile stores, named as the worker names them.
                 var KEPT = 'packs';
-                var SEEN = 'browse';
                 // Tile prefixes identify the stand; Keep derives pack prefixes
                 // from them when a completed run removes an older stand.
                 var STAND = 'stand';
@@ -864,7 +863,7 @@
                             // the wait never ends. Measured here -- the page held
                             // 1 while the worker asked for 2, and the map stopped
                             // opening altogether.
-                            var ask = window.indexedDB.open('{{ this.database }}', 4);
+                            var ask = window.indexedDB.open('{{ this.database }}', 5);
                             ask.onblocked = function () { fail(new Error('blocked')); };
                             ask.onupgradeneeded = function () {
                                 var made = ask.result;
@@ -874,12 +873,8 @@
                                     made.deleteObjectStore('tiles');
                                     ask.transaction.objectStore('flags').delete(HELD);
                                 }
-                                if (!made.objectStoreNames.contains('packs')) { made.createObjectStore('packs'); }
                                 if (!made.objectStoreNames.contains('bench')) { made.createObjectStore('bench'); }
-                                if (!made.objectStoreNames.contains(KEPT)) { made.createObjectStore(KEPT); }
-                                if (!made.objectStoreNames.contains(SEEN)) {
-                                    made.createObjectStore(SEEN).createIndex('at', 'at');
-                                }
+                                PackIO.upgrade(made, ask.transaction);
                             };
                             ask.onsuccess = function () {
                                 var open = ask.result;
@@ -928,24 +923,7 @@
                 // stand once a run has replaced the tiles it wanted.
                 function dbSweep(store, prefix) {
                     if (!prefix) { return Promise.resolve(); }
-                    return db().then(function (open) {
-                        return new Promise(function (done, fail) {
-                            var tx = open.transaction([store, 'flags'], 'readwrite');
-                            var flags = tx.objectStore('flags'), held = flags.get(HELD);
-                            held.onsuccess = function () {
-                                var was = held.result, part = was && was.layers && was.layers[prefix];
-                                tx.objectStore(store).delete(IDBKeyRange.bound(prefix, prefix + '￿', false, true));
-                                if (part) {
-                                    was.packs -= part.packs; was.bytes -= part.bytes;
-                                    delete was.layers[prefix];
-                                    flags.put(was, HELD);
-                                }
-                            };
-                            tx.oncomplete = done;
-                            tx.onerror = function () { fail(tx.error); };
-                            tx.onabort = function () { fail(tx.error); };
-                        });
-                    });
+                    return db().then(function (open) { return PackIO.forget(open, prefix); });
                 }
 
                 // The prefixes the page names now, one per kind of tile.
@@ -1010,26 +988,16 @@
                 // A pack and its count commit together. A stopped run, overlapping
                 // scopes and a repeated Keep all leave the same exact held figure.
                 function putPack(url, body, top, prefix) {
-                    return db().then(function (open) {
-                        return new Promise(function (done, fail) {
-                            var tx = open.transaction([KEPT, 'flags'], 'readwrite');
-                            var store = tx.objectStore(KEPT), flags = tx.objectStore('flags');
-                            var old = store.get(url), held = flags.get(HELD);
-                            held.onsuccess = function () {
-                                var was = held.result || {packs: 0, bytes: 0, top: 0};
-                                store.put(body, url);
-                                var count = old.result ? 0 : 1;
-                                var bytes = body.byteLength - (old.result ? old.result.byteLength : 0);
-                                // One scalar per tree/stand, never one per pack.
-                                var layers = was.layers || {}, part = layers[prefix] || {packs: 0, bytes: 0};
-                                part.packs += count; part.bytes += bytes; layers[prefix] = part;
-                                flags.put({packs: was.packs + count, bytes: was.bytes + bytes,
-                                           top: Math.max(was.top, top), layers: layers}, HELD);
-                            };
-                            tx.oncomplete = function () { done(); };
-                            tx.onerror = function () { fail(tx.error); };
-                            tx.onabort = function () { fail(tx.error); };
-                        });
+                    return db().then(function (open) { return PackIO.put(open, url, body, top); });
+                }
+
+                function packsChanged() {
+                    var worker = navigator.serviceWorker && navigator.serviceWorker.controller;
+                    if (!worker) { return Promise.resolve(); }
+                    return new Promise(function (done) {
+                        var channel = new MessageChannel();
+                        channel.port1.onmessage = function () { channel.port1.close(); done(); };
+                        worker.postMessage({trails: 'packs-changed'}, [channel.port2]);
                     });
                 }
 
@@ -1374,7 +1342,7 @@
                     });
                 }
 
-                function fetchTile(url, attempt, waited) {
+                function fetchTile(url, attempt, waited, start, end) {
                     var away = putAway;
                     function again(answer) {
                         // **A failure across a suspension costs no try.** The app
@@ -1384,7 +1352,7 @@
                         if (putAway !== away || document.hidden) {
                             if (waited >= WAITS) { return null; }
                             return whenInFront().then(function () {
-                                return fetchTile(url, attempt, waited + 1);
+                                return fetchTile(url, attempt, waited + 1, start, end);
                             });
                         }
                         var worth = !answer || answer.status === 429 || answer.status >= 500;
@@ -1394,7 +1362,7 @@
                         // and not the first.
                         if (!worth || attempt >= TRIES) { return answer && answer.status === 404 ? false : null; }
                         return later(400 * attempt).then(function () {
-                            return fetchTile(url, attempt + 1, waited);
+                            return fetchTile(url, attempt + 1, waited, start, end);
                         });
                     }
                     return whenInFront().then(function () {
@@ -1411,7 +1379,8 @@
                         // mattering. A no-op while the lock is held, which is
                         // every tile but the first after a glance elsewhere.
                         keepAwake();
-                        return fetch(url, {cache: 'reload', mode: 'cors'});
+                        return fetch(url, {cache: 'reload', mode: 'cors',
+                            headers: start === undefined ? {} : {Range: 'bytes=' + start + '-' + end}});
                     }).then(function (answer) {
                         if (answer && answer.ok) { return answer; }
                         return again(answer);
@@ -1463,11 +1432,13 @@
                             if (!next) { return Promise.resolve(); }
                             var kept = false, size = 0;
                             return dbRead(KEPT, next.url).then(function (there) {
-                                if (there) { missed = 0; state.held += 1; kept = true; size = there.byteLength; return null; }
-                                return fetchTile(next.url, 1, 0).then(function (answer) {
+                                if (there && there.kept && there.complete) { missed = 0; state.held += 1; kept = true; size = there.size; return null; }
+                                return PackIO.complete(there, function (start, end) {
+                                    return fetchTile(next.url, 1, 0, start, end);
+                                }).then(function (answer) {
                                     if (answer) {
                                         missed = 0;
-                                        return answer.arrayBuffer().then(function (body) {
+                                        return Promise.resolve(answer).then(function (body) {
                                             return putPack(next.url, body, next.kind === 'map' ? Math.min(state.requested, next.z + 3) : 0,
                                                 packPrefix(prefixes()[next.kind])).then(function () {
                                                 state.added += 1; kept = true; size = body.byteLength;
@@ -1571,7 +1542,7 @@
                         if (!lastRun.kept) { return refresh(); }
                         chooser = false;
                         remember(true);
-                        return tellWorker(true).then(function () {
+                        return packsChanged().then(function () { return tellWorker(true); }).then(function () {
                             // Ground that was blank a moment ago is kept now.
                             restamp();
                             return refresh();
@@ -1588,12 +1559,9 @@
                 function forget() {
                     if (!window.caches) { return Promise.resolve(); }
                     return Promise.all([
-                        dbClear(KEPT), dbClear(SEEN), dbWrite('flags', HELD, null),
-                        // What earlier versions wrote, in case the ground was
-                        // never moved across. Deleting a cache that is not there
-                        // is not an error.
+                        db().then(function (open) { return PackIO.forget(open); }),
                         caches.delete(TERRAIN), caches.delete(TILES)
-                    ]).then(function () {
+                    ]).then(packsChanged).then(function () {
                         remember(false);
                         return tellWorker(false);
                     }).then(refresh);

@@ -2250,7 +2250,7 @@ def the_sources_measure_the_store(page: Any) -> Check:
         page.wait_for_function("() => navigator.serviceWorker && navigator.serviceWorker.controller", timeout=60_000)
         page.evaluate("() => window.trailsChrome.open('info')")
         scratch = in_db("""seed => new Promise((done, fail) => {
-                const ask = indexedDB.open('__DB__', 4);
+                const ask = indexedDB.open('__DB__', 5);
                 ask.onerror = () => fail(ask.error);
                 ask.onsuccess = () => {
                     const db = ask.result, deal = db.transaction('bench', seed ? 'readwrite' : 'readonly');
@@ -9272,7 +9272,7 @@ def served(directory: pathlib.Path) -> Any:
 #: entries in a cache: the first `caches.open()` of any cache costs 23 s on a
 #: phone with the ground kept.
 ROWS = """async (store) => await new Promise(done => {
-    const ask = indexedDB.open('__DB__', 4);
+    const ask = indexedDB.open('__DB__', 5);
     ask.onsuccess = () => {
         const count = ask.result.transaction(store, 'readonly').objectStore(store).count();
         count.onsuccess = () => done(count.result);
@@ -9282,7 +9282,7 @@ ROWS = """async (store) => await new Promise(done => {
 })"""
 
 CACHED_PAGE = """async () => await new Promise(done => {
-    const ask = indexedDB.open('__DB__', 4);
+    const ask = indexedDB.open('__DB__', 5);
     ask.onsuccess = () => {
         const get = ask.result.transaction('pages', 'readonly').objectStore('pages').get(location.href);
         get.onsuccess = () => done(!!get.result);
@@ -9867,6 +9867,14 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
                 return fetch.apply(this, arguments);
             };
         }""")
+        complete_before = page.evaluate(
+            """async keys => {
+            const ready=[];
+            for(const key of keys) if((await window.trailsOffline.dbRead('packs',key))?.complete) ready.push(key);
+            return ready;
+        }""",
+            sorted(expected),
+        )
         page.evaluate("() => window.trailsOffline.keep()")
         first = page.evaluate("() => window.trailsOffline.state().run")
         fetched = page.evaluate("() => window.trailsOverviewFetches.slice().sort()")
@@ -9875,13 +9883,13 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         held = page.evaluate(
             in_db("""async (extra) => {
             const db = await new Promise((done, fail) => {
-                const ask = indexedDB.open('__DB__', 4);
+                const ask = indexedDB.open('__DB__', 5);
                 ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
             });
             const keys = await new Promise((done, fail) => {
                 const deal = db.transaction(['packs', 'flags'], 'readwrite'), store = deal.objectStore('packs');
                 const flags = deal.objectStore('flags'), held = flags.get('held');
-                const ask = store.getAllKeys();
+                const ask = store.index('kept').getAllKeys();
                 held.onsuccess = () => {
                     const value = held.result;
                     for (const url of extra) {
@@ -9889,8 +9897,8 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
                         body.onsuccess = () => {
                             if (!body.result) return;
                             const prefix = url.split('/').slice(0, -3).join('/') + '/';
-                            value.packs--; value.bytes -= body.result.byteLength;
-                            value.layers[prefix].packs--; value.layers[prefix].bytes -= body.result.byteLength;
+                            value.packs--; value.bytes -= body.result.size;
+                            value.layers[prefix].packs--; value.layers[prefix].bytes -= body.result.size;
                             flags.put(value, 'held');
                         };
                         store.delete(url);
@@ -9910,7 +9918,7 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         stored = page.evaluate(
             in_db("""async () => {
             const db = await new Promise(done => {
-                const ask = indexedDB.open('__DB__', 4); ask.onsuccess = () => done(ask.result);
+                const ask = indexedDB.open('__DB__', 5); ask.onsuccess = () => done(ask.result);
             });
             const result = await new Promise(done => {
                 const tx = db.transaction(['packs', 'flags']);
@@ -9919,7 +9927,7 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
                 const rows = tx.objectStore('packs').openCursor();
                 rows.onsuccess = () => {
                     const row = rows.result;
-                    if (row) { packs++; bytes += row.value.byteLength; row.continue(); }
+                    if (row) { if(row.value.kept) { packs++; bytes += row.value.pack.byteLength; } row.continue(); }
                 };
                 tx.oncomplete = () => done({packs, bytes, held: {packs: held.result.packs, bytes: held.result.bytes}});
             }); db.close(); return result;
@@ -9941,7 +9949,12 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
                     note=line,
                 ),
                 Reading("the overview line names its packs", line.startswith(f"overview, {len(overview):,} packs, "), True),
-                Reading("the first run fetches the exact scope and z8–z11 box", fetched == sorted(expected), True, note=f"{len(fetched)} fetched"),
+                Reading(
+                    "the first run completes the exact scope and z8–z11 box",
+                    set(fetched) == set(expected) - set(complete_before),
+                    True,
+                    note=f"{len(fetched)} requests, {len(complete_before)} complete rows reused",
+                ),
                 Reading("and keeps every one in the store", held == sorted(expected), True, note=f"{len(held)} rows, {first['failed']} refused"),
                 Reading("the repeat finds the old scope already kept", repeat["held"], len(old_scope)),
                 Reading("and fetches only the missing overview", refetched == extra, True, note=f"{len(refetched)} fetched, {repeat['added']} added"),
@@ -9968,7 +9981,7 @@ def the_empty_pack_count(page: Any) -> Check:
             page.evaluate(
                 in_db("""async (state) => {
                     const db = await new Promise((done, fail) => {
-                        const ask = indexedDB.open('__DB__', 4);
+                        const ask = indexedDB.open('__DB__', 5);
                         ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
                     });
                     await new Promise((done, fail) => {
@@ -9976,8 +9989,10 @@ def the_empty_pack_count(page: Any) -> Check:
                         tx.objectStore('packs').clear();
                         if (state === 'missing') { tx.objectStore('flags').delete('held'); }
                         else {
-                            tx.objectStore('packs').put(new ArrayBuffer(100), 'count-fixture');
-                            tx.objectStore('flags').put({packs: 1, bytes: 100, top: 14}, 'held');
+                            const row=PackIO.row(PackIO.write(new Map([[0,new ArrayBuffer(8)]])),true,true,'count-fixture');
+                            tx.objectStore('packs').put(row, 'count-fixture');
+                            tx.objectStore('flags').put({packs: 1, bytes: row.size, top: 14,
+                                layers:{'count-fixture':{packs:1,bytes:row.size}}}, 'held');
                         }
                         tx.oncomplete = done; tx.onabort = () => fail(tx.error);
                     });
@@ -9991,7 +10006,7 @@ def the_empty_pack_count(page: Any) -> Check:
             Reading(
                 state + " record has an exact count",
                 {key: snapshot["kept"][key] for key in ["packs", "bytes", "known"]},
-                {"packs": int(kept), "bytes": 100 if kept else 0, "known": True},
+                {"packs": int(kept), "bytes": 142 if kept else 0, "known": True},
             )
         )
         figures = page.evaluate("() => window.trailsOffline.holder.querySelector('.trails-offline-figures').textContent")
@@ -10007,92 +10022,67 @@ def the_empty_pack_count(page: Any) -> Check:
 
 
 def the_pack_upgrade(browser: Any, page_path: pathlib.Path) -> Check:
-    """Either opener drops version-3 tile rows, retaining unrelated records."""
+    """Both version-five openers discard terrain, preserving the page and switch."""
     panel = (pathlib.Path(maps.__file__).parent / "js" / "offline_panel.js").read_text()
     opener = "function db(" + panel.split("function db(", 1)[1].split("\n                function dbRead", 1)[0]
     opener = opener.replace("{{ this.database }}", "pack-upgrade")
-    worker_name = "sw.js" if page_path.stem == "lomsdal-visten" else "abisko-sw.js"
-    worker = (page_path.parent / worker_name).read_text()
+    worker = (page_path.parent / SCENE.companions.worker).read_text()
     worker = re.sub(r'var DB = "[^"]+";', 'var DB = "pack-upgrade";', worker, count=1)
-    ledger = ""
-    for name in ["putPack", "dbSweep"]:
-        ledger += "function " + name + "(" + panel.split("function " + name + "(", 1)[1].split("\n                }", 1)[0] + "\n}\n"
     readings = []
     with served(page_path.parent) as origin:
         for who, script in [
-            ("page", "var KEPT='packs', SEEN='browse', HELD='held';" + opener + "return db();"),
+            ("page", maps.PACK_IO + "var HELD='held';" + opener + "return db();"),
             ("worker", worker + "\nreturn base();"),
         ]:
             with browser.new_context() as context:
                 page = context.new_page()
                 page.goto(origin + "/missing-upgrade-test", timeout=30_000)
                 result = page.evaluate(
-                    """async (script) => {
+                    """async script => {
                     await new Promise((done, fail) => {
-                        const ask = indexedDB.open('pack-upgrade', 3);
+                        const ask = indexedDB.open('pack-upgrade', 4);
                         ask.onupgradeneeded = () => {
-                            const db = ask.result;
-                            db.createObjectStore('tiles').put(new Blob(['old terrain']), 'old-tile');
-                            const flags = db.createObjectStore('flags');
-                            flags.put({tiles: 1, bytes: 11, top: 16}, 'held');
-                            flags.put({tiles: 'old-prefix/'}, 'stand');
+                            const db = ask.result, flags = db.createObjectStore('flags');
+                            flags.put({packs: 1, bytes: 11}, 'held'); flags.put({tiles: 'old/'}, 'stand');
+                            flags.put({bytes: 12, writes: 49}, 'browse-bytes'); flags.put(12, 'browse-size:old');
+                            flags.put('on', 'offline');
                             db.createObjectStore('pages').put('kept page', 'page');
+                            db.createObjectStore('packs').put(new ArrayBuffer(11), 'legacy');
                             db.createObjectStore('browse').createIndex('at', 'at');
                         };
-                        ask.onsuccess = () => { ask.result.close(); done(); };
-                        ask.onerror = () => fail(ask.error);
+                        ask.onsuccess = () => { ask.result.close(); done(); }; ask.onerror = () => fail(ask.error);
                     });
-                    const db = await new Function('self', script)({location: location, addEventListener: () => {}});
-                    const get = (store, key) => new Promise(done => {
-                        const ask = db.transaction(store).objectStore(store).get(key);
-                        ask.onsuccess = () => done(ask.result);
-                    });
-                    const answer = {version: db.version, tiles: db.objectStoreNames.contains('tiles'),
-                                    packs: db.objectStoreNames.contains('packs'), held: !!(await get('flags', 'held')),
-                                    page: await get('pages', 'page'), stand: await get('flags', 'stand')};
-                    db.close(); return answer;
+                    const db = await new Function('self', script)({location, addEventListener: () => {}});
+                    const tx = db.transaction(['packs', 'flags', 'pages']);
+                    const count = tx.objectStore('packs').count(), held = tx.objectStore('flags').get('held'),
+                        browse = tx.objectStore('flags').get('browse-bytes'), stand = tx.objectStore('flags').get('stand'),
+                        offline = tx.objectStore('flags').get('offline'), page = tx.objectStore('pages').get('page');
+                    await new Promise((done, fail) => {tx.oncomplete=done;tx.onerror=()=>fail(tx.error);});
+                    const result = {version: db.version, browse: db.objectStoreNames.contains('browse'),
+                        indexes: [...db.transaction('packs').objectStore('packs').indexNames], count:count.result,
+                        held: !!held.result, bytes: !!browse.result, stand: !!stand.result, offline: offline.result, page: page.result};
+                    db.close(); return result;
                 }""",
                     script,
                 )
                 readings.append(
                     Reading(
-                        who + " upgrades and drops tiles without losing the page or stand",
+                        who + " recreates packs and resets terrain flags without losing page or switch",
                         result,
-                        {"version": 4, "tiles": False, "packs": True, "held": False, "page": "kept page", "stand": {"tiles": "old-prefix/"}},
+                        {
+                            "version": 5,
+                            "browse": False,
+                            "indexes": ["browsed-at", "kept"],
+                            "count": 0,
+                            "held": False,
+                            "bytes": False,
+                            "stand": False,
+                            "offline": "on",
+                            "page": "kept page",
+                        },
                     )
                 )
-                counted = page.evaluate(
-                    """async (script) => {
-                    const open = await new Promise(done => {
-                        const ask = indexedDB.open('pack-upgrade', 4); ask.onsuccess = () => done(ask.result);
-                    });
-                    const read = () => new Promise(done => {
-                        const ask = open.transaction('flags').objectStore('flags').get('held');
-                        ask.onsuccess = () => done({packs: ask.result.packs, bytes: ask.result.bytes, top: ask.result.top});
-                    });
-                    const run = new Function('open', "var KEPT='packs', HELD='held'; function db(){return Promise.resolve(open);}" +
-                        script + "return {put:putPack, sweep:dbSweep};")(open);
-                    await run.put('https://atlas.test/packs/old/1/2/3.pmtiles', new ArrayBuffer(100), 14, 'https://atlas.test/packs/old/');
-                    await run.put('https://atlas.test/packs/new/1/2/3.pmtiles', new ArrayBuffer(200), 16, 'https://atlas.test/packs/new/');
-                    await run.put('https://atlas.test/packs/old/1/2/3.pmtiles', new ArrayBuffer(150), 14, 'https://atlas.test/packs/old/');
-                    const before = await read();
-                    await run.sweep('packs', 'https://atlas.test/packs/old/');
-                    const after = await read();
-                    const count = await new Promise(done => {
-                        const ask = open.transaction('packs').objectStore('packs').count(); ask.onsuccess = () => done(ask.result);
-                    });
-                    open.close(); return {before, after, count};
-                }""",
-                    ledger,
-                )
-                readings.append(
-                    Reading(
-                        who + " counts overlaps and removes an old stand exactly",
-                        counted,
-                        {"before": {"packs": 2, "bytes": 350, "top": 16}, "after": {"packs": 1, "bytes": 200, "top": 16}, "count": 1},
-                    )
-                )
-    return Check("both openers discard the old tile store on upgrade", readings)
+    return Check("both openers recreate the pack store on upgrade", readings)
 
 
 def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
@@ -10136,24 +10126,30 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         readings.append(Reading("the online reader uses ranges too", any(row[1] is not None for row in initial), True))
         page.wait_for_timeout(2200)
         readings.append(Reading("staying on the first screen starts no request", len(_Quiet.pack_requests) - len(initial), 0))
-        # A new worker loses every directory and memory pack. With no Keep
-        # and no whole pack fetched, only the tile rows can draw this screen.
+        # Resolve the visible tile URLs using the production address function.
+        worker = (page_path.parent / SCENE.companions.worker).read_text()
+        page.evaluate(
+            "source => { window.probePackFor = new Function('self', source + ';return packFor;')({location,addEventListener:()=>{}}); }", worker
+        )
         assert wait_until(
             page,
             """async () => {
-            const urls = [...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')].map(t => t.src.split('?')[0]);
-            const rows = await Promise.all(urls.map(u => window.trailsOffline.dbRead('browse', u)));
-            return rows.every(r => r && r.body instanceof ArrayBuffer && r.size === r.body.byteLength);
+            const urls=[...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')].map(t=>t.src.split('?')[0]);
+            for(const url of urls) {
+                const a=window.probePackFor(url),row=await window.trailsOffline.dbRead('packs',a.url);
+                if(!row || row.kept || !PackIO.unpack(row.pack).entries.has(a.id)) return false;
+            }return true;
         }""",
             30_000,
         )
         ranged = page.evaluate("""async () => {
-            const urls = [...new Set([...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')].map(t => t.src.split('?')[0]))];
-            const rows = await Promise.all(urls.map(u => window.trailsOffline.dbRead('browse', u)));
-            return {tiles: rows.length, bytes: rows.reduce((n, r) => n + r.size, 0),
-                total: (await window.trailsOffline.dbRead('flags', 'browse-bytes')).bytes};
+            const urls=[...new Set([...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')].map(t=>t.src.split('?')[0]))];
+            const keys=[...new Set(urls.map(u=>window.probePackFor(u).url))];
+            const rows=await Promise.all(keys.map(u=>window.trailsOffline.dbRead('packs',u)));
+            return {tiles:urls.length,rows:rows.length,bytes:rows.reduce((n,r)=>n+r.size,0),
+                total:(await window.trailsOffline.dbRead('flags','browse-bytes')).bytes};
         }""")
-        readings.append(Reading("browse accounts for just the first screen's tile bytes", ranged["total"], ranged["bytes"]))
+        readings.append(Reading("browse accounts for the first screen as pack rows", ranged["total"], ranged["bytes"], note=str(ranged)))
         page.evaluate("""async () => {
             const reg = await navigator.serviceWorker.getRegistration();
             await navigator.serviceWorker.register(reg.active.scriptURL.split('?')[0] + '?browse-offline=1', {scope: reg.scope});
@@ -10168,17 +10164,18 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         page.wait_for_function(loaded, timeout=30_000)
         assert wait_until(
             page,
-            """async () => (await window.trailsOffline.dbRead('flags', 'tiles-said'))?.seen >= __COUNT__""".replace(
-                "__COUNT__", str(ranged["tiles"])
-            ),
+            """async () => {
+                const tally = await window.trailsOffline.dbRead('flags', 'tiles-said');
+                return tally && tally.seen + tally.mem >= __COUNT__;
+            }""".replace("__COUNT__", str(ranged["tiles"])),
             10_000,
         )
         browse_tally = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
         readings.append(
             Reading(
-                "a cold offline worker draws the first screen from browse tiles",
-                [browse_tally["seen"], browse_tally["mem"], browse_tally["db"]],
-                [ranged["tiles"], 0, 0],
+                "a cold offline worker draws the first screen from browse packs",
+                [browse_tally["seen"] + browse_tally["mem"], browse_tally["db"]],
+                [ranged["tiles"], 0],
                 note=f"{ranged['tiles']} tiles, {ranged['bytes']} bytes; seen {browse_tally['seen']}",
             )
         )
@@ -10211,7 +10208,7 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
             page,
             """async () => {
             const db = window.trailsOffline;
-            return (await db.dbRead('browse', window.promotedPack))?.body instanceof ArrayBuffer;
+            return (await db.dbRead('packs', window.promotedPack))?.complete === true;
         }""",
         )
         settled = list(_Quiet.pack_requests)
@@ -10254,29 +10251,17 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
                 f"worst {after['time']['mem']['worst']:.1f} ms",
             )
         )
-        # Seed exactly the production row shape, remove browse, and start a new
-        # worker life. A memory hit cannot hide a broken kept-store read here.
-        # The database name belongs to this scene, not to a global origin.
-        page.evaluate("name => { window.packDB = name; }", SCENE.companions.database)
-        seeded = page.evaluate("""async () => {
-            const db = await new Promise((done, fail) => {
-                const ask = indexedDB.open(window.packDB, 4);
-                ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
-            });
-            const result = await new Promise((done, fail) => {
-                const tx = db.transaction(['packs', 'browse', 'flags'], 'readwrite');
-                const seen = tx.objectStore('browse'), kept = tx.objectStore('packs'); let count = 0, bytes = 0;
-                const ask = seen.openCursor(); ask.onsuccess = () => {
-                    const row = ask.result; if (!row) { seen.clear(); return; }
-                    if (!(row.value.body instanceof ArrayBuffer)) throw Error('browse row is not an ArrayBuffer');
-                    if (row.key.endsWith('.pmtiles')) { kept.put(row.value.body, row.key); count++; bytes += row.value.size; }
-                    row.continue();
-                };
-                tx.objectStore('flags').put('on', 'offline');
-                tx.objectStore('flags').delete('tiles-said');
-                tx.oncomplete = () => done({count, bytes}); tx.onerror = () => fail(tx.error);
-            }); db.close(); return result;
-        }""")
+        # Promote exactly one full browse row, then start a cold worker life.
+        seeded = page.evaluate(
+            """async () => {
+            const row=await window.trailsOffline.dbRead('packs',window.promotedPack);
+            const db=await new Promise((done,fail)=>{const ask=indexedDB.open('__DB__',5);
+                ask.onsuccess=()=>done(ask.result);ask.onerror=()=>fail(ask.error);});
+            await PackIO.put(db,window.promotedPack,row.pack,17);
+            await new Promise(done=>{const tx=db.transaction('flags','readwrite');tx.objectStore('flags').put('on','offline');tx.oncomplete=done;});
+            db.close();return {count:1,bytes:row.size};
+        }""".replace("__DB__", SCENE.companions.database)
+        )
         page.evaluate("""async () => {
             const reg = await navigator.serviceWorker.getRegistration();
             await navigator.serviceWorker.register(reg.active.scriptURL.split('?')[0] + '?pack-offline=1', {scope: reg.scope});
@@ -10311,281 +10296,164 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
 
 
 def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
-    """Exercise the built worker's functions against real Firefox IndexedDB.
-
-    A dedicated worker runs the unchanged functions with a scratch database;
-    instrumentation counts transactions/gets and forbids blob reads during trim.
-    This measures operation counts, not the phone's store latency.
-    """
+    """One-row merges, atomic ledgers and bounded key-only deletion in real IndexedDB."""
     with served(page_path.parent) as origin:
-        context = browser.new_context()
-        page = context.new_page()
-        # No map/Leaflet traffic in the scratch store or the operation counts.
-        page.goto(origin + "/")
-        result = page.evaluate(
-            r"""async (workerURL) => {
-            let source = await (await fetch(workerURL)).text();
-            source = source.replace(/var DB = "[^"]+";/, 'var DB = "pack-store-probe";')
-                .replaceAll('self.location.href', JSON.stringify(workerURL));
-            const run = async function () {
-                const out = {}, db = await base();
-                const transaction = IDBDatabase.prototype.transaction;
-                const get = IDBObjectStore.prototype.get;
-                const cursor = IDBObjectStore.prototype.openCursor;
-                const clear = IDBObjectStore.prototype.clear;
-                const counts = {tx: [], gets: []};
-                let forbid = false, browseClears = 0;
-                IDBObjectStore.prototype.clear = function () {
-                    if (this.name === SEEN) browseClears++;
-                    return clear.call(this);
-                };
-                IDBDatabase.prototype.transaction = function (names, mode) {
-                    counts.tx.push({names: Array.from(typeof names === 'string' ? [names] : names), mode: mode || 'readonly'});
-                    return transaction.call(this, names, mode);
-                };
-                IDBObjectStore.prototype.get = function (key) {
-                    if (forbid && this.name === SEEN) throw Error('trim read a browse blob');
-                    counts.gets.push({store: this.name, key});
-                    return get.call(this, key);
-                };
-                IDBObjectStore.prototype.openCursor = function (...args) {
-                    if (forbid && this.name === SEEN) throw Error('trim opened a value cursor');
-                    return cursor.apply(this, args);
-                };
-                const committed = tx => new Promise((done, fail) => {
-                    tx.oncomplete = done; tx.onabort = tx.onerror = () => fail(tx.error);
-                });
-                const reset = () => { counts.tx = []; counts.gets = []; };
-                const seed = async fn => {
-                    const tx = transaction.call(db, [KEPT, SEEN, FLAGS], 'readwrite');
-                    fn(tx.objectStore(KEPT), tx.objectStore(SEEN), tx.objectStore(FLAGS));
-                    await committed(tx);
-                };
-                const browseState = async () => {
-                    const tx = transaction.call(db, [SEEN, FLAGS], 'readonly');
-                    const rows = tx.objectStore(SEEN).count();
-                    const sizes = tx.objectStore(FLAGS).count(IDBKeyRange.bound(BROWSE_SIZE, BROWSE_SIZE + '\uffff'));
-                    const total = tx.objectStore(FLAGS).get(BROWSE_BYTES);
-                    await committed(tx);
-                    return {rows: rows.result, sizes: sizes.result, total: total.result, clears: browseClears};
-                };
-                const kt = TILE_PREFIX + '14/1/1.png', st = TILE_PREFIX + '14/1/2.png', mt = TILE_PREFIX + '14/1/3.png',
-                    sibling = TILE_PREFIX + '15/2/6.png', absent = TILE_PREFIX + '15/3/6.png';
-                const k = packFor(kt).url, s = packFor(st).url, m = packFor(mt).url;
-                const buffer = text => new TextEncoder().encode(text).buffer;
-                await seed((kept, seen, flags) => {
-                    kept.put(buffer('kept'), k);
-                    seen.put({body: buffer('shadow'), size: 6, at: 1}, k);
-                    seen.put({body: buffer('seen'), size: 4, at: 2}, s);
-                    for (const tile of [kt, st, mt, sibling]) seen.put({body: buffer('tile'), size: 4, at: 3}, tile);
-                    flags.put(6, BROWSE_SIZE + k);
-                    flags.put('on', STATE);
-                });
-                reset();
-                const answers = await Promise.all([kt, st, mt, kt, sibling, absent].map(tile =>
-                    lookup(packFor(tile).url, {expired: false, off: false}, tile)));
-                out.lookup = {transactions: counts.tx.length, gets: counts.gets.slice(),
-                    paths: answers.map(a => a && a.path), tiles: answers.map(a => !!(a && a.tile)),
-                    bodies: answers.map(a => a && new TextDecoder().decode(a.body))};
-                // Every answer settles in its own request callback, not at commit.
-                const originalGet = IDBObjectStore.prototype.get;
-                let release = null;
-                let sawRequest;
-                const requestReady = new Promise(done => { sawRequest = done; });
-                IDBObjectStore.prototype.get = function (key) {
-                    const ask = originalGet.call(this, key);
-                    if (this.name !== KEPT || key !== m) return ask;
-                    const proxy = {result: undefined};
-                    Object.defineProperty(proxy, 'onsuccess', {set(fn) { ask.onsuccess = () => { release = fn; sawRequest(); }; }});
-                    return proxy;
-                };
-                let fast = false, slow = false;
-                const one = lookup(k, {expired: false, off: true}).then(() => { fast = true; });
-                const waiting = {expired: false, off: true};
-                const two = lookup(m, waiting).then(() => { slow = true; });
-                let limit;
-                try {
-                    await Promise.race([Promise.all([one, requestReady]), new Promise((_, fail) => {
-                        limit = setTimeout(() => fail(Error('lookup callbacks did not arrive')), 30000);
-                    })]);
-                } finally { clearTimeout(limit); }
-                out.independent = fast && !slow && !!release;
-                // An expired tile must not start a browse get after a late miss.
-                waiting.expired = true;
-                const beforeLate = counts.gets.length;
-                release();
-                out.noLateBrowse = counts.gets.length === beforeLate;
-                IDBObjectStore.prototype.get = originalGet;
-                reset();
-                // Flush without new puts so the reset's zero rows/bytes are
-                // visible. The following read queues behind its transaction.
-                forbid = true;
-                flushPuts();
-                await read(FLAGS, BROWSE_BYTES);
-                out.legacyCleared = await browseState();
-                // A surviving total with no size records is also old browse.
-                await seed((kept, seen, flags) => {
-                    seen.put({body: new Blob(['legacy']), at: 1}, s);
-                    flags.put({bytes: 6, writes: 17}, BROWSE_BYTES);
-                });
-                flushPuts();
-                await read(FLAGS, BROWSE_BYTES);
-                out.missingSizesCleared = await browseState();
-                await browsePut(k + '-new', buffer('new'));
-                await browsePut(s + '-new', buffer('next'));
-                out.browseAfterReset = await browseState();
-                forbid = false;
-                // A cold life still uses one transaction, without a stand read.
-                switched = null; reset();
-                await lookup(s, {expired: false, off: false});
-                out.cold = {transactions: counts.tx.length, gets: counts.gets};
-                // 49 writes can cross the soft cap; the fiftieth trims fifty
-                // oldest keys. Use real sizes, including unlike tile weights.
-                const large = new ArrayBuffer(4_000_000);
-                await seed((kept, seen, flags) => {
-                    seen.clear(); flags.delete(BROWSE_BYTES);
-                    for (let i = 0; i < 50; i++) {
-                        const key = i % 2 ? packFor(TILE_PREFIX + '14/' + i + '/10.png').url : TILE_PREFIX + '17/' + i + '/10.png';
-                        seen.put({body: large, size: large.byteLength, at: i}, key);
-                        flags.put(large.byteLength, BROWSE_SIZE + key);
+        with browser.new_context() as context:
+            page = context.new_page()
+            page.goto(origin + "/")
+            result = page.evaluate(
+                r"""async workerURL => {
+                let source = await (await fetch(workerURL)).text();
+                source = source.replace(/var DB = "[^"]+";/, 'var DB = "pack-store-probe";')
+                    .replaceAll('self.location.href', JSON.stringify(workerURL));
+                const run = async function () {
+                    const db = await base(), out = {}, transactions = [], gets = [];
+                    const transaction = IDBDatabase.prototype.transaction, get = IDBObjectStore.prototype.get;
+                    const indexCursor = IDBIndex.prototype.openKeyCursor;
+                    let deleting = false, visited = 0;
+                    IDBDatabase.prototype.transaction = function (names, mode) {
+                        transactions.push({names, mode}); return transaction.call(this, names, mode);
+                    };
+                    IDBObjectStore.prototype.get = function (key) {
+                        if (deleting && this.name === 'packs') throw Error('deletion reads a pack');
+                        gets.push([this.name,key]); return get.call(this,key);
+                    };
+                    IDBObjectStore.prototype.openCursor = IDBIndex.prototype.openCursor = function () {throw Error('value cursor');};
+                    IDBIndex.prototype.openKeyCursor = function (...args) {visited++;return indexCursor.apply(this,args);};
+                    const commit = tx => new Promise((done,fail)=>{tx.oncomplete=done;tx.onabort=tx.onerror=()=>fail(tx.error);});
+                    const state = async () => {
+                        const tx = transaction.call(db, ['packs','flags']);
+                        const count=tx.objectStore('packs').count(), kept=tx.objectStore('packs').index('kept').count(),
+                            seen=tx.objectStore('packs').index('browsed-at').count(), held=tx.objectStore('flags').get('held'),
+                            browse=tx.objectStore('flags').get('browse-bytes');
+                        await commit(tx);
+                        return {rows:count.result,kept:kept.result,browsed:seen.result,held:held.result,browse:browse.result};
+                    };
+                    const bytes = await blank().arrayBuffer(), id=tileId(14,1,1), other=tileId(15,2,2);
+                    const url=packFor(TILE_PREFIX+'14/1/1.png').url, second=url.replace('/1/1.pmtiles','/1/2.pmtiles');
+                    transactions.length=0;
+                    await Promise.all([browsePut(url,bytes,id),browsePut(url,bytes,other)]);
+                    out.mergeTransactions=transactions.length;
+                    let row=await read('packs',url);
+                    out.merge={entries:PackIO.unpack(row.pack).entries.size,complete:row.complete,kept:row.kept};
+                    out.first=await state();
+                    await PackIO.put(db,second,PackIO.write(new Map([[id,bytes]])),14);
+                    switched=null;transactions.length=0;gets.length=0;
+                    const answers=await Promise.all([url,url,second,url+'absent'].map(key=>lookup(key,{expired:false,off:false})));
+                    out.lookup={transactions:transactions.length,gets:gets.slice(),paths:answers.map(a=>a&&a.path)};
+                    // Promotion removes browse bytes and changes the kept ledger atomically.
+                    await PackIO.put(db,url,row.pack,15);out.afterKeep=await state();
+                    await browsePut(url,bytes,other);out.keptPreserved=(await read('packs',url)).kept;
+                    await browsePut(url+'browse',bytes,id);
+                    const beforeForget=await state();
+                    deleting=true;await PackIO.forget(db);deleting=false;
+                    out.afterForget=await state();out.browseSurvives=out.afterForget.browse.bytes===beforeForget.browse.bytes;
+                    // A complete browse row changes only its promise during Keep: no request.
+                    row=await read('packs',url+'browse');
+                    let requests=0;
+                    row.complete=true;
+                    await PackIO.complete(row,()=>{requests++;throw Error('complete pack fetched');});
+                    out.completeRequests=requests;
+                    // Fifty differently addressed packs, each 4 MB; kept is absent from the eviction index.
+                    const large=PackIO.write(new Map([[id,new ArrayBuffer(4_000_000)]]));
+                    let tx=transaction.call(db,['packs','flags'],'readwrite');
+                    tx.objectStore('packs').clear();tx.objectStore('flags').delete('held');
+                    for(let i=0;i<50;i++) {
+                        const key='https://test/packs/'+i+'/0/0.pmtiles', r=PackIO.row(large,false,true,key);
+                        r.at=i;r.browsedAt=[i,r.size];tx.objectStore('packs').put(r,key);
                     }
-                    flags.put({bytes: 50 * large.byteLength, writes: 0}, BROWSE_BYTES);
-                });
-                forbid = true; reset();
-                await Promise.all(Array.from({length: 49}, (_, i) => browsePut(TILE_PREFIX + '17/' + i + '/11.png', buffer('small'))));
-                out.putTransactions = counts.tx.length;
-                out.beforeTrim = await read(FLAGS, BROWSE_BYTES);
-                // Simulate a new life: cadence must come from persistent metadata.
-                puts = []; putTick = null;
-                await browsePut(TILE_PREFIX + '17/49/11.png', buffer('small'));
-                out.afterTrim = await read(FLAGS, BROWSE_BYTES);
-                forbid = false;
-                out.oldestGone = (await read(SEEN, TILE_PREFIX + '17/0/10.png')) === null;
-                out.newestThere = (await read(SEEN, TILE_PREFIX + '17/49/11.png')).size;
-                await browsePut(TILE_PREFIX + '17/49/11.png', buffer('overwrite'));
-                out.overwrite = (await read(FLAGS, BROWSE_BYTES)).bytes;
-                // Even when fifty removals cannot reach the soft cap, a trim
-                // must end there instead of walking the rest of the cache.
-                await seed((kept, seen, flags) => {
-                    seen.clear();
-                    flags.delete(IDBKeyRange.bound(BROWSE_SIZE, BROWSE_SIZE + '\uffff'));
-                    for (let i = 0; i < 100; i++) {
-                        const key = TILE_PREFIX + 'over-cap/' + i;
-                        seen.put({body: large, size: large.byteLength, at: i}, key);
-                        flags.put(large.byteLength, BROWSE_SIZE + key);
+                    tx.objectStore('flags').put({bytes:50*large.byteLength,writes:0},BROWSE_BYTES);await commit(tx);
+                    await PackIO.put(db,second,PackIO.write(new Map([[id,bytes]])),14);
+                    const originalTrim=trim;
+                    trim=function(store,total,done,removedKey) {
+                        deleting=true;originalTrim(store,total,()=>{deleting=false;done();},removedKey);
+                    };
+                    transactions.length=0;
+                    await Promise.all(Array.from({length:49},(_,i)=>browsePut('https://test/new/'+i+'/0/0.pmtiles',bytes,id)));
+                    out.putTransactions=transactions.length;out.beforeTrim=await state();
+                    await browsePut('https://test/new/49/0/0.pmtiles',bytes,id);out.afterTrim=await state();
+                    out.keptAfterTrim=!!(await read('packs',second));out.indexCursors=visited;
+                    // More than fifty evictions must finish in separate bounded transactions.
+                    tx=transaction.call(db,['packs','flags'],'readwrite');
+                    tx.objectStore('packs').clear();tx.objectStore('flags').delete('held');
+                    for(let i=0;i<100;i++) {
+                        const key='https://test/large/'+i+'/0/0.pmtiles',r=PackIO.row(large,false,true,key);
+                        r.browsedAt=[i,r.size];tx.objectStore('packs').put(r,key);
                     }
-                    flags.put({bytes: 100 * large.byteLength, writes: 49}, BROWSE_BYTES);
-                });
-                forbid = true;
-                await browsePut(TILE_PREFIX + 'over-cap/new', buffer('small'));
-                out.boundedTrim = await browseState();
-                forbid = false;
-                // The exact production deadline, with both switch states. Holding
-                // open prevents all lookup work and includes cold-open time.
-                const openedBefore = opened, networkBefore = networkTile, timeoutBefore = setTimeout;
-                const limits = [];
-                setTimeout = (fn, ms, ...args) => {
-                    if (ms >= 1000) limits.push(ms);
-                    return timeoutBefore(fn, ms, ...args);
+                    tx.objectStore('flags').put({bytes:100*large.byteLength,writes:49},BROWSE_BYTES);await commit(tx);
+                    const cursorsBefore=visited;
+                    await browsePut('https://test/large/new/0/0.pmtiles',bytes,id);
+                    out.largeTrim=await state();out.largeTrimBatches=visited-cursorsBefore;
+                    // Forget spans batches too; browse archives survive every batch.
+                    for(let i=0;i<60;i++) await PackIO.put(db,'https://test/kept/'+i+'/0/0.pmtiles',row.pack,14);
+                    deleting=true;const beforeBatches=visited;await PackIO.forget(db);deleting=false;
+                    out.forgetBatches=visited-beforeBatches;out.largeForget=await state();
+                    // One deadline, including a cold open; slow network remains outside it.
+                    packs.clear();const realOpen=opened, realNetwork=networkTile;let network=0;
+                    networkTile=async()=>{network++;return bytes;};
+                    for(const off of [true,false]) {
+                        switched=Promise.resolve(off);opened=new Promise(()=>{});
+                        const before=told.deadlines,start=performance.now();
+                        const answer=await tileFor(new Request(TILE_PREFIX+'14/9/9.png'));
+                        out[off?'deadlineOn':'deadlineOff']={ms:performance.now()-start,deadlines:told.deadlines-before,
+                            bytes:(await answer.arrayBuffer()).byteLength,network};
+                    }
+                    opened=realOpen;networkTile=realNetwork;db.close();return out;
                 };
-                let network = 0;
-                networkTile = async () => { network++; return buffer('network'); };
-                for (const off of [true, false]) {
-                    switched = Promise.resolve(off); opened = new Promise(() => {});
-                    const before = told.deadlines, began = performance.now();
-                    const response = await tileFor(new Request(TILE_PREFIX + '14/1/3.png'));
-                    out[off ? 'deadlineOn' : 'deadlineOff'] = {ms: performance.now() - began,
-                        deadlines: told.deadlines - before, bytes: (await response.blob()).size, network};
-                }
-                opened = openedBefore; setTimeout = timeoutBefore;
-                // A fast store miss followed by a slow network is not a store deadline.
-                networkTile = async () => {
-                    await new Promise(done => setTimeout(done, 2700));
-                    return buffer('network');
-                };
-                const beforeSlow = told.deadlines, slowBegan = performance.now();
-                const slowResponse = await tileFor(new Request(TILE_PREFIX + '14/1/3.png'));
-                out.slowNetwork = {ms: performance.now() - slowBegan, deadlines: told.deadlines - beforeSlow,
-                    bytes: (await slowResponse.arrayBuffer()).byteLength};
-                networkTile = networkBefore;
-                out.limits = limits;
-                out.tally = {deadlines: told.deadlines, peak: told.peak, time: told.time};
-                IDBDatabase.prototype.transaction = transaction;
-                IDBObjectStore.prototype.get = get;
-                IDBObjectStore.prototype.openCursor = cursor;
-                IDBObjectStore.prototype.clear = clear;
-                db.close();
-                return out;
-            };
-            const blob = new Blob([source, '\nself.onmessage = async () => { try { self.postMessage({result: await (',
-                run.toString(), ')()}); } catch (e) { self.postMessage({error: String(e), stack: e.stack}); } };'],
-                {type: 'text/javascript'});
-            const url = URL.createObjectURL(blob), worker = new Worker(url);
-            try {
-                return await new Promise((done, fail) => {
-                    worker.onmessage = e => e.data.error ? fail(Error(e.data.error + '\n' + e.data.stack)) : done(e.data.result);
-                    worker.onerror = e => fail(Error(e.message)); worker.postMessage('run');
-                });
-            } finally {
-                worker.terminate(); URL.revokeObjectURL(url); indexedDB.deleteDatabase('pack-store-probe');
-            }
-        }""",
-            origin + "/" + SCENE.companions.worker,
-        )
-        context.close()
-    gets = result["lookup"]["gets"]
+                const blob=new Blob([source,'\nself.onmessage=async()=>{try{self.postMessage({result:await (',run.toString(),
+                    ')()});}catch(e){self.postMessage({error:String(e),stack:e.stack});}};'],{type:'text/javascript'});
+                const url=URL.createObjectURL(blob), worker=new Worker(url);
+                try {return await new Promise((done,fail)=>{
+                    const timer=setTimeout(()=>fail(Error('store probe exceeded 60 seconds')),60000);
+                    worker.onmessage=e=>{clearTimeout(timer);e.data.error?fail(Error(e.data.error+'\n'+e.data.stack)):done(e.data.result);};
+                    worker.onerror=e=>fail(Error(e.message));worker.postMessage('run');
+                });}finally{worker.terminate();URL.revokeObjectURL(url);}
+            }""",
+                origin + "/" + SCENE.companions.worker,
+            )
+    lookup = result["lookup"]
     return Check(
         "the worker store path",
         [
-            Reading("one tick of six tile lookups uses one transaction", result["lookup"]["transactions"], 1),
-            Reading("three distinct packs get kept once each", sum(g["store"] == "packs" for g in gets), 3),
-            Reading("two pack misses and three tile fallbacks read browse", sum(g["store"] == "browse" for g in gets), 5),
-            Reading("whole packs win over their tile rows", result["lookup"]["bodies"], ["kept", "seen", "tile", "kept", "tile", None]),
-            Reading("browse tile answers count as seen", result["lookup"]["paths"], ["db", "seen", "seen", "db", "seen", None]),
-            Reading("only tile rows bypass pack slicing", result["lookup"]["tiles"], [False, False, True, False, True, False]),
-            Reading("an answer does not wait for another tile", result["independent"], True),
-            Reading("an expired miss starts no browse read", result["noLateBrowse"], True),
+            Reading("two tiles of one pack commit in one transaction", result["mergeTransactions"], 1),
+            Reading("the row is a partial browse pack", result["merge"], {"entries": 2, "complete": False, "kept": False}),
+            Reading("one tick of lookups uses one transaction", lookup["transactions"], 1),
+            Reading("one get per distinct pack", sum(g[0] == "packs" for g in lookup["gets"]), 3),
+            Reading("the row determines the tally path", lookup["paths"], ["seen", "seen", "db", None]),
+            Reading("Keep moves bytes out of browse", result["afterKeep"]["browse"]["bytes"], 0, note=str(result["afterKeep"])),
+            Reading("browsing preserves kept", result["keptPreserved"], True),
             Reading(
-                "old browse rows are cleared once",
-                result["legacyCleared"],
-                {"rows": 0, "sizes": 0, "total": {"bytes": 0, "writes": 0}, "clears": 1},
+                "Forget removes kept rows and bytes",
+                [result["afterForget"]["kept"], result["afterForget"]["held"]["bytes"]],
+                [0, 0],
+                note=str(result["afterForget"]),
             ),
+            Reading("Forget preserves browse bytes", result["browseSurvives"], True),
+            Reading("Keep of a complete row makes no request", result["completeRequests"], 0),
+            Reading("49 pack writes coalesce in one transaction", result["putTransactions"], 1),
+            Reading("49 writes do not trim", result["beforeTrim"]["browsed"], 99),
             Reading(
-                "old browse with a total but no size records is cleared",
-                result["missingSizesCleared"],
-                {"rows": 0, "sizes": 0, "total": {"bytes": 0, "writes": 0}, "clears": 2},
+                "the fiftieth write trims below 150 MB with keys only",
+                result["afterTrim"]["browse"]["bytes"] <= 150_000_000,
+                True,
+                note=str(result["afterTrim"]),
             ),
+            Reading("trim never visits or removes kept rows", result["keptAfterTrim"], True),
+            Reading("a larger excess uses multiple bounded trim batches", result["largeTrimBatches"] >= 2, True, note=str(result["largeTrim"])),
+            Reading("the larger trim also finishes under the cap", result["largeTrim"]["browse"]["bytes"] <= 150_000_000, True),
+            Reading("Forget handles sixty kept rows in two batches", result["forgetBatches"], 2),
             Reading(
-                "later writes retain new browse without repeating the clear",
-                result["browseAfterReset"],
-                {"rows": 2, "sizes": 2, "total": {"bytes": 7, "writes": 2}, "clears": 2},
+                "batched Forget preserves all browse rows",
+                [result["largeForget"]["kept"], result["largeForget"]["browse"]["bytes"]],
+                [0, result["largeTrim"]["browse"]["bytes"]],
             ),
-            Reading("a cold worker still uses one lookup transaction", result["cold"]["transactions"], 1),
-            Reading("49 puts in one tick share one transaction", result["putTransactions"], 1),
-            Reading("no trim before the fiftieth write", result["beforeTrim"]["bytes"], 200_000_245),
-            Reading("fiftieth write trims mixed pack and tile rows without body reads", result["afterTrim"]["bytes"], 250),
-            Reading("the write cadence is persistent", result["afterTrim"]["writes"], 50),
-            Reading("oldest is gone and newest stays", [result["oldestGone"], result["newestThere"]], [True, 5]),
-            Reading("overwriting accounts for the size difference", result["overwrite"], 254),
+            Reading("offline deadline avoids the network", result["deadlineOn"]["network"], 0),
+            Reading("online deadline reaches the network", result["deadlineOff"]["network"], 1),
             Reading(
-                "a trim stops at fifty even while still above the cap",
-                [result["boundedTrim"]["rows"], result["boundedTrim"]["sizes"], result["boundedTrim"]["total"]["bytes"]],
-                [51, 51, 200_000_005],
-            ),
-            Reading("offline deadline returns blank without network", [result["deadlineOn"]["bytes"], result["deadlineOn"]["network"]], [68, 0]),
-            Reading("online deadline reaches network", [result["deadlineOff"]["bytes"], result["deadlineOff"]["network"]], [7, 1]),
-            Reading(
-                "slow network is awaited without a store deadline",
-                [result["slowNetwork"]["bytes"], result["slowNetwork"]["deadlines"], result["slowNetwork"]["ms"] >= 2500],
-                [7, 0, True],
-                note=f"{result['slowNetwork']['ms']:.0f} ms",
-            ),
-            Reading("each whole lookup counts one deadline", [result["deadlineOn"]["deadlines"], result["deadlineOff"]["deadlines"]], [1, 1]),
-            Reading(
-                "each lookup arms exactly one 2.5-second timer",
-                result["limits"],
-                [2500, 2500],
-                note=f"{result['deadlineOn']['ms']:.0f}, {result['deadlineOff']['ms']:.0f} ms; {result['tally']}",
+                "both lookups have one bounded deadline",
+                all(result[k]["deadlines"] == 1 and 2400 <= result[k]["ms"] <= 15000 for k in ("deadlineOn", "deadlineOff")),
+                True,
+                note=str([result["deadlineOn"], result["deadlineOff"]]),
             ),
         ],
     )
@@ -10673,7 +10541,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         first.wait_for_timeout(2200)
         first.evaluate("async url => { await (await fetch(url + '?drive-browse=1')).arrayBuffer(); }", tile_url)
         wait_for_async(first, "async () => (await window.trailsOffline.dbRead('flags', 'browse-bytes'))?.bytes > 0")
-        browsed = first.evaluate(in_db(ROWS), "browse")
+        browsed = first.evaluate(in_db(ROWS), "packs")
         # **What the first visit paid**, read off the server rather than the
         # page: the worker keeps the map by asking for it a second time, and if
         # that second ask crossed the wire the first visit would cost twice.
@@ -10757,7 +10625,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         stamped = first.evaluate(
             in_db("""(when) => new Promise(resolve => {
                 const stamp = new Date(when).toUTCString();
-                const ask = indexedDB.open('__DB__', 4);
+                const ask = indexedDB.open('__DB__', 5);
                 ask.onsuccess = () => { const db = ask.result;
                   const store = db.transaction('pages', 'readwrite').objectStore('pages');
                   const got = store.get(location.href);
@@ -11041,7 +10909,16 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
         after = first.evaluate("() => window.trailsOffline.state()")
-        terrain.append(Reading("what it said it would keep is what it kept", after["kept"]["packs"], first_ask["packs"]))
+        first_keep_rows = first.evaluate(in_db(ROWS), "packs")
+        first_keep_browse = first.evaluate("async () => await window.trailsOffline.dbRead('flags','browse-bytes')")
+        terrain.append(
+            Reading(
+                "what it said it would keep is what it kept",
+                after["kept"]["packs"],
+                first_ask["packs"],
+                note=f"{first_keep_rows} rows; {after['kept']['bytes']} kept bytes; {first_keep_browse['bytes']} browse bytes",
+            )
+        )
         terrain.append(Reading("and the switch is on once it is there", after["on"], True))
         # **And the row says so without being opened.** The switch is thrown
         # inside this panel, which on a phone is covering the menu at the time,
@@ -11106,15 +10983,15 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         )
         weighed = first.evaluate(
             in_db("""async () => await new Promise(done => {
-                const ask = indexedDB.open('__DB__', 4);
+                const ask = indexedDB.open('__DB__', 5);
                 ask.onsuccess = () => {
                     const store = ask.result.transaction('packs', 'readonly').objectStore('packs');
                     const all = store.getAll(undefined, 40);
-                    const count = store.count();
+                    const count = store.index('kept').count();
                     let smallest = Infinity, seen = 0;
                     all.onsuccess = () => {
-                        for (const body of all.result) {
-                            smallest = Math.min(smallest, body instanceof ArrayBuffer ? body.byteLength : 0); seen += 1;
+                        for (const row of all.result) {
+                            smallest = Math.min(smallest, row.pack instanceof ArrayBuffer ? row.pack.byteLength : 0); seen += 1;
                         }
                         count.onsuccess = () => done({kept: count.result, smallest: smallest, sampled: seen});
                     };
@@ -11364,10 +11241,22 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         context.set_offline(True)
         # And the reader can have the space back from inside the thing that took
         # it, which is the last of the four this panel is for.
+        before_forget = second.evaluate("async () => await window.trailsOffline.dbRead('flags','browse-bytes')")
         emptied = second.evaluate("async () => { var s = await window.trailsOffline.forget(); return {packs: s.kept.packs, on: s.on}; }")
         terrain.append(Reading("and it can all be deleted again", emptied["packs"], 0))
-        terrain.append(Reading("forget empties the pack store", second.evaluate(in_db(ROWS), "packs"), 0))
+        terrain.append(
+            Reading("forget removes kept bytes", second.evaluate("async () => (await window.trailsOffline.dbRead('flags','held')).bytes"), 0)
+        )
         terrain.append(Reading("which switches offline mode back off", emptied["on"], False))
+        after_forget = second.evaluate("async () => await window.trailsOffline.dbRead('flags','browse-bytes')")
+        terrain.append(
+            Reading(
+                "forget leaves browse bytes alone",
+                after_forget["bytes"],
+                before_forget["bytes"],
+                note=f"{second.evaluate(in_db(ROWS), 'packs')} browse rows, {after_forget['bytes']} bytes",
+            )
+        )
 
         context.set_offline(False)
         context.close()

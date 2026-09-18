@@ -687,7 +687,7 @@
             async function benchOpen() {
                 var timer, failed = false;
                 var opening = new Promise(function (done, fail) {
-                    var ask = indexedDB.open(BENCH_DB, 4);
+                    var ask = indexedDB.open(BENCH_DB, 5);
                     ask.onblocked = function () { failed = true; fail(new Error('The database is blocked.')); };
                     ask.onerror = function () { fail(ask.error); };
                     ask.onsuccess = function () {

@@ -932,7 +932,8 @@ def _lean(options: dict[str, Any], *, filled: bool) -> dict[str, Any]:
     return lean
 
 
-SERVICE_WORKER = files("trails.visualization").joinpath("js", "worker.js").read_text(encoding="utf-8")
+PACK_IO = files("trails.visualization").joinpath("js", "pack_io.js").read_text(encoding="utf-8")
+SERVICE_WORKER = files("trails.visualization").joinpath("js", "worker.js").read_text(encoding="utf-8").replace("__PACK_IO__", PACK_IO)
 
 #: Where a third party's file is kept once it has been fetched. A build needs
 #: the network for it exactly once, and after that never again -- the same
@@ -4090,6 +4091,12 @@ def _legend_pin(colour: str, icon: str) -> str:
     )
 
 
+class _PackIO(MacroElement):
+    """The pack codec and row ledger shared with the service worker."""
+
+    _template = Template("{% macro script(this, kwargs) %}" + PACK_IO + "{% endmacro %}")
+
+
 class _OfflinePanel(MacroElement):
     """The terrain a reader asked to keep, the switch that proves they have it,
     and the way to get the space back.
@@ -4422,5 +4429,6 @@ def add_chrome(fmap: folium.Map, credits: dict[str, list[dict[str, str]]] | None
     # Before the dock, because the dock reads `window.trailsOffline.holder`:
     # folium renders a map's children in the order they were added.
     provider = provider_of_map(fmap)
+    _PackIO().add_to(fmap)
     _OfflinePanel(provider, companions_of_map(fmap)).add_to(fmap)
     _Chrome(credits, getattr(fmap, MAP_BOUNDS_ATTR, None), provider, untranslated).add_to(fmap)

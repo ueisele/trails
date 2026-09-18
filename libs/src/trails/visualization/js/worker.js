@@ -1,3 +1,4 @@
+__PACK_IO__
 // The map's service worker. Written by the build, stamped with the page it was
 // built beside, so a deploy is a new worker and an unchanged page is not.
 //
@@ -29,16 +30,13 @@ var DB = "__DB__";
 // database at 1 while the worker asked for 2 and a navigation never answered at
 // all. The app would not have opened. There is a test that the two literals
 // match, because nothing else would notice.
-var DB_AT = 4;
+var DB_AT = 5;
 var PAGES = "pages";
 var FLAGS = "flags";
-// **The ground, and what was merely looked at.** Two stores because they are two
-// different promises: `KEPT` is what the reader asked for and is never trimmed,
-// `SEEN` is what panning left behind and is held to `TILE_CAP`. A deliberate
-// nine-hundred-tile download into an LRU of five hundred would evict itself on
-// the way in and report success.
+// One archive row per address. Its kept flag makes the storage promise;
+// only browse rows carry the eviction index key.
 var KEPT = "packs";
-var SEEN = "browse";
+
 var opened = null;
 
 function base() {
@@ -56,13 +54,8 @@ function base() {
                 made.deleteObjectStore("tiles");
                 ask.transaction.objectStore(FLAGS).delete("held");
             }
-            if (!made.objectStoreNames.contains(KEPT)) { made.createObjectStore(KEPT); }
             if (!made.objectStoreNames.contains("bench")) { made.createObjectStore("bench"); }
-            if (!made.objectStoreNames.contains(SEEN)) {
-                // The index is what makes the trim cheap: oldest first, without
-                // reading a row to find out how old it is.
-                made.createObjectStore(SEEN).createIndex("at", "at");
-            }
+            PackIO.upgrade(made, ask.transaction);
         };
         ask.onsuccess = function () {
             var open = ask.result;
@@ -287,6 +280,11 @@ self.addEventListener("message", function (event) {
         event.waitUntil(takeNewer());
         return;
     }
+    if (said.trails === "packs-changed") {
+        packs.clear();
+        if (event.ports[0]) { event.ports[0].postMessage(true); }
+        return;
+    }
     if (said.trails !== "offline") { return; }
     event.waitUntil(setOffline(said.on).then(function () {
         if (event.source) { event.source.postMessage({trails: "offline", on: !!said.on}); }
@@ -495,20 +493,7 @@ function within(ms, work, fallback, late) {
 }
 
 // Zoom-then-Hilbert, the same integer algorithm as processing.packs.tile_id.
-function tileId(z, x, y) {
-    if (!Number.isInteger(z) || z < 0 || z > 26 || !Number.isInteger(x) || !Number.isInteger(y) ||
-            x < 0 || y < 0 || x >= 2 ** z || y >= 2 ** z) { throw Error("invalid tile address"); }
-    var result = (4 ** z - 1) / 3;
-    for (var bit = z - 1; bit >= 0; bit--) {
-        var side = 2 ** bit, rx = !!(x & side), ry = !!(y & side);
-        result += side * side * ((3 * rx) ^ ry);
-        if (!ry) {
-            if (rx) { x = side - 1 - x; y = side - 1 - y; }
-            var swap = x; x = y; y = swap;
-        }
-    }
-    return result;
-}
+var tileId = PackIO.tileId;
 
 var LAYERS = [[TILE_PREFIX, __TILE_TOP__], [HEIGHT_PREFIX, __HEIGHT_TOP__],
     [SHADE_PREFIX, __SHADE_TOP__], [SLOPE_PREFIX, __SLOPE_TOP__],
@@ -545,70 +530,13 @@ function remember(cache, key, value, limit) {
     if (cache.size > limit) { cache.delete(cache.keys().next().value); }
     return value;
 }
-function packHeader(body) {
-    var bytes = new Uint8Array(body), view = new DataView(body);
-    function u64(at) {
-        var value = Number(view.getBigUint64(at, true));
-        if (!Number.isSafeInteger(value)) { throw Error("unsafe pack offset"); }
-        return value;
-    }
-    if (bytes.length < 127 || String.fromCharCode.apply(null, bytes.subarray(0, 8)) !== 'PMTiles\x03') {
-        throw Error("invalid PMTiles v3 header");
-    }
-    var h = {root: u64(8), rootLen: u64(16), data: u64(56), size: u64(64), count: u64(80), low: bytes[100], high: bytes[101]};
-    if (bytes[96] !== 1 || bytes[97] !== 1 || bytes[98] !== 1 || bytes[99] !== 2 ||
-            h.low > h.high || h.high > 26 || h.count < 1 || h.count > 85 || u64(72) !== h.count || u64(88) !== h.count ||
-            h.root !== 127 || h.rootLen <= 0 || h.rootLen > 16384 || u64(24) !== h.root + h.rootLen ||
-            u64(32) < 2 || u64(32) > 16384 || h.data !== u64(24) + u64(32) || u64(40) !== h.data || u64(48) !== 0) {
-        throw Error("unsupported pack header");
-    }
-    return h;
+var packHeader = PackIO.header, packDirectory = PackIO.directory;
+function holdPack(url, body, complete = true) {
+    var held = PackIO.unpack(body);
+    if (complete) { remember(directories, url, {entries: held.entries, at: Date.now()}, DIRECTORY_LIMIT); }
+    return remember(packs, url, held, PACK_LIMIT);
 }
-function packDirectory(h, body) {
-    var bytes = new Uint8Array(body), cursor = 0;
-    function varint() {
-        var value = 0;
-        for (var shift = 0; shift < 56; shift += 7) {
-            if (cursor >= bytes.length) { break; }
-            var byte = bytes[cursor++];
-            value += (byte & 127) * 2 ** shift;
-            if (!Number.isSafeInteger(value)) { break; }
-            if (byte < 128) { return value; }
-        }
-        throw Error("invalid directory varint");
-    }
-    if (varint() !== h.count) { throw Error("directory count mismatch"); }
-    var ids = [], lengths = [], id = 0, entries = new Map(), end = 0;
-    for (var i = 0; i < h.count; i++) {
-        var delta = varint();
-        if (i && !delta) { throw Error("duplicate tile ID"); }
-        id += delta; ids.push(id);
-    }
-    for (i = 0; i < h.count; i++) { if (varint() !== 1) { throw Error("unsupported run length"); } }
-    for (i = 0; i < h.count; i++) { lengths.push(varint()); }
-    for (i = 0; i < h.count; i++) {
-        var encoded = varint(), offset = encoded === 0 && i > 0 ? end : encoded - 1, length = lengths[i];
-        if (length <= 0 || offset !== end || offset + length > h.size) { throw Error("invalid tile offset"); }
-        entries.set(ids[i], {offset: h.data + offset, length: length}); end = offset + length;
-    }
-    if (cursor !== bytes.length || end !== h.size || ids[0] < (4 ** h.low - 1) / 3 || ids[ids.length - 1] >= (4 ** (h.high + 1) - 1) / 3) {
-        throw Error("directory length or zoom mismatch");
-    }
-    return entries;
-}
-function holdPack(url, body) {
-    if (!(body instanceof ArrayBuffer)) { throw Error("pack row is not an ArrayBuffer"); }
-    var h = packHeader(body);
-    if (body.byteLength !== h.data + h.size) { throw Error("truncated pack"); }
-    var entries = packDirectory(h, body.slice(h.root, h.root + h.rootLen));
-    remember(directories, url, {entries: entries, at: Date.now()}, DIRECTORY_LIMIT);
-    return remember(packs, url, {body: body, entries: entries}, PACK_LIMIT);
-}
-function sliceTile(pack, id) {
-    var entry = pack.entries.get(id);
-    if (!entry) { return null; }
-    return pack.body.slice(entry.offset, entry.offset + entry.length);
-}
+var sliceTile = PackIO.slice;
 function png(body) { return new Response(body, {headers: {'content-type': 'image/png'}}); }
 
 // A 200 to a Range request is a whole pack, never bytes at the requested offset.
@@ -661,7 +589,7 @@ function directoryFor(url, event) {
 }
 async function networkTile(address, event, asked = Date.now()) {
     var url = address.url, held = recent(packs, url), directory = recent(directories, url);
-    if (held) { return sliceTile(held, address.id); }
+    if (held && held.entries.has(address.id)) { return sliceTile(held, address.id); }
     // Height packs are ~5.3 MB at z10 (the plan's phase 6 built-note), far too
     // much speculative traffic for a phone. Keep still downloads them whole.
     // Use arrival time: waiting on the store cannot turn a burst into a later visit.
@@ -674,14 +602,14 @@ async function networkTile(address, event, asked = Date.now()) {
         }
     }
     var entries = await directoryFor(url, event), pack = recent(packs, url);
-    if (pack) { return sliceTile(pack, address.id); }
+    if (pack && pack.entries.has(address.id)) { return sliceTile(pack, address.id); }
     var entry = entries.get(address.id);
     if (!entry) { return null; }
     var part = await range(url, entry.offset, entry.offset + entry.length - 1);
     if (part.whole) { return sliceTile(keepNetworkPack(url, part.whole, event), address.id); }
-    // A range bought this tile, not its pack. Keep exactly those bytes so the
-    // first screen survives a cold offline visit without promoting any pack.
-    var kept = browsePut(address.tile, part.body);
+    // Merge only the bytes bought by this range into the partial archive.
+    // The first screen survives a cold visit without promoting any pack.
+    var kept = browsePut(address.url, part.body, address.id);
     if (event) { event.waitUntil(kept); }
     return part.body;
 }
@@ -711,39 +639,14 @@ function flushLookups() {
                     off.then(function (on) { items.forEach(function (item) { item.state.off = on; item.done(value); }); });
                 }
                 ask.onsuccess = function () {
-                    if (ask.result instanceof ArrayBuffer) { answer({body: ask.result, path: "db"}); return; }
                     if (items.every(function (item) { return item.state.expired; })) { return; }
-                    var seen = tx.objectStore(SEEN).get(plain);
-                    seen.onsuccess = function () {
-                        if (seen.result && seen.result.body instanceof ArrayBuffer) {
-                            answer({body: seen.result.body, path: "seen"}); return;
-                        }
-                        // Share the pack reads, then ask only for the missing
-                        // tiles. A later whole pack supersedes these rows without
-                        // a walk through browse to remove them.
-                        var tiles = new Map();
-                        items.forEach(function (item) {
-                            if (item.state.expired) { return; }
-                            if (!item.tile) { off.then(function (on) { item.state.off = on; item.done(null); }); return; }
-                            if (!tiles.has(item.tile)) { tiles.set(item.tile, []); }
-                            tiles.get(item.tile).push(item);
-                        });
-                        tiles.forEach(function (waiting, tile) {
-                            var ask = tx.objectStore(SEEN).get(tile);
-                            ask.onsuccess = function () {
-                                var value = ask.result && ask.result.body instanceof ArrayBuffer ?
-                                    {body: ask.result.body, path: "seen", tile: true} : null;
-                                off.then(function (on) {
-                                    waiting.forEach(function (item) { item.state.off = on; item.done(value); });
-                                });
-                            };
-                        });
-                    };
+                    var row = ask.result;
+                    answer(row ? {body: row.pack, complete: row.complete, path: row.kept ? "db" : "seen"} : null);
                 };
             });
             tx.onabort = tx.onerror = function () { batch.forEach(function (item) { item.done(null); }); };
         }
-        var deal = open.transaction([KEPT, SEEN, FLAGS], "readonly");
+        var deal = open.transaction([KEPT, FLAGS], "readonly");
         var off = switched;
         if (!off) {
             switched = off = new Promise(function (done) {
@@ -774,22 +677,22 @@ function tileFor(request, event) {
         var address = packFor(plain), held = recent(packs, address.url);
         if (held) {
             var body = sliceTile(held, address.id);
-            answered(body ? "mem" : "blank"); return body ? png(body) : blank();
+            if (body) { answered("mem"); return png(body); }
         }
         // The deadline bounds the store only; even a slow network answer is awaited below.
         return within(2500, lookup(address.url, state, plain), null, late).then(async function (found) {
             if (found) {
                 var cached = recent(packs, address.url);
-                var body = cached ? sliceTile(cached, address.id) :
-                    (found.tile ? found.body : sliceTile(holdPack(address.url, found.body), address.id));
-                answered(body ? (cached ? "mem" : found.path) : "blank"); return body ? png(body) : blank();
+                var body = cached && sliceTile(cached, address.id);
+                if (body) { answered("mem"); return png(body); }
+                // A locally completed archive has {} metadata; its offsets need not
+                // match the bucket. Only network bodies seed the range directory.
+                body = sliceTile(holdPack(address.url, found.body, false), address.id);
+                if (body) { answered(found.path); return png(body); }
             }
             // A concurrent request may have filled memory while this get ran.
-            var cached = recent(packs, address.url);
-            if (cached) {
-                var body = sliceTile(cached, address.id);
-                answered(body ? "mem" : "blank"); return body ? png(body) : blank();
-            }
+            var cached = recent(packs, address.url), body = cached && sliceTile(cached, address.id);
+            if (body) { answered("mem"); return png(body); }
             var off = state.off;
             if (off) { answered("blank"); return blank(); }
             var body = await networkTile(address, event, asked);
@@ -799,93 +702,89 @@ function tileFor(request, event) {
         .finally(function () { inFlight -= 1; });
 }
 
-var BROWSE_BYTES = "browse-bytes", BROWSE_SIZE = "browse-size:";
+var BROWSE_BYTES = "browse-bytes";
 var puts = [], putTick = null;
-function browsePut(plain, body) {
+function browsePut(plain, body, id) {
     return new Promise(function (done) {
-        puts.push({plain: plain, body: body, done: done});
+        puts.push({plain: plain, body: body, id: id, done: done});
         if (putTick === null) { putTick = setTimeout(flushPuts, 0); }
     });
 }
-
 function flushPuts() {
-    var batch = puts;
+    var batch = puts, grouped = new Map(), committed = new Map(), pruning = false;
     puts = []; putTick = null;
-    base().then(function (open) {
-        var deal = open.transaction([SEEN, FLAGS], "readwrite");
-        var store = deal.objectStore(SEEN), flags = deal.objectStore(FLAGS);
-        var ask = flags.get(BROWSE_BYTES);
-        ask.onsuccess = function () {
-            function put(total) {
-                var i = 0;
+    batch.forEach(function (item) {
+        var group = grouped.get(item.plain);
+        if (!group) { group = {tiles: new Map(), body: null}; grouped.set(item.plain, group); }
+        if (item.id === undefined) { group.body = item.body; }
+        else { group.tiles.set(item.id, item.body); }
+    });
+    return base().then(function (open) {
+        return new Promise(function (done, fail) {
+            var deal = open.transaction([KEPT, FLAGS], "readwrite"), store = deal.objectStore(KEPT);
+            PackIO.totals(deal, function (held, total) {
+                var entries = grouped.entries();
                 function next() {
-                    if (i === batch.length) { flags.put(total, BROWSE_BYTES); return; }
-                    var item = batch[i++], key = BROWSE_SIZE + item.plain;
-                    // Metadata only, including on overwrite: no browse blob get.
-                    var size = flags.get(key);
-                    size.onsuccess = function () {
-                        // The panel can clear browse; stale metadata must not
-                        // subtract bytes for a row it has already removed.
-                        var exists = store.getKey(item.plain);
-                        exists.onsuccess = function () {
-                            total.bytes += item.body.byteLength - (exists.result === undefined ? 0 : (size.result || 0));
-                            store.put({body: item.body, at: Date.now(), size: item.body.byteLength}, item.plain);
-                            flags.put(item.body.byteLength, key);
-                            total.writes += 1;
-                            if (total.writes % 50 === 0) { trim(store, flags, total, next); }
+                    var step = entries.next();
+                    if (step.done) { PackIO.saveTotals(deal, held, total); return; }
+                    var url = step.value[0], group = step.value[1], ask = store.get(url);
+                    ask.onsuccess = function () {
+                        try {
+                            var old = ask.result, body = group.body || PackIO.merge(old && old.pack, group.tiles);
+                            var made = PackIO.row(body, !!(old && old.kept), !!(group.body || (old && old.complete)), url);
+                            PackIO.account(held, total, url, old, made); store.put(made, url);
+                            remember(committed, url, made, PACK_LIMIT);
+                            if (!made.kept) { total.writes += 1; }
+                            if (!made.kept && total.writes % 50 === 0) {
+                                pruning = true;
+                                trim(store, total, next, function (key) { committed.delete(key); });
+                            }
                             else { next(); }
-                        };
+                        } catch (error) { deal.abort(); }
                     };
                 }
                 next();
-            }
-            var sizes = IDBKeyRange.bound(BROWSE_SIZE, BROWSE_SIZE + "\uffff");
-            function reset() {
-                // Browse is disposable. Rewriting old blobs can hold this
-                // transaction past an iOS worker's life and repeat forever.
-                store.clear();
-                flags.delete(sizes);
-                put({bytes: 0, writes: 0});
-            }
-            if (!ask.result) { reset(); return; }
-            // All browse keys are URLs. Ask only whether one exists, never
-            // count the store on a write. A page-side clear leaves flags.
-            var first = store.getKey(IDBKeyRange.lowerBound(""));
-            first.onsuccess = function () {
-                if (first.result === undefined) {
-                    flags.delete(sizes);
-                    put({bytes: 0, writes: 0});
-                    return;
-                }
-                var size = flags.getKey(sizes);
-                size.onsuccess = function () {
-                    if (size.result === undefined) { reset(); }
-                    else { put(ask.result); }
-                };
+            });
+            deal.oncomplete = function () {
+                committed.forEach(function (row, url) { holdPack(url, row.pack, false); }); done();
             };
-        };
-        deal.oncomplete = deal.onabort = deal.onerror = function () { batch.forEach(function (item) { item.done(); }); };
-    }).catch(function () { batch.forEach(function (item) { item.done(); }); });
+            deal.onabort = deal.onerror = function () { fail(deal.error); };
+        }).then(function () { return pruning ? trimBrowse(open) : null; });
+    }).catch(function () {}).finally(function () { batch.forEach(function (item) { item.done(); }); });
 }
-
-// Every fiftieth write above the byte budget, remove at most fifty oldest keys.
-// Only index keys and small size records are read, never tile bodies.
-function trim(store, flags, total, done) {
+// Index keys contain [at, size] only for browse rows. At most fifty per transaction.
+function trim(store, total, done, removedKey) {
     if (total.bytes <= TILE_CAP) { done(); return; }
-    var removed = 0, walk = store.index("at").openKeyCursor();
+    var removed = 0, walk = store.index("browsed-at").openKeyCursor();
     walk.onsuccess = function () {
         var at = walk.result;
-        if (!at) { total.bytes = 0; done(); return; }
-        var key = BROWSE_SIZE + at.primaryKey, size = flags.get(key);
-        size.onsuccess = function () {
-            total.bytes -= size.result || 0;
-            store.delete(at.primaryKey);
-            flags.delete(key);
-            removed += 1;
-            if (removed >= 50) { done(); }
-            else { at.continue(); }
-        };
+        if (!at) { done(); return; }
+        total.bytes -= at.key[1]; store.delete(at.primaryKey); packs.delete(at.primaryKey);
+        if (removedKey) { removedKey(at.primaryKey); }
+        removed += 1;
+        if (removed >= 50 || total.bytes <= TILE_CAP) { done(); }
+        else { at.continue(); }
     };
+}
+
+// A large excess takes several short transactions, each bounded at fifty keys.
+// Re-read totals between batches so concurrent Keep and browse commits are included.
+async function trimBrowse(open) {
+    var more = true;
+    for (; more;) {
+        more = await new Promise(function (done, fail) {
+            var tx = open.transaction([KEPT, FLAGS], "readwrite"), again = false;
+            PackIO.totals(tx, function (held, total) {
+                var before = total.bytes;
+                trim(tx.objectStore(KEPT), total, function () {
+                    again = total.bytes > TILE_CAP && total.bytes < before;
+                    PackIO.saveTotals(tx, held, total);
+                });
+            });
+            tx.oncomplete = function () { done(again); };
+            tx.onabort = tx.onerror = function () { fail(tx.error); };
+        });
+    }
 }
 
 self.addEventListener("fetch", function (event) {

@@ -322,7 +322,7 @@ class TestServiceWorker:
         assert "if (kept) { return kept; }" in maps.SERVICE_WORKER
         # Bounded, because a cache with no ceiling is a quota with no floor.
         assert "var TILE_CAP = 150 * 1000 * 1000;" in maps.SERVICE_WORKER
-        assert "function trim(store, flags, total, done)" in maps.SERVICE_WORKER
+        assert "function trim(store, total, done, removedKey)" in maps.SERVICE_WORKER
 
     def test_it_is_registered_only_where_a_worker_can_exist(self):
         """A worker needs a secure origin, so a page opened off the disk gets
@@ -359,23 +359,15 @@ class TestOfflineWorker:
     """What the worker does with terrain somebody asked for, as against terrain
     they happened to pan over."""
 
-    def test_what_was_asked_for_is_kept_apart_from_what_was_merely_seen(self):
-        """Two stores, because they are two different promises. `browse` is
-        opportunistic and trimmed to the last 500; `tiles` is what the reader
-        chose and is never trimmed -- a deliberate nine-hundred-tile download
-        into an LRU of five hundred would evict itself on the way in, and the
-        panel would report that it had worked."""
-        assert 'var KEPT = "packs";' in maps.SERVICE_WORKER
-        assert 'var SEEN = "browse";' in maps.SERVICE_WORKER
-        # Looked at in that order: what was asked for answers before what was
-        # seen, so a trimmed tile never shadows a kept one.
-        lookup = maps.SERVICE_WORKER.split("function flushLookups()")[1].split("\nfunction ")[0]
-        assert 'open.transaction([KEPT, SEEN, FLAGS], "readonly")' in lookup
-        assert lookup.index("tx.objectStore(KEPT).get(plain)") < lookup.index("tx.objectStore(SEEN).get(plain)")
-        assert 'if (ask.result instanceof ArrayBuffer) { answer({body: ask.result, path: "db"}); return; }' in lookup
-        trimming = maps.SERVICE_WORKER.split("function trim(store, flags, total, done)")[1].split("\nfunction ")[0]
-        assert 'store.index("at").openKeyCursor()' in trimming
-        assert "store.get(" not in trimming and "openCursor(" not in trimming
+    def test_one_store_uses_disjoint_key_only_indexes(self):
+        worker = maps.SERVICE_WORKER
+        assert 'var KEPT = "packs";' in worker
+        assert "var SEEN =" not in worker
+        assert 'open.transaction([KEPT, FLAGS], "readonly")' in worker
+        assert 'row.kept ? "db" : "seen"' in worker
+        assert 'store.index("browsed-at").openKeyCursor()' in worker
+        assert "store.index('kept').openKeyCursor(bounds)" in worker
+        assert "openCursor(" not in worker and "getAll(" not in worker
 
     def test_every_cache_an_earlier_version_wrote_is_swept(self):
         """Nothing reads a cache any longer, so whatever is left in one is
@@ -480,7 +472,7 @@ class TestOfflineWorker:
     def test_warm_lookups_place_a_get_before_yielding_the_new_transaction(self):
         """WebKit can commit an empty transaction before its complete event."""
         lookup = maps.SERVICE_WORKER.split("function flushLookups()")[1].split("\nfunction ")[0]
-        creation = lookup.split('var deal = open.transaction([KEPT, SEEN, FLAGS], "readonly");')[1]
+        creation = lookup.split('var deal = open.transaction([KEPT, FLAGS], "readonly");')[1]
         assert "readBatch(deal);" in creation
         assert "await " not in creation
         first_get = lookup.split("function readBatch(tx) {", 1)[1].split("tx.objectStore(KEPT).get(plain);", 1)[0]
@@ -489,30 +481,25 @@ class TestOfflineWorker:
 
     def test_browse_bytes_and_write_cadence_survive_a_worker_restart(self):
         worker = maps.SERVICE_WORKER
-        assert "var DB_AT = 4;" in worker
+        assert "var DB_AT = 5;" in worker
         assert "var TILE_CAP = 150 * 1000 * 1000;" in worker
         assert "setTimeout(flushPuts, 0)" in worker
-        assert "size: item.body.byteLength" in worker
+        assert "size: body.byteLength" in worker
         assert "total.writes % 50 === 0" in worker
-        assert "flags.put(total, BROWSE_BYTES)" in worker
-        assert "if (removed >= 50) { done(); }" in worker
+        assert "PackIO.saveTotals(deal, held, total)" in worker
+        assert "if (removed >= 50 || total.bytes <= TILE_CAP) { done(); }" in worker
         assert "if (event) { event.waitUntil(kept); }" in worker
 
-    def test_old_browse_is_cleared_without_walking_or_updating_blobs(self):
-        """A disposable cache must not be rewritten on every interrupted life."""
+    def test_upgrade_recreates_packs_and_discards_browse_without_a_walk(self):
         worker = maps.SERVICE_WORKER
-        assert "openCursor(" not in worker
-        assert ".update(" not in worker
-        assert "getAll(" not in worker and "getAllKeys(" not in worker
-        flush = worker.split("function flushPuts()")[1].split("\nfunction ")[0]
-        assert 'open.transaction([SEEN, FLAGS], "readwrite")' in flush
-        assert "store.clear();" in flush and "flags.delete(sizes);" in flush
-        assert "put({bytes: 0, writes: 0});" in flush
-        assert "if (!ask.result) { reset(); return; }" in flush
-        assert "if (size.result === undefined) { reset(); }" in flush
-        assert "flags.getKey(sizes)" in flush
-        assert 'store.getKey(IDBKeyRange.lowerBound(""))' in flush
-        assert ".count(" not in flush and "Cursor(" not in flush
+        upgrade = worker.split("function upgrade(db, tx)")[1].split("function prefix")[0]
+        assert "db.deleteObjectStore('browse')" in upgrade
+        assert "db.deleteObjectStore('packs')" in upgrade
+        assert "db.createObjectStore('packs')" in upgrade
+        for flag in ("held", "stand", "browse-bytes"):
+            assert f"flags.delete('{flag}')" in upgrade
+        assert "Cursor(" not in upgrade and ".get(" not in upgrade
+        assert "PackIO.upgrade(made, ask.transaction)" in worker
 
     def test_a_deliberate_download_is_not_answered_by_the_worker(self):
         """The panel fetches what the reader asked to keep with `cache:
@@ -1113,7 +1100,7 @@ class TestOfflinePanel:
         maps.add_chrome(fmap)
 
         html = fmap.get_root().render()
-        assert "keepAwake();\n                        return fetch(url, {cache: 'reload', mode: 'cors'});" in html
+        assert "keepAwake();\n                        return fetch(url, {cache: 'reload', mode: 'cors'," in html
         # The poll behind the event, which is what the run already leaned on.
         assert "var poll = window.setInterval(go, 1000);" in html
 
@@ -1143,7 +1130,7 @@ class TestOfflinePanel:
         # the cache before it is asked of the network, so a stopped run costs
         # nothing to pick up.
         assert "return dbRead(KEPT, next.url).then(function (there) {" in html
-        assert "if (there) { missed = 0; state.held += 1; kept = true; size = there.byteLength; return null; }" in html
+        assert "if (there && there.kept && there.complete) { missed = 0; state.held += 1; kept = true; size = there.size; return null; }" in html
 
     def test_a_run_never_holds_more_than_one_tile(self):
         """The pre-scan that let a resumed run open at the figure it had reached
@@ -1230,7 +1217,7 @@ class TestOfflinePanel:
         assert "if (missed >= 12) { state.stop = true; state.stalled = true; }" in html
         # Reset on every success, so bad tiles arriving in ones and twos never
         # trip it — twelve rather than three because six requests run at once.
-        assert "missed = 0;" in html and "return answer.arrayBuffer().then(function (body) {" in html
+        assert "missed = 0;" in html and "return Promise.resolve(answer).then(function (body) {" in html
         # A run the connection stopped still switches on for what arrived; only
         # a run the reader stopped leaves the chooser where it was.
         assert "if (state.stop && !state.stalled) { return refresh(); }" in html
@@ -1576,7 +1563,7 @@ class TestATileIsAskedForMoreThanOnce:
         one a tile the run simply gave up on."""
         html = self.rendered()
         assert "var TRIES = 3;" in html
-        assert "return fetchTile(next.url, 1, 0).then(function (answer) {" in html
+        assert "return fetchTile(next.url, 1, 0, start, end);" in html
         # The wait grows with the attempt, because what this exists for is a
         # server briefly out of patience and coming straight back is what made
         # it so.
@@ -1649,7 +1636,9 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         page = re.search(r"window\.indexedDB\.open\('trails', (\d+)\)", html)
         assert worker and page, "both sides must name a version"
         assert worker.group(1) == page.group(1)
-        assert worker.group(1) == "4"
+        assert worker.group(1) == "5"
+        bench = re.search(r"indexedDB\.open\(BENCH_DB, (\d+)\)", html)
+        assert bench and bench.group(1) == worker.group(1)
 
     def test_neither_side_hangs_and_neither_side_blocks(self):
         """Two halves. Saying so beats waiting — blocked means somebody holds an
@@ -1669,9 +1658,10 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         for store in ("pages", "flags", "bench", "packs"):
             assert f"createObjectStore('{store}')" in html
             assert f"contains({store.upper()})" in maps.SERVICE_WORKER or f'"{store}"' in maps.SERVICE_WORKER
-        assert "createObjectStore(KEPT)" in html and "createObjectStore(KEPT)" in maps.SERVICE_WORKER
-        assert "createObjectStore(SEEN).createIndex" in html
-        assert "createObjectStore(SEEN).createIndex" in maps.SERVICE_WORKER
+        for source in (html, maps.SERVICE_WORKER):
+            assert "PackIO.upgrade(made, ask.transaction)" in source
+            assert "store.createIndex('browsed-at', 'browsedAt')" in source
+            assert "store.createIndex('kept', 'keptAt')" in source
 
     def test_sources_reads_the_tally_and_owns_the_bounded_store_measurement(self):
         html = self.rendered()
@@ -1679,7 +1669,7 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         assert "spent.total.toFixed(1)" in html and "spent.worst.toFixed(1)" in html
         assert "told.deadlines" in html and "told.peak" in html
         assert 'var BENCH_DB = "trails";' in html
-        assert "indexedDB.open(BENCH_DB, 4)" in html
+        assert "indexedDB.open(BENCH_DB, 5)" in html
         assert "sourcesHolder.appendChild(benchBox);" in html
         assert "measureStore: measureStore" in html
         for variant in ("blob-url", "blob-number", "pack", "archive"):
@@ -1852,14 +1842,14 @@ class TestNothingGrowsWithTheDownload:
         # cleared under the page would take both — and it meant that opening this
         # panel opened a Cache Storage holding tens of thousands of entries and
         # several gigabytes. Measured on an installed app at twenty seconds.
-        assert "window.indexedDB.open('trails', 4)" in html
+        assert "window.indexedDB.open('trails', 5)" in html
         # `forget` clears the row too, which is the property the first place was
         # chosen for.
-        assert "dbClear(KEPT), dbClear(SEEN), dbWrite('flags', HELD, null)" in html
+        assert "db().then(function (open) { return PackIO.forget(open); })" in html
         # Written as the run goes, so a run the phone interrupts still leaves a
         # figure behind — which is exactly the run that used to leave the panel
         # saying nothing was kept.
-        assert "var tx = open.transaction([KEPT, 'flags'], 'readwrite');" in html
+        assert "var tx = open.transaction(['packs', 'flags'], 'readwrite')" in html
 
     def test_no_record_means_zero_packs_kept(self):
         """The upgrade dropped old tiles; every pack now commits with its count.
@@ -1971,7 +1961,7 @@ class TestTheSwitchWaitsForTheWorker:
         where the redraw matters most: the switch has just gone on, and every
         tile on the screen is about to be asked for again."""
         html = self.rendered()
-        assert "return tellWorker(true).then(function () {" in html
+        assert "return packsChanged().then(function () { return tellWorker(true); }).then(function () {" in html
 
 
 class TestNativeZoomFollowsWhatIsKept:
@@ -2007,7 +1997,7 @@ class TestNativeZoomFollowsWhatIsKept:
         hundred thousand keys, in the panel that already pays for one."""
         html = self.rendered()
         assert "if (next.kind === 'map') { state.top = Math.max(state.top, Math.min(state.requested, next.z + 3)); }" in html
-        assert "top: Math.max(was.top, top)" in html
+        assert "held.top = Math.max(held.top, top)" in html
         assert "fitNativeZoom(both[0].top);" in html
 
     def test_a_sheet_switched_under_the_reader_gets_the_same_ceiling(self):
@@ -2316,7 +2306,7 @@ class TestTwoMapsOnOneOrigin:
         for retired in ("migrateStand", "walkStand", "STAND_WALK", "keptFor", "var STAND ="):
             assert retired not in worker
         assert "openCursor(" not in worker
-        assert worker.count("openKeyCursor(") == 1, "only the bounded browse trim visits keys"
+        assert worker.count("openKeyCursor(") == 2, "only bounded trim and explicit Forget visit indexed keys"
 
     def test_a_tile_tree_version_reaches_the_provider_the_layer_and_the_page(self, tmp_path):
         """A new stand of Lantmäteriet's file is a new version segment; the
@@ -2437,7 +2427,7 @@ class TestTwoMapsOnOneOrigin:
     def test_the_page_opens_its_own_database_and_caches(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
-        assert "window.indexedDB.open('trails-abisko', 4)" in html
+        assert "window.indexedDB.open('trails-abisko', 5)" in html
         assert "var TERRAIN = 'trails-abisko-terrain';" in html
         assert "var TILES = 'trails-abisko-tiles';" in html
         assert "var KEY = 'trails-abisko-offline';" in html
@@ -9640,6 +9630,17 @@ class TestGlyphColumnMustExist:
         assert maps.add_points(fmap, empty, name="Ferry quays [OSM]", icon_field="glyph") is not None
 
 
+@pytest.fixture
+def full_pack_fixture(tmp_path):
+    """A full 85-tile Python archive to compare with the worker's dumped bytes."""
+    tile = tmp_path / "tile.png"
+    tile.write_bytes(base64.b64decode(maps._ERROR_TILE_URL.split(",")[1]))
+    tiles = {(z, x, y): tile for z in range(2, 6) for x in range(2 ** (z - 2)) for y in range(2 ** (z - 2))}
+    reference = tmp_path / "python.pmtiles"
+    packs.write_pack(tiles, reference)
+    return tile, tiles, reference
+
+
 class TestPackWorker:
     """Run the emitted JavaScript against the independent Python format reader."""
 
@@ -9802,12 +9803,12 @@ class TestPackWorker:
         assert result["requests"][0] == "bytes=0-16383"
         assert len(result["beforeSettle"]) == 6, "burst tiles stay ranged, even after a slow store lookup or at the two-second boundary"
         assert all(request.startswith("bytes=") for request in result["beforeSettle"])
-        assert result["rangeWrites"] == [{"url": "https://atlas.test/tiles/kartverket/topo/1/14/1/1.png", "size": 68}]
+        assert result["rangeWrites"] == [{"url": "https://atlas.test/packs/tiles/kartverket/topo/1/14/1/1.pmtiles", "size": 68}]
         assert result["afterSettle"] == result["afterMemory"]
         assert result["requests"].count("whole") == 1
         assert result["requests"][-1] == "bytes=0-16383"
         assert result["same"]
-        whole_writes = [row for row in result["writes"] if row["url"].endswith(".pmtiles")]
+        whole_writes = [row for row in result["writes"] if row["size"] > 68]
         assert len(whole_writes) == 2
         assert all(row["size"] == 68 for row in result["writes"] if row not in whole_writes)
 
@@ -9873,29 +9874,168 @@ class TestPackWorker:
         }
 
     @pytest.mark.parametrize("offline", [False, True])
-    def test_browse_tile_answers_without_network_or_pack_parsing(self, tmp_path, offline):
+    @pytest.mark.parametrize("kept", [False, True])
+    def test_partial_lookup_uses_memory_then_row_then_blank_or_network(self, tmp_path, offline, kept):
         result = self.run_worker(
             tmp_path,
             """
             (async function () {
-                var bytes = new Uint8Array([1, 2, 3]).buffer, paths = [], keys;
-                tally = path => paths.push(path);
-                switched = Promise.resolve(OFFLINE);
-                lookup = async (pack, state, tile) => {
-                    keys = [pack, tile]; state.off = OFFLINE;
-                    return {body: bytes, path: 'seen', tile: true};
+                var bytes = new Uint8Array(8).fill(7).buffer, paths = [], reads = 0, network = 0;
+                var a = packFor(TILE_PREFIX + '14/1/1.png'), b = packFor(TILE_PREFIX + '15/2/2.png');
+                var body = PackIO.write(new Map([[a.id, bytes]]));
+                tally = path => paths.push(path); switched = Promise.resolve(OFFLINE);
+                lookup = async (key, state) => {
+                    reads++; state.off = OFFLINE; return {body, complete: false, path: KEPT ? 'db' : 'seen'};
                 };
-                networkTile = async () => { throw Error('browse tile reached network'); };
-                var response = await tileFor(new Request(TILE_PREFIX + '14/1/1.png?token=2'));
-                console.log(JSON.stringify({body: [...new Uint8Array(await response.arrayBuffer())], paths, keys}));
+                networkTile = async () => { network++; return bytes; };
+                const sizes = [];
+                for (const tile of [a.tile, a.tile, b.tile]) {
+                    sizes.push((await (await tileFor(new Request(tile))).arrayBuffer()).byteLength);
+                }
+                console.log(JSON.stringify({paths, reads, network, sizes}));
             })().catch(e => { console.error(e); process.exitCode = 1; });
-            """.replace("OFFLINE", json.dumps(offline)),
+            """.replace("OFFLINE", json.dumps(offline)).replace("KEPT", json.dumps(kept)),
         )
         assert result == {
-            "body": [1, 2, 3],
-            "paths": ["seen"],
-            "keys": ["https://atlas.test/packs/tiles/kartverket/topo/1/14/1/1.pmtiles", "https://atlas.test/tiles/kartverket/topo/1/14/1/1.png"],
+            "paths": ["db" if kept else "seen", "mem", "blank" if offline else "net"],
+            "reads": 2,
+            "network": 0 if offline else 1,
+            "sizes": [8, 8, 68 if offline else 8],
         }
+
+    def test_writer_and_merge_agree_byte_for_byte_with_python(self, tmp_path, full_pack_fixture):
+        tile, tiles, reference = full_pack_fixture
+        result = self.run_worker(
+            tmp_path,
+            f"""
+            const tileBytes = Uint8Array.from(Buffer.from('{base64.b64encode(tile.read_bytes()).decode()}', 'base64')).buffer;
+            const ids = {json.dumps([packs.tile_id(*t) for t in tiles])};
+            const tiles = new Map(ids.map(id => [id, tileBytes]));
+            const full = PackIO.write(tiles), first = PackIO.write(new Map([[ids[0], tileBytes]]));
+            const merged = PackIO.merge(first, tiles), pack = PackIO.unpack(merged);
+            console.log(JSON.stringify({{full: Buffer.from(full).toString('base64'),
+                merged: Buffer.from(merged).equals(Buffer.from(full)), count: pack.entries.size,
+                slices: ids.every(id => Buffer.from(PackIO.slice(pack, id)).equals(Buffer.from(tileBytes)))}}));
+        """,
+        )
+        written = tmp_path / "worker.pmtiles"
+        written.write_bytes(base64.b64decode(result["full"]))
+        assert written.read_bytes() == reference.read_bytes()
+        reader = packs.PackReader(written)
+        assert all(reader.read_tile(*address) == tile.read_bytes() for address in tiles)
+        assert result["merged"] and result["slices"] and result["count"] == 85
+
+    @pytest.mark.parametrize("present", [0, 1, 2, 3, 4])
+    def test_keep_completes_only_missing_ranges_or_fetches_whole(self, tmp_path, present):
+        result = self.run_worker(
+            tmp_path,
+            f"""
+            (async () => {{
+                const bytes = new Uint8Array(8).fill(9).buffer, ids = [0, 1, 2, 3];
+                const full = PackIO.write(new Map(ids.map(id => [id, bytes]))), requests = [];
+                const request = async (start, end) => {{
+                    requests.push(start === undefined ? 'whole' : [start, end]);
+                    if (start === undefined) return new Response(full);
+                    end = Math.min(end, full.byteLength - 1);
+                    return new Response(full.slice(start, end + 1), {{status:206, headers:{{
+                        'content-range': 'bytes ' + start + '-' + end + '/' + full.byteLength}}}});
+                }};
+                const row = {present} ? PackIO.row(PackIO.write(new Map(ids.slice(0, {present}).map(id => [id, bytes]))), false, false, 'p') : null;
+                const body = await PackIO.complete(row, request);
+                const at = requests.length;
+                await PackIO.complete(PackIO.row(body, true, true, 'p'), request);
+                console.log(JSON.stringify({{requests, skipped: at === requests.length,
+                    same: Buffer.from(body).equals(Buffer.from(full))}}));
+            }})().catch(e => {{console.error(e);process.exitCode=1;}});
+        """,
+        )
+        assert result["same"] and result["skipped"]
+        requests = result["requests"]
+        assert len(requests) == (1 if present == 0 else 2 if present == 1 else 5 - present)
+        assert ("whole" in requests) == (present < 2)
+        if present:
+            assert requests[0] == [0, 16383]
+
+    def test_merge_replaces_bytes_without_duplicating_ids(self, tmp_path):
+        result = self.run_worker(
+            tmp_path,
+            """
+            const a = new Uint8Array(8).fill(1).buffer, b = new Uint8Array(9).fill(2).buffer;
+            const first = PackIO.write(new Map([[0,a],[1,a]]));
+            const merged = PackIO.unpack(PackIO.merge(first,new Map([[1,b],[2,b]])));
+            console.log(JSON.stringify({ids:[...merged.entries.keys()],
+                bytes:[0,1,2].map(id=>[...new Uint8Array(PackIO.slice(merged,id))])}));
+        """,
+        )
+        assert result == {"ids": [0, 1, 2], "bytes": [[1] * 8, [2] * 9, [2] * 9]}
+
+    def test_upgrade_discards_only_terrain_and_creates_both_indexes(self, tmp_path):
+        result = self.run_worker(
+            tmp_path,
+            """
+            const stores = new Set(['pages','flags','bench','packs','browse']), indexes = [], deleted = [], flags = [];
+            IDBKeyRange = {bound: (a,b)=>[a,b]};
+            PackIO.upgrade({objectStoreNames:{contains:name=>stores.has(name)},
+                deleteObjectStore:name=>{deleted.push(name);stores.delete(name);},
+                createObjectStore:name=>{stores.add(name);return {createIndex:(...args)=>indexes.push(args)};}
+            },{objectStore:()=>({delete:key=>flags.push(key)})});
+            console.log(JSON.stringify({stores:[...stores],deleted,indexes,flags}));
+        """,
+        )
+        assert result["stores"] == ["pages", "flags", "bench", "packs"]
+        assert result["deleted"] == ["browse", "packs"]
+        assert result["indexes"] == [["browsed-at", "browsedAt"], ["kept", "keptAt"]]
+        assert result["flags"] == ["held", "stand", "browse-bytes", ["browse-size:", "browse-size:\uffff"]]
+
+    def test_keep_accepts_an_ignored_range_and_rejects_a_truncated_one(self, tmp_path):
+        result = self.run_worker(
+            tmp_path,
+            """
+            (async () => {
+                const bytes=new Uint8Array(8).buffer,body=PackIO.write(new Map([[0,bytes],[1,bytes]]));
+                const row=PackIO.row(PackIO.write(new Map([[0,bytes]])),false,false,'url');
+                const whole=await PackIO.complete(row,async()=>new Response(body));
+                let refused=false;
+                try {await PackIO.complete(row,async()=>new Response(body.slice(0,128),{status:206,
+                    headers:{'content-range':'bytes 0-1000/1001'}}));}catch(e){refused=true;}
+                console.log(JSON.stringify({refused,same:Buffer.from(whole).equals(Buffer.from(body))}));
+            })().catch(e=>{console.error(e);process.exitCode=1;});
+        """,
+        )
+        assert result == {"refused": True, "same": True}
+
+    def test_local_complete_archive_never_seeds_remote_range_offsets(self, tmp_path, full_pack_fixture):
+        tile, tiles, _ = full_pack_fixture
+        remote = tmp_path / "remote.pmtiles"
+        packs.write_pack(tiles, remote, metadata={"encoding": "height bytes"})
+        result = self.run_worker(
+            tmp_path,
+            f"""
+            (async () => {{
+                const remote=Uint8Array.from(Buffer.from('{base64.b64encode(remote.read_bytes()).decode()}','base64')).buffer;
+                const local=PackIO.merge(remote,new Map()), id=tileId(2,0,0), requests=[];
+                const address=packFor(TILE_PREFIX+'2/0/0.png');
+                tally=()=>{{}};switched=Promise.resolve(false);
+                lookup=async()=>({{body:local,complete:true,path:'db'}});
+                await tileFor(new Request(address.tile));
+                const cachedDirectory=directories.has(address.url);
+                packs.clear();lookup=async()=>null;
+                fetch=async(url,options)=>{{
+                    requests.push(options.headers.Range);
+                    const [start,last]=options.headers.Range.slice(6).split('-').map(Number);
+                    const end=Math.min(last,remote.byteLength-1);
+                    return new Response(remote.slice(start,end+1),{{status:206,headers:{{
+                        'content-range':'bytes '+start+'-'+end+'/'+remote.byteLength}}}});
+                }};
+                const answer=await (await tileFor(new Request(address.tile))).arrayBuffer();
+                console.log(JSON.stringify({{cachedDirectory,requests,offsetsDiffer:PackIO.header(local).data!==PackIO.header(remote).data,
+                    same:Buffer.from(answer).equals(Buffer.from(PackIO.slice(PackIO.unpack(remote),id)))}}));
+            }})().catch(e=>{{console.error(e);process.exitCode=1;}});
+        """,
+        )
+        assert result["offsetsDiffer"] and result["same"]
+        assert not result["cachedDirectory"]
+        assert result["requests"][0] == "bytes=0-16383"
 
     def test_slow_network_is_awaited_outside_the_store_deadline(self, tmp_path):
         result = self.run_worker(
