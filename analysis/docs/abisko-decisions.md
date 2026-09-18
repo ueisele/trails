@@ -1304,17 +1304,56 @@ slope classes' yellows. Both layers are drawn as the slope classes are — palet
 the palette, `mix-blend-mode: multiply` — so the lettering stays black under them, and both start
 off and are remembered (§6.9).
 
-**Two kinds of nothing, told apart.** NMD writes 255 both where the laser found nothing and where
-nobody has flown — 13 % of the Abisko box, the corner at Riksgränsen — and the delivery's own
-metadata raster names the flight strip of every scanned cell. The source reads it and keeps 0
-(*scanned, nothing there*) apart from 255 (*not scanned*); the tiles draw neither, but the codes
-say which is which, and a Norwegian cell no model has a post for is the same 255. The
-rasters are not on one grid, either — 153,936 rows for the low ones, 154,001 for the tall cover,
-153,903 for the flight strips — so a box is cut on the ground in metres and each file read over
-that ground on its own grid.
+**Three kinds of nothing, told apart — and, since the same evening, drawn apart.** NMD writes 255
+both where the laser found nothing and where it has no word, and the delivery's own metadata
+raster names the flight strip of every cell it has one for. The source reads it and keeps 0
+(*scanned, nothing there*) apart from 255 (*no word*). The first cut drew neither, and Uwe asked
+at once: *"Erkenne ich in den Kacheln den Unterschied zwischen kein Bewuchs und nicht beflogen?"*
+— no. So the vegetation tree has a **seventh class, a light neutral grey (`#cfcfcf`) for the
+ground the laser has no word on**, one more palette entry and a legend row of its own, *not
+surveyed by the laser*. The grey was validated as the ramp was: ΔE 16.7 in full colour and 9.8
+under simulated protanopia from the lightest teal, so a reader who cannot tell red from green
+still tells *not surveyed* from *a tenth covered*; `#bdbdbd`, the next darker step, reached 4.2 and
+was refused. Only the vegetation tree carries it — the forest is a yes-or-no, and *unknown* is not
+a kind of forest.
 
-**Built for the countries, not for the boxes.** The Swedish source fetches the four nationwide
-rasters once (5.8 GB of zips, 10 GB each unpacked, converted to deflate GeoTIFFs of about a tenth
+**What the 255 past the strips actually is: water, mostly.** The first reading of it — *"13 % of
+the Abisko box, the corner at Riksgränsen"* — was wrong, and the first grey cut showed it: 115 of
+the 120 z12 tiles carried grey. Measured on the cut codes: the 13 % is 34,174 patches, and the
+largest, two thirds of all of it, is Torneträsk; the next are the smaller lakes and a river
+network (a 9 × 10 km patch a tenth filled), and one perfect rectangle is the strip past the
+Norwegian border, where NMD stops. Riksgränsen itself is classed. The laser gets nothing back off
+water and NMD computes no object over it, so the flight-strip raster is 0 there too — and grey
+over Torneträsk would have been a dataset artefact, not a property of the place. So the Swedish
+source reads a fifth nationwide raster, the base land cover (1.4 GB, the same place, no login),
+as a mask of its two water classes, 61 *sjö och vattendrag* and 62 *hav*, and a cell past the
+strips that is water is 0, known and empty — exactly what the Norwegian side does.
+
+**And a hole smaller than three cells across is not a gap.** With the water out, what had no
+strip was 0.47 % of the box in 30,109 patches — 27,429 of them one or two cells, 2,304 of three
+to eight, and three of a hectare or more. A lone cell inside flown ground is one the laser got too
+little back from to class — a pond the base layer does not list, a wet mire, a snow patch — and
+drawn grey those would have been a speckle over the whole map, which is not what a walker means
+by *unsurveyed*. So the gap is opened with a 3 × 3 window and a hole narrower than 30 m is bare
+like the water round it. What survives is 53 patches on 0.17 % of the box: the 2.5 × 1.0 km
+rectangle past the Norwegian border, where NMD stops; a 10 ha island in Torneträsk the strips
+did not cross; a 4.6 ha patch at the border; and fifty of under a hectare. That is the grey, and
+the honest one — the class is there for a country-wide build, where a gap in the scanning is
+real, and over this box it says *Norway* and *that island*.
+
+**Norway's nothing is water, so it is bare.** A Norwegian cell no model has a post for came back
+as the same 255, and would have gone grey with the class — the fjords and every lake, since the
+laser gets nothing off still water. Measured before deciding: 11 % of the Lomsdal-Visten box's
+cells have no post in either model, and 5,000 of them drawn at random all sit at exactly 0.0 m in
+the terrain mosaic §6.10 cached, the height the model gives sea, against 15 % of the cells that
+do have a post. So the Norwegian source turns *no post* into 0, *known, nothing there*, before the
+box is cached; no Norwegian cell is grey until a Norwegian box crosses the border, where both
+models are empty for the other reason. The rasters are not on one grid, either — 153,936 rows for
+the low ones, 154,001 for the tall cover, 153,903 for the flight strips — so a box is cut on the
+ground in metres and each file read over that ground on its own grid.
+
+**Built for the countries, not for the boxes.** The Swedish source fetches the five nationwide
+rasters once (7.2 GB of zips, 10 GB each unpacked, converted to deflate GeoTIFFs of about a tenth
 and thrown away), and every box in Sweden is then a window read; the Norwegian source asks
 `hoydedata.no` for 5 km squares of both models at 2 m — 26 MB and 8 s a square, measured — classes
 each to 500 × 500 cells and caches the cells, so a box is its squares and a second box that overlaps
@@ -1334,8 +1373,10 @@ within a tenth either way -- measured, then the two trees cut both ways:
 | tree | z | tiles | full palette | palette of its classes | time |
 |---|---|---|---|---|---|
 | `vegetation/lantmateriet/1/` | 8–15 | 9,330 | 27.5 MB | **19.7 MB** | 121 s |
+| `vegetation/lantmateriet/2/`, the ground past the strips grey | 8–15 | 9,330 | — | **19.8 MB** | 123 s |
 | `forest/lantmateriet/1/` | 8–15 | 9,330 | 12.7 MB | **2.6 MB** | 111 s |
 | `vegetation/kartverket/1/` | 8–15 | 37,915 | — | **128.2 MB** | 505 s |
+| `vegetation/kartverket/2/`, water bare, the grey entry unused | 8–15 | 37,915 | — | **128.3 MB** | 510 s |
 | `forest/kartverket/1/` | 8–15 | 37,915 | — | **24.1 MB** | 476 s |
 
 The Norwegian trees were cut with the short palette only, after 342 squares of the two models
@@ -1343,6 +1384,11 @@ were read and classed in 31 minutes. The forest is mostly blank, and four fifths
 tree's shape -- 9,330 tiles, z8 to z15, cut exactly as those are -- and weighs 19.7 MB against the
 slope classes' 25.0; its tiles are busier per zoom (7.5 kB at z12 against the slope's 4.5) because
 the ground it draws is the valleys, where a tile is all edges, and it stops earlier up the hill.
+The grey is 18 of Abisko's 120 z12 tiles and a tenth of a megabyte over the tree — the first
+grey cut, before the water and the opening, had it in 115 of them and weighed 21.2 MB. Over
+Norway, where no cell is grey, the second version differs from the first by the four bytes of the
+unused palette entry, tile for tile. Both first versions were dropped from the bucket the same
+evening, nobody having kept them (§9.21's deletion, for once).
 
 **What the whole map costs offline now.** The drive's reading of *the whole map at its cap* moved
 from 166,035 tiles to **184,655** -- the two trees' 9,310 tiles each -- and from 1,031.9 MB at z17
@@ -3228,6 +3274,14 @@ finds — which would have been the next false alarm.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-18, third** — the vegetation tree draws the ground the laser has no word on in a light
+  grey, a seventh class with its own legend row, after Uwe asked whether a blank meant *nothing
+  there* or *nobody looked* (§6.11). Water is bare on both sides of the border: Norway's cells
+  without a post are water, measured, and Sweden's cells past the flight strips are Torneträsk,
+  the lakes and the rivers, measured too — not the unflown corner first claimed — so the Swedish
+  source reads NMD's base land cover as a water mask, a fifth nationwide raster. Both vegetation
+  trees are version 2; version 1 was dropped from the bucket, nobody having kept it.
+
 - **2026-09-18, second** — the several-lines check presses the first chip that is not lit rather
   than the second in the row, after the Lomsdal-Visten drive found nearest paint giving the tap
   the second source at the busiest crossing: pressing it again changed nothing and two readings
@@ -3760,5 +3814,7 @@ A line per change to this document or to the decisions in it, newest first.
 | whether newer would matter | Sentinel-2 L2A collection 1 off Earth Search, tile 34WDA, 29 July 2018, 1 and 28 July 2023 and 15 July 2024, warped to 10 m SWEREF 99 TM over the box with `WarpedVRT`, SCL classes 4–7 kept, NDVI per NMD 2018 base class read off Naturvårdsverket's WMS at 10 m, drop clusters labelled with `scipy.ndimage` |
 | the vegetation and forest colours | candidate ramps stepped in OKLCH with `coloraide` and run through the dataviz palette validator with `--ordinal` against `#fffff2`; the forest candidates against the ramp's light and dark steps with `--pairs all`; green against blue-green judged on a 390 px crop of the mockup at z13 |
 | what the vegetation trees weigh | both trees built with `make vegetation PARK=abisko` and their `index.json` read per zoom, once with the slope classes' full palette and once with the palette of the classes; the palette sizes on a blank, a patched and a random tile written with Pillow in memory |
+| whether Norway's cells without a laser post are water | 5,000 such cells of the assembled Lomsdal-Visten codes drawn at random and the cached 4 m terrain mosaic sampled at their centres, against 5,000 cells with a post; the grey for the unflown ground run through the palette validator with `--pairs all` against the ramp's light step and the sepia |
+| what Sweden's cells past the flight strips are | the 255 cells of the cut Abisko codes labelled into connected patches with `scipy.ndimage`, the largest twelve located by centre of mass and bounding box and named off the map; then the first grey cut counted, tile by tile at z12, for tiles with the grey in them |
 | the NMD rasters' grids | the row counts of the converted GeoTIFFs, read with `rasterio` |
 | the surface model service | `hoydedata.no/arcgis/rest/services?f=json` for the service list, `DOM/ImageServer?f=json` for its limits, and one 5 km `exportImage` at 2 m timed with `curl` |

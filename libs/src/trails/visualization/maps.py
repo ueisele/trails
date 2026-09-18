@@ -320,9 +320,11 @@ class VegetationTiles:
     (analysis/docs/abisko-decisions.md §6.11): the laser's reading of what
     stands between 0.5 and 5 m -- dwarf birch, willow, young mountain birch
     -- as the share of each 10 m cell it covers, in six steps of one teal,
-    drawn multiplied over the sheet like the slope classes and off until the
-    reader asks. It answers the question the sheet does not: whether the open
-    ground off the path is walked across or pushed through.
+    and the ground the laser has not flown in a light grey, drawn multiplied
+    over the sheet like the slope classes and off until the reader asks. It
+    answers the question the sheet does not: whether the open ground off the
+    path is walked across or pushed through -- and, since the grey, whether
+    a blank means nothing there or nobody looked.
     """
 
     #: What every vegetation tile's address starts with, root-relative.
@@ -347,15 +349,18 @@ class VegetationTiles:
 
     @staticmethod
     def classes() -> list[dict[str, object]]:
-        """The legend's rows: each class's span of the cell in per cent, and its colour.
+        """The legend's rows: each class's span of the cell in per cent and its colour, then the unsurveyed grey.
 
         Returns:
-            One row per class, sparsest first, ``from``, ``to`` and ``colour``
+            One row per class, sparsest first, ``label`` and ``colour``; the
+            density rows carry ``from`` and ``to`` as well
         """
-        return [
-            {"from": span[0], "to": span[1], "colour": colour}
+        rows: list[dict[str, object]] = [
+            {"from": span[0], "to": span[1], "colour": colour, "label": f"{span[0]}–{span[1]} % of the ground"}
             for span, colour in zip(vegetation_tiles.DENSITY_SPANS, vegetation_tiles.COLOURS, strict=True)
         ]
+        rows.append({"colour": vegetation_tiles.UNSURVEYED_COLOUR, "label": "not surveyed by the laser"})
+        return rows
 
 
 @dataclasses.dataclass(frozen=True)
@@ -474,12 +479,15 @@ _WEIGHT_LV_SHADE = {8: 13071, 9: 22789, 10: 24516, 11: 26800, 12: 26208, 13: 225
 #: The slope classes, z8 to z15: 37,915 tiles, 141.8 MB.
 _WEIGHT_LV_SLOPE = {8: 2453, 9: 4296, 10: 5038, 11: 5849, 12: 6186, 13: 5764, 14: 4604, 15: 3339}
 #: The vegetation and forest trees (§6.11), z8 to z15, 37,915 tiles each:
-#: 128.2 MB and 24.1 MB, the mean per zoom of the first build, 2026-09-18.
-_WEIGHT_LV_VEGETATION = {8: 3591, 9: 6881, 10: 8196, 11: 10901, 12: 14144, 13: 11068, 14: 5120, 15: 2227}
+#: 128.3 MB and 24.1 MB, the mean per zoom of the second vegetation build
+#: (the grey class, unused over Norway, is four bytes a tile) and the first
+#: forest build, 2026-09-18.
+_WEIGHT_LV_VEGETATION = {8: 3595, 9: 6885, 10: 8200, 11: 10905, 12: 14148, 13: 11072, 14: 5124, 15: 2231}
 _WEIGHT_LV_FOREST = {8: 1037, 9: 1770, 10: 1803, 11: 1962, 12: 2153, 13: 1683, 14: 914, 15: 467}
-#: The same two over the Abisko box, 9,330 tiles each: 19.7 MB and 2.6 MB,
-#: the mean per zoom of the first build, 2026-09-18.
-_WEIGHT_AB_VEGETATION = {8: 1154, 9: 1589, 10: 3262, 11: 5624, 12: 7535, 13: 6090, 14: 3040, 15: 1520}
+#: The same two over the Abisko box, 9,330 tiles each: 19.8 MB with the
+#: ground past the border drawn grey and 2.6 MB, the mean per zoom of the
+#: second vegetation build and the first forest build, 2026-09-18.
+_WEIGHT_AB_VEGETATION = {8: 1173, 9: 1605, 10: 3284, 11: 5653, 12: 7559, 13: 6096, 14: 3045, 15: 1525}
 _WEIGHT_AB_FOREST = {8: 262, 9: 312, 10: 486, 11: 625, 12: 718, 13: 581, 14: 358, 15: 232}
 
 
@@ -20822,14 +20830,15 @@ class _Legend(MacroElement):
                         swatch.style.cssText = 'display:inline-block;width:18px;height:11px;flex:none;border:1px solid #999;'
                             + 'background:' + row.colour + ';opacity:0.6';
                         var text = document.createElement('span');
-                        text.textContent = row.from + '–' + row.to + ' % of the ground';
+                        text.textContent = row.label;
                         line.appendChild(swatch);
                         line.appendChild(text);
                         vegetationRows.appendChild(line);
                     });
                     var vegetationNote = document.createElement('div');
                     vegetationNote.style.cssText = 'color:#666;margin-top:2px';
-                    vegetationNote.textContent = 'How much of each 10 m cell carries bushes and low trees, by laser; under a tenth is not drawn.';
+                    vegetationNote.textContent = 'How much of each 10 m cell carries bushes and low trees, by laser; under a tenth is not drawn, '
+                        + 'and grey is ground nobody has flown.';
                     vegetationRows.appendChild(vegetationNote);
                     vegetationRows.style.display = vegetationTick.checked ? '' : 'none';
                     picked.appendChild(vegetationRows);

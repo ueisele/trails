@@ -31,6 +31,19 @@ sepia. All three were stepped in OKLCH and run through the palette
 validator: the ramp reads light to dark with every step at least 0.06 apart
 and its light end over 2:1 on the sheet, and the sepia stands at least
 ΔE 15.6 from every teal step under simulated colour blindness (2026-09-18).
+
+**And a seventh class, grey, for the ground the laser has no word on.** Uwe
+asked whether a blank tile means *nothing there* or *nobody looked*, and it
+could not: both were transparent. So the cells the source marks
+:data:`~trails.io.sources.nmd.UNKNOWN` are drawn in a light neutral grey at
+the same alpha, one more palette entry and a legend row of its own. The grey
+was validated against the ramp's light step and the sepia: ΔE 16.7 in full
+colour and 9.8 under simulated protanopia from the lightest teal, so a reader
+who cannot tell red from green still tells *not surveyed* from *a tenth
+covered*; a darker grey did not (ΔE 4.2 at ``#bdbdbd``). Water is not
+unknown on either side of the border -- both sources report it as bare,
+measured, since the laser gets nothing back off it -- so the grey is the
+ground past a country's edge and any gap in its scanning, and nothing else.
 """
 
 import json
@@ -72,6 +85,14 @@ COLOURS: tuple[str, ...] = ("#4ab9b2", "#2fa29d", "#018d87", "#007873", "#00635f
 #: The forest's one colour: sepia, OKLCH hue 62, chroma 0.115, lightness 0.62.
 FOREST_COLOUR = "#b77534"
 
+#: The class of a cell the laser has not flown, after the six density classes.
+UNSURVEYED = len(DENSITY_EDGES) + 1
+
+#: Its colour: a neutral grey at OKLCH lightness 0.86, the lightest the
+#: multiply still shows and far enough from the ramp's light step (ΔE 9.8
+#: under simulated protanopia; ``#bdbdbd`` reached 4.2).
+UNSURVEYED_COLOUR = "#cfcfcf"
+
 #: The least tall-tree cover a cell needs to be forest, as an NMD code: 40 is
 #: *30–40 %*, so this is at least 30 % of the cell under crowns over 5 m.
 FOREST_MIN_COVER = 40
@@ -89,7 +110,7 @@ MARGIN_PX = 2
 
 
 def classify_vegetation(codes: np.ndarray, edges: Sequence[int] = DENSITY_EDGES) -> np.ndarray:
-    """Which vegetation class each cell falls in: 0 for nothing or unknown, then 1 upwards.
+    """Which vegetation class each cell falls in: 0 for nothing, 1 upwards by cover, :data:`UNSURVEYED` where the laser has not been.
 
     Args:
         codes: The three code bands, ``(3, rows, cols)``
@@ -100,7 +121,8 @@ def classify_vegetation(codes: np.ndarray, edges: Sequence[int] = DENSITY_EDGES)
     """
     cover = codes[1]
     classes: np.ndarray = np.digitize(cover, np.asarray(edges, dtype=np.uint8)).astype(np.uint8)
-    classes[(cover == UNKNOWN) | (codes[0] == 0)] = 0
+    classes[codes[0] == 0] = 0
+    classes[cover == UNKNOWN] = len(edges) + 1
     return classes
 
 
@@ -146,9 +168,10 @@ def colours_of(kind: str) -> tuple[str, ...]:
         kind: ``vegetation`` or ``forest``
 
     Returns:
-        One colour per class
+        One colour per class: the six density steps and the grey of the
+        unsurveyed ground, or the forest's one
     """
-    return COLOURS if kind == "vegetation" else (FOREST_COLOUR,)
+    return (*COLOURS, UNSURVEYED_COLOUR) if kind == "vegetation" else (FOREST_COLOUR,)
 
 
 def palette(colours: Sequence[str], alpha: int) -> tuple[list[int], bytes]:
@@ -298,7 +321,8 @@ def build_tiles(
         "colours": list(colours),
         "alpha": alpha,
         "cell_m": CELL_M,
-        "encoding": "palette PNG of one entry per class; index 0 transparent, then one index per class from the first edge up",
+        "encoding": "palette PNG of one entry per class; index 0 transparent, then one index per class from the first edge up"
+        + (", then the grey of the ground the laser has not flown" if kind == "vegetation" else ""),
         "seconds": round(time.time() - started, 1),
     }
     (out_dir / INDEX_FILE).write_text(json.dumps(index, indent=2), encoding="utf-8")

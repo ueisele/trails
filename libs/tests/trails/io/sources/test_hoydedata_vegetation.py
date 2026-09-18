@@ -83,6 +83,18 @@ class TestSource:
         with rasterio.open(next(tmp_path.glob("vegetation/hoydedata/codes_*.tif"))) as kept:
             assert kept.descriptions == nmd.BANDS
 
+    def test_ground_the_models_have_no_post_for_is_water_and_comes_out_bare(self, tmp_path, monkeypatch):
+        """A square of nothing: the cells are unknown to :func:`codes_from` and 0 in the box, since over Norway
+        the models' silence is water -- every one of 5,000 such cells sampled at 0.0 m (2026-09-18)."""
+        monkeypatch.setattr(veg, "CHUNK_M", 50.0)
+        box = _box(400_010.0, 7_260_010.0, 400_090.0, 7_260_090.0)
+        source = veg.Source(cache_dir=tmp_path, fetch=lambda url: _tiff(next(iter(veg.squares_over(box, veg.POSTS_M, 50.0)[0])), veg.NODATA))
+        codes, _ = source.structure(box)
+        assert not (codes == nmd.UNKNOWN).any()
+        assert (codes == 0).all()
+        with rasterio.open(next(tmp_path.glob("vegetation/hoydedata/codes_*.tif"))) as kept:
+            assert (kept.read() == nmd.UNKNOWN).all()
+
 
 def _box(west, south, east, north):
     from rasterio.warp import transform_bounds

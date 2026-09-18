@@ -6169,6 +6169,7 @@ def the_vegetation_over_the_relief(page: Any) -> Check:
     classes = page.evaluate(
         "() => [...document.querySelectorAll('.trails-vegetation-classes > div')].map(d => d.textContent.trim()).filter(t => /%/.test(t))"
     )
+    unflown = page.evaluate("() => [...document.querySelectorAll('.trails-vegetation-classes > div')].some(d => /not surveyed/.test(d.textContent))")
     blends = page.evaluate(
         with_map("""(paths) => {
             const out = [];
@@ -6239,6 +6240,7 @@ def the_vegetation_over_the_relief(page: Any) -> Check:
             Reading("and every one of them answers", answered_forest, asked_forest),
             Reading("the rows explain the colours while it is on", rows_on, "block"),
             Reading("six classes", len(classes), 6, note="; ".join(classes)),
+            Reading("and a grey row for the ground nobody has flown", unflown, True),
             Reading("both are multiplied over the sheet", all(b["blend"] == "multiply" for b in blends) and len(blends) == 2, True),
             Reading("and sit over the relief", all(relief_at is not None and b["above"] > relief_at for b in blends), True),
             Reading("and stop at the relief's top", all(b["top"] == 15 for b in blends), True),

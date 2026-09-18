@@ -15,7 +15,13 @@ class TestClasses:
     def test_the_density_classes_start_at_a_tenth(self):
         cover = np.array([0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, nmd.UNKNOWN], dtype=np.uint8)
         codes = np.stack([np.where(cover == 0, 0, 1).astype(np.uint8), cover, np.zeros_like(cover)])
-        assert vegetation_tiles.classify_vegetation(codes).tolist() == [0, 0, 0, 1, 2, 3, 4, 5, 5, 6, 6, 6, 0]
+        assert vegetation_tiles.classify_vegetation(codes).tolist() == [0, 0, 0, 1, 2, 3, 4, 5, 5, 6, 6, 6, 7]
+
+    def test_the_unflown_ground_is_its_own_class_whatever_the_height_band_says(self):
+        """Uwe, 2026-09-18: can the tiles tell *nothing there* from *nobody looked*? Now they can."""
+        codes = np.array([[[0, nmd.UNKNOWN]], [[nmd.UNKNOWN, nmd.UNKNOWN]], [[0, nmd.UNKNOWN]]], dtype=np.uint8)
+        assert vegetation_tiles.classify_vegetation(codes)[0].tolist() == [vegetation_tiles.UNSURVEYED] * 2
+        assert vegetation_tiles.UNSURVEYED == 7
 
     def test_a_cell_with_no_low_object_is_not_drawn_whatever_its_cover_says(self):
         codes = np.array([[[0]], [[60]], [[0]]], dtype=np.uint8)
@@ -26,8 +32,10 @@ class TestClasses:
         codes = np.stack([np.zeros_like(tall), np.zeros_like(tall), tall])
         assert vegetation_tiles.classify_forest(codes).tolist() == [0, 0, 0, 1, 1, 0]
 
-    def test_six_colours_for_six_classes_and_one_for_the_forest(self):
+    def test_six_colours_for_six_classes_a_grey_after_them_and_one_for_the_forest(self):
         assert len(vegetation_tiles.COLOURS) == len(vegetation_tiles.DENSITY_EDGES) == len(vegetation_tiles.DENSITY_SPANS) == 6
+        assert vegetation_tiles.colours_of("vegetation") == (*vegetation_tiles.COLOURS, vegetation_tiles.UNSURVEYED_COLOUR)
+        assert vegetation_tiles.colours_of("vegetation")[vegetation_tiles.UNSURVEYED - 1] == vegetation_tiles.UNSURVEYED_COLOUR
         assert vegetation_tiles.colours_of("forest") == (vegetation_tiles.FOREST_COLOUR,)
         with pytest.raises(ValueError, match="kind must be"):
             vegetation_tiles.classify(np.zeros((3, 1, 1), dtype=np.uint8), "heather")
@@ -53,7 +61,7 @@ class TestClasses:
 
 @pytest.fixture
 def codes():
-    """Codes over the Abisko box in SWEREF 99 TM: willow in the west, forest in the east, a bare band between."""
+    """Codes over the Abisko box in SWEREF 99 TM: willow in the west, forest in the east, a bare band between, and a corner nobody flew."""
     transform = Affine(50.0, 0.0, 600_000.0, 0.0, -50.0, 7_620_000.0)
     rows, cols = 1_200, 1_400
     low_height = np.zeros((rows, cols), dtype=np.uint8)
@@ -62,7 +70,9 @@ def codes():
     low_height[:, : cols // 3] = 3
     low_cover[:, : cols // 3] = 60
     tall[:, 2 * cols // 3 :] = 70
-    return np.stack([low_height, low_cover, tall]), transform, "EPSG:3006"
+    stack = np.stack([low_height, low_cover, tall])
+    stack[:, : rows // 4, : cols // 4] = nmd.UNKNOWN
+    return stack, transform, "EPSG:3006"
 
 
 class TestBuild:
@@ -71,7 +81,8 @@ class TestBuild:
         stack, transform, crs = codes
         index = vegetation_tiles.build_tiles(stack, transform, crs, bounds, [8, 9], tmp_path / "vegetation", kind="vegetation")
         forest = vegetation_tiles.build_tiles(stack, transform, crs, bounds, [8], tmp_path / "forest", kind="forest")
-        assert index["kind"] == "vegetation" and index["zooms"] == [8, 9] and index["colours"] == list(vegetation_tiles.COLOURS)
+        assert index["kind"] == "vegetation" and index["zooms"] == [8, 9]
+        assert index["colours"] == [*vegetation_tiles.COLOURS, vegetation_tiles.UNSURVEYED_COLOUR]
         assert forest["kind"] == "forest" and forest["colours"] == [vegetation_tiles.FOREST_COLOUR]
         written = json.loads((tmp_path / "vegetation" / "index.json").read_text())
         assert written["tiles"] == index["tiles"] and written["per_zoom"]["9"]["written"] > 0
@@ -80,16 +91,21 @@ class TestBuild:
         with Image.open(tiles[0]) as image:
             assert image.mode == "P" and image.size == (TILE_PX, TILE_PX)
             assert image.info["transparency"][0] == 0 and image.info["transparency"][1] == vegetation_tiles.ALPHA
-            assert len(image.getpalette()) // 3 <= 7
+            assert len(image.getpalette()) // 3 <= 8
         blank = next(t for t in tiles if t.stat().st_size < 300)
         assert blank.stat().st_size < 300
-        # The willow is class 5 (50–70 %) and nothing else is drawn on that side.
+        # The willow is class 5 (50–70 %), the unflown corner is the grey, and nothing else is drawn on that side.
         classes = set()
         for tile in tiles:
             with Image.open(tile) as image:
                 classes.update(np.unique(np.asarray(image)).tolist())
-        assert classes <= {0, 5}
-        assert 5 in classes
+        assert classes == {0, 5, vegetation_tiles.UNSURVEYED}
+        # The forest tree does not draw the unflown corner: it is nothing, not a class.
+        wooded = set()
+        for tile in (tmp_path / "forest").glob("8/*/*.png"):
+            with Image.open(tile) as image:
+                wooded.update(np.unique(np.asarray(image)).tolist())
+        assert wooded == {0, 1}
         assert vegetation_tiles.weights(index)[9] > 0
 
     def test_a_second_run_skips_what_is_there(self, codes, tmp_path):

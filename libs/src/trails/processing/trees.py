@@ -189,6 +189,9 @@ TREES: dict[str, Tree] = {
         # Kartverket's surface model less its terrain model, classed to NMD's
         # codes (§6.11).
         structure="hoydedata-vegetation",
+        # Two since the unflown ground got a class of its own and the water
+        # stopped counting as unknown (§6.11).
+        vegetation_version=2,
     ),
     # The Abisko box itself (§2, widened §9.24): the sheet was copied for it and
     # the height mosaic read over it, so the graph, the water grid, the page and
@@ -203,5 +206,7 @@ TREES: dict[str, Tree] = {
         slope_version=2,
         # Naturvårdsverket's NMD 2018 object height and cover (§6.11).
         structure="nmd",
+        # Two since the unflown ground got a class of its own (§6.11).
+        vegetation_version=2,
     ),
 }

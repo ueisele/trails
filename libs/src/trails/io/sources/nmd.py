@@ -11,19 +11,42 @@ above 5 m. Measured over the Abisko box (analysis/docs/abisko-decisions.md
 §6.11): 26 % of the ground carries something between 0.5 and 5 m, 8 % has trees
 above it, and the rest is bare, water, or rock.
 
-**Nationwide rasters, converted once and read by window.** The five files are
-Erdas Imagine, 65,520 × 153,936 cells of 10 m in SWEREF 99 TM, some 10 GB
-each unpacked and almost all of it nothing. They are fetched, converted to a
+**Nationwide rasters, converted once and read by window.** The object files
+are Erdas Imagine, 65,520 × 153,936 cells of 10 m in SWEREF 99 TM, some 10 GB
+each unpacked and almost all of it nothing; the base land cover is a GeoTIFF
+of 71,273 × 157,992 on a grid of its own. They are fetched, converted to a
 deflate GeoTIFF of a tenth the size, and thrown away; every later box is a
 window read of the converted file, so the second map in Sweden costs nothing
 over the network and a map anywhere in the country is the same call.
 
-**Two kinds of nothing.** NMD writes 255 both where the laser found no object
-and where nobody has flown -- 13 % of the Abisko box, the corner at
-Riksgränsen. The delivery's own metadata raster names the flight strip of
-every scanned cell, and 0 where there is none; this module reads it and keeps
-the two apart, 0 for *no object* and :data:`UNKNOWN` for *not scanned*, so a
-tile over the gap is a blank and not a claim.
+**Three kinds of nothing.** NMD writes 255 both where the laser found no
+object and where it has no word at all, and the delivery's own metadata
+raster names the flight strip of every cell it has one for, 0 elsewhere. What
+that 0 covers was measured over the Abisko box on 2026-09-18 rather than
+assumed: 13 % of the cells, two thirds of them Torneträsk, the rest the
+smaller lakes, the river network and the strip past the Norwegian border --
+not, as first read, an unflown corner; Riksgränsen itself is classed. The
+laser gets nothing back off water, and NMD computes no object over it. So
+this module reads a fifth raster, the base land cover, and tells three
+things apart: 0 for *no object* where the strips are, 0 again for water
+(:data:`WATER_CLASSES`) where they are not -- known and empty, as the
+Norwegian source treats its fjords -- and :data:`UNKNOWN` only where the
+laser has no word and the ground is not water: past the border, or a gap in
+the scanning. The tiles draw that last one as a class of its own
+(:mod:`trails.processing.vegetation_tiles`), so a blank means *nothing there*
+and grey means *nobody looked*.
+
+**A hole smaller than three cells across is not a gap.** With the water
+taken out, what had no strip over the Abisko box was 30,109 patches, and
+27,429 of them one or two cells: a cell the laser got too little back from
+to class -- a pond the base layer does not list, a wet mire, a snow patch --
+scattered through ground that was flown. Drawn grey they would be a speckle
+over the whole map, and they are not what a walker means by *unsurveyed*.
+So the gap is opened with a 3 × 3 window, :data:`GAP_CELLS`, and a hole
+narrower than that is bare like the water round it; what survives over
+Abisko is 53 patches on 0.17 % of the box -- the 2.5 km strip past the
+Norwegian border, a 10 ha island in Torneträsk the strips did not cross,
+and small ones -- which is the grey, and the honest one.
 
 ::
 
@@ -63,8 +86,16 @@ CRS = "EPSG:3006"
 CELL_M = 10.0
 
 #: What the codes carry where the laser has not been: told apart from 0, which
-#: is *scanned and nothing there*.
+#: is *scanned and nothing there*, or water.
 UNKNOWN = 255
+
+#: The base land cover's water classes: 61 *sjö och vattendrag* (lake and
+#: watercourse), 62 *hav* (sea). No object is computed over either.
+WATER_CLASSES = (61, 62)
+
+#: The narrowest gap in the flight strips kept as unknown, in cells a side:
+#: a hole the 3 × 3 opening closes is bare. See the module docstring.
+GAP_CELLS = 3
 
 #: NMD's height classes for objects between 0.5 and 5 m: the code is the class's
 #: upper bound in metres, and 0 is no object.
@@ -108,20 +139,25 @@ class Layer:
 
     #: The zip's stem on the server.
     zip_stem: str
-    #: The raster's stem inside it.
+    #: The raster's stem inside it: an Erdas ``.img`` for the object layers,
+    #: a GeoTIFF for the base land cover, and either is read the same way.
     img_stem: str
     #: What the converted file is called.
     cached: str
     #: Whether the raster is converted to a 0/1 mask rather than kept as codes.
     as_mask: bool = False
+    #: If given, the raster is converted to a 0/1 mask of these values instead.
+    values: tuple[int, ...] = ()
 
 
-#: The five rasters, in the order they are read.
+#: The five rasters, in the order they are read: three of codes, the flight
+#: strips as a mask, and the base land cover as a mask of its water.
 LAYERS = (
     Layer("Objekt_hojd_intervall_0_5_till_5_v1_3", "objekt_hojd_intervall_0_5_till_5_v1_3", "low_height.tif"),
     Layer("Objekt_tackning_hojdintervall_0_5_till_5_v1_3", "objekt_tackning_hojdintervall_0_5_till_5_v1_3", "low_cover.tif"),
     Layer("Objekt_tackning_hojdintervall_5_till_45_v1_3", "objekt_tackning_hojdintervall_5_till_45_v1_3", "tall_cover.tif"),
     Layer("Objekt_metadata_flygstraksdatum_v1_3", "objekt_metadata_flygstraksdatum_v1_3", "scanned.tif", as_mask=True),
+    Layer("NMD2018_basskikt_ogeneraliserad_Sverige_v1_1", "nmd2018bas_ogeneraliserad_v1_1", "water.tif", values=WATER_CLASSES),
 )
 
 
@@ -137,7 +173,7 @@ def _download(url: str, target: Path) -> None:
     partial.replace(target)
 
 
-def convert(img: Path, target: Path, as_mask: bool = False) -> None:
+def convert(img: Path, target: Path, as_mask: bool = False, values: tuple[int, ...] = ()) -> None:
     """Rewrite one Erdas raster as a tiled, deflated GeoTIFF, stripe by stripe.
 
     Args:
@@ -145,7 +181,10 @@ def convert(img: Path, target: Path, as_mask: bool = False) -> None:
         target: The GeoTIFF to write
         as_mask: Whether to write 1 where the raster is non-zero and 0
             elsewhere, rather than the raster's own values
+        values: If given, write 1 where the raster is one of these and 0
+            elsewhere
     """
+    as_mask = as_mask or bool(values)
     partial = target.with_suffix(".part.tif")
     with rasterio.open(img) as src:
         profile = {
@@ -159,7 +198,9 @@ def convert(img: Path, target: Path, as_mask: bool = False) -> None:
                 rows = min(STRIPE_ROWS, src.height - row)
                 window = Window(0, row, src.width, rows)
                 stripe = src.read(1, window=window)
-                if as_mask:
+                if values:
+                    stripe = np.isin(stripe, values).astype(np.uint8)
+                elif as_mask:
                     stripe = (stripe != 0).astype(np.uint8)
                 else:
                     stripe = stripe.astype(np.uint8)
@@ -167,6 +208,31 @@ def convert(img: Path, target: Path, as_mask: bool = False) -> None:
                 if (row // STRIPE_ROWS) % 25 == 0:
                     print(f"  {row + rows:,}/{src.height:,} rows of {img.name}, {time.time() - started:,.0f} s", flush=True)
     partial.replace(target)
+
+
+def opened(mask: np.ndarray, cells: int = GAP_CELLS) -> np.ndarray:
+    """The mask with every patch narrower than ``cells`` a side taken out: a morphological opening with a square window.
+
+    Erosion then dilation, each the ``cells`` × ``cells`` neighbourhood, in
+    numpy alone: the raster's edge counts as outside, so a patch touching it
+    survives only if it is wide enough within.
+
+    Args:
+        mask: A boolean image
+        cells: Side of the square window, odd
+
+    Returns:
+        A boolean image of the same shape
+    """
+    reach = cells // 2
+    padded = np.pad(mask, reach, constant_values=False)
+    rows, cols = mask.shape
+    shifts = [padded[r : r + rows, c : c + cols] for r in range(cells) for c in range(cells)]
+    eroded = np.logical_and.reduce(shifts)
+    padded = np.pad(eroded, reach, constant_values=False)
+    shifts = [padded[r : r + rows, c : c + cols] for r in range(cells) for c in range(cells)]
+    result: np.ndarray = np.logical_or.reduce(shifts)
+    return result
 
 
 class Source:
@@ -203,9 +269,12 @@ class Source:
         print(f"Unpacking {archive.name} ({archive.stat().st_size / 1e9:,.1f} GB)...", flush=True)
         with zipfile.ZipFile(archive) as bundle:
             bundle.extractall(unpacked)
-        img = next(unpacked.rglob(f"{layer.img_stem}.img"))
+        images = sorted(image for image in unpacked.rglob("*") if image.suffix in (".img", ".tif"))
+        img = next((image for image in images if image.stem == layer.img_stem), images[0] if len(images) == 1 else None)
+        if img is None:
+            raise FileNotFoundError(f"{archive.name} holds no {layer.img_stem}.img or .tif; it holds {[image.name for image in images]}")
         print(f"Converting {img.name} to {target.name}...", flush=True)
-        convert(img, target, as_mask=layer.as_mask)
+        convert(img, target, as_mask=layer.as_mask, values=layer.values)
         for file in sorted(unpacked.rglob("*")):
             if file.is_file():
                 file.unlink()
@@ -260,13 +329,18 @@ class Source:
         low_cover = read_over("low_cover.tif", UNKNOWN)
         tall_cover = read_over("tall_cover.tif", UNKNOWN)
         scanned = read_over("scanned.tif", 0) != 0
+        water = read_over("water.tif", 0) != 0
         codes = np.stack([low_height, low_cover, tall_cover]).astype(np.uint8)
         # NMD's 255 is *nothing here* wherever the laser flew, band by band --
         # a cell with trees and no bush is 255 in the low bands and a code in
-        # the tall one; past the flight strips every band stays unknown.
+        # the tall one. Past the flight strips a band is unknown only over a
+        # gap wide enough to mean it: water and holes narrower than the
+        # opening's window are bare -- see the module docstring.
         for band in range(codes.shape[0]):
             codes[band][scanned & (codes[band] == UNKNOWN)] = 0
-        codes[:, ~scanned] = UNKNOWN
+        gap = opened(~scanned & ~water)
+        codes[:, ~scanned] = 0
+        codes[:, gap] = UNKNOWN
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         partial = cached.with_suffix(".part.tif")
         with rasterio.open(
@@ -276,6 +350,10 @@ class Source:
             out.write(codes)
             out.descriptions = BANDS
         partial.replace(cached)
-        known = float((codes[0] != UNKNOWN).mean())
-        print(f"  structure over {bounds} cached at {cached}: {codes.shape[2]:,} × {codes.shape[1]:,} cells, {100 * known:.1f} % scanned", flush=True)
+        print(
+            f"  structure over {bounds} cached at {cached}: {codes.shape[2]:,} × {codes.shape[1]:,} cells,"
+            f" {100 * float(scanned.mean()):.1f} % scanned, {100 * float((~scanned & water).mean()):.1f} % water past the strips,"
+            f" {100 * float((~scanned & ~water & ~gap).mean()):.2f} % holes taken as bare, {100 * float(gap.mean()):.2f} % unknown",
+            flush=True,
+        )
         return codes, transform

@@ -1,6 +1,6 @@
 """Fetch and convert Naturvårdsverket's NMD 2018 object rasters into the cache, once.
 
-The four nationwide rasters :mod:`trails.io.sources.nmd` reads are 10 GB each
+The five nationwide rasters :mod:`trails.io.sources.nmd` reads are 10 GB each
 unpacked and take a while to convert; this does that ahead of a build, so
 ``make vegetation PARK=abisko`` finds them ready. Every layer already converted
 is skipped, so it is safe to run again. A zip that is still arriving under

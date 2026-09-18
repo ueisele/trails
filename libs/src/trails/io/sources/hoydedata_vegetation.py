@@ -25,6 +25,24 @@ metre of something on it -- measured 2026-09-17 before this was built, since a
 box the laser had not flown would come back as two copies of one model and
 class every cell as bare.
 
+**And what it leaves empty is water, so the box carries no unknown.** The
+surface model has no post over a lake or a fjord -- the laser gets nothing
+back off still water -- and the terrain model marks the same ground as sea
+(:mod:`trails.io.sources.hoydedata_dtm`). Measured 2026-09-18 over the
+assembled Lomsdal-Visten box: 11 % of its cells had no post in either model,
+and 5,000 of them drawn at random all sit at exactly 0.0 m in the cached
+terrain mosaic, against 15 % of the cells that do have a post. So
+:func:`codes_from` answers :data:`~trails.io.sources.nmd.UNKNOWN` for a cell
+with no post, as it should for a cell it cannot see, and :meth:`Source.structure`
+turns that into 0 -- *known, nothing there* -- before the box is cached: over
+Norway the model's silence is water, and water is not ground a walker pushes
+through. The Swedish source keeps 255 for the ground nobody has flown, which
+the tiles draw as their own class (:mod:`trails.processing.vegetation_tiles`);
+a Norwegian box gets no such patch. **The one thing this cannot tell apart is
+the border**: past Norway's edge both models are empty too, so a box that
+crosses into Sweden would call the Swedish side bare. Keep a Norwegian box in
+Norway, or read the Swedish side from its own source.
+
 ::
 
     source = hoydedata_vegetation.Source(cache_dir=".cache")
@@ -256,7 +274,9 @@ class Source:
 
         Returns:
             ``(3, rows, cols)`` ``uint8`` in :data:`~trails.io.sources.nmd.BANDS`
-            order, and the georeferencing in :data:`CRS`
+            order, and the georeferencing in :data:`CRS`. No cell is
+            :data:`~trails.io.sources.nmd.UNKNOWN`: where the models have no
+            post the ground is water, and it is 0 (see the module docstring).
         """
         cached = self._structure_file(bounds)
         if cached.exists() and not force_download:
@@ -275,6 +295,10 @@ class Source:
             codes[:, row : row + patch.shape[1], col : col + patch.shape[2]] = patch
             if number % 10 == 0 or number == len(squares):
                 print(f"  {number}/{len(squares)} squares, {time.time() - started:,.0f} s", flush=True)
+        # A cell no model has a post for is water, not unflown ground: see
+        # the module docstring for the measurement. Known and empty, then.
+        water = codes[0] == UNKNOWN
+        codes[:, water] = 0
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         partial = cached.with_suffix(".part.tif")
         with rasterio.open(
@@ -284,9 +308,9 @@ class Source:
             out.write(codes)
             out.descriptions = BANDS
         partial.replace(cached)
-        known = float((codes[0] != UNKNOWN).mean())
         print(
-            f"  structure cached at {cached}: {100 * known:.1f} % of cells read, {100 * float((codes[0] > 0).mean()):.1f} % with something 0.5–5 m",
+            f"  structure cached at {cached}: {100 * float(water.mean()):.1f} % of cells water or past the model's edge, taken as bare,"
+            f" {100 * float((codes[0] > 0).mean()):.1f} % with something 0.5–5 m",
             flush=True,
         )
         return codes, transform

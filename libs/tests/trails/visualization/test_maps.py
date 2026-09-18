@@ -11,7 +11,7 @@ import folium
 import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
-from trails.processing import slope_tiles
+from trails.processing import slope_tiles, vegetation_tiles
 from trails.routing.sources import BRIDGE, FERRY
 from trails.visualization import maps
 
@@ -2332,6 +2332,21 @@ class TestTwoMapsOnOneOrigin:
         assert "if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope" in html
         assert "|| layer.options.trailsVegetation || layer.options.trailsForest)) { return; }" in html
         assert '"trailsShade": true' in html or '"trails_shade": true' in html
+
+    def test_the_vegetation_legend_names_the_ground_nobody_flew(self):
+        """Uwe, 2026-09-18: *"Erkenne ich in den Kacheln den Unterschied zwischen kein Bewuchs
+        und nicht beflogen?"* -- since the grey, yes, and the legend says which is which."""
+        rows = maps.VegetationTiles.classes()
+        assert len(rows) == 7
+        assert rows[0] == {"from": 10, "to": 20, "colour": vegetation_tiles.COLOURS[0], "label": "10–20 % of the ground"}
+        assert rows[-1] == {"colour": vegetation_tiles.UNSURVEYED_COLOUR, "label": "not surveyed by the laser"}
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
+        maps.add_legend(fmap, "Abisko", [maps.LegendRow("a line", "#000", None)])
+        html = fmap.get_root().render()
+        written = json.loads(html.split("var vegetationClasses = ")[1].split(";\n")[0])
+        assert written == rows
+        assert "text.textContent = row.label;" in html
+        assert "and grey is ground nobody has flown." in html
 
     def test_the_worker_answers_the_relief_from_what_was_kept(self, tmp_path):
         """A sheet answered from the store with no shadow over it would look

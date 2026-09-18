@@ -64,7 +64,7 @@ which is rarely what you want.
 same cached model, z8–z15, `command make slope` colours how steep that ground is,
 in classes, cut exactly as the relief is, and `command make vegetation` colours what
 stands on it off the country's laser survey — the cover of bushes and low trees in six
-steps, and the forest over 5 m as a tree of its own. All four take `PARK=<map>` — default
+steps, the ground the laser has not flown in grey, and the forest over 5 m as a tree of its own. All four take `PARK=<map>` — default
 `lomsdal-visten`, as `make map` and `make graph` default — and which box each is cut to
 and out of which model is `trails.processing.trees.TREES`, written once and read by the
 scripts and by `maps.PROVIDERS` alike. All four resume, all write under
@@ -72,7 +72,7 @@ scripts and by `maps.PROVIDERS` alike. All four resume, all write under
 what they wrote. `analysis/docs/abisko-decisions.md` carries every figure — §6.3, §6.6,
 §6.7 and §6.11 for the shapes, §6.10 for the Norwegian model and its box. The Swedish
 vegetation comes off Naturvårdsverket's nationwide NMD 2018 rasters, fetched and converted
-once into the cache by `command make nmd` (5.8 GB down, no login); the Norwegian off
+once into the cache by `command make nmd` (7.2 GB down, no login); the Norwegian off
 `hoydedata.no`'s surface model, no login either.
 
 **The one asymmetry is the sheet and the login.** Abisko draws Lantmäteriet's tiles out of
@@ -171,8 +171,9 @@ sheet so its lettering stays black; a second checkbox under the relief's, off un
 with the class colours listed under it while it is on. **And what stands on the ground is
 coloured over both** (`maps.VegetationTiles`, `maps.ForestTiles`,
 `processing/vegetation_tiles.py`): the laser's reading of the cover of what is between 0.5
-and 5 m — willow, dwarf birch, young mountain birch — in six blue-green steps, and the forest
-over 5 m apart in sepia, two more checkboxes under the slope's, both off until asked. Sweden's
+and 5 m — willow, dwarf birch, young mountain birch — in six blue-green steps with a grey for
+the ground nobody has flown, and the forest over 5 m apart in sepia, two more checkboxes under
+the slope's, both off until asked. Sweden's
 classes are NMD 2018's (`io/sources/nmd.py`); Norway's are computed to the same codes from
 Kartverket's surface model less its terrain model (`io/sources/hoydedata_vegetation.py`).
 A state trail's popup links to the county's page
