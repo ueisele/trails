@@ -63,6 +63,7 @@ import argparse
 import contextlib
 import functools
 import http.server
+import io
 import json
 import math
 import pathlib
@@ -714,62 +715,6 @@ DRAWN = """
   __MAP__.eachLayer(layer => { if (layer.setStyle && !layer.eachLayer) { drawn.push(layer); } });
   const chained = drawn.filter(l => (l.options.className || '').indexOf('trail-group-') === 0);
 """
-
-#: Move every kept map tile under a prefix the page does not name and point the
-#: stand flag at it -- what a page built on the next version of the tree finds.
-#: The keys sort before the page's own, so the cursor never meets what it put.
-STAGE_OLD_STAND = """async () => {
-  const prefix = window.trailsOffline.prefixes().tiles;
-  const old = prefix.slice(0, -1) + '-old/';
-  const db = await new Promise((done, fail) => {
-    const ask = indexedDB.open('__DB__', 3); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
-  return await new Promise((done) => {
-    const tx = db.transaction(['tiles', 'flags'], 'readwrite'); const store = tx.objectStore('tiles');
-    let moved = 0, sample = null;
-    const all = store.openCursor();
-    all.onsuccess = () => { const c = all.result; if (!c) { return; } const k = c.key;
-      if (k.indexOf(prefix) === 0) { store.put(c.value, old + k.slice(prefix.length)); store.delete(k); moved += 1; if (!sample) { sample = k; } }
-      c.continue(); };
-    store.put(new Blob(['retired']), 'https://retired.invalid/tiles/14/1/1.png');
-    tx.objectStore('flags').put({...window.trailsOffline.prefixes(), map: old, tiles: old,
-      retired: 'https://retired.invalid/tiles/'}, 'stand');
-    tx.oncomplete = () => { db.close(); done({moved: moved, sample: sample, old: old, prefix: prefix}); };
-  });
-}"""
-
-#: The background walk commits its current stand and removes its checkpoint together.
-STAND_MIGRATED = """async () => {
-  const current = window.trailsOffline.prefixes();
-  const db = await new Promise((done, fail) => {
-    const ask = indexedDB.open('__DB__', 3); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
-  return await new Promise((done, fail) => {
-    const tx = db.transaction('flags', 'readonly'), flags = tx.objectStore('flags');
-    const stand = flags.get('stand'), checkpoint = flags.get('stand-walk');
-    tx.oncomplete = () => {
-      db.close();
-      const saved = stand.result;
-      done(!!saved && checkpoint.result === undefined && Object.keys(saved).length === Object.keys(current).length &&
-        Object.keys(current).every(kind => saved[kind] === current[kind]));
-    };
-    tx.onabort = tx.onerror = () => { db.close(); fail(tx.error || Error('stand check aborted')); };
-  });
-}"""
-
-#: How many kept tiles sit under the old prefix and under the page's, and the flag.
-COUNT_STANDS = """async (old) => {
-  const prefix = window.trailsOffline.prefixes().tiles;
-  const db = await new Promise((done, fail) => {
-    const ask = indexedDB.open('__DB__', 3); ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error); });
-  return await new Promise((done) => {
-    const tx = db.transaction(['tiles', 'flags']); const store = tx.objectStore('tiles'); const out = {old: 0, now: 0, total: 0, stand: null};
-    const all = store.openKeyCursor();
-    all.onsuccess = () => { const c = all.result; if (!c) { return; }
-      out.total += 1; if (c.key.indexOf(old) === 0) { out.old += 1; } else if (c.key.indexOf(prefix) === 0) { out.now += 1; }
-      c.continue(); };
-    const f = tx.objectStore('flags').get('stand'); f.onsuccess = () => { out.stand = f.result || null; };
-    tx.oncomplete = () => { db.close(); done(out); };
-  });
-}"""
 
 WHOLE_MAP = with_map(
     """() => {"""
@@ -2305,7 +2250,7 @@ def the_sources_measure_the_store(page: Any) -> Check:
         page.wait_for_function("() => navigator.serviceWorker && navigator.serviceWorker.controller", timeout=60_000)
         page.evaluate("() => window.trailsChrome.open('info')")
         scratch = in_db("""seed => new Promise((done, fail) => {
-                const ask = indexedDB.open('__DB__', 3);
+                const ask = indexedDB.open('__DB__', 4);
                 ask.onerror = () => fail(ask.error);
                 ask.onsuccess = () => {
                     const db = ask.result, deal = db.transaction('bench', seed ? 'readwrite' : 'readonly');
@@ -9210,6 +9155,7 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
 
     #: How often each path was asked for with a GET, across every instance.
     asked: dict[str, int] = {}
+    pack_requests: list[tuple[str, str | None, int]] = []
 
     #: And with a HEAD, counted apart. `send_head` runs for both, so counting
     #: them together would put the worker's cheap "has it moved?" into the figure
@@ -9243,6 +9189,26 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
             while _Quiet.hold == holding and waited < 120:
                 time.sleep(0.25)
                 waited += 0.25
+        path = pathlib.Path(self.translate_path(self.path))
+        if path.suffix == ".pmtiles" and path.is_file():
+            length = path.stat().st_size
+            requested = self.headers.get("Range")
+            match = re.fullmatch(r"bytes=(\d+)-(\d+)", requested or "")
+            start, end = (int(match[1]), min(int(match[2]), length - 1)) if match else (0, length - 1)
+            if start > end:
+                self.send_error(416)
+                return None
+            self.send_response(206 if match else 200)
+            self.send_header("Content-Type", "application/vnd.pmtiles")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            if match:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{length}")
+            self.end_headers()
+            _Quiet.pack_requests.append((self.path, requested, end - start + 1))
+            with path.open("rb") as source:
+                source.seek(start)
+                return io.BytesIO(source.read(end - start + 1))
         return super().send_head()
 
 
@@ -9264,6 +9230,7 @@ def served(directory: pathlib.Path) -> Any:
         The origin it is reachable at.
     """
     _Quiet.asked = {}
+    _Quiet.pack_requests = []
     handler = functools.partial(_Quiet, directory=str(directory))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -9285,7 +9252,7 @@ def served(directory: pathlib.Path) -> Any:
 #: entries in a cache: the first `caches.open()` of any cache costs 23 s on a
 #: phone with the ground kept.
 ROWS = """async (store) => await new Promise(done => {
-    const ask = indexedDB.open('__DB__', 3);
+    const ask = indexedDB.open('__DB__', 4);
     ask.onsuccess = () => {
         const count = ask.result.transaction(store, 'readonly').objectStore(store).count();
         count.onsuccess = () => done(count.result);
@@ -9295,7 +9262,7 @@ ROWS = """async (store) => await new Promise(done => {
 })"""
 
 CACHED_PAGE = """async () => await new Promise(done => {
-    const ask = indexedDB.open('__DB__', 3);
+    const ask = indexedDB.open('__DB__', 4);
     ask.onsuccess = () => {
         const get = ask.result.transaction('pages', 'readonly').objectStore('pages').get(location.href);
         get.onsuccess = () => done(!!get.result);
@@ -9842,11 +9809,11 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         held = page.evaluate(
             in_db("""async (extra) => {
             const db = await new Promise((done, fail) => {
-                const ask = indexedDB.open('__DB__', 3);
+                const ask = indexedDB.open('__DB__', 4);
                 ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
             });
             const keys = await new Promise((done, fail) => {
-                const deal = db.transaction('tiles', 'readwrite'), store = deal.objectStore('tiles');
+                const deal = db.transaction('packs', 'readwrite'), store = deal.objectStore('packs');
                 const ask = store.getAllKeys();
                 for (const url of extra) store.delete(url);
                 deal.oncomplete = () => done(ask.result.sort()); deal.onerror = () => fail(deal.error);
@@ -9882,208 +9849,132 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         )
 
 
-def the_worker_stand_batches(browser: Any, page_path: pathlib.Path) -> Check:
-    """Measure the built worker on 150,000 1 kB kept rows, across real worker lives.
-
-    Like the store-path reading, this runs the emitted functions in a dedicated
-    Firefox worker with real IndexedDB. Activation's unrelated page/cache work
-    is stubbed; the activation handler and its waitUntil promise are exercised.
-    """
+def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
+    """Real first control, range/whole requests, a second screen, and cold offline packs."""
+    readings: list[Reading] = []
     with served(page_path.parent) as origin:
-        context = browser.new_context()
+        context = browser.new_context(viewport={"width": 430, "height": 932})
         page = context.new_page()
-        page.goto(origin + "/")
-        source = page.evaluate("async url => (await fetch(url)).text()", origin + "/" + SCENE.companions.worker)
-        source = re.sub(r'var DB = "[^"]+";', 'var DB = "phase3b-stand-probe";', source)
-        source = source.replace("self.location.href", json.dumps(origin + "/" + SCENE.companions.worker))
-        harness = r"""
-        self.onmessage = async ({data: mode}) => {
-            try {
-                const db = await base(), now = prefixes(), old = TILE_PREFIX + 'old/';
-                const key = i => '17/' + String(i).padStart(6, '0') + '/1.png';
-                const committed = tx => new Promise((done, fail) => {
-                    tx.addEventListener('complete', done);
-                    tx.addEventListener('abort', () => fail(tx.error || Error('aborted')));
-                });
-                if (mode.startsWith('seed')) {
-                    const tx = db.transaction([KEPT, SEEN, FLAGS], 'readwrite');
-                    tx.objectStore(KEPT).clear(); tx.objectStore(SEEN).clear(); tx.objectStore(FLAGS).clear();
-                    const stand = {...now};
-                    delete stand.vegetation; delete stand.forest;
-                    if (mode === 'seed-old') { stand.map = old; stand.tiles = old; }
-                    tx.objectStore(FLAGS).put(stand, STAND);
-                    tx.objectStore(FLAGS).put({tiles: 150000, bytes: 153600000, top: 17}, 'held');
-                    tx.objectStore(FLAGS).put('on', STATE);
-                    await committed(tx);
-                    const body = new Blob([new Uint8Array(1024)]);
-                    for (let start = 0; start < 150000; start += 1000) {
-                        const tx = db.transaction(KEPT, 'readwrite'), store = tx.objectStore(KEPT);
-                        for (let i = start; i < start + 1000; i++) {
-                            store.put(body, (mode === 'seed-old' ? old : TILE_PREFIX) + key(i));
-                        }
-                        await committed(tx);
-                    }
-                    db.close(); self.postMessage({result: {seeded: 150000}}); return;
-                }
-                const out = {batches: 0, maxKeys: 0, cursors: 0, writes: 0,
-                    answersDuring: 0, worstTile: 0, tiles: 0, standWrites: 0, heldWrites: 0, firstLower: null};
-                const transaction = IDBDatabase.prototype.transaction;
-                const cursor = IDBObjectStore.prototype.openKeyCursor;
-                const put = IDBObjectStore.prototype.put;
-                IDBObjectStore.prototype.put = function (value, key) {
-                    if (this.name === FLAGS && key === 'held') out.heldWrites++;
-                    if (this.name === FLAGS && key === STAND) {
-                        out.standWrites++;
-                        out.standScope = Array.from(this.transaction.objectStoreNames);
-                    }
-                    return put.call(this, value, key);
-                };
-                IDBDatabase.prototype.transaction = function (names, mode) {
-                    const tx = transaction.call(this, names, mode);
-                    if (mode === 'readwrite') out.writes++;
-                    if (mode === 'readwrite' && Array.from(tx.objectStoreNames).includes(KEPT)) {
-                        tx.addEventListener('complete', () => { out.batches++; });
-                    }
-                    return tx;
-                };
-                IDBObjectStore.prototype.openKeyCursor = function (range, ...args) {
-                    if (this.name !== KEPT) return cursor.call(this, range, ...args);
-                    if (!out.cursors) {
-                        out.firstLower = range ? range.lower : null;
-                        out.firstOpen = range ? range.lowerOpen : false;
-                    }
-                    out.cursors++;
-                    const ask = cursor.call(this, range, ...args);
-                    let keys = 0;
-                    ask.addEventListener('success', () => {
-                        if (ask.result) keys++;
-                        out.maxKeys = Math.max(out.maxKeys, keys);
-                    });
-                    return ask;
-                };
-                const checkpointBefore = await read(FLAGS, STAND_WALK);
-                out.resumeAfter = checkpointBefore ? checkpointBefore.last : null;
-                const began = performance.now();
-                if (mode === 'missing') {
-                    // Lazy check on the first tile of a reloaded worker.
-                    const tile = await tileFor(new Request(TILE_PREFIX + key(0)));
-                    out.firstTile = performance.now() - began;
-                    out.firstBytes = (await tile.blob()).size;
-                    out.standMs = performance.now() - began;
-                } else {
-                    // Exercise the real activation handler, keeping its promise.
-                    self.clients = {claim: async () => {}};
-                    keepWhatIsOpen = sweepOldCaches = async () => {};
-                    const event = new Event('activate');
-                    let activation;
-                    event.waitUntil = work => { activation = work; };
-                    self.dispatchEvent(event);
-                    await activation;
-                    out.activationMs = performance.now() - began;
-                    out.pendingAtActivation = !!migrating;
-                    // Limit this test's wait independently of the worker's walk.
-                    for (let i = 0; i < 100000 && performance.now() - began < 600000; i++) {
-                        const start = performance.now(), before = out.batches;
-                        const tile = await tileFor(new Request(TILE_PREFIX + key(0)));
-                        await tile.blob();
-                        out.worstTile = Math.max(out.worstTile, performance.now() - start);
-                        out.tiles++;
-                        if (migrating && out.batches && out.batches >= before) out.answersDuring++;
-                        if (mode === 'interrupt' && out.batches >= 5) {
-                            out.checkpoint = await read(FLAGS, STAND_WALK);
-                            out.standStillOld = (await read(FLAGS, STAND)).tiles === old;
-                            out.heldStillOld = (await read(FLAGS, 'held')).tiles === 150000;
-                            out.ms = performance.now() - began;
-                            out.deadlines = told.deadlines;
-                            self.postMessage({result: out}); return;
-                        }
-                        if (!migrating) break;
-                        await new Promise(done => setTimeout(done, 0));
-                    }
-                    if (migrating) throw Error('migration did not finish within the test limit');
-                    out.ms = performance.now() - began;
-                }
-                out.stand = sameStand(await read(FLAGS, STAND));
-                out.held = await read(FLAGS, 'held');
-                out.deadlines = told.deadlines;
-                out.checkpointGone = (await read(FLAGS, STAND_WALK)) === null;
-                const tx = db.transaction(KEPT, 'readonly'), store = tx.objectStore(KEPT);
-                const count = range => new Promise(done => { const ask = store.count(range); ask.onsuccess = () => done(ask.result); });
-                [out.total, out.old] = await Promise.all([count(), count(IDBKeyRange.bound(old, old + '\uffff'))]);
-                out.lastBytes = (await read(KEPT, TILE_PREFIX + key(149999))).size;
-                db.close(); self.postMessage({result: out});
-            } catch (e) { self.postMessage({error: String(e), stack: e.stack}); }
-        };
-        """
-        run = r"""async ({source, mode}) => {
-            const url = URL.createObjectURL(new Blob([source], {type: 'text/javascript'}));
-            const worker = new Worker(url);
-            try {
-                return await new Promise((done, fail) => {
-                    const timer = setTimeout(() => fail(Error('worker probe timed out')), 900000);
-                    worker.onmessage = e => {
-                        clearTimeout(timer);
-                        e.data.error ? fail(Error(e.data.error + '\n' + e.data.stack)) : done(e.data.result);
-                    };
-                    worker.onerror = e => { clearTimeout(timer); fail(Error(e.message)); };
-                    worker.postMessage(mode);
-                });
-            } finally { worker.terminate(); URL.revokeObjectURL(url); }
+        page.goto(f"{origin}/{page_path.name}", timeout=180_000)
+        page.wait_for_function("() => navigator.serviceWorker.controller", timeout=30_000)
+        loaded = """() => {
+            const tiles = [...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')];
+            return tiles.length > 0 && tiles.every(t => t.complete && t.naturalWidth > 1);
         }"""
-        results = {}
-        for mode in ("seed-missing", "missing", "seed-old", "interrupt", "resume"):
-            print(f"  worker stand: {mode}", flush=True)
-            if not mode.startswith("seed"):
-                page.reload()
-            results[mode] = page.evaluate(run, {"source": source + harness, "mode": mode})
+        page.wait_for_function(loaded, timeout=60_000)
+        initial = list(_Quiet.pack_requests)
+        readings.append(Reading("first visit draws after control", True, True, note=f"{len(initial)} pack requests"))
+        # A phone screen centred well inside one z14 parent, with just its base
+        # shown, so a small pan stays inside the very same pack.
+        page.evaluate(
+            with_map("""(at) => {
+            const layers = []; __MAP__.eachLayer(l => { if (l.getTileUrl) layers.push(l); });
+            window.packSheet = layers.find(l => !l.options.trailsShade && !l.options.trailsSlope &&
+                !l.options.trailsVegetation && !l.options.trailsForest);
+            layers.filter(l => l !== window.packSheet).forEach(l => __MAP__.removeLayer(l));
+            const p = __MAP__.project(at, 14).divideBy(256).floor();
+            __MAP__.setView(__MAP__.unproject(p.add([0.5, 0.5]).multiplyBy(256), 14), 17, {animate: false});
+        }"""),
+            list(SCENE.standing),
+        )
+        page.wait_for_function(loaded, timeout=60_000)
+        page.wait_for_timeout(2200)  # Measure after the documented two-second settling window.
+        settled = list(_Quiet.pack_requests)
+        whole = [row for row in settled if row[1] is None]
+        whole_paths = {row[0] for row in whole}
+        readings.append(
+            Reading(
+                "settling fetches each whole pack once",
+                len(whole),
+                len(whole_paths),
+                note=f"{len(settled)} requests, {len(whole)} whole, {sum(r[2] for r in settled)} bytes",
+            )
+        )
+        readings.append(Reading("the online reader uses ranges too", any(row[1] is not None for row in settled), True))
+        per_tile = [path for path in _Quiet.asked if re.match(r"/(tiles|dem|shade|slope|vegetation|forest)/.*\.png", path)]
+        readings.append(Reading("no per-tile object reaches the server", per_tile, []))
+        before = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
+        page.evaluate(
+            with_map("""() => {
+            window.packSheet.setUrl(window.packSheet._url.split('?')[0] + '?pack-screen=2');
+            __MAP__.panBy([64, 0], {animate: false});
+        }""")
+        )
+        page.wait_for_function(loaded, timeout=30_000)
+        page.wait_for_function(
+            """async (before) => {
+            const told = await window.trailsOffline.dbRead('flags', 'tiles-said');
+            return told && told.mem > before;
+        }""",
+            arg=before["mem"],
+            timeout=10_000,
+        )
+        page.wait_for_timeout(500)  # Include the tally's trailing 400 ms write.
+        after = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
+        readings.append(Reading("a second screen in the same pack makes no request", len(_Quiet.pack_requests) - len(settled), 0))
+        readings.append(
+            Reading(
+                "the page receives the memory tally",
+                after["mem"] > before["mem"],
+                True,
+                note=f"mem {before['mem']} → {after['mem']}; total {after['time']['mem']['total']:.1f} ms, "
+                f"worst {after['time']['mem']['worst']:.1f} ms",
+            )
+        )
+        # Seed exactly the production row shape, remove browse, and start a new
+        # worker life. A memory hit cannot hide a broken kept-store read here.
+        # The database name belongs to this scene, not to a global origin.
+        page.evaluate("name => { window.packDB = name; }", SCENE.companions.database)
+        seeded = page.evaluate("""async () => {
+            const db = await new Promise((done, fail) => {
+                const ask = indexedDB.open(window.packDB, 4);
+                ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
+            });
+            const result = await new Promise((done, fail) => {
+                const tx = db.transaction(['packs', 'browse', 'flags'], 'readwrite');
+                const seen = tx.objectStore('browse'), kept = tx.objectStore('packs'); let count = 0, bytes = 0;
+                const ask = seen.openCursor(); ask.onsuccess = () => {
+                    const row = ask.result; if (!row) { seen.clear(); return; }
+                    if (!(row.value.body instanceof ArrayBuffer)) throw Error('browse pack is not an ArrayBuffer');
+                    kept.put(row.value.body, row.key); count++; bytes += row.value.size; row.continue();
+                };
+                tx.objectStore('flags').put('on', 'offline');
+                tx.oncomplete = () => done({count, bytes}); tx.onerror = () => fail(tx.error);
+            }); db.close(); return result;
+        }""")
+        page.evaluate("""async () => {
+            const reg = await navigator.serviceWorker.getRegistration();
+            await navigator.serviceWorker.register(reg.active.scriptURL.split('?')[0] + '?pack-offline=1', {scope: reg.scope});
+        }""")
+        page.wait_for_function("() => navigator.serviceWorker.controller.scriptURL.includes('pack-offline=1')", timeout=30_000)
+        context.set_offline(True)
+        page.evaluate("() => { window.packSheet.setUrl(window.packSheet._url.split('?')[0] + '?pack-screen=offline'); }")
+        page.wait_for_function(loaded, timeout=30_000)
+        page.wait_for_function(
+            """async () => {
+            const told = await window.trailsOffline.dbRead('flags', 'tiles-said');
+            return told && told.db > 0;
+        }""",
+            timeout=10_000,
+        )
+        page.wait_for_timeout(500)
+        offline = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
+        readings.append(
+            Reading(
+                "a cold offline worker draws the kept screen",
+                offline["db"] > 0,
+                True,
+                note=f"{seeded['count']} packs, {seeded['bytes']} bytes; db {offline['db']}, worst {offline['time']['db']['worst']:.1f} ms",
+            )
+        )
+        blank_size = page.evaluate("""async () => {
+            const prefix = window.trailsOffline.prefixes().tiles;
+            return (await (await fetch(prefix + '17/0/0.png?pack-absent=1')).arrayBuffer()).byteLength;
+        }""")
+        readings.append(Reading("outside the kept packs is blank", blank_size, 68))
+        readings.append(Reading("offline asks for no pack", len(_Quiet.pack_requests) - len(settled), 0))
         context.close()
-    missing, interrupted, moved = (results[key] for key in ("missing", "interrupt", "resume"))
-    return Check(
-        "the worker stand batches",
-        [
-            Reading("missing overlay keys rewrite the stand", missing["stand"], True),
-            Reading("the rewrite takes well under a second", missing["standMs"] < 500, True, note=f"{missing['standMs']:.1f} ms"),
-            Reading("the rewrite opens no kept cursor", [missing["cursors"], missing["batches"]], [0, 0]),
-            Reading("the rewrite uses one small write transaction", missing["standWrites"], 1),
-            Reading("the small update only locks flags", missing["standScope"], ["flags"]),
-            Reading("the first tile answers before its deadline", missing["firstTile"] < 2500, True, note=f"{missing['firstTile']:.1f} ms"),
-            Reading("the first tile is kept ground", missing["firstBytes"], 1024),
-            Reading("the rewrite preserves count and byte estimate", missing["held"], {"tiles": 150000, "bytes": 153600000, "top": 17}),
-            Reading("the rewrite preserves every row", missing["total"], 150000),
-            Reading("the rewrite never writes the count", missing["heldWrites"], 0),
-            Reading(
-                "activation finishes while the walk is pending",
-                interrupted["pendingAtActivation"],
-                True,
-                note=f"{interrupted['activationMs']:.1f} ms; resume {moved['activationMs']:.1f} ms",
-            ),
-            Reading("an interrupted walk retains its stand and count", [interrupted["standStillOld"], interrupted["heldStillOld"]], [True, True]),
-            Reading("the next life resumes after its committed checkpoint", moved["firstLower"], moved["resumeAfter"]),
-            Reading("the interrupted life saved a checkpoint", bool(interrupted["checkpoint"]), True),
-            Reading("the checkpoint bound is exclusive", moved["firstOpen"], True),
-            Reading("activation does not wait for the walk", max(interrupted["activationMs"], moved["activationMs"]) < 500, True),
-            Reading("count and stand stay unwritten between batches", [interrupted["heldWrites"], interrupted["standWrites"]], [0, 0]),
-            Reading("count and stand are written only at the end", [moved["heldWrites"], moved["standWrites"]], [1, 1]),
-            Reading("each migration transaction visits at most 500 keys", max(interrupted["maxKeys"], moved["maxKeys"]) <= 500, True),
-            Reading(
-                "the large walk needs multiple transactions",
-                moved["batches"] > 1,
-                True,
-                note=f"{interrupted['batches']} + {moved['batches']} batches; {interrupted['ms'] + moved['ms']:.1f} ms",
-            ),
-            Reading(
-                "tiles answer between migration batches",
-                moved["answersDuring"] > 1,
-                True,
-                note=f"{moved['answersDuring']} answers; worst {max(interrupted['worstTile'], moved['worstTile']):.1f} ms",
-            ),
-            Reading("tiles stay below 2.5 seconds during the walk", max(interrupted["worstTile"], moved["worstTile"]) < 2500, True),
-            Reading("no tile runs past the deadline", missing["deadlines"] + interrupted.get("deadlines", 0) + moved["deadlines"], 0),
-            Reading("the walk writes the new stand and removes its checkpoint", [moved["stand"], moved["checkpointGone"]], [True, True]),
-            Reading("all 150000 rows are renamed and counted", [moved["total"], moved["old"], moved["held"]["tiles"]], [150000, 0, 150000]),
-            Reading("the final renamed row keeps its body", moved["lastBytes"], 1024),
-        ],
-    )
+    return Check("the worker reads packs", readings)
 
 
 def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
@@ -10101,7 +9992,7 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
         result = page.evaluate(
             r"""async (workerURL) => {
             let source = await (await fetch(workerURL)).text();
-            source = source.replace(/var DB = "[^"]+";/, 'var DB = "phase3-store-probe";')
+            source = source.replace(/var DB = "[^"]+";/, 'var DB = "pack-store-probe";')
                 .replaceAll('self.location.href', JSON.stringify(workerURL));
             const run = async function () {
                 const out = {}, db = await base();
@@ -10145,18 +10036,20 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                     await committed(tx);
                     return {rows: rows.result, sizes: sizes.result, total: total.result, clears: browseClears};
                 };
-                const k = TILE_PREFIX + '14/1/1.png', s = TILE_PREFIX + '14/1/2.png', m = TILE_PREFIX + '14/1/3.png';
+                const k = packFor(TILE_PREFIX + '14/1/1.png').url, s = packFor(TILE_PREFIX + '14/1/2.png').url,
+                    m = packFor(TILE_PREFIX + '14/1/3.png').url;
+                const buffer = text => new TextEncoder().encode(text).buffer;
                 await seed((kept, seen, flags) => {
-                    kept.put(new Blob(['kept']), k);
-                    seen.put({body: new Blob(['shadow']), size: 6, at: 1}, k);
-                    seen.put({body: new Blob(['seen']), size: 4, at: 2}, s);
+                    kept.put(buffer('kept'), k);
+                    seen.put({body: buffer('shadow'), size: 6, at: 1}, k);
+                    seen.put({body: buffer('seen'), size: 4, at: 2}, s);
                     flags.put(6, BROWSE_SIZE + k);
-                    flags.put(prefixes(), STAND); flags.put('on', STATE);
+                    flags.put('on', STATE);
                 });
                 reset();
                 const answers = await Promise.all([k, s, m, k].map(plain => lookup(plain, {expired: false, off: false})));
                 out.lookup = {transactions: counts.tx.length, gets: counts.gets.slice(),
-                    paths: answers.map(a => a && a.path), bodies: await Promise.all(answers.map(a => a && a.body.text()))};
+                    paths: answers.map(a => a && a.path), bodies: await Promise.all(answers.map(a => a && new TextDecoder().decode(a.body)))};
                 // Every answer settles in its own request callback, not at commit.
                 const originalGet = IDBObjectStore.prototype.get;
                 let release = null;
@@ -10194,71 +10087,38 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 flushPuts();
                 await read(FLAGS, BROWSE_BYTES);
                 out.missingSizesCleared = await browseState();
-                await browsePut(TILE_PREFIX + '14/2/1.png', new Blob(['new']));
-                await browsePut(TILE_PREFIX + '14/2/2.png', new Blob(['next']));
+                await browsePut(k + '-new', buffer('new'));
+                await browsePut(s + '-new', buffer('next'));
                 out.browseAfterReset = await browseState();
                 forbid = false;
-                // A removed kind alone must trigger a walk, even when every
-                // currently drawn prefix is unchanged. Unrelated keys survive.
-                const retired = 'https://retired.invalid/tree/', unrelated = 'https://unrelated.invalid/row';
-                await seed((kept, seen, flags) => {
-                    kept.put(new Blob(['retired']), retired + '1.png');
-                    kept.put(new Blob(['unrelated']), unrelated);
-                    flags.put({...prefixes(), retired}, STAND);
-                });
-                stood = null;
-                await lookup(k, {expired: false, off: false});
-                await migrating;
-                out.retired = {gone: (await read(KEPT, retired + '1.png')) === null,
-                    kept: await (await read(KEPT, k)).text(), unrelated: await (await read(KEPT, unrelated)).text()};
-                // Stage an old prefix, a collision and an unnamed tree.
-                const old = TILE_PREFIX + 'old/', removed = 'https://removed.invalid/tree/';
-                await seed((kept, seen, flags) => {
-                    kept.clear();
-                    kept.put(new Blob(['old']), old + '14/1/1.png');
-                    kept.put(new Blob(['fresh']), k);
-                    kept.put(new Blob(['move']), old + '14/1/2.png');
-                    kept.put(new Blob(['gone']), removed + '14/1/1.png');
-                    flags.put({...prefixes(), map: old, tiles: old, retired: removed}, STAND);
-                    flags.put({tiles: 99, bytes: 900, top: 14}, 'held');
-                });
-                stood = null; switched = null; reset();
-                await lookup(s, {expired: false, off: false});
-                await migrating;
-                out.migration = {held: await read(FLAGS, 'held'), stand: await read(FLAGS, STAND),
-                    old: await read(KEPT, old + '14/1/2.png'), removed: await read(KEPT, removed + '14/1/1.png'),
-                    fresh: await (await read(KEPT, k)).text(), moved: await (await read(KEPT, s)).text()};
-                reset();
-                await lookup(s, {expired: false, off: false});
-                out.migrationAgain = counts.tx.filter(t => t.mode === 'readwrite').length;
-                // Cold life with persisted current stand: still one transaction.
-                stood = null; switched = null; reset();
+                // A cold life still uses one transaction, without a stand read.
+                switched = null; reset();
                 await lookup(s, {expired: false, off: false});
                 out.cold = {transactions: counts.tx.length, gets: counts.gets};
                 // 49 writes can cross the soft cap; the fiftieth trims fifty
                 // oldest keys. Use real sizes, including unlike tile weights.
-                const large = new Blob([new Uint8Array(4_000_000)]);
+                const large = new ArrayBuffer(4_000_000);
                 await seed((kept, seen, flags) => {
                     seen.clear(); flags.delete(BROWSE_BYTES);
                     for (let i = 0; i < 50; i++) {
                         const key = TILE_PREFIX + 'old-browse/' + i;
-                        seen.put({body: large, size: large.size, at: i}, key);
-                        flags.put(large.size, BROWSE_SIZE + key);
+                        seen.put({body: large, size: large.byteLength, at: i}, key);
+                        flags.put(large.byteLength, BROWSE_SIZE + key);
                     }
-                    flags.put({bytes: 50 * large.size, writes: 0}, BROWSE_BYTES);
+                    flags.put({bytes: 50 * large.byteLength, writes: 0}, BROWSE_BYTES);
                 });
                 forbid = true; reset();
-                await Promise.all(Array.from({length: 49}, (_, i) => browsePut(TILE_PREFIX + 'new-browse/' + i, new Blob(['small']))));
+                await Promise.all(Array.from({length: 49}, (_, i) => browsePut(TILE_PREFIX + 'new-browse/' + i, buffer('small'))));
                 out.putTransactions = counts.tx.length;
                 out.beforeTrim = await read(FLAGS, BROWSE_BYTES);
                 // Simulate a new life: cadence must come from persistent metadata.
                 puts = []; putTick = null;
-                await browsePut(TILE_PREFIX + 'new-browse/49', new Blob(['small']));
+                await browsePut(TILE_PREFIX + 'new-browse/49', buffer('small'));
                 out.afterTrim = await read(FLAGS, BROWSE_BYTES);
                 forbid = false;
                 out.oldestGone = (await read(SEEN, TILE_PREFIX + 'old-browse/0')) === null;
                 out.newestThere = (await read(SEEN, TILE_PREFIX + 'new-browse/49')).size;
-                await browsePut(TILE_PREFIX + 'new-browse/49', new Blob(['overwrite']));
+                await browsePut(TILE_PREFIX + 'new-browse/49', buffer('overwrite'));
                 out.overwrite = (await read(FLAGS, BROWSE_BYTES)).bytes;
                 // Even when fifty removals cannot reach the soft cap, a trim
                 // must end there instead of walking the rest of the cache.
@@ -10267,33 +10127,33 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                     flags.delete(IDBKeyRange.bound(BROWSE_SIZE, BROWSE_SIZE + '\uffff'));
                     for (let i = 0; i < 100; i++) {
                         const key = TILE_PREFIX + 'over-cap/' + i;
-                        seen.put({body: large, size: large.size, at: i}, key);
-                        flags.put(large.size, BROWSE_SIZE + key);
+                        seen.put({body: large, size: large.byteLength, at: i}, key);
+                        flags.put(large.byteLength, BROWSE_SIZE + key);
                     }
-                    flags.put({bytes: 100 * large.size, writes: 49}, BROWSE_BYTES);
+                    flags.put({bytes: 100 * large.byteLength, writes: 49}, BROWSE_BYTES);
                 });
                 forbid = true;
-                await browsePut(TILE_PREFIX + 'over-cap/new', new Blob(['small']));
+                await browsePut(TILE_PREFIX + 'over-cap/new', buffer('small'));
                 out.boundedTrim = await browseState();
                 forbid = false;
                 // The exact production deadline, with both switch states. Holding
                 // open prevents all lookup work and includes cold-open time.
-                const openedBefore = opened, fetchBefore = fetch, timeoutBefore = setTimeout;
+                const openedBefore = opened, networkBefore = networkTile, timeoutBefore = setTimeout;
                 const limits = [];
                 setTimeout = (fn, ms, ...args) => {
                     if (ms >= 1000) limits.push(ms);
                     return timeoutBefore(fn, ms, ...args);
                 };
                 let network = 0;
-                fetch = async () => { network++; return new Response('network'); };
+                networkTile = async () => { network++; return buffer('network'); };
                 for (const off of [true, false]) {
                     switched = Promise.resolve(off); opened = new Promise(() => {});
                     const before = told.deadlines, began = performance.now();
-                    const response = await tileFor(new Request(m));
+                    const response = await tileFor(new Request(TILE_PREFIX + '14/1/3.png'));
                     out[off ? 'deadlineOn' : 'deadlineOff'] = {ms: performance.now() - began,
                         deadlines: told.deadlines - before, bytes: (await response.blob()).size, network};
                 }
-                opened = openedBefore; fetch = fetchBefore; setTimeout = timeoutBefore;
+                opened = openedBefore; networkTile = networkBefore; setTimeout = timeoutBefore;
                 out.limits = limits;
                 out.tally = {deadlines: told.deadlines, peak: told.peak, time: told.time};
                 IDBDatabase.prototype.transaction = transaction;
@@ -10313,7 +10173,7 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                     worker.onerror = e => fail(Error(e.message)); worker.postMessage('run');
                 });
             } finally {
-                worker.terminate(); URL.revokeObjectURL(url); indexedDB.deleteDatabase('phase3-store-probe');
+                worker.terminate(); URL.revokeObjectURL(url); indexedDB.deleteDatabase('pack-store-probe');
             }
         }""",
             origin + "/" + SCENE.companions.worker,
@@ -10324,7 +10184,7 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
         "the worker store path",
         [
             Reading("one tick of four lookups uses one transaction", result["lookup"]["transactions"], 1),
-            Reading("three distinct tiles get kept once each", sum(g["store"] == "tiles" for g in gets), 3),
+            Reading("three distinct packs get kept once each", sum(g["store"] == "packs" for g in gets), 3),
             Reading("only the two kept misses read browse", sum(g["store"] == "browse" for g in gets), 2),
             Reading("kept wins and duplicate lookups share its body", result["lookup"]["bodies"], ["kept", "seen", None, "kept"]),
             Reading("an answer does not wait for another tile", result["independent"], True),
@@ -10344,15 +10204,6 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
                 result["browseAfterReset"],
                 {"rows": 2, "sizes": 2, "total": {"bytes": 7, "writes": 2}, "clears": 2},
             ),
-            Reading("a removed kind alone is migrated", result["retired"], {"gone": True, "kept": "kept", "unrelated": "unrelated"}),
-            Reading("migration corrects the held count", result["migration"]["held"]["tiles"], 2),
-            Reading("migration removes old and unnamed keys", [result["migration"]["old"], result["migration"]["removed"]], [None, None]),
-            Reading(
-                "migration preserves current ground and renames old ground",
-                [result["migration"]["fresh"], result["migration"]["moved"]],
-                ["fresh", "move"],
-            ),
-            Reading("a later lookup does not repeat migration", result["migrationAgain"], 0),
             Reading("a cold worker still uses one lookup transaction", result["cold"]["transactions"], 1),
             Reading("49 puts in one tick share one transaction", result["putTransactions"], 1),
             Reading("no trim before the fiftieth write", result["beforeTrim"]["bytes"], 200_000_245),
@@ -10448,7 +10299,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # mtime, which is what `Last-Modified` is served from and what the worker
         # compares.
         newer: list[Reading] = []
-        before_tiles = first.evaluate(in_db(ROWS), "tiles")
+        before_tiles = first.evaluate(in_db(ROWS), "packs")
         page_path.touch()
         got_before = _Quiet.asked.get(f"/{page_path.name}", 0)
         # Through the page's own switch and not a hand-written message: what is
@@ -10483,7 +10334,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         newer.append(
             Reading(
                 "and finding one costs the terrain nothing",
-                first.evaluate(in_db(ROWS), "tiles"),
+                first.evaluate(in_db(ROWS), "packs"),
                 before_tiles,
             )
         )
@@ -10518,7 +10369,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         stamped = first.evaluate(
             in_db("""(when) => new Promise(resolve => {
                 const stamp = new Date(when).toUTCString();
-                const ask = indexedDB.open('__DB__', 3);
+                const ask = indexedDB.open('__DB__', 4);
                 ask.onsuccess = () => { const db = ask.result;
                   const store = db.transaction('pages', 'readwrite').objectStore('pages');
                   const got = store.get(location.href);
@@ -10848,14 +10699,16 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         )
         weighed = first.evaluate(
             in_db("""async () => await new Promise(done => {
-                const ask = indexedDB.open('__DB__', 3);
+                const ask = indexedDB.open('__DB__', 4);
                 ask.onsuccess = () => {
-                    const store = ask.result.transaction('tiles', 'readonly').objectStore('tiles');
+                    const store = ask.result.transaction('packs', 'readonly').objectStore('packs');
                     const all = store.getAll(undefined, 40);
                     const count = store.count();
                     let smallest = Infinity, seen = 0;
                     all.onsuccess = () => {
-                        for (const body of all.result) { smallest = Math.min(smallest, body.size); seen += 1; }
+                        for (const body of all.result) {
+                            smallest = Math.min(smallest, body instanceof ArrayBuffer ? body.byteLength : 0); seen += 1;
+                        }
                         count.onsuccess = () => done({kept: count.result, smallest: smallest, sampled: seen});
                     };
                     all.onerror = () => done({kept: -1, smallest: -1, sampled: 0});
@@ -10875,8 +10728,8 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # A blank tile is 68 bytes. Anything Kartverket drew is thousands.
         terrain.append(
             Reading(
-                "and every kept tile is terrain, not a blank",
-                weighed["smallest"] > 1000,
+                "and every kept pack is an ArrayBuffer of terrain",
+                weighed["sampled"] > 0 and weighed["smallest"] > 1000,
                 True,
                 note=f"smallest of {weighed['sampled']}: {weighed['smallest']} B",
             )
@@ -10961,14 +10814,13 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 return {good: good, blank: blank, drawn: drawn.slice(0, 4)};
             }"""
         )
-        terrain.append(
-            Reading(
-                "with the switch on, unkept ground stays blank even online",
-                indoors["good"],
-                0,
-                note=f"{indoors['blank']} blank" + (f"; drawn: {', '.join(indoors['drawn'])}" if indoors["drawn"] else ""),
-            )
-        )
+        # A kept/browsed parent can cover ground outside the old tile scope.
+        # Ask a known absent pack, not a coordinate inside that larger parent.
+        absent = first.evaluate("""async () => {
+            const url = window.trailsOffline.prefixes().tiles + '17/0/0.png?absent-pack=1';
+            return (await (await fetch(url)).arrayBuffer()).byteLength;
+        }""")
+        terrain.append(Reading("with the switch on, an absent pack stays blank even online", absent, 68))
         # **And turning the switch off keeps every tile.** Nothing about the
         # switch is a deletion -- it is a flag in `localStorage` and a message to
         # the worker -- and the only thing in this page that empties a tile cache
@@ -11057,7 +10909,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         terrain.append(Reading("and so does the terrain", reloaded["kept"]["tiles"], second_ask["tiles"]))
 
         terrain.append(Reading("offline, the kept ground draws", drawn_terrain["good"] > 0, True, note=f"{drawn_terrain['good']} tiles"))
-        terrain.append(Reading("and none of it is a broken image", drawn_terrain["blank"], 0))
+        terrain.append(Reading("and every kept layer draws terrain rather than a blank", drawn_terrain["blank"], 0))
 
         # **And ground nobody kept is blank rather than broken**, which is the
         # other half of the same design: offline the worker answers an unkept
@@ -11096,51 +10948,6 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         terrain.append(Reading("and no unkept tile is a broken image", unkept["broken"], 0))
         terrain.append(Reading("and still threw nothing", len(thrown), 0, note="; ".join(thrown[:2])))
 
-        # Stage the store an updated worker encounters. A new script URL makes
-        # a new worker life: changing flags behind a memo in the same life is
-        # not a deploy. Migration replaces the old per-tile fallback entirely.
-        staged = second.evaluate(in_db(STAGE_OLD_STAND))
-        context.set_offline(False)
-        second.evaluate("""async () => {
-            const reg = await navigator.serviceWorker.getRegistration();
-            const next = reg.active.scriptURL.split('?')[0] + '?phase3=migration';
-            await navigator.serviceWorker.register(next, {scope: reg.scope});
-        }""")
-        second.wait_for_function("() => navigator.serviceWorker.controller.scriptURL.includes('?phase3=migration')", timeout=60_000)
-        context.set_offline(True)
-        second.reload(timeout=120_000)
-        second.wait_for_function("() => window.trailsOffline && window.trailsOffline.state().kept", timeout=60_000)
-        # Since 32b5b37, reload proceeds while the stand walk runs in background
-        # batches. Read the panel and counts only after its final commit.
-        if not wait_until(second, in_db(STAND_MIGRATED), 120_000):
-            raise TimeoutError("worker stand migration did not finish within 120 seconds")
-        refreshed = second.evaluate("async () => (await window.trailsOffline.refresh()).kept")
-        migrated = second.evaluate(in_db(COUNT_STANDS), staged["old"])
-        answered = second.evaluate("(url) => fetch(url).then(r => r.blob()).then(b => b.size)", staged["sample"])
-        terrain.append(Reading("the worker migration removes the older prefix", migrated["old"], 0))
-        terrain.append(Reading("the worker migration keeps every tile at its current address", migrated["now"], staged["moved"]))
-        terrain.append(Reading("the panel agrees with the migrated store count", refreshed["tiles"], migrated["total"]))
-        terrain.append(Reading("the panel no longer reports an older stand", refreshed["stale"], None))
-        terrain.append(Reading("and offline the migrated tile answers at the new address", answered > 1000, True, note=f"{answered} bytes"))
-        context.set_offline(False)
-        # A small selection -- a triangle two kilometres across where the
-        # reader stands, a few dozen tiles with the margin -- so the run
-        # does not fetch a valley's worth from Kartverket. The migrated tiles
-        # outside it remain kept. Drawn
-        # again, because the ring did not survive the reload, and the chooser
-        # floors every scope at z14.
-        lat, lng = SCENE.standing
-        second.evaluate(
-            "async (ring) => { await window.trailsOffline.area(ring); await window.trailsOffline.choose('draw', 14); }",
-            [[lat, lng], [lat + 0.02, lng], [lat, lng + 0.05]],
-        )
-        second.evaluate("() => { window.trailsOffline.keep(); }")
-        second.wait_for_timeout(1500)
-        second.wait_for_function("() => !window.trailsOffline.state().busy", timeout=240_000)
-        replaced = second.evaluate(in_db(COUNT_STANDS), staged["old"])
-        terrain.append(Reading("keep again leaves nothing of the older stand", replaced["old"], 0, note=f"{staged['moved']} were under it"))
-        terrain.append(Reading("and the page's stand holds the new selection", replaced["now"] > 0, True, note=f"{replaced['now']} tiles"))
-        terrain.append(Reading("and the stand is written down", (replaced["stand"] or {}).get("tiles"), staged["prefix"]))
         context.set_offline(True)
         # And the reader can have the space back from inside the thing that took
         # it, which is the last of the four this panel is for.
@@ -11858,8 +11665,10 @@ def main() -> int:
         # costs about 590 MB settled, and a second one beside it took the browser
         # down mid-load -- `TargetClosedError` at the first wait, with nothing
         # said about why. Two 42 MB documents at once is not a thing to ask for.
-        if wanted(the_worker_stand_batches):
-            checks.append(the_worker_stand_batches(browser, page_path))
+        if wanted(the_worker_reads_packs):
+            page.close()
+            serving.close()
+            checks.append(the_worker_reads_packs(browser, page_path))
         if wanted(the_worker_store_path):
             checks.append(the_worker_store_path(browser, page_path))
         if wanted(the_overview_is_kept):

@@ -502,17 +502,11 @@ PROVIDERS: dict[str, Provider] = {
     "kartverket": Provider(
         key="kartverket",
         label="Kartverket",
-        tiles="https://cache.kartverket.no/",
-        top=18,
+        tiles="/tiles/kartverket/topo/1/",
+        top=17,
         cap=16,
-        # Twelve samples per zoom taken on the trail network rather than over
-        # the park: the sea tiles a bounding box is full of are a fraction of
-        # the size and would make every estimate optimistic.
-        # z8–z10: five cache topo tiles per zoom at the box's corners and
-        # centre, 2026-09-18; rounded mean bytes, not the flat WMS tree.
-        weight={8: 37246, 9: 99511, 10: 96923, 11: 73914, 12: 73914, 13: 73914, 14: 70170, 15: 45898, 16: 51295, 17: 28637, 18: 37037},
-        # **Kartverket's sheet answers the world; these three trees are ours and
-        # do not.** The extent is theirs, not the sheet's -- see the field.
+        # Mean PNG bytes per zoom of the finished flat WMS tree, phase 5.
+        weight={8: 11417, 9: 15036, 10: 18338, 11: 19503, 12: 14311, 13: 12905, 14: 13584, 15: 8107, 16: 11135, 17: 6567},
         extent=_LOMSDAL_VISTEN.box,
         # Kartverket's national height model as tiles (§6.10), z8 to z13; the
         # weights are the mean per zoom of the first build's 2,475 tiles,
@@ -983,11 +977,17 @@ def write_service_worker(beside: pathlib.Path, provider: Provider = PROVIDERS["k
     script = (
         SERVICE_WORKER.replace("__VERSION__", stamp)
         .replace("__TILE_PREFIX__", provider.tiles)
+        .replace("__TILE_TOP__", str(provider.top))
         .replace("__HEIGHT_PREFIX__", provider.heights.tiles if provider.heights else "")
+        .replace("__HEIGHT_TOP__", str(provider.heights.top if provider.heights else 0))
         .replace("__SHADE_PREFIX__", provider.shade.tiles if provider.shade else "")
+        .replace("__SHADE_TOP__", str(provider.shade.top if provider.shade else 0))
         .replace("__SLOPE_PREFIX__", provider.slope.tiles if provider.slope else "")
+        .replace("__SLOPE_TOP__", str(provider.slope.top if provider.slope else 0))
         .replace("__VEGETATION_PREFIX__", provider.vegetation.tiles if provider.vegetation else "")
+        .replace("__VEGETATION_TOP__", str(provider.vegetation.top if provider.vegetation else 0))
         .replace("__FOREST_PREFIX__", provider.forest.tiles if provider.forest else "")
+        .replace("__FOREST_TOP__", str(provider.forest.top if provider.forest else 0))
         .replace("__DB__", companions.database)
         .replace("__CACHE__", companions.cache)
     )
@@ -1373,6 +1373,24 @@ class _TileRetention(MacroElement):
         """Initialize the retention override."""
         super().__init__()
         self._name = "TileRetention"
+
+
+class _TileStart(MacroElement):
+    """Wait briefly for control before adding the pack-backed tile layers."""
+
+    _template = Template(
+        """
+        {% macro script(this, kwargs) %}
+"""
+        + files("trails.visualization").joinpath("js", "tile_start.js").read_text(encoding="utf-8")
+        + """        {% endmacro %}
+    """
+    )
+
+    def __init__(self) -> None:
+        """Initialize the first-control gate."""
+        super().__init__()
+        self._name = "TileStart"
 
 
 class _PinSize(MacroElement):
@@ -1804,7 +1822,7 @@ _LANTMATERIET_ATTRIBUTION = '&copy; <a href="https://www.lantmateriet.se/">Lantm
 #: tiles come from -- ``None`` for one the offline panel does not keep.
 _BASE_LAYERS: dict[BaseMap, dict[str, str | None]] = {
     BaseMap.KARTVERKET_TOPO: {
-        "tiles": "https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png",
+        "tiles": "/tiles/kartverket/topo/1/{z}/{x}/{y}.png",
         "attr": _KARTVERKET_ATTRIBUTION,
         "name": "Kartverket Topo",
         "provider": "kartverket",
@@ -2115,6 +2133,8 @@ def create_map(
         header.add_child(_Head(title, companions), name="head")
 
     _TileRetention().add_to(fmap)
+    if provider is not None:
+        _TileStart().add_to(fmap)
 
     for index, source in enumerate((base, *(extra for extra in extra_bases if extra is not base))):
         layer = _BASE_LAYERS[source]
@@ -2130,7 +2150,7 @@ def create_map(
             # tile at every zoom up to `maxNativeZoom` and scales past it, so a
             # sheet that ends at z17 is drawn magnified at z18 rather than
             # requested and answered 404.
-            max_zoom=provider.top if provider is not None else None,
+            max_zoom=18 if provider is not None else None,
             max_native_zoom=own.top if own is not None else None,
             # **Asked for across origins, so a cache can hold them plainly.**
             # An `<img>` without this fetches no-cors and the answer is opaque:
@@ -2140,8 +2160,7 @@ def create_map(
             cross_origin=True,
             update_when_zooming=False,
             error_tile_url=_ERROR_TILE_URL,
-            # The same index.json box as the overlays. Norway's base remains
-            # unbounded until it moves from Kartverket's cache to its own tree.
+            # The same index.json box as the overlays, for both countries.
             bounds=[[own.extent[1], own.extent[0]], [own.extent[3], own.extent[2]]]
             if own is not None and own.tiles.startswith("/") and own.extent is not None
             else None,
@@ -2171,7 +2190,7 @@ def create_map(
             control=False,
             show=True,
             opacity=provider.shade.opacity,
-            max_zoom=provider.top,
+            max_zoom=18,
             max_native_zoom=provider.shade.top,
             cross_origin=True,
             update_when_zooming=False,
@@ -2210,7 +2229,7 @@ def create_map(
             show=False,
             # Full strength: the alpha is in the palette, chosen on the mockup.
             opacity=1.0,
-            max_zoom=provider.top,
+            max_zoom=18,
             max_native_zoom=provider.slope.top,
             cross_origin=True,
             update_when_zooming=False,
@@ -2244,7 +2263,7 @@ def create_map(
             control=False,
             show=False,
             opacity=1.0,
-            max_zoom=provider.top,
+            max_zoom=18,
             max_native_zoom=provider.vegetation.top,
             cross_origin=True,
             update_when_zooming=False,
@@ -2265,7 +2284,7 @@ def create_map(
             control=False,
             show=False,
             opacity=1.0,
-            max_zoom=provider.top,
+            max_zoom=18,
             max_native_zoom=provider.forest.top,
             cross_origin=True,
             update_when_zooming=False,

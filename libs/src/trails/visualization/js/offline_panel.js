@@ -1005,12 +1005,13 @@
                             // the wait never ends. Measured here -- the page held
                             // 1 while the worker asked for 2, and the map stopped
                             // opening altogether.
-                            var ask = window.indexedDB.open('{{ this.database }}', 3);
+                            var ask = window.indexedDB.open('{{ this.database }}', 4);
                             ask.onblocked = function () { fail(new Error('blocked')); };
                             ask.onupgradeneeded = function () {
                                 var made = ask.result;
                                 if (!made.objectStoreNames.contains('pages')) { made.createObjectStore('pages'); }
                                 if (!made.objectStoreNames.contains('flags')) { made.createObjectStore('flags'); }
+                                if (!made.objectStoreNames.contains('packs')) { made.createObjectStore('packs'); }
                                 if (!made.objectStoreNames.contains('bench')) { made.createObjectStore('bench'); }
                                 if (!made.objectStoreNames.contains(KEPT)) { made.createObjectStore(KEPT); }
                                 if (!made.objectStoreNames.contains(SEEN)) {

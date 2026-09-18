@@ -29,7 +29,7 @@ var DB = "__DB__";
 // database at 1 while the worker asked for 2 and a navigation never answered at
 // all. The app would not have opened. There is a test that the two literals
 // match, because nothing else would notice.
-var DB_AT = 3;
+var DB_AT = 4;
 var PAGES = "pages";
 var FLAGS = "flags";
 // **The ground, and what was merely looked at.** Two stores because they are two
@@ -37,10 +37,8 @@ var FLAGS = "flags";
 // `SEEN` is what panning left behind and is held to `TILE_CAP`. A deliberate
 // nine-hundred-tile download into an LRU of five hundred would evict itself on
 // the way in and report success.
-var KEPT = "tiles";
+var KEPT = "packs";
 var SEEN = "browse";
-// The stand is migrated once, not consulted after every kept-store miss.
-var STAND = "stand";
 var opened = null;
 
 function base() {
@@ -54,6 +52,7 @@ function base() {
             var made = ask.result;
             if (!made.objectStoreNames.contains(PAGES)) { made.createObjectStore(PAGES); }
             if (!made.objectStoreNames.contains(FLAGS)) { made.createObjectStore(FLAGS); }
+            if (!made.objectStoreNames.contains("tiles")) { made.createObjectStore("tiles"); }
             if (!made.objectStoreNames.contains(KEPT)) { made.createObjectStore(KEPT); }
             if (!made.objectStoreNames.contains("bench")) { made.createObjectStore("bench"); }
             if (!made.objectStoreNames.contains(SEEN)) {
@@ -199,11 +198,7 @@ self.addEventListener("install", function () {
 // activation takes both -- and it is much the cheaper mistake.
 self.addEventListener("activate", function (event) {
     event.waitUntil(
-        self.clients.claim().then(function () {
-            // Only the check is awaited; a kept-store walk continues in batches.
-            stood = base().then(migrateStand);
-            return stood;
-        }).then(keepWhatIsOpen).then(sweepOldCaches)
+        self.clients.claim().then(keepWhatIsOpen).then(sweepOldCaches)
     );
 });
 
@@ -445,25 +440,6 @@ function pageFor(request) {
     });
 }
 
-// **Cache first, because terrain does not change while somebody walks over it.**
-// What was asked for is looked at before what was merely seen, and with the
-// switch on the network is not reached for at all -- which is what makes the
-// switch worth having indoors: a reader can see exactly what they kept, instead
-// of finding out in a valley.
-// **Looked up without the query, and stored without it.** The page appends a
-// token to the sheet's URL whenever the answer here would change -- see
-// `restamp` -- because a browser holds an image by its address and will not ask
-// again for one it has. Everything on this side is keyed on the tile itself, so
-// a token that moves costs one lookup and no bytes: what was kept is still kept.
-//
-// Stripped rather than matched with `ignoreSearch`, which would turn every one of
-// a hundred thousand keys into a comparison instead of a lookup.
-// **Whether the old cache is still there, asked once and remembered.** Touching
-// Cache Storage at all is what costs 23 seconds on a phone with the ground kept,
-// so this is read from a row and not from `caches.has` -- and once the migration
-// has run, nothing here goes near a cache again.
-var legacy = null;
-
 // **What the tiles did, because a blank says nothing about why.** Every path
 // out of `tileFor` ends in an image, and three of the four are indistinguishable
 // on the screen: a tile from the database, one from the old cache and one from
@@ -471,8 +447,9 @@ var legacy = null;
 // the ground stopped appearing at all and there was no way to ask where it had
 // gone. Written to the same small row the navigation timings use, at most once a
 // second, so a hundred thousand tiles do not become a hundred thousand writes.
-var told = {db: 0, seen: 0, legacy: 0, net: 0, blank: 0, why: null, at: 0};
+var told = {mem: 0, db: 0, seen: 0, legacy: 0, net: 0, blank: 0, why: null, at: 0};
 told.time = {
+    mem: {total: 0, worst: 0},
     db: {total: 0, worst: 0}, seen: {total: 0, worst: 0},
     net: {total: 0, worst: 0}, blank: {total: 0, worst: 0}
 };
@@ -514,138 +491,178 @@ function within(ms, work, fallback, late) {
     });
 }
 
-function prefixOf(plain) {
-    if (plain.indexOf(TILE_PREFIX) === 0) { return TILE_PREFIX; }
-    if (HEIGHT_PREFIX && plain.indexOf(HEIGHT_PREFIX) === 0) { return HEIGHT_PREFIX; }
-    if (SHADE_PREFIX && plain.indexOf(SHADE_PREFIX) === 0) { return SHADE_PREFIX; }
-    if (SLOPE_PREFIX && plain.indexOf(SLOPE_PREFIX) === 0) { return SLOPE_PREFIX; }
-    if (VEGETATION_PREFIX && plain.indexOf(VEGETATION_PREFIX) === 0) { return VEGETATION_PREFIX; }
-    if (FOREST_PREFIX && plain.indexOf(FOREST_PREFIX) === 0) { return FOREST_PREFIX; }
-    return null;
-}
-
-// The aliases match the page's stand and its kept-count record.
-function prefixes() {
-    return {map: TILE_PREFIX, tiles: TILE_PREFIX, height: HEIGHT_PREFIX, heights: HEIGHT_PREFIX,
-        shade: SHADE_PREFIX, slope: SLOPE_PREFIX, vegetation: VEGETATION_PREFIX, forest: FOREST_PREFIX};
-}
-
-var stood = null, standCurrent = false, migrating = null;
-var STAND_WALK = "stand-walk";
-function sameStand(stand) {
-    var now = prefixes();
-    return !!stand && Object.keys(now).every(function (kind) { return Object.prototype.hasOwnProperty.call(stand, kind); }) &&
-        Object.keys(Object.assign({}, stand, now)).every(function (kind) {
-            return (stand[kind] || null) === (now[kind] || null);
-        });
-}
-
-// Resolves after the stand check or its small flags-only update. The walk is
-// deliberately detached: neither activation nor a tile waits for all the ground.
-function migrateStand(open, was) {
-    if (was === undefined) {
-        return new Promise(function (done, fail) {
-            var ask = open.transaction(FLAGS, "readonly").objectStore(FLAGS).get(STAND);
-            ask.onsuccess = function () { migrateStand(open, ask.result || {}).then(done, fail); };
-            ask.onerror = function () { fail(ask.error); };
-        });
-    }
-    var now = prefixes();
-    var moved = Object.keys(was).filter(function (kind) { return was[kind] && was[kind] !== now[kind]; });
-    if (!moved.length) {
-        return new Promise(function (done, fail) {
-            var deal = open.transaction(FLAGS, "readwrite");
-            deal.objectStore(FLAGS).put(now, STAND);
-            deal.objectStore(FLAGS).delete(STAND_WALK);
-            deal.oncomplete = function () { standCurrent = true; done(true); };
-            deal.onabort = deal.onerror = function () { fail(deal.error || new Error("stand update aborted")); };
-        });
-    }
-    if (!migrating) {
-        migrating = walkStand(open, was, now, moved);
-        migrating.then(function () { migrating = null; }, function () {
-            migrating = null; stood = null; standCurrent = false;
-        });
-    }
-    // Here current means checked this life: reads use the keys as they stand.
-    standCurrent = true;
-    return Promise.resolve(true);
-}
-
-// Each commit checkpoints at most 500 keys, also yielding after 50 ms of work
-// on slow devices. No transaction is held between batches. A killed life resumes
-// after its last committed key; an aborted batch retries its idempotent moves.
-// Only renamed rows read blobs, and current ground wins every collision.
-function walkStand(open, was, now, moved) {
-    return new Promise(function (done, fail) {
-        var lastKey = null;
-        function batch() {
-            var deal = open.transaction([KEPT, FLAGS], "readwrite");
-            var store = deal.objectStore(KEPT), flags = deal.objectStore(FLAGS);
-            var finished = false, visited = 0, began = performance.now();
-            function walkFrom() {
-                var walk = store.openKeyCursor(lastKey === null ? null : IDBKeyRange.lowerBound(lastKey, true));
-                walk.onsuccess = function () {
-                    var at = walk.result;
-                    if (!at) {
-                        finished = true;
-                        var count = store.count();
-                        count.onsuccess = function () {
-                            var held = flags.get("held");
-                            held.onsuccess = function () {
-                                // Preserve the page's byte estimate, correct the count.
-                                var value = held.result || {bytes: 0, top: 0};
-                                value.tiles = count.result;
-                                flags.put(value, "held");
-                                flags.put(now, STAND);
-                                flags.delete(STAND_WALK);
-                            };
-                        };
-                        return;
-                    }
-                    var key = at.key;
-                    visited += 1;
-                    function next() {
-                        lastKey = key;
-                        if (visited >= 500 || performance.now() - began >= 50) {
-                            flags.put({was: was, now: now, last: lastKey}, STAND_WALK);
-                        } else { at.continue(); }
-                    }
-                    var kind = moved.find(function (name) { return key.indexOf(was[name]) === 0; });
-                    var current = prefixOf(key);
-                    if (!kind || (current && current.length >= was[kind].length)) { next(); return; }
-                    if (!now[kind]) { store.delete(key); next(); return; }
-                    var target = now[kind] + key.slice(was[kind].length);
-                    var exists = store.getKey(target);
-                    exists.onsuccess = function () {
-                        if (exists.result !== undefined) { store.delete(key); next(); return; }
-                        var body = store.get(key);
-                        body.onsuccess = function () {
-                            store.put(body.result, target);
-                            store.delete(key);
-                            next();
-                        };
-                    };
-                };
-            }
-            if (lastKey === null) {
-                var checkpoint = flags.get(STAND_WALK);
-                checkpoint.onsuccess = function () {
-                    var saved = checkpoint.result;
-                    if (saved && JSON.stringify(saved.was) === JSON.stringify(was) && JSON.stringify(saved.now) === JSON.stringify(now)) {
-                        lastKey = saved.last;
-                    }
-                    walkFrom();
-                };
-            } else { walkFrom(); }
-            deal.oncomplete = function () {
-                if (finished) { done(true); }
-                else { setTimeout(batch, 0); }
-            };
-            deal.onabort = deal.onerror = function () { fail(deal.error || new Error("stand migration aborted")); };
+// Zoom-then-Hilbert, the same integer algorithm as processing.packs.tile_id.
+function tileId(z, x, y) {
+    if (!Number.isInteger(z) || z < 0 || z > 26 || !Number.isInteger(x) || !Number.isInteger(y) ||
+            x < 0 || y < 0 || x >= 2 ** z || y >= 2 ** z) { throw Error("invalid tile address"); }
+    var result = (4 ** z - 1) / 3;
+    for (var bit = z - 1; bit >= 0; bit--) {
+        var side = 2 ** bit, rx = !!(x & side), ry = !!(y & side);
+        result += side * side * ((3 * rx) ^ ry);
+        if (!ry) {
+            if (rx) { x = side - 1 - x; y = side - 1 - y; }
+            var swap = x; x = y; y = swap;
         }
-        setTimeout(batch, 0);
-    });
+    }
+    return result;
+}
+
+var LAYERS = [[TILE_PREFIX, __TILE_TOP__], [HEIGHT_PREFIX, __HEIGHT_TOP__],
+    [SHADE_PREFIX, __SHADE_TOP__], [SLOPE_PREFIX, __SLOPE_TOP__],
+    [VEGETATION_PREFIX, __VEGETATION_TOP__], [FOREST_PREFIX, __FOREST_TOP__]];
+function packFor(plain) {
+    var layer = LAYERS.find(function (entry) { return entry[0] && plain.indexOf(entry[0]) === 0; });
+    if (!layer) { throw Error("unknown tile tree"); }
+    var match = /^(\d+)\/(\d+)\/(\d+)\.png$/.exec(plain.slice(layer[0].length));
+    if (!match) { throw Error("invalid tile path"); }
+    var z = Number(match[1]), x = Number(match[2]), y = Number(match[3]), id = tileId(z, x, y);
+    if (z > layer[1]) { throw Error("tile above layer top"); }
+    var level = Math.max(0, layer[1] - 3 - 4 * Math.floor((layer[1] - z) / 4));
+    var prefix = new URL(layer[0]);
+    prefix.pathname = '/packs' + prefix.pathname;
+    return {url: prefix.href + level + '/' + (x >> (z - level)) + '/' + (y >> (z - level)) + '.pmtiles', id: id};
+}
+
+// 48 directories are small (85 entries at most); eight bodies cover nearby
+// screens, bounded to eight packs even for the ~5.3 MB height packs. Two seconds
+// distinguishes settling on a screen from passing the same parent much later.
+var DIRECTORY_LIMIT = 48, PACK_LIMIT = 8, SETTLE_MS = 2000;
+var directories = new Map(), packs = new Map(), opening = new Map(), filling = new Map(), visits = new Map();
+function recent(cache, key) {
+    var value = cache.get(key);
+    if (value !== undefined) { cache.delete(key); cache.set(key, value); }
+    return value;
+}
+function remember(cache, key, value, limit) {
+    cache.delete(key); cache.set(key, value);
+    if (cache.size > limit) { cache.delete(cache.keys().next().value); }
+    return value;
+}
+function packHeader(body) {
+    var bytes = new Uint8Array(body), view = new DataView(body);
+    function u64(at) {
+        var value = Number(view.getBigUint64(at, true));
+        if (!Number.isSafeInteger(value)) { throw Error("unsafe pack offset"); }
+        return value;
+    }
+    if (bytes.length < 127 || String.fromCharCode.apply(null, bytes.subarray(0, 8)) !== 'PMTiles\x03') {
+        throw Error("invalid PMTiles v3 header");
+    }
+    var h = {root: u64(8), rootLen: u64(16), data: u64(56), size: u64(64), count: u64(80), low: bytes[100], high: bytes[101]};
+    if (bytes[96] !== 1 || bytes[97] !== 1 || bytes[98] !== 1 || bytes[99] !== 2 ||
+            h.low > h.high || h.high > 26 || h.count < 1 || h.count > 85 || u64(72) !== h.count || u64(88) !== h.count ||
+            h.root !== 127 || h.rootLen <= 0 || h.rootLen > 16384 || u64(24) !== h.root + h.rootLen ||
+            u64(32) < 2 || u64(32) > 16384 || h.data !== u64(24) + u64(32) || u64(40) !== h.data || u64(48) !== 0) {
+        throw Error("unsupported pack header");
+    }
+    return h;
+}
+function packDirectory(h, body) {
+    var bytes = new Uint8Array(body), cursor = 0;
+    function varint() {
+        var value = 0;
+        for (var shift = 0; shift < 56; shift += 7) {
+            if (cursor >= bytes.length) { break; }
+            var byte = bytes[cursor++];
+            value += (byte & 127) * 2 ** shift;
+            if (!Number.isSafeInteger(value)) { break; }
+            if (byte < 128) { return value; }
+        }
+        throw Error("invalid directory varint");
+    }
+    if (varint() !== h.count) { throw Error("directory count mismatch"); }
+    var ids = [], lengths = [], id = 0, entries = new Map(), end = 0;
+    for (var i = 0; i < h.count; i++) {
+        var delta = varint();
+        if (i && !delta) { throw Error("duplicate tile ID"); }
+        id += delta; ids.push(id);
+    }
+    for (i = 0; i < h.count; i++) { if (varint() !== 1) { throw Error("unsupported run length"); } }
+    for (i = 0; i < h.count; i++) { lengths.push(varint()); }
+    for (i = 0; i < h.count; i++) {
+        var encoded = varint(), offset = encoded === 0 && i > 0 ? end : encoded - 1, length = lengths[i];
+        if (length <= 0 || offset !== end || offset + length > h.size) { throw Error("invalid tile offset"); }
+        entries.set(ids[i], {offset: h.data + offset, length: length}); end = offset + length;
+    }
+    if (cursor !== bytes.length || end !== h.size || ids[0] < (4 ** h.low - 1) / 3 || ids[ids.length - 1] >= (4 ** (h.high + 1) - 1) / 3) {
+        throw Error("directory length or zoom mismatch");
+    }
+    return entries;
+}
+function holdPack(url, body) {
+    if (!(body instanceof ArrayBuffer)) { throw Error("pack row is not an ArrayBuffer"); }
+    var h = packHeader(body);
+    if (body.byteLength !== h.data + h.size) { throw Error("truncated pack"); }
+    var entries = packDirectory(h, body.slice(h.root, h.root + h.rootLen));
+    remember(directories, url, entries, DIRECTORY_LIMIT);
+    return remember(packs, url, {body: body, entries: entries}, PACK_LIMIT);
+}
+function sliceTile(pack, id) {
+    var entry = pack.entries.get(id);
+    if (!entry) { return null; }
+    return pack.body.slice(entry.offset, entry.offset + entry.length);
+}
+function png(body) { return new Response(body, {headers: {'content-type': 'image/png'}}); }
+
+// A 200 to a Range request is a whole pack, never bytes at the requested offset.
+async function range(url, start, end) {
+    var answer = await fetch(url, {headers: {Range: 'bytes=' + start + '-' + end}});
+    if (!answer.ok || (answer.status !== 200 && answer.status !== 206)) { throw Error("pack HTTP " + answer.status); }
+    var body = await answer.arrayBuffer();
+    if (answer.status === 200) { return {whole: body}; }
+    var match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(answer.headers.get('content-range') || '');
+    if (!match || Number(match[1]) !== start || Number(match[2]) !== Math.min(end, Number(match[3]) - 1) ||
+            body.byteLength !== Number(match[2]) - start + 1) { throw Error("invalid pack range"); }
+    return {body: body};
+}
+function keepNetworkPack(url, body, event) {
+    var pack = holdPack(url, body), kept = browsePut(url, body);
+    if (event) { event.waitUntil(kept); }
+    return pack;
+}
+function wholePack(url, event) {
+    if (!filling.has(url)) {
+        var work = fetch(url).then(function (answer) {
+            if (!answer.ok) { throw Error("pack HTTP " + answer.status); }
+            return answer.arrayBuffer();
+        }).then(function (body) { return keepNetworkPack(url, body, event); }).finally(function () { filling.delete(url); });
+        filling.set(url, work);
+    }
+    return filling.get(url);
+}
+function directoryFor(url, event) {
+    var held = recent(directories, url);
+    if (held) { return Promise.resolve(held); }
+    if (!opening.has(url)) {
+        var work = range(url, 0, 16383).then(async function (part) {
+            if (part.whole) { return keepNetworkPack(url, part.whole, event).entries; }
+            var h = packHeader(part.body), root;
+            if (h.root + h.rootLen <= part.body.byteLength) { root = part.body.slice(h.root, h.root + h.rootLen); }
+            else {
+                var more = await range(url, h.root, h.root + h.rootLen - 1);
+                if (more.whole) { return keepNetworkPack(url, more.whole, event).entries; }
+                root = more.body;
+            }
+            return remember(directories, url, packDirectory(h, root), DIRECTORY_LIMIT);
+        }).finally(function () { opening.delete(url); });
+        opening.set(url, work);
+    }
+    return opening.get(url);
+}
+async function networkTile(address, event) {
+    var url = address.url, held = recent(packs, url), last = visits.get(url), now = Date.now();
+    if (held) { return sliceTile(held, address.id); }
+    remember(visits, url, now, DIRECTORY_LIMIT);
+    if (filling.has(url) || (last !== undefined && now - last <= SETTLE_MS)) {
+        return sliceTile(await wholePack(url, event), address.id);
+    }
+    var entries = await directoryFor(url, event), pack = recent(packs, url);
+    if (pack) { return sliceTile(pack, address.id); }
+    if (filling.has(url)) { return sliceTile(await filling.get(url), address.id); }
+    var entry = entries.get(address.id);
+    if (!entry) { return null; }
+    var part = await range(url, entry.offset, entry.offset + entry.length - 1);
+    return part.whole ? sliceTile(keepNetworkPack(url, part.whole, event), address.id) : part.body;
 }
 
 var lookups = [], lookupTick = null;
@@ -655,7 +672,6 @@ function lookup(plain, state) {
         if (lookupTick === null) { lookupTick = setTimeout(flushLookups, 0); }
     });
 }
-
 function flushLookups() {
     var batch = lookups;
     lookups = []; lookupTick = null;
@@ -665,68 +681,36 @@ function flushLookups() {
         function readBatch(tx) {
             var pending = new Map();
             batch.forEach(function (item) {
-                if (item.state.expired) { return; }
                 if (!pending.has(item.plain)) { pending.set(item.plain, []); }
                 pending.get(item.plain).push(item);
             });
             pending.forEach(function (items, plain) {
                 var ask = tx.objectStore(KEPT).get(plain);
                 function answer(value) {
-                    off.then(function () { items.forEach(function (item) { item.done(value); }); });
+                    off.then(function (on) { items.forEach(function (item) { item.state.off = on; item.done(value); }); });
                 }
                 ask.onsuccess = function () {
-                    if (ask.result) { answer({body: ask.result, path: "db"}); return; }
+                    if (ask.result instanceof ArrayBuffer) { answer({body: ask.result, path: "db"}); return; }
                     if (items.every(function (item) { return item.state.expired; })) { return; }
-                    // Do not speculatively read a browse blob on a kept hit.
                     var seen = tx.objectStore(SEEN).get(plain);
                     seen.onsuccess = function () {
-                        answer(seen.result && seen.result.body ? {body: seen.result.body, path: "seen"} : null);
+                        answer(seen.result && seen.result.body instanceof ArrayBuffer ? {body: seen.result.body, path: "seen"} : null);
                     };
                 };
             });
             tx.onabort = tx.onerror = function () { batch.forEach(function (item) { item.done(null); }); };
         }
-        // On iOS a life may be one fetch. Cold flags join this transaction,
-        // rather than turning "once per life" into another transaction per tile.
         var deal = open.transaction([KEPT, SEEN, FLAGS], "readonly");
-        var flags = deal.objectStore(FLAGS), ready = stood, off = switched, active = true;
-        var currentInDeal = standCurrent && !!ready;
-        deal.addEventListener("complete", function () { active = false; });
-        deal.addEventListener("abort", function () { active = false; });
-        // WebKit may commit an empty transaction before a promise callback,
-        // before its complete event can clear active. Warm reads must start in
-        // the task that created the transaction, with no promise in between.
-        if (standCurrent && ready && off) {
-            readBatch(deal);
-        } else {
-            if (!ready) {
-                standCurrent = false;
-                stood = ready = new Promise(function (done, fail) {
-                    var ask = flags.get(STAND);
-                    ask.onsuccess = function () {
-                        if (sameStand(ask.result)) { standCurrent = currentInDeal = true; done(true); }
-                        else { migrateStand(open, ask.result || {}).then(done, fail); }
-                    };
-                    ask.onerror = function () { fail(ask.error); };
-                });
-                // Only the check and flags-only update precede a lookup.
-                // A walk runs in the background with the old stand still written.
-                ready.catch(function () { stood = null; standCurrent = false; });
-            }
-            if (!off) {
-                switched = off = new Promise(function (done) {
-                    var ask = flags.get(STATE);
-                    ask.onsuccess = function () { done(ask.result === "on"); };
-                    ask.onerror = function () { done(false); };
-                });
-            }
-            // Promise continuations from IDB request callbacks run before this
-            // transaction becomes inactive. After a stand update, use a new one.
-            ready.then(function () {
-                // A checked stand from another transaction needs a fresh one.
-                readBatch(currentInDeal && active ? deal : open.transaction([KEPT, SEEN], "readonly"));
-            }).catch(function () { batch.forEach(function (item) { item.done(null); }); });
+        var off = switched;
+        if (!off) {
+            switched = off = new Promise(function (done) {
+                var ask = deal.objectStore(FLAGS).get(STATE);
+                ask.onsuccess = function () { done(ask.result === "on"); };
+                ask.onerror = function () { done(false); };
+            });
         }
+        // Start gets synchronously, before WebKit can commit an empty transaction.
+        readBatch(deal);
         off.then(function (value) { batch.forEach(function (item) { item.state.off = value; }); });
     }).catch(function () { batch.forEach(function (item) { item.done(null); }); });
 }
@@ -736,28 +720,36 @@ function tileFor(request, event) {
     inFlight += 1;
     told.peak = Math.max(told.peak, inFlight);
     var state = {expired: false, off: false};
-    // Count a tile once over the entire lookup, including open and stand check.
     function late() {
         state.expired = true;
         if (!missed) { missed = true; told.deadlines += 1; }
     }
     function answered(which, why) { tally(which, why, began); }
     var plain = request.url.split("?")[0];
-    // An already-known switch still governs a lookup whose database is stuck.
     if (switched) { switched.then(function (off) { state.off = off; }); }
-    return within(2500, lookup(plain, state), null, late).then(function (found) {
-        if (found) { answered(found.path); return new Response(found.body); }
-        var off = state.off;
-        if (off) { answered("blank"); return blank(); }
-        return fetch(request).then(function (answer) {
-            if (answer && answer.ok) {
-                answered("net");
-                var keeping = answer.clone().blob().then(function (body) { return browsePut(plain, body); });
-                // iOS may stop us after answering this single fetch.
-                if (event) { event.waitUntil(keeping); }
+    return Promise.resolve().then(function () {
+        var address = packFor(plain), held = recent(packs, address.url);
+        if (held) {
+            var body = sliceTile(held, address.id);
+            answered(body ? "mem" : "blank"); return body ? png(body) : blank();
+        }
+        return within(2500, lookup(address.url, state), null, late).then(async function (found) {
+            if (found) {
+                var cached = recent(packs, address.url);
+                var body = sliceTile(cached || holdPack(address.url, found.body), address.id);
+                answered(body ? (cached ? "mem" : found.path) : "blank"); return body ? png(body) : blank();
             }
-            return answer;
-        }).catch(function (gone) { answered("blank", gone); return blank(); });
+            // A concurrent request may have filled memory while this get ran.
+            var cached = recent(packs, address.url);
+            if (cached) {
+                var body = sliceTile(cached, address.id);
+                answered(body ? "mem" : "blank"); return body ? png(body) : blank();
+            }
+            var off = state.off;
+            if (off) { answered("blank"); return blank(); }
+            var body = await networkTile(address, event);
+            answered(body ? "net" : "blank"); return body ? png(body) : blank();
+        });
     }).catch(function (gone) { answered("blank", gone); return blank(); })
         .finally(function () { inFlight -= 1; });
 }
@@ -791,9 +783,9 @@ function flushPuts() {
                         // subtract bytes for a row it has already removed.
                         var exists = store.getKey(item.plain);
                         exists.onsuccess = function () {
-                            total.bytes += item.body.size - (exists.result === undefined ? 0 : (size.result || 0));
-                            store.put({body: item.body, at: Date.now(), size: item.body.size}, item.plain);
-                            flags.put(item.body.size, key);
+                            total.bytes += item.body.byteLength - (exists.result === undefined ? 0 : (size.result || 0));
+                            store.put({body: item.body, at: Date.now(), size: item.body.byteLength}, item.plain);
+                            flags.put(item.body.byteLength, key);
                             total.writes += 1;
                             if (total.writes % 50 === 0) { trim(store, flags, total, next); }
                             else { next(); }

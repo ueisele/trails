@@ -2,9 +2,12 @@
 
 import base64
 import json
+import math
 import pathlib
 import re
+import shutil
 import struct
+import subprocess
 import tempfile
 import zlib
 from importlib.resources import files
@@ -13,7 +16,7 @@ import folium
 import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
-from trails.processing import slope_tiles, vegetation_tiles
+from trails.processing import packs, slope_tiles, vegetation_tiles
 from trails.routing.sources import BRIDGE, FERRY
 from trails.visualization import maps
 
@@ -93,7 +96,7 @@ class TestCreateMap:
 
     def test_uses_kartverket_tiles_by_default(self):
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
-        assert "cache.kartverket.no" in fmap.get_root().render()
+        assert "/tiles/kartverket/topo/1/{z}/{x}/{y}.png" in fmap.get_root().render()
 
     @pytest.mark.parametrize("base", list(maps.BaseMap))
     def test_every_tile_layer_waits_for_the_pinch_and_has_a_transparent_error_tile(self, base):
@@ -120,8 +123,10 @@ class TestCreateMap:
         for layer in layers:
             if layer.overlay or layer.layer_name == "Lantmäteriet Topo":
                 assert layer.options["bounds"] == [[68.139, 18.15], [68.46, 19.1]]
+            elif layer.layer_name.startswith("Kartverket"):
+                assert layer.options["bounds"] == [[65.15, 12.0], [65.95, 13.75]]
             else:
-                assert "bounds" not in layer.options, "Kartverket and OSM still answer beyond the tree"
+                assert "bounds" not in layer.options, "OSM answers beyond the tree"
 
     def test_retention_changes_only_the_child_depth_before_any_tile_layer(self):
         html = ours(maps.create_map(center=(65.55, 13.05)).get_root().render())
@@ -353,14 +358,14 @@ class TestOfflineWorker:
         chose and is never trimmed -- a deliberate nine-hundred-tile download
         into an LRU of five hundred would evict itself on the way in, and the
         panel would report that it had worked."""
-        assert 'var KEPT = "tiles";' in maps.SERVICE_WORKER
+        assert 'var KEPT = "packs";' in maps.SERVICE_WORKER
         assert 'var SEEN = "browse";' in maps.SERVICE_WORKER
         # Looked at in that order: what was asked for answers before what was
         # seen, so a trimmed tile never shadows a kept one.
         lookup = maps.SERVICE_WORKER.split("function flushLookups()")[1].split("\nfunction ")[0]
         assert 'open.transaction([KEPT, SEEN, FLAGS], "readonly")' in lookup
         assert lookup.index("tx.objectStore(KEPT).get(plain)") < lookup.index("tx.objectStore(SEEN).get(plain)")
-        assert 'if (ask.result) { answer({body: ask.result, path: "db"}); return; }' in lookup
+        assert 'if (ask.result instanceof ArrayBuffer) { answer({body: ask.result, path: "db"}); return; }' in lookup
         trimming = maps.SERVICE_WORKER.split("function trim(store, flags, total, done)")[1].split("\nfunction ")[0]
         assert 'store.index("at").openKeyCursor()' in trimming
         assert "store.get(" not in trimming and "openCursor(" not in trimming
@@ -407,8 +412,7 @@ class TestOfflineWorker:
         somebody: `caches.keys()` is the call measured at 23 s on a phone with
         the ground kept."""
         activate = maps.SERVICE_WORKER.split('addEventListener("activate"')[1].split("\nfunction ")[0]
-        assert "stood = base().then(migrateStand);" in activate
-        assert "}).then(keepWhatIsOpen).then(sweepOldCaches)" in activate
+        assert "self.clients.claim().then(keepWhatIsOpen).then(sweepOldCaches)" in activate
 
     def test_a_row_is_replaced_in_place_so_nothing_has_to_be_carried_over(self):
         """Fetch before you evict was a whole dance when the page lived in a
@@ -439,14 +443,12 @@ class TestOfflineWorker:
         assert 'if (off) { answered("blank"); return blank(); }' in maps.SERVICE_WORKER
         # Every path retains a count and adds only two time accumulators; no
         # samples are retained as the number of tiles grows.
-        assert "var told = {db: 0, seen: 0, legacy: 0, net: 0, blank: 0, why: null, at: 0};" in maps.SERVICE_WORKER
-        for path in ("db", "seen", "net", "blank"):
+        assert "var told = {mem: 0, db: 0, seen: 0, legacy: 0, net: 0, blank: 0, why: null, at: 0};" in maps.SERVICE_WORKER
+        for path in ("mem", "db", "seen", "net", "blank"):
             assert f"{path}: {{total: 0, worst: 0}}" in maps.SERVICE_WORKER
         assert "told.time[which].total += spent;" in maps.SERVICE_WORKER
         assert "told.time[which].worst = Math.max(told.time[which].worst, spent);" in maps.SERVICE_WORKER
-        # HTTP errors remain uncounted, as before the timing was added.
-        assert 'if (answer && answer.ok) {\n                answered("net");' in maps.SERVICE_WORKER
-        assert maps.SERVICE_WORKER.count('answered("net")') == 1
+        assert 'answered(body ? "net" : "blank")' in maps.SERVICE_WORKER
 
     def test_tile_deadlines_and_concurrency_are_counted_without_changing_the_throttle(self):
         worker = maps.SERVICE_WORKER
@@ -462,39 +464,32 @@ class TestOfflineWorker:
         worker = maps.SERVICE_WORKER
         tile = worker.split("function tileFor(request, event)")[1].split("\nfunction ")[0]
         assert tile.count("within(") == 1
-        assert "within(2500, lookup(plain, state), null, late)" in tile
+        assert "within(2500, lookup(address.url, state), null, late)" in tile
         assert "state.expired = true;" in tile
         assert "setTimeout(flushLookups, 0)" in worker
         assert "if (items.every(function (item) { return item.state.expired; }))" in worker
-        assert "if (sameStand(ask.result)) { standCurrent = currentInDeal = true; done(true); }" in worker
+        assert "migrateStand" not in worker
 
     def test_warm_lookups_place_a_get_before_yielding_the_new_transaction(self):
         """WebKit can commit an empty transaction before its complete event."""
         lookup = maps.SERVICE_WORKER.split("function flushLookups()")[1].split("\nfunction ")[0]
         creation = lookup.split('var deal = open.transaction([KEPT, SEEN, FLAGS], "readonly");')[1]
-        warm = creation.split("} else {", 1)[0]
-        assert "if (standCurrent && ready && off) {" in warm
-        assert "readBatch(deal);" in warm
-        assert ".then(" not in warm and "await " not in warm
-        assert "new Promise" not in warm and "setTimeout" not in warm
-        # Follow the synchronous helper too: no promise before its first get.
+        assert "readBatch(deal);" in creation
+        assert "await " not in creation
         first_get = lookup.split("function readBatch(tx) {", 1)[1].split("tx.objectStore(KEPT).get(plain);", 1)[0]
         assert ".then(" not in first_get and "await " not in first_get
         assert "new Promise" not in first_get and "setTimeout" not in first_get
-        assert "standCurrent = true; done(true);" in maps.SERVICE_WORKER
-        assert "stood = null; standCurrent = false;" in lookup
-        assert 'readBatch(currentInDeal && active ? deal : open.transaction([KEPT, SEEN], "readonly"));' in lookup
 
     def test_browse_bytes_and_write_cadence_survive_a_worker_restart(self):
         worker = maps.SERVICE_WORKER
-        assert "var DB_AT = 3;" in worker
+        assert "var DB_AT = 4;" in worker
         assert "var TILE_CAP = 150 * 1000 * 1000;" in worker
         assert "setTimeout(flushPuts, 0)" in worker
-        assert "size: item.body.size" in worker
+        assert "size: item.body.byteLength" in worker
         assert "total.writes % 50 === 0" in worker
         assert "flags.put(total, BROWSE_BYTES)" in worker
         assert "if (removed >= 50) { done(); }" in worker
-        assert "if (event) { event.waitUntil(keeping); }" in worker
+        assert "if (event) { event.waitUntil(kept); }" in worker
 
     def test_old_browse_is_cleared_without_walking_or_updating_blobs(self):
         """A disposable cache must not be rewritten on every interrupted life."""
@@ -788,7 +783,7 @@ class TestOfflinePanel:
         assert "var FLOOR = 14;" in self.panel()
         norwegian = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         maps.add_chrome(norwegian)
-        assert "var TOP = 18;" in norwegian.get_root().render()
+        assert "var TOP = 17;" in norwegian.get_root().render()
         swedish = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
         maps.add_chrome(swedish)
         assert "var TOP = 17;" in swedish.get_root().render()
@@ -1680,7 +1675,7 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         page = re.search(r"window\.indexedDB\.open\('trails', (\d+)\)", html)
         assert worker and page, "both sides must name a version"
         assert worker.group(1) == page.group(1)
-        assert worker.group(1) == "3"
+        assert worker.group(1) == "4"
 
     def test_neither_side_hangs_and_neither_side_blocks(self):
         """Two halves. Saying so beats waiting — blocked means somebody holds an
@@ -1697,7 +1692,7 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         all five — a store missing on one side is a transaction that throws on
         the other."""
         html = self.rendered()
-        for store in ("pages", "flags", "bench"):
+        for store in ("pages", "flags", "bench", "packs"):
             assert f"createObjectStore('{store}')" in html
             assert f"contains({store.upper()})" in maps.SERVICE_WORKER or f'"{store}"' in maps.SERVICE_WORKER
         assert "createObjectStore(KEPT)" in html and "createObjectStore(KEPT)" in maps.SERVICE_WORKER
@@ -1882,7 +1877,7 @@ class TestNothingGrowsWithTheDownload:
         # cleared under the page would take both — and it meant that opening this
         # panel opened a Cache Storage holding tens of thousands of entries and
         # several gigabytes. Measured on an installed app at twenty seconds.
-        assert "window.indexedDB.open('trails', 3)" in html
+        assert "window.indexedDB.open('trails', 4)" in html
         # `forget` clears the row too, which is the property the first place was
         # chosen for.
         assert "dbClear(KEPT), dbClear(SEEN), dbWrite('flags', HELD, null)" in html
@@ -1938,10 +1933,10 @@ class TestTheSheetCarriesAToken:
         ground still draws under its new address."""
         assert 'var plain = request.url.split("?")[0];' in maps.SERVICE_WORKER
         tile = maps.SERVICE_WORKER.split("function tileFor(request, event)")[1].split("\nfunction ")[0]
-        assert "lookup(plain, state)" in tile
+        assert "lookup(address.url, state)" in tile
         # Stored without it too, or a second token would orphan what the first
         # one wrote.
-        assert "browsePut(plain, body)" in tile
+        assert "browsePut(url, body)" in maps.SERVICE_WORKER
         # **Stripped rather than matched with `ignoreSearch`**, which would turn
         # every one of a hundred thousand keys into a comparison.
         assert "ignoreSearch" not in tile
@@ -2323,21 +2318,19 @@ class TestTwoMapsOnOneOrigin:
         assert not set(named) & set(maps.ROOT.files()), "a shared name is the other map's object overwritten"
 
     def test_the_providers_end_where_their_sources_do(self):
-        """Kartverket's cache answers z18 and 400 at z19; Lantmäteriet's file
-        holds z0 to z17. The weights are what a kept tile costs, per zoom, and
-        every level the panel can offer has one."""
+        """Both sheets end at z17, with measured weights at every source level."""
         kartverket, lantmateriet = maps.PROVIDERS["kartverket"], maps.PROVIDERS["lantmateriet"]
-        assert kartverket.top == 18 and lantmateriet.top == 17
-        assert set(kartverket.weight) == set(range(8, 19))
+        assert kartverket.top == 17 and lantmateriet.top == 17
+        assert set(kartverket.weight) == set(range(8, 18))
         assert set(lantmateriet.weight) == set(range(8, 18))
-        assert [kartverket.weight[z] for z in range(8, 11)] == [37246, 99511, 96923]
+        assert [kartverket.weight[z] for z in range(8, 11)] == [11417, 15036, 18338]
         assert [lantmateriet.weight[z] for z in range(8, 11)] == [16066, 14279, 12273]
         assert lantmateriet.weight[13] == 25719
         # Our own bucket, root-relative: no host in the page, and the same page
         # served locally over the same tree draws the same tiles.
         assert lantmateriet.tiles.startswith("/tiles/lantmateriet/")
         assert "://" not in lantmateriet.tiles
-        assert kartverket.tiles == "https://cache.kartverket.no/"
+        assert kartverket.tiles == "/tiles/kartverket/topo/1/"
         # Our trees end at their box and the panel's margin must end there too.
         # Kartverket's own cache answers everywhere, but the heights, the relief
         # and the slope classes drawn on it are ours and stop at the box (§6.10),
@@ -2345,37 +2338,12 @@ class TestTwoMapsOnOneOrigin:
         assert lantmateriet.extent == (18.15, 68.139, 19.10, 68.46)
         assert kartverket.extent == (12.0, 65.15, 13.75, 65.95)
 
-    def test_a_kept_tile_of_an_older_stand_is_migrated_once(self, tmp_path):
-        """A new stand migrates keys in the background while lookups proceed.
-
-        The page still understands an old stand while migration is pending.
-        """
-        page, companions = self.abisko(tmp_path)
-        html = page.read_text(encoding="utf-8")
-        worker = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
-        assert 'var STAND = "stand";' in worker
-        assert "function migrateStand(open, was)" in worker
-        assert "IDBKeyRange.lowerBound(lastKey, true)" in worker
-        assert "visited >= 500 || performance.now() - began >= 50" in worker
-        assert "else { setTimeout(batch, 0); }" in worker
-        assert "flags.put({was: was, now: now, last: lastKey}, STAND_WALK);" in worker
-        assert "lastKey = saved.last;" in worker
-        small = worker.split("if (!moved.length) {", 1)[1].split("if (!migrating)", 1)[0]
-        assert 'open.transaction(FLAGS, "readwrite")' in small
-        assert "KEPT" not in small and "count(" not in small and "Cursor" not in small
-        assert "migrating = walkStand(open, was, now, moved);" in worker
-        assert "return Promise.resolve(true);" in worker
-        assert "flags.put(now, STAND);" in worker
-        assert "value.tiles = count.result;" in worker
-        assert 'flags.put(value, "held");' in worker
-        assert "olderPrefix" not in worker and "keptFor" not in worker
-        assert "var STAND = 'stand';" in html
-        assert 'var TILE_PREFIX = new URL("/tiles/lantmateriet/topowebb/1/", location.href).href;' in html
-        assert "if (!stand) { stand = prefixes(); dbWrite('flags', STAND, stand); }" in html, "a store from before is the page's own stand"
-        assert "}).then(function () { return replacing(next); });" in html, "a fetched tile takes the old one's place"
-        assert "if (state.stop || !state.stale) { return null; }" in html, "a stopped run leaves the old stand written down"
-        assert ".then(function () { return dbWrite('flags', STAND, prefixes()); });" in html
-        assert "Kept from an older stand of the map" in html
+    def test_pack_addresses_replace_stand_migration(self):
+        worker = maps.SERVICE_WORKER
+        for retired in ("migrateStand", "walkStand", "STAND_WALK", "keptFor", "var STAND ="):
+            assert retired not in worker
+        assert "openCursor(" not in worker
+        assert worker.count("openKeyCursor(") == 1, "only the bounded browse trim visits keys"
 
     def test_a_tile_tree_version_reaches_the_provider_the_layer_and_the_page(self, tmp_path):
         """A new stand of Lantmäteriet's file is a new version segment; the
@@ -2394,8 +2362,10 @@ class TestTwoMapsOnOneOrigin:
         finally:
             maps.tile_tree_version("lantmateriet", 1)
         assert maps.PROVIDERS["lantmateriet"].tiles == "/tiles/lantmateriet/topowebb/1/"
-        with pytest.raises(ValueError):
-            maps.tile_tree_version("kartverket", 2)
+        try:
+            assert maps.tile_tree_version("kartverket", 2).tiles == "/tiles/kartverket/topo/2/"
+        finally:
+            maps.tile_tree_version("kartverket", 1)
 
     def test_the_panel_hands_the_page_the_extent_of_its_tree(self, tmp_path):
         """Each page carries the box its own trees were cut to as ``EXTENT``,
@@ -2452,16 +2422,16 @@ class TestTwoMapsOnOneOrigin:
         rather than requested and answered 404."""
         fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
         layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer) and not child.overlay]
-        assert [(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in layers] == [(17, 17)]
+        assert [(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in layers] == [(18, 17)]
         # The relief overlay is drawn over the same sheet and stops two levels
         # earlier, which is where the height model stops having anything to add.
         relief = getattr(fmap, maps.MAP_SHADE_ATTR)
-        assert (relief.options["max_zoom"], relief.options["max_native_zoom"]) == (17, 15)
+        assert (relief.options["max_zoom"], relief.options["max_native_zoom"]) == (18, 15)
         # Kartverket's own cache goes to z18, and the two overlays cut over it
         # stop at z15 exactly as Lantmäteriet's do.
         norwegian = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         sheets = [child for child in norwegian._children.values() if isinstance(child, folium.TileLayer) and not child.overlay]
-        assert {(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in sheets} == {(18, 18)}
+        assert {(layer.options["max_zoom"], layer.options["max_native_zoom"]) for layer in sheets} == {(18, 17)}
         over = getattr(norwegian, maps.MAP_SHADE_ATTR)
         assert (over.options["max_zoom"], over.options["max_native_zoom"]) == (18, 15)
 
@@ -2498,7 +2468,7 @@ class TestTwoMapsOnOneOrigin:
     def test_the_page_opens_its_own_database_and_caches(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
-        assert "window.indexedDB.open('trails-abisko', 3)" in html
+        assert "window.indexedDB.open('trails-abisko', 4)" in html
         assert "var TERRAIN = 'trails-abisko-terrain';" in html
         assert "var TILES = 'trails-abisko-tiles';" in html
         assert "var KEY = 'trails-abisko-offline';" in html
@@ -2525,7 +2495,7 @@ class TestTwoMapsOnOneOrigin:
         script = maps.write_service_worker(page).read_text(encoding="utf-8")
         assert 'var DB = "trails";' in script
         assert 'var TILES = "trails-tiles";' in script
-        assert 'var TILE_PREFIX = new URL("https://cache.kartverket.no/", self.location.href).href;' in script
+        assert 'var TILE_PREFIX = new URL("/tiles/kartverket/topo/1/", self.location.href).href;' in script
         # And since §6.10 it keeps this map's three trees beside them, which sit
         # in our own bucket and are therefore addressed from the root.
         assert 'var HEIGHT_PREFIX = "/dem/kartverket/1/" ? new URL("/dem/kartverket/1/", self.location.href).href : null;' in script
@@ -2629,7 +2599,7 @@ class TestTwoMapsOnOneOrigin:
         assert 'var SHADE_PREFIX = "/shade/lantmateriet/1/" ? new URL("/shade/lantmateriet/1/", self.location.href).href : null;' in script
         assert "(SHADE_PREFIX && request.url.indexOf(SHADE_PREFIX) === 0)" in script
         # And a tile of it is found under an older stand like any other.
-        assert "if (SHADE_PREFIX && plain.indexOf(SHADE_PREFIX) === 0) { return SHADE_PREFIX; }" in script
+        assert "[SHADE_PREFIX, 15]" in script
 
     def test_the_offline_panel_keeps_the_relief_at_every_level_it_draws(self, tmp_path):
         """Unlike the heights, which are read at one zoom and so kept at one:
@@ -2661,7 +2631,7 @@ class TestTwoMapsOnOneOrigin:
         html = fmap.get_root().render()
         blend = ".leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles, .leaflet-layer.trails-forest-tiles"
         assert blend + " { mix-blend-mode: multiply; }" in html
-        assert (slope.options["max_zoom"], slope.options["max_native_zoom"]) == (17, 15)
+        assert (slope.options["max_zoom"], slope.options["max_native_zoom"]) == (18, 15)
         assert slope.options["bounds"] == [[68.139, 18.15], [68.46, 19.10]]
         assert slope.options["attribution"] == maps._LANTMATERIET_ATTRIBUTION
 
@@ -2788,9 +2758,8 @@ class TestTwoMapsOnOneOrigin:
         script = maps.write_service_worker(page, maps.PROVIDERS["lantmateriet"], companions).read_text(encoding="utf-8")
         assert 'var SLOPE_PREFIX = "/slope/lantmateriet/2/" ? new URL("/slope/lantmateriet/2/", self.location.href).href : null;' in script
         assert "(SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)" in script
-        assert "if (SLOPE_PREFIX && plain.indexOf(SLOPE_PREFIX) === 0) { return SLOPE_PREFIX; }" in script
-        assert "slope: SLOPE_PREFIX" in script
-        assert "vegetation: VEGETATION_PREFIX, forest: FOREST_PREFIX" in script
+        assert "[SLOPE_PREFIX, 15]" in script
+        assert "[VEGETATION_PREFIX, 15], [FOREST_PREFIX, 15]" in script
 
     def test_the_offline_panel_keeps_the_slope_classes_whether_or_not_they_are_on(self, tmp_path):
         """The switch is the reader's to flip in the field, and a class that
@@ -9700,3 +9669,201 @@ class TestGlyphColumnMustExist:
         empty = gpd.GeoDataFrame({"name": [], "geometry": []}, crs="EPSG:4326")
         fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
         assert maps.add_points(fmap, empty, name="Ferry quays [OSM]", icon_field="glyph") is not None
+
+
+class TestPackWorker:
+    """Run the emitted JavaScript against the independent Python format reader."""
+
+    @staticmethod
+    def run_worker(tmp_path, script, provider="kartverket"):
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("Node is needed to execute the worker unit tests")
+        page = tmp_path / "map.html"
+        page.write_text("pack test", encoding="utf-8")
+        worker = maps.write_service_worker(page, maps.PROVIDERS[provider]).read_text(encoding="utf-8")
+        source = 'var self = {location: {href: "https://atlas.test/sw.js"}, addEventListener: function () {}};\n'
+        source += worker + "\n" + script
+        result = subprocess.run([node, "-"], input=source, text=True, capture_output=True, check=True, timeout=15)
+        return json.loads(result.stdout)
+
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    def test_addresses_at_every_level_and_box_edge(self, tmp_path, provider):
+        own = maps.PROVIDERS[provider]
+        west, south, east, north = own.extent
+        addresses, expected = [], []
+        for layer in (own, own.heights, own.shade, own.slope, own.vegetation, own.forest):
+            for zoom in range(8, layer.top + 1):
+                level = max(z for z in packs.pack_levels(range(8, layer.top + 1)) if z <= zoom)
+                for lon, lat in ((west, south), (west, north), (east, south), (east, north)):
+                    x = int((lon + 180) / 360 * 2**zoom)
+                    y = int((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * 2**zoom)
+                    addresses.append(f"https://atlas.test{layer.tiles}{zoom}/{x}/{y}.png")
+                    expected.append(
+                        {
+                            "url": f"https://atlas.test/packs{layer.tiles}{level}/{x >> (zoom - level)}/{y >> (zoom - level)}.pmtiles",
+                            "id": packs.tile_id(zoom, x, y),
+                        }
+                    )
+        assert self.run_worker(tmp_path, f"console.log(JSON.stringify({json.dumps(addresses)}.map(packFor)));", provider) == expected
+
+    def test_tile_id_matches_python_on_twelve_addresses(self, tmp_path):
+        addresses = [
+            (0, 0, 0),
+            (1, 0, 0),
+            (1, 1, 0),
+            (1, 0, 1),
+            (1, 1, 1),
+            (6, 34, 16),
+            (8, 137, 65),
+            (10, 565, 243),
+            (13, 4500, 2010),
+            (14, 8738, 4200),
+            (17, 70000, 33000),
+            (26, 67108863, 67108863),
+        ]
+        assert self.run_worker(tmp_path, f"console.log(JSON.stringify({json.dumps(addresses)}.map(a => tileId(...a))));") == [
+            packs.tile_id(*tile) for tile in addresses
+        ]
+
+    def test_reader_slices_exact_python_bytes_and_bounds_memory(self, tmp_path):
+        tile = tmp_path / "tile.png"
+        tile.write_bytes(base64.b64decode(maps._ERROR_TILE_URL.split(",")[1]))
+        path = tmp_path / "fixture.pmtiles"
+        tiles = {(z, x, y): tile for z in range(2, 6) for x in range(2 ** (z - 2)) for y in range(2 ** (z - 2))}
+        packs.write_pack(tiles, path)
+        reader = packs.PackReader(path)
+        encoded = base64.b64encode(path.read_bytes()).decode()
+        result = self.run_worker(
+            tmp_path,
+            f"""
+            var bytes = Uint8Array.from(Buffer.from('{encoded}', 'base64')).buffer;
+            var held = holdPack('fixture', bytes);
+            var answers = {json.dumps(list(tiles))}.map(a => Buffer.from(sliceTile(held, tileId(...a))).toString('base64'));
+            var rejected = 0;
+            for (var at of [0, 7, 48, 97, 98, 99, 127]) {{
+                var corrupt = bytes.slice(0); new Uint8Array(corrupt)[at] ^= 255;
+                try {{ holdPack('bad', corrupt); }} catch (_) {{ rejected++; }}
+            }}
+            for (var i = 0; i < 60; i++) {{ holdPack('pack' + i, bytes); }}
+            recent(packs, 'pack52'); holdPack('pack60', bytes);
+            console.log(JSON.stringify({{answers, rejected, packs: packs.size, directories: directories.size,
+                oldestGone: !packs.has('pack53'), touchedStays: packs.has('pack52'), missing: sliceTile(held, tileId(2, 3, 3))}}));
+        """,
+        )
+        assert result.pop("answers") == [base64.b64encode(reader.read_tile(*address)).decode() for address in tiles]
+        assert result == {"rejected": 7, "packs": 8, "directories": 48, "oldestGone": True, "touchedStays": True, "missing": None}
+
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    def test_all_worker_placeholders_are_filled(self, tmp_path, provider):
+        page = tmp_path / "map.html"
+        page.write_text("page", encoding="utf-8")
+        own = maps.PROVIDERS[provider]
+        worker = maps.write_service_worker(page, own).read_text(encoding="utf-8")
+        assert not re.search(r"__[A-Z_]+__", worker)
+        for name, layer in (
+            ("TILE", own),
+            ("HEIGHT", own.heights),
+            ("SHADE", own.shade),
+            ("SLOPE", own.slope),
+            ("VEGETATION", own.vegetation),
+            ("FOREST", own.forest),
+        ):
+            assert f"[{name}_PREFIX, {layer.top}]" in worker
+
+    def test_page_waits_for_first_controller_but_only_on_secure_origins(self):
+        html = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7)).get_root().render()
+        assert "!secure || !('serviceWorker' in navigator) || navigator.serviceWorker.controller" in html
+        assert "setTimeout(release, 3000)" in html
+        assert "addEventListener('controllerchange', controlled)" in html
+        assert html.index("pending.set(L.stamp(layer), layer)") < html.index("var tile_layer_")
+        # The page reads the complete row; the fixed Sources renderer is phase 6b's second half.
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        assert "dbRead('flags', 'tiles-said')" in fmap.get_root().render()
+        assert "mem: 0" in maps.SERVICE_WORKER and "mem: {total: 0, worst: 0}" in maps.SERVICE_WORKER
+
+    def test_network_ranges_settling_and_ignored_range_header(self, tmp_path):
+        tile = tmp_path / "tile.png"
+        tile.write_bytes(base64.b64decode(maps._ERROR_TILE_URL.split(",")[1]))
+        path = tmp_path / "fixture.pmtiles"
+        packs.write_pack({(14, 1, 1): tile, (15, 2, 2): tile}, path)
+        encoded = base64.b64encode(path.read_bytes()).decode()
+        result = self.run_worker(
+            tmp_path,
+            f"""
+            (async function () {{
+                var bytes = Uint8Array.from(Buffer.from('{encoded}', 'base64')).buffer;
+                var requests = [], writes = 0, ignoreRange = false;
+                browsePut = async function (url, body) {{
+                    if (!(body instanceof ArrayBuffer)) throw Error('not an ArrayBuffer');
+                    writes++;
+                }};
+                fetch = async function (url, options) {{
+                    var range = options && options.headers.Range;
+                    requests.push(range || 'whole');
+                    if (!range || ignoreRange) return new Response(bytes);
+                    var ends = range.slice(6).split('-').map(Number), end = Math.min(ends[1], bytes.byteLength - 1);
+                    return new Response(bytes.slice(ends[0], end + 1), {{status: 206, headers: {{
+                        'content-range': 'bytes ' + ends[0] + '-' + end + '/' + bytes.byteLength
+                    }}}});
+                }};
+                var a = packFor(TILE_PREFIX + '14/1/1.png'), b = packFor(TILE_PREFIX + '15/2/2.png');
+                var one = await networkTile(a), rangeWrites = writes;
+                visits.set(a.url, Date.now() - SETTLE_MS - 1);
+                await networkTile(a);
+                var beforeSettle = requests.length;
+                await Promise.all([networkTile(b), networkTile(a), networkTile(b)]);
+                var afterSettle = requests.length;
+                await networkTile(a);
+                var afterMemory = requests.length;
+                packs.clear(); directories.clear(); visits.clear(); ignoreRange = true;
+                var whole = await networkTile(a);
+                console.log(JSON.stringify({{requests, rangeWrites, writes, beforeSettle, afterSettle, afterMemory,
+                    same: Buffer.from(one).equals(Buffer.from(whole))}}));
+            }})().catch(e => {{ console.error(e); process.exitCode = 1; }});
+        """,
+        )
+        assert result["requests"][0] == "bytes=0-16383"
+        assert result["requests"][1] == result["requests"][2], "a later visit reuses its directory but stays ranged"
+        assert result["rangeWrites"] == 0
+        assert result["beforeSettle"] == 3
+        assert result["afterSettle"] == result["afterMemory"] == 4
+        assert result["requests"][3:] == ["whole", "bytes=0-16383"]
+        assert result["same"] and result["writes"] == 2
+
+    def test_first_control_gate_releases_on_control_or_timeout(self, tmp_path):
+        gate = files("trails.visualization").joinpath("js", "tile_start.js").read_text(encoding="utf-8")
+        gate = gate.replace("{{ this._parent.get_name() }}", "namedMap")
+        result = self.run_worker(
+            tmp_path,
+            """
+            var vm = require('node:vm'), results = [];
+            for (var scenario of ['insecure', 'controlled', 'control', 'timeout']) {
+                var added = [], timer, handler, delay = null;
+                function Tile() {}
+                var layer = new Tile(); layer.id = 1;
+                var cancelled = new Tile(); cancelled.id = 2;
+                var map = {addLayer: function (l) { added.push(l.id); return this; }, removeLayer: function () { return this; }};
+                var sw = {controller: scenario === 'controlled' ? {} : null,
+                    addEventListener: function (_, fn) { handler = fn; }, removeEventListener: function () { handler = null; }};
+                vm.runInNewContext(__GATE__, {namedMap: map, L: {TileLayer: Tile, stamp: l => l.id},
+                    location: {protocol: scenario === 'insecure' ? 'http:' : 'https:', hostname: 'atlas.test'},
+                    navigator: {serviceWorker: sw}, setTimeout: (fn, ms) => { timer = fn; delay = ms; }, clearTimeout: () => {}});
+                map.addLayer(layer);
+                var before = added.length;
+                if (timer) {
+                    map.addLayer(layer); map.addLayer(cancelled); map.removeLayer(cancelled);
+                    if (scenario === 'control') { sw.controller = {}; handler(); } else { timer(); }
+                }
+                results.push({scenario, before, added, delay, listening: !!handler});
+            }
+            console.log(JSON.stringify(results));
+        """.replace("__GATE__", json.dumps(gate)),
+        )
+        assert result == [
+            {"scenario": "insecure", "before": 1, "added": [1], "delay": None, "listening": False},
+            {"scenario": "controlled", "before": 1, "added": [1], "delay": None, "listening": False},
+            {"scenario": "control", "before": 0, "added": [1], "delay": 3000, "listening": False},
+            {"scenario": "timeout", "before": 0, "added": [1], "delay": 3000, "listening": False},
+        ]
