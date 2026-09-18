@@ -10008,6 +10008,49 @@ class TestPackPanel:
         assert result["total"] == result["unique"] == count
         assert result["weighed"] == {"packs": count, "bytes": result["bytes"]}
 
+    @pytest.mark.parametrize("provider,count", [("kartverket", 9162), ("lantmateriet", 2274)])
+    def test_whole_box_to_z17_never_builds_a_set(self, tmp_path, provider, count):
+        script = (
+            self.setup(provider)
+            + """
+            // A whole-map estimate and download must work without allocating
+            // any tile or pack set, even for the 449,790 z17 tiles in Norway.
+            globalThis.Set = function () { throw Error('whole-map set allocated'); };
+            var levels = levelsFor(null, 17, 1), walk = packWalk(levels), count = 0;
+            while (walk.next()) {
+                if (++count > 10000) throw Error('pack iterator did not terminate');
+            }
+            console.log(JSON.stringify({count, weighed: weigh(levels).packs}));
+        """
+        )
+        assert TestPackWorker.run_worker(tmp_path, script, provider) == {"count": count, "weighed": count}
+
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    def test_whole_map_budget_waits_for_a_request_and_is_counted_once(self, tmp_path, provider):
+        panel = files("trails.visualization").joinpath("js", "offline_panel.js").read_text(encoding="utf-8")
+        budget = "var memo = {};" + panel.split("var memo = {};", 1)[1].split("var chosen = null;", 1)[0]
+        script = (
+            self.setup(provider)
+            + self.function("sig")
+            + """
+            var CAP_ZOOM = 17, weighs = 0, originalWeigh = weigh;
+            function coreOf() { return null; }
+            function scopeOf() { return {pad: 1}; }
+            weigh = function (levels) { weighs++; return originalWeigh(levels); };
+            """
+            + budget
+            + """
+            var before = {weighs, cap, entries: Object.keys(memo).length};
+            var first = budget(), second = budget(), estimate = cost('all', CAP_ZOOM).bytes;
+            console.log(JSON.stringify({before, weighs, agrees: first > 0 && first === second && second === estimate}));
+            """
+        )
+        assert TestPackWorker.run_worker(tmp_path, script, provider) == {
+            "before": {"weighs": 0, "cap": None, "entries": 0},
+            "weighs": 1,
+            "agrees": True,
+        }
+
     @pytest.mark.parametrize(
         "provider,position,overview,tiny",
         [
@@ -10099,3 +10142,54 @@ class TestPackPanel:
         assert "zoom > options.maxNativeZoom" in scale
         assert "' · tiles z' + options.maxNativeZoom" in scale
         assert "trailsnativezoom" in scale
+
+    def test_scale_ignores_vector_layers_but_follows_sheet_and_kept_zoom_changes(self, tmp_path):
+        scale = files("trails.visualization").joinpath("js", "scale_zoom.js").read_text(encoding="utf-8")
+        scale = scale.replace("{{ this._parent.get_name() }}", "namedMap")
+        script = (
+            """
+            var handlers = {}, scans = 0, line;
+            var box = {appendChild: function (made) { line = made; line.parentNode = box; }};
+            var sheet = {getTileUrl: function () {}, options: {maxNativeZoom: 17}};
+            var layers = [sheet], zoom = 18;
+            var namedMap = {
+                getContainer: () => ({querySelector: () => box}),
+                getCenter: () => ({lat: 65.5}), containerPointToLatLng: p => p,
+                distance: () => 100, getZoom: () => zoom,
+                eachLayer: fn => { scans++; layers.forEach(fn); },
+                on: (events, fn) => { events.split(' ').forEach(event => { handlers[event] = fn; }); },
+                whenReady: fn => fn()
+            };
+            var document = {createElement: () => ({})};
+            var L = {control: {scale: () => ({addTo: () => {}})}};
+        """
+            + scale
+            + """
+            var initial = line.textContent, initialScans = scans;
+            for (var i = 0; i < 12500; i++) {
+                var path = {options: {}};
+                layers.push(path); handlers.layeradd({layer: path});
+                handlers.layerremove({layer: path}); layers.pop();
+            }
+            var vectorScans = scans - initialScans;
+            layers = []; handlers.layerremove({layer: sheet});
+            var removed = line.textContent;
+            layers = [sheet]; handlers.layeradd({layer: sheet});
+            var added = line.textContent;
+            zoom = 17; sheet.options.maxNativeZoom = 16; handlers.trailsnativezoom();
+            var kept = line.textContent;
+            sheet.options.maxNativeZoom = 17; handlers.trailsnativezoom();
+            var restored = line.textContent;
+            zoom = 18; handlers.zoomend();
+            console.log(JSON.stringify({initial, vectorScans, removed, added, kept, restored, zoomed: line.textContent}));
+        """
+        )
+        assert TestPackWorker.run_worker(tmp_path, script) == {
+            "initial": "z18 · 1 m/px · tiles z17",
+            "vectorScans": 0,
+            "removed": "z18 · 1 m/px",
+            "added": "z18 · 1 m/px · tiles z17",
+            "kept": "z17 · 1 m/px · tiles z16",
+            "restored": "z17 · 1 m/px",
+            "zoomed": "z18 · 1 m/px · tiles z17",
+        }

@@ -1461,7 +1461,8 @@ class _ScaleZoom(MacroElement):
 
     It is drawn in the scale control's own box rather than beside it, and takes
     no measuring bar: a line with a rule under it in that corner claims to be a
-    distance, and this one is not.
+    distance, and this one is not. Layer additions and removals redraw it only
+    for tile layers: scanning the map for each path made construction quadratic.
     """
 
     _template = Template(

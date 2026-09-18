@@ -48,7 +48,13 @@
                     line.title = 'Zoom ' + zoom + ' at ' + middle.lat.toFixed(2) + '° N';
                 }
 
-                map.on('zoomend moveend layeradd layerremove trailsnativezoom', said);
+                map.on('zoomend moveend trailsnativezoom', said);
+                // Each path and pin fires layeradd during construction. Scanning
+                // all layers for each of them made opening the large map quadratic.
+                // Only tile layers can change the sheet's native zoom.
+                map.on('layeradd layerremove', function (event) {
+                    if (event.layer.getTileUrl) { said(); }
+                });
                 map.whenReady(said);
                 said();
             })();

@@ -276,6 +276,8 @@ SCENES: dict[str, Scene] = {
         # has not got.
         over_http=True,
         figures={
+            # Phase 6e, 2026-09-18: Firefox-on-forge time, not a phone budget.
+            "map built in ms (Firefox on forge)": 1228,
             # Re-recorded 2026-09-01, from 11,589 and 11,290: the source cache
             # was cleared and the map regenerated, so Turrutebasen was fetched
             # again and came back with twelve more chains. This is the movement
@@ -422,6 +424,8 @@ SCENES: dict[str, Scene] = {
         # Recorded 2026-09-12 from the first build of the page: 813 chains,
         # 19 legend rows, one base map.
         figures={
+            # Phase 6e, 2026-09-18: Firefox-on-forge time, not a phone budget.
+            "map built in ms (Firefox on forge)": 263,
             # Clipped to the box since the review (§9.15): one point chain and
             # three markers fewer than the first build drew. Twenty chains more
             # since §9.26, where a name stopped running on past the ground the
@@ -633,8 +637,10 @@ def noted(what: str, got: Any, note: str = "") -> Reading:
     faster machine, a slower one, or two pages driven at once into a red line,
     and the one thing they never say is that the page changed.
 
-    So they are printed and not compared. A reader who wants to know what the
-    page costs reads the number; nothing fails because of it. Where the duration
+    So they are normally printed and not compared. The explicitly recorded
+    Firefox-on-forge map build is an exception, to catch startup regressions.
+    A reader who wants to know what the page costs reads the number; this helper
+    never fails because of it. Where the duration
     really is the subject -- a timeout that has to fire, a retry that has to
     happen three times -- the claim is made about the **work**: what the page
     counted, which every machine agrees on.
@@ -10752,7 +10758,8 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # device this map is carried on -- an installed app reported ten to
         # twenty seconds where this run measures under two -- so the page keeps
         # its own account and `Sources` reads it out. Driven for the shape of the
-        # sentence, not the figures: those belong to whatever opened it.
+        # sentence and for a recorded Firefox-on-forge build time. The latter
+        # catches construction regressions; it makes no claim about the phone.
         said_cost = first.evaluate("() => (document.querySelector('.trails-dock .trails-open-cost') || {}).textContent || ''")
         cost = first.evaluate("() => window.trailsOpened.cost()")
         newer.append(
@@ -10769,6 +10776,14 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 cost["build"] is not None and cost["build"] > 0,
                 True,
                 note=f"{cost['build']} ms building, {cost['parse']} ms parsing, {cost['bytes'] / 1e6:.1f} MB",
+            )
+        )
+        newer.append(
+            stands(
+                "map built in ms (Firefox on forge)",
+                cost["build"],
+                within=500,
+                note="Firefox-on-forge time; ±500 ms for run-to-run variation, not a phone budget",
             )
         )
         first.evaluate("() => window.trailsChrome.close()")
