@@ -481,7 +481,7 @@ class TestOfflineWorker:
 
     def test_browse_bytes_and_write_cadence_survive_a_worker_restart(self):
         worker = maps.SERVICE_WORKER
-        assert "var DB_AT = 5;" in worker
+        assert "var DB_AT = 6;" in worker
         assert "var TILE_CAP = 150 * 1000 * 1000;" in worker
         assert "setTimeout(flushPuts, 0)" in worker
         assert "size: body.byteLength" in worker
@@ -1636,9 +1636,7 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         page = re.search(r"window\.indexedDB\.open\('trails', (\d+)\)", html)
         assert worker and page, "both sides must name a version"
         assert worker.group(1) == page.group(1)
-        assert worker.group(1) == "5"
-        bench = re.search(r"indexedDB\.open\(BENCH_DB, (\d+)\)", html)
-        assert bench and bench.group(1) == worker.group(1)
+        assert worker.group(1) == "6"
 
     def test_neither_side_hangs_and_neither_side_blocks(self):
         """Two halves. Saying so beats waiting — blocked means somebody holds an
@@ -1652,10 +1650,10 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
 
     def test_both_sides_make_every_store(self):
         """Whichever opens first runs the upgrade, so both have to know about
-        all five — a store missing on one side is a transaction that throws on
+        all three — a store missing on one side is a transaction that throws on
         the other."""
         html = self.rendered()
-        for store in ("pages", "flags", "bench", "packs"):
+        for store in ("pages", "flags", "packs"):
             assert f"createObjectStore('{store}')" in html
             assert f"contains({store.upper()})" in maps.SERVICE_WORKER or f'"{store}"' in maps.SERVICE_WORKER
         for source in (html, maps.SERVICE_WORKER):
@@ -1663,120 +1661,11 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
             assert "store.createIndex('browsed-at', 'browsedAt')" in source
             assert "store.createIndex('kept', 'keptAt')" in source
 
-    def test_sources_reads_the_tally_and_owns_the_bounded_store_measurement(self):
+    def test_sources_reads_the_real_tally(self):
         html = self.rendered()
         assert "['mem', 'db', 'seen', 'net', 'blank'].forEach" in html
         assert "spent.total.toFixed(1)" in html and "spent.worst.toFixed(1)" in html
         assert "told.deadlines" in html and "told.peak" in html
-        assert 'var BENCH_DB = "trails";' in html
-        assert "indexedDB.open(BENCH_DB, 5)" in html
-        assert "sourcesHolder.appendChild(benchBox);" in html
-        assert "measureStore: measureStore" in html
-        for variant in ("blob-url", "blob-number", "pack", "archive"):
-            assert f"<option>{variant}</option>" in html
-        assert 'class="trails-bench-tiles"' in html and 'class="trails-bench-shape"' in html
-        helper = html.split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
-        assert "new Uint8Array(1024)" in helper
-        assert "variant === 'pack' ? 3 : 250" in helper
-        assert "row < Math.min(start + batch, rows)" in helper
-        assert "store.put(pack, key(row * 85))" in helper
-        assert "readTiles(50)" in helper
-        assert "Math.floor(i * tiles / count)" in helper
-        assert "ask.result !== rows" in helper
-        assert "Promise.allSettled" in helper
-        assert "fetch(url, {cache: 'no-store'})" in helper
-        assert "store.put(body, key(i))" in helper
-        assert helper.count("store.clear()") == 1
-        assert helper.count("await clearScratch()") == 2
-        assert "finally" in helper.split("store.clear()")[1]
-        assert "deleteObjectStore" not in helper
-        assert "getAll" not in helper
-        assert "'tiles', 'readwrite'" not in helper and "'browse', 'readwrite'" not in helper
-        for figure in ("rows", "writes", "fill", "clear", "open", "get", "fifty", "screen", "usageBefore", "usageAfter", "bytes"):
-            assert f"result.{figure}" in helper
-
-    def test_store_shapes_read_one_tile_and_report_failed_archive_writes(self):
-        helper = self.rendered().split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
-        assert "'bench/tiles/17/' + x + '/' + y + '.png'" in helper
-        assert "17 * 2 ** 36 + x * 2 ** 18 + y" in helper
-        assert "Math.ceil(tiles / 85)" in helper
-        assert "new ArrayBuffer(340 + 85 * 1024)" in helper
-        assert "new Uint32Array(value, 0, 85)[i % 85]" in helper
-        assert "receive(value.slice(at, at + 1024))" in helper
-        assert "chunkBytes = 8 * 1024 * 1024" in helper
-        assert "store.get('bench/chunks/' + part)" in helper
-        assert "archive = new Blob([archive, chunk])" in helper
-        assert "store.put(archive, key(0))" in helper
-        assert "store.delete(IDBKeyRange.bound('bench/chunks/'" in helper
-        assert "value.slice(i * 1024, (i + 1) * 1024).arrayBuffer()" in helper
-        assert "await Promise.all(reads)" in helper
-        assert "navigator.storage.estimate()" in helper
-        assert "result.error = stage" in helper
-        assert "result.cleared ? ' Scratch rows cleared.'" in helper
-        assert "return result;" in helper
-
-    def test_the_measurement_uses_this_maps_database(self):
-        fmap = maps.create_map(bounds=(18, 68, 19, 69), companions=maps.Companions.named("abisko"))
-        maps.add_chrome(fmap)
-        html = fmap.get_root().render()
-        assert 'var BENCH_DB = "trails-abisko";' in html
-
-    def test_store_measurement_bounds_optional_estimates_and_every_open(self):
-        html = self.rendered()
-        opening = html.split("async function benchOpen()")[1].split("function benchDeal")[0]
-        assert "await Promise.race([opening," in opening
-        assert "failed = true;\n                            fail(new Error('the database did not open'));" in opening
-        assert "}, 15000);" in opening
-        assert "if (failed) { db.close(); return; }" in opening
-        assert "finally { clearTimeout(timer); }" in opening
-        helper = html.split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
-        usage = helper.split("async function usage()")[1].split("function key(i)")[0]
-        assert "await Promise.race([navigator.storage.estimate()," in usage
-        assert "estimateSkipped = true;\n                                    done(null);" in usage
-        assert "}, 5000);" in usage
-        assert "return estimate && Number.isFinite(estimate.usage) ? estimate.usage : null;" in usage
-        assert "finally { clearTimeout(timer); }" in usage
-        assert helper.count("await usage()") == 3  # Before, after, and on failure all use the same bound.
-        assert helper.count("await benchOpen()") == 3  # Initial, measured, and cleanup opens are all bounded.
-        assert "estimateSkipped ? 'estimate skipped'" in helper
-
-    def test_store_measurement_names_stages_before_waiting(self):
-        helper = self.rendered().split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
-        assert helper.index("finding visible tiles…") < helper.index("benchScreen()")
-        assert helper.index("estimating storage…") < helper.index("await Promise.race([navigator.storage.estimate()")
-        for before, after, text in (
-            ("benchButton.disabled = true;", "db = await benchOpen()", "opening the database…"),
-            ("stage = 'fill'", "await benchDeal", "filling…"),
-            ("stage = 'assemble archive'", "await benchDeal", "assembling archive…"),
-            ("stage = 'write archive'", "await benchDeal", "writing archive…"),
-            ("stage = 'delete archive chunks'", "await benchDeal", "deleting archive chunks…"),
-            ("stage = 'verify row count'", "await benchDeal", "verifying row count…"),
-            ("stage = 'open'", "db = await benchOpen()", "opening the database…"),
-            ("stage = 'one get'", "await readTiles(1)", "measuring one get…"),
-            ("stage = 'fifty gets'", "await readTiles(50)", "measuring fifty gets…"),
-            ("if (!db) {", "db = await benchOpen()", "opening the database for cleanup…"),
-        ):
-            section = helper.split(before)[1].split(after)[0]
-            assert f"benchSaid.textContent = variant + ' · {text}';" in section
-        assert "stage = 'clear before fill';\n                    await clearScratch();" in helper
-        assert "result.cleared = await clearScratch();" in helper
-
-    def test_store_clears_count_first_bound_the_wait_and_show_elapsed_seconds(self):
-        helper = self.rendered().split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
-        clearing = helper.split("async function clearScratch()")[1].split("async function usage()")[0]
-        assert "if (countBlocked) { return false; }" in clearing
-        assert clearing.index("counting scratch rows…") < clearing.index("await Promise.race([benchDeal(db, 'readonly'")
-        assert "var ask = store.count();" in clearing
-        assert "fail(new Error('the database is held by another transaction'));" in clearing
-        assert "transaction.abort();\n                            }, 15000);" in clearing
-        assert "finally { clearTimeout(timer); }" in clearing
-        assert clearing.index("if (count === 0) { return true; }") < clearing.index("benchDeal(db, 'readwrite'")
-        assert "count.toLocaleString() + ' scratch rows…'" in clearing
-        assert "Math.floor((performance.now() - clearBegan) / 1000) + ' s'" in clearing
-        assert "}, 1000);" in clearing
-        assert "clearInterval(timer);" in clearing
-        assert "result.clear += performance.now() - clearBegan;" in clearing
-        assert "' · clear ' + (result.clear / 1000).toFixed(1) + ' s'" in helper
 
 
 class TestNothingGrowsWithTheDownload:
@@ -1842,7 +1731,7 @@ class TestNothingGrowsWithTheDownload:
         # cleared under the page would take both — and it meant that opening this
         # panel opened a Cache Storage holding tens of thousands of entries and
         # several gigabytes. Measured on an installed app at twenty seconds.
-        assert "window.indexedDB.open('trails', 5)" in html
+        assert "window.indexedDB.open('trails', 6)" in html
         # `forget` clears the row too, which is the property the first place was
         # chosen for.
         assert "db().then(function (open) { return PackIO.forget(open); })" in html
@@ -2427,7 +2316,7 @@ class TestTwoMapsOnOneOrigin:
     def test_the_page_opens_its_own_database_and_caches(self, tmp_path):
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
-        assert "window.indexedDB.open('trails-abisko', 5)" in html
+        assert "window.indexedDB.open('trails-abisko', 6)" in html
         assert "var TERRAIN = 'trails-abisko-terrain';" in html
         assert "var TILES = 'trails-abisko-tiles';" in html
         assert "var KEY = 'trails-abisko-offline';" in html
@@ -9652,7 +9541,7 @@ class TestPackWorker:
         page = tmp_path / "map.html"
         page.write_text("pack test", encoding="utf-8")
         worker = maps.write_service_worker(page, maps.PROVIDERS[provider]).read_text(encoding="utf-8")
-        source = 'var self = {location: {href: "https://atlas.test/sw.js"}, addEventListener: function () {}};\n'
+        source = 'var self = {navigator: {onLine: true}, location: {href: "https://atlas.test/sw.js"}, addEventListener: function () {}};\n'
         source += worker + "\n" + script
         result = subprocess.run([node, "-"], input=source, text=True, capture_output=True, check=True, timeout=15)
         return json.loads(result.stdout)
@@ -9755,7 +9644,7 @@ class TestPackWorker:
         assert "dbRead('flags', 'tiles-said')" in fmap.get_root().render()
         assert "mem: 0" in maps.SERVICE_WORKER and "mem: {total: 0, worst: 0}" in maps.SERVICE_WORKER
 
-    def test_network_ranges_settling_and_ignored_range_header(self, tmp_path):
+    def test_network_stays_on_ranges_and_accepts_an_ignored_range_header(self, tmp_path):
         tile = tmp_path / "tile.png"
         tile.write_bytes(base64.b64decode(maps._ERROR_TILE_URL.split(",")[1]))
         path = tmp_path / "fixture.pmtiles"
@@ -9782,20 +9671,13 @@ class TestPackWorker:
                 }};
                 var a = packFor(TILE_PREFIX + '14/1/1.png'), b = packFor(TILE_PREFIX + '15/2/2.png');
                 var one = await networkTile(a), rangeWrites = writes.slice();
-                var fetchedAt = directories.get(a.url).at;
-                Date.now = () => fetchedAt + SETTLE_MS;
                 await Promise.all([networkTile(b), networkTile(a), networkTile(b)]);
-                Date.now = () => fetchedAt + SETTLE_MS + 1;
-                await networkTile(b, undefined, fetchedAt);  // An original burst tile delayed by the store.
+                Date.now = () => 100000;
+                await networkTile(b);  // Even a later tile stays on ranges.
                 var beforeSettle = requests.slice();
-                await Promise.all([networkTile(b), networkTile(a), networkTile(b)]);
-                await Promise.all(filling.values());
-                var afterSettle = requests.length;
-                await networkTile(a);
-                var afterMemory = requests.length;
                 packs.clear(); directories.clear(); ignoreRange = true;
                 var whole = await networkTile(a);
-                console.log(JSON.stringify({{requests, rangeWrites, writes, beforeSettle, afterSettle, afterMemory,
+                console.log(JSON.stringify({{requests, rangeWrites, writes, beforeSettle,
                     same: Buffer.from(one).equals(Buffer.from(whole))}}));
             }})().catch(e => {{ console.error(e); process.exitCode = 1; }});
         """,
@@ -9804,74 +9686,95 @@ class TestPackWorker:
         assert len(result["beforeSettle"]) == 6, "burst tiles stay ranged, even after a slow store lookup or at the two-second boundary"
         assert all(request.startswith("bytes=") for request in result["beforeSettle"])
         assert result["rangeWrites"] == [{"url": "https://atlas.test/packs/tiles/kartverket/topo/1/14/1/1.pmtiles", "size": 68}]
-        assert result["afterSettle"] == result["afterMemory"]
-        assert result["requests"].count("whole") == 1
+        assert result["requests"].count("whole") == 0
         assert result["requests"][-1] == "bytes=0-16383"
         assert result["same"]
         whole_writes = [row for row in result["writes"] if row["size"] > 68]
-        assert len(whole_writes) == 2
+        assert len(whole_writes) == 1
         assert all(row["size"] == 68 for row in result["writes"] if row not in whole_writes)
 
-    def test_promotions_are_bounded_do_not_block_ranges_and_never_include_heights(self, tmp_path):
-        tile = tmp_path / "tile.png"
-        tile.write_bytes(base64.b64decode(maps._ERROR_TILE_URL.split(",")[1]))
-        path = tmp_path / "fixture.pmtiles"
-        packs.write_pack({(14, 1, 1): tile}, path)
-        encoded = base64.b64encode(path.read_bytes()).decode()
+    def test_idle_window_resets_is_bounded_and_fills_sheet_before_overlays(self, tmp_path):
         result = self.run_worker(
             tmp_path,
-            f"""
-            (async function () {{
-                var bytes = Uint8Array.from(Buffer.from('{encoded}', 'base64')).buffer;
-                var now = 1000, active = 0, peak = 0, whole = [], releases = [], ranges = 0;
-                Date.now = () => now;
-                browsePut = async () => {{}};
-                fetch = async function (url, options) {{
-                    var range = options && options.headers.Range;
-                    if (!range) {{
-                        whole.push(url); peak = Math.max(peak, ++active);
-                        await new Promise((done, fail) => releases.push(ok => {{ active--; ok ? done() : fail(Error('gone')); }}));
-                        return new Response(bytes);
-                    }}
-                    ranges++;
-                    var ends = range.slice(6).split('-').map(Number), end = Math.min(ends[1], bytes.byteLength - 1);
-                    return new Response(bytes.slice(ends[0], end + 1), {{status: 206, headers: {{
-                        'content-range': 'bytes ' + ends[0] + '-' + end + '/' + bytes.byteLength
-                    }}}});
-                }};
-                var base = packFor(TILE_PREFIX + '14/1/1.png');
-                var addresses = [0, 1, 2, 3].map(i => ({{...base, url: base.url + '?ground=' + i}}));
-                var height = {{...packFor(HEIGHT_PREFIX + '13/1/1.png'), id: base.id}};
-                addresses.push(height);
-                await Promise.all(addresses.map(a => networkTile(a)));
-                var first = {{ranges, whole: whole.length}};
-                now += SETTLE_MS + 1;
-                // All tiles must finish while both whole bodies are still held.
-                var answers = await Promise.all([...addresses, addresses[0]].map(a => networkTile(a)));
-                var pending = {{active, filling: filling.size, whole: whole.length, bytes: answers.map(a => a.byteLength)}};
-                var work = [...filling.values()]; releases[0](true); releases[1](false);
-                await Promise.allSettled(work);
-                var released = filling.size;
-                await networkTile(addresses[2]);
-                var retry = [...filling.values()]; releases[2](true); await Promise.all(retry);
-                // Losing a directory loses its age as well: a fresh range starts the window again.
-                directories.delete(addresses[3].url);
-                await networkTile(addresses[3]);
-                await networkTile(height);
-                console.log(JSON.stringify({{first, pending, released, peak, whole: whole.length,
-                    heightWhole: whole.includes(height.url), refreshed: directories.get(addresses[3].url).at === now}}));
-            }})().catch(e => {{ console.error(e); process.exitCode = 1; }});
-        """,
+            """
+            (async () => {
+                const body = PackIO.write(new Map([[0,new Uint8Array(8).buffer]]));
+                let now=1000, timer, armed=0, cleared=0, active=0, peak=0;
+                const requests=[], releases=[], writes=[], waits=[], reads=[];
+                Date.now=()=>now;
+                setTimeout=(fn,ms)=>{if(ms!==SETTLE_MS)throw Error('wrong idle delay');timer=fn;return ++armed;};
+                clearTimeout=()=>{cleared++;};
+                read=async(store,url)=>{reads.push(url);return url.endsWith('?stored')?{complete:true}:null;};
+                switched=Promise.resolve(false);
+                browsePut=async(url,body)=>{writes.push(url);};
+                fetch=async(url)=>{
+                    requests.push(url);peak=Math.max(peak,++active);
+                    await new Promise((done,fail)=>releases.push(ok=>{active--;ok?done():fail(Error('gone'));}));
+                    return new Response(body);
+                };
+                const turn=()=>new Promise(done=>setImmediate(done)), event={waitUntil:p=>waits.push(p)};
+                const base=packFor(TILE_PREFIX+'14/1/1.png'), shade=packFor(SHADE_PREFIX+'14/1/1.png'),
+                    height=packFor(HEIGHT_PREFIX+'13/1/1.png');
+                // Old addresses and repeated tile requests cannot grow the map.
+                for(let i=0;i<70;i++)notePack({...base,url:base.url+'?old='+i},event);
+                const bounded=askedPacks.size;
+                now+=SETTLE_MS+1;
+                notePack(shade,event);notePack(height,event);
+                notePack({...base,url:base.url+'?stored'},event);
+                holdPack(base.url+'?memory',body);
+                notePack({...base,url:base.url+'?memory'},event);
+                for(let i=0;i<3;i++)notePack({...base,url:base.url+'?sheet='+i},event);
+                const before=requests.length, shared=waits.every(p=>p===waits[0]);
+                timer();await turn();
+                const first=requests.slice();
+                releases[0](true);await turn();
+                const third=requests.slice();
+                releases[1](false);releases[2](true);await turn();
+                const last=requests.slice();releases[3](true);
+                await waits[0];
+                console.log(JSON.stringify({bounded,before,shared,reset:cleared===armed-1,peak,
+                    first:first.map(u=>u.split('?')[1]),third:third.map(u=>u.split('?')[1]),
+                    sheetFirst:last[3]===shade.url,height:requests.includes(height.url),writes:writes.length,
+                    complete:packs.get(shade.url).complete,directory:directories.has(shade.url),
+                    memoryRead:reads.includes(base.url+'?memory'),filling:filling.size}));
+            })().catch(e=>{console.error(e);process.exitCode=1;});
+            """,
         )
         assert result == {
-            "first": {"ranges": 10, "whole": 0},
-            "pending": {"active": 2, "filling": 2, "whole": 2, "bytes": [68] * 6},
-            "released": 0,
+            "bounded": 48,
+            "before": 0,
+            "shared": True,
+            "reset": True,
             "peak": 2,
-            "whole": 3,
-            "heightWhole": False,
-            "refreshed": True,
+            "first": ["sheet=0", "sheet=1"],
+            "third": ["sheet=0", "sheet=1", "sheet=2"],
+            "sheetFirst": True,
+            "height": False,
+            "writes": 3,
+            "complete": True,
+            "directory": True,
+            "memoryRead": False,
+            "filling": 0,
         }
+
+    @pytest.mark.parametrize("offline", ["switch", "network", "moving"])
+    def test_idle_fill_stops_offline_or_when_a_new_request_arrives(self, tmp_path, offline):
+        result = self.run_worker(
+            tmp_path,
+            """
+            (async()=>{
+                let requested=0,reads=0,timer;
+                const a=packFor(TILE_PREFIX+'14/1/1.png');
+                setTimeout=fn=>{timer=fn;return 1;};clearTimeout=()=>{};
+                switched=Promise.resolve(MODE==='switch');self.navigator.onLine=MODE!=='network';
+                fetch=async()=>{requested++;throw Error('must not fetch');};
+                read=async()=>{reads++;if(MODE==='moving')notePack(a);return null;};
+                let pending;notePack(a,{waitUntil:p=>{pending=p;}});timer();await pending;
+                console.log(JSON.stringify({requested,reads}));
+            })().catch(e=>{console.error(e);process.exitCode=1;});
+            """.replace("MODE", json.dumps(offline)),
+        )
+        assert result == {"requested": 0, "reads": int(offline == "moving")}
 
     @pytest.mark.parametrize("offline", [False, True])
     @pytest.mark.parametrize("kept", [False, True])
@@ -9969,11 +9872,39 @@ class TestPackWorker:
         )
         assert result == {"ids": [0, 1, 2], "bytes": [[1] * 8, [2] * 9, [2] * 9]}
 
+    @pytest.mark.parametrize("opener", ["worker", "page"])
+    @pytest.mark.parametrize("scratch", [False, True])
+    def test_version_six_preserves_every_pack_flag_and_page(self, tmp_path, opener, scratch):
+        panel = (pathlib.Path(maps.__file__).parent / "js" / "offline_panel.js").read_text()
+        page_open = "function db(" + panel.split("function db(", 1)[1].split("\n                function dbRead", 1)[0]
+        script = page_open + "\nconst open = await db();" if opener == "page" else "const open = await base();"
+        result = self.run_worker(
+            tmp_path,
+            """
+            (async()=>{
+                const stores=new Set(['pages','flags','packs']),deleted=[],changed=[];
+                if(SCRATCH)stores.add('bench');
+                const fixtureDB={objectStoreNames:{contains:n=>stores.has(n)},close:()=>{},
+                    deleteObjectStore:n=>{deleted.push(n);stores.delete(n);},
+                    createObjectStore:n=>{changed.push(n);return {createIndex:()=>{}};}};
+                indexedDB={open:(name,version)=>{
+                    if(version!==6)throw Error('wrong version');
+                    const ask={result:fixtureDB,transaction:{objectStore:n=>({delete:k=>changed.push(k)})}};
+                    queueMicrotask(()=>{ask.onupgradeneeded({oldVersion:5});ask.onsuccess();});return ask;
+                }};
+                const window={indexedDB};
+                SCRIPT
+                console.log(JSON.stringify({stores:[...stores],deleted,changed}));
+            })().catch(e=>{console.error(e);process.exitCode=1;});
+            """.replace("SCRATCH", json.dumps(scratch)).replace("SCRIPT", script),
+        )
+        assert result == {"stores": ["pages", "flags", "packs"], "deleted": ["bench"] if scratch else [], "changed": []}
+
     def test_upgrade_discards_only_terrain_and_creates_both_indexes(self, tmp_path):
         result = self.run_worker(
             tmp_path,
             """
-            const stores = new Set(['pages','flags','bench','packs','browse']), indexes = [], deleted = [], flags = [];
+            const stores = new Set(['pages','flags','packs','browse']), indexes = [], deleted = [], flags = [];
             IDBKeyRange = {bound: (a,b)=>[a,b]};
             PackIO.upgrade({objectStoreNames:{contains:name=>stores.has(name)},
                 deleteObjectStore:name=>{deleted.push(name);stores.delete(name);},
@@ -9982,7 +9913,7 @@ class TestPackWorker:
             console.log(JSON.stringify({stores:[...stores],deleted,indexes,flags}));
         """,
         )
-        assert result["stores"] == ["pages", "flags", "bench", "packs"]
+        assert result["stores"] == ["pages", "flags", "packs"]
         assert result["deleted"] == ["browse", "packs"]
         assert result["indexes"] == [["browsed-at", "browsedAt"], ["kept", "keptAt"]]
         assert result["flags"] == ["held", "stand", "browse-bytes", ["browse-size:", "browse-size:\uffff"]]

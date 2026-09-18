@@ -2242,258 +2242,6 @@ def the_theme_switch(page: Any) -> Check:
     return Check("the theme switch", readings)
 
 
-def the_sources_measure_the_store(page: Any) -> Check:
-    """Four shapes at 2,000 tiles; the phone owns the large-store readings."""
-    viewport = page.viewport_size
-    page.set_viewport_size({"width": 430, "height": 932})
-    try:
-        page.wait_for_function("() => navigator.serviceWorker && navigator.serviceWorker.controller", timeout=60_000)
-        page.evaluate("() => window.trailsChrome.open('info')")
-        scratch = in_db("""seed => new Promise((done, fail) => {
-                const ask = indexedDB.open('__DB__', 5);
-                ask.onerror = () => fail(ask.error);
-                ask.onsuccess = () => {
-                    const db = ask.result, deal = db.transaction('bench', seed ? 'readwrite' : 'readonly');
-                    const store = deal.objectStore('bench');
-                    if (seed) {
-                        store.put(new Blob(['leftover chunk']), 'bench/chunks/interrupted');
-                        store.put(new Blob(['leftover tile']), -100);
-                    }
-                    const count = store.count();
-                    deal.oncomplete = () => { db.close(); done(count.result); };
-                    deal.onabort = () => { db.close(); fail(deal.error); };
-                };
-            })""")
-        readings = []
-        for variant, rows, writes in (("blob-url", 2000, 2000), ("blob-number", 2000, 2000), ("pack", 24, 24), ("archive", 1, 2)):
-            # An interrupted run may leave either kind of key. The helper must
-            # remove both before verifying its new row count, as well as after.
-            page.evaluate(scratch, True)
-            measured = page.evaluate("variant => window.trailsChrome.measureStore(2000, variant)", variant)
-            count = page.evaluate(scratch, False)
-            said = page.locator(".trails-store-bench-said").text_content() or ""
-            numbers = all(
-                isinstance(measured.get(key), (int, float)) and math.isfinite(measured[key]) and measured[key] >= 0
-                for key in ("rows", "writes", "fill", "clear", "open", "get", "fifty", "screen", "screenTiles", "screenErrors")
-            )
-            storage = (
-                measured["bytes"] == measured["usageAfter"] - measured["usageBefore"]
-                if measured["usageBefore"] is not None and measured["usageAfter"] is not None
-                else measured["bytes"] is None
-            )
-            readings.extend(
-                [
-                    Reading(
-                        f"{variant}: figures for 2,000 tiles",
-                        numbers and storage and "error" not in measured and measured["tiles"] == 2000 and measured["variant"] == variant,
-                        True,
-                        note=json.dumps(measured),
-                    ),
-                    Reading(f"{variant}: rows and writes", [measured["rows"], measured["writes"]], [rows, writes]),
-                    Reading(f"{variant}: scratch store is empty", count, 0),
-                    Reading(
-                        f"{variant}: Sources displays the figures",
-                        said.startswith(variant + " · ")
-                        and all(
-                            word in said for word in ("fill", "clear", "open", "one get", "fifty gets", "screen", "storage", "Scratch rows cleared.")
-                        ),
-                        True,
-                        note=said,
-                    ),
-                ]
-            )
-        # Keep both clear transactions alive long enough to see their clocks.
-        # Repeated requests are bounded in time and count, and touch only bench.
-        page.evaluate(scratch, True)
-        slow_clear = page.evaluate("""async () => {
-            const clear = IDBObjectStore.prototype.clear, stages = [], counts = [];
-            const said = document.querySelector('.trails-store-bench-said');
-            const observer = new MutationObserver(() => stages.push(said.textContent));
-            observer.observe(said, {childList: true});
-            IDBObjectStore.prototype.clear = function () {
-                if (this.name !== 'bench') { return clear.call(this); }
-                counts.push(said.textContent);
-                const label = said.textContent, began = performance.now();
-                const request = clear.call(this);
-                let requests = 0;
-                const hold = () => {
-                    // Keep the transaction alive until its clock has actually painted.
-                    // Even any-tick matching cannot see a tick after the stage has ended.
-                    const elapsed = performance.now() - began;
-                    if (elapsed >= 2100 && stages.some(s => s.startsWith(label + ' ') && /[0-9]+ s$/.test(s))) { return; }
-                    if (++requests > 100000 || elapsed > 30000) {
-                        this.transaction.abort(); throw new Error('Clear test request bound');
-                    }
-                    this.count().onsuccess = hold;
-                };
-                hold();
-                return request;
-            };
-            try {
-                const result = await window.trailsChrome.measureStore(3, 'blob-number');
-                return {result, stages, counts, said: said.textContent};
-            } finally { observer.disconnect(); IDBObjectStore.prototype.clear = clear; }
-        }""")
-        readings.extend(
-            [
-                Reading(
-                    "both clears show their row count and elapsed seconds",
-                    slow_clear["counts"] == [f"blob-number · clearing {count} scratch rows…" for count in (2, 3)]
-                    # Any elapsed reading, not the first second exactly: under two drives and a
-                    # hooks run at once the one-second tick was skipped (0 s, then 2 s) and the
-                    # clock was still shown, which is what the reading is about.
-                    and all(
-                        any(re.fullmatch(rf"blob-number · clearing {count} scratch rows… \d+ s", stage) for stage in slow_clear["stages"])
-                        for count in (2, 3)
-                    ),
-                    True,
-                    note=json.dumps(slow_clear),
-                ),
-                Reading(
-                    "clear time includes both transactions and appears in seconds",
-                    slow_clear["result"]["clear"] >= 4200
-                    and f" · clear {slow_clear['result']['clear'] / 1000:.1f} s" in slow_clear["said"]
-                    and slow_clear["result"]["cleared"],
-                    True,
-                ),
-            ]
-        )
-        # Empty initial scratch needs no write. A blocked count, before fill or
-        # during cleanup, must report the diagnosis and release the controls.
-        for blocked_read in (0, 1, 5):
-            blocked = page.evaluate(
-                """async blockedRead => {
-                const transaction = IDBDatabase.prototype.transaction, clear = IDBObjectStore.prototype.clear;
-                const timeout = window.setTimeout, fired = [];
-                window.setTimeout = function (fn, ms, ...args) {
-                    return timeout(() => { fired.push(ms); fn(...args); }, ms);
-                };
-                let reads = 0, clears = 0, aborted = false;
-                IDBDatabase.prototype.transaction = function (name, mode, ...rest) {
-                    if (name === 'bench' && mode === 'readonly' && ++reads === blockedRead) {
-                        const deal = {
-                            objectStore: () => ({transaction: deal, count: () => ({})}),
-                            abort: () => { aborted = true; queueMicrotask(() => deal.onabort()); }
-                        };
-                        return deal;
-                    }
-                    return transaction.call(this, name, mode, ...rest);
-                };
-                IDBObjectStore.prototype.clear = function () {
-                    if (this.name === 'bench') { clears++; }
-                    return clear.call(this);
-                };
-                const began = performance.now();
-                try {
-                    const result = await window.trailsChrome.measureStore(3, 'blob-number');
-                    return {result, clears, aborted, fired, elapsed: performance.now() - began,
-                        said: document.querySelector('.trails-store-bench-said').textContent};
-                } finally {
-                    IDBDatabase.prototype.transaction = transaction;
-                    IDBObjectStore.prototype.clear = clear;
-                    window.setTimeout = timeout;
-                }
-            }""",
-                blocked_read,
-            )
-            readings.append(
-                Reading(
-                    f"scratch count: {'empty skips the initial clear' if not blocked_read else f'read {blocked_read} times out'}",
-                    (
-                        blocked["clears"] == 1 and blocked["result"]["cleared"] and "error" not in blocked["result"]
-                        if not blocked_read
-                        else blocked["clears"] == 0
-                        and blocked["aborted"]
-                        and blocked["fired"].count(15000) == 1
-                        and "the database is held by another transaction" in blocked["result"].get("error", "")
-                        and "the database is held by another transaction" in blocked["said"]
-                        and page.locator(".trails-store-bench button").is_enabled()
-                    ),
-                    True,
-                    note=json.dumps(blocked),
-                )
-            )
-        # Fail after the stored chunk exists. Quota or WebKit's composite-Blob
-        # limit must become a result, and must leave neither chunks nor a row.
-        failed = page.evaluate("""async () => {
-            const put = IDBObjectStore.prototype.put;
-            IDBObjectStore.prototype.put = function (value, key) {
-                if (this.name === 'bench' && key === 0) {
-                    throw new DOMException('Simulated archive quota', 'QuotaExceededError');
-                }
-                return put.call(this, value, key);
-            };
-            try { return await window.trailsChrome.measureStore(2000, 'archive'); }
-            finally { IDBObjectStore.prototype.put = put; }
-        }""")
-        readings.extend(
-            [
-                Reading(
-                    "archive: failed write is a result",
-                    "write archive: QuotaExceededError" in failed.get("error", "") and failed["cleared"],
-                    True,
-                    note=json.dumps(failed),
-                ),
-                Reading("archive: failed write leaves no chunks or rows", page.evaluate(scratch, False), 0),
-                Reading(
-                    "archive: failure is visible and another run is allowed",
-                    "Measurement failed: write archive: QuotaExceededError" in (page.locator(".trails-store-bench-said").text_content() or "")
-                    and page.locator(".trails-store-bench button").is_enabled(),
-                    True,
-                ),
-            ]
-        )
-        # A real IndexedDB request fails asynchronously. Its error bubbles
-        # before transaction.error is set; cleanup must wait for the abort.
-        failed_request = page.evaluate("""async () => {
-            const put = IDBObjectStore.prototype.put;
-            IDBObjectStore.prototype.put = function (value, key) {
-                if (this.name === 'bench' && key === 0) {
-                    return this.add(value, 'bench/chunks/0');
-                }
-                return put.call(this, value, key);
-            };
-            try { return await window.trailsChrome.measureStore(2000, 'archive'); }
-            finally { IDBObjectStore.prototype.put = put; }
-        }""")
-        readings.extend(
-            [
-                Reading(
-                    "archive: asynchronous request failure is a result",
-                    "write archive: ConstraintError" in failed_request.get("error", "") and failed_request["cleared"],
-                    True,
-                    note=json.dumps(failed_request),
-                ),
-                Reading("archive: aborted transaction leaves no chunks or rows", page.evaluate(scratch, False), 0),
-            ]
-        )
-        # The unchanged trailing write takes 400 ms. Wait for its data, not an
-        # arbitrary sleep, then reopen Sources to read it out beside the counts.
-        told = wait_for_async(
-            page,
-            """async () => {
-                const told = await window.trailsOffline.dbRead('flags', 'tiles-said');
-                return told && told.time && told.peak > 0 &&
-                    ['mem', 'db', 'seen', 'net', 'blank'].some(path => told[path] > 0) && told;
-            }""",
-            timeout_ms=30_000,
-        )
-        page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.open('info'); }")
-        page.wait_for_function("() => document.querySelector('.trails-open-tiles').textContent.includes('peak in flight:')")
-        tally = all(
-            isinstance(told[path], int) and told[path] >= 0 and 0 <= told["time"][path]["worst"] <= told["time"][path]["total"]
-            for path in ("mem", "db", "seen", "net", "blank")
-        ) and 0 <= told["deadlines"] <= sum(told[path] for path in ("mem", "db", "seen", "net", "blank"))
-        readings.append(Reading("the worker tally has counts, times, deadlines and peak concurrency", tally and told["peak"] > 0, True))
-        line = page.locator(".trails-open-tiles").text_content() or ""
-        readings.append(Reading("Sources shows memory counts and timings", "from memory" in line and "Memory:" in line, True, note=line))
-        return Check("the sources measure the store", readings)
-    finally:
-        page.evaluate("() => window.trailsChrome.close()")
-        if viewport:
-            page.set_viewport_size(viewport)
-
-
 def the_sources_are_a_page(page: Any) -> Check:
     """Eleven lines of licence, and the room they take on a phone.
 
@@ -9176,6 +8924,7 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
     #: How often each path was asked for with a GET, across every instance.
     asked: dict[str, int] = {}
     pack_requests: list[tuple[str, str | None, int]] = []
+    pack_events: list[tuple[str, str]] = []
 
     #: And with a HEAD, counted apart. `send_head` runs for both, so counting
     #: them together would put the worker's cheap "has it moved?" into the figure
@@ -9195,6 +8944,17 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
             *args: Ignored.
         """
 
+    def do_GET(self) -> None:
+        """Record whole-pack starts and finishes at the serving end."""
+        whole = self.path.split("?")[0].endswith(".pmtiles") and not self.headers.get("Range")
+        if whole:
+            _Quiet.pack_events.append(("start", self.path))
+        try:
+            super().do_GET()
+        finally:
+            if whole:
+                _Quiet.pack_events.append(("end", self.path))
+
     def send_head(self) -> Any:
         """Count the request, then answer it as usual.
 
@@ -9210,6 +8970,25 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
                 time.sleep(0.25)
                 waited += 0.25
         path = pathlib.Path(self.translate_path(self.path))
+        if path.suffix == ".js" and "drive-packs" in self.path and path.is_file():
+            # Only this reading's worker exposes an idle barrier. The page waits
+            # for its actual timer and commits, never for a guessed wall time.
+            probe = """
+var driveFill = Promise.resolve(), driveFillRecent = fillRecent;
+fillRecent = function () { return driveFill = driveFillRecent.apply(this, arguments); };
+self.addEventListener('message', function (event) {
+    if (event.data.trails !== 'drive-settled') return;
+    event.waitUntil(Promise.resolve(settleWait || driveFill).then(function () {
+        return Promise.allSettled(Array.from(filling.values()));
+    }).then(function () { event.ports[0].postMessage({idle: settleTimer === null, filling: filling.size}); }));
+});
+"""
+            body = (path.read_text() + probe).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return io.BytesIO(body)
         if path.suffix == ".pmtiles" and path.is_file():
             length = path.stat().st_size
             requested = self.headers.get("Range")
@@ -9251,6 +9030,7 @@ def served(directory: pathlib.Path) -> Any:
     """
     _Quiet.asked = {}
     _Quiet.pack_requests = []
+    _Quiet.pack_events = []
     handler = functools.partial(_Quiet, directory=str(directory))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -9272,7 +9052,7 @@ def served(directory: pathlib.Path) -> Any:
 #: entries in a cache: the first `caches.open()` of any cache costs 23 s on a
 #: phone with the ground kept.
 ROWS = """async (store) => await new Promise(done => {
-    const ask = indexedDB.open('__DB__', 5);
+    const ask = indexedDB.open('__DB__', 6);
     ask.onsuccess = () => {
         const count = ask.result.transaction(store, 'readonly').objectStore(store).count();
         count.onsuccess = () => done(count.result);
@@ -9282,7 +9062,7 @@ ROWS = """async (store) => await new Promise(done => {
 })"""
 
 CACHED_PAGE = """async () => await new Promise(done => {
-    const ask = indexedDB.open('__DB__', 5);
+    const ask = indexedDB.open('__DB__', 6);
     ask.onsuccess = () => {
         const get = ask.result.transaction('pages', 'readonly').objectStore('pages').get(location.href);
         get.onsuccess = () => done(!!get.result);
@@ -9883,7 +9663,7 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         held = page.evaluate(
             in_db("""async (extra) => {
             const db = await new Promise((done, fail) => {
-                const ask = indexedDB.open('__DB__', 5);
+                const ask = indexedDB.open('__DB__', 6);
                 ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
             });
             const keys = await new Promise((done, fail) => {
@@ -9918,7 +9698,7 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         stored = page.evaluate(
             in_db("""async () => {
             const db = await new Promise(done => {
-                const ask = indexedDB.open('__DB__', 5); ask.onsuccess = () => done(ask.result);
+                const ask = indexedDB.open('__DB__', 6); ask.onsuccess = () => done(ask.result);
             });
             const result = await new Promise(done => {
                 const tx = db.transaction(['packs', 'flags']);
@@ -9981,7 +9761,7 @@ def the_empty_pack_count(page: Any) -> Check:
             page.evaluate(
                 in_db("""async (state) => {
                     const db = await new Promise((done, fail) => {
-                        const ask = indexedDB.open('__DB__', 5);
+                        const ask = indexedDB.open('__DB__', 6);
                         ask.onsuccess = () => done(ask.result); ask.onerror = () => fail(ask.error);
                     });
                     await new Promise((done, fail) => {
@@ -10022,7 +9802,7 @@ def the_empty_pack_count(page: Any) -> Check:
 
 
 def the_pack_upgrade(browser: Any, page_path: pathlib.Path) -> Check:
-    """Both version-five openers discard terrain, preserving the page and switch."""
+    """Older terrain is reset; version five keeps its rows through the next upgrade."""
     panel = (pathlib.Path(maps.__file__).parent / "js" / "offline_panel.js").read_text()
     opener = "function db(" + panel.split("function db(", 1)[1].split("\n                function dbRead", 1)[0]
     opener = opener.replace("{{ this.database }}", "pack-upgrade")
@@ -10070,7 +9850,7 @@ def the_pack_upgrade(browser: Any, page_path: pathlib.Path) -> Check:
                         who + " recreates packs and resets terrain flags without losing page or switch",
                         result,
                         {
-                            "version": 5,
+                            "version": 6,
                             "browse": False,
                             "indexes": ["browsed-at", "kept"],
                             "count": 0,
@@ -10082,30 +9862,93 @@ def the_pack_upgrade(browser: Any, page_path: pathlib.Path) -> Check:
                         },
                     )
                 )
-    return Check("both openers recreate the pack store on upgrade", readings)
+                preserved = page.evaluate(
+                    """async script => {
+                    await new Promise((done,fail)=>{const ask=indexedDB.deleteDatabase('pack-upgrade');
+                        ask.onsuccess=done;ask.onerror=()=>fail(ask.error);});
+                    const original = {
+                        kept:{pack:new Uint8Array([1,2,3]).buffer,kept:true,complete:true,at:12,size:3,keptAt:['kept',3]},
+                        partial:{pack:new Uint8Array([4,5]).buffer,kept:false,complete:false,at:13,size:2,browsedAt:[13,2]}
+                    };
+                    await new Promise((done,fail)=>{
+                        const ask=indexedDB.open('pack-upgrade',5);
+                        ask.onupgradeneeded=()=>{
+                            const db=ask.result,store=db.createObjectStore('packs');
+                            store.createIndex('kept','keptAt');store.createIndex('browsed-at','browsedAt');
+                            for(const [key,row] of Object.entries(original))store.put(row,key);
+                            const flags=db.createObjectStore('flags');
+                            flags.put({packs:1,bytes:3,top:17},'held');flags.put({bytes:2,writes:7},'browse-bytes');flags.put('on','offline');
+                            db.createObjectStore('pages').put('saved document','page');db.createObjectStore('bench').put('scratch','old');
+                        };
+                        ask.onsuccess=()=>{ask.result.close();done();};ask.onerror=()=>fail(ask.error);
+                    });
+                    const db=await new Function('self',script)({location,addEventListener:()=>{}});
+                    const tx=db.transaction(['packs','flags','pages']),store=tx.objectStore('packs');
+                    const kept=store.get('kept'),partial=store.get('partial'),held=tx.objectStore('flags').get('held'),
+                        browse=tx.objectStore('flags').get('browse-bytes'),offline=tx.objectStore('flags').get('offline'),
+                        page=tx.objectStore('pages').get('page');
+                    await new Promise(done=>{tx.oncomplete=done;});
+                    const encode=row=>JSON.stringify({...row,pack:[...new Uint8Array(row.pack)]});
+                    const out={stores:[...db.objectStoreNames],version:db.version,
+                        rows:encode(kept.result)===encode(original.kept) && encode(partial.result)===encode(original.partial),
+                        held:held.result,browse:browse.result,offline:offline.result,page:page.result};
+                    db.close();return out;
+                }""",
+                    script,
+                )
+                readings.append(
+                    Reading(
+                        who + " preserves version-five rows, ledgers, page and switch",
+                        preserved,
+                        {
+                            "stores": ["flags", "packs", "pages"],
+                            "version": 6,
+                            "rows": True,
+                            "held": {"packs": 1, "bytes": 3, "top": 17},
+                            "browse": {"bytes": 2, "writes": 7},
+                            "offline": "on",
+                            "page": "saved document",
+                        },
+                    )
+                )
+    return Check("both database openers upgrade without losing version-five ground", readings)
 
 
 def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
     """Real first control, range/whole requests, a second screen, and cold offline packs."""
     readings: list[Reading] = []
     with served(page_path.parent) as origin:
-        context = browser.new_context(viewport={"width": 430, "height": 932})
-        # Start at z17 on a fresh origin, with the page's default overlays.
-        # Override only its initial fitBounds, before any tile layer is added.
-        context.add_init_script(
-            """(() => {
-            let leaflet;
-            Object.defineProperty(window, 'L', {configurable: true, get: () => leaflet, set: value => {
-                leaflet = value;
-                const fit = value.Map.prototype.fitBounds;
-                value.Map.prototype.fitBounds = function (...args) {
-                    value.Map.prototype.fitBounds = fit;
-                    const p = this.project(__STANDING__, 14).divideBy(256).floor();
-                    return this.setView(this.unproject(p.add([0.5, 0.5]).multiplyBy(256), 14), 17, {animate: false});
-                };
-            }});
-        })();""".replace("__STANDING__", json.dumps(SCENE.standing))
-        )
+
+        def new_context() -> Any:
+            context = browser.new_context(viewport={"width": 430, "height": 932})
+            # Start at z17 on a fresh origin, with the page's default overlays.
+            # Override only its initial fitBounds, before any tile layer is added.
+            context.add_init_script("""(() => {
+                const register = navigator.serviceWorker.register.bind(navigator.serviceWorker);
+                navigator.serviceWorker.register = (url, options) => register(url + (url.includes('?') ? '&' : '?') + 'drive-packs', options);
+                window.waitPackIdle = () => new Promise(done => {
+                    const channel = new MessageChannel();
+                    channel.port1.onmessage = event => done(event.data);
+                    navigator.serviceWorker.controller.postMessage({trails:'drive-settled'}, [channel.port2]);
+                });
+            })();""")
+            context.add_init_script(
+                """(() => {
+                let leaflet;
+                Object.defineProperty(window, 'L', {configurable: true, get: () => leaflet, set: value => {
+                    leaflet = value;
+                    const fit = value.Map.prototype.fitBounds;
+                    value.Map.prototype.fitBounds = function (...args) {
+                        value.Map.prototype.fitBounds = fit;
+                        const p = this.project(__STANDING__, 14).divideBy(256).floor();
+                        return this.setView(this.unproject(p.add([0.5, 0.5]).multiplyBy(256), 14), 17, {animate: false});
+                    };
+                }});
+            })();""".replace("__STANDING__", json.dumps(SCENE.standing))
+            )
+            return context
+
+        context = new_context()
         page = context.new_page()
         page.goto(f"{origin}/{page_path.name}", timeout=180_000)
         page.wait_for_function("() => navigator.serviceWorker.controller", timeout=30_000)
@@ -10124,12 +9967,26 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         )
         readings.append(Reading("first z17 screen requests no whole pack", sum(row[1] is None for row in initial), 0))
         readings.append(Reading("the online reader uses ranges too", any(row[1] is not None for row in initial), True))
-        page.wait_for_timeout(2200)
-        readings.append(Reading("staying on the first screen starts no request", len(_Quiet.pack_requests) - len(initial), 0))
         # Resolve the visible tile URLs using the production address function.
         worker = (page_path.parent / SCENE.companions.worker).read_text()
         page.evaluate(
             "source => { window.probePackFor = new Function('self', source + ';return packFor;')({location,addEventListener:()=>{}}); }", worker
+        )
+        idle = page.evaluate("async () => await window.waitPackIdle()")
+        settled = list(_Quiet.pack_requests)
+        background = settled[len(initial) :]
+        whole = [row for row in background if row[1] is None]
+        readings.append(Reading("the idle screen finishes its background writes", idle, {"idle": True, "filling": 0}))
+        readings.append(Reading("stillness fills the sheet before its overlays", [row[0].split("/")[2] for row in whole], ["tiles", "shade"]))
+        readings.append(Reading("stillness fetches whole packs only", len(background), len(whole)))
+        readings.append(Reading("height packs are never filled in the background", any("/dem/" in row[0] for row in whole), False))
+        active = peak = 0
+        for action, _ in _Quiet.pack_events:
+            active += 1 if action == "start" else -1
+            peak = max(peak, active)
+        readings.append(Reading("at most two whole requests are served at once", peak <= 2, True, note=f"peak {peak}"))
+        readings.append(
+            Reading("first-screen ordered requests are recorded", True, True, note=json.dumps({"ranges": initial, "settled": background}))
         )
         assert wait_until(
             page,
@@ -10137,7 +9994,7 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
             const urls=[...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')].map(t=>t.src.split('?')[0]);
             for(const url of urls) {
                 const a=window.probePackFor(url),row=await window.trailsOffline.dbRead('packs',a.url);
-                if(!row || row.kept || !PackIO.unpack(row.pack).entries.has(a.id)) return false;
+                if(!row || row.kept || !row.complete || !PackIO.unpack(row.pack).entries.has(a.id)) return false;
             }return true;
         }""",
             30_000,
@@ -10179,50 +10036,18 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
                 note=f"{ranged['tiles']} tiles, {ranged['bytes']} bytes; seen {browse_tally['seen']}",
             )
         )
-        readings.append(Reading("the cold browse screen asks for no pack", len(_Quiet.pack_requests) - len(initial), 0))
+        readings.append(Reading("the cold browse screen asks for no pack", len(_Quiet.pack_requests) - len(settled), 0))
         context.set_offline(False)
-        # Once the directory is older than the window, one further tile asks
-        # for its pack. Keep only the base for the following warm/offline views.
-        tile_url = page.evaluate(
+        # Keep only the base for the following warm and switch-on screens.
+        page.evaluate(
             with_map("""() => {
             const layers = []; __MAP__.eachLayer(l => { if (l.getTileUrl) layers.push(l); });
             window.packSheet = layers.find(l => !l.options.trailsShade && !l.options.trailsSlope &&
                 !l.options.trailsVegetation && !l.options.trailsForest);
             layers.filter(l => l !== window.packSheet).forEach(l => __MAP__.removeLayer(l));
-            return Object.values(window.packSheet._tiles)[0].el.src;
+            window.settledPack = window.probePackFor(Object.values(window.packSheet._tiles)[0].el.src.split('?')[0]).url;
         }""")
         )
-        # The visible z17 tile is now cached. Two unseen ancestors in its pack
-        # exercise directory arrival and later promotion after the cold life.
-        parent_url = re.sub(r"17/(\d+)/(\d+)\.png.*", lambda m: f"14/{int(m[1]) >> 3}/{int(m[2]) >> 3}.png", tile_url)
-        child_url = re.sub(r"14/(\d+)/(\d+)\.png", lambda m: f"15/{int(m[1]) * 2}/{int(m[2]) * 2}.png", parent_url)
-        page.evaluate("async url => { await (await fetch(url)).arrayBuffer(); }", child_url)
-        page.wait_for_timeout(2200)
-        page.evaluate("async url => { await (await fetch(url + '?pack-dwell=1')).arrayBuffer(); }", parent_url)
-        page.evaluate(
-            "url => { const u = new URL(url); u.pathname = '/packs' + u.pathname.replace('.png', '.pmtiles'); window.promotedPack = u.href; }",
-            parent_url,
-        )
-        # The tile's range need not wait for the background whole-pack body.
-        wait_for_async(
-            page,
-            """async () => {
-            const db = window.trailsOffline;
-            return (await db.dbRead('packs', window.promotedPack))?.complete === true;
-        }""",
-        )
-        settled = list(_Quiet.pack_requests)
-        promoted = settled[len(initial) :]
-        whole = [row for row in promoted if row[1] is None]
-        readings.append(
-            Reading(
-                "one tile after the window fetches at most one whole pack",
-                len(whole) <= 1,
-                True,
-                note=f"{len(whole)} whole, {sum(r[2] for r in promoted)} bytes",
-            )
-        )
-        readings.append(Reading("the settled base pack is available", any("/packs/tiles/" in row[0] and row[1] is None for row in settled), True))
         per_tile = [path for path in _Quiet.asked if re.match(r"/(tiles|dem|shade|slope|vegetation|forest)/.*\.png", path)]
         readings.append(Reading("no per-tile object reaches the server", per_tile, []))
         before = wait_for_async(page, "async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
@@ -10251,13 +10076,13 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
                 f"worst {after['time']['mem']['worst']:.1f} ms",
             )
         )
-        # Promote exactly one full browse row, then start a cold worker life.
+        # Keep exactly one complete browse row, then start a cold worker life.
         seeded = page.evaluate(
             """async () => {
-            const row=await window.trailsOffline.dbRead('packs',window.promotedPack);
-            const db=await new Promise((done,fail)=>{const ask=indexedDB.open('__DB__',5);
+            const row=await window.trailsOffline.dbRead('packs',window.settledPack);
+            const db=await new Promise((done,fail)=>{const ask=indexedDB.open('__DB__',6);
                 ask.onsuccess=()=>done(ask.result);ask.onerror=()=>fail(ask.error);});
-            await PackIO.put(db,window.promotedPack,row.pack,17);
+            await PackIO.put(db,window.settledPack,row.pack,17);
             await new Promise(done=>{const tx=db.transaction('flags','readwrite');tx.objectStore('flags').put('on','offline');tx.oncomplete=done;});
             db.close();return {count:1,bytes:row.size};
         }""".replace("__DB__", SCENE.companions.database)
@@ -10290,7 +10115,96 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
             return (await (await fetch(prefix + '17/0/0.png?pack-absent=1')).arrayBuffer()).byteLength;
         }""")
         readings.append(Reading("outside the kept packs is blank", blank_size, 68))
+        switch_initial = list(_Quiet.pack_requests[len(settled) :])
+        idle = page.evaluate("async () => await window.waitPackIdle()")
+        switched_rows = page.evaluate("""async () => {
+            const row=await window.trailsOffline.dbRead('packs',window.settledPack);
+            const held=await window.trailsOffline.dbRead('flags','held');
+            const browse=await window.trailsOffline.dbRead('flags','browse-bytes');
+            return {complete:row.complete,kept:row.kept,keptRows:held.packs,keptBytes:held.bytes,browseBytes:browse.bytes};
+        }""")
+        switched_rows["rows"] = page.evaluate(in_db(ROWS), "packs")
+        readings.append(
+            Reading(
+                "the switch-on screen settles without background work",
+                idle,
+                {"idle": True, "filling": 0},
+                note=json.dumps(
+                    {"initial": switch_initial, "settled": _Quiet.pack_requests[len(settled) + len(switch_initial) :], "store": switched_rows}
+                ),
+            )
+        )
         readings.append(Reading("offline asks for no pack", len(_Quiet.pack_requests) - len(settled), 0))
+        context.close()
+        # A fresh browse session keeps requesting while the view moves. Add
+        # every overlay and ask for a height tile too, so exclusion is exercised.
+        context = new_context()
+        page = context.new_page()
+        began_requests, began_events = len(_Quiet.pack_requests), len(_Quiet.pack_events)
+        page.goto(f"{origin}/{page_path.name}", timeout=180_000)
+        page.wait_for_function(loaded, timeout=60_000)
+        prefixes = page.evaluate("() => window.trailsOffline.prefixes()")
+        provider = next(p for p in maps.PROVIDERS.values() if prefixes["map"].endswith(p.tiles))
+        overlay_tops = {name: getattr(provider, name).top for name in ("slope", "vegetation", "forest")}
+        page.evaluate(
+            with_map("""tops => {
+            const map=__MAP__, prefixes=window.trailsOffline.prefixes();
+            Object.entries(tops).forEach(([name,top])=>L.tileLayer(prefixes[name]+'{z}/{x}/{y}.png',
+                {maxNativeZoom:top,maxZoom:18,updateWhenIdle:true}).addTo(map));
+            window.movingRounds=0;
+            async function move() {
+                map.panBy([8,0],{animate:false});
+                const urls=[...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')].map(t=>t.src.split('?')[0]);
+                const p=map.project(map.getCenter(),13).divideBy(256).floor();
+                urls.push(prefixes.height+'13/'+p.x+'/'+p.y+'.png');
+                await Promise.all(urls.map(u=>fetch(u+'?moving='+window.movingRounds).then(r=>r.arrayBuffer())));
+                window.movingRounds++;
+                if(window.movingRounds<12)setTimeout(move,300);
+            }
+            move();
+        }"""),
+            overlay_tops,
+        )
+        page.wait_for_function("() => window.movingRounds === 12", timeout=60_000)
+        moving_requests = list(_Quiet.pack_requests[began_requests:])
+        readings.append(Reading("moving through twelve views fetches no whole pack", sum(r[1] is None for r in moving_requests), 0))
+        idle = page.evaluate("async () => await window.waitPackIdle()")
+        filled = _Quiet.pack_requests[began_requests + len(moving_requests) :]
+        kinds = [row[0].split("/")[2] for row in filled if row[1] is None]
+        readings.append(
+            Reading(
+                "the moving view fills the sheet before all four overlays once it stops",
+                bool(kinds) and kinds[0] == "tiles" and sorted(kinds[1:]) == ["forest", "shade", "slope", "vegetation"],
+                True,
+                note=str(kinds),
+            )
+        )
+        active = peak = 0
+        for action, _ in _Quiet.pack_events[began_events:]:
+            active += 1 if action == "start" else -1
+            peak = max(peak, active)
+        readings.append(Reading("all overlays still use at most two whole requests at once", 0 < peak <= 2, True, note=f"peak {peak}; {kinds}"))
+        readings.append(Reading("the moving view settles all its writes", idle, {"idle": True, "filling": 0}))
+        complete = page.evaluate(
+            """async paths => {
+            const rows=await Promise.all(paths.map(path=>window.trailsOffline.dbRead('packs',new URL(path,location.href).href)));
+            return rows.every(row=>row && row.complete && !row.kept);
+        }""",
+            [row[0] for row in filled if row[1] is None],
+        )
+        readings.append(Reading("the settled sheet and all overlay rows are complete browse packs", complete, True))
+        # Turn the switch on before the next idle window on unfilled ground.
+        # The acknowledgement comes after the flag's commit.
+        page.evaluate("""() => new Promise(done => {
+            const hear=e=>{if(e.data.trails==='offline' && e.data.on){navigator.serviceWorker.removeEventListener('message',hear);done();}};
+            navigator.serviceWorker.addEventListener('message',hear);
+            navigator.serviceWorker.controller.postMessage({trails:'offline',on:true});
+        })""")
+        before_offline = len(_Quiet.pack_requests)
+        page.evaluate(with_map("() => {__MAP__.panBy([2048,0],{animate:false});}"))
+        page.wait_for_function("() => [...document.querySelectorAll('.leaflet-tile-pane img.leaflet-tile')].every(t=>t.complete)")
+        page.evaluate("async () => await window.waitPackIdle()")
+        readings.append(Reading("the switch prevents idle fills on unseen ground", len(_Quiet.pack_requests) - before_offline, 0))
         context.close()
     return Check("the worker reads packs", readings)
 
@@ -10521,26 +10435,21 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
             }""",
             timeout=60_000,
         )
-        # First-screen ranges deliberately keep no whole pack. A further tile
-        # after the two-second directory window triggers promotion; sitting still
-        # for four seconds does not. Wait for its store commit before counting.
-        tile_url = first.evaluate(
-            with_map("""() => {
-                let url = null;
-                __MAP__.eachLayer(l => {
-                    if (!l.getTileUrl || l.options.trailsShade || l.options.trailsSlope ||
-                            l.options.trailsVegetation || l.options.trailsForest) return;
-                    const tile = Object.values(l._tiles).find(t => t.current && t.el.naturalWidth > 1);
-                    if (tile) url = tile.el.src;
-                });
-                return url;
-            }""")
+        # Stillness completes the visible sheet packs without another tile request.
+        worker = (page_path.parent / SCENE.companions.worker).read_text()
+        first.evaluate(
+            "source => { window.probePackFor = new Function('self', source + ';return packFor;')({location,addEventListener:()=>{}}); }", worker
         )
-        if not tile_url:
-            raise RuntimeError("No drawn sheet tile to revisit for browse promotion")
-        first.wait_for_timeout(2200)
-        first.evaluate("async url => { await (await fetch(url + '?drive-browse=1')).arrayBuffer(); }", tile_url)
-        wait_for_async(first, "async () => (await window.trailsOffline.dbRead('flags', 'browse-bytes'))?.bytes > 0")
+        wait_for_async(
+            first,
+            """async () => {
+            const tiles = [...document.querySelectorAll('img.leaflet-tile')].filter(t=>t.naturalWidth>1);
+            if (!tiles.length) return false;
+            const urls = [...new Set(tiles.map(t=>window.probePackFor(t.src.split('?')[0]).url))];
+            const rows = await Promise.all(urls.map(u=>window.trailsOffline.dbRead('packs',u)));
+            return rows.every(r=>r && r.complete);
+        }""",
+        )
         browsed = first.evaluate(in_db(ROWS), "packs")
         # **What the first visit paid**, read off the server rather than the
         # page: the worker keeps the map by asking for it a second time, and if
@@ -10625,7 +10534,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         stamped = first.evaluate(
             in_db("""(when) => new Promise(resolve => {
                 const stamp = new Date(when).toUTCString();
-                const ask = indexedDB.open('__DB__', 5);
+                const ask = indexedDB.open('__DB__', 6);
                 ask.onsuccess = () => { const db = ask.result;
                   const store = db.transaction('pages', 'readwrite').objectStore('pages');
                   const got = store.get(location.href);
@@ -10862,6 +10771,15 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # it says online and the guard above waves the run through -- which is
         # what the twelve-in-a-row rule behind it is for. Driven by forcing the
         # flag true while the context is offline, which is that valley exactly.
+        complete_before = first.evaluate(
+            in_db("""() => new Promise(done => {
+            const ask=indexedDB.open('__DB__',6);
+            ask.onsuccess=()=>{
+                const db=ask.result,store=db.transaction('packs').objectStore('packs'),keys=store.getAllKeys(),rows=store.getAll();
+                rows.onsuccess=()=>{const result=keys.result.filter((_,i)=>rows.result[i].complete);db.close();done(result);};
+            };
+        })""")
+        )
         first.evaluate("() => { Object.defineProperty(navigator, 'onLine', {value: true, configurable: true}); }")
         first.evaluate("() => window.trailsOffline.keep()")
         first.wait_for_function("() => !window.trailsOffline.state().busy", timeout=180_000)
@@ -10878,8 +10796,27 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 note="twelve refusals in a row, not a hundred thousand attempts",
             )
         )
-        terrain.append(Reading("and it too keeps nothing", stalled["kept"]["packs"], 0))
-        terrain.append(Reading("and switches nothing on either", stalled["on"], False))
+        kept_after_stall = first.evaluate(
+            in_db("""() => new Promise(done => {
+            const ask=indexedDB.open('__DB__',6);
+            ask.onsuccess=()=>{
+                const db=ask.result,keys=db.transaction('packs').objectStore('packs').index('kept').getAllKeys();
+                keys.onsuccess=()=>{db.close();done(keys.result);};
+            };
+        })""")
+        )
+        terrain.append(
+            Reading(
+                "the interrupted run keeps only packs already complete locally",
+                stalled["kept"]["packs"] == len(kept_after_stall) and set(kept_after_stall).issubset(complete_before),
+                True,
+                note=f"{stalled['kept']['packs']} complete browse packs reused",
+            )
+        )
+        terrain.append(Reading("the interrupted run switches on only if it kept ground", stalled["on"], bool(kept_after_stall)))
+        # The following chooser and arrow-to-tick readings start without a kept
+        # promise, just as they did before idle browsing supplied complete packs.
+        first.evaluate("async () => await window.trailsOffline.forget()")
 
         # **What the chooser draws, before anything is downloaded.** It needs the
         # network for the terrain under the preview and the switch still off, and
@@ -10983,7 +10920,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         )
         weighed = first.evaluate(
             in_db("""async () => await new Promise(done => {
-                const ask = indexedDB.open('__DB__', 5);
+                const ask = indexedDB.open('__DB__', 6);
                 ask.onsuccess = () => {
                     const store = ask.result.transaction('packs', 'readonly').objectStore('packs');
                     const all = store.getAll(undefined, 40);
@@ -11616,8 +11553,6 @@ def drive(page: Any) -> list[Check]:
     ]
     if wanted(zoom_out_requests):
         checks.append(timed(zoom_out_requests, page))
-    if wanted(the_sources_measure_the_store):
-        checks.append(timed(the_sources_measure_the_store, page))
     if wanted(the_zoom_the_scale_says):
         checks.append(timed(the_zoom_the_scale_says, page))
     if wanted(the_empty_pack_count):

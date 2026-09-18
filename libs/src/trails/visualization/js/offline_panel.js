@@ -863,18 +863,20 @@
                             // the wait never ends. Measured here -- the page held
                             // 1 while the worker asked for 2, and the map stopped
                             // opening altogether.
-                            var ask = window.indexedDB.open('{{ this.database }}', 5);
+                            var ask = window.indexedDB.open('{{ this.database }}', 6);
                             ask.onblocked = function () { fail(new Error('blocked')); };
-                            ask.onupgradeneeded = function () {
+                            ask.onupgradeneeded = function (event) {
                                 var made = ask.result;
-                                if (!made.objectStoreNames.contains('pages')) { made.createObjectStore('pages'); }
-                                if (!made.objectStoreNames.contains('flags')) { made.createObjectStore('flags'); }
-                                if (made.objectStoreNames.contains('tiles')) {
-                                    made.deleteObjectStore('tiles');
-                                    ask.transaction.objectStore('flags').delete(HELD);
+                                if (event.oldVersion < 5) {
+                                    if (!made.objectStoreNames.contains('pages')) { made.createObjectStore('pages'); }
+                                    if (!made.objectStoreNames.contains('flags')) { made.createObjectStore('flags'); }
+                                    if (made.objectStoreNames.contains('tiles')) {
+                                        made.deleteObjectStore('tiles');
+                                        ask.transaction.objectStore('flags').delete(HELD);
+                                    }
+                                    PackIO.upgrade(made, ask.transaction);
                                 }
-                                if (!made.objectStoreNames.contains('bench')) { made.createObjectStore('bench'); }
-                                PackIO.upgrade(made, ask.transaction);
+                                if (made.objectStoreNames.contains('bench')) { made.deleteObjectStore('bench'); }
                             };
                             ask.onsuccess = function () {
                                 var open = ask.result;

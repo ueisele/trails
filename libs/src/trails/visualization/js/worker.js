@@ -30,7 +30,7 @@ var DB = "__DB__";
 // database at 1 while the worker asked for 2 and a navigation never answered at
 // all. The app would not have opened. There is a test that the two literals
 // match, because nothing else would notice.
-var DB_AT = 5;
+var DB_AT = 6;
 var PAGES = "pages";
 var FLAGS = "flags";
 // One archive row per address. Its kept flag makes the storage promise;
@@ -46,16 +46,18 @@ function base() {
         // Said rather than waited on: blocked means somebody else is holding an
         // older connection, and hanging is the one answer that helps nobody.
         ask.onblocked = function () { fail(new Error("the database is blocked")); };
-        ask.onupgradeneeded = function () {
+        ask.onupgradeneeded = function (event) {
             var made = ask.result;
-            if (!made.objectStoreNames.contains(PAGES)) { made.createObjectStore(PAGES); }
-            if (!made.objectStoreNames.contains(FLAGS)) { made.createObjectStore(FLAGS); }
-            if (made.objectStoreNames.contains("tiles")) {
-                made.deleteObjectStore("tiles");
-                ask.transaction.objectStore(FLAGS).delete("held");
+            if (event.oldVersion < 5) {
+                if (!made.objectStoreNames.contains(PAGES)) { made.createObjectStore(PAGES); }
+                if (!made.objectStoreNames.contains(FLAGS)) { made.createObjectStore(FLAGS); }
+                if (made.objectStoreNames.contains("tiles")) {
+                    made.deleteObjectStore("tiles");
+                    ask.transaction.objectStore(FLAGS).delete("held");
+                }
+                PackIO.upgrade(made, ask.transaction);
             }
-            if (!made.objectStoreNames.contains("bench")) { made.createObjectStore("bench"); }
-            PackIO.upgrade(made, ask.transaction);
+            if (made.objectStoreNames.contains("bench")) { made.deleteObjectStore("bench"); }
         };
         ask.onsuccess = function () {
             var open = ask.result;
@@ -516,8 +518,8 @@ function packFor(plain) {
 }
 
 // 48 directories are small (85 entries at most); eight bodies cover nearby
-// screens. Only a new request after two seconds on that ground can promote a
-// directory to a whole pack; a first-screen burst stays on ranges.
+// screens. Requests stay on ranges; idle time fills the recent screen whole.
+// The phone may tune SETTLE_MS; all address and body caches stay bounded.
 var DIRECTORY_LIMIT = 48, PACK_LIMIT = 8, SETTLE_MS = 2000, FILL_LIMIT = 2;
 var directories = new Map(), packs = new Map(), opening = new Map(), filling = new Map();
 function recent(cache, key) {
@@ -531,9 +533,10 @@ function remember(cache, key, value, limit) {
     return value;
 }
 var packHeader = PackIO.header, packDirectory = PackIO.directory;
-function holdPack(url, body, complete = true) {
+function holdPack(url, body, network = true, complete = network) {
     var held = PackIO.unpack(body);
-    if (complete) { remember(directories, url, {entries: held.entries, at: Date.now()}, DIRECTORY_LIMIT); }
+    held.complete = complete;
+    if (network) { remember(directories, url, {entries: held.entries}, DIRECTORY_LIMIT); }
     return remember(packs, url, held, PACK_LIMIT);
 }
 var sliceTile = PackIO.slice;
@@ -555,13 +558,63 @@ function keepNetworkPack(url, body, event) {
     if (event) { event.waitUntil(kept); }
     return pack;
 }
-function wholePack(url, event) {
+// One resettable timer, and at most 48 addresses rather than one item per tile.
+// Its promise is attached during the fetch event, keeping the worker alive through
+// the idle window and the writes. A new request also stops an old fill queue.
+var askedPacks = new Map(), settleTimer = null, settleWait = null, settleDone = null, requestGeneration = 0;
+function notePack(address, event) {
+    var asked = Date.now(), generation = ++requestGeneration;
+    remember(askedPacks, address.url, asked, DIRECTORY_LIMIT);
+    if (settleTimer !== null) { clearTimeout(settleTimer); }
+    if (!settleWait) { settleWait = new Promise(function (done) { settleDone = done; }); }
+    if (event) { event.waitUntil(settleWait); }
+    settleTimer = setTimeout(function () {
+        var done = settleDone;
+        settleTimer = null; settleWait = null; settleDone = null;
+        fillRecent(asked, generation).catch(function () {}).finally(done);
+    }, SETTLE_MS);
+}
+function packPriority(url) {
+    var layer = LAYERS.findIndex(function (entry) {
+        if (!entry[0]) { return false; }
+        var prefix = new URL(entry[0]); prefix.pathname = '/packs' + prefix.pathname;
+        return url.indexOf(prefix.href) === 0;
+    });
+    return layer === 1 ? -1 : layer;
+}
+async function fillRecent(asked, generation) {
+    // A previous window may still have bodies in flight. Never start a second
+    // pair alongside it, and never delay a tile's own range behind these bodies.
+    await Promise.allSettled(Array.from(filling.values()));
+    var urls = Array.from(askedPacks).filter(function (entry) {
+        return entry[1] >= asked - SETTLE_MS && packPriority(entry[0]) >= 0;
+    }).map(function (entry) { return entry[0]; }).sort(function (a, b) { return packPriority(a) - packPriority(b); });
+    async function next(queue) {
+        for (; queue.length && generation === requestGeneration;) {
+            var url = queue.shift(), held = recent(packs, url);
+            if (held && held.complete) { continue; }
+            if (self.navigator.onLine === false || await offlineNow()) { return; }
+            var row = await read(KEPT, url);
+            if (row && row.complete) { continue; }
+            if (self.navigator.onLine === false || await offlineNow() || generation !== requestGeneration) { return; }
+            try { await wholePack(url); } catch (_) { /* A failed fill leaves its ranges available. */ }
+        }
+    }
+    var sheet = urls.filter(function (url) { return packPriority(url) === 0; });
+    var overlays = urls.filter(function (url) { return packPriority(url) > 0; });
+    await Promise.all([next(sheet), next(sheet)]);
+    await Promise.all([next(overlays), next(overlays)]);
+}
+function wholePack(url) {
     if (!filling.has(url)) {
         if (filling.size >= FILL_LIMIT) { return null; }
         var work = fetch(url).then(function (answer) {
             if (!answer.ok) { throw Error("pack HTTP " + answer.status); }
             return answer.arrayBuffer();
-        }).then(function (body) { return keepNetworkPack(url, body, event); }).finally(function () { filling.delete(url); });
+        }).then(async function (body) {
+            holdPack(url, body);
+            await browsePut(url, body);
+        }).finally(function () { filling.delete(url); });
         filling.set(url, work);
     }
     return filling.get(url);
@@ -580,27 +633,16 @@ function directoryFor(url, event) {
                 root = more.body;
             }
             var entries = packDirectory(h, root);
-            remember(directories, url, {entries: entries, at: Date.now()}, DIRECTORY_LIMIT);
+            remember(directories, url, {entries: entries}, DIRECTORY_LIMIT);
             return entries;
         }).finally(function () { opening.delete(url); });
         opening.set(url, work);
     }
     return opening.get(url);
 }
-async function networkTile(address, event, asked = Date.now()) {
-    var url = address.url, held = recent(packs, url), directory = recent(directories, url);
+async function networkTile(address, event) {
+    var url = address.url, held = recent(packs, url);
     if (held && held.entries.has(address.id)) { return sliceTile(held, address.id); }
-    // Height packs are ~5.3 MB at z10 (the plan's phase 6 built-note), far too
-    // much speculative traffic for a phone. Keep still downloads them whole.
-    // Use arrival time: waiting on the store cannot turn a burst into a later visit.
-    if (!address.height && directory && asked - directory.at > SETTLE_MS) {
-        var fill = wholePack(url, event);
-        if (fill) {
-            // A failed promotion must not fail the tile, nor delay its range.
-            var background = fill.catch(function () {});
-            if (event) { event.waitUntil(background); }
-        }
-    }
     var entries = await directoryFor(url, event), pack = recent(packs, url);
     if (pack && pack.entries.has(address.id)) { return sliceTile(pack, address.id); }
     var entry = entries.get(address.id);
@@ -662,7 +704,7 @@ function flushLookups() {
 }
 
 function tileFor(request, event) {
-    var began = performance.now(), asked = Date.now(), missed = false;
+    var began = performance.now(), missed = false;
     inFlight += 1;
     told.peak = Math.max(told.peak, inFlight);
     var state = {expired: false, off: false};
@@ -672,9 +714,13 @@ function tileFor(request, event) {
     }
     function answered(which, why) { tally(which, why, began); }
     var plain = request.url.split("?")[0];
+    var address;
+    try { address = packFor(plain); }
+    catch (error) { answered("blank", error); inFlight -= 1; return Promise.resolve(blank()); }
+    notePack(address, event);
     if (switched) { switched.then(function (off) { state.off = off; }); }
     return Promise.resolve().then(function () {
-        var address = packFor(plain), held = recent(packs, address.url);
+        var held = recent(packs, address.url);
         if (held) {
             var body = sliceTile(held, address.id);
             if (body) { answered("mem"); return png(body); }
@@ -687,7 +733,7 @@ function tileFor(request, event) {
                 if (body) { answered("mem"); return png(body); }
                 // A locally completed archive has {} metadata; its offsets need not
                 // match the bucket. Only network bodies seed the range directory.
-                body = sliceTile(holdPack(address.url, found.body, false), address.id);
+                body = sliceTile(holdPack(address.url, found.body, false, found.complete), address.id);
                 if (body) { answered(found.path); return png(body); }
             }
             // A concurrent request may have filled memory while this get ran.
@@ -695,7 +741,7 @@ function tileFor(request, event) {
             if (body) { answered("mem"); return png(body); }
             var off = state.off;
             if (off) { answered("blank"); return blank(); }
-            var body = await networkTile(address, event, asked);
+            var body = await networkTile(address, event);
             answered(body ? "net" : "blank"); return body ? png(body) : blank();
         });
     }).catch(function (gone) { answered("blank", gone); return blank(); })
@@ -746,7 +792,7 @@ function flushPuts() {
                 next();
             });
             deal.oncomplete = function () {
-                committed.forEach(function (row, url) { holdPack(url, row.pack, false); }); done();
+                committed.forEach(function (row, url) { holdPack(url, row.pack, false, row.complete); }); done();
             };
             deal.onabort = deal.onerror = function () { fail(deal.error); };
         }).then(function () { return pruning ? trimBrowse(open) : null; });
