@@ -301,6 +301,22 @@ No behaviour changes. Two figures this plan needs and does not have.
 
 Report both numbers in the decisions document before phase 2 starts.
 
+**Measured 2026-09-18 on the phone** (iPhone, Safari, the Lomsdal-Visten page over LTE, Sources
+→ *Measure this device's tile store*), Firefox on forge at 2,000 rows beside it for shape:
+
+| rows | open | one get | fifty gets | screen through the worker |
+|---:|---:|---:|---:|---:|
+| 2,000 (Firefox) | 1 ms | 2 ms | 7 ms | 461 ms, 27 tiles |
+| 150,000 | 0 ms | 257 ms | 832 ms (17 ms a get) | 515 ms, 14 tiles |
+| 600,000 | 1 ms | 363 ms | 2,989 ms (60 ms a get) | 1,765 ms, 14 tiles |
+
+The open is free because WebKit opens lazily; the first transaction pays it, which is what
+"one get" shows. The figure that decides: a get inside one transaction costs 3.5× more at
+600,000 rows than at 150,000, and a screen through the worker 3.4× — the cost is per get and
+grows with the store, so more transactions per lookup (phase 3) cannot buy it back. **Decision
+for phase 6: `cap` stays 16 on Norway** (the box at z16 is 150,875 tiles, exactly the 150,000
+measured); z17 remains a scope for a route or a view, and the whole box at z17 is not offered.
+
 ### Phase 2 — Fewer requests, page only
 
 1. `updateWhenZooming: false` on every tile layer, in the Python that emits them, so a
