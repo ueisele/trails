@@ -226,6 +226,14 @@ off, Cache Reserve not on this plan.
 Not done: pre-warming the edge. Six hundred thousand tiles into every colo is nonsense; what
 is looked at warms on first sight and stays warm for a year.
 
+**Applied 2026-09-18 from forge** (`just plan-out`, `just apply-plan` in `home/trails-map`), with two
+corrections to the text above. The tree rule sits *after* the general one, not ahead of it: when
+several cache rules match, the later rule's settings win, so a tree rule placed first would have
+been overridden back to 300 s for every tile. And Smart Tiered Cache did not apply — the token
+lacks *Cache Settings → Edit*; the resource stays in the config and applies once the token has
+the permission (laptop: the dashboard, then `just plan-out` and `just apply-plan` anywhere). The
+rule and 0-RTT are live; the measurement is in `home/trails-map/known-issues.md`.
+
 ### Phase S — The JavaScript leaves `maps.py`
 
 Before phase 1, alone, as one commit, in a window when nobody else is in the file. Measured
