@@ -361,6 +361,31 @@ at 120 ms and a class B operation, below it the edge holds the whole object and 
 from it. So whatever the row shape, objects on R2 stay well under 512 MB — packs do; a country
 archive does not. Both objects were deleted after the reading.
 
+**The four readings, 2026-09-18 18:31–18:59 on the phone** (Lomsdal-Visten, 600,000 tiles of
+1 kB each, the kept ground of about 2.4 GB beside them; the worker of phase 3 with its fixes):
+
+| row shape | rows | fill | one get | per get in fifty | screen, 16 tiles |
+|---|---:|---:|---:|---:|---:|
+| blob-url | 600,000 | 536 s | 464 ms | 41 ms | 696 ms |
+| blob-number | 600,000 | 598 s | 1,032 ms | 54 ms | 1,018 ms |
+| pack | 7,059 | 73 s | 226 ms | 64 ms | 1,041 ms |
+| archive | 1 | 186 s | 68 ms | 70 ms | 1,255 ms |
+
+**What it says.** On this device every IndexedDB request costs 40–70 ms whatever the row: the
+count of rows, the key, the row's size and even a `slice()` of one blob make no difference. What
+grew across the four runs was the database itself, 2.48 → 3.03 GB (WebKit reclaims deleted
+blobs late), and the price per request with it; at 150,000 rows in the afternoon a get was
+17 ms. So the price follows the size of the database — the kept ground with its hundred
+thousand-odd blob files — and not the scratch store. The row shape alone buys nothing; the
+archive buys nothing over packs and costs the awkward download.
+
+**Decided for phase 6b (Uwe, 19:00):** packs, as `ArrayBuffer` rows (no blob file per row), a
+cache of a few packs in the worker's memory, and lookups bundled per screen — a screen is one to
+four packs, so one to four requests instead of sixteen, and panning inside a pack none. The
+second lever the conversion itself will show: a store of ~9,500 pack rows instead of 150,000
+blob files should make the database smaller and every request cheaper. Kept ground is fetched
+once more after the conversion, because the format changes.
+
 ### Phase 2 — Fewer requests, page only
 
 1. `updateWhenZooming: false` on every tile layer, in the Python that emits them, so a
@@ -516,6 +541,9 @@ is not.
 Waits for phase 1b's four readings. Then, in `worker.js`, `offline_panel.js`, `chrome.js` and
 the Python that emits the layers:
 
+0. **The store's row is an `ArrayBuffer`, never a `Blob`** (phase 1b: a blob file per row is what
+   the kept ground's cost is made of), and the worker keeps the last few packs in memory so a
+   screen costs one to four requests.
 1. **The worker reads packs.** A tile request is resolved to its pack (parent at the layer's
    pack level) and an offset inside it: online a range request into the pack's object — the
    directory first, cached per pack in a bounded memory of a few packs, then the tile — or the
