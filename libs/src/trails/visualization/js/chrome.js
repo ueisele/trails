@@ -684,9 +684,10 @@
             var benchButton = benchBox.querySelector('button');
             var benchSaid = benchBox.querySelector('.trails-store-bench-said');
 
-            function benchOpen() {
-                return new Promise(function (done, fail) {
-                    var ask = indexedDB.open(BENCH_DB, 3), failed = false;
+            async function benchOpen() {
+                var timer, failed = false;
+                var opening = new Promise(function (done, fail) {
+                    var ask = indexedDB.open(BENCH_DB, 3);
                     ask.onblocked = function () { failed = true; fail(new Error('The database is blocked.')); };
                     ask.onerror = function () { fail(ask.error); };
                     ask.onsuccess = function () {
@@ -696,6 +697,14 @@
                         done(db);
                     };
                 });
+                try {
+                    return await Promise.race([opening, new Promise(function (_, fail) {
+                        timer = setTimeout(function () {
+                            failed = true;
+                            fail(new Error('the database did not open'));
+                        }, 15000);
+                    })]);
+                } finally { clearTimeout(timer); }
             }
 
             function benchDeal(db, mode, work) {
@@ -739,17 +748,26 @@
                 if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
                     throw new Error('Wait for the map’s worker, then try again.');
                 }
-                var urls = benchScreen(), db = null, began, fillBegan, stage = 'open for fill';
+                benchSaid.textContent = variant + ' · finding visible tiles…';
+                var urls = benchScreen(), db = null, began, fillBegan, stage = 'open for fill', estimateSkipped = false;
                 var rows = variant === 'pack' ? Math.ceil(tiles / 85) : variant === 'archive' ? 1 : tiles;
                 var result = {variant: variant, tiles: tiles, rows: 0, writes: 0, cleared: false,
                     usageBefore: null, usageAfter: null, bytes: null};
                 async function usage() {
+                    benchSaid.textContent = variant + ' · estimating storage…';
+                    var timer;
                     try {
                         if (navigator.storage && navigator.storage.estimate) {
-                            var estimate = await navigator.storage.estimate();
-                            return Number.isFinite(estimate.usage) ? estimate.usage : null;
+                            var estimate = await Promise.race([navigator.storage.estimate(), new Promise(function (done) {
+                                timer = setTimeout(function () {
+                                    estimateSkipped = true;
+                                    done(null);
+                                }, 5000);
+                            })]);
+                            return estimate && Number.isFinite(estimate.usage) ? estimate.usage : null;
                         }
                     } catch (_) { /* Storage estimates are optional, not a failed measurement. */ }
+                    finally { clearTimeout(timer); }
                     return null;
                 }
                 // Arithmetic, not bitwise: the packed z/x/y id is an exact
@@ -766,11 +784,14 @@
                 benchRunning = true;
                 benchButton.disabled = true;
                 try {
+                    benchSaid.textContent = variant + ' · opening the database…';
                     db = await benchOpen();
                     stage = 'clear before fill';
+                    benchSaid.textContent = variant + ' · clearing scratch rows…';
                     await benchDeal(db, 'readwrite', function (store) { store.clear(); });
                     result.usageBefore = await usage();
                     stage = 'fill';
+                    benchSaid.textContent = variant + ' · filling…';
                     fillBegan = performance.now();
                     var body = new Blob([new Uint8Array(1024)], {type: 'application/octet-stream'});
                     if (variant === 'archive') {
@@ -784,6 +805,7 @@
                             benchSaid.textContent = variant + ' · filling ' + Math.min(offset + chunkBytes, totalBytes) + ' bytes…';
                         }
                         stage = 'assemble archive';
+                        benchSaid.textContent = variant + ' · assembling archive…';
                         var archive = new Blob([]);
                         // Read stored Blobs, never their bytes. Fold each into
                         // the composite so even the JS list of handles is bounded.
@@ -800,11 +822,13 @@
                             chunk = null;
                         }
                         stage = 'write archive';
+                        benchSaid.textContent = variant + ' · writing archive…';
                         await benchDeal(db, 'readwrite', function (store) { store.put(archive, key(0)); });
                         result.writes += 1;
                         result.rows += 1;
                         archive = null;
                         stage = 'delete archive chunks';
+                        benchSaid.textContent = variant + ' · deleting archive chunks…';
                         await benchDeal(db, 'readwrite', function (store) {
                             store.delete(IDBKeyRange.bound('bench/chunks/', 'bench/chunks/\uffff'));
                         });
@@ -831,6 +855,7 @@
                     }
                     result.fill = performance.now() - fillBegan;
                     stage = 'verify row count';
+                    benchSaid.textContent = variant + ' · verifying row count…';
                     await benchDeal(db, 'readonly', function (store) {
                         var ask = store.count();
                         ask.onsuccess = function () { if (ask.result !== rows) { store.transaction.abort(); } };
@@ -842,6 +867,7 @@
                     db.close();
                     db = null;
                     stage = 'open';
+                    benchSaid.textContent = variant + ' · opening the database…';
                     began = performance.now();
                     db = await benchOpen();
                     result.open = performance.now() - began;
@@ -888,10 +914,12 @@
                         }
                     }
                     stage = 'one get';
+                    benchSaid.textContent = variant + ' · measuring one get…';
                     began = performance.now();
                     await readTiles(1);
                     result.get = performance.now() - began;
                     stage = 'fifty gets';
+                    benchSaid.textContent = variant + ' · measuring fifty gets…';
                     began = performance.now();
                     await readTiles(50);
                     result.fifty = performance.now() - began;
@@ -922,7 +950,11 @@
                     try {
                         // Reopen if the measured open failed after closing the
                         // filling connection; cleanup is also owed on failure.
-                        if (!db) { db = await benchOpen(); }
+                        if (!db) {
+                            benchSaid.textContent = variant + ' · opening the database for cleanup…';
+                            db = await benchOpen();
+                        }
+                        benchSaid.textContent = variant + ' · clearing scratch rows…';
                         await benchDeal(db, 'readwrite', function (store) { store.clear(); });
                         result.cleared = true;
                     } catch (error) {
@@ -939,7 +971,7 @@
                     ' · open ' + ms('open') + ' · one get ' + ms('get') + ' · fifty gets ' + ms('fifty') +
                     ' · screen ' + ms('screen') + (result.screenTiles === undefined ? '' : ' (' + result.screenTiles +
                     ' tiles, ' + result.screenErrors + ' HTTP errors)') + ' · storage ' +
-                    (result.bytes === null ? 'unavailable' : result.bytes.toLocaleString() + ' bytes (' +
+                    (estimateSkipped ? 'estimate skipped' : result.bytes === null ? 'unavailable' : result.bytes.toLocaleString() + ' bytes (' +
                         result.usageBefore.toLocaleString() + ' → ' + result.usageAfter.toLocaleString() + ')') +
                     (result.error ? '. Measurement failed: ' + result.error + '.' : '.') +
                     (result.cleared ? ' Scratch rows cleared.' : ' Scratch cleanup failed; run again to retry.');

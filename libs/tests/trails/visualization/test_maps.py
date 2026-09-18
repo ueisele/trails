@@ -1744,6 +1744,47 @@ class TestTheTwoScriptsAgreeAboutTheDatabase:
         html = fmap.get_root().render()
         assert 'var BENCH_DB = "trails-abisko";' in html
 
+    def test_store_measurement_bounds_optional_estimates_and_every_open(self):
+        html = self.rendered()
+        opening = html.split("async function benchOpen()")[1].split("function benchDeal")[0]
+        assert "await Promise.race([opening," in opening
+        assert "failed = true;\n                            fail(new Error('the database did not open'));" in opening
+        assert "}, 15000);" in opening
+        assert "if (failed) { db.close(); return; }" in opening
+        assert "finally { clearTimeout(timer); }" in opening
+        helper = html.split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
+        usage = helper.split("async function usage()")[1].split("function key(i)")[0]
+        assert "await Promise.race([navigator.storage.estimate()," in usage
+        assert "estimateSkipped = true;\n                                    done(null);" in usage
+        assert "}, 5000);" in usage
+        assert "return estimate && Number.isFinite(estimate.usage) ? estimate.usage : null;" in usage
+        assert "finally { clearTimeout(timer); }" in usage
+        assert helper.count("await usage()") == 3  # Before, after, and on failure all use the same bound.
+        assert helper.count("await benchOpen()") == 3  # Initial, measured, and cleanup opens are all bounded.
+        assert "estimateSkipped ? 'estimate skipped'" in helper
+
+    def test_store_measurement_names_stages_before_waiting(self):
+        helper = self.rendered().split("async function measureStore(tiles, variant)")[1].split("benchButton.addEventListener")[0]
+        assert helper.index("finding visible tiles…") < helper.index("benchScreen()")
+        assert helper.index("estimating storage…") < helper.index("await Promise.race([navigator.storage.estimate()")
+        for before, after, text in (
+            ("benchButton.disabled = true;", "db = await benchOpen()", "opening the database…"),
+            ("stage = 'clear before fill'", "await benchDeal", "clearing scratch rows…"),
+            ("stage = 'fill'", "await benchDeal", "filling…"),
+            ("stage = 'assemble archive'", "await benchDeal", "assembling archive…"),
+            ("stage = 'write archive'", "await benchDeal", "writing archive…"),
+            ("stage = 'delete archive chunks'", "await benchDeal", "deleting archive chunks…"),
+            ("stage = 'verify row count'", "await benchDeal", "verifying row count…"),
+            ("stage = 'open'", "db = await benchOpen()", "opening the database…"),
+            ("stage = 'one get'", "await readTiles(1)", "measuring one get…"),
+            ("stage = 'fifty gets'", "await readTiles(50)", "measuring fifty gets…"),
+            ("if (!db) {", "db = await benchOpen()", "opening the database for cleanup…"),
+        ):
+            section = helper.split(before)[1].split(after)[0]
+            assert f"benchSaid.textContent = variant + ' · {text}';" in section
+        cleanup = helper.split("if (!db) {")[1].split("await benchDeal")[0]
+        assert "benchSaid.textContent = variant + ' · clearing scratch rows…';" in cleanup
+
 
 class TestNothingGrowsWithTheDownload:
     """What an installed app can hold while it keeps a hundred thousand tiles."""
