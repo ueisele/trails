@@ -665,6 +665,22 @@ Decided 2026-09-18, 21:00 (Uwe). Two things, both in the worker's and the panel'
    pack of its scope whole anyway, and a range path beside that is a second code path for a few
    kilobytes. Built in 6h, in the same run.
 
+**Built 2026-09-18, 22:20 and 22:38 (codex, gpt-6-astra; `746c16c`, `1376a41`).** The helper
+is gone from Sources, the drive and the tests, and `bench` with it: `DB_AT` 6, whose upgrade
+deletes that store and nothing else — the version-5 rows, ledgers, page and switch survive,
+pinned by a test. The idle fill: one timer reset by every tile request, a bounded map of the
+48 pack addresses last asked, and two seconds after the last request the packs asked in that
+window that are not complete, the sheet's first and then the overlays', at most two in
+flight, never a height pack, never offline; a new request stops a fill under way. The
+directory-age promotion of `57f25e2` is gone. Keep replaces (item 3): an incomplete row is
+fetched whole and replaces the row; a complete one costs no request. Measured on Firefox on
+forge: the first z17 screen is 14 ranges — two directories of 16 kB and twelve tiles — 86,095
+bytes on Abisko and 204,646 on Lomsdal-Visten; after the two seconds the sheet's pack arrives
+first (437 kB / 830 kB) and the relief's second (1.25 MB / 1.48 MB), two complete browse rows
+of 1.69 MB / 2.31 MB; with the switch on no request before or after; twelve moving views fetch
+nothing whole; the first Keep is 70 / 109 whole requests, seven complete rows reused on
+Lomsdal-Visten. 840 readings a page, hooks 1,789 + 97 tests.
+
 #### 6, as first written — Norway moves to the tree
 
 1. `PROVIDERS["kartverket"]`: `tiles="/tiles/kartverket/topo/1/"`, `top=17`, `cap=17` if
