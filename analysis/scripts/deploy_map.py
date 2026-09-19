@@ -105,6 +105,7 @@ TREES = {
     "slope": "the slope-class tiles, slope/<provider>/<version>/{z}/{x}/{y}.png",
     "vegetation": "the vegetation tiles, vegetation/<provider>/<version>/{z}/{x}/{y}.png",
     "forest": "the forest tiles, forest/<provider>/<version>/{z}/{x}/{y}.png",
+    "mire": "the mire tiles, mire/<provider>/<version>/{z}/{x}/{y}.png",
     "packs": "the PMTiles packs, packs/<tree>/<provider>[/<sheet>]/<version>/{z}/{x}/{y}.pmtiles",
 }
 

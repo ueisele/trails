@@ -1,5 +1,7 @@
 """The one place the tile trees' boxes, models and versions are written down."""
 
+import dataclasses
+
 import pytest
 from trails.processing import trees
 from trails.utils.tiles import tile_range
@@ -15,7 +17,7 @@ class TestPrefix:
 
     def test_the_two_maps_are_stacked_and_never_mixed(self):
         """A directory per source, which is what §6.3's address line is for."""
-        for tree in ("dem", "shade", "slope", "vegetation", "forest"):
+        for tree in ("dem", "shade", "slope", "vegetation", "forest", "mire"):
             swedish = trees.TREES["abisko"].prefix(tree)
             norwegian = trees.TREES["lomsdal-visten"].prefix(tree)
             assert swedish != norwegian
@@ -30,6 +32,16 @@ class TestPrefix:
         assert trees.TREES["abisko"].structure == "nmd"
         assert trees.TREES["lomsdal-visten"].structure == "hoydedata-vegetation"
         assert set(trees.STRUCTURES) == {"nmd", "hoydedata-vegetation"}
+
+    def test_both_maps_name_a_mire_source_and_the_tree_is_addressed_like_the_others(self):
+        """Sweden's off the sheet's wetlands and the moisture model, Norway's off N50's bogs (§6.13)."""
+        assert trees.TREES["abisko"].mire == "marktacke-slu"
+        assert trees.TREES["lomsdal-visten"].mire == "n50"
+        assert set(trees.MIRES) == {"marktacke-slu", "n50"}
+        assert trees.TREES["abisko"].prefix("mire") == "/mire/lantmateriet/1/"
+        assert trees.TREES["lomsdal-visten"].zooms("mire") == range(8, 16)
+        with pytest.raises(ValueError, match="names no mire source"):
+            trees.read_mire(dataclasses.replace(trees.TREES["abisko"], mire=None), "unused")
 
 
 class TestZooms:

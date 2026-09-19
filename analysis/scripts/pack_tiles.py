@@ -14,7 +14,7 @@ from pathlib import Path
 
 from trails.processing import packs, trees
 
-LAYERS = ("tiles", "dem", "shade", "slope", "vegetation", "forest")
+LAYERS = ("tiles", "dem", "shade", "slope", "vegetation", "forest", "mire")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--park", choices=sorted(trees.TREES), default="lomsdal-visten")
     parser.add_argument("--input-dir", type=Path, default=default)
     parser.add_argument("--output-dir", type=Path, default=default)
-    parser.add_argument("--tree", choices=LAYERS, action="append", help="Only this tree; repeatable, default all six")
+    parser.add_argument("--tree", choices=LAYERS, action="append", help="Only this tree; repeatable, default all seven")
     parser.add_argument("--parent", nargs=3, type=int, metavar=("Z", "X", "Y"))
     args = parser.parse_args(argv)
     selected = list(dict.fromkeys(args.tree or LAYERS))
@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
                 source = root / str(max(versions))
             else:
                 source = args.input_dir / tree.prefix(layer).strip("/")
-            packs.read_index(source / "index.json")  # preflight all six before writing any
+            packs.read_index(source / "index.json")  # preflight all seven before writing any
             sources.append(source)
         for source in sources:
             relative = source.relative_to(args.input_dir)

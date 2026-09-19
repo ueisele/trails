@@ -147,6 +147,8 @@ var SLOPE_PREFIX = "__SLOPE_PREFIX__" ? new URL("__SLOPE_PREFIX__", self.locatio
 // And the vegetation and forest tiles', kept with the others on the same terms.
 var VEGETATION_PREFIX = "__VEGETATION_PREFIX__" ? new URL("__VEGETATION_PREFIX__", self.location.href).href : null;
 var FOREST_PREFIX = "__FOREST_PREFIX__" ? new URL("__FOREST_PREFIX__", self.location.href).href : null;
+// And the mire tiles' (§6.13), likewise.
+var MIRE_PREFIX = "__MIRE_PREFIX__" ? new URL("__MIRE_PREFIX__", self.location.href).href : null;
 
 // **Where the offline switch is kept, and why it is kept at all.** A service
 // worker is not a process that stays alive: the browser starts it for a fetch
@@ -499,7 +501,7 @@ var tileId = PackIO.tileId;
 
 var LAYERS = [[TILE_PREFIX, __TILE_TOP__], [HEIGHT_PREFIX, __HEIGHT_TOP__],
     [SHADE_PREFIX, __SHADE_TOP__], [SLOPE_PREFIX, __SLOPE_TOP__],
-    [VEGETATION_PREFIX, __VEGETATION_TOP__], [FOREST_PREFIX, __FOREST_TOP__]];
+    [VEGETATION_PREFIX, __VEGETATION_TOP__], [FOREST_PREFIX, __FOREST_TOP__], [MIRE_PREFIX, __MIRE_TOP__]];
 function packLevel(top, z) {
     return Math.max(0, top - 3 - 4 * Math.floor((top - z) / 4));
 }
@@ -915,7 +917,8 @@ self.addEventListener("fetch", function (event) {
             || (SHADE_PREFIX && request.url.indexOf(SHADE_PREFIX) === 0)
             || (SLOPE_PREFIX && request.url.indexOf(SLOPE_PREFIX) === 0)
             || (VEGETATION_PREFIX && request.url.indexOf(VEGETATION_PREFIX) === 0)
-            || (FOREST_PREFIX && request.url.indexOf(FOREST_PREFIX) === 0)) {
+            || (FOREST_PREFIX && request.url.indexOf(FOREST_PREFIX) === 0)
+            || (MIRE_PREFIX && request.url.indexOf(MIRE_PREFIX) === 0)) {
         event.respondWith(tileFor(request, event));
     }
 });

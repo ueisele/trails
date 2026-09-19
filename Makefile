@@ -19,7 +19,7 @@ ifneq ($(MISE),)
 export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
 endif
 
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive drive-both deploy tiles packs dem shade slope nmd vegetation abisko lomsdal-visten
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive drive-both deploy tiles packs dem shade slope nmd vegetation mire abisko lomsdal-visten
 
 # Default target
 help:
@@ -249,9 +249,18 @@ vegetation:
 	@echo "🌿 Building the $(PARK) vegetation and forest tiles (resumable)..."
 	uv run python analysis/scripts/vegetation_tiles.py --park $(PARK) $(ARGS)
 
+# Colours where the ground is bog and marsh in three classes -- wet mire, firm mire, and the wet
+# ground the soil-moisture model finds beyond the surveyed mires -- off Lantmäteriet's wetland
+# outlines and SLU's moisture mosaic for Sweden (the Geotorget login and Skogsstyrelsen's published
+# FTPS login, both only on a cold cache) and N50's bogs for Norway (no login), z8-z15. Resumable;
+# `make packs` packs it. See analysis/docs/abisko-decisions.md §6.13.
+mire:
+	@echo "🪵 Building the $(PARK) mire tiles (resumable)..."
+	uv run python analysis/scripts/mire_tiles.py --park $(PARK) $(ARGS)
+
 # The whole Abisko chain in one run, in the order the pieces depend on each other: the base-map
 # tiles off the FTP, the height mosaic and tiles with the login, the hillshade and the slope classes
-# off the same mosaic,
+# off the same mosaic, the vegetation, forest and mire off their surveys (§6.11, §6.13),
 # then the graph (Topografi 50 through
 # the delivery API with the login and the order id, Naturvårdsverket's nightly files, OSM through
 # Overpass -- fetched once each and cached) and its report, then the page. Every step is resumable
@@ -260,7 +269,7 @@ vegetation:
 # `just abisko` there is this target with the login supplied.
 abisko:
 	$(MAKE) tiles PARK=abisko
-	$(MAKE) dem shade slope vegetation PARK=abisko
+	$(MAKE) dem shade slope vegetation mire PARK=abisko
 	$(MAKE) packs PARK=abisko
 	@echo "🕸️  Building and reporting the Abisko routing graph..."
 	uv run python analysis/scripts/route_graph.py --park abisko
@@ -271,12 +280,13 @@ abisko:
 # The whole Lomsdal-Visten chain, in the same order and with the same properties: the sheet
 # rendered off Kartverket's WMS without its hillshade into our own tree (§6.12, no login), the
 # height model off hoydedata.no (no login, no order), the heights, the relief and the slope classes
-# off the one cached mosaic, the vegetation and forest off its surface model (§6.11), the packs off
+# off the one cached mosaic, the vegetation and forest off its surface model (§6.11), the mire off
+# N50's bogs (§6.13), the packs off
 # every tree, then the graph and the page. Nothing in this chain needs a credential, which is the
 # one way it differs from `abisko`. See analysis/docs/abisko-decisions.md §6.10 and §6.12.
 lomsdal-visten:
 	$(MAKE) tiles PARK=lomsdal-visten
-	$(MAKE) dem shade slope vegetation PARK=lomsdal-visten
+	$(MAKE) dem shade slope vegetation mire PARK=lomsdal-visten
 	$(MAKE) packs PARK=lomsdal-visten
 	@echo "🕸️  Building and reporting the Lomsdal-Visten routing graph..."
 	uv run python analysis/scripts/route_graph.py --park lomsdal-visten

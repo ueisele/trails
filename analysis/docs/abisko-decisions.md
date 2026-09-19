@@ -1490,6 +1490,105 @@ the version-5 upgrade of the same evening (one store) recreated `packs` empty. U
 both; the thing to do after the deploy is Keep once, and nothing on the panel says so, because
 there is one reader and this is where it is written.
 
+---
+
+### 6.13 Where the ground is mire: the sheet's wetlands, and the model's wet ground beyond them
+
+Uwe, 2026-09-18: *"Moor und Sumpf ist neben Bewuchs auch sehr relevant. Gibt es hier auch nutzbare
+Vermessungsdaten? Allerdings wäre dort sehr aktuelle Daten relevant, da sich das ja auch relativ
+schnell zwischen den Jahreszeiten ändern kann."* Then, on the proposal: *"Für Schweden auch ein
+overlay mit Daten aus zwei Quellen?"* and *"Ok baue das für Lomsdal Visten und Abisko."*
+
+**A mire is a landform, and its wetness is the weather's.** The question of currency has two
+halves and only one of them is a data question. Whether a place is a mire does not change with
+the season: the peat has been there for centuries and every survey that drew it is still right.
+What changes is the water table, which follows the snowmelt and the last fortnight's rain, and no
+survey records that — nor should the overlay pretend to. So the overlay draws the mires, and the
+legend's note says in words that how wet one is this week follows the weather, which the page
+already shows. Sentinel-1 radar could see standing water on open mires every six days at 10 m,
+cloud or no cloud; that is a project of its own and was not begun.
+
+**Three classes, each a property of the place and never a source.** Lantmäteriet's sheet has
+always drawn two kinds of wetland and named them in its legend: *Sankmark, fast*, peat-forming
+ground on comparatively firm peat that usually carries a boot, and *Sankmark, våt*, ground often
+or always under water that usually does not. That is the distinction a walker wants, and the
+product the sheet draws them from — *Marktäcke Nedladdning, vektor*, CC BY 4.0, a GeoPackage per
+municipality updated weekly, ordered once in Geotorget (Uwe did, 2026-09-19) and read with the
+same login as the heights — carries them as a layer of their own. Kartverket's N50 draws its
+bogs, *Myr*, as one kind, so over Norway every bog is *firm mire* and no wet class is drawn: a
+distinction the data cannot support is not a row in the legend. The third class is the reason
+the Swedish overlay has two sources. SLU's *Markfuktighetskarta*, made for Skogsstyrelsen and
+published as open data, is the national laser scan's terrain model run through a hydrological
+model and a classifier trained on 20,000 forest-inventory plots, at 2 m, answering how likely the
+ground is to be wet in the year's mean (kappa 0.69 on the plots held back). Its moist-to-wet class
+is drawn as *wet ground* wherever no surveyed wetland claims the cell: the seepage lines, brook
+banks and small mires under the sheet's threshold. It is a model and not a survey, which is why it
+is never drawn as a mire.
+
+**Measured over the Abisko box, 2026-09-18 and -19.** The surveyed wetlands are 357 firm outlines
+of 8.3 km² and 34 wet ones of 0.17 km² — 0.63 % of the land. The model calls 3.4 % of the land wet
+where at least half of a 10 m cell's twenty-five 2 m cells are moist-to-wet (4.4 % at a third,
+2.7 % at seven in ten), and **87 % of that lies outside the surveyed outlines**, which is what made
+the third class worth drawing; inside the outlines the model agrees with the surveyors on 71 % of
+the firm and 80 % of the wet ground. Around the Stordalen palsa mire it reads 27 % wet against 4 %
+on the dry Nuolja slope. Coverage of the box is whole but for 0.05 %, the largest gap 0.6 km² at
+the southern edge, though the product description warns of gaps in the mountains. NMD 2018's own
+*öppen våtmark* class, already on disk as the water mask's source, found 1.1 % of the land and was
+not used: its wetlands rest on SGU's soil map, which is coarse in the fjäll. Over the
+Lomsdal-Visten box N50 holds 11,598 bogs of 207 km², 3.6 % of the land, half of them under 0.7 ha.
+
+**One grid, and the survey burnt in last.** Both countries' classes are laid on a 10 m grid
+snapped to whole tens of metres in the sheet's projection — SWEREF 99 TM, UTM 33 — so a 10 m cell
+is exactly five by five of the moisture model's 2 m cells, read by window out of the one 8.4 GB
+mosaic. The firm outlines are burnt first, the wet ones over them, and the model's wet ground only
+where the cell is still empty and the model does not call it water; water is nothing, as in the
+vegetation codes. A cell is inside an outline when its centre is, which a 10 m cell over a mire
+drawn at 1:50 000 deserves. The cut is cached per box as a GeoTIFF (`.cache/mire/`, 0.3 and
+0.8 MB) and both cuts took six seconds.
+
+**How the mosaic got here.** Skogsstyrelsen serves the moisture map through an ArcGIS image
+service behind an account of their own and through an FTPS server behind a login they publish on
+the download page. Reading a window of the mosaic over FTPS by range request timed out after
+1,800 s — every range is a new data connection with its own handshake — while the whole file came
+down in 800 s at 10 MB/s, so the file is fetched once (`.cache/moisture/`) and every box is a
+window read after that. The login is read from the environment (`SKOGSSTYRELSEN_FTP_USERNAME`,
+`SKOGSSTYRELSEN_FTP_PASSWORD`) and not written into this public repository, published though it
+is; the first fetch was done by hand and the loader's own fetch is written to the same file.
+
+**One hue, three lightness steps, the wettest darkest.** Drawn as the vegetation is (§6.11):
+palette PNG of three entries and a transparent index 0, alpha 150, `mix-blend-mode: multiply`,
+off until asked, a third checkbox under the forest's with a row per class the tree carries — three
+over Sweden, one over Norway. The hue is a violet, OKLCH 285 at chroma 0.13, chosen against the
+vegetation's teal (190), the forest's sepia (62) and the slope classes' pastels; lightness 0.44,
+0.605 and 0.77 give `#4d4496`, `#7b75cc`, `#aca8ff`. A blue-violet at hue 275 sat within ΔE 14.6
+of the teal's light step in full colour, under the validator's floor of 15, and a violet at 305
+came within 7.9 of it under simulated deuteranopia; the chosen ramp stands at ΔE 16.2 from it in
+full colour and 10.4 under deuteranopia, its own adjacent steps at 16.2 and over, run through the
+palette validator 2026-09-19. The light step is 2.1:1 on the sheet, which the legend's labels
+relieve as the teal's light step is relieved.
+
+**What was cut and packed, 2026-09-19:**
+
+| tree | z | tiles | blank | weight | time | packs |
+|---|---|---|---|---|---|---|
+| `mire/lantmateriet/1/` | 8–15 | 9,330 | 2,675 | **4.0 MB** | 114 s | 122, 4.1 MB |
+| `mire/kartverket/1/` | 8–15 | 37,915 | 25,011 | **10.1 MB** | 455 s | 489, 10.4 MB |
+
+A blank tile is 163 bytes of palette, and over Norway two thirds of the tree is blank: the bogs are
+the valley floors. The tree is the slope tree's shape and is packed, kept, priced and swept with
+the others — one more prefix in the worker's list, one more kind on the panel, nothing new in the
+store (§6.12). A `mire` reading joins the drive's suite: nothing drawn until asked, every tile
+answered, one row per class the page's country carries, the note about the weather, multiplied
+over the sheet above the forest, priced by the panel, standing after a reload and remembered off.
+
+**Left aside, with the reason.** SLU's moist class (*frisk-fuktig*, 4.4 % of the land) is moist
+ground and no obstacle, so it is not drawn. The 0–100 index behind the classes is a 74 GB mosaic;
+the three classes are what a walker can act on. Norway has no moisture model; a wetness index
+could be computed off the terrain model this map already reads, but that would be a model of ours
+and not a survey. NMD 2018's *öppen våtmark* stays where it is, as the water mask's source. VMI,
+the wetland inventory of 1981–2005, classes the mire types but only above a size threshold and is
+being vectorised county by county; it may one day tell a raised bog from a fen.
+
 ## 7. The order of work
 
 1. **Geotorget account** — done 2026-09-12 as a private person, `lantmateriet@uweeisele.eu`.
@@ -3585,6 +3684,11 @@ removed once phase 1b had its answer.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-19, third** — where the ground is mire, coloured over both maps (§6.13): Lantmäteriet's
+  wetlands wet or firm and SLU's modelled wet ground beyond them over Sweden, N50's bogs as firm
+  mire over Norway, three violet steps under a third checkbox, one more tree packed with the
+  others. A mire is a landform and its wetness this week is the weather's; the legend says so.
+
 - **2026-09-19, second** — one ring of tiles past the viewport (§6.12, plan phase 8c), after
   the pan still showed tiles arriving at the leading edge: Leaflet loads only the viewport's
   tiles and `keepBuffer` loads nothing. Sources folds its figures behind a stopwatch (8b).
@@ -4117,6 +4221,10 @@ A line per change to this document or to the decisions in it, newest first.
 
 | figure | how |
 |---|---|
+| the surveyed wetlands and the model's wet ground over Abisko (§6.13) | Marktäcke's `sankmark` layer for Kiruna (`kn2584`) clipped to the box in SWEREF 99 TM and rasterised at 10 m with `rasterio.features.rasterize`; SLU's classed mosaic read by window at 2 m and the share of moist-to-wet per 10 m cell taken over 5 × 5 blocks at thresholds of 0.3, 0.5 and 0.7; patches labelled with `scipy.ndimage` (2026-09-18, -19) |
+| the moisture map's coverage of the box and its reading on a known mire | the classed mosaic over the box: nodata patches labelled and located; 1.4 km squares round the Stordalen mire (68.356 N 19.047 E) and the Nuolja slope (68.360 N 18.720 E) counted by class (2026-09-18) |
+| N50's bogs over the Lomsdal-Visten box | `N50_Arealdekke_omrade` of the twelve municipalities the box touches, `objtype == "Myr"`, clipped to the box in UTM 33 and summed against the land outlines (2026-09-19) |
+| the mire colours | the dataviz palette validator over `#4d4496,#7b75cc,#aca8ff` alone and with `#4ab9b2` and `#b77534`, `--mode light --surface #fffff2 --pairs all` (2026-09-19) |
 | the tree, the packs, the store and the edge (§6.12) | `analysis/docs/kartverket-tree-phases.md`: §3 for the probes and the edge timings, the built-note of each phase of §4 for what the render, the deploy, the drive and the phone measured (2026-09-18) |
 | place coordinates, and Rautasjaure's extent | Nominatim (`nominatim.openstreetmap.org`, `countrycodes=se,no`, the lake's bounding box from its OSM relation) and `minkarta.lantmateriet.se/api/searchservice/searchinput?searchtext=`, the latter answering in SWEREF99 TM and converted with an inverse transverse Mercator on GRS80 |
 | the border trace | Overpass, `rel(2978650)` clipped to 68.10–68.70 N, 17.6–19.3 E, `out geom`, binned at 0.05° |

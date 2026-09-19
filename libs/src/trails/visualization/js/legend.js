@@ -287,6 +287,55 @@
                         keepGround('forest', forestTick.checked);
                     });
                 }
+                // **And where the ground is mire (§6.13).** A third switch of the
+                // same shape, with a row per class the tree carries: three over
+                // Sweden, one over Norway, since its sheet draws one kind of bog.
+                var mire = {{ this.mire_name }};
+                var mireClasses = {{ this.mire_classes_json }};
+                if (mire) {
+                    var boggy = document.createElement('label');
+                    boggy.className = 'trails-mire';
+                    boggy.style.cssText = 'display:flex;align-items:center;gap:6px;margin:3px 0;cursor:pointer';
+                    var mireTick = document.createElement('input');
+                    mireTick.type = 'checkbox';
+                    mireTick.style.cssText = 'flex:none;margin:0';
+                    mireTick.checked = groundKept('mire', map.hasLayer(mire));
+                    standAs(mire, mireTick.checked);
+                    var mireWord = document.createElement('span');
+                    mireWord.textContent = 'Mire and wet ground';
+                    boggy.appendChild(mireTick);
+                    boggy.appendChild(mireWord);
+                    picked.appendChild(boggy);
+                    var mireRows = document.createElement('div');
+                    mireRows.className = 'trails-mire-classes';
+                    mireRows.style.cssText = 'margin:0 0 4px 22px;font-size:12px;line-height:1.5';
+                    mireClasses.forEach(function (row) {
+                        var line = document.createElement('div');
+                        line.style.cssText = 'display:flex;align-items:center;gap:6px';
+                        var swatch = document.createElement('span');
+                        swatch.style.cssText = 'display:inline-block;width:18px;height:11px;flex:none;border:1px solid #999;'
+                            + 'background:' + row.colour + ';opacity:0.6';
+                        var text = document.createElement('span');
+                        text.textContent = row.label;
+                        line.appendChild(swatch);
+                        line.appendChild(text);
+                        mireRows.appendChild(line);
+                    });
+                    var mireNote = document.createElement('div');
+                    mireNote.style.cssText = 'color:#666;margin-top:2px';
+                    mireNote.textContent = mireClasses.length > 1
+                        ? 'The sheet\'s wetlands, wet or firm, and the ground a soil-moisture model calls wet in the year\'s mean; '
+                            + 'how wet it is this week follows the weather.'
+                        : 'The sheet\'s bogs, which it draws as one kind; how wet one is this week follows the weather.';
+                    mireRows.appendChild(mireNote);
+                    mireRows.style.display = mireTick.checked ? '' : 'none';
+                    picked.appendChild(mireRows);
+                    mireTick.addEventListener('change', function () {
+                        standAs(mire, mireTick.checked);
+                        mireRows.style.display = mireTick.checked ? '' : 'none';
+                        keepGround('mire', mireTick.checked);
+                    });
+                }
                 if (bases.length) { body.appendChild(picked); }
 
                 // A row is a label where it switches something and a plain div

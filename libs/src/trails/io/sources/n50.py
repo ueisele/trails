@@ -54,6 +54,11 @@ WATER_COVER_TYPES = ("Havflate", "Innsjø", "InnsjøRegulert")
 #: that is what the page says.
 RIVER_COVER_TYPES = ("Elv",)
 
+#: ``objtype`` values of the land-cover layer that are bogs. N50 draws them
+#: as one kind and says nothing of whether one carries a boot; the mire tiles
+#: (§6.13) draw every one as firm mire for that reason.
+MIRE_COVER_TYPES = ("Myr",)
+
 #: Matrikkel building-type codes for huts out in the terrain, mapped to a label.
 #: Wilderness huts often carry neither a name nor a service level in N50, so the
 #: type code is the only thing marking them as something a hiker can shelter in.
@@ -357,6 +362,24 @@ class Source:
         cover = self.load_layers(kommune_codes, (LAND_COVER_LAYER,), force_download=force_download)
         water = cover[cover["objtype"].isin(WATER_COVER_TYPES)]
         return gpd.GeoDataFrame(water[["objtype", "kommune", "geometry"]].reset_index(drop=True), crs="EPSG:4326")
+
+    def load_mire(self, kommune_codes: list[str], force_download: bool = False) -> gpd.GeoDataFrame:
+        """Load the bogs, as outlines.
+
+        The same whole, cached land-cover layer :meth:`load_water` reads,
+        for the same reason.
+
+        Args:
+            kommune_codes: Municipality numbers to load
+            force_download: Re-order and re-download even if cached
+
+        Returns:
+            GeoDataFrame in EPSG:4326 with Polygon geometries and the columns
+            ``objtype`` and ``kommune``, holding only :data:`MIRE_COVER_TYPES`
+        """
+        cover = self.load_layers(kommune_codes, (LAND_COVER_LAYER,), force_download=force_download)
+        bogs = cover[cover["objtype"].isin(MIRE_COVER_TYPES)]
+        return gpd.GeoDataFrame(bogs[["objtype", "kommune", "geometry"]].reset_index(drop=True), crs="EPSG:4326")
 
     def load_rivers(self, kommune_codes: list[str], force_download: bool = False) -> gpd.GeoDataFrame:
         """Load the rivers N50 draws as outlines, with their names where it has one.

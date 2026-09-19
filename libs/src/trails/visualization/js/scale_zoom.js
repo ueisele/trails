@@ -42,7 +42,7 @@
                     map.eachLayer(function (layer) {
                         var options = layer.options || {};
                         if (!layer.getTileUrl || options.trailsShade || options.trailsSlope ||
-                                options.trailsVegetation || options.trailsForest) { return; }
+                                options.trailsVegetation || options.trailsForest || options.trailsMire) { return; }
                         if (zoom > options.maxNativeZoom) { line.textContent += ' · tiles z' + options.maxNativeZoom; }
                     });
                     line.title = 'Zoom ' + zoom + ' at ' + middle.lat.toFixed(2) + '° N';

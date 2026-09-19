@@ -2,7 +2,8 @@
 
 Three trees are cut here rather than fetched -- the height tiles (§6.3), the
 relief shadow (§6.6) and the slope classes (§6.7) -- and all three are cut from
-one height model over one box, for one map. That box is the thing several
+one height model over one box, for one map; the vegetation, forest and mire
+trees (§6.11, §6.13) are cut over the same box from sources of their own. That box is the thing several
 places have to agree on and none of them may guess:
 
 - the three build scripts under ``analysis/scripts/``, which cut the tiles;
@@ -69,27 +70,32 @@ class Tree:
     slope_version: int = 1
     vegetation_version: int = 1
     forest_version: int = 1
+    mire_version: int = 1
     #: The module that reads the laser's word on what stands on the ground,
     #: by name: a key of :data:`STRUCTURES`. The vegetation and forest trees
     #: (§6.11) are cut from it rather than from the height model; None for a
     #: map that has no such source, and then those two trees are not cut.
     structure: str | None = None
+    #: The module that reads where the ground is mire, by name: a key of
+    #: :data:`MIRES`. The mire tree (§6.13) is cut from it; None for a map
+    #: with no such source, and then that tree is not cut.
+    mire: str | None = None
 
     def prefix(self, tree: str) -> str:
         """Where one of the trees is addressed from, root-relative.
 
         Args:
-            tree: ``dem``, ``shade``, ``slope``, ``vegetation`` or ``forest``
+            tree: ``dem``, ``shade``, ``slope``, ``vegetation``, ``forest`` or ``mire``
 
         Returns:
             The address every tile of it starts with
 
         Raises:
-            KeyError: If ``tree`` is not one of the five
+            KeyError: If ``tree`` is not one of the six
         """
         version = {
             "dem": self.dem_version, "shade": self.shade_version, "slope": self.slope_version,
-            "vegetation": self.vegetation_version, "forest": self.forest_version,
+            "vegetation": self.vegetation_version, "forest": self.forest_version, "mire": self.mire_version,
         }[tree]  # fmt: skip
         return f"/{tree}/{self.provider}/{version}/"
 
@@ -97,17 +103,17 @@ class Tree:
         """The levels one of the trees is cut over.
 
         Args:
-            tree: ``dem``, ``shade``, ``slope``, ``vegetation`` or ``forest``
+            tree: ``dem``, ``shade``, ``slope``, ``vegetation``, ``forest`` or ``mire``
 
         Returns:
             The levels, coarsest first
 
         Raises:
-            KeyError: If ``tree`` is not one of the five
+            KeyError: If ``tree`` is not one of the six
         """
         top = {
             "dem": self.dem_max_zoom, "shade": self.ground_max_zoom, "slope": self.ground_max_zoom,
-            "vegetation": self.ground_max_zoom, "forest": self.ground_max_zoom,
+            "vegetation": self.ground_max_zoom, "forest": self.ground_max_zoom, "mire": self.ground_max_zoom,
         }[tree]  # fmt: skip
         return range(self.min_zoom, top + 1)
 
@@ -126,6 +132,14 @@ MODELS = {
 STRUCTURES = {
     "nmd": "trails.io.sources.nmd",
     "hoydedata-vegetation": "trails.io.sources.hoydedata_vegetation",
+}
+
+#: And what reads where the ground is mire (§6.13): Sweden's off the sheet's
+#: wetland outlines and the soil-moisture model together, Norway's off N50's
+#: bogs alone, both answering with one class grid at 10 m.
+MIRES = {
+    "marktacke-slu": "trails.io.sources.mire_sweden",
+    "n50": "trails.io.sources.mire_norway",
 }
 
 
@@ -174,6 +188,28 @@ def read_structure(tree: Tree, cache_dir: str | Path, force_download: bool = Fal
     return codes, transform, module.CRS
 
 
+def read_mire(tree: Tree, cache_dir: str | Path, force_download: bool = False) -> tuple[np.ndarray, Affine, str]:
+    """The mire classes over one map's box, and what cutting them needs.
+
+    Args:
+        tree: The map's trees
+        cache_dir: Where the source's cache lives
+        force_download: Read the source again rather than its cache
+
+    Returns:
+        The class grid (rows from the north), its georeferencing, and the
+        projection it is in
+
+    Raises:
+        ValueError: If the map names no mire source
+    """
+    if tree.mire is None:
+        raise ValueError(f"{tree.park} names no mire source; nothing to cut")
+    module: Any = importlib.import_module(MIRES[tree.mire])
+    classes, transform = module.Source(cache_dir=cache_dir).mire(tree.box, force_download=force_download)
+    return classes, transform, module.CRS
+
+
 #: One entry per map that carries trees of its own.
 TREES: dict[str, Tree] = {
     # The band the Norwegian map draws -- 15 km round the park, measured
@@ -192,6 +228,8 @@ TREES: dict[str, Tree] = {
         # Two since the unflown ground got a class of its own and the water
         # stopped counting as unknown (§6.11).
         vegetation_version=2,
+        # N50's bogs, every one of them firm mire (§6.13).
+        mire="n50",
     ),
     # The Abisko box itself (§2, widened §9.24): the sheet was copied for it and
     # the height mosaic read over it, so the graph, the water grid, the page and
@@ -208,5 +246,8 @@ TREES: dict[str, Tree] = {
         structure="nmd",
         # Two since the unflown ground got a class of its own (§6.11).
         vegetation_version=2,
+        # Lantmäteriet's wetlands, firm or wet, and SLU's wet ground beyond
+        # them (§6.13).
+        mire="marktacke-slu",
     ),
 }

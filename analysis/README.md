@@ -58,22 +58,29 @@ and Overpass and takes considerably longer. Re-fetch on purpose with
 `--force-download`; `command make cache-clean` throws the cache away entirely,
 which is rarely what you want.
 
-**The ground under a map** is four more targets, and **both maps have all four**.
+**The ground under a map** is five more targets, and **both maps have all five**.
 `command make dem` builds z8–z13 height tiles from the country's height model,
 `command make shade` cuts the relief shadow the page lays under the contours out of the
 same cached model, z8–z15, `command make slope` colours how steep that ground is,
-in classes, cut exactly as the relief is, and `command make vegetation` colours what
+in classes, cut exactly as the relief is, `command make vegetation` colours what
 stands on it off the country's laser survey — the cover of bushes and low trees in six
-steps, the ground the laser has not flown in grey, and the forest over 5 m as a tree of its own. All four take `PARK=<map>` — default
+steps, the ground the laser has not flown in grey, and the forest over 5 m as a tree of its
+own — and `command make mire` colours where the ground is bog and marsh: the sheet's
+wetlands, wet or firm, and over Sweden the wet ground a soil-moisture model finds beyond
+them. All five take `PARK=<map>` — default
 `lomsdal-visten`, as `make map` and `make graph` default — and which box each is cut to
 and out of which model is `trails.processing.trees.TREES`, written once and read by the
-scripts and by `maps.PROVIDERS` alike. All four resume, all write under
-`analysis/output/<tree>/<provider>/<version>/`, and `make deploy ARGS="--tree …"` uploads
-what they wrote. `analysis/docs/abisko-decisions.md` carries every figure — §6.3, §6.6,
-§6.7 and §6.11 for the shapes, §6.10 for the Norwegian model and its box. The Swedish
+scripts and by `maps.PROVIDERS` alike. All five resume, all write under
+`analysis/output/<tree>/<provider>/<version>/`, and `command make packs` packs what they
+wrote. `analysis/docs/abisko-decisions.md` carries every figure — §6.3, §6.6,
+§6.7, §6.11 and §6.13 for the shapes, §6.10 for the Norwegian model and its box. The Swedish
 vegetation comes off Naturvårdsverket's nationwide NMD 2018 rasters, fetched and converted
 once into the cache by `command make nmd` (7.2 GB down, no login); the Norwegian off
-`hoydedata.no`'s surface model, no login either.
+`hoydedata.no`'s surface model, no login either. The Swedish mire needs two logins on a cold
+cache — Geotorget's for Lantmäteriet's Marktäcke, once the product is ordered there, and the
+one Skogsstyrelsen publishes on its download page for the 8.4 GB soil-moisture mosaic, in
+`SKOGSSTYRELSEN_FTP_USERNAME` and `SKOGSSTYRELSEN_FTP_PASSWORD` — and the Norwegian none, off
+N50's bogs.
 
 **Both maps copy their sheet, and only Abisko needs a login.** `command make tiles PARK=abisko`
 copies Lantmäteriet's tiles for the box out of its open download over FTP (no login), and its
@@ -85,7 +92,7 @@ no login, no order and no key at all. What the page draws is neither tree tile b
 `command make packs PARK=…` writes every tree of a map as packs of 85 tiles — PMTiles
 archives under `analysis/output/packs/` — and `just deploy --tree packs` uploads those.
 
-**Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, slope, vegetation, the graph
+**Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, slope, vegetation, mire, the graph
 with its report and the page, in that order, and from `home/trails-map`
 `just abisko` is the same with the login supplied. `command make lomsdal-visten` is the same
 chain without any credential. Every step resumes or reads
@@ -178,6 +185,11 @@ the ground nobody has flown, and the forest over 5 m apart in sepia, two more ch
 the slope's, both off until asked. Sweden's
 classes are NMD 2018's (`io/sources/nmd.py`); Norway's are computed to the same codes from
 Kartverket's surface model less its terrain model (`io/sources/hoydedata_vegetation.py`).
+**And where the ground is mire** (`maps.MireTiles`, `processing/mire_tiles.py`, §6.13): the
+sheet's wetlands, wet or firm, and over Sweden the ground a soil-moisture model calls wet
+beyond them, in three violet steps under one more checkbox — Lantmäteriet's Marktäcke and
+SLU's moisture mosaic for Sweden (`io/sources/mire_sweden.py`), N50's bogs for Norway
+(`io/sources/mire_norway.py`), where the sheet draws one kind of bog and one row is shown.
 A state trail's popup links to the county's page
 for it on Naturkartan, one link per *BD* number on the chain, out of a hand-kept
 catalogue (`analysis/routes/abisko-naturkartan.toml`, `io/sources/naturkartan.py`):
@@ -374,8 +386,8 @@ Publishing a second map needs nothing but a second upload.
 
 **Tile trees** are the other thing it uploads — the base-map tiles `command make tiles` copied,
 the height tiles `command make dem` built, the relief `command make shade` cut, the slope
-classes `command make slope` coloured and the vegetation and forest `command make vegetation`
-coloured — and they go up
+classes `command make slope` coloured, the vegetation and forest `command make vegetation`
+coloured and the mire `command make mire` coloured — and they go up
 by `aws s3 sync` rather than one `cp` each:
 
 ```bash

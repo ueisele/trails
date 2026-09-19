@@ -341,7 +341,7 @@ def test_reader_rejects_broken_packs(tmp_path, damage):
         packs.PackReader(target)
 
 
-def test_cli_builds_all_six_trees_and_refuses_latest_incomplete_base(tmp_path):
+def test_cli_builds_all_seven_trees_and_refuses_latest_incomplete_base(tmp_path):
     script = _script("pack_tiles")
     source, output = tmp_path / "in", tmp_path / "out"
     prefixes = [
@@ -351,6 +351,7 @@ def test_cli_builds_all_six_trees_and_refuses_latest_incomplete_base(tmp_path):
         "slope/lantmateriet/2",
         "vegetation/lantmateriet/2",
         "forest/lantmateriet/1",
+        "mire/lantmateriet/1",
     ]
     for prefix in prefixes:
         _source(source / prefix, [(8, 140, 60), (13, 4480, 1920)])

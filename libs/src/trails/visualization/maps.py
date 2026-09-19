@@ -27,7 +27,8 @@ import pandas as pd
 from branca.element import Element, Figure, MacroElement
 from jinja2 import Template
 
-from trails.processing import slope_tiles, trees, vegetation_tiles
+from trails.io.sources import mire
+from trails.processing import mire_tiles, slope_tiles, trees, vegetation_tiles
 from trails.processing.dem_tiles import TERRARIUM_OFFSET, TERRARIUM_STEP
 from trails.routing import elevation
 
@@ -62,6 +63,12 @@ MAP_SLOPE_ATTR = "_trails_slope"
 #: And the vegetation and forest overlays' (§6.11), for the same reason.
 MAP_VEGETATION_ATTR = "_trails_vegetation"
 MAP_FOREST_ATTR = "_trails_forest"
+
+#: And the mire overlay's (§6.13), and where that layer carries the legend
+#: rows of the classes its tree draws, since the legend meets the layer and
+#: not the provider.
+MAP_MIRE_ATTR = "_trails_mire"
+MAP_MIRE_CLASSES_ATTR = "_trails_mire_classes"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -428,6 +435,62 @@ class ForestTiles:
 
 
 @dataclasses.dataclass(frozen=True)
+class MireTiles:
+    """Mire tiles beside a provider's map tiles: where the ground is bog and marsh, and whether it carries a boot.
+
+    Palette PNGs cut by :mod:`trails.processing.mire_tiles`
+    (analysis/docs/abisko-decisions.md §6.13): the sheet's wetlands, wet or
+    firm, and over Sweden the wet ground the soil-moisture model finds
+    beyond them, in three steps of one violet, drawn multiplied over the
+    sheet like the vegetation and off until the reader asks. Over Norway
+    the sheet makes no wet-or-firm distinction and there is no model, so
+    only the firm class is ever drawn there and the legend says nothing of
+    the other two.
+    """
+
+    #: What every mire tile's address starts with, root-relative.
+    tiles: str
+    #: The finest zoom cut: the relief's, since a 10 m cell has no more to give past it.
+    top: int
+    #: Mean bytes per tile, retained beside the pack estimate weights.
+    weight: dict[int, int]
+    #: Mean bytes per pack at each parent level, measured from the pack index.
+    pack_weight: dict[int, int] = dataclasses.field(default_factory=dict)
+    #: Which classes the tree carries, in class order: all three over Sweden,
+    #: the firm mire alone over Norway. The legend lists these and no other.
+    drawn: tuple[int, ...] = mire.CLASSES
+    #: Whose data the tree is cut from, shown in the map's attribution line
+    #: while the overlay is on: the surveys' terms ask for it by name.
+    attribution: str = ""
+
+    @property
+    def template(self) -> str:
+        """The address of a tile, with ``{z}``, ``{x}`` and ``{y}`` to fill."""
+        return f"{self.tiles}{{z}}/{{x}}/{{y}}.png"
+
+    def as_settings(self) -> dict[str, object]:
+        """What the page is handed: where the tiles are, how deep they go, what they weigh.
+
+        Returns:
+            ``url``, ``top`` and ``weight`` per zoom, for the offline panel.
+        """
+        return {
+            "url": self.template,
+            "top": self.top,
+            "weight": {str(zoom): bytes_ for zoom, bytes_ in self.weight.items()},
+            "pack_weight": {str(level): size for level, size in self.pack_weight.items()},
+        }
+
+    def classes(self) -> list[dict[str, object]]:
+        """The legend's rows: each drawn class's colour and what it is, wettest first.
+
+        Returns:
+            One row per class the tree carries, ``label`` and ``colour``
+        """
+        return [{"colour": mire_tiles.COLOURS[index - 1], "label": mire_tiles.LABELS[index - 1]} for index in mire.CLASSES if index in self.drawn]
+
+
+@dataclasses.dataclass(frozen=True)
 class Provider:
     """Whose tiles a map draws, and the three things the page needs to know about them.
 
@@ -469,6 +532,9 @@ class Provider:
     #: country has a laser survey to cut them from (§6.11); None where not.
     vegetation: VegetationTiles | None = None
     forest: ForestTiles | None = None
+    #: Mire tiles cut beside the map tiles, where the map's country draws its
+    #: mires (§6.13); None where not.
+    mire: MireTiles | None = None
     #: The finite tree box, west, south, east, north in degrees.
     extent: tuple[float, float, float, float] = dataclasses.field(kw_only=True)
 
@@ -494,6 +560,11 @@ _WEIGHT_LV_FOREST = {8: 1037, 9: 1770, 10: 1803, 11: 1962, 12: 2153, 13: 1683, 1
 #: second vegetation build and the first forest build, 2026-09-18.
 _WEIGHT_AB_VEGETATION = {8: 1173, 9: 1605, 10: 3284, 11: 5653, 12: 7559, 13: 6096, 14: 3045, 15: 1525}
 _WEIGHT_AB_FOREST = {8: 262, 9: 312, 10: 486, 11: 625, 12: 718, 13: 581, 14: 358, 15: 232}
+#: The mire trees (§6.13), z8 to z15, the mean per zoom of the first build,
+#: 2026-09-19: Lomsdal-Visten's 37,915 tiles off N50's bogs, 10.1 MB, and
+#: Abisko's 9,330 off Lantmäteriet's wetlands and SLU's wet ground, 4.0 MB.
+_WEIGHT_LV_MIRE = {8: 399, 9: 872, 10: 1107, 11: 1167, 12: 902, 13: 586, 14: 327, 15: 216}
+_WEIGHT_AB_MIRE = {8: 303, 9: 455, 10: 943, 11: 1457, 12: 1458, 13: 1047, 14: 568, 15: 333}
 
 
 #: Where each map's own trees are cut, written once and read here so the page,
@@ -551,6 +622,16 @@ PROVIDERS: dict[str, Provider] = {
             top=_LOMSDAL_VISTEN.ground_max_zoom,
             weight=_WEIGHT_LV_FOREST,
             pack_weight={8: 60763, 12: 49852},
+        ),
+        # And where the ground is bog, off N50's outlines (§6.13): the sheet
+        # draws one kind of bog, so one class is drawn and one row shown.
+        mire=MireTiles(
+            tiles=_LOMSDAL_VISTEN.prefix("mire"),
+            top=_LOMSDAL_VISTEN.ground_max_zoom,
+            weight=_WEIGHT_LV_MIRE,
+            pack_weight={8: 35986, 12: 21165},
+            drawn=(mire.FIRM_MIRE,),
+            attribution="Mire: © Kartverket (N50)",
         ),
     ),
     "lantmateriet": Provider(
@@ -615,6 +696,15 @@ PROVIDERS: dict[str, Provider] = {
             top=_ABISKO.ground_max_zoom,
             weight=_WEIGHT_AB_FOREST,
             pack_weight={8: 13850, 12: 22138},
+        ),
+        # And where the ground is mire, wet or firm off Lantmäteriet's
+        # wetlands and wet ground beyond them off SLU's model (§6.13).
+        mire=MireTiles(
+            tiles=_ABISKO.prefix("mire"),
+            top=_ABISKO.ground_max_zoom,
+            weight=_WEIGHT_AB_MIRE,
+            pack_weight={8: 29563, 12: 33592},
+            attribution="Mire: © Lantmäteriet (Marktäcke), © Skogsstyrelsen/SLU (Markfuktighetskarta)",
         ),
     ),
 }
@@ -1005,6 +1095,8 @@ def write_service_worker(beside: pathlib.Path, provider: Provider = PROVIDERS["k
         .replace("__VEGETATION_TOP__", str(provider.vegetation.top if provider.vegetation else 0))
         .replace("__FOREST_PREFIX__", provider.forest.tiles if provider.forest else "")
         .replace("__FOREST_TOP__", str(provider.forest.top if provider.forest else 0))
+        .replace("__MIRE_PREFIX__", provider.mire.tiles if provider.mire else "")
+        .replace("__MIRE_TOP__", str(provider.mire.top if provider.mire else 0))
         .replace("__DB__", companions.database)
         .replace("__CACHE__", companions.cache)
     )
@@ -1618,7 +1710,8 @@ class _Theme(MacroElement):
         /* The slope classes overprint the sheet rather than cover it: black
            lettering multiplied by any colour is still black. The layer's
            own alpha keeps the darkening partial -- see SlopeTiles. */
-        .leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles, .leaflet-layer.trails-forest-tiles { mix-blend-mode: multiply; }
+        .leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles,
+        .leaflet-layer.trails-forest-tiles, .leaflet-layer.trails-mire-tiles { mix-blend-mode: multiply; }
         :root {
             color-scheme: light;
             --trails-panel: rgba(255,255,255,0.94);
@@ -2343,6 +2436,32 @@ def create_map(
         )
         forest.add_to(fmap)
         setattr(fmap, MAP_FOREST_ATTR, forest)
+    # And where the ground is mire (§6.13), cut and drawn the same way, its
+    # own switch since a bog is neither willow nor forest.
+    if provider is not None and provider.mire is not None:
+        mire_layer = folium.TileLayer(
+            tiles=provider.mire.template,
+            attr=provider.mire.attribution or _BASE_LAYERS[base]["attr"] or "",
+            name="Mire",
+            overlay=True,
+            control=False,
+            show=False,
+            opacity=1.0,
+            max_zoom=18,
+            max_native_zoom=provider.mire.top,
+            cross_origin=True,
+            update_when_zooming=False,
+            update_when_idle=False,
+            keep_buffer=4,
+            error_tile_url=_ERROR_TILE_URL,
+            trails_mire=True,
+            class_name="trails-mire-tiles",
+            z_index=266,
+            bounds=[[provider.extent[1], provider.extent[0]], [provider.extent[3], provider.extent[2]]],
+        )
+        mire_layer.add_to(fmap)
+        setattr(mire_layer, MAP_MIRE_CLASSES_ATTR, provider.mire.classes())
+        setattr(fmap, MAP_MIRE_ATTR, mire_layer)
 
     # Every page gets the colours, chrome or no chrome: the panels carry them
     # as inline styles, and an inline style resolves its variables against the
@@ -4221,6 +4340,7 @@ class _OfflinePanel(MacroElement):
         self.slope_json = _script_json(provider.slope.as_settings() if provider.slope else None)
         self.vegetation_json = _script_json(provider.vegetation.as_settings() if provider.vegetation else None)
         self.forest_json = _script_json(provider.forest.as_settings() if provider.forest else None)
+        self.mire_json = _script_json(provider.mire.as_settings() if provider.mire else None)
         self.tile_prefix_json = _script_json(provider.tiles)
         extent = provider.extent
         self.extent_json = _script_json({"w": extent[0], "s": extent[1], "e": extent[2], "n": extent[3]})
@@ -4297,6 +4417,10 @@ class _Legend(MacroElement):
         self.vegetation_classes_json = "[]"
         self.forest_name = "null"
         self.forest_colour_json = _script_json(ForestTiles.colour())
+        # And the mire overlay's (§6.13), with the rows for the classes its
+        # tree carries.
+        self.mire_name = "null"
+        self.mire_classes_json = "[]"
         # What the two switches above the layers remember themselves under,
         # filled in at render from the map's own companions: the same name the
         # caches and the offline switch carry, so two maps on one origin do not
@@ -4336,6 +4460,10 @@ class _Legend(MacroElement):
         self.vegetation_classes_json = _script_json(VegetationTiles.classes()) if vegetation is not None else "[]"
         forest = getattr(self._parent, MAP_FOREST_ATTR, None) if self._parent is not None else None
         self.forest_name = forest.get_name() if forest is not None else "null"
+        mire_layer = getattr(self._parent, MAP_MIRE_ATTR, None) if self._parent is not None else None
+        self.mire_name = mire_layer.get_name() if mire_layer is not None else "null"
+        drawn = getattr(mire_layer, MAP_MIRE_CLASSES_ATTR, None) if mire_layer is not None else None
+        self.mire_classes_json = _script_json(drawn) if drawn is not None else "[]"
         companions = getattr(self._parent, MAP_COMPANIONS_ATTR, ROOT) if self._parent is not None else ROOT
         self.ground_key_json = _script_json(f"{companions.cache}-ground-")
         return super().render(**kwargs)

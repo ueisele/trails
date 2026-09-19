@@ -224,6 +224,12 @@ class Scene:
     #: where the map's country has a laser survey; None where not.
     vegetation_path: str | None = None
     forest_path: str | None = None
+    #: And what a mire tile's has in it (§6.13), where the map's country draws
+    #: its mires; None where not.
+    mire_path: str | None = None
+    #: How many classes the mire legend lists over this page: three over
+    #: Sweden, one over Norway, whose sheet draws one kind of bog.
+    mire_classes: int = 0
 
     @property
     def companions(self) -> maps.Companions:
@@ -265,6 +271,9 @@ SCENES: dict[str, Scene] = {
         # And what stands on the ground, off Kartverket's surface model (§6.11).
         vegetation_path="/vegetation/",
         forest_path="/forest/",
+        # And where the ground is bog, off N50, one class (§6.13).
+        mire_path="/mire/",
+        mire_classes=1,
         # One sheet since §6.10: the grey one came out.
         base_maps=1,
         borrowed_name=("trail-group-fkb", "trail-group-turrutebasen"),
@@ -343,12 +352,12 @@ SCENES: dict[str, Scene] = {
             # The Rundtur's page on ut.no and its GPX; it is the one route
             # without a lomsdalvisten.no counterpart.
             "links to pages published elsewhere": 2,
-            # All six pack trees, including the overview, at the z17 cap.
-            "packs the whole map holds at its cap": 9162,
-            "packs kept for the tiny scope and overview": 116,
-            "estimated bytes for the tiny scope and overview": 83176025,
-            "packs in the sheet and overlay overview": 67,
-            "estimated bytes in the sheet and overlay overview": 41982780,
+            # All seven pack trees, including the overview, at the z17 cap.
+            "packs the whole map holds at its cap": 9651,
+            "packs kept for the tiny scope and overview": 131,
+            "estimated bytes for the tiny scope and overview": 83582426,
+            "packs in the sheet and overlay overview": 73,
+            "estimated bytes in the sheet and overlay overview": 42198696,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -413,6 +422,10 @@ SCENES: dict[str, Scene] = {
         # And what stands on the ground, off NMD 2018 (§6.11).
         vegetation_path="/vegetation/",
         forest_path="/forest/",
+        # And where the ground is mire, off Lantmäteriet's wetlands and SLU's
+        # wet ground, three classes (§6.13).
+        mire_path="/mire/",
+        mire_classes=3,
         base_maps=1,
         borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
         search_for="Abiskojaure",
@@ -493,12 +506,12 @@ SCENES: dict[str, Scene] = {
             # The long chain is BD 21, BD 92, BD 16 and BD 91 run together, and
             # Naturkartan has a page for each.
             "links to pages published elsewhere": 4,
-            # All six pack trees, including the overview, at the z17 cap.
-            "packs the whole map holds at its cap": 2274,
-            "packs kept for the tiny scope and overview": 70,
-            "estimated bytes for the tiny scope and overview": 50750235,
-            "packs in the sheet and overlay overview": 21,
-            "estimated bytes in the sheet and overlay overview": 16653230,
+            # All seven pack trees, including the overview, at the z17 cap.
+            "packs the whole map holds at its cap": 2396,
+            "packs kept for the tiny scope and overview": 81,
+            "estimated bytes for the tiny scope and overview": 51111689,
+            "packs in the sheet and overlay overview": 23,
+            "estimated bytes in the sheet and overlay overview": 16712356,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -770,13 +783,15 @@ FURNITURE = with_map(
     off: legend.filter(i => i.type === 'checkbox' && !i.checked).length,
     radios: bases.filter(i => i.type === 'radio').length,
     tiles: Object.values(__MAP__._layers).filter(l => l._url && !(l.options || {}).trailsShade && !(l.options || {}).trailsSlope
-        && !(l.options || {}).trailsVegetation && !(l.options || {}).trailsForest).length,
+        && !(l.options || {}).trailsVegetation && !(l.options || {}).trailsForest && !(l.options || {}).trailsMire).length,
     relief: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsShade).length,
     // The slope classes start off, so a page that draws them holds none here.
     slope: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsSlope).length,
     // And so do the vegetation and the forest (§6.11).
     vegetation: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsVegetation).length,
     forest: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsForest).length,
+    // And the mire (§6.13).
+    mire: Object.values(__MAP__._layers).filter(l => (l.options || {}).trailsMire).length,
     // The rail takes the top-left corner and the zoom steps aside for it. Left
     // rather than top, because both stand at 10 from the top and only the one
     // that moved says whether the corner made room.
@@ -1266,6 +1281,7 @@ def furniture(page: Any) -> Check:
             Reading("and no slope classes until they are asked for", seen["slope"], 0),
             Reading("nor vegetation", seen["vegetation"], 0),
             Reading("nor forest", seen["forest"], 0),
+            Reading("nor mire", seen["mire"], 0),
             Reading("separate layer controls", seen["layerControls"], 0),
             # **One bar and not two.** A bare `L.control.scale()` draws metric
             # and imperial, one above the other, and with the zoom line under
@@ -6255,6 +6271,147 @@ def the_vegetation_over_the_relief(page: Any) -> Check:
     )
 
 
+def the_mire_over_the_relief(page: Any) -> Check:
+    """Where the ground is mire, coloured over the shadow when the reader asks (§6.13).
+
+    A third switch under the vegetation's: wet mire, firm mire and the
+    model's wet ground in three violet steps over Sweden, the firm mire
+    alone over Norway. It starts off, is multiplied over the sheet, is
+    priced by the offline panel whether on or off, and stands after a
+    reload -- the vegetation's readings, taken once more for this tree.
+
+    Args:
+        page: The driven page, at any state
+
+    Returns:
+        What the checkbox drew, how many rows explain it, and what the panel counts
+    """
+    if SCENE.mire_path is None:
+        return Check("the mire over the relief", skipped="no mire survey has been cut over this page's ground")
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(800)
+
+    def drawn(path: str) -> tuple[int, int]:
+        """How many tiles of the tree the page asked for, and how many answered."""
+        return tuple(
+            page.evaluate(
+                """(path) => {
+                    const imgs = [...document.querySelectorAll('img')].filter(i => (i.src || '').indexOf(path) >= 0);
+                    return [imgs.length, imgs.filter(i => i.naturalWidth > 0).length];
+                }""",
+                path,
+            )
+        )
+
+    def flip() -> Any:
+        return page.evaluate(
+            """() => {
+                const row = document.querySelector('.trails-basemap label.trails-mire');
+                if (!row) { return 'no row'; }
+                const box = row.querySelector('input[type=checkbox]');
+                if (!box) { return 'no checkbox'; }
+                box.click();
+                return box.checked;
+            }"""
+        )
+
+    rows_shown = "() => { const r = document.querySelector('.trails-mire-classes'); return r ? getComputedStyle(r).display : 'none'; }"
+    before = drawn(SCENE.mire_path)[0]
+    rows_before = page.evaluate(rows_shown)
+    switched = flip()
+    page.wait_for_function(
+        """path => {
+            const imgs = [...document.querySelectorAll('img')].filter(i => i.src.includes(path));
+            return imgs.length > 0 && imgs.every(i => i.complete);
+        }""",
+        arg=SCENE.mire_path,
+        timeout=60_000,
+    )
+    asked, answered = drawn(SCENE.mire_path)
+    rows_on = page.evaluate(rows_shown)
+    classes = page.evaluate(
+        "() => [...document.querySelectorAll('.trails-mire-classes > div')].filter(d => d.querySelector('span[style*=background]'))"
+        ".map(d => d.textContent.trim())"
+    )
+    weather = page.evaluate("() => /follows the weather/.test(document.querySelector('.trails-mire-classes').textContent)")
+    blend = page.evaluate(
+        with_map("""(path) => {
+            let out = null;
+            __MAP__.eachLayer(layer => {
+                if (layer._url && String(layer._url).indexOf(path) >= 0 && layer.getContainer) {
+                    out = {blend: getComputedStyle(layer.getContainer()).mixBlendMode, above: layer.options.zIndex, top: layer.options.maxNativeZoom};
+                }
+            });
+            return out;
+        }"""),
+        SCENE.mire_path,
+    )
+    # Against the relief, which is always on the map; the forest is off and a
+    # layer that is off is not among the map's layers.
+    relief_at = page.evaluate(
+        with_map("""() => {
+            let z = null;
+            __MAP__.eachLayer(l => { if (l.options && l.options.trailsShade) { z = l.options.zIndex; } });
+            return z;
+        }""")
+    )
+    priced = page.evaluate(
+        """(path) => {
+            const p = window.trailsOffline.prefixes();
+            return !!(p && p.mire && p.mire.indexOf(path) >= 0);
+        }""",
+        SCENE.mire_path,
+    )
+    stands = with_map(
+        """(path) => {
+            let bog = false;
+            __MAP__.eachLayer(l => { if (l._url && String(l._url).indexOf(path) >= 0) { bog = true; } });
+            const rows = document.querySelector('.trails-mire-classes');
+            return {mire: bog, rows: rows ? getComputedStyle(rows).display : 'none'}; }"""
+    )
+    page.reload(timeout=120_000)
+    ready(page)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(1200)
+    reloaded = page.evaluate(stands, SCENE.mire_path)
+    if switched is True:
+        flip()
+    page.wait_for_timeout(800)
+    after = drawn(SCENE.mire_path)[1]
+    page.reload(timeout=120_000)
+    ready(page)
+    page.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.here(false); }")
+    page.wait_for_timeout(1200)
+    off_again = page.evaluate(stands, SCENE.mire_path)
+
+    return Check(
+        "the mire over the relief",
+        [
+            Reading("nothing of it is drawn until it is asked for", before, 0),
+            Reading("and its rows are folded away with it", rows_before, "none"),
+            Reading("the mire checkbox switches it on", switched, True),
+            Reading("the mire asks for tiles", asked > 0, True, note=f"{asked} asked"),
+            Reading("and every one of them answers", answered, asked),
+            Reading("the rows explain the colours while it is on", rows_on, "block"),
+            Reading("one row per class the tree carries", len(classes), SCENE.mire_classes, note="; ".join(classes)),
+            Reading("and the note says this week's wetness is the weather's", weather, True),
+            Reading("it is multiplied over the sheet", blend is not None and blend["blend"] == "multiply", True),
+            Reading(
+                "and sits over the relief, above the forest's 264",
+                blend is not None and relief_at is not None and blend["above"] > relief_at and blend["above"] == 266,
+                True,
+            ),
+            Reading("and stops at the relief's top", blend is not None and blend["top"] == 15, True),
+            Reading("the offline panel prices the tree", priced, True),
+            Reading("it stands after a reload", reloaded["mire"], True),
+            Reading("with the rows still shown", reloaded["rows"], "block"),
+            Reading("switched off, nothing of it is drawn", after, 0),
+            Reading("and off is remembered too", off_again["mire"], False),
+        ],
+    )
+
+
 def what_the_panel_remembers(page: Any) -> Check:
     """A layer put away and a sheet chosen are still that way after a reload.
 
@@ -9354,7 +9511,7 @@ def zoom_out_requests(page: Any) -> Check:
                 probe.counts.push(c);
                 probe.handlers.push({layer, start, error});
                 if (!layer.options.trailsShade && !layer.options.trailsSlope &&
-                    !layer.options.trailsVegetation && !layer.options.trailsForest) probe.base = layer;
+                    !layer.options.trailsVegetation && !layer.options.trailsForest && !layer.options.trailsMire) probe.base = layer;
             });
         }""")
         )
@@ -9778,7 +9935,7 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
         }""")
         )
         trees = [(base_url, 8, provider.top, provider.pack_weight, True)]
-        for layer in (provider.heights, provider.shade, provider.slope, provider.vegetation, provider.forest):
+        for layer in (provider.heights, provider.shade, provider.slope, provider.vegetation, provider.forest, provider.mire):
             if layer:
                 trees.append((origin + layer.template, 8, layer.top, layer.pack_weight, layer is not provider.heights))
         overview: dict[str, int] = {}
@@ -10229,12 +10386,12 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
             with_map("""() => {
             const layers = []; __MAP__.eachLayer(l => { if (l.getTileUrl) layers.push(l); });
             window.packSheet = layers.find(l => !l.options.trailsShade && !l.options.trailsSlope &&
-                !l.options.trailsVegetation && !l.options.trailsForest);
+                !l.options.trailsVegetation && !l.options.trailsForest && !l.options.trailsMire);
             layers.filter(l => l !== window.packSheet).forEach(l => __MAP__.removeLayer(l));
             window.settledPack = window.probePackFor(Object.values(window.packSheet._tiles)[0].el.src.split('?')[0]).url;
         }""")
         )
-        per_tile = [path for path in _Quiet.asked if re.match(r"/(tiles|dem|shade|slope|vegetation|forest)/.*\.png", path)]
+        per_tile = [path for path in _Quiet.asked if re.match(r"/(tiles|dem|shade|slope|vegetation|forest|mire)/.*\.png", path)]
         readings.append(Reading("no per-tile object reaches the server", per_tile, []))
         before = wait_for_async(page, "async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
         page.evaluate(
@@ -10331,7 +10488,7 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         page.wait_for_function(loaded, timeout=60_000)
         prefixes = page.evaluate("() => window.trailsOffline.prefixes()")
         provider = next(p for p in maps.PROVIDERS.values() if prefixes["map"].endswith(p.tiles))
-        overlay_tops = {name: getattr(provider, name).top for name in ("slope", "vegetation", "forest")}
+        overlay_tops = {name: getattr(provider, name).top for name in ("slope", "vegetation", "forest", "mire")}
         page.evaluate(
             with_map("""tops => {
             const map=__MAP__, prefixes=window.trailsOffline.prefixes();
@@ -10360,8 +10517,8 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         sheets = kinds.count("tiles")
         readings.append(
             Reading(
-                "the moving view fills the sheet before all four overlays once it stops",
-                sheets > 0 and kinds[:sheets] == ["tiles"] * sheets and set(kinds[sheets:]) == {"forest", "shade", "slope", "vegetation"},
+                "the moving view fills the sheet before all five overlays once it stops",
+                sheets > 0 and kinds[:sheets] == ["tiles"] * sheets and set(kinds[sheets:]) == {"forest", "mire", "shade", "slope", "vegetation"},
                 True,
                 note=str(kinds),
             )
@@ -10581,7 +10738,8 @@ def the_kept_pan(page: Any) -> list[Reading]:
             const map=__MAP__;
             window.panLayers=[];
             map.eachLayer(layer=>{if(layer.getTileUrl){
-                if(layer.options.trailsShade || layer.options.trailsSlope || layer.options.trailsVegetation || layer.options.trailsForest) {
+                if(layer.options.trailsShade || layer.options.trailsSlope || layer.options.trailsVegetation || layer.options.trailsForest
+                        || layer.options.trailsMire) {
                     window.panLayers.push(layer);map.removeLayer(layer);
                 } else window.panSheet=layer;
             }});
@@ -12252,6 +12410,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(the_slope_classes_over_the_relief, page))
     if wanted(the_vegetation_over_the_relief):
         checks.append(timed(the_vegetation_over_the_relief, page))
+    if wanted(the_mire_over_the_relief):
+        checks.append(timed(the_mire_over_the_relief, page))
     if wanted(what_the_panel_remembers):
         checks.append(timed(what_the_panel_remembers, page))
     if wanted(a_tap_beside_a_path_in_plan_mode):

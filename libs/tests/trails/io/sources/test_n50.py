@@ -299,6 +299,23 @@ class TestLoadWater:
         assert mock_load.call_args.args[1] == (n50.LAND_COVER_LAYER,)
 
 
+class TestLoadMire:
+    """Tests for Source.load_mire (§6.13)."""
+
+    def test_keeps_the_bogs_and_nothing_else(self, tmp_path):
+        square = Polygon([(13.0, 65.0), (13.01, 65.0), (13.01, 65.01), (13.0, 65.01)])
+        cover = gpd.GeoDataFrame(
+            {"objtype": ["Myr", "Skog", "Innsjø", "Myr"], "kommune": ["1824"] * 4, "layer": [n50.LAND_COVER_LAYER] * 4, "geometry": [square] * 4},
+            crs="EPSG:4326",
+        )
+        source = n50.Source(cache_dir=str(tmp_path))
+        with patch.object(source, "load_layers", return_value=cover) as mock_load:
+            bogs = source.load_mire(["1824"])
+        assert mock_load.call_args.args[1] == (n50.LAND_COVER_LAYER,)
+        assert bogs["objtype"].tolist() == ["Myr", "Myr"]
+        assert list(bogs.columns) == ["objtype", "kommune", "geometry"] and bogs.crs.to_epsg() == 4326
+
+
 class TestLoadRivers:
     """Tests for Source.load_rivers."""
 

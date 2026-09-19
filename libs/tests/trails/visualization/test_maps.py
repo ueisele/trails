@@ -17,7 +17,7 @@ import folium
 import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
-from trails.processing import packs, slope_tiles, vegetation_tiles
+from trails.processing import mire_tiles, packs, slope_tiles, vegetation_tiles
 from trails.routing.sources import BRIDGE, FERRY
 from trails.visualization import maps
 
@@ -103,7 +103,7 @@ class TestCreateMap:
     def test_every_tile_layer_waits_for_the_pinch_and_has_a_transparent_error_tile(self, base):
         fmap = maps.create_map(center=(68.30, 18.70), base=base, extra_bases=tuple(maps.BaseMap))
         layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
-        assert len(layers) == (4 if base is maps.BaseMap.OPENSTREETMAP else 8)
+        assert len(layers) == (4 if base is maps.BaseMap.OPENSTREETMAP else 9)
         for layer in layers:
             assert layer.options["update_when_zooming"] is False
             assert layer.options["update_when_idle"] is False
@@ -2469,7 +2469,8 @@ class TestTwoMapsOnOneOrigin:
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
         assert "if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope" in html
-        assert "|| layer.options.trailsVegetation || layer.options.trailsForest)) { return; }" in html
+        assert "|| layer.options.trailsVegetation || layer.options.trailsForest" in html
+        assert "|| layer.options.trailsMire)) { return; }" in html
         assert '"trailsShade": true' in html or '"trails_shade": true' in html
 
     def test_the_vegetation_legend_names_the_ground_nobody_flew(self):
@@ -2486,6 +2487,25 @@ class TestTwoMapsOnOneOrigin:
         assert written == rows
         assert "text.textContent = row.label;" in html
         assert "and grey is ground nobody has flown." in html
+
+    def test_the_mire_legend_lists_the_classes_the_tree_carries(self):
+        """Three over Sweden, one over Norway (§6.13): a class the data cannot support is not a row."""
+        swedish = maps.PROVIDERS["lantmateriet"].mire.classes()
+        assert [row["label"] for row in swedish] == ["wet mire, hard going", "firm mire", "wet ground outside the mires"]
+        assert [row["colour"] for row in swedish] == list(mire_tiles.COLOURS)
+        norwegian = maps.PROVIDERS["kartverket"].mire.classes()
+        assert norwegian == [{"colour": mire_tiles.COLOURS[1], "label": "firm mire"}]
+        fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
+        maps.add_legend(fmap, "Abisko", [maps.LegendRow("a line", "#000", None)])
+        html = fmap.get_root().render()
+        written = json.loads(html.split("var mireClasses = ")[1].split(";\n")[0])
+        assert written == swedish
+        assert "mireWord.textContent = 'Mire and wet ground';" in html
+        assert "follows the weather" in html
+        layer = getattr(fmap, maps.MAP_MIRE_ATTR)
+        assert layer.options["class_name"] == "trails-mire-tiles" and layer.options["z_index"] == 266
+        assert layer.options["trails_mire"] is True and layer.show is False
+        assert layer.options["attribution"].startswith("Mire: © Lantmäteriet (Marktäcke), © Skogsstyrelsen/SLU")
 
     def test_the_worker_answers_the_relief_from_what_was_kept(self, tmp_path):
         """A sheet answered from the store with no shadow over it would look
@@ -2524,8 +2544,8 @@ class TestTwoMapsOnOneOrigin:
         # name is what the theme's one rule hangs on.
         assert slope.options["class_name"] == "trails-slope-tiles"
         html = fmap.get_root().render()
-        blend = ".leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles, .leaflet-layer.trails-forest-tiles"
-        assert blend + " { mix-blend-mode: multiply; }" in html
+        assert ".leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles," in html
+        assert ".leaflet-layer.trails-forest-tiles, .leaflet-layer.trails-mire-tiles { mix-blend-mode: multiply; }" in html
         assert (slope.options["max_zoom"], slope.options["max_native_zoom"]) == (18, 15)
         assert slope.options["bounds"] == [[68.139, 18.15], [68.46, 19.10]]
         assert slope.options["attribution"] == maps._LANTMATERIET_ATTRIBUTION
@@ -2645,7 +2665,8 @@ class TestTwoMapsOnOneOrigin:
         page, _companions = self.abisko(tmp_path)
         html = page.read_text(encoding="utf-8")
         assert "if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope" in html
-        assert "|| layer.options.trailsVegetation || layer.options.trailsForest)) { return; }" in html
+        assert "|| layer.options.trailsVegetation || layer.options.trailsForest" in html
+        assert "|| layer.options.trailsMire)) { return; }" in html
         assert '"trailsSlope": true' in html or '"trails_slope": true' in html
 
     def test_the_worker_answers_the_slope_classes_from_what_was_kept(self, tmp_path):
@@ -9790,7 +9811,7 @@ class TestPackWorker:
         own = maps.PROVIDERS[provider]
         west, south, east, north = own.extent
         addresses, expected = [], []
-        for layer in (own, own.heights, own.shade, own.slope, own.vegetation, own.forest):
+        for layer in (own, own.heights, own.shade, own.slope, own.vegetation, own.forest, own.mire):
             for zoom in range(8, layer.top + 1):
                 level = max(z for z in packs.pack_levels(range(8, layer.top + 1)) if z <= zoom)
                 for lon, lat in ((west, south), (west, north), (east, south), (east, north)):
@@ -9869,6 +9890,7 @@ class TestPackWorker:
             ("SLOPE", own.slope),
             ("VEGETATION", own.vegetation),
             ("FOREST", own.forest),
+            ("MIRE", own.mire),
         ):
             assert f"[{name}_PREFIX, {layer.top}]" in worker
 
@@ -10301,7 +10323,7 @@ class TestPackPanel:
     def test_worker_and_panel_use_the_same_level_rule_at_every_zoom(self, tmp_path, provider):
         panel_rule = self.function("packLevel")
         own = maps.PROVIDERS[provider]
-        layers = [own, own.heights, own.shade, own.slope, own.vegetation, own.forest]
+        layers = [own, own.heights, own.shade, own.slope, own.vegetation, own.forest, own.mire]
         addresses = [(layer.top, z) for layer in layers for z in range(8, layer.top + 1)]
         result = TestPackWorker.run_worker(
             tmp_path,
@@ -10319,7 +10341,10 @@ class TestPackPanel:
     def setup(self, provider):
         own = maps.PROVIDERS[provider]
         west, south, east, north = own.extent
-        settings = {"HEIGHTS": own.heights, "SHADE": own.shade, "SLOPE": own.slope, "VEGETATION": own.vegetation, "FOREST": own.forest}
+        settings = {
+            "HEIGHTS": own.heights, "SHADE": own.shade, "SLOPE": own.slope,
+            "VEGETATION": own.vegetation, "FOREST": own.forest, "MIRE": own.mire,
+        }  # fmt: skip
         setup = f"var location = {{href: 'https://atlas.test/map.html'}}, TOP = {own.top}, OVERVIEW = 8, BOTTOM = 11, SPAN = 262144;"
         setup += "var EXTENT = " + json.dumps({"w": west, "s": south, "e": east, "n": north}) + ";"
         setup += "var PACK_WEIGHT = " + json.dumps(own.pack_weight) + ";"
@@ -10344,7 +10369,7 @@ class TestPackPanel:
             setup += self.function(name)
         return setup
 
-    @pytest.mark.parametrize("provider,count", [("kartverket", 9162), ("lantmateriet", 2274)])
+    @pytest.mark.parametrize("provider,count", [("kartverket", 9651), ("lantmateriet", 2396)])
     def test_whole_box_iterator_counts_packs_once_with_measured_weights(self, tmp_path, provider, count):
         setup = self.setup(provider)
         setup += """
@@ -10357,7 +10382,7 @@ class TestPackPanel:
         assert result["total"] == result["unique"] == count
         assert result["weighed"] == {"packs": count, "bytes": result["bytes"]}
 
-    @pytest.mark.parametrize("provider,count", [("kartverket", 9162), ("lantmateriet", 2274)])
+    @pytest.mark.parametrize("provider,count", [("kartverket", 9651), ("lantmateriet", 2396)])
     def test_whole_box_to_z17_never_builds_a_set(self, tmp_path, provider, count):
         script = (
             self.setup(provider)
@@ -10403,8 +10428,8 @@ class TestPackPanel:
     @pytest.mark.parametrize(
         "provider,position,overview,tiny",
         [
-            ("kartverket", (65.55, 13.05), {"packs": 67, "bytes": 41982780}, {"packs": 116, "bytes": 83176025}),
-            ("lantmateriet", (68.32, 18.72), {"packs": 21, "bytes": 16653230}, {"packs": 70, "bytes": 50750235}),
+            ("kartverket", (65.55, 13.05), {"packs": 73, "bytes": 42198696}, {"packs": 131, "bytes": 83582426}),
+            ("lantmateriet", (68.32, 18.72), {"packs": 23, "bytes": 16712356}, {"packs": 81, "bytes": 51111689}),
         ],
     )
     def test_overview_keeps_the_sheet_and_overlays_but_only_scope_heights(self, tmp_path, provider, position, overview, tiny):
@@ -10441,7 +10466,7 @@ class TestPackPanel:
         result = TestPackWorker.run_worker(tmp_path, script, provider)
         assert result["overview"] == overview
         assert result["tiny"] == tiny
-        assert result["kinds"] == ["forest", "map", "shade", "slope", "vegetation"]
+        assert result["kinds"] == ["forest", "map", "mire", "shade", "slope", "vegetation"]
         assert len(result["heights"]) == 4
         assert result["heights"] == result["expected"]
 

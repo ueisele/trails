@@ -38,6 +38,8 @@
                 // condition, kept with the rest whether or not they are on.
                 var VEGETATION = {{ this.vegetation_json }};
                 var FOREST = {{ this.forest_json }};
+                // And the mire tiles' (§6.13), likewise.
+                var MIRE = {{ this.mire_json }};
                 // Every layer ends at this tree box. Both scope and margin are clipped.
                 var EXTENT = {{ this.extent_json }};
 
@@ -482,7 +484,7 @@
                 function packLayers() {
                     return [{kind: 'map', top: TOP, weight: PACK_WEIGHT, prefix: TILE_PREFIX}].concat(
                         [[HEIGHTS, 'height'], [SHADE, 'shade'], [SLOPE, 'slope'],
-                         [VEGETATION, 'vegetation'], [FOREST, 'forest']].filter(function (pair) { return pair[0]; })
+                         [VEGETATION, 'vegetation'], [FOREST, 'forest'], [MIRE, 'mire']].filter(function (pair) { return pair[0]; })
                         .map(function (pair) {
                             var layer = pair[0];
                             return {kind: pair[1], top: layer.top || layer.zoom,
@@ -630,7 +632,8 @@
                         // on again re-adds it behind this one in the map's own
                         // order, so "the first tile layer" is not enough.
                         if (layer.options && (layer.options.trailsShade || layer.options.trailsSlope
-                                || layer.options.trailsVegetation || layer.options.trailsForest)) { return; }
+                                || layer.options.trailsVegetation || layer.options.trailsForest
+                                || layer.options.trailsMire)) { return; }
                         found = layer;
                     });
                     return found;
@@ -941,7 +944,8 @@
                         shade: SHADE ? new URL(SHADE.url.split('{z}')[0], location.href).href : null,
                         slope: SLOPE ? new URL(SLOPE.url.split('{z}')[0], location.href).href : null,
                         vegetation: VEGETATION ? new URL(VEGETATION.url.split('{z}')[0], location.href).href : null,
-                        forest: FOREST ? new URL(FOREST.url.split('{z}')[0], location.href).href : null
+                        forest: FOREST ? new URL(FOREST.url.split('{z}')[0], location.href).href : null,
+                        mire: MIRE ? new URL(MIRE.url.split('{z}')[0], location.href).href : null
                     };
                 }
 
@@ -955,8 +959,9 @@
                     var was = {map: moved(now.map, stand.tiles), tiles: moved(now.tiles, stand.tiles),
                                height: moved(now.height, stand.heights), heights: moved(now.heights, stand.heights),
                                shade: moved(now.shade, stand.shade), slope: moved(now.slope, stand.slope),
-                               vegetation: moved(now.vegetation, stand.vegetation), forest: moved(now.forest, stand.forest)};
-                    if (was.tiles || was.heights || was.shade || was.slope || was.vegetation || was.forest) { out = was; }
+                               vegetation: moved(now.vegetation, stand.vegetation), forest: moved(now.forest, stand.forest),
+                               mire: moved(now.mire, stand.mire)};
+                    if (was.tiles || was.heights || was.shade || was.slope || was.vegetation || was.forest || was.mire) { out = was; }
                     return out;
                 }
 
@@ -1510,7 +1515,7 @@
                             // that stopped leaves the old stand written down
                             // so the next Keep can finish removing it.
                             if (state.stop || !state.stale) { return null; }
-                            return Promise.all(['tiles', 'heights', 'shade', 'slope', 'vegetation', 'forest'].map(function (kind) {
+                            return Promise.all(['tiles', 'heights', 'shade', 'slope', 'vegetation', 'forest', 'mire'].map(function (kind) {
                                 return dbSweep(KEPT, packPrefix(state.stale[kind]));
                             })).then(function () { return dbWrite('flags', STAND, prefixes()); });
                         });

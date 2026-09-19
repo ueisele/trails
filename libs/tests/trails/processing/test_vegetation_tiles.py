@@ -7,7 +7,7 @@ import pytest
 from affine import Affine
 from PIL import Image
 from trails.io.sources import nmd
-from trails.processing import vegetation_tiles
+from trails.processing import class_tiles, vegetation_tiles
 from trails.utils.tiles import TILE_PX
 
 
@@ -43,7 +43,7 @@ class TestClasses:
     def test_the_palette_is_no_longer_than_its_classes(self):
         """A blank tile carries the palette and nothing else, so the palette is
         the classes and not 256 entries: measured, 163 bytes against 1,189."""
-        flat, clear = vegetation_tiles.palette(("#ff0000", "#00ff00"), 150)
+        flat, clear = class_tiles.palette(("#ff0000", "#00ff00"), 150)
         assert flat == [0, 0, 0, 255, 0, 0, 0, 255, 0]
         assert clear == bytes([0, 150, 150])
 
