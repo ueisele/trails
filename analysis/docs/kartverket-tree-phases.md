@@ -1007,6 +1007,45 @@ markers on the canvas grow with the lines.
    exceed the frames (state, not a clock). Then hooks and the full drive on both pages in
    parallel.
 
+### Phase 8g — Two switches for the finger's release
+
+8e did not hold either, and the reading that settles it came from `?blend=never`: the page
+still ends under the fast cycle with the overlays never multiplied. **The blend is not the
+cause**; 8d and 8e only made it rarer (Uwe: it now takes many more cycles), and two more
+facts came with that: it happens **when the finger lifts**, not during the pinch, and it
+still needs many tile layers with real images. At the release WebKit does what it defers
+while a transform is moving: it re-rasterises the layers whose transform changed, at the new
+scale. Leaflet holds each layer's old ground scaled — up to 16× on a four-level jump — until
+the new level has loaded. If a visible old tile is rasterised at its displayed size, it costs
+a screen's worth of pixels, about 12 MB at three device pixels a CSS pixel, and six layers'
+worth of them is a few hundred MB a release, freed later than the next release comes. Two
+layers stay under it. Whether tiles are rasterised rather than composited straight from the
+image cannot be measured here; Leaflet's own `.leaflet-safari .leaflet-tile { image-rendering:
+-webkit-optimize-contrast }` is the rule that could make it so. No third theory: two switches
+in the address, read once like `?blend=`, so both levers are tested on the phone in one build.
+
+1. **`?ground=drop`** — at a zoom change the old level's tiles are not retained: the
+   retention override (`js/tile_retention.js`) keeps nothing across levels while the switch
+   is on, and Leaflet's `_pruneTiles` removes them at once; the layers are blank until the
+   new level loads. If the page holds under it, the scaled old ground is the cost, and the
+   fix to design is retaining one level back instead of five (parents) and three (children).
+2. **`?tiles=plain`** — the theme overrides Leaflet's Safari rule with `image-rendering:
+   auto` on every tile. If the page holds under this one alone, the rule was the cost and
+   the fix is that line, with the slight blur it may bring at fractional zoom to be looked at.
+3. The blend switches of 8e stay for now. **If the reading shows the blend plays no part, the
+   `_ZoomBlend` machinery of 8d/8e is removed in the phase that lands the fix**, so the page
+   carries nothing that explains nothing.
+4. **Drive**, both pages: under `?ground=drop` no tile of another zoom is in any layer after a
+   driven zoom step at any moment (state, not a clock) and the new level loads as before;
+   under `?tiles=plain` the computed `image-rendering` of a tile is `auto` where the map's
+   container carries `leaflet-safari` (set the class in the drive, since no browser here is
+   Safari); without switches nothing changes against 8f. Then hooks and the full drive on
+   both pages in parallel.
+
+The phone's readings, in order, all with every overlay on under the fast cycle: plain page
+(the baseline, expected to die after many cycles), `?ground=drop`, `?tiles=plain`, and if
+neither holds alone, both together.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
