@@ -870,43 +870,59 @@ refill. Fixed by refreshing a skipped neighbour's position (`70471b0`, a regress
 fails before it on both providers); three diagnostic runs beside a full drive reproduced the
 failure once before and never after; hooks 1,803 + 97.
 
-### Phase 8d — What the page holds with every overlay on
+### Phase 8d — The blend is switched off while the map zooms
 
-Reported 2026-09-19, 15:38 (Uwe, screenshot): Safari's *"A problem repeatedly occurred"* on the
-Abisko page, now and then, with every overlay on — the page process ended twice in a row, which
-on iOS is memory far more often than a crash. A sixth tile layer came the same day (mire,
-§6.13), and the page holds more per layer since 8 and 8c. Measured on `forge` in Firefox at
-390 × 844 (the page under 4e66340, 8c plus its LRU fix, two layers): after a few pans at z12 a
-layer holds **53 tiles** with the ring and `keepBuffer: 4`, **44** with the ring and
-`keepBuffer: 2`, **24** with neither — Leaflet's own figure. The ring doubles what a layer
-holds, since it widens the range that `keepBuffer` pads. Six layers are about 320 tiles, and
-during a zoom step Leaflet holds two levels. A decoded tile is 256 kB; what WebKit holds for a
-composited tile at three device pixels a CSS pixel is unmeasured, and Leaflet's own `leaflet-safari`
-rule sets `image-rendering` on every tile there. JS heap and DOM do not grow (Chromium: 13 MB
-after 60 pans and zooms, garbage collected; 2,400 nodes; no console error), so the tiles are
-what there is. The phone's own reading — *Analytics Data*, a `JetsamEvent` against a
-`WebContent` crash — is still to be looked at; it says memory or crash, and this phase assumes
-memory.
+Reported 2026-09-19, 15:38 (Uwe, screenshot): Safari's *"A problem repeatedly occurred"* on
+both pages — the page process ended twice in a row; the first time Safari reloads the page
+quietly, which is the reset to the initial zoom Uwe saw before the message. **Only when every
+overlay is on, and only when zooming in and out several times in a row**; any zoom level, any
+pan, for any length of time, is fine. A sixth tile layer came the same day (mire, §6.13).
 
-1. **The ring is the sheet's only.** `js/tile_ring.js` pads the range only for a layer whose
-   options ask for it (`tileRing: 1` on the sheet, set from `maps.py`; nothing on an overlay).
-   The sheet is what the reader sees arrive at the edge; an overlay's tile a frame later is a
-   memory answer after 8's warm-up, which warms every layer's neighbours as before.
-2. **`keepBuffer` back to Leaflet's 2, on every layer.** Four kept where the reader came from
-   and loaded nothing (8c's finding); with the ring in front, two is enough behind. One
-   deviation from Leaflet fewer.
-3. Together that is about 44 + 5 × 24 ≈ 165 tiles for Abisko's six layers against ≈ 320
-   today — half — with the sheet's ring untouched. The worker is not changed.
-4. **Drive**, both pages, every overlay on, offline over kept ground: after 8c's pan sequence
-   the sheet holds no more than its ring-padded range plus `keepBuffer` and each overlay no
-   more than the plain range plus `keepBuffer` (counts read off `_tiles` against the viewport's
-   tile range); 8c's readings hold for the sheet and are not claimed for the overlays; the sum
-   over all layers is written into the run's output so the phone's figure can be compared to
-   it. Readings wait for state and never compare wall-clock figures. Then hooks and the full
-   drive on both pages in parallel.
+**What was ruled out, in order.** The page itself: JS heap and DOM do not grow (Chromium,
+60 pans and zooms with the layers on: 13 MB after collection, 2,400 nodes, no console error).
+The tile count: measured in Firefox and Chromium at 390 × 844 with six layers, a zoom cycle
+12 ↔ 16 holds 210 tiles at z12 and 84 at z16 (the overlays end at z15 and are magnified),
+against about 320 after a few pans at z12 — Leaflet drops the unloaded tiles of the left
+level at every zoom change and keeps only the loaded ones until the new level is in, so a
+zoom never holds more than a pan, and the ring and `keepBuffer` of 8 and 8c are not the
+lever here. The phone's own records: no `JetsamEvent` and no `WebContent` crash in Analytics
+Data that day, so it was WebKit's own limit, which writes none. Then four one-minute
+experiments on the phone, all with the fast zoom cycle that kills it: six tile layers with
+every vector layer off — dies; two tile layers with the vectors on — fine; slow cycles with
+three seconds at each level — fine; airplane mode — dies, so not the online pack fill; over
+ground that is not kept, where the tiles come back empty — fine, so not the requests but the
+images. And the one that named it: **five layers with all four blended overlays on and the
+relief off — dies; five layers with the mire off — fine.**
 
-If the phone still ends the page after this, the next lever is the sheet's ring itself, and
-the reading before pulling it is the phone's Analytics entry, not another guess.
+**The cause.** Four of the six tile layers are drawn with `mix-blend-mode: multiply` — slope,
+vegetation, forest, mire (the theme's one blend rule in `maps.py`, §6.13's two are the new
+ones). A blended layer is not composited straight from its images: WebKit renders it into a
+buffer of its own and multiplies that with what is under it, on every frame the layer or its
+ground changes. During a pinch the layer's container is scaled — up to 16× on a jump of four
+levels — and after the finger lifts Leaflet keeps the old level's tiles scaled until the new
+level has loaded, every arriving tile changing the group again. Four such buffers at that
+size reach a limit three do not; two never did. That is why it is zoom-only, image-only,
+and counts blended layers rather than layers. Not reproducible on `forge`: no WebKit here.
+
+1. **A class on the map container for as long as the map is zooming**, in a small
+   `js/zoom_blend.js` emitted like the other page scripts: set on `zoomstart` (Leaflet fires
+   it at the start of every pinch; its own `leaflet-zoom-anim` class covers only the snap
+   animation after the finger lifts, read in 1.9.3's `TouchZoom`, so it is not enough);
+   removed after `zoomend` once every tile layer that started loading has fired `load`, or
+   after 1,500 ms at most, whichever comes first — the waiting is for the magnified old
+   ground Leaflet keeps while the new level arrives.
+2. **One rule in the theme**: under that class the four overlays composite normally instead
+   of multiplying. At rest the map is exactly what it is today; during a pinch the overlays
+   lie a little lighter over the lettering.
+3. Nothing else changes: the ring, `keepBuffer`, `updateWhenIdle`, the retention, the
+   worker, the number of layers with a ring.
+4. **Drive**, both pages, every overlay on: during a driven zoom the class is on the
+   container; after the zoom it is off once the layers have loaded (read off state — the
+   layers' `load` events or the tile loading counts — never a wall-clock comparison); the
+   theme carries the rule and the four layers carry the class names it hangs on; a zoom
+   with no tile still loading drops the class without waiting the full 1,500 ms. Then
+   hooks and the full drive on both pages in parallel. Whether the phone holds is Uwe's
+   reading, with the same fast cycle.
 
 ## 5. Not in this plan
 
