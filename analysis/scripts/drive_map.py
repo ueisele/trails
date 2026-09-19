@@ -230,6 +230,9 @@ class Scene:
     #: How many classes the mire legend lists over this page: four over
     #: Sweden, one over Norway, whose sheet draws one kind of bog.
     mire_classes: int = 0
+    #: What the *Sources* panel calls the data the mire tree is cut from, so
+    #: the credit is on the panel and not in the map's foot.
+    mire_sources: tuple[str, ...] = ()
 
     @property
     def companions(self) -> maps.Companions:
@@ -274,6 +277,7 @@ SCENES: dict[str, Scene] = {
         # And where the ground is bog, off N50, one class (§6.13).
         mire_path="/mire/",
         mire_classes=1,
+        mire_sources=("N50 Kartdata",),
         # One sheet since §6.10: the grey one came out.
         base_maps=1,
         borrowed_name=("trail-group-fkb", "trail-group-turrutebasen"),
@@ -426,6 +430,7 @@ SCENES: dict[str, Scene] = {
         # wet and moist ground, four classes (§6.13).
         mire_path="/mire/",
         mire_classes=4,
+        mire_sources=("Marktäcke Nedladdning, vektor", "SLU Markfuktighetskarta, klassad"),
         base_maps=1,
         borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
         search_for="Abiskojaure",
@@ -6339,6 +6344,14 @@ def the_mire_over_the_relief(page: Any) -> Check:
         "() => [...document.querySelectorAll('.trails-mire-classes span[style*=background]')]"
         ".filter(s => /repeating-linear-gradient/.test(s.style.background || s.style.backgroundImage)).length"
     )
+    credited = page.evaluate(
+        """(names) => {
+            const text = document.body.textContent || '';
+            const foot = document.querySelector('.leaflet-control-attribution');
+            return {panel: names.every(n => text.indexOf(n) >= 0), foot: !!foot && /Mire:/.test(foot.textContent || '')};
+        }""",
+        list(SCENE.mire_sources),
+    )
     blend = page.evaluate(
         with_map("""(path) => {
             let out = null;
@@ -6401,6 +6414,8 @@ def the_mire_over_the_relief(page: Any) -> Check:
             Reading("one row per class the tree carries", len(classes), SCENE.mire_classes, note="; ".join(classes)),
             Reading("and the note says this week's wetness is the weather's", weather, True),
             Reading("and the model's classes alone are hatched", hatched, 2 if SCENE.mire_classes == 4 else 0),
+            Reading("the data is named on the Sources panel", credited["panel"], True, note=", ".join(SCENE.mire_sources)),
+            Reading("and not in the map's foot", credited["foot"], False),
             Reading("it is multiplied over the sheet", blend is not None and blend["blend"] == "multiply", True),
             Reading(
                 "and sits over the relief, above the forest's 264",

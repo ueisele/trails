@@ -460,9 +460,6 @@ class MireTiles:
     #: Which classes the tree carries, in class order: all four over Sweden,
     #: the mire alone over Norway. The legend lists these and no other.
     drawn: tuple[int, ...] = mire.CLASSES
-    #: Whose data the tree is cut from, shown in the map's attribution line
-    #: while the overlay is on: the surveys' terms ask for it by name.
-    attribution: str = ""
 
     @property
     def template(self) -> str:
@@ -643,7 +640,6 @@ PROVIDERS: dict[str, Provider] = {
             weight=_WEIGHT_LV_MIRE,
             pack_weight={8: 39477, 12: 23765},
             drawn=(mire.FIRM_MIRE,),
-            attribution="Mire: © Kartverket (N50)",
         ),
     ),
     "lantmateriet": Provider(
@@ -716,7 +712,6 @@ PROVIDERS: dict[str, Provider] = {
             top=_ABISKO.ground_max_zoom,
             weight=_WEIGHT_AB_MIRE,
             pack_weight={8: 35327, 12: 71315},
-            attribution="Mire: © Lantmäteriet (Marktäcke), © Skogsstyrelsen/SLU (Markfuktighetskarta)",
         ),
     ),
 }
@@ -2453,7 +2448,7 @@ def create_map(
     if provider is not None and provider.mire is not None:
         mire_layer = folium.TileLayer(
             tiles=provider.mire.template,
-            attr=provider.mire.attribution or _BASE_LAYERS[base]["attr"] or "",
+            attr=_BASE_LAYERS[base]["attr"] or "",
             name="Mire",
             overlay=True,
             control=False,

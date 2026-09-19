@@ -2508,7 +2508,8 @@ class TestTwoMapsOnOneOrigin:
         layer = getattr(fmap, maps.MAP_MIRE_ATTR)
         assert layer.options["class_name"] == "trails-mire-tiles" and layer.options["z_index"] == 266
         assert layer.options["trails_mire"] is True and layer.show is False
-        assert layer.options["attribution"].startswith("Mire: © Lantmäteriet (Marktäcke), © Skogsstyrelsen/SLU")
+        # The data is credited on the Sources panel, not in the map's foot (2026-09-19).
+        assert "Marktäcke" not in layer.options["attribution"]
 
     def test_the_worker_answers_the_relief_from_what_was_kept(self, tmp_path):
         """A sheet answered from the store with no shadow over it would look

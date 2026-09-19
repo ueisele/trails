@@ -102,15 +102,19 @@ from trails.io.sources import (
     entur,
     geonorge,
     hoydedata,
+    hoydedata_vegetation,
     kulturmiljoregistret,
     lantmateriet,
     markhojd,
+    marktacke,
     n50,
     naturbase,
     naturkartan,
     naturvardsregistret,
+    nmd,
     ortnamn,
     overpass,
+    slu_moisture,
     stedsnavn,
     topografi50,
     trafiklab,
@@ -1604,6 +1608,34 @@ def source_credits(
             )
         ]
     return credits
+
+
+#: What the *Sources* panel calls the two ground overlays' data.
+VEGETATION_SOURCES = "Vegetation and forest"
+MIRE_SOURCES = "Mire and wet ground"
+
+
+def ground_credits(vegetation: tuple[Described, ...], mire: tuple[Described, ...]) -> dict[str, list[dict[str, str]]]:
+    """Name what the vegetation and mire overlays are cut from, for the *Sources* panel.
+
+    **On the panel and not in the map's foot.** Leaflet's attribution line
+    is where a tile layer's ``attr`` lands, and a mire layer carrying its
+    own put three data sets across the scale bar (Uwe, 2026-09-19: *"Quellen
+    gehören nach Source und nicht in den Fuß."*). So the overlays' data is
+    credited where every other data set on the page is, and the layers carry
+    the sheet's attribution like the relief does.
+
+    Args:
+        vegetation: What the vegetation and forest trees are cut from (§6.11)
+        mire: What the mire tree is cut from (§6.13)
+
+    Returns:
+        Two entries of the credits, keyed by what the panel calls the overlays
+    """
+    return {
+        VEGETATION_SOURCES: [credit(d.name, d.license, "", d.attribution, d.url, getattr(d, "version", None)) for d in vegetation],
+        MIRE_SOURCES: [credit(d.name, d.license, "", d.attribution, d.url, getattr(d, "version", None)) for d in mire],
+    }
 
 
 def height_credit(model: Described) -> list[dict[str, str]]:
@@ -3384,6 +3416,7 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     credits = Credits(
         sources={
             **source_credits(loaded.versions, NORWAY_SOURCE_TERMS, NORWAY_SOURCE_METADATA),
+            **ground_credits((hoydedata_vegetation.METADATA,), (n50.METADATA,)),
             ENTUR: [
                 credit(
                     f"{ENTUR} ({entur.METADATA.name})",
@@ -3852,6 +3885,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     credits = Credits(
         sources={
             **source_credits(loaded.versions, SWEDEN_SOURCE_TERMS, SWEDEN_SOURCE_METADATA),
+            **ground_credits((nmd.METADATA,), (marktacke.METADATA, slu_moisture.METADATA)),
             # **Two entries, because the page carries both.** The feed says
             # what calls at a stop and the register says where the stop is
             # (§9.36); naming only the one the lines came from would leave the
