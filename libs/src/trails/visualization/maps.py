@@ -1509,6 +1509,24 @@ class _TileRing(MacroElement):
         self._name = "TileRing"
 
 
+class _ZoomBlend(MacroElement):
+    """Suspend overlay multiplication through zooming and the new tiles' load."""
+
+    _template = Template(
+        """
+        {% macro script(this, kwargs) %}
+"""
+        + files("trails.visualization").joinpath("js", "zoom_blend.js").read_text(encoding="utf-8")
+        + """        {% endmacro %}
+    """
+    )
+
+    def __init__(self) -> None:
+        """Initialize the zoom and tile-load listeners."""
+        super().__init__()
+        self._name = "ZoomBlend"
+
+
 class _TileStart(MacroElement):
     """Wait briefly for control before adding the pack-backed tile layers."""
 
@@ -1719,6 +1737,11 @@ class _Theme(MacroElement):
            own alpha keeps the darkening partial -- see SlopeTiles. */
         .leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles,
         .leaflet-layer.trails-forest-tiles, .leaflet-layer.trails-mire-tiles { mix-blend-mode: multiply; }
+        /* Avoid multiplying scaled old ground during a pinch and its tile load. */
+        .trails-zoom-blend .leaflet-layer.trails-slope-tiles,
+        .trails-zoom-blend .leaflet-layer.trails-vegetation-tiles,
+        .trails-zoom-blend .leaflet-layer.trails-forest-tiles,
+        .trails-zoom-blend .leaflet-layer.trails-mire-tiles { mix-blend-mode: normal; }
         :root {
             color-scheme: light;
             --trails-panel: rgba(255,255,255,0.94);
@@ -2271,6 +2294,7 @@ def create_map(
 
     _TileRetention().add_to(fmap)
     _TileRing().add_to(fmap)
+    _ZoomBlend().add_to(fmap)
     if provider is not None:
         _TileStart().add_to(fmap)
 

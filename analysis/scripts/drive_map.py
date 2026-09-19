@@ -9468,6 +9468,144 @@ def wait_for_async(page: Any, expr: str, timeout_ms: int = 30_000, arg: Any = No
     raise TimeoutError(f"Asynchronous reading did not arrive within {timeout_ms} ms: {expr}")
 
 
+def the_zoom_blend(page: Any) -> Check:
+    """Read blend state at zoom and tile-load events with every overlay on.
+
+    Args:
+        page: The driven page.
+
+    Returns:
+        The four overlays' computed blend modes and the event that ends the wait.
+    """
+    viewport = page.viewport_size
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate(
+        with_map("""() => {
+        const map = __MAP__;
+        const boxes = [...document.querySelectorAll('.trails-basemap input[type=checkbox], .trails-legend-body input[type=checkbox]')];
+        window.blendProbe = {map, original: {center: map.getCenter(), zoom: map.getZoom()},
+            boxes: boxes.map(box => ({box, checked: box.checked}))};
+        boxes.forEach(box => { if (!box.checked) box.click(); });
+        blendProbe.layers = Object.values(map._layers).filter(layer => layer instanceof L.TileLayer);
+        blendProbe.blended = blendProbe.layers.filter(layer => /trails-(slope|vegetation|forest|mire)-tiles/.test(layer.options.className || ''));
+        blendProbe.snapshot = () => ({on: map.getContainer().classList.contains('trails-zoom-blend'),
+            loading: blendProbe.layers.filter(layer => layer.isLoading()).length,
+            modes: blendProbe.blended.map(layer => getComputedStyle(layer.getContainer()).mixBlendMode)});
+    }""")
+    )
+    settled = "() => blendProbe.layers.every(layer => !layer.isLoading())"
+    readings: list[Reading] = []
+    try:
+        # Warm both levels through the real tile path before observing a quick zoom.
+        for zoom in (14, 15):
+            page.evaluate(with_map("v => { __MAP__.setView(v.at, v.zoom, {animate: false}); }"), {"at": SCENE.position, "zoom": zoom})
+            page.wait_for_function(settled, timeout=60_000)
+        page.wait_for_function("() => !blendProbe.snapshot().on", timeout=10_000)
+        before = page.evaluate(
+            "() => ({...blendProbe.snapshot(), layers: blendProbe.layers.length, boxes: blendProbe.boxes.every(v => v.box.checked)})"
+        )
+        readings.extend(
+            [
+                Reading("every overlay checkbox is on", before["boxes"], True),
+                Reading("the sheet and all five tile overlays are drawn", before["layers"], 6),
+                Reading("the four named overlays multiply at rest", before["modes"], ["multiply"] * 4),
+            ]
+        )
+        page.evaluate("""() => {
+            const p = blendProbe;
+            p.setTimeout = window.setTimeout; p.clearTimeout = window.clearTimeout;
+            p.timers = []; p.loads = []; p.starts = [];
+            // Observe callback delivery and cancellation, never elapsed time.
+            window.setTimeout = function (fn, delay, ...args) {
+                if (delay !== 1500) return p.setTimeout.call(window, fn, delay, ...args);
+                const row = {fired: false, cancelled: false};
+                row.id = p.setTimeout.call(window, () => { row.fired = true; fn(...args); }, delay);
+                p.timers.push(row); return row.id;
+            };
+            window.clearTimeout = function (id) {
+                const row = p.timers.find(row => row.id === id);
+                if (row) row.cancelled = true;
+                return p.clearTimeout.call(window, id);
+            };
+            p.start = () => { p.during = p.snapshot(); };
+            p.end = () => { p.ended = p.snapshot(); };
+            p.loading = e => p.starts.push(L.stamp(e.target));
+            p.load = e => p.loads.push({layer: L.stamp(e.target), ...p.snapshot()});
+            p.map.on('zoomstart', p.start).on('zoomend', p.end);
+            p.layers.forEach(layer => layer.on('loading', p.loading).on('load', p.load));
+            p.map.setZoom(14, {animate: false});
+        }""")
+        page.wait_for_function(settled, timeout=60_000)
+        page.wait_for_function("() => !blendProbe.snapshot().on", timeout=10_000)
+        quick = page.evaluate("""() => {
+            const p = blendProbe;
+            return {during: p.during, ended: p.ended, after: p.snapshot(), starts: p.starts, loads: p.loads, timers: p.timers};
+        }""")
+        readings.extend(
+            [
+                Reading("zoomstart puts the class on the container", quick["during"]["on"], True),
+                Reading("all four overlays composite normally during zoom", quick["during"]["modes"], ["normal"] * 4),
+                Reading("zoomend still has tile layers loading", quick["ended"]["loading"] > 0, True, note=str(quick["ended"])),
+                Reading("the class stays after zoomend while tiles load", quick["ended"]["on"], True),
+                Reading("all six layers start loading", len(set(quick["starts"])), 6),
+                Reading("every layer that started fires load", sorted({row["layer"] for row in quick["loads"]}), sorted(set(quick["starts"]))),
+                Reading("the class stays until the last layer loads", all(row["on"] for row in quick["loads"] if row["loading"]), True),
+                Reading("the final load event sees the class removed", [row["on"] for row in quick["loads"] if not row["loading"]], [False]),
+                Reading(
+                    "quick tiles cancel the fallback without firing it",
+                    [[row["cancelled"], row["fired"]] for row in quick["timers"]],
+                    [[True, False]],
+                ),
+                Reading("after loading the class is off", quick["after"]["on"], False),
+                Reading("after loading all four overlays multiply again", quick["after"]["modes"], ["multiply"] * 4),
+            ]
+        )
+        # Animate the closer view: Leaflet's nonanimated reset discards every tile,
+        # even when both views use the same native level and need no new ground.
+        page.evaluate("() => { blendProbe.map.setZoom(17, {animate: false}); }")
+        page.wait_for_function(settled, timeout=60_000)
+        page.wait_for_function("() => !blendProbe.snapshot().on", timeout=10_000)
+        page.evaluate("""() => {
+            const p = blendProbe;
+            p.timers = []; p.starts = []; p.loads = []; p.ended = null;
+            p.map.setZoom(18, {animate: true});
+        }""")
+        page.wait_for_function("() => !!blendProbe.ended", timeout=10_000)
+        empty = page.evaluate("""() => {
+            const p = blendProbe;
+            return {during: p.during, ended: p.ended, after: p.snapshot(), starts: p.starts.length, timers: p.timers.length};
+        }""")
+        readings.extend(
+            [
+                Reading("a zoom over loaded tiles still sets the class at zoomstart", empty["during"]["on"], True),
+                Reading("the magnified view starts no tile load", empty["starts"], 0),
+                Reading("with no layer loading zoomend removes the class immediately", [empty["ended"]["loading"], empty["ended"]["on"]], [0, False]),
+                Reading("with no layer loading no fallback is scheduled", empty["timers"], 0),
+                Reading("the magnified view restores all four multiply modes", empty["after"]["modes"], ["multiply"] * 4),
+            ]
+        )
+        return Check("the zoom blend with every overlay on", readings)
+    finally:
+        page.evaluate("""() => {
+            const p = blendProbe;
+            if (p.setTimeout) { window.setTimeout = p.setTimeout; window.clearTimeout = p.clearTimeout; }
+            if (p.start) {
+                p.map.off('zoomstart', p.start).off('zoomend', p.end);
+                p.layers.forEach(layer => layer.off('loading', p.loading).off('load', p.load));
+            }
+            p.boxes.forEach(({box, checked}) => { if (box.checked !== checked) box.click(); });
+            p.map.setView(p.original.center, p.original.zoom, {animate: false});
+        }""")
+        if viewport:
+            page.set_viewport_size(viewport)
+        page.wait_for_function(
+            with_map("""() => Object.values(__MAP__._layers).every(layer =>
+            !(layer instanceof L.TileLayer) || !layer.isLoading())"""),
+            timeout=60_000,
+        )
+        page.evaluate("() => { delete window.blendProbe; }")
+
+
 def zoom_out_requests(page: Any) -> Check:
     """Compare the §3.1 pinch with a direct jump, and read what survives pruning.
 
@@ -12281,6 +12419,8 @@ def drive(page: Any) -> list[Check]:
     ]
     if wanted(zoom_out_requests):
         checks.append(timed(zoom_out_requests, page))
+    if wanted(the_zoom_blend):
+        checks.append(timed(the_zoom_blend, page))
     if wanted(the_zoom_the_scale_says):
         checks.append(timed(the_zoom_the_scale_says, page))
     if wanted(the_empty_pack_count):
