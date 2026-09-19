@@ -1058,6 +1058,17 @@ The phone's readings, in order, all with every overlay on under the fast cycle: 
 (the baseline, expected to die after many cycles), `?ground=drop`, `?tiles=plain`, and if
 neither holds alone, both together.
 
+**Built 2026-09-19, 20:40 (codex, gpt-6-astra; `61bd3c4`, rebased `7146d1c`).** `?ground=drop`
+read once in `tile_retention.js` (no parent or child retained); `?tiles=plain` read once by
+`_TileRendering`, a class on the container and one theme rule of higher specificity than
+Leaflet's Safari rule. Driven on both pages, six layers, 15 → 12 → 15: without a switch each
+layer holds 28 / 24 tiles of the left zoom at the peak, under `ground=drop` none, at every
+moment; under `tiles=plain` with the `leaflet-safari` class forced, every tile computes
+`image-rendering: auto`, read as an explicit rule so Firefox's ignorance of the Safari value
+cannot pass for it; every level loads real images under every combination; without a switch
+nothing changes. 1,003 readings a page, hooks 1,880 + 97; the reviewer's own hooks and
+parallel drives green. Published 20:55. The four phone readings are open.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
