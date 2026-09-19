@@ -967,6 +967,36 @@ The phone's readings, in order: the plain page under the fast cycle; if it still
 `?blend=never` — dies too, and the blend is not the cause at all; holds, and the wait is the
 part to look at again, with `?blend=always` as the control.
 
+### Phase 8f — The pinch is drawn, not scaled
+
+Reported 2026-09-19, 18:40 (Uwe), on the 8d page: while a pinch is held, the trails grow with
+the zoom and are very wide by the time the finger lifts. Leaflet's canvas renderer has always
+done this — `_onZoom` calls `_updateTransform`, which scales the canvas element by CSS, and
+the paths are redrawn only at `zoomend`; nothing in the page changed it. It shows now because
+the pinch runs smoothly since 8d; before, WebKit managed few frames under it and the jump hid
+the widening. Markers are placed afresh at every `zoom` event and are not affected; the circle
+markers on the canvas grow with the lines.
+
+1. **During a pinch the canvas is redrawn each frame instead of being scaled.** The paths'
+   projected geometry of the last integer zoom is drawn through the context's transform at
+   the pinch's current scale and offset — exact in Web Mercator, since scaling at a fixed
+   zoom is linear in pixel space — and every stroke width, dash and circle radius is divided
+   by that scale, so on screen they keep their size. No reprojection during the pinch.
+2. **Throttled to animation frames**, one draw per frame at most, of the visible part only
+   (the renderer's own bounds test does that). Measured on `forge` (Firefox, 390 × 844):
+   a full redraw is 61 ms for Lomsdal-Visten with the whole park in view at z8 and 1–5 ms
+   inside the park; Abisko 12 / 1–3 ms.
+3. **At `zoomend` nothing changes**: Leaflet's own reprojection and redraw as today. The
+   override is confined to the zoom's duration and to `L.Canvas`; SVG renderers, if any, are
+   untouched. A separate `js/pinch_draw.js` in the shape of `tile_ring.js`, one named
+   constant if one is needed.
+4. **Drive**, both pages: during a driven zoom step (a `zoom` event between `zoomstart` and
+   `zoomend`, or a fractional `setZoom` with the animation held) the canvas element carries
+   no CSS scale and a stroke measured on the canvas keeps its width; after `zoomend` the
+   drawn width is the same as before the zoom; the redraw count during a held zoom does not
+   exceed the frames (state, not a clock). Then hooks and the full drive on both pages in
+   parallel.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
