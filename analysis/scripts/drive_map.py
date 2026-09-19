@@ -9468,6 +9468,176 @@ def wait_for_async(page: Any, expr: str, timeout_ms: int = 30_000, arg: Any = No
     raise TimeoutError(f"Asynchronous reading did not arrive within {timeout_ms} ms: {expr}")
 
 
+def the_pinch_is_drawn(page: Any) -> Check:
+    """Hold fractional zooms and read canvas paint, projection and animation frames."""
+    # A preceding check can restore the viewport before Leaflet's debounced
+    # moveend updates the canvases. Wait for their actual bounds and paint.
+    page.wait_for_function(
+        with_map("""() => {
+        const map = __MAP__, size = map.getSize(), box = map.getContainer();
+        return !map._animatingZoom && size.x === box.clientWidth && size.y === box.clientHeight &&
+            Object.values(map._layers).filter(layer => layer instanceof L.Canvas).every(r => {
+                const min = map.containerPointToLayerPoint(size.multiplyBy(-r.options.padding)).round();
+                const max = min.add(size.multiplyBy(1 + 2 * r.options.padding)).round();
+                return !r._redrawRequest && r._zoom === map.getZoom() &&
+                    r._bounds.min.equals(min) && r._bounds.max.equals(max);
+            });
+    }""")
+    )
+    result = page.evaluate(
+        with_map("""async () => {
+        const map = __MAP__, original = {center: map.getCenter(), zoom: map.getZoom()};
+        const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+        await frame(); await frame();
+        // An isolated default-width line gives an unambiguous alpha cross-section.
+        // The real park canvases are instrumented alongside it below.
+        const renderer = L.canvas().addTo(map), size = map.getSize();
+        const referenceAt = map.containerPointToLatLng(size.divideBy(2));
+        const line = L.polyline([[-60, 0], [60, 0]].map(([x, y]) =>
+            map.containerPointToLatLng(size.divideBy(2).add([x, y]))), {renderer}).addTo(map);
+        const circle = L.circleMarker(map.containerPointToLatLng(size.divideBy(2).add([0, 70])), {renderer}).addTo(map);
+        await frame(); await frame();
+        const renderers = Object.values(map._layers).filter(layer => layer instanceof L.Canvas);
+        const saved = [], samples = []; let frameNumber = 0, running = true, projections = 0;
+        const tick = () => { if (running) { frameNumber++; requestAnimationFrame(tick); } };
+        requestAnimationFrame(tick);
+        for (const r of renderers) {
+            const item = {r, draw: r._draw, fill: r._fillStroke, circle: r._updateCircle,
+                strokes: [], circles: [], counts: new Map(), reference: new DOMMatrix(getComputedStyle(r._container).transform)};
+            r._draw = function () {
+                item.counts.set(frameNumber, (item.counts.get(frameNumber) || 0) + 1);
+                return item.draw.call(this);
+            };
+            r._fillStroke = function (ctx, layer) {
+                const stroke = ctx.stroke;
+                ctx.stroke = function () {
+                    const t = this.getTransform(), ratio = L.Browser.retina ? 2 : 1;
+                    item.strokes.push({width: this.lineWidth * Math.hypot(t.a, t.b) / ratio,
+                        want: layer.options.weight, dash: this.getLineDash().map(v => v * Math.hypot(t.a, t.b) / ratio),
+                        wantDash: layer.options._dashArray || []});
+                    return stroke.call(this);
+                };
+                try { return item.fill.call(this, ctx, layer); } finally { ctx.stroke = stroke; }
+            };
+            r._updateCircle = function (layer) {
+                const ctx = this._ctx, arc = ctx.arc;
+                ctx.arc = function (x, y, radius, ...rest) {
+                    const t = this.getTransform(), ratio = L.Browser.retina ? 2 : 1;
+                    const actual = new L.Point((t.a * x + t.c * y + t.e) / ratio,
+                        (t.b * x + t.d * y + t.f) / ratio).add(L.DomUtil.getPosition(r._container));
+                    const local = layer._point.subtract(r._bounds.min), reference = item.reference;
+                    const expected = new L.Point(reference.a * local.x + reference.c * local.y + reference.e,
+                        reference.b * local.x + reference.d * local.y + reference.f);
+                    item.circles.push({radius: radius * Math.hypot(t.a, t.b) / ratio,
+                        want: Math.max(Math.round(layer._radius), 1),
+                        distance: actual.distanceTo(expected)});
+                    return arc.call(this, x, y, radius, ...rest);
+                };
+                try { return item.circle.call(this, layer); } finally { ctx.arc = arc; }
+            };
+            saved.push(item);
+        }
+        const projected = renderers.flatMap(r => Object.values(r._layers)).map(layer => {
+            const project = layer._project;
+            layer._project = function () { projections++; return project.call(this); };
+            return {layer, project};
+        });
+        const pixelWidth = () => {
+            const c = renderer._container, ctx = renderer._ctx, ratio = L.Browser.retina ? 2 : 1;
+            const at = map.latLngToLayerPoint(referenceAt).subtract(L.DomUtil.getPosition(c));
+            const x = Math.round(at.x * ratio), pixels = ctx.getImageData(x, 0, 1, c.height).data;
+            // Only the line, above the separate circle; alpha sums include antialiasing.
+            let width = 0;
+            const y = Math.round(at.y * ratio);
+            for (let row = y - 12 * ratio; row <= y + 12 * ratio; row++) width += pixels[row * 4 + 3] / 255;
+            return width / ratio;
+        };
+        const cssScale = r => {
+            const t = new DOMMatrix(getComputedStyle(r._container).transform);
+            return Math.hypot(t.a, t.b);
+        };
+        const before = pixelWidth();
+        try {
+            for (const scale of [1.75, 0.75]) {
+                map._moveStart(true, false);
+                projections = 0;
+                saved.forEach(s => { s.counts.clear(); s.strokes = []; s.circles = []; });
+                // Three events per frame must coalesce; move exactly as TouchZoom does.
+                for (let step = 0; step < 5; step++) {
+                    await frame();
+                    for (let burst = 0; burst < 3; burst++) {
+                        map._move(original.center, original.zoom + Math.log2(scale), {pinch: true, round: false});
+                    }
+                    for (const s of saved) {
+                        // Leaflet's unmodified renderer supplies the reference transform.
+                        // Reprojecting lat/lng here would introduce different rounding.
+                        const element = document.createElement('div');
+                        L.Renderer.prototype._updateTransform.call({...s.r, _container: element}, map.getCenter(), map.getZoom());
+                        s.reference = new DOMMatrix(element.style.transform);
+                    }
+                }
+                await frame(); await frame();
+                const scales = renderers.map(cssScale), strokes = saved.flatMap(s => s.strokes);
+                const circles = saved.flatMap(s => s.circles);
+                const count = saved.reduce((sum, s) => sum + [...s.counts.values()].reduce((a, b) => a + b, 0), 0);
+                const held = {scale, scales, pixel: pixelWidth(), screen: pixelWidth() * cssScale(renderer),
+                    projections, strokes: strokes.length, widths: [...new Set(strokes.map(s => Number(s.width.toFixed(6))))],
+                    correctWidths: strokes.length > 0 && strokes.every(s => Math.abs(s.width - s.want) < 1e-6),
+                    correctDashes: strokes.every(s => s.dash.length === s.wantDash.length &&
+                        s.dash.every((v, i) => Math.abs(v - s.wantDash[i]) < 1e-6)),
+                    correctRadii: circles.length > 0 && circles.every(c => Math.abs(c.radius - c.want) < 1e-6),
+                    maxCenterError: Math.max(0, ...circles.map(c => c.distance)),
+                    maxDraws: Math.max(0, ...saved.flatMap(s => [...s.counts.values()])), count};
+                await frame(); await frame();
+                held.idleDraws = saved.reduce((sum, s) => sum + [...s.counts.values()].reduce((a, b) => a + b, 0), 0) - count;
+                // The ordinary end reprojects and redraws, as a released pinch does.
+                map._moveEnd(true);
+                await frame(); await frame();
+                held.after = pixelWidth();
+                held.afterScales = renderers.map(cssScale);
+                samples.push(held);
+                map.setView(original.center, original.zoom, {animate: false});
+                await frame(); await frame();
+            }
+        } finally {
+            running = false;
+            saved.forEach(s => { s.r._draw = s.draw; s.r._fillStroke = s.fill; s.r._updateCircle = s.circle; });
+            projected.forEach(s => { s.layer._project = s.project; });
+            map.removeLayer(line); map.removeLayer(circle); map.removeLayer(renderer);
+            map.setView(original.center, original.zoom, {animate: false});
+        }
+        return {before, samples, renderers: renderers.length};
+    }""")
+    )
+    readings = [Reading("the reference stroke is painted at its default width", result["before"], 3, within=0.1)]
+    for sample in result["samples"]:
+        label = f"held {sample['scale']}x zoom"
+        readings.extend(
+            [
+                Reading(f"{label}: every canvas has unit CSS scale", sample["scales"], [1] * result["renderers"]),
+                Reading(f"{label}: raster stroke width on canvas", sample["pixel"], result["before"], within=0.1),
+                Reading(f"{label}: stroke width on screen", sample["screen"], result["before"], within=0.1),
+                Reading(f"{label}: strokes were drawn", sample["strokes"] > 0, True, note=str(sample["strokes"])),
+                Reading(f"{label}: every painted stroke retains its width", sample["correctWidths"], True, note=str(sample["widths"])),
+                Reading(f"{label}: painted dashes retain their lengths", sample["correctDashes"], True),
+                Reading(f"{label}: painted circles retain their radii", sample["correctRadii"], True),
+                Reading(
+                    f"{label}: painted circle centers follow Leaflet's transform",
+                    sample["maxCenterError"],
+                    0,
+                    within=0.001,
+                    note="CSS serializes the reference transform to subpixel precision",
+                ),
+                Reading(f"{label}: no path is reprojected", sample["projections"], 0),
+                Reading(f"{label}: at most one draw per renderer per frame", sample["maxDraws"], 1, note=f"{sample['count']} draws"),
+                Reading(f"{label}: holding still schedules no more draws", sample["idleDraws"], 0),
+                Reading(f"{label}: width after zoomend", sample["after"], result["before"], within=0.1),
+                Reading(f"{label}: CSS scale after zoomend", sample["afterScales"], [1] * result["renderers"]),
+            ]
+        )
+    return Check("the pinch is drawn", readings)
+
+
 def the_zoom_blend(page: Any) -> Check:
     """Read blend state at zoom and tile-load events with every overlay on.
 
@@ -12526,6 +12696,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(zoom_out_requests, page))
     if wanted(the_zoom_blend):
         checks.append(timed(the_zoom_blend, page))
+    if wanted(the_pinch_is_drawn):
+        checks.append(timed(the_pinch_is_drawn, page))
     if wanted(the_zoom_blend_switches):
         checks.append(timed(the_zoom_blend_switches, page))
     if wanted(the_zoom_the_scale_says):

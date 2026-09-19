@@ -1509,6 +1509,24 @@ class _TileRing(MacroElement):
         self._name = "TileRing"
 
 
+class _PinchDraw(MacroElement):
+    """Draw canvas geometry during a pinch with constant screen-sized strokes."""
+
+    _template = Template(
+        """
+        {% macro script(this, kwargs) %}
+"""
+        + files("trails.visualization").joinpath("js", "pinch_draw.js").read_text(encoding="utf-8")
+        + """        {% endmacro %}
+    """
+    )
+
+    def __init__(self) -> None:
+        """Initialize the canvas zoom override."""
+        super().__init__()
+        self._name = "PinchDraw"
+
+
 class _ZoomBlend(MacroElement):
     """Suspend overlay multiplication until loading and old-zoom pruning finish."""
 
@@ -2294,6 +2312,7 @@ def create_map(
 
     _TileRetention().add_to(fmap)
     _TileRing().add_to(fmap)
+    _PinchDraw().add_to(fmap)
     _ZoomBlend().add_to(fmap)
     if provider is not None:
         _TileStart().add_to(fmap)
