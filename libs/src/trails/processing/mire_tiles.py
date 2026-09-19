@@ -12,16 +12,22 @@ over either map, from the class grid its country's source cuts
 (:mod:`trails.io.sources.mire_sweden`, :mod:`trails.io.sources.mire_norway`;
 analysis/docs/abisko-decisions.md §6.13).
 
-**One hue, three lightness steps, multiplied.** Drawn as the vegetation is:
-a palette PNG with the alpha in it, ``mix-blend-mode: multiply``, off until
-asked. The hue is a violet, OKLCH 285, chosen so the ramp stands apart from
-the vegetation's teal, the forest's sepia and the slope classes' pastels,
-and stepped in lightness 0.44, 0.605 and 0.77 with the darkest for the
-wettest, since the wet mire is the one to walk round. Run through the
-palette validator 2026-09-19: every adjacent pair over ΔE 16 in full colour
-and over 10 under every simulated colour blindness, and the lightest step
-ΔE 16.2 from the teal's lightest, so a reader with both overlays on tells a
-willow thicket from a wet flat.
+**One hue, two lightness steps, and a hatch for the model.** Drawn as the
+vegetation is: a palette PNG with the alpha in it, ``mix-blend-mode:
+multiply``, off until asked. The hue is a violet, OKLCH 285, chosen so it
+stands apart from the vegetation's teal, the forest's sepia and the slope
+classes' pastels; the wet mire is its dark step (lightness 0.44), the firm
+mire its middle one (0.605), and the model's wet ground is the middle one
+again, hatched. The first cut had the wet ground as a third, lighter step,
+which the validator passed at ΔE 16 from the middle one and Uwe could not
+tell apart on the phone: *"Firm mire und wet ground sind kaum auseinander zu
+halten, wenn sie nicht nebeneinander liegen"* (2026-09-19). Two lightness
+steps of one hue are a difference a reader sees side by side and not alone,
+and no second hue was free -- every blue to pink sat within ΔE 6 of the
+violet under simulated colour blindness or on top of the slope pastels. So
+the difference is a texture: diagonal lines two pixels wide with gaps as
+wide, in tile pixels so they read at every zoom, which is also what the
+mark says -- a surveyed mire is a solid fill, a modelled one is hatched.
 """
 
 from collections.abc import Iterable
@@ -39,10 +45,16 @@ from .vegetation_tiles import ALPHA
 #: What the tree is called: its segment of every address.
 KIND = "mire"
 
-#: One colour per class, in class order: wet mire darkest, then firm mire,
-#: then the model's wet ground. A violet ramp in OKLCH at hue 285, chroma
-#: 0.13, lightness 0.44, 0.605 and 0.77.
-COLOURS: tuple[str, ...] = ("#4d4496", "#7b75cc", "#aca8ff")
+#: One colour per class, in class order: wet mire darkest, firm mire the
+#: middle step, and the model's wet ground the middle step again, hatched. A
+#: violet in OKLCH at hue 285, chroma 0.13, lightness 0.44 and 0.605.
+COLOURS: tuple[str, ...] = ("#4d4496", "#7b75cc", "#7b75cc")
+
+#: The classes drawn hatched rather than solid: the model's.
+HATCHED: tuple[int, ...] = (mire.WET_GROUND,)
+
+#: The hatch's line and gap, in tile pixels.
+HATCH_PX = 2
 
 #: What each class is, for the legend, in class order.
 LABELS: tuple[str, ...] = ("wet mire, hard going", "firm mire", "wet ground outside the mires")
@@ -94,8 +106,11 @@ def build_tiles(
         colours=COLOURS,
         alpha=alpha,
         cell_m=CELL_M,
+        hatched=HATCHED,
+        hatch_px=HATCH_PX,
         extra={
             "labels": list(LABELS),
-            "encoding": "palette PNG of one entry per class; index 0 transparent, then wet mire, firm mire, and the wet ground the model adds",
+            "encoding": "palette PNG of one entry per class; index 0 transparent, then wet mire, firm mire, and the wet ground the model adds,"
+            " the last hatched",
         },
     )

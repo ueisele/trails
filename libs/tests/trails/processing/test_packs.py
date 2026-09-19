@@ -351,7 +351,7 @@ def test_cli_builds_all_seven_trees_and_refuses_latest_incomplete_base(tmp_path)
         "slope/lantmateriet/2",
         "vegetation/lantmateriet/2",
         "forest/lantmateriet/1",
-        "mire/lantmateriet/1",
+        "mire/lantmateriet/2",
     ]
     for prefix in prefixes:
         _source(source / prefix, [(8, 140, 60), (13, 4480, 1920)])

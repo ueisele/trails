@@ -1555,27 +1555,44 @@ window read after that. The login is read from the environment (`SKOGSSTYRELSEN_
 `SKOGSSTYRELSEN_FTP_PASSWORD`) and not written into this public repository, published though it
 is; the first fetch was done by hand and the loader's own fetch is written to the same file.
 
-**One hue, three lightness steps, the wettest darkest.** Drawn as the vegetation is (§6.11):
+**One hue, two lightness steps, and a hatch for the model.** Drawn as the vegetation is (§6.11):
 palette PNG of three entries and a transparent index 0, alpha 150, `mix-blend-mode: multiply`,
 off until asked, a third checkbox under the forest's with a row per class the tree carries — three
 over Sweden, one over Norway. The hue is a violet, OKLCH 285 at chroma 0.13, chosen against the
-vegetation's teal (190), the forest's sepia (62) and the slope classes' pastels; lightness 0.44,
-0.605 and 0.77 give `#4d4496`, `#7b75cc`, `#aca8ff`. A blue-violet at hue 275 sat within ΔE 14.6
-of the teal's light step in full colour, under the validator's floor of 15, and a violet at 305
-came within 7.9 of it under simulated deuteranopia; the chosen ramp stands at ΔE 16.2 from it in
-full colour and 10.4 under deuteranopia, its own adjacent steps at 16.2 and over, run through the
-palette validator 2026-09-19. The light step is 2.1:1 on the sheet, which the legend's labels
-relieve as the teal's light step is relieved.
+vegetation's teal (190), the forest's sepia (62) and the slope classes' pastels: lightness 0.44
+for the wet mire (`#4d4496`) and 0.605 for the firm (`#7b75cc`). A blue-violet at hue 275 sat
+within ΔE 14.6 of the teal's light step in full colour, under the validator's floor of 15, and a
+violet at 305 came within 7.9 of it under simulated deuteranopia; the chosen hue stands at ΔE 16.2
+from it in full colour and 10.4 under deuteranopia (palette validator, 2026-09-19).
+
+**The first cut drew the wet ground as a third, lighter step** (`#aca8ff`, lightness 0.77), which
+the validator passed at ΔE 16.2 from the middle step and Uwe could not tell apart on the phone:
+*"Firm mire und wet ground sind kaum auseinander zu halten, wenn sie nicht nebeneinander liegen"*
+(2026-09-19). The validator measures two colours side by side; on the map a patch stands alone,
+multiplied over a sheet whose own colour varies, and two lightness steps of one hue are a
+difference seen in comparison and not in isolation. A second hue was tried and is not there to
+have: every candidate from blue to pink (OKLCH 240–350) sat within ΔE 6 of the violet under
+simulated colour blindness or within ΔE 5 of the slope classes' light purple and blue. So the
+difference is a texture, which is also the honest mark: **a surveyed mire is a solid fill, a
+modelled one is hatched** — the firm mire's colour in diagonal lines two tile pixels wide with
+gaps as wide, drawn in tile pixels rather than on the ground so the hatch reads the same at every
+zoom, the tile side a multiple of the pitch so it runs on across tile edges. The legend's swatch
+is the same colour under the same hatch. Both trees went to version 2 for it: Norway's tiles
+carry the palette too, and a tree whose bytes change is a new address (§9.20).
 
 **What was cut and packed, 2026-09-19:**
 
 | tree | z | tiles | blank | weight | time | packs |
 |---|---|---|---|---|---|---|
-| `mire/lantmateriet/1/` | 8–15 | 9,330 | 2,675 | **4.0 MB** | 114 s | 122, 4.1 MB |
+| `mire/lantmateriet/1/`, the wet ground a lighter step | 8–15 | 9,330 | 2,675 | **4.0 MB** | 114 s | 122, 4.1 MB |
 | `mire/kartverket/1/` | 8–15 | 37,915 | 25,011 | **10.1 MB** | 455 s | 489, 10.4 MB |
+| `mire/lantmateriet/2/`, the wet ground hatched | 8–15 | 9,330 | 2,675 | **5.6 MB** | 116 s | 122, 5.6 MB |
+| `mire/kartverket/2/`, the palette alone changed | 8–15 | 37,915 | 25,011 | **10.1 MB** | 455 s | 489, 10.4 MB |
 
 A blank tile is 163 bytes of palette, and over Norway two thirds of the tree is blank: the bogs are
-the valley floors. The tree is the slope tree's shape and is packed, kept, priced and swept with
+the valley floors. The hatch costs Abisko's tree 1.6 MB — a diagonal every four pixels is what a
+PNG's filters pack worst — and Norway's nothing, since no cell there is hatched. Version 1 of both
+was dropped from the bucket the same day, nobody having kept it. The tree is the slope tree's shape and is packed, kept, priced and swept with
 the others — one more prefix in the worker's list, one more kind on the panel, nothing new in the
 store (§6.12). A `mire` reading joins the drive's suite: nothing drawn until asked, every tile
 answered, one row per class the page's country carries, the note about the weather, multiplied
@@ -3683,6 +3700,10 @@ removed once phase 1b had its answer.
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-19, fourth** — the modelled wet ground is hatched, in the firm mire's colour, after a
+  lighter third step could not be told from the middle one alone on the phone (§6.13); both mire
+  trees at version 2.
 
 - **2026-09-19, third** — where the ground is mire, coloured over both maps (§6.13): Lantmäteriet's
   wetlands wet or firm and SLU's modelled wet ground beyond them over Sweden, N50's bogs as firm

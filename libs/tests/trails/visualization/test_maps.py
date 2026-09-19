@@ -2493,14 +2493,16 @@ class TestTwoMapsOnOneOrigin:
         swedish = maps.PROVIDERS["lantmateriet"].mire.classes()
         assert [row["label"] for row in swedish] == ["wet mire, hard going", "firm mire", "wet ground outside the mires"]
         assert [row["colour"] for row in swedish] == list(mire_tiles.COLOURS)
+        assert [row["hatched"] for row in swedish] == [False, False, True]
         norwegian = maps.PROVIDERS["kartverket"].mire.classes()
-        assert norwegian == [{"colour": mire_tiles.COLOURS[1], "label": "firm mire"}]
+        assert norwegian == [{"colour": mire_tiles.COLOURS[1], "hatched": False, "label": "firm mire"}]
         fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
         maps.add_legend(fmap, "Abisko", [maps.LegendRow("a line", "#000", None)])
         html = fmap.get_root().render()
         written = json.loads(html.split("var mireClasses = ")[1].split(";\n")[0])
         assert written == swedish
         assert "mireWord.textContent = 'Mire and wet ground';" in html
+        assert "repeating-linear-gradient(45deg," in html
         assert "follows the weather" in html
         layer = getattr(fmap, maps.MAP_MIRE_ATTR)
         assert layer.options["class_name"] == "trails-mire-tiles" and layer.options["z_index"] == 266
@@ -10428,8 +10430,8 @@ class TestPackPanel:
     @pytest.mark.parametrize(
         "provider,position,overview,tiny",
         [
-            ("kartverket", (65.55, 13.05), {"packs": 73, "bytes": 42198696}, {"packs": 131, "bytes": 83582426}),
-            ("lantmateriet", (68.32, 18.72), {"packs": 23, "bytes": 16712356}, {"packs": 81, "bytes": 51111689}),
+            ("kartverket", (65.55, 13.05), {"packs": 73, "bytes": 42198804}, {"packs": 131, "bytes": 83582696}),
+            ("lantmateriet", (68.32, 18.72), {"packs": 23, "bytes": 16700730}, {"packs": 81, "bytes": 51217477}),
         ],
     )
     def test_overview_keeps_the_sheet_and_overlays_but_only_scope_heights(self, tmp_path, provider, position, overview, tiny):

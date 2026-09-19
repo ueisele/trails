@@ -313,8 +313,14 @@
                         var line = document.createElement('div');
                         line.style.cssText = 'display:flex;align-items:center;gap:6px';
                         var swatch = document.createElement('span');
+                        // The modelled class is hatched on the tiles, two
+                        // pixels of line and two of gap, and its swatch is
+                        // hatched the same way.
+                        var fill = row.hatched
+                            ? 'repeating-linear-gradient(45deg,' + row.colour + ' 0 2px,transparent 2px 4px)'
+                            : row.colour;
                         swatch.style.cssText = 'display:inline-block;width:18px;height:11px;flex:none;border:1px solid #999;'
-                            + 'background:' + row.colour + ';opacity:0.6';
+                            + 'background:' + fill + ';opacity:0.6';
                         var text = document.createElement('span');
                         text.textContent = row.label;
                         line.appendChild(swatch);

@@ -482,12 +482,16 @@ class MireTiles:
         }
 
     def classes(self) -> list[dict[str, object]]:
-        """The legend's rows: each drawn class's colour and what it is, wettest first.
+        """The legend's rows: each drawn class's colour, whether it is hatched, and what it is, wettest first.
 
         Returns:
-            One row per class the tree carries, ``label`` and ``colour``
+            One row per class the tree carries, ``label``, ``colour`` and ``hatched``
         """
-        return [{"colour": mire_tiles.COLOURS[index - 1], "label": mire_tiles.LABELS[index - 1]} for index in mire.CLASSES if index in self.drawn]
+        return [
+            {"colour": mire_tiles.COLOURS[index - 1], "hatched": index in mire_tiles.HATCHED, "label": mire_tiles.LABELS[index - 1]}
+            for index in mire.CLASSES
+            if index in self.drawn
+        ]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -560,11 +564,12 @@ _WEIGHT_LV_FOREST = {8: 1037, 9: 1770, 10: 1803, 11: 1962, 12: 2153, 13: 1683, 1
 #: second vegetation build and the first forest build, 2026-09-18.
 _WEIGHT_AB_VEGETATION = {8: 1173, 9: 1605, 10: 3284, 11: 5653, 12: 7559, 13: 6096, 14: 3045, 15: 1525}
 _WEIGHT_AB_FOREST = {8: 262, 9: 312, 10: 486, 11: 625, 12: 718, 13: 581, 14: 358, 15: 232}
-#: The mire trees (§6.13), z8 to z15, the mean per zoom of the first build,
+#: The mire trees (§6.13), z8 to z15, the mean per zoom of the second build,
 #: 2026-09-19: Lomsdal-Visten's 37,915 tiles off N50's bogs, 10.1 MB, and
-#: Abisko's 9,330 off Lantmäteriet's wetlands and SLU's wet ground, 4.0 MB.
+#: Abisko's 9,330 off Lantmäteriet's wetlands and SLU's wet ground hatched,
+#: 5.6 MB (4.0 before the hatch, which the PNG packs less well).
 _WEIGHT_LV_MIRE = {8: 399, 9: 872, 10: 1107, 11: 1167, 12: 902, 13: 586, 14: 327, 15: 216}
-_WEIGHT_AB_MIRE = {8: 303, 9: 455, 10: 943, 11: 1457, 12: 1458, 13: 1047, 14: 568, 15: 333}
+_WEIGHT_AB_MIRE = {8: 268, 9: 378, 10: 753, 11: 1162, 12: 1206, 13: 1037, 14: 780, 15: 509}
 
 
 #: Where each map's own trees are cut, written once and read here so the page,
@@ -629,7 +634,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_LOMSDAL_VISTEN.prefix("mire"),
             top=_LOMSDAL_VISTEN.ground_max_zoom,
             weight=_WEIGHT_LV_MIRE,
-            pack_weight={8: 35986, 12: 21165},
+            pack_weight={8: 36004, 12: 21183},
             drawn=(mire.FIRM_MIRE,),
             attribution="Mire: © Kartverket (N50)",
         ),
@@ -703,7 +708,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_ABISKO.prefix("mire"),
             top=_ABISKO.ground_max_zoom,
             weight=_WEIGHT_AB_MIRE,
-            pack_weight={8: 29563, 12: 33592},
+            pack_weight={8: 23750, 12: 46638},
             attribution="Mire: © Lantmäteriet (Marktäcke), © Skogsstyrelsen/SLU (Markfuktighetskarta)",
         ),
     ),

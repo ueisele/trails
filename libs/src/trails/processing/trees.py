@@ -228,8 +228,10 @@ TREES: dict[str, Tree] = {
         # Two since the unflown ground got a class of its own and the water
         # stopped counting as unknown (§6.11).
         vegetation_version=2,
-        # N50's bogs, every one of them firm mire (§6.13).
+        # N50's bogs, every one of them firm mire (§6.13). Two since the
+        # modelled class went hatched and the palette with it.
         mire="n50",
+        mire_version=2,
     ),
     # The Abisko box itself (§2, widened §9.24): the sheet was copied for it and
     # the height mosaic read over it, so the graph, the water grid, the page and
@@ -247,7 +249,8 @@ TREES: dict[str, Tree] = {
         # Two since the unflown ground got a class of its own (§6.11).
         vegetation_version=2,
         # Lantmäteriet's wetlands, firm or wet, and SLU's wet ground beyond
-        # them (§6.13).
+        # them (§6.13). Two since the wet ground went hatched.
         mire="marktacke-slu",
+        mire_version=2,
     ),
 }

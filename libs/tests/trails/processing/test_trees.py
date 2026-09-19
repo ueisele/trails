@@ -38,7 +38,7 @@ class TestPrefix:
         assert trees.TREES["abisko"].mire == "marktacke-slu"
         assert trees.TREES["lomsdal-visten"].mire == "n50"
         assert set(trees.MIRES) == {"marktacke-slu", "n50"}
-        assert trees.TREES["abisko"].prefix("mire") == "/mire/lantmateriet/1/"
+        assert trees.TREES["abisko"].prefix("mire") == "/mire/lantmateriet/2/"
         assert trees.TREES["lomsdal-visten"].zooms("mire") == range(8, 16)
         with pytest.raises(ValueError, match="names no mire source"):
             trees.read_mire(dataclasses.replace(trees.TREES["abisko"], mire=None), "unused")

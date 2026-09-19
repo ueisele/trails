@@ -355,9 +355,9 @@ SCENES: dict[str, Scene] = {
             # All seven pack trees, including the overview, at the z17 cap.
             "packs the whole map holds at its cap": 9651,
             "packs kept for the tiny scope and overview": 131,
-            "estimated bytes for the tiny scope and overview": 83582426,
+            "estimated bytes for the tiny scope and overview": 83582696,
             "packs in the sheet and overlay overview": 73,
-            "estimated bytes in the sheet and overlay overview": 42198696,
+            "estimated bytes in the sheet and overlay overview": 42198804,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -509,9 +509,9 @@ SCENES: dict[str, Scene] = {
             # All seven pack trees, including the overview, at the z17 cap.
             "packs the whole map holds at its cap": 2396,
             "packs kept for the tiny scope and overview": 81,
-            "estimated bytes for the tiny scope and overview": 51111689,
+            "estimated bytes for the tiny scope and overview": 51217477,
             "packs in the sheet and overlay overview": 23,
-            "estimated bytes in the sheet and overlay overview": 16712356,
+            "estimated bytes in the sheet and overlay overview": 16700730,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -6335,6 +6335,10 @@ def the_mire_over_the_relief(page: Any) -> Check:
         ".map(d => d.textContent.trim())"
     )
     weather = page.evaluate("() => /follows the weather/.test(document.querySelector('.trails-mire-classes').textContent)")
+    hatched = page.evaluate(
+        "() => [...document.querySelectorAll('.trails-mire-classes span[style*=background]')]"
+        ".filter(s => /repeating-linear-gradient/.test(s.style.background || s.style.backgroundImage)).length"
+    )
     blend = page.evaluate(
         with_map("""(path) => {
             let out = null;
@@ -6396,6 +6400,7 @@ def the_mire_over_the_relief(page: Any) -> Check:
             Reading("the rows explain the colours while it is on", rows_on, "block"),
             Reading("one row per class the tree carries", len(classes), SCENE.mire_classes, note="; ".join(classes)),
             Reading("and the note says this week's wetness is the weather's", weather, True),
+            Reading("and the modelled class alone is hatched", hatched, 1 if SCENE.mire_classes == 3 else 0),
             Reading("it is multiplied over the sheet", blend is not None and blend["blend"] == "multiply", True),
             Reading(
                 "and sits over the relief, above the forest's 264",
