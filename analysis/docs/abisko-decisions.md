@@ -3750,6 +3750,22 @@ is visible in Firefox; the tally on the Sources panel (tiles per path, with the 
 and worst time) is the instrument, and the measurement helper that once sat beside it was
 removed once phase 1b had its answer.
 
+### 9.45 The pinch is drawn, not scaled — settled, 2026-09-19
+
+Leaflet's canvas renderer scales its element by CSS while a pinch is held and redraws the
+paths only at `zoomend`, so the trails grew with the zoom until the finger lifted, sixteen
+times as wide on a four-level jump. It had always done so; it showed once the pinch ran
+smoothly (§6.13's resting blend), where before WebKit managed few frames under it and the jump
+hid the widening. Settled (plan phase 8f, `js/pinch_draw.js`): from `zoomstart` the canvas is
+positioned over the viewport without a CSS scale and redrawn at most once a frame through the
+context's transform at the pinch's scale — the projection of the last integer zoom, exact in
+Web Mercator since scaling at a fixed zoom is linear in pixel space, no reprojection — with
+every stroke width, dash length and circle radius divided by the scale. At `zoomend` Leaflet's
+own projection and redraw run as before. Driven on both pages at a held 1.75× and 0.75×: the
+canvas keeps a unit CSS scale, the reference stroke measures 3.0 px on the canvas and on the
+screen before, during and after, one draw per renderer per frame and none while idle. Markers
+were never affected: Leaflet places them afresh at every `zoom` event.
+
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
@@ -3759,6 +3775,13 @@ A line per change to this document or to the decisions in it, newest first.
   model's moist ground joins as a fourth class, sparsely hatched; and the hatch is a close-up
   mark — solid below z13, the moist ground drawn from z13 up only — after it was hard to read at
   low zoom. Both mire trees at version 3.
+
+- **2026-09-19, sixth** — the pinch is drawn, not scaled (§9.45, plan phase 8f): the canvas
+  is redrawn each frame at the pinch's scale with widths and radii held, instead of being
+  scaled by CSS until the finger lifts. And the blend's wait of 8d runs to the pruning of
+  the old level (8e), with `?blend=` as a measuring switch — and `?blend=never` then showed
+  the page still ends, so the blend is not the cause; plan phase 8g carries the next two
+  switches.
 
 - **2026-09-19, fifth** — the blend rests while the map zooms (§6.13, plan phase 8d): four
   multiplied overlays ended the page on the phone under a fast zoom cycle, three did not; the

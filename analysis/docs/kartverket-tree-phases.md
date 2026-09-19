@@ -1007,6 +1007,18 @@ markers on the canvas grow with the lines.
    exceed the frames (state, not a clock). Then hooks and the full drive on both pages in
    parallel.
 
+**Built 2026-09-19, 19:47 (codex, gpt-6-astra; `e25862d`, rebased `1f115c9`).** `js/pinch_draw.js`,
+an `L.Canvas.include` over `_updateTransform`, `_redraw`, `_fillStroke` and `_updateCircle`,
+active between `zoomstart` and `_onZoomEnd`: the canvas is positioned over the viewport with
+no CSS scale, the paths drawn through `setTransform` at the pinch's scale with widths, dashes
+and radii divided by it, the visible rectangle inverted into the old projection so the
+renderer's own bounds test skips the rest; `_PinchDraw` in `maps.py`. Driven on both pages at
+a held 1.75× and 0.75×: unit CSS scale on every canvas, the reference stroke 3.004 px on the
+canvas and on screen before, during and after, at most one draw per renderer per frame, no
+idle draw, no reprojection; pinch tile requests equal the direct zoom's. 969 readings a page,
+hooks 1,868 + 97; the reviewer's own hooks and parallel drives green (codex's Abisko run had
+one intermittent failure in 8e's blend reading, its recheck 40 of 40; the reviewer's run none).
+
 ### Phase 8g — Two switches for the finger's release
 
 8e did not hold either, and the reading that settles it came from `?blend=never`: the page
