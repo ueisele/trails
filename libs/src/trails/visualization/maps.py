@@ -2179,6 +2179,8 @@ def create_map(
             cross_origin=True,
             class_name="trails-grayscale" if source is BaseMap.KARTVERKET_GRAYSCALE else "",
             update_when_zooming=False,
+            update_when_idle=False,
+            keep_buffer=4,
             error_tile_url=_ERROR_TILE_URL,
             # The same index.json box as the overlays, for both countries.
             bounds=[[own.extent[1], own.extent[0]], [own.extent[3], own.extent[2]]] if own is not None else None,
@@ -2212,6 +2214,8 @@ def create_map(
             max_native_zoom=provider.shade.top,
             cross_origin=True,
             update_when_zooming=False,
+            update_when_idle=False,
+            keep_buffer=4,
             error_tile_url=_ERROR_TILE_URL,
             # **Named, so the offline panel does not take it for the base map.**
             # That panel finds the sheet by walking the map's layers for the
@@ -2251,6 +2255,8 @@ def create_map(
             max_native_zoom=provider.slope.top,
             cross_origin=True,
             update_when_zooming=False,
+            update_when_idle=False,
+            keep_buffer=4,
             error_tile_url=_ERROR_TILE_URL,
             # Named for the same reason the relief is: the offline panel must
             # never take it for the sheet, and the drive counts it apart.
@@ -2285,6 +2291,8 @@ def create_map(
             max_native_zoom=provider.vegetation.top,
             cross_origin=True,
             update_when_zooming=False,
+            update_when_idle=False,
+            keep_buffer=4,
             error_tile_url=_ERROR_TILE_URL,
             trails_vegetation=True,
             class_name="trails-vegetation-tiles",
@@ -2306,6 +2314,8 @@ def create_map(
             max_native_zoom=provider.forest.top,
             cross_origin=True,
             update_when_zooming=False,
+            update_when_idle=False,
+            keep_buffer=4,
             error_tile_url=_ERROR_TILE_URL,
             trails_forest=True,
             class_name="trails-forest-tiles",

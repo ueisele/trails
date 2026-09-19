@@ -8970,7 +8970,7 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
                 time.sleep(0.25)
                 waited += 0.25
         path = pathlib.Path(self.translate_path(self.path))
-        if path.suffix == ".js" and "drive-packs" in self.path and path.is_file():
+        if path.suffix == ".js" and ("drive-packs" in self.path or "drive-pan" in self.path) and path.is_file():
             # Only this reading's worker exposes an idle barrier. The page waits
             # for its actual timer and commits, never for a guessed wall time.
             probe = """
@@ -8981,6 +8981,77 @@ self.addEventListener('message', function (event) {
     event.waitUntil(Promise.resolve(settleWait || driveFill).then(function () {
         return Promise.allSettled(Array.from(filling.values()));
     }).then(function () { event.ports[0].postMessage({idle: settleTimer === null, filling: filling.size}); }));
+});
+"""
+            if "drive-pan" in self.path:
+                probe += """
+var drivePan = {transactions:0, gets:0, network:0, warms:[], peak:0}, driveWarm = null, driveCancel = null;
+var driveTransaction = IDBDatabase.prototype.transaction, driveGet = IDBObjectStore.prototype.get;
+IDBDatabase.prototype.transaction = function (stores) {
+    var tx = driveTransaction.apply(this, arguments);
+    if (tx.objectStoreNames.contains(KEPT)) {
+        drivePan.transactions++;
+        if (driveWarm) driveWarm.transactions++;
+    }
+    return tx;
+};
+IDBObjectStore.prototype.get = function (key) {
+    var ask = driveGet.apply(this, arguments);
+    if (this.name === KEPT) {
+        drivePan.gets++;
+        if (this.transaction === warmTransaction && driveWarm) {
+            var run = driveWarm;
+            run.gets++; run.active++; run.peak = Math.max(run.peak, run.active); run.urls.push(key);
+            ask.addEventListener('success', function () {
+                run.active--;
+                if (ask.result) run.rows++;
+                if (driveCancel) {
+                    var tile = driveCancel; driveCancel = null;
+                    run.cancelled = true; run.atCancel = run.gets;
+                    tileFor(new Request(tile));
+                }
+            });
+        }
+    }
+    return ask;
+};
+var driveFetch = fetch;
+fetch = function () { drivePan.network++; if (driveWarm) driveWarm.network++; return driveFetch.apply(this, arguments); };
+var driveHold = holdPack;
+holdPack = function () {
+    var result = driveHold.apply(this, arguments);
+    drivePan.peak = Math.max(drivePan.peak, packBytes);
+    if (driveWarm && warmTransaction) driveWarm.warmed++;
+    return result;
+};
+var driveWarmRecent = warmRecent;
+warmRecent = async function () {
+    var run = {gets:0, rows:0, warmed:0, active:0, peak:0, network:0, transactions:0, urls:[], cancelled:false};
+    driveWarm = run;
+    try { return await driveWarmRecent.apply(this, arguments); }
+    finally { drivePan.warms.push(run); if (driveWarm === run) driveWarm = null; }
+};
+self.addEventListener('message', function (event) {
+    var action = event.data.trails;
+    if (!action.startsWith('drive-pan-')) return;
+    event.waitUntil((async function () {
+        if (action === 'drive-pan-settle') {
+            for (var i=0; i<100; i++) {
+                await (settleWait || driveFill);
+                if (!settleTimer && !warmTransaction && !filling.size && !inFlight) break;
+                if (i===99) throw Error('pan never settled');
+            }
+        }
+        if (action === 'drive-pan-reset' || action === 'drive-pan-cold') {
+            drivePan = {transactions:0, gets:0, network:0, warms:[], peak:packBytes};
+            if (action === 'drive-pan-cold') { clearPacks(); askedPacks.clear(); drivePan.peak=0; }
+            for (var key of ['mem','db','seen','net','blank']) { told[key]=0; told.time[key]={total:0,worst:0}; }
+            told.why=null; told.deadlines=0; told.peak=0;
+        }
+        if (action === 'drive-pan-cancel') driveCancel = event.data.tile;
+        event.ports[0].postMessage({tally:told, bytes:packBytes, limit:PACK_BYTES, packs:packs.size,
+            directories:directories.size, addresses:askedPacks.size, ...drivePan});
+    })());
 });
 """
             body = (path.read_text() + probe).encode()
@@ -10028,17 +10099,19 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
             page,
             """async () => {
                 const tally = await window.trailsOffline.dbRead('flags', 'tiles-said');
-                return tally && tally.seen + tally.mem >= __COUNT__;
+                return tally && tally.seen + tally.db + tally.mem >= __COUNT__;
             }""".replace("__COUNT__", str(ranged["tiles"])),
             10_000,
         )
+        # A follower that waited on the lookup is db, even when its row was browsed.
         browse_tally = page.evaluate("async () => await window.trailsOffline.dbRead('flags', 'tiles-said')")
         readings.append(
             Reading(
                 "a cold offline worker draws the first screen from browse packs",
-                [browse_tally["seen"] + browse_tally["mem"], browse_tally["db"]],
-                [ranged["tiles"], 0],
-                note=f"{ranged['tiles']} tiles, {ranged['bytes']} bytes; seen {browse_tally['seen']}",
+                [browse_tally["seen"] + browse_tally["db"] + browse_tally["mem"], browse_tally["net"], browse_tally["blank"]],
+                [ranged["tiles"], 0, 0],
+                note=f"{ranged['tiles']} tiles, {ranged['bytes']} bytes; "
+                f"seen {browse_tally['seen']}, db {browse_tally['db']}, mem {browse_tally['mem']}",
             )
         )
         readings.append(Reading("the cold browse screen asks for no pack", len(_Quiet.pack_requests) - len(settled), 0))
@@ -10390,6 +10463,132 @@ def the_worker_store_path(browser: Any, page_path: pathlib.Path) -> Check:
     )
 
 
+def the_kept_pan(page: Any) -> list[Reading]:
+    """Read the real worker on the offline scene's kept ground, including idle work."""
+    original_size = page.viewport_size
+    page.set_viewport_size({"width": 430, "height": 932})
+    page.evaluate(
+        with_map("""at => {
+            const map=__MAP__;
+            window.panLayers=[];
+            map.eachLayer(layer=>{if(layer.getTileUrl){
+                if(layer.options.trailsShade || layer.options.trailsSlope || layer.options.trailsVegetation || layer.options.trailsForest) {
+                    window.panLayers.push(layer);map.removeLayer(layer);
+                } else window.panSheet=layer;
+            }});
+            window.panOriginal={center:map.getCenter(),zoom:map.getZoom(),url:window.panSheet._url};
+            map.invalidateSize({animate:false});map.setView(at,15,{animate:false});
+        }"""),
+        list(SCENE.position),
+    )
+    loaded = """() => {
+        const layer=window.panSheet, tiles=Object.values(layer._tiles).filter(t=>t.current);
+        return tiles.length>0 && !layer._loading && tiles.every(t=>t.loaded && t.el.complete);
+    }"""
+    page.wait_for_function(loaded, timeout=60_000)
+    page.evaluate("() => window.panProbe('settle')")
+    page.evaluate("() => window.panProbe('cold')")
+    page.evaluate("() => { window.panSheet.setUrl(window.panOriginal.url.split('?')[0]+'?phase8=cold'); }")
+    page.wait_for_function(loaded, timeout=60_000)
+    cold = page.evaluate("() => window.panProbe('state')")
+    settled = page.evaluate("() => window.panProbe('settle')")
+    page.evaluate("() => window.panProbe('reset')")
+    page.evaluate(with_map("() => { __MAP__.panBy([__MAP__.getSize().x,0],{animate:false}); }"))
+    page.wait_for_function(loaded, timeout=60_000)
+    pan = page.evaluate("() => window.panProbe('state')")
+    drawn = page.evaluate("() => Object.values(window.panSheet._tiles).filter(t=>t.current).every(t=>t.el.naturalWidth>1)")
+
+    def figures(state: dict[str, Any]) -> str:
+        tally = state["tally"]
+        return "; ".join(
+            f"{path} {tally[path]}, total {tally['time'][path]['total']:.3f} ms, worst {tally['time'][path]['worst']:.3f} ms"
+            for path in ("mem", "db")
+        )
+
+    readings = [
+        Reading("cold kept screen has no false memory hits", cold["tally"]["mem"], 0, note=figures(cold)),
+        Reading("cold kept screen is answered by the store", cold["tally"]["db"] > 0 and cold["tally"]["blank"] == 0, True),
+        Reading("one-screen pan after the settle draws every sheet tile", drawn, True),
+        Reading("one-screen pan answers new sheet tiles from memory", pan["tally"]["mem"] > 0, True, note=figures(pan)),
+        Reading("one-screen pan has no store or other tile answers", [pan["tally"][p] for p in ("db", "seen", "net", "blank")], [0] * 4),
+        Reading("one-screen pan opens no pack-store transaction", pan["transactions"], 0),
+    ]
+    # A bounded serpentine pass across the actual box, with its active overlays.
+    # The scene keeps the coarse box plus its drawn fine scope; absent rows stay absent.
+    page.evaluate(with_map("() => window.panLayers.forEach(layer=>layer.addTo(__MAP__))"))
+    page.wait_for_function(loaded, timeout=60_000)
+    page.evaluate("() => window.panProbe('settle')")
+    page.evaluate("() => window.panProbe('reset')")
+    for row in range(4):
+        for column in range(6) if row % 2 == 0 else reversed(range(6)):
+            page.evaluate(
+                with_map("""([row,column]) => {
+                    const box=L.latLngBounds(window.trailsOffline.bounds());
+                    __MAP__.setView([box.getSouth()+(box.getNorth()-box.getSouth())*(row+0.5)/4,
+                        box.getWest()+(box.getEast()-box.getWest())*(column+0.5)/6],14,{animate:false});
+                }"""),
+                [row, column],
+            )
+            page.wait_for_function(loaded, timeout=60_000)
+            page.evaluate("() => window.panProbe('settle')")
+    passed = page.evaluate("() => window.panProbe('state')")
+    # Interrupt a warm-up at an actual IDB success with a new tile request.
+    # The probe schedules that request deterministically; production notePack aborts.
+    page.evaluate(with_map("at => { __MAP__.setView(at,15,{animate:false}); }"), list(SCENE.position))
+    page.wait_for_function(loaded, timeout=60_000)
+    page.evaluate("() => window.panProbe('settle')")
+    page.evaluate("() => window.panProbe('cold')")
+    page.evaluate("() => window.panProbe('cancel',Object.values(window.panSheet._tiles).find(t=>t.current).el.src)")
+    page.evaluate("() => { window.panSheet.setUrl(window.panOriginal.url.split('?')[0]+'?phase8=cancel'); }")
+    page.wait_for_function(loaded, timeout=60_000)
+    cancelled = page.evaluate("() => window.panProbe('settle')")
+    stopped = [run for run in cancelled["warms"] if run["cancelled"]]
+    warms = settled["warms"] + passed["warms"] + cancelled["warms"]
+    readings.extend(
+        [
+            Reading(
+                "memory stays within 48 MB across the box",
+                passed["peak"] <= passed["limit"] and passed["bytes"] <= passed["limit"],
+                True,
+                note=f"{passed['bytes']} bytes after pass; peak {passed['peak']}; bound {passed['limit']}",
+            ),
+            Reading("directory and address maps stay at 48", passed["directories"] <= 48 and passed["addresses"] <= 48, True),
+            Reading(
+                "settles warm existing rows",
+                sum(run["warmed"] for run in warms) > 0,
+                True,
+                note=json.dumps(
+                    {
+                        "cold": [r["warmed"] for r in settled["warms"]],
+                        "pass": [r["warmed"] for r in passed["warms"]],
+                        "cancel": [r["warmed"] for r in cancelled["warms"]],
+                    }
+                ),
+            ),
+            Reading(
+                "every settle reads at most 32 rows one at a time",
+                all(r["gets"] <= 32 and r["peak"] <= 1 and r["transactions"] <= 1 for r in warms),
+                True,
+            ),
+            Reading("warm-up makes no network request", sum(r["network"] for r in warms), 0),
+            Reading("the offline pass makes no network request", passed["network"], 0),
+            Reading("new request stops the warm-up without another get", bool(stopped) and all(r["gets"] == r["atCancel"] for r in stopped), True),
+            Reading("warm-up never reads heights", any("/dem/" in url for r in warms for url in r["urls"]), False),
+        ]
+    )
+    page.set_viewport_size(original_size)
+    page.evaluate(
+        with_map("""() => {
+        const original=window.panOriginal;
+        window.panSheet.setUrl(original.url);__MAP__.invalidateSize({animate:false});
+        __MAP__.setView(original.center,original.zoom,{animate:false});
+    }""")
+    )
+    page.wait_for_function(loaded, timeout=60_000)
+    page.evaluate("() => window.panProbe('settle')")
+    return readings
+
+
 def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) -> list[Check]:
     """The map, served by its own worker, with the network switched off.
 
@@ -10415,6 +10614,14 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
     with served(page_path.parent) as origin:
         address = f"{origin}/{page_path.name}"
         context = browser.new_context(viewport={"width": 1400, "height": 900})
+        context.add_init_script("""(() => {
+            const register=navigator.serviceWorker.register.bind(navigator.serviceWorker);
+            navigator.serviceWorker.register=(url,options)=>register(url+(url.includes('?')?'&':'?')+'drive-pan',options);
+            window.panProbe=(action,tile)=>new Promise(done=>{
+                const channel=new MessageChannel();channel.port1.onmessage=e=>done(e.data);
+                navigator.serviceWorker.controller.postMessage({trails:'drive-pan-'+action,tile},[channel.port2]);
+            });
+        })();""")
         # **Counted before any page script runs**, which is the only place a
         # wrapper can see every timer the page arms. A tick behind a locked
         # screen is the cheapest way to spend a battery on nothing, and the one
@@ -11153,6 +11360,8 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         terrain.append(Reading("and so does the terrain", reloaded["kept"]["packs"], second_ask["packs"]))
 
         terrain.append(Reading("offline, the kept ground draws", drawn_terrain["good"] > 0, True, note=f"{drawn_terrain['good']} tiles"))
+        terrain.extend(the_kept_pan(second))
+
         terrain.append(Reading("and every kept layer draws terrain rather than a blank", drawn_terrain["blank"], 0))
 
         # **And ground nobody kept is blank rather than broken**, which is the

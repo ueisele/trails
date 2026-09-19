@@ -105,6 +105,8 @@ class TestCreateMap:
         assert len(layers) == (4 if base is maps.BaseMap.OPENSTREETMAP else 8)
         for layer in layers:
             assert layer.options["update_when_zooming"] is False
+            assert layer.options["update_when_idle"] is False
+            assert layer.options["keep_buffer"] == 4
             uri = layer.options["error_tile_url"]
             assert uri.startswith("data:image/png;base64,")
             png = base64.b64decode(uri.split(",", 1)[1])
@@ -115,6 +117,8 @@ class TestCreateMap:
             assert zlib.decompress(png[start + 4 : start + 4 + size]) == b"\0" * 5, "unfiltered transparent black"
         html = ours(fmap.get_root().render())
         assert html.count('"updateWhenZooming": false') == len(layers)
+        assert html.count('"updateWhenIdle": false') == len(layers)
+        assert html.count('"keepBuffer": 4') == len(layers)
         assert html.count('"errorTileUrl": "data:image/png;base64,') == len(layers)
 
     def test_only_the_base_with_its_own_tree_is_bounded(self):
@@ -9546,6 +9550,103 @@ class TestPackWorker:
         result = subprocess.run([node, "-"], input=source, text=True, capture_output=True, check=True, timeout=15)
         return json.loads(result.stdout)
 
+    def test_pack_bytes_count_replacement_eviction_oversize_and_clear(self, tmp_path):
+        result = self.run_worker(
+            tmp_path,
+            """
+            const body = size => PackIO.write(new Map([[0,new ArrayBuffer(size)]]));
+            const small=body(2_000_000), large=body(20_000_000);
+            holdPack('a',large); holdPack('b',large); holdPack('c',small);
+            recent(packs,'a'); holdPack('d',large);
+            const lru=[...packs.keys()], bytes=packBytes;
+            holdPack('a',small); const replaced=packBytes;
+            dropPack('c'); const deleted=packBytes;
+            const huge=body(PACK_BYTES), returned=holdPack('huge',huge);
+            const oversized=!packs.has('huge') && returned.body===huge && packBytes===deleted;
+            clearPacks();
+            console.log(JSON.stringify({limit:PACK_BYTES,lru,bytes,replaced,deleted,oversized,
+                expected:[2*large.byteLength+small.byteLength,large.byteLength+2*small.byteLength,large.byteLength+small.byteLength],
+                cleared:[packs.size,packBytes]}));
+            """,
+        )
+        assert result["limit"] == 48_000_000
+        assert result["lru"] == ["c", "a", "d"]
+        assert [result[key] for key in ("bytes", "replaced", "deleted")] == result["expected"]
+        assert result["oversized"]
+        assert result["cleared"] == [0, 0]
+
+    def test_only_memory_before_lookup_is_tallied_as_memory(self, tmp_path):
+        result = self.run_worker(
+            tmp_path,
+            """
+            (async()=>{
+                const a=packFor(TILE_PREFIX+'14/1/1.png'),body=PackIO.write(new Map([[a.id,new ArrayBuffer(8)]]));
+                notePack=()=>{};write=async()=>true;
+                let clock=0, pending=[];
+                performance.now=()=>clock;
+                lookup=()=>new Promise(done=>pending.push(done));
+                const work=[tileFor(new Request(a.tile)),tileFor(new Request(a.tile))];
+                await Promise.resolve(); clock=42;
+                pending.forEach(done=>done({body,complete:true,path:'db'}));await Promise.all(work);
+                const cold=JSON.parse(JSON.stringify(told));
+                clearPacks();
+                lookup=async()=>{clock+=10;holdPack(a.url,body);return null;};
+                await tileFor(new Request(a.tile));await tileFor(new Request(a.tile));
+                clearTimeout(telling);
+                console.log(JSON.stringify({cold:{mem:cold.mem,db:cold.db,time:cold.time.db.total},
+                    final:{mem:told.mem,db:told.db,time:told.time.db.total}}));
+            })().catch(e=>{console.error(e);process.exitCode=1;});
+            """,
+        )
+        assert result == {"cold": {"mem": 0, "db": 2, "time": 84}, "final": {"mem": 1, "db": 3, "time": 94}}
+
+    @pytest.mark.parametrize("cancel", [False, True])
+    def test_store_warmup_is_serial_bounded_and_stops_on_a_tile_request(self, tmp_path, cancel):
+        result = self.run_worker(
+            tmp_path,
+            """
+            (async()=>{
+                const tile=packFor(TILE_PREFIX+'14/4/4.png'),body=PackIO.write(new Map([[tile.id,new ArrayBuffer(8)]]));
+                let gets=[],transactions=0,active=0,peak=0,network=0,aborted=false;
+                fetch=async()=>{network++;throw Error('network forbidden');};
+                setTimeout=()=>1;clearTimeout=()=>{};
+                const tx={objectStore:()=>({get:url=>{
+                    gets.push(url);active++;peak=Math.max(peak,active);const ask={};
+                    setImmediate(()=>{
+                        active--;if(aborted)return;
+                        // A missing row is harmless; only rows that exist enter memory.
+                        ask.result=gets.length===2?undefined:{pack:body,complete:true};
+                        if(CANCEL && gets.length===2){notePack(tile);return;}
+                        ask.onsuccess();
+                        if(!active)setImmediate(()=>tx.oncomplete());
+                    });return ask;
+                }}),abort:()=>{aborted=true;setImmediate(()=>tx.onabort());}};
+                base=async()=>({transaction:(store,mode)=>{
+                    if(store!=='packs'||mode!=='readonly')throw Error('wrong transaction');transactions++;return tx;
+                }});
+                const urls=[tile.url,packFor(TILE_PREFIX+'14/8/8.png').url,
+                    packFor(SHADE_PREFIX+'14/4/4.png').url,packFor(SLOPE_PREFIX+'14/8/8.png').url,
+                    packFor(HEIGHT_PREFIX+'13/4/4.png').url];
+                await warmRecent(urls,requestGeneration);
+                console.log(JSON.stringify({gets:gets.length,transactions,peak,network,aborted,packs:packs.size,
+                    first:gets[0]===tile.url,unique:new Set(gets).size===gets.length,
+                    heights:gets.some(u=>u.includes('/dem/')),sheetFirst:gets.slice(0,18).every(u=>u.includes('/tiles/'))}));
+            })().catch(e=>{console.error(e);process.exitCode=1;});
+            """.replace("CANCEL", json.dumps(cancel)),
+        )
+        assert result == {
+            "gets": 2 if cancel else 32,
+            "transactions": 1,
+            "peak": 1,
+            "network": 0,
+            "aborted": cancel,
+            "packs": 1 if cancel else 31,
+            "first": True,
+            "unique": True,
+            "heights": False,
+            "sheetFirst": True,
+        }
+
     @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
     def test_addresses_at_every_level_and_box_edge(self, tmp_path, provider):
         own = maps.PROVIDERS[provider]
@@ -9606,6 +9707,7 @@ class TestPackWorker:
                 var corrupt = bytes.slice(0); new Uint8Array(corrupt)[at] ^= 255;
                 try {{ holdPack('bad', corrupt); }} catch (_) {{ rejected++; }}
             }}
+            clearPacks(); PACK_BYTES = 8 * bytes.byteLength;
             for (var i = 0; i < 60; i++) {{ holdPack('pack' + i, bytes); }}
             recent(packs, 'pack52'); holdPack('pack60', bytes);
             console.log(JSON.stringify({{answers, rejected, packs: packs.size, directories: directories.size,
@@ -9701,6 +9803,8 @@ class TestPackWorker:
                 const body = PackIO.write(new Map([[0,new Uint8Array(8).buffer]]));
                 let now=1000, timer, armed=0, cleared=0, active=0, peak=0;
                 const requests=[], releases=[], writes=[], waits=[], reads=[];
+                let warmedAfterWrites=-1;
+                warmRecent=async()=>{warmedAfterWrites=writes.length;};
                 Date.now=()=>now;
                 setTimeout=(fn,ms)=>{if(ms!==SETTLE_MS)throw Error('wrong idle delay');timer=fn;return ++armed;};
                 clearTimeout=()=>{cleared++;};
@@ -9736,7 +9840,7 @@ class TestPackWorker:
                     first:first.map(u=>u.split('?')[1]),third:third.map(u=>u.split('?')[1]),
                     sheetFirst:last[3]===shade.url,height:requests.includes(height.url),writes:writes.length,
                     complete:packs.get(shade.url).complete,directory:directories.has(shade.url),
-                    memoryRead:reads.includes(base.url+'?memory'),filling:filling.size}));
+                    memoryRead:reads.includes(base.url+'?memory'),filling:filling.size,warmedAfterWrites}));
             })().catch(e=>{console.error(e);process.exitCode=1;});
             """,
         )
@@ -9755,6 +9859,7 @@ class TestPackWorker:
             "directory": True,
             "memoryRead": False,
             "filling": 0,
+            "warmedAfterWrites": 3,
         }
 
     @pytest.mark.parametrize("offline", ["switch", "network", "moving"])

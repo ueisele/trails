@@ -283,7 +283,7 @@ self.addEventListener("message", function (event) {
         return;
     }
     if (said.trails === "packs-changed") {
-        packs.clear();
+        clearPacks();
         if (event.ports[0]) { event.ports[0].postMessage(true); }
         return;
     }
@@ -517,10 +517,11 @@ function packFor(plain) {
     return {url: prefix.href + level + '/' + (x >> (z - level)) + '/' + (y >> (z - level)) + '.pmtiles', id: id, tile: plain, height: layer[0] === HEIGHT_PREFIX};
 }
 
-// 48 directories are small (85 entries at most); eight bodies cover nearby
-// screens. Requests stay on ranges; idle time fills the recent screen whole.
+// 48 directories are small (85 entries at most); bodies have a byte budget.
+// Requests stay on ranges; idle time fills the recent screen whole.
 // The phone may tune SETTLE_MS; all address and body caches stay bounded.
-var DIRECTORY_LIMIT = 48, PACK_LIMIT = 8, SETTLE_MS = 2000, FILL_LIMIT = 2;
+var DIRECTORY_LIMIT = 48, PACK_BYTES = 48 * 1000 * 1000, SETTLE_MS = 2000, FILL_LIMIT = 2;
+var packBytes = 0, warmTransaction = null;
 var directories = new Map(), packs = new Map(), opening = new Map(), filling = new Map();
 function recent(cache, key) {
     var value = cache.get(key);
@@ -532,12 +533,21 @@ function remember(cache, key, value, limit) {
     if (cache.size > limit) { cache.delete(cache.keys().next().value); }
     return value;
 }
+function dropPack(url) {
+    var held = packs.get(url);
+    if (held) { packBytes -= held.body.byteLength; packs.delete(url); }
+}
+function clearPacks() { packs.clear(); packBytes = 0; }
 var packHeader = PackIO.header, packDirectory = PackIO.directory;
 function holdPack(url, body, network = true, complete = network) {
     var held = PackIO.unpack(body);
     held.complete = complete;
     if (network) { remember(directories, url, {entries: held.entries}, DIRECTORY_LIMIT); }
-    return remember(packs, url, held, PACK_LIMIT);
+    dropPack(url);
+    if (body.byteLength > PACK_BYTES) { return held; }
+    for (; packs.size && packBytes + body.byteLength > PACK_BYTES;) { dropPack(packs.keys().next().value); }
+    packs.set(url, held); packBytes += body.byteLength;
+    return held;
 }
 var sliceTile = PackIO.slice;
 function png(body) { return new Response(body, {headers: {'content-type': 'image/png'}}); }
@@ -564,6 +574,7 @@ function keepNetworkPack(url, body, event) {
 var askedPacks = new Map(), settleTimer = null, settleWait = null, settleDone = null, requestGeneration = 0;
 function notePack(address, event) {
     var asked = Date.now(), generation = ++requestGeneration;
+    if (warmTransaction) { warmTransaction.abort(); warmTransaction = null; }
     remember(askedPacks, address.url, asked, DIRECTORY_LIMIT);
     if (settleTimer !== null) { clearTimeout(settleTimer); }
     if (!settleWait) { settleWait = new Promise(function (done) { settleDone = done; }); }
@@ -604,6 +615,55 @@ async function fillRecent(asked, generation) {
     var overlays = urls.filter(function (url) { return packPriority(url) > 0; });
     await Promise.all([next(sheet), next(sheet)]);
     await Promise.all([next(overlays), next(overlays)]);
+    // Finish the screen's whole online packs before reading neighbours. Offline
+    // next() does nothing, and this is the only work the settle undertakes.
+    await warmRecent(urls, generation);
+}
+async function warmRecent(urls, generation) {
+    if (generation !== requestGeneration) { return; }
+    var open = await base();
+    if (generation !== requestGeneration) { return; }
+    // At most 48 windows of nine addresses; deduplicate overlapping windows.
+    var neighbours = new Set();
+    urls.forEach(function (url) {
+        var match = /^(.*\/)(\d+)\/(\d+)\/(\d+)\.pmtiles$/.exec(url);
+        if (!match || packPriority(url) < 0) { return; }
+        var z = Number(match[2]), x = Number(match[3]), y = Number(match[4]);
+        neighbours.add(url);
+        for (var dy = -1; dy <= 1; dy += 1) {
+            for (var dx = -1; dx <= 1; dx += 1) {
+                if (x + dx >= 0 && y + dy >= 0 && x + dx < Math.pow(2, z) && y + dy < Math.pow(2, z)) {
+                    neighbours.add(match[1] + z + '/' + (x + dx) + '/' + (y + dy) + '.pmtiles');
+                }
+            }
+        }
+    });
+    if (!neighbours.size) { return; }
+    return new Promise(function (done) {
+        var tx = open.transaction(KEPT, 'readonly'), store = tx.objectStore(KEPT);
+        warmTransaction = tx;
+        var queue = neighbours.values(), reads = 0;
+        function next() {
+            for (var step = queue.next(); !step.done && reads < 32 && generation === requestGeneration; step = queue.next()) {
+                var url = step.value, held = packs.get(url);
+                if (held && held.complete) { continue; }
+                reads += 1;
+                var ask = store.get(url);
+                ask.onsuccess = function () {
+                    if (generation !== requestGeneration) { return; }
+                    var row = ask.result;
+                    if (row) { holdPack(url, row.pack, false, row.complete); }
+                    next();
+                };
+                return;
+            }
+        }
+        tx.oncomplete = tx.onabort = tx.onerror = function () {
+            if (warmTransaction === tx) { warmTransaction = null; }
+            done();
+        };
+        next();
+    });
 }
 function wholePack(url) {
     if (!filling.has(url)) {
@@ -730,7 +790,7 @@ function tileFor(request, event) {
             if (found) {
                 var cached = recent(packs, address.url);
                 var body = cached && sliceTile(cached, address.id);
-                if (body) { answered("mem"); return png(body); }
+                if (body) { answered("db"); return png(body); }
                 // A locally completed archive has {} metadata; its offsets need not
                 // match the bucket. Only network bodies seed the range directory.
                 body = sliceTile(holdPack(address.url, found.body, false, found.complete), address.id);
@@ -738,7 +798,7 @@ function tileFor(request, event) {
             }
             // A concurrent request may have filled memory while this get ran.
             var cached = recent(packs, address.url), body = cached && sliceTile(cached, address.id);
-            if (body) { answered("mem"); return png(body); }
+            if (body) { answered("db"); return png(body); }
             var off = state.off;
             if (off) { answered("blank"); return blank(); }
             var body = await networkTile(address, event);
@@ -779,7 +839,7 @@ function flushPuts() {
                             var old = ask.result, body = group.body || PackIO.merge(old && old.pack, group.tiles);
                             var made = PackIO.row(body, !!(old && old.kept), !!(group.body || (old && old.complete)), url);
                             PackIO.account(held, total, url, old, made); store.put(made, url);
-                            remember(committed, url, made, PACK_LIMIT);
+                            remember(committed, url, made, 8);
                             if (!made.kept) { total.writes += 1; }
                             if (!made.kept && total.writes % 50 === 0) {
                                 pruning = true;
@@ -805,7 +865,7 @@ function trim(store, total, done, removedKey) {
     walk.onsuccess = function () {
         var at = walk.result;
         if (!at) { done(); return; }
-        total.bytes -= at.key[1]; store.delete(at.primaryKey); packs.delete(at.primaryKey);
+        total.bytes -= at.key[1]; store.delete(at.primaryKey); dropPack(at.primaryKey);
         if (removedKey) { removedKey(at.primaryKey); }
         removed += 1;
         if (removed >= 50 || total.bytes <= TILE_CAP) { done(); }
