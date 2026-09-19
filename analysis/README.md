@@ -79,8 +79,10 @@ once into the cache by `command make nmd` (7.2 GB down, no login); the Norwegian
 `hoydedata.no`'s surface model, no login either. The Swedish mire needs two logins on a cold
 cache — Geotorget's for Lantmäteriet's Marktäcke, once the product is ordered there, and the
 one Skogsstyrelsen publishes on its download page for the 8.4 GB soil-moisture mosaic, in
-`SKOGSSTYRELSEN_FTP_USERNAME` and `SKOGSSTYRELSEN_FTP_PASSWORD` — and the Norwegian none, off
-N50's bogs.
+`SKOGSSTYRELSEN_FTP_USERNAME` and `SKOGSSTYRELSEN_FTP_PASSWORD`; both live in
+`home/trails-map`'s `secrets.sops.env`, so a cold `make mire PARK=abisko` runs from there as
+`sops exec-env secrets.sops.env 'cd ../../trails && command make mire PARK=abisko'` — and the
+Norwegian none, off N50's bogs.
 
 **Both maps copy their sheet, and only Abisko needs a login.** `command make tiles PARK=abisko`
 copies Lantmäteriet's tiles for the box out of its open download over FTP (no login), and its
