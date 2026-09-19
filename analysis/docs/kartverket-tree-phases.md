@@ -727,6 +727,66 @@ Lomsdal-Visten. 840 readings a page, hooks 1,789 + 97 tests.
    two maps carry relief, slope and height tiles should add that both now draw from our own
    trees.
 
+### Phase 8 — The pan with everything kept
+
+Decided 2026-09-19, 08:30 (Uwe): with the whole map kept, a pan or a zoom still shows the
+tiles arriving — much better than before, but visible. Sources on the phone after a session of
+panning over Abisko, everything kept, the switch on:
+
+| path | tiles | total | mean | worst |
+|---|---|---|---|---|
+| memory | 439 | 21,646 ms | 49 ms | 390 ms |
+| store | 161 | 13,376 ms | 83 ms | 380 ms |
+| network, seen, blank | 0 | | | |
+
+Peak in flight 54; at open 52 tiles in 4.5 s, worst 339 ms; the worker's own opening 3 + 2 + 1 ms.
+
+**What the figures say.** A memory hit that costs 49 ms on average is not a memory hit. The
+worker's memory holds eight packs, and a screen over three layers is more than eight, so
+most requests start with the pack not in memory, go through the coalesced store lookup —
+one `get` per pack, serial inside the transaction, 40–70 ms each on the device (phase 1b) —
+and the tiles of one pack that arrive behind the first are tallied `mem` because the first
+has filled memory by the time their own lookup returns. So 600 tiles paid for the store, and
+the worst of 380–390 ms is a transaction of five or six gets. Two things sit on top: on a
+phone Leaflet asks for tiles only when the drag has ended (`updateWhenIdle` defaults to true on
+mobile) and keeps a buffer of two tiles past the edge, so nothing is asked for while the
+finger moves; and iOS ends an idle worker after about thirty seconds, so the first pan after a
+pause starts with an empty memory — the 3 + 2 + 1 ms of opening are cheap, the packs are not.
+
+**Built as one codex run, in the worker and the tile options:**
+
+1. **The tally tells the truth.** `mem` counts only a tile answered from memory without a
+   store transaction; a tile answered from memory after waiting on the lookup counts as `db`
+   with the time it waited. Nothing else about the tally changes.
+2. **Memory is bounded in bytes, not in packs.** The pack cache holds up to 48 MB (a named
+   constant; a z10 height pack is 5.3 MB, a sheet pack under 1 MB), least recently used out;
+   the directory cache stays at 48 entries. Nothing else in the worker grows.
+3. **The store warms memory while the reader stays.** On the same two-second settle as
+   phase 6h, for every pack asked in the window: the pack itself and its eight neighbours
+   at its pack level, in the same layer — the sheet's first, then the overlays', never the
+   heights — read from the store into memory, one readonly transaction, one get at a time,
+   only rows that are there, at most 32 rows a settle, and stopped by a new request like the
+   fill. No network for these: online, the screen's own packs come whole through 6h's fill;
+   the neighbours are warmed only if the store holds them. The next pan then finds its packs
+   in memory, and the store is asked only for ground nobody has been near.
+4. **Leaflet asks while the finger moves.** `updateWhenIdle: false` and `keepBuffer: 4` on
+   every tile layer of both maps, where phase 2 set `updateWhenZooming: false`. Requests
+   start during the drag, throttled by Leaflet's `updateInterval` of 200 ms, and two rings
+   of tiles past the edge are held, so a pan of half a screen shows ground already there.
+   The cost is more requests per pan, all of them answered from memory after 3.
+5. **Drive.** Both pages, offline with the ground kept, as the suite already sets up: a pan
+   of one screen after the settle reads every sheet tile as `mem` with no store transaction
+   in the pan; the worker's memory stays under the byte bound after a pass over the box;
+   the warm-up reads nothing from the network and stops on a new request; the tally's `mem`
+   figure after a cold first screen is what it says (a first screen from the store is `db`).
+   Readings wait for state and never compare wall-clock figures. Then hooks and the full
+   drive on both pages in parallel.
+
+What this cannot fix: the first pan after iOS has ended the worker pays the store once for
+the screen; the warm-up then covers the neighbours. If the phone still shows the tiles
+arriving after this, the next figure to read is the `db` worst after a pause, and the next
+lever is the page reading kept packs itself, which is another design.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
