@@ -924,6 +924,18 @@ and counts blended layers rather than layers. Not reproducible on `forge`: no We
    hooks and the full drive on both pages in parallel. Whether the phone holds is Uwe's
    reading, with the same fast cycle.
 
+**Built 2026-09-19, 16:53 (codex, gpt-6-astra; `03a9944`, landed by fast-forward).** The first
+run of this phase, under the earlier text that blamed the tile count, was stopped at Uwe's word
+before it built anything ("erst klären"); its readings were discarded. `js/zoom_blend.js` and
+`_ZoomBlend` in `maps.py`, a `trails-zoom-blend` class on the map container from `zoomstart`
+until the last of the loading layers fires `load` or 1,500 ms, and the theme's second rule that
+sets the four overlays to normal under it. Driven on both pages with every overlay on: the four
+overlays multiply at rest and composite normally during the zoom; at `zoomend` six layers are
+still loading and the class stays; every layer that started fires `load` and the last one sees
+the class removed; a zoom with quick tiles cancels the 1,500 ms fallback without firing it; six
+readings that fail before the change. 926 readings a page, hooks 1,841 + 97, the reviewer's own
+hooks and parallel drives green. Whether the phone holds under the fast cycle is Uwe's reading.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
