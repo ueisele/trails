@@ -802,6 +802,16 @@ where the drive's kept ground is wide, and 0–5 on Lomsdal-Visten, where it is 
 no network request from the warm-up, and a new request stops it. 854 readings a page, hooks
 1,793 + 97 tests. What the phone will show is the first pan after iOS has ended the worker.
 
+### Phase 8b — The figures fold away
+
+Decided 2026-09-19, 09:15 (Uwe): the readings on Sources are useful, and they should not sit
+in front of the sources. The two measurement paragraphs — *Opened in …* and the worker's tally
+— fold behind one small symbol in the Sources header beside the title (a stopwatch), closed by
+default, opened by a tap; not remembered. The line *This map was built … ago* with its check
+button stays where it is, because it is an action, and the sources follow it as before. The
+drive reads the fold closed on open, open after the tap, and the tally still readable inside
+it; the readings that read the tally today keep working through the open fold.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
