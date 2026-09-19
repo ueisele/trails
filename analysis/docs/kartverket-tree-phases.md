@@ -850,6 +850,17 @@ even from memory.
    reader sees is still loading. Readings wait for state and never compare wall-clock
    figures. Then the full drive on both pages in parallel and hooks.
 
+**Built 2026-09-19, 09:19 (codex, gpt-6-astra; `308fbf2`, rebased `5fdc39f`).** The run first
+stopped, rightly: the ring moves with the viewport, so the "no request" reading could not hold,
+and item 3 was corrected before it went on. `js/tile_ring.js`, a separate override of
+`_getTiledPixelBounds` beside the retention one, `TILE_RING = 1`, padding at the tile's own
+scale so overzoom is covered; emitted before the tile layers. Measured at z15 on the phone's
+430 × 932: a view loads 28 tiles a layer on Abisko (10 visible) and 24 on Lomsdal-Visten (8);
+a pan of half a tile and of a full tile asks for 7 / 6 tiles — the ring's new outer column —
+all from memory, no store transaction, and every tile that became visible (5 / 4) was
+complete at `moveend`; the overview and whole-map counts are unchanged. Two older readings
+that assumed one pack a layer were widened. 887 readings a page, hooks 1,799 + 97 tests.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).

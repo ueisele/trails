@@ -1474,7 +1474,10 @@ screen's packs and their eight neighbours per layer (never heights, one readonly
 at most 32 gets, stopped by the next request), and every tile layer asks while the finger
 moves (`updateWhenIdle: false`) and keeps four rings past the edge. Driven offline: a pan of
 one screen after the settle is answered from memory with no store transaction. What stays: the
-first pan after iOS has ended an idle worker pays the store once for the screen.
+first pan after iOS has ended an idle worker pays the store once for the screen. And since
+`keepBuffer` keeps and loads nothing, the page loads one ring of tiles past every viewport
+edge (phase 8c, `tile_ring.js`): 28 tiles a layer for 10 visible at z15, a pan asking only for
+the ring's new column, from memory, everything that becomes visible already complete.
 
 **The edge keeps a pack as long as the object says.** A year, `immutable`: the zone's cache
 rule for the tree and pack paths respects the origin instead of the five minutes written for
@@ -3581,6 +3584,10 @@ removed once phase 1b had its answer.
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-19, second** — one ring of tiles past the viewport (§6.12, plan phase 8c), after
+  the pan still showed tiles arriving at the leading edge: Leaflet loads only the viewport's
+  tiles and `keepBuffer` loads nothing. Sources folds its figures behind a stopwatch (8b).
 
 - **2026-09-19** — the pan with everything kept (§6.12, plan phase 8): a memory hit that waited
   on the store is counted as a store answer, memory holds 48 MB of packs, the settle warms the
