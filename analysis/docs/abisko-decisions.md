@@ -1433,8 +1433,10 @@ layer's top less three and less seven (a sheet to z17 packs at z14, z10 and z6).
 packs PARK=…` writes them from the trees; `just deploy --tree packs` uploads them and opens
 every directory first. Lomsdal-Visten is 9,162 packs, 5.57 GB (the sheet 7,163 at 638 kB
 mean); Abisko 2,274, 1.07 GB; a z10 height pack, 5.3 MB, is the heaviest object. Norway's
-per-tile objects were never uploaded, and Lantmäteriet's will be dropped once the phone has
-confirmed the packs. Why the pack, and not the tile or the country: measured on the phone
+per-tile objects were never uploaded, and the eleven per-tile trees that were — Lantmäteriet's
+sheet and both countries' heights, relief, slope, vegetation and forest — were dropped from the
+bucket on 2026-09-19 at Uwe's word, after the phone had confirmed the packs; the bucket holds
+packs, pages and icons and nothing else. Why the pack, and not the tile or the country: measured on the phone
 (plan phase 1b), every IndexedDB request costs 40–70 ms whatever the row's shape, and the
 price follows the size of the database, so what scales is the request count per screen and
 not the row count; and a 600 MB object is `BYPASS` at the edge on every range request, the
