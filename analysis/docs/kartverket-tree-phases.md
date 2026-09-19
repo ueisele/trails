@@ -812,6 +812,14 @@ button stays where it is, because it is an action, and the sources follow it as 
 drive reads the fold closed on open, open after the tap, and the tally still readable inside
 it; the readings that read the tally today keep working through the open fold.
 
+**Built 2026-09-19, 07:57 (codex, gpt-6-astra; `7f5abb0`).** A stopwatch button beside the
+Sources title, the size and colour of the close control, `aria-expanded` and `aria-controls`
+on it; the two measurement paragraphs live in one hidden block it toggles, closed again every
+time Sources opens; the build-age line, its button and the sources are where they were. Ten
+readings a page (closed on open, open after the tap with the tally readable, keyboard, reset,
+no such button on the other panels), the opening-cost reading opens the fold first; 864
+readings a page, hooks 1,795 + 97 tests.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
