@@ -9142,6 +9142,16 @@ ROWS = """async (store) => await new Promise(done => {
     ask.onerror = () => done(-1);
 })"""
 
+KEPT_ROWS = """async () => await new Promise(done => {
+    const ask = indexedDB.open('__DB__', 6);
+    ask.onsuccess = () => {
+        const count = ask.result.transaction('packs', 'readonly').objectStore('packs').index('kept').count();
+        count.onsuccess = () => done(count.result);
+        count.onerror = () => done(-1);
+    };
+    ask.onerror = () => done(-1);
+})"""
+
 CACHED_PAGE = """async () => await new Promise(done => {
     const ask = indexedDB.open('__DB__', 6);
     ask.onsuccess = () => {
@@ -9883,7 +9893,9 @@ def the_empty_pack_count(page: Any) -> Check:
         if not kept:
             asked = page.evaluate("async () => await window.trailsOffline.toggle(true)")
             readings.append(Reading(state + " cannot switch on an empty store", [asked["on"], asked["chooser"]], [False, True]))
-    readings.append(Reading("Forget clears the fixture pack", page.evaluate(in_db(ROWS), "packs"), 0))
+    # Forget removes kept rows only (phase 6g); the first screen's range tiles
+    # become browse rows on their own time and may sit beside the count.
+    readings.append(Reading("Forget clears the fixture pack", page.evaluate(in_db(KEPT_ROWS)), 0))
     return Check("an empty pack store has a known zero count", readings)
 
 
