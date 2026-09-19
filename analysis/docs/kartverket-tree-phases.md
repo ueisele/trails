@@ -859,10 +859,16 @@ scale so overzoom is covered; emitted before the tile layers. Measured at z15 on
 a pan of half a tile and of a full tile asks for 7 / 6 tiles — the ring's new outer column —
 all from memory, no store transaction, and every tile that became visible (5 / 4) was
 complete at `moveend`; the overview and whole-map counts are unchanged. Two older readings
-that assumed one pack a layer were widened. 887 readings a page, hooks 1,799 + 97 tests. The reviewer's parallel drives then caught a wait gap in the drive: between the settle
-timer firing and the warm-up's transaction opening nothing was pending, so a pan could start
-against an unwarmed store (two of fourteen answers from the store on Abisko); the drive now
-tracks every settle through fill and warm-up and waits on that (`7e24e55`, hooks 1,801 + 97).
+that assumed one pack a layer were widened. 887 readings a page, hooks 1,799 + 97 tests. The reviewer's parallel drives then went red on Abisko in one run of three — two of the
+pan's fourteen answers from the store — and the first suspect, a wait gap in the drive
+between the settle timer and the warm-up's transaction, was closed (`7e24e55`) without being
+the cause. A trace of the failing answers found it: **the warm-up evicted the next pan's
+sheet pack**. A neighbour already complete in memory was skipped without touching its
+least-recently-used position, so the overlays' reads later in the same warm-up pushed it out
+of the 48 MB — a real worker fault that a phone would have paid as a store read on every ring
+refill. Fixed by refreshing a skipped neighbour's position (`70471b0`, a regression test that
+fails before it on both providers); three diagnostic runs beside a full drive reproduced the
+failure once before and never after; hooks 1,803 + 97.
 
 ## 5. Not in this plan
 
