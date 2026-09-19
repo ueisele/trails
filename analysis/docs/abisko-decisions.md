@@ -1650,8 +1650,12 @@ renders it into a buffer of its own and multiplies that with the ground on every
 and through a pinch the layer is scaled up to 16× and the old ground is kept scaled until the new
 level has loaded. Four such buffers reach a limit that three do not. So the map's container
 carries a class from `zoomstart` until every tile layer that started loading has fired `load`
-(1,500 ms at most — Leaflet's own `leaflet-zoom-anim` covers only the snap after the finger
-lifts, not the pinch), and under it the four overlays composite normally. At rest nothing changes;
+and no blended layer holds a tile of another zoom any more (phase 8e, after 8d's wait to `load`
+alone did not hold on the phone: Leaflet prunes the left level 250 ms after `load` and fades the
+new one in, and the blend came back with two levels in every blended layer; 3,000 ms at most —
+Leaflet's own `leaflet-zoom-anim` covers only the snap after the finger lifts, not the pinch),
+and under it the four overlays composite normally. `?blend=never` and `?blend=always` in the
+address are a measuring switch for the phone and go when the reading is taken. At rest nothing changes;
 the ring, `keepBuffer` and the warm-up stay as decided. During a pinch the overlays lie a little
 lighter over the lettering. `js/zoom_blend.js`, `_ZoomBlend`, the theme's second blend rule.
 

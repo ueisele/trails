@@ -967,6 +967,16 @@ The phone's readings, in order: the plain page under the fast cycle; if it still
 `?blend=never` — dies too, and the blend is not the cause at all; holds, and the wait is the
 part to look at again, with `?blend=always` as the control.
 
+**Built 2026-09-19, 19:05 (codex, gpt-6-astra; `267d24c`, rebased `439133a`).** The wait ends
+when no blended layer holds a tile of another zoom, polled every 50 ms after the last `load`,
+3,000 ms at most; `?blend=never` and `?blend=always` read once from the address. Driven on both
+pages with every overlay on: at `zoomend` six layers are loading and each blended layer holds
+24–28 tiles of the left zoom; the last `load` still sees other-zoom tiles in three of the four
+and the class stays; it leaves only once all four counts are zero; the plain page multiplies at
+rest, `never` never does, `always` does throughout. Six readings that fail before the change.
+942 readings a page, hooks 1,857 + 97, the reviewer's own hooks and parallel drives green.
+Published 19:10. The phone's reading is open.
+
 ### Phase 8f — The pinch is drawn, not scaled
 
 Reported 2026-09-19, 18:40 (Uwe), on the 8d page: while a pinch is held, the trails grow with
