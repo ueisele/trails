@@ -174,7 +174,7 @@ def write_tree(
     out_dir.mkdir(parents=True, exist_ok=True)
     source_crs = CRS.from_user_input(crs)
     flat, clear = palette(colours, alpha)
-    masks = {index: hatch_mask(line, gap) for index, (line, gap) in (hatched or {}).items()}
+    masks = {klass: hatch_mask(line, gap) for klass, (line, gap) in (hatched or {}).items()}
     middle = (bounds[1] + bounds[3]) / 2.0
     started = time.time()
     total = tile_count(bounds, levels)
@@ -198,8 +198,8 @@ def write_tree(
                     continue
                 tile = cut(classes, transform, source_crs, zoom, x, y, ground_m, cell_m)
                 if fine:
-                    for index, dropped in masks.items():
-                        tile[(tile == index) & dropped] = 0
+                    for klass, dropped in masks.items():
+                        tile[(tile == klass) & dropped] = 0
                 elif fine_only:
                     tile[np.isin(tile, fine_only)] = 0
                 if not tile.any():
@@ -228,7 +228,7 @@ def write_tree(
         "colours": list(colours),
         "alpha": alpha,
         "cell_m": cell_m,
-        "hatched": {str(index): list(pitch) for index, pitch in (hatched or {}).items()},
+        "hatched": {str(klass): list(pitch) for klass, pitch in (hatched or {}).items()},
         "fine_from": fine_from,
         "fine_only": list(fine_only),
         **(extra or {}),
