@@ -1491,6 +1491,27 @@ class _TileRetention(MacroElement):
         self._name = "TileRetention"
 
 
+class _TileRendering(MacroElement):
+    """Read the temporary tile-rendering switch before any tile layer is added."""
+
+    _template = Template(
+        """
+        {% macro script(this, kwargs) %}
+        (function () {
+            if (new URLSearchParams(location.search).get('tiles') === 'plain') {
+                {{ this._parent.get_name() }}.getContainer().classList.add('trails-tiles-plain');
+            }
+        })();
+        {% endmacro %}
+        """
+    )
+
+    def __init__(self) -> None:
+        """Initialize the address switch."""
+        super().__init__()
+        self._name = "TileRendering"
+
+
 class _TileRing(MacroElement):
     """Load one tile beyond each viewport edge at the layer's tile scale."""
 
@@ -1760,6 +1781,8 @@ class _Theme(MacroElement):
         .trails-zoom-blend .leaflet-layer.trails-vegetation-tiles,
         .trails-zoom-blend .leaflet-layer.trails-forest-tiles,
         .trails-zoom-blend .leaflet-layer.trails-mire-tiles { mix-blend-mode: normal; }
+        /* Temporary tiles=plain measurement: override Leaflet's Safari rule. */
+        .leaflet-container.trails-tiles-plain .leaflet-tile { image-rendering: auto; }
         :root {
             color-scheme: light;
             --trails-panel: rgba(255,255,255,0.94);
@@ -2311,6 +2334,7 @@ def create_map(
         header.add_child(_Head(title, companions), name="head")
 
     _TileRetention().add_to(fmap)
+    _TileRendering().add_to(fmap)
     _TileRing().add_to(fmap)
     _PinchDraw().add_to(fmap)
     _ZoomBlend().add_to(fmap)

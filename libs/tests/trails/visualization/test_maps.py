@@ -133,7 +133,7 @@ class TestCreateMap:
             else:
                 assert "bounds" not in layer.options, "OSM answers beyond the tree"
 
-    def test_retention_changes_only_the_child_depth_before_any_tile_layer(self):
+    def test_retention_and_its_address_switch_precede_any_tile_layer(self):
         html = ours(maps.create_map(center=(65.55, 13.05)).get_root().render())
         start = html.index("L.GridLayer.include({")
         end = html.index("L.tileLayer(", start)
@@ -142,7 +142,7 @@ class TestCreateMap:
         assert "zoom > this.options.maxZoom || zoom < this.options.minZoom" in pruning
         assert "this._removeAllTiles();" in pruning
         assert "tile.retain = tile.current;" in pruning
-        assert "if (tile.current && !tile.active)" in pruning
+        assert "if (!dropGround && tile.current && !tile.active)" in pruning
         assert "if (!this._retainParent(coords.x, coords.y, coords.z, coords.z - 5))" in pruning
         assert "this._retainChildren(coords.x, coords.y, coords.z, coords.z + 3);" in pruning
         assert "if (!this._tiles[key].retain) { this._removeTile(key); }" in pruning

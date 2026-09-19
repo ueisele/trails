@@ -9881,6 +9881,116 @@ def the_zoom_blend_switches(page: Any) -> Check:
     return Check("the zoom blend address switches with every overlay on", readings)
 
 
+def the_release_switches(page: Any) -> Check:
+    """Measure old ground and tile rendering under each release switch and both.
+
+    Args:
+        page: The plain page supplying the browser and address.
+
+    Returns:
+        State readings at completed zoom steps, tile events and drawn frames.
+    """
+    readings: list[Reading] = []
+    for query in ("", "ground=drop", "tiles=plain", "ground=drop&tiles=plain"):
+        label = query or "no switch"
+        print(f"    · release switches: {label}", flush=True)
+        drop, plain = "ground=drop" in query, "tiles=plain" in query
+        address = page.evaluate("q => { const u = new URL(location.href); u.search = q; return u.href; }", query)
+        probe = page.context.browser.new_page(viewport={"width": 390, "height": 844})
+        errors: list[str] = []
+        probe.on("pageerror", lambda error, errors=errors: errors.append(str(error)))
+        try:
+            probe.goto(address, timeout=120_000)
+            ready(probe)
+            probe.evaluate(
+                with_map("""() => {
+                const map = __MAP__;
+                const boxes = [...document.querySelectorAll('.trails-basemap input[type=checkbox], .trails-legend-body input[type=checkbox]')];
+                boxes.forEach(box => { if (!box.checked) box.click(); });
+                const layers = Object.values(map._layers).filter(layer => layer instanceof L.TileLayer);
+                map.getContainer().classList.add('leaflet-safari');
+                const p = window.releaseProbe = {map, boxes, layers, samples: [], loads: [], enabled: false};
+                p.snapshot = event => ({event,
+                    old: layers.map(layer => Object.values(layer._tiles).filter(t => t.coords.z !== layer._tileZoom).length),
+                    loading: layers.filter(layer => layer.isLoading()).length});
+                p.record = event => { if (p.enabled) p.samples.push(p.snapshot(event)); };
+            }""")
+            )
+            probe.evaluate("at => { releaseProbe.map.setView(at, 15, {animate: false}); }", SCENE.position)
+            clean = """() => releaseProbe.layers.every(layer => !layer.isLoading() && Object.values(layer._tiles).length > 0 &&
+                Object.values(layer._tiles).every(t => t.coords.z === layer._tileZoom && t.active))"""
+            probe.wait_for_function(clean, timeout=60_000)
+            rest = probe.evaluate("""() => {
+                const p = releaseProbe, tiles = p.layers.flatMap(layer => Object.values(layer._tiles).map(t => t.el));
+                const rules = [...document.styleSheets].flatMap(sheet => [...sheet.cssRules]);
+                // Firefox may ignore Safari's vendor value. Read the explicit override as
+                // well as computed style, so that an unsupported value cannot pass alone.
+                const overridden = tiles.every(tile => rules.some(rule => rule.selectorText &&
+                    rule.style?.imageRendering === 'auto' && tile.matches(rule.selectorText)));
+                return {boxes: p.boxes.every(box => box.checked), layers: p.layers.length,
+                    tiles: tiles.length, overridden, modes: [...new Set(tiles.map(t => getComputedStyle(t).imageRendering))]};
+            }""")
+            probe.evaluate("""() => {
+                const p = releaseProbe;
+                p.layers.forEach((layer, index) => {
+                    layer.on('tileload tileerror', e => p.record(e.type));
+                    layer.on('load', () => { p.loads.push(index); p.record('load'); });
+                });
+                p.map.on('zoomend', () => { p.enabled = true; p.record('zoomend'); p.ended = true; });
+                p.frame = () => { p.record('frame'); p.raf = requestAnimationFrame(p.frame); };
+                p.raf = requestAnimationFrame(p.frame);
+            }""")
+            steps = []
+            for zoom in (12, 15):
+                probe.evaluate(
+                    """z => {
+                    const p = releaseProbe; p.enabled = false; p.ended = false; p.loads = [];
+                    p.map.setZoom(z, {animate: true});
+                }""",
+                    zoom,
+                )
+                probe.wait_for_function("() => releaseProbe.ended", timeout=10_000)
+                probe.wait_for_function(clean, timeout=60_000)
+                steps.append(
+                    probe.evaluate("""() => {
+                    const p = releaseProbe; p.record('settled');
+                    return {loads: [...new Set(p.loads)].length,
+                        good: p.layers.map(layer => Object.values(layer._tiles).filter(t =>
+                            t.current && t.loaded && t.el.complete && t.el.naturalWidth === 256).length)};
+                }""")
+                )
+            samples = probe.evaluate("() => { cancelAnimationFrame(releaseProbe.raf); return releaseProbe.samples; }")
+            ends = [row for row in samples if row["event"] == "zoomend"]
+            peaks = [max(row["old"][i] for row in samples) for i in range(rest["layers"])]
+            readings.extend(
+                [
+                    Reading(f"{label}: every overlay on, six tile layers", [rest["boxes"], rest["layers"]], [True, 6]),
+                    Reading(f"{label}: tiles exist under the Safari class", rest["tiles"] > 0, True),
+                    Reading(f"{label}: explicit auto rule matches every tile only under tiles=plain", rest["overridden"], plain),
+                    Reading(f"{label}: two zoom steps finish while tiles load", [row["loading"] for row in ends], [6, 6]),
+                    Reading(
+                        f"{label}: old tiles after each step through loading and drawn frames",
+                        all(peak == 0 for peak in peaks) if drop else all(peak > 0 for peak in peaks),
+                        True,
+                        note=f"peak per layer: {peaks}; {len(samples)} state samples",
+                    ),
+                    Reading(f"{label}: each new level fires load in all six layers", [step["loads"] for step in steps], [6, 6]),
+                    Reading(
+                        f"{label}: both new levels contain real loaded images in every layer",
+                        all(count > 0 for step in steps for count in step["good"]),
+                        True,
+                        note=f"current 256 px images per layer: {[step['good'] for step in steps]}",
+                    ),
+                    Reading(f"{label}: no script errors", errors, []),
+                ]
+            )
+            if plain:
+                readings.append(Reading(f"{label}: every tile computes image-rendering auto", rest["modes"], ["auto"]))
+        finally:
+            probe.close()
+    return Check("the finger release address switches with every overlay on", readings)
+
+
 def zoom_out_requests(page: Any) -> Check:
     """Compare the §3.1 pinch with a direct jump, and read what survives pruning.
 
@@ -12698,6 +12808,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(the_zoom_blend, page))
     if wanted(the_pinch_is_drawn):
         checks.append(timed(the_pinch_is_drawn, page))
+    if wanted(the_release_switches):
+        checks.append(timed(the_release_switches, page))
     if wanted(the_zoom_blend_switches):
         checks.append(timed(the_zoom_blend_switches, page))
     if wanted(the_zoom_the_scale_says):
