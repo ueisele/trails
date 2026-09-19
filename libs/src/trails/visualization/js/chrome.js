@@ -61,6 +61,7 @@
                 undo: '<path d="M4 8.5h7.2a3.3 3.3 0 0 1 0 6.6H7"/><path d="M6.8 5.3 3.6 8.5l3.2 3.2"/>',
                 chevron: '<path d="M7 4.5 12 9l-5 4.5"/>',
                 close: '<path d="M4.8 4.8 13.2 13.2M13.2 4.8 4.8 13.2"/>',
+                stopwatch: '<circle cx="9" cy="10.3" r="5.7"/><path d="M7 1.5h4M9 1.5v3.1M13.2 5.8l1.4-1.4M9 7v3.3l2 1.3"/>',
                 here: '<circle cx="9" cy="9" r="3.1"/><circle cx="9" cy="9" r="6.4"/>' +
                       '<path d="M9 1.4v2.2M9 14.4v2.2M1.4 9h2.2M14.4 9h2.2"/>',
                 // A pin and not a second crosshair: `here` is where the reader
@@ -437,7 +438,7 @@
                     '-webkit-overflow-scrolling:touch';
                 box.appendChild(bar);
                 box.appendChild(body);
-                return {title: title, body: body};
+                return {title: title, body: body, close: shut};
             }
 
             // **What is open, as three facts rather than as three styles.**
@@ -456,6 +457,24 @@
 
             // ---- the sources panel, built from what the export was handed ----
             var sourcesHolder = document.createElement('div');
+            var measurements = document.createElement('div');
+            measurements.id = 'trails-source-measurements';
+            measurements.hidden = true;
+            var measurementsButton = document.createElement('button');
+            measurementsButton.type = 'button';
+            measurementsButton.className = 'trails-source-measurements-toggle';
+            measurementsButton.setAttribute('aria-label', 'Measurements');
+            measurementsButton.setAttribute('aria-controls', measurements.id);
+            measurementsButton.setAttribute('aria-expanded', 'false');
+            measurementsButton.innerHTML = icon('stopwatch', 19);
+            measurementsButton.style.cssText = dockParts.close.style.cssText;
+            measurementsButton.style.marginRight = 'auto';
+            measurementsButton.hidden = true;
+            measurementsButton.addEventListener('click', function () {
+                measurements.hidden = !measurements.hidden;
+                measurementsButton.setAttribute('aria-expanded', String(!measurements.hidden));
+            });
+            dockParts.close.parentNode.insertBefore(measurementsButton, dockParts.close);
             (function () {
                 var seen = {}, out = '';
                 Object.keys(CREDITS).forEach(function (key) {
@@ -677,8 +696,9 @@
             if (window.trailsOffline && window.trailsOffline.freshness) {
                 sourcesHolder.insertBefore(window.trailsOffline.freshness(), sourcesHolder.firstChild);
             }
-            sourcesHolder.insertBefore(tileLine, sourcesHolder.firstChild);
-            sourcesHolder.insertBefore(costLine, sourcesHolder.firstChild);
+            measurements.appendChild(costLine);
+            measurements.appendChild(tileLine);
+            sourcesHolder.insertBefore(measurements, sourcesHolder.firstChild);
             byKey.info.holder = sourcesHolder;
 
             // ---- what is kept on this device ----------------------------------
@@ -2802,8 +2822,12 @@
                 }
                 if (openTool === key) { closeDock(); return; }
                 openTool = key;
+                measurementsButton.hidden = key !== 'info';
+                measurements.hidden = true;
+                measurementsButton.setAttribute('aria-expanded', 'false');
                 raise('tool');
                 dockParts.title.textContent = tool.label;
+                dockParts.title.style.flex = key === 'info' ? '0 1 auto' : '1';
                 if (key === 'offline' && window.trailsOffline) { window.trailsOffline.refresh(); }
                 TOOLS.forEach(function (each) {
                     if (each.holder) { each.holder.style.display = each.key === key ? '' : 'none'; }

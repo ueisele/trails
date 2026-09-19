@@ -10906,6 +10906,64 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
                 True,
             )
         )
+        # The figures belong to Sources, behind its header's stopwatch. Read
+        # visibility as well as text: textContent alone also reads a shut fold.
+        fold = first.locator("#trails-source-measurements")
+        sources = fold.locator("..")
+        stopwatch = first.get_by_role("button", name="Measurements", exact=True)
+        paragraphs = fold.locator("p")
+        newer.append(Reading("Sources opens with both measurement paragraphs folded", [fold.is_visible(), paragraphs.count()], [False, 2]))
+        newer.append(Reading("the stopwatch says the fold is closed", stopwatch.get_attribute("aria-expanded"), "false"))
+        newer.append(
+            Reading(
+                "the age and its action stay visible outside the fold",
+                [
+                    sources.locator(".trails-offline-age").is_visible(),
+                    sources.locator(".trails-offline-check").is_visible(),
+                    fold.locator(".trails-offline-age, .trails-offline-check").count(),
+                ],
+                [True, True, 0],
+            )
+        )
+        header_mark = stopwatch.evaluate("""button => {
+            const close = button.parentElement.querySelector('.trails-chrome-close');
+            const mark = button.querySelector('svg');
+            const same = ['width', 'height', 'color', 'backgroundColor', 'borderColor'].every(
+                key => getComputedStyle(button)[key] === getComputedStyle(close)[key]);
+            const title = button.previousElementSibling;
+            return [title.className, Math.round(button.getBoundingClientRect().left - title.getBoundingClientRect().right),
+                    button.nextElementSibling === close,
+                    !!mark && mark.getAttribute('stroke') === 'currentColor', same, button.textContent];
+        }""")
+        newer.append(Reading("one themed stopwatch beside the title, matching Close", header_mark, ["trails-chrome-title", 8, True, True, True, ""]))
+        stopwatch.click()
+        newer.append(Reading("a tap unfolds both paragraphs", [fold.is_visible(), stopwatch.get_attribute("aria-expanded")], [True, "true"]))
+        first.wait_for_function("""() => document.querySelector('#trails-source-measurements .trails-open-tiles')
+            .textContent.includes('peak in flight:')""")
+        tally_text = fold.locator(".trails-open-tiles").inner_text()
+        newer.append(
+            Reading(
+                "the worker tally is readable inside the open fold",
+                all(word in tally_text for word in ("Tiles:", "Memory:", "Store:", "Seen:", "Network:", "Blank:", "Past deadline:")),
+                True,
+                note=tally_text[tally_text.index("Tiles:") :],
+            )
+        )
+        stopwatch.click()
+        newer.append(Reading("a second tap folds the figures again", [fold.is_visible(), stopwatch.get_attribute("aria-expanded")], [False, "false"]))
+        stopwatch.focus()
+        stopwatch.press("Enter")
+        newer.append(
+            Reading("the stopwatch also opens from the keyboard", [fold.is_visible(), stopwatch.get_attribute("aria-expanded")], [True, "true"])
+        )
+        first.evaluate("() => { window.trailsChrome.close(); window.trailsChrome.open('info'); }")
+        newer.append(
+            Reading("reopening Sources forgets the open fold", [fold.is_visible(), stopwatch.get_attribute("aria-expanded")], [False, "false"])
+        )
+        first.evaluate("() => window.trailsChrome.open('theme')")
+        newer.append(Reading("other panel headers have no stopwatch", stopwatch.is_visible(), False))
+        first.evaluate("() => window.trailsChrome.open('info')")
+        stopwatch.click()
         # **What the page says opening it cost.** No check here can measure the
         # device this map is carried on -- an installed app reported ten to
         # twenty seconds where this run measures under two -- so the page keeps
@@ -10913,7 +10971,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
         # sentence and a broad Firefox-on-forge build ceiling. The latter allows
         # contention from drive-both while catching the former 8.3 s regression;
         # it makes no claim about the phone. See also the Makefile's drive-both rule.
-        said_cost = first.evaluate("() => (document.querySelector('.trails-dock .trails-open-cost') || {}).textContent || ''")
+        said_cost = fold.locator(".trails-open-cost").inner_text()
         cost = first.evaluate("() => window.trailsOpened.cost()")
         newer.append(
             Reading(

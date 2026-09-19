@@ -1276,7 +1276,9 @@ class TestThePageAccountsForItsOwnOpening:
         that had taken 1.7 seconds."""
         html = self.rendered()
         assert "if (key === 'info') { sayOpenCost(); }" in html
-        assert "sourcesHolder.insertBefore(costLine, sourcesHolder.firstChild);" in html
+        assert "measurements.appendChild(costLine);" in html
+        assert "measurements.appendChild(tileLine);" in html
+        assert "sourcesHolder.insertBefore(measurements, sourcesHolder.firstChild);" in html
         # Built empty and filled later, rather than composed once and left.
         assert "function sayOpenCost() {" in html
         assert "costLine.textContent = parts.join" in html
@@ -1910,6 +1912,32 @@ class TestNativeZoomFollowsWhatIsKept:
 
 class TestSourcesFreshness:
     """The map's age where a reader who never turns offline mode on can see it."""
+
+    def test_only_the_measurements_fold_behind_the_header_stopwatch(self):
+        """The age action and credits stay outside the two folded paragraphs."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "measurementsButton.innerHTML = icon('stopwatch', 19);" in html
+        assert "measurementsButton.style.cssText = dockParts.close.style.cssText;" in html
+        assert "measurementsButton.style.marginRight = 'auto';" in html
+        assert "dockParts.title.style.flex = key === 'info' ? '0 1 auto' : '1';" in html
+        assert "measurementsButton.setAttribute('aria-label', 'Measurements');" in html
+        assert "measurementsButton.setAttribute('aria-controls', measurements.id);" in html
+        assert "dockParts.close.parentNode.insertBefore(measurementsButton, dockParts.close);" in html
+        assert re.findall(r"measurements.appendChild\((\w+)\)", html) == ["costLine", "tileLine"]
+
+    def test_the_fold_resets_on_open_and_reports_its_state(self):
+        """Opening another tool cannot inherit the Sources control or its state."""
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_chrome(fmap)
+        html = fmap.get_root().render()
+        assert "measurements.hidden = !measurements.hidden;" in html
+        assert "measurementsButton.setAttribute('aria-expanded', String(!measurements.hidden));" in html
+        opened = html.split("openTool = key;")[1].split("raise('tool');")[0]
+        assert "measurementsButton.hidden = key !== 'info';" in opened
+        assert "measurements.hidden = true;" in opened
+        assert "measurementsButton.setAttribute('aria-expanded', 'false');" in opened
 
     def test_sources_carries_the_age_and_the_check(self):
         """A map goes stale because an installed app resumes instead of
