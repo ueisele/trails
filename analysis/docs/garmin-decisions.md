@@ -75,11 +75,58 @@ falls back to a download — `saveFile`, `shareable` and `anchorFile` at
 `route-planning-decisions.md`; it was written for iOS Safari naming a `blob:` download after its
 own identifier, and Explore is the second thing it turns out to buy.
 
-**Open, and cheap to settle:** whether Explore appears in the sheet at all on this iPhone, and
-whether it makes one course or several out of an export whose `<trkseg>` breaks at a crossing
-(`route-planning-decisions.md`, "In the GPX, a crossing ends a `<trkseg>`"). If it splits badly,
-the fix is a second export variant — one unbroken track, no waypoints — which is a few lines beside
-the existing writer. **Do not write that variant before measuring.** It may not be needed.
+**Measured 2026-09-19, and the variant is needed after all — but not the one guessed above.**
+The share sheet works and an export imports into Explore in one piece: the `<trkseg>` breaks were
+never the problem (the Abisko–Björkliden route has one segment and 4,920 points). The problem is
+the *kind* of thing Explore makes of it. Garmin's support page "Importing GPX Files in the Garmin
+Explore App" (read 2026-09-19, rendered in a browser because the page is client-side) is explicit:
+
+| in the GPX | in Explore | reaches the watch |
+|---|---|---|
+| `<trk>` | a **Track**, condensed to 20,000 points | only after a manual *Copy as Course* |
+| `<rte>` | a **Course**, condensed to 200 points | yes, on sync |
+
+So `trails`'s export, which writes `<trk>`, lands as a Track and needs one extra tap per route on
+the phone. The same test file, rewritten by hand as a `<rte>`, was imported twice on the iPhone
+(Uwe, 2026-09-19): **both came in as a Course and synced to the fēnix 7 without the extra step.**
+The two files differed in one thing, and it decides who does the condensing:
+
+| file | `<rtept>` written | points Explore kept | max. deviation from the full line |
+|---|---|---|---|
+| A | 200, Douglas-Peucker in UTM 34N at 3.5 m | **200** | 3.5 m |
+| B | all 4,920 | **122** | not measured; Explore's own choice |
+
+Explore's own condensing keeps fewer points than the cap allows, so the line is better when the
+export cuts it to 200 itself. Decided: **variant A is the shape of the Garmin export.**
+
+**What the Garmin variant is**, the whole of it, so it can be built without re-deriving anything:
+
+- One `<rte>` in place of the `<trk>`, carrying the same `<name>` and `<desc>`. No `<trkseg>` at
+  all, so a crossing does not break it — a course is one line by definition.
+- At most **200** `<rtept>`, chosen by Douglas-Peucker on projected metres with the tolerance
+  searched down until the count fits; every kept point is an original vertex and keeps its `<ele>`.
+  Measured on the route above and on eleven ut.no tracks of 8–18 km: the tolerance that fits lands
+  between 2.5 and 9.3 m. Under 10 m is nothing on a walk; **it is not nothing on a phone screen
+  at z14 for a switchback**, which is why the cap belongs to this variant and not to the ordinary
+  export.
+- The **set** waypoints stay as `<wpt>`; the **generated** ones (park boundaries) are dropped,
+  because a Course on the watch has no use for eight boundary markers and Explore would sync
+  every one as a location.
+- None of the `trails:` extensions. The Garmin file is for a watch, not for loading back into the
+  map; the ordinary export is the one that carries provenance and can be re-read.
+- The watch shows the first **15 characters** of a course name (Garmin, "Importing a Third-Party
+  Course into Garmin Connect"), so *Abisko to Björkliden via pass* is *Abisko to Björk* on the
+  wrist. A name is the reader's; the file does not shorten it.
+
+Where it goes: a second button beside the route export in `profile_panel.js` (`saveNow`, the
+`routeGpxOf` writer), sharing `metadataOf`, `waypoint` and `saveFile`. Nothing in the Python
+writer, which never exports a planned route. **Not built yet** — recorded here on 2026-09-19 so
+the build is a build and not a re-measurement.
+
+One figure to know from the same test: Explore's list header showed **9.2 km** for the imported
+track while its own statistics said 12.9 km and the file holds 12.87 km in one segment. The
+straight line from start to end is 9.31 km. It is Explore's display, not the file, and it was not
+chased further.
 
 ---
 
@@ -455,13 +502,9 @@ time, including before any of the above, because it needs only a map file that a
 
 Nothing below can be settled from here. Grouped by what it would change.
 
-**Free, and settles §3:**
-
-- Does Garmin Explore appear in the iOS share sheet for an `application/gpx+xml` file exported by
-  the map? If not, saving to Files and importing from inside Explore is the fallback, still offline.
-- Does Explore make **one** course or several from an export whose track breaks at a crossing?
-- Do the export's waypoints survive the import, and do they reach the watch?
-- Does the first Explore sync really take ~30 minutes, and does the collection warning hold?
+**§3 is settled** (2026-09-19): the export imports, a `<rte>` lands as a Course and syncs. Still
+unmeasured from that test: whether the `<wpt>` reach the watch as locations, and whether the first
+sync really takes ~30 minutes.
 
 **Needed before §10.1 is worth starting:**
 
@@ -516,3 +559,7 @@ day and are measured, not reported.
   other watches, Coros in particular) and §10.6 (the Pi bridge). **One correction**: §5 had claimed
   jmtpfs mounts the watch unremarkably on Linux. It does not — it fails on exactly the write we
   need. Sections renumbered once to fit the new material; there are no external references to break.
+- **2026-09-19** — §3 measured on the iPhone and the fēnix 7. The trkseg guess was wrong; the real
+  cause is that Explore makes a Track of a `<trk>` and a Course of a `<rte>`, and it condenses a
+  course to 200 points worse than we do. The Garmin variant is specified in §3 and not yet built.
+  §12's first block closed.
