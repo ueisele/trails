@@ -109,9 +109,13 @@ export cuts it to 200 itself. Decided: **variant A is the shape of the Garmin ex
   between 2.5 and 9.3 m. Under 10 m is nothing on a walk; **it is not nothing on a phone screen
   at z14 for a switchback**, which is why the cap belongs to this variant and not to the ordinary
   export.
-- The **set** waypoints stay as `<wpt>`; the **generated** ones (park boundaries) are dropped,
-  because a Course on the watch has no use for eight boundary markers and Explore would sync
-  every one as a location.
+- **No `<wpt>` at all.** A `<wpt>` is a top-level element with no tie to the route, so Explore
+  imports each as a Waypoint of its own and syncs it to the watch as a saved location. In the
+  ordinary export the set points are the plan — what the map re-routes through on loading the
+  file back — and the generated ones are the park boundaries; the watch re-routes nothing, start
+  and end are the course's own ends, and a pass worth marking would be a Garmin course point,
+  which GPX cannot carry. Left in, "Point 1, 2, 3" would pile up on the wrist as nameless
+  locations, one set per route. Uwe asked whether they are needed, 2026-09-19; they are not.
 - None of the `trails:` extensions. The Garmin file is for a watch, not for loading back into the
   map; the ordinary export is the one that carries provenance and can be re-read.
 - The watch shows the first **15 characters** of a course name (Garmin, "Importing a Third-Party
