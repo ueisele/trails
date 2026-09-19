@@ -870,6 +870,44 @@ refill. Fixed by refreshing a skipped neighbour's position (`70471b0`, a regress
 fails before it on both providers); three diagnostic runs beside a full drive reproduced the
 failure once before and never after; hooks 1,803 + 97.
 
+### Phase 8d — What the page holds with every overlay on
+
+Reported 2026-09-19, 15:38 (Uwe, screenshot): Safari's *"A problem repeatedly occurred"* on the
+Abisko page, now and then, with every overlay on — the page process ended twice in a row, which
+on iOS is memory far more often than a crash. A sixth tile layer came the same day (mire,
+§6.13), and the page holds more per layer since 8 and 8c. Measured on `forge` in Firefox at
+390 × 844 (the page under 4e66340, 8c plus its LRU fix, two layers): after a few pans at z12 a
+layer holds **53 tiles** with the ring and `keepBuffer: 4`, **44** with the ring and
+`keepBuffer: 2`, **24** with neither — Leaflet's own figure. The ring doubles what a layer
+holds, since it widens the range that `keepBuffer` pads. Six layers are about 320 tiles, and
+during a zoom step Leaflet holds two levels. A decoded tile is 256 kB; what WebKit holds for a
+composited tile at three device pixels a CSS pixel is unmeasured, and Leaflet's own `leaflet-safari`
+rule sets `image-rendering` on every tile there. JS heap and DOM do not grow (Chromium: 13 MB
+after 60 pans and zooms, garbage collected; 2,400 nodes; no console error), so the tiles are
+what there is. The phone's own reading — *Analytics Data*, a `JetsamEvent` against a
+`WebContent` crash — is still to be looked at; it says memory or crash, and this phase assumes
+memory.
+
+1. **The ring is the sheet's only.** `js/tile_ring.js` pads the range only for a layer whose
+   options ask for it (`tileRing: 1` on the sheet, set from `maps.py`; nothing on an overlay).
+   The sheet is what the reader sees arrive at the edge; an overlay's tile a frame later is a
+   memory answer after 8's warm-up, which warms every layer's neighbours as before.
+2. **`keepBuffer` back to Leaflet's 2, on every layer.** Four kept where the reader came from
+   and loaded nothing (8c's finding); with the ring in front, two is enough behind. One
+   deviation from Leaflet fewer.
+3. Together that is about 44 + 5 × 24 ≈ 165 tiles for Abisko's six layers against ≈ 320
+   today — half — with the sheet's ring untouched. The worker is not changed.
+4. **Drive**, both pages, every overlay on, offline over kept ground: after 8c's pan sequence
+   the sheet holds no more than its ring-padded range plus `keepBuffer` and each overlay no
+   more than the plain range plus `keepBuffer` (counts read off `_tiles` against the viewport's
+   tile range); 8c's readings hold for the sheet and are not claimed for the overlays; the sum
+   over all layers is written into the run's output so the phone's figure can be compared to
+   it. Readings wait for state and never compare wall-clock figures. Then hooks and the full
+   drive on both pages in parallel.
+
+If the phone still ends the page after this, the next lever is the sheet's ring itself, and
+the reading before pulling it is the phone's Analytics entry, not another guess.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
