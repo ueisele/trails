@@ -10053,7 +10053,18 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         background = settled[len(initial) :]
         whole = [row for row in background if row[1] is None]
         readings.append(Reading("the idle screen finishes its background writes", idle, {"idle": True, "filling": 0}))
-        readings.append(Reading("stillness fills the sheet before its overlays", [row[0].split("/")[2] for row in whole], ["tiles", "shade"]))
+        # The ring can cross several overlay packs even while the sheet fits in one.
+        # Read the priority of all sheet packs, not a fixed number of packs per layer.
+        kinds = [row[0].split("/")[2] for row in whole]
+        sheets = kinds.count("tiles")
+        readings.append(
+            Reading(
+                "stillness fills the sheet before its overlays",
+                sheets > 0 and kinds[:sheets] == ["tiles"] * sheets and set(kinds[sheets:]) == {"shade"},
+                True,
+                note=str(kinds),
+            )
+        )
         readings.append(Reading("stillness fetches whole packs only", len(background), len(whole)))
         readings.append(Reading("height packs are never filled in the background", any("/dem/" in row[0] for row in whole), False))
         active = peak = 0
@@ -10249,10 +10260,11 @@ def the_worker_reads_packs(browser: Any, page_path: pathlib.Path) -> Check:
         idle = page.evaluate("async () => await window.waitPackIdle()")
         filled = _Quiet.pack_requests[began_requests + len(moving_requests) :]
         kinds = [row[0].split("/")[2] for row in filled if row[1] is None]
+        sheets = kinds.count("tiles")
         readings.append(
             Reading(
                 "the moving view fills the sheet before all four overlays once it stops",
-                bool(kinds) and kinds[0] == "tiles" and sorted(kinds[1:]) == ["forest", "shade", "slope", "vegetation"],
+                sheets > 0 and kinds[:sheets] == ["tiles"] * sheets and set(kinds[sheets:]) == {"forest", "shade", "slope", "vegetation"},
                 True,
                 note=str(kinds),
             )
@@ -10586,6 +10598,142 @@ def the_kept_pan(page: Any) -> list[Reading]:
     )
     page.wait_for_function(loaded, timeout=60_000)
     page.evaluate("() => window.panProbe('settle')")
+    return readings
+
+
+def the_tile_ring(page: Any) -> list[Reading]:
+    """Read the loaded ring and its refill at moveend on the offline scene's kept ground."""
+    original_size = page.viewport_size
+    original_choice = page.evaluate("() => { const s=trailsOffline.state();return {scope:s.scope,zoom:s.zoom,chooser:s.chooser}; }")
+    page.evaluate("async () => await trailsOffline.open(true)")
+    page.evaluate("async cap => await trailsOffline.choose('all',cap)", SCENE.cap)
+    counted = "() => trailsOffline.state().counted && trailsOffline.state().counted.scope === 'all'"
+    page.wait_for_function(counted, timeout=120_000)
+    scope_before = page.evaluate("() => trailsOffline.state().counted")
+    page.set_viewport_size({"width": 430, "height": 932})
+    page.evaluate(
+        with_map("""at => {
+            const map=__MAP__;
+            window.ringOriginal={center:map.getCenter(),zoom:map.getZoom()};
+            window.ringLayers=[];
+            map.eachLayer(layer=>{if(layer.getTileUrl) ringLayers.push({layer,url:layer._url});});
+            map.invalidateSize({animate:false});map.setView(at,15,{animate:false});
+            // Leaflet 1.9.3's unpadded bounds, at each layer's native tile scale.
+            window.ringRange=(layer,padding)=>{
+                const center=map.project(map.getCenter(),layer._tileZoom).floor();
+                const half=map.getSize().divideBy(map.getZoomScale(map.getZoom(),layer._tileZoom)*2);
+                const margin=layer.getTileSize().multiplyBy(padding);
+                const range=layer._pxBoundsToTileRange(L.bounds(center.subtract(half).subtract(margin),center.add(half).add(margin)));
+                const keys=[];
+                for(let y=range.min.y;y<=range.max.y;y++) for(let x=range.min.x;x<=range.max.x;x++) {
+                    const coords=L.point(x,y);coords.z=layer._tileZoom;
+                    if(layer._isValidTile(coords)) keys.push(layer._tileCoordsToKey(coords));
+                }
+                return keys.sort();
+            };
+        }"""),
+        list(SCENE.position),
+    )
+    loaded = """() => ringLayers.length>0 && ringLayers.every(({layer})=>{
+        const tiles=Object.values(layer._tiles);
+        return tiles.length>0 && !layer._loading && tiles.every(t=>t.loaded && t.el.complete);
+    })"""
+    readings: list[Reading] = []
+    for pixels in (128, 256):
+        # Each pan starts with a fresh view at the scene position, not tiles retained
+        # from the previous pan. A unique URL also keeps the browser cache out of the tally.
+        page.evaluate(
+            with_map("""({at,pixels})=>{
+                __MAP__.setView(at,15,{animate:false});
+                ringLayers.forEach(({layer,url})=>layer.setUrl(url.split('?')[0]+'?phase8c='+pixels));
+            }"""),
+            {"at": list(SCENE.position), "pixels": pixels},
+        )
+        page.wait_for_function(loaded, timeout=60_000)
+        page.evaluate("() => window.panProbe('settle')")
+        page.evaluate("() => window.panProbe('reset')")
+        view = page.evaluate("""() => ringLayers.map(({layer})=>({
+            layer:layer._url.split('?')[0],zoom:layer._tileZoom,
+            visible:ringRange(layer,0).length,expected:ringRange(layer,1),actual:Object.keys(layer._tiles).sort()
+        }))""")
+        if pixels == 128:
+            for index, layer in enumerate(view):
+                readings.append(
+                    Reading(
+                        f"ring layer {index}: viewport plus exactly one ring",
+                        layer["actual"],
+                        layer["expected"],
+                        note=f"{layer['layer']} z{layer['zoom']}: {layer['visible']} viewport tiles -> {len(layer['actual'])} loaded",
+                    )
+                )
+        ended = page.evaluate(
+            with_map("""pixels => {
+                const before=ringLayers.map(({layer})=>({
+                    visible:new Set(ringRange(layer,0)),tiles:new Map(Object.entries(layer._tiles).map(([key,t])=>
+                        [key,{el:t.el,loaded:!!t.loaded && t.el.complete && t.el.naturalWidth>1}])),asked:[]
+                }));
+                const listeners=ringLayers.map(({layer},i)=>{
+                    const hear=e=>before[i].asked.push(layer._tileCoordsToKey(e.coords));
+                    layer.on('tileloadstart',hear);return hear;
+                });
+                let ended;
+                __MAP__.once('moveend',()=>{
+                    ended=ringLayers.map(({layer},i)=>{
+                        const old=before[i],visible=ringRange(layer,0);
+                        const newlyVisible=visible.filter(key=>!old.visible.has(key));
+                        return {newlyVisible:newlyVisible.length,complete:newlyVisible.every(key=>{
+                            const prior=old.tiles.get(key),now=layer._tiles[key];
+                            return prior && prior.loaded && now && now.el===prior.el && now.el.complete && now.el.naturalWidth>1;
+                        }),expected:ringRange(layer,1).filter(key=>!old.tiles.has(key)).sort(),
+                            asked:old.asked.slice().sort(),outside:old.asked.every(key=>!visible.includes(key))};
+                    });
+                });
+                __MAP__.panBy([pixels,0],{animate:false});
+                ringLayers.forEach(({layer},i)=>layer.off('tileloadstart',listeners[i]));
+                return ended;
+            }"""),
+            pixels,
+        )
+        page.wait_for_function(loaded, timeout=60_000)
+        answered = page.evaluate("() => window.panProbe('state')")
+        requests = sum(len(layer["asked"]) for layer in ended)
+        for index, layer in enumerate(ended):
+            readings.extend(
+                [
+                    Reading(
+                        f"ring {pixels}px pan layer {index}: newly visible tiles were complete at moveend",
+                        layer["complete"] and layer["newlyVisible"] > 0,
+                        True,
+                        note=f"{layer['newlyVisible']} newly visible tiles; {len(layer['asked'])} requests",
+                    ),
+                    Reading(f"ring {pixels}px pan layer {index}: only the new outer column was requested", layer["asked"], layer["expected"]),
+                    Reading(f"ring {pixels}px pan layer {index}: requests stay outside the viewport", layer["outside"], True),
+                ]
+            )
+        readings.extend(
+            [
+                Reading(f"ring {pixels}px pan: every request is answered from memory", answered["tally"]["mem"], requests),
+                Reading(f"ring {pixels}px pan: no other tile answers", [answered["tally"][p] for p in ("db", "seen", "net", "blank")], [0] * 4),
+                Reading(f"ring {pixels}px pan: no pack-store transaction", answered["transactions"], 0),
+            ]
+        )
+    page.evaluate("async cap => await trailsOffline.choose('all',cap)", SCENE.cap)
+    page.wait_for_function(counted, timeout=120_000)
+    scope_after = page.evaluate("() => trailsOffline.state().counted")
+    for key in ("packs", "bytes", "overview"):
+        readings.append(Reading(f"ring leaves the whole-map scope's {key} unchanged", scope_after[key], scope_before[key]))
+    page.evaluate("async choice => await trailsOffline.choose(choice.scope,choice.zoom)", original_choice)
+    page.evaluate("async choice => await trailsOffline.open(choice.chooser)", original_choice)
+    page.set_viewport_size(original_size)
+    page.evaluate(
+        with_map("""() => {
+        ringLayers.forEach(({layer,url})=>layer.setUrl(url));
+        __MAP__.invalidateSize({animate:false});__MAP__.setView(ringOriginal.center,ringOriginal.zoom,{animate:false});
+    }""")
+    )
+    page.wait_for_function(loaded, timeout=60_000)
+    page.evaluate("() => window.panProbe('settle')")
+    page.evaluate("() => { delete window.ringLayers;delete window.ringOriginal;delete window.ringRange; }")
     return readings
 
 
@@ -11419,6 +11567,7 @@ def the_map_opens_with_the_network_off(browser: Any, page_path: pathlib.Path) ->
 
         terrain.append(Reading("offline, the kept ground draws", drawn_terrain["good"] > 0, True, note=f"{drawn_terrain['good']} tiles"))
         terrain.extend(the_kept_pan(second))
+        terrain.extend(the_tile_ring(second))
 
         terrain.append(Reading("and every kept layer draws terrain rather than a blank", drawn_terrain["blank"], 0))
 

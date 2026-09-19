@@ -146,6 +146,21 @@ class TestCreateMap:
         assert "this._retainChildren(coords.x, coords.y, coords.z, coords.z + 3);" in pruning
         assert "if (!this._tiles[key].retain) { this._removeTile(key); }" in pruning
 
+    @pytest.mark.parametrize("base", list(maps.BaseMap))
+    def test_every_page_loads_one_ring_at_the_tile_scale_before_any_tile_layer(self, base):
+        html = ours(maps.create_map(center=(65.55, 13.05), base=base).get_root().render())
+        start = html.index("var TILE_RING = 1;")
+        end = html.index("L.tileLayer(")
+        assert start < end
+        ring = html[start:end]
+        assert "var tiledPixelBounds = L.GridLayer.prototype._getTiledPixelBounds;" in ring
+        assert "L.GridLayer.include({" in ring
+        assert "_getTiledPixelBounds: function (center)" in ring
+        assert "var bounds = tiledPixelBounds.call(this, center);" in ring
+        assert "var margin = this.getTileSize().multiplyBy(TILE_RING);" in ring
+        assert "return L.bounds(bounds.min.subtract(margin), bounds.max.add(margin));" in ring
+        assert html.count("var TILE_RING = 1;") == 1
+
     # **Base layers only.** Since §6.10 a map on Kartverket's sheet also carries
     # the relief and the slope classes, which are tile layers too -- but they are
     # overlays, drawn over whichever sheet is chosen rather than instead of it.

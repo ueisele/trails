@@ -1392,6 +1392,24 @@ class _TileRetention(MacroElement):
         self._name = "TileRetention"
 
 
+class _TileRing(MacroElement):
+    """Load one tile beyond each viewport edge at the layer's tile scale."""
+
+    _template = Template(
+        """
+        {% macro script(this, kwargs) %}
+"""
+        + files("trails.visualization").joinpath("js", "tile_ring.js").read_text(encoding="utf-8")
+        + """        {% endmacro %}
+    """
+    )
+
+    def __init__(self) -> None:
+        """Initialize the bounds override."""
+        super().__init__()
+        self._name = "TileRing"
+
+
 class _TileStart(MacroElement):
     """Wait briefly for control before adding the pack-backed tile layers."""
 
@@ -2152,6 +2170,7 @@ def create_map(
         header.add_child(_Head(title, companions), name="head")
 
     _TileRetention().add_to(fmap)
+    _TileRing().add_to(fmap)
     if provider is not None:
         _TileStart().add_to(fmap)
 
