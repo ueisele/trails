@@ -787,6 +787,21 @@ the screen; the warm-up then covers the neighbours. If the phone still shows the
 arriving after this, the next figure to read is the `db` worst after a pause, and the next
 lever is the page reading kept packs itself, which is another design.
 
+**Built 2026-09-19, 07:10 (codex, gpt-6-astra; `1375e76`).** As specified: a tile answered from
+memory after waiting on the lookup counts as `db` with its wait; the pack cache is 48,000,000
+bytes, least recently used out, the directory and address caches 48 entries; after 6h's fill
+(online) or at once (offline) the settle warms memory from the store — the asked packs and
+their eight neighbours per layer, sheet first, never heights, one readonly transaction, one
+get at a time, at most 32 gets including misses, aborted by the next tile request; every tile
+layer carries `updateWhenIdle: false` and `keepBuffer: 4` beside `updateWhenZooming: false`.
+Measured on Firefox on forge, offline over kept ground: a cold first screen is 10 (Abisko) /
+8 (Lomsdal-Visten) `db` answers, 53 / 96 ms in all; a pan of one screen after the settle is
+10 / 8 `mem` answers in 3 / 1 ms with **no pack-store transaction**; a pass over the box
+leaves 47.7 MB in memory, peak under 48 MB on both; a settle warms up to 27 rows on Abisko,
+where the drive's kept ground is wide, and 0–5 on Lomsdal-Visten, where it is a small scope;
+no network request from the warm-up, and a new request stops it. 854 readings a page, hooks
+1,793 + 97 tests. What the phone will show is the first pan after iOS has ended the worker.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).

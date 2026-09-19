@@ -1462,6 +1462,18 @@ scope's packs kept and fetches whole any pack that is not complete; a complete o
 nothing. The panel counts packs and megabytes; the overview of §9.43 is 67 packs and 42 MB on
 Lomsdal-Visten, 21 and 17 MB on Abisko.
 
+**And the pan with everything kept (phase 8, 2026-09-19).** Uwe's Sources after keeping the
+whole map said 439 tiles "from memory" at 49 ms each — a memory hit that had waited on the
+store, tallied as memory because the first tile of its pack had filled it meanwhile; the worker
+held eight packs, fewer than a screen over three layers; and Leaflet on a phone asks for tiles
+only when the drag has ended. Since then the tally counts such a tile as `db` with its wait,
+memory holds 48 MB of packs, the two-second settle also warms memory from the store with the
+screen's packs and their eight neighbours per layer (never heights, one readonly transaction,
+at most 32 gets, stopped by the next request), and every tile layer asks while the finger
+moves (`updateWhenIdle: false`) and keeps four rings past the edge. Driven offline: a pan of
+one screen after the settle is answered from memory with no store transaction. What stays: the
+first pan after iOS has ended an idle worker pays the store once for the screen.
+
 **The edge keeps a pack as long as the object says.** A year, `immutable`: the zone's cache
 rule for the tree and pack paths respects the origin instead of the five minutes written for
 the page, and Tiered Cache and 0-RTT are on (`home/trails-map`, plan phase 0). Before it,
@@ -3567,6 +3579,11 @@ removed once phase 1b had its answer.
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-19** — the pan with everything kept (§6.12, plan phase 8): a memory hit that waited
+  on the store is counted as a store answer, memory holds 48 MB of packs, the settle warms the
+  neighbours from the store, and the tile layers ask while the finger moves and keep four rings.
+  From Uwe's Sources reading of the morning: 439 "memory" tiles at 49 ms each.
 
 - **2026-09-18, eighth** — both maps draw from our own trees, as packs (§6.12): Norway's sheet
   rendered from Kartverket's WMS without its hillshade into a tree of our own, z17 the top on
