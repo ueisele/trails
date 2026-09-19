@@ -1510,7 +1510,7 @@ class _TileRing(MacroElement):
 
 
 class _ZoomBlend(MacroElement):
-    """Suspend overlay multiplication through zooming and the new tiles' load."""
+    """Suspend overlay multiplication until loading and old-zoom pruning finish."""
 
     _template = Template(
         """
@@ -1522,7 +1522,7 @@ class _ZoomBlend(MacroElement):
     )
 
     def __init__(self) -> None:
-        """Initialize the zoom and tile-load listeners."""
+        """Initialize the zoom, tile-load and pruning wait, or the address override."""
         super().__init__()
         self._name = "ZoomBlend"
 
@@ -1737,7 +1737,7 @@ class _Theme(MacroElement):
            own alpha keeps the darkening partial -- see SlopeTiles. */
         .leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles,
         .leaflet-layer.trails-forest-tiles, .leaflet-layer.trails-mire-tiles { mix-blend-mode: multiply; }
-        /* Avoid multiplying scaled old ground during a pinch and its tile load. */
+        /* Avoid multiplying old ground until pruning, or throughout blend=never. */
         .trails-zoom-blend .leaflet-layer.trails-slope-tiles,
         .trails-zoom-blend .leaflet-layer.trails-vegetation-tiles,
         .trails-zoom-blend .leaflet-layer.trails-forest-tiles,

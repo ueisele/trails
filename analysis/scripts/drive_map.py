@@ -9490,6 +9490,7 @@ def the_zoom_blend(page: Any) -> Check:
         blendProbe.blended = blendProbe.layers.filter(layer => /trails-(slope|vegetation|forest|mire)-tiles/.test(layer.options.className || ''));
         blendProbe.snapshot = () => ({on: map.getContainer().classList.contains('trails-zoom-blend'),
             loading: blendProbe.layers.filter(layer => layer.isLoading()).length,
+            old: blendProbe.blended.map(layer => Object.values(layer._tiles).filter(tile => tile.coords.z !== layer._tileZoom).length),
             modes: blendProbe.blended.map(layer => getComputedStyle(layer.getContainer()).mixBlendMode)});
     }""")
     )
@@ -9517,7 +9518,7 @@ def the_zoom_blend(page: Any) -> Check:
             p.timers = []; p.loads = []; p.starts = [];
             // Observe callback delivery and cancellation, never elapsed time.
             window.setTimeout = function (fn, delay, ...args) {
-                if (delay !== 1500) return p.setTimeout.call(window, fn, delay, ...args);
+                if (delay !== 1500 && delay !== 3000) return p.setTimeout.call(window, fn, delay, ...args);
                 const row = {fired: false, cancelled: false};
                 row.id = p.setTimeout.call(window, () => { row.fired = true; fn(...args); }, delay);
                 p.timers.push(row); return row.id;
@@ -9531,15 +9532,22 @@ def the_zoom_blend(page: Any) -> Check:
             p.end = () => { p.ended = p.snapshot(); };
             p.loading = e => p.starts.push(L.stamp(e.target));
             p.load = e => p.loads.push({layer: L.stamp(e.target), ...p.snapshot()});
+            p.removals = [];
+            p.observer = new MutationObserver(() => {
+                if (!p.snapshot().on) p.removals.push(p.snapshot());
+            });
+            p.observer.observe(p.map.getContainer(), {attributes: true, attributeFilter: ['class']});
             p.map.on('zoomstart', p.start).on('zoomend', p.end);
             p.layers.forEach(layer => layer.on('loading', p.loading).on('load', p.load));
-            p.map.setZoom(14, {animate: false});
+            p.map.setZoom(14, {animate: true});
         }""")
+        page.wait_for_function("() => !!blendProbe.ended", timeout=10_000)
         page.wait_for_function(settled, timeout=60_000)
         page.wait_for_function("() => !blendProbe.snapshot().on", timeout=10_000)
         quick = page.evaluate("""() => {
             const p = blendProbe;
-            return {during: p.during, ended: p.ended, after: p.snapshot(), starts: p.starts, loads: p.loads, timers: p.timers};
+            return {during: p.during, ended: p.ended, after: p.snapshot(), starts: p.starts, loads: p.loads,
+                timers: p.timers, removals: p.removals};
         }""")
         readings.extend(
             [
@@ -9550,14 +9558,26 @@ def the_zoom_blend(page: Any) -> Check:
                 Reading("all six layers start loading", len(set(quick["starts"])), 6),
                 Reading("every layer that started fires load", sorted({row["layer"] for row in quick["loads"]}), sorted(set(quick["starts"]))),
                 Reading("the class stays until the last layer loads", all(row["on"] for row in quick["loads"] if row["loading"]), True),
-                Reading("the final load event sees the class removed", [row["on"] for row in quick["loads"] if not row["loading"]], [False]),
+                Reading(
+                    "the final load still holds other-zoom tiles in a blended layer",
+                    bool(quick["loads"]) and any(quick["loads"][-1]["old"]),
+                    True,
+                    note=str(quick["loads"][-1] if quick["loads"] else []),
+                ),
+                Reading("the class stays at every load holding other-zoom tiles", all(row["on"] for row in quick["loads"] if any(row["old"])), True),
+                Reading(
+                    "the class leaves only when no blended layer holds another zoom",
+                    bool(quick["removals"]) and all(not any(row["old"]) and not row["loading"] for row in quick["removals"]),
+                    True,
+                    note=str(quick["removals"]),
+                ),
                 Reading(
                     "quick tiles cancel the fallback without firing it",
                     [[row["cancelled"], row["fired"]] for row in quick["timers"]],
                     [[True, False]],
                 ),
-                Reading("after loading the class is off", quick["after"]["on"], False),
-                Reading("after loading all four overlays multiply again", quick["after"]["modes"], ["multiply"] * 4),
+                Reading("after pruning the class is off", quick["after"]["on"], False),
+                Reading("after pruning all four overlays multiply again", quick["after"]["modes"], ["multiply"] * 4),
             ]
         )
         # Animate the closer view: Leaflet's nonanimated reset discards every tile,
@@ -9588,6 +9608,7 @@ def the_zoom_blend(page: Any) -> Check:
     finally:
         page.evaluate("""() => {
             const p = blendProbe;
+            if (p.observer) p.observer.disconnect();
             if (p.setTimeout) { window.setTimeout = p.setTimeout; window.clearTimeout = p.clearTimeout; }
             if (p.start) {
                 p.map.off('zoomstart', p.start).off('zoomend', p.end);
@@ -9604,6 +9625,90 @@ def the_zoom_blend(page: Any) -> Check:
             timeout=60_000,
         )
         page.evaluate("() => { delete window.blendProbe; }")
+
+
+def the_zoom_blend_switches(page: Any) -> Check:
+    """Read both address switches through animated zooms with every overlay on.
+
+    Args:
+        page: The plain page, whose address and browser context supply the probes.
+
+    Returns:
+        Computed blend modes at rest, at zoom events, at load and on every drawn frame.
+    """
+    readings: list[Reading] = []
+    for switch, mode in (("never", "normal"), ("always", "multiply")):
+        address = page.evaluate("v => { const url = new URL(location.href); url.searchParams.set('blend', v); return url.href; }", switch)
+        probe = page.context.browser.new_page()
+        errors: list[str] = []
+        probe.on("pageerror", lambda error, errors=errors: errors.append(str(error)))
+        try:
+            probe.set_viewport_size({"width": 390, "height": 844})
+            probe.goto(address, timeout=120_000)
+            ready(probe)
+            probe.evaluate(
+                with_map("""() => {
+                const map = __MAP__;
+                const boxes = [...document.querySelectorAll('.trails-basemap input[type=checkbox], .trails-legend-body input[type=checkbox]')];
+                boxes.forEach(box => { if (!box.checked) box.click(); });
+                const layers = Object.values(map._layers).filter(layer => layer instanceof L.TileLayer);
+                const blended = layers.filter(layer => /trails-(slope|vegetation|forest|mire)-tiles/.test(layer.options.className || ''));
+                window.blendSwitchProbe = {map, boxes, layers, blended, samples: []};
+                blendSwitchProbe.snapshot = event => ({event,
+                    modes: blended.map(layer => getComputedStyle(layer.getContainer()).mixBlendMode),
+                    old: blended.map(layer => Object.values(layer._tiles).filter(tile => tile.coords.z !== layer._tileZoom).length)});
+            }""")
+            )
+            probe.evaluate("v => { blendSwitchProbe.map.setView(v.at, 15, {animate: false}); }", {"at": SCENE.position})
+            clean = """() => { const p = blendSwitchProbe; return p.layers.every(layer => !layer.isLoading()) &&
+                p.blended.every(layer => Object.values(layer._tiles).every(tile => tile.coords.z === layer._tileZoom)); }"""
+            probe.wait_for_function(clean, timeout=60_000)
+            rest = probe.evaluate(
+                """() => ({...blendSwitchProbe.snapshot('rest'), boxes: blendSwitchProbe.boxes.every(box => box.checked),
+                    layers: blendSwitchProbe.layers.length})"""
+            )
+            probe.evaluate("""() => {
+                const p = blendSwitchProbe;
+                p.record = event => p.samples.push(p.snapshot(event));
+                p.map.on('zoomstart', () => p.record('zoomstart')).on('zoomend', () => { p.record('zoomend'); p.ended = true; });
+                p.layers.forEach(layer => layer.on('load', () => p.record('load')));
+                p.frame = () => { p.record('frame'); p.raf = requestAnimationFrame(p.frame); };
+                p.raf = requestAnimationFrame(p.frame);
+            }""")
+            for zoom in (14, 15):
+                probe.evaluate("z => { blendSwitchProbe.ended = false; blendSwitchProbe.map.setZoom(z, {animate: true}); }", zoom)
+                probe.wait_for_function("() => blendSwitchProbe.ended", timeout=10_000)
+                probe.wait_for_function(clean, timeout=60_000)
+            result = probe.evaluate("""() => {
+                const p = blendSwitchProbe; cancelAnimationFrame(p.raf); p.record('rest');
+                return {samples: p.samples, after: p.snapshot('rest')};
+            }""")
+            samples = result["samples"]
+            readings.extend(
+                [
+                    Reading(f"blend={switch}: every overlay is on and six tile layers are drawn", [rest["boxes"], rest["layers"]], [True, 6]),
+                    Reading(f"blend={switch}: all four modes at rest", rest["modes"], [mode] * 4),
+                    Reading(
+                        f"blend={switch}: two zooms start and end",
+                        [sum(row["event"] == event for row in samples) for event in ("zoomstart", "zoomend")],
+                        [2, 2],
+                    ),
+                    Reading(
+                        f"blend={switch}: load events expose old ground", any(row["event"] == "load" and any(row["old"]) for row in samples), True
+                    ),
+                    Reading(
+                        f"blend={switch}: every event and drawn frame keeps all four modes",
+                        all(row["modes"] == [mode] * 4 for row in samples),
+                        True,
+                        note=f"{len(samples)} samples; modes seen: {sorted({mode for row in samples for mode in row['modes']})}",
+                    ),
+                    Reading(f"blend={switch}: all four modes after pruning", result["after"]["modes"], [mode] * 4),
+                    Reading(f"blend={switch}: no script errors", errors, []),
+                ]
+            )
+        finally:
+            probe.close()
+    return Check("the zoom blend address switches with every overlay on", readings)
 
 
 def zoom_out_requests(page: Any) -> Check:
@@ -12421,6 +12526,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(zoom_out_requests, page))
     if wanted(the_zoom_blend):
         checks.append(timed(the_zoom_blend, page))
+    if wanted(the_zoom_blend_switches):
+        checks.append(timed(the_zoom_blend_switches, page))
     if wanted(the_zoom_the_scale_says):
         checks.append(timed(the_zoom_the_scale_says, page))
     if wanted(the_empty_pack_count):

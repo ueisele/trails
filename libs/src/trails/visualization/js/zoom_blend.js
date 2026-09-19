@@ -1,20 +1,41 @@
-// A pinch scales the old ground until the new tiles load. Keep WebKit from
-// multiplying four scaled layer buffers during that interval (phase 8d).
+// A pinch scales the old ground, which Leaflet keeps past load until pruning.
+// Keep the four overlays unmultiplied until that ground is gone (phase 8e).
 (function () {
     var map = {{ this._parent.get_name() }};
-    var ZOOM_BLEND_WAIT_MS = 1500;
+    var ZOOM_BLEND_WAIT_MS = 3000;
+    var ZOOM_BLEND_POLL_MS = 50;
     var container = map.getContainer(), pending = new Set();
-    var zooming = false, active = false, timer;
+    // Temporary address switch for the phone's blend measurement, read once.
+    var blend = new URLSearchParams(location.search).get('blend');
+    if (blend === 'never') { container.classList.add('trails-zoom-blend'); return; }
+    if (blend === 'always') { return; }
+    var zooming = false, active = false, timer, poll;
 
     function finish() {
         clearTimeout(timer);
+        clearTimeout(poll);
         timer = undefined;
+        poll = undefined;
         active = false;
         pending.clear();
         container.classList.remove('trails-zoom-blend');
     }
+    function currentTilesOnly() {
+        var current = true;
+        map.eachLayer(function (layer) {
+            if (!(layer instanceof L.GridLayer) ||
+                !/(?:^|\s)trails-(slope|vegetation|forest|mire)-tiles(?:\s|$)/.test(layer.options.className || '')) { return; }
+            var tiles = layer._tiles || {};
+            if (Object.keys(tiles).some(function (key) { return tiles[key].coords.z !== layer._tileZoom; })) { current = false; }
+        });
+        return current;
+    }
     function settled() {
-        if (active && !zooming && pending.size === 0) { finish(); }
+        clearTimeout(poll);
+        poll = undefined;
+        if (!active || zooming || pending.size !== 0) { return; }
+        if (currentTilesOnly()) { finish(); }
+        else { poll = setTimeout(settled, ZOOM_BLEND_POLL_MS); }
     }
     function loading(event) {
         if (active) { pending.add(event.target); }
@@ -39,7 +60,9 @@
     });
     map.on('zoomstart', function () {
         clearTimeout(timer);
+        clearTimeout(poll);
         timer = undefined;
+        poll = undefined;
         active = true;
         zooming = true;
         pending.clear();
@@ -52,7 +75,7 @@
     map.on('zoomend', function () {
         zooming = false;
         if (!active) { return; }
-        if (pending.size === 0) { finish(); }
-        else { timer = setTimeout(finish, ZOOM_BLEND_WAIT_MS); }
+        settled();
+        if (active) { timer = setTimeout(finish, ZOOM_BLEND_WAIT_MS); }
     });
 })();
