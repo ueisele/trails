@@ -8974,13 +8974,27 @@ class _Quiet(http.server.SimpleHTTPRequestHandler):
             # Only this reading's worker exposes an idle barrier. The page waits
             # for its actual timer and commits, never for a guessed wall time.
             probe = """
-var driveFill = Promise.resolve(), driveFillRecent = fillRecent;
-fillRecent = function () { return driveFill = driveFillRecent.apply(this, arguments); };
+var driveSettles = new Set(), driveFillRecent = fillRecent;
+fillRecent = function () {
+    // Called synchronously by the settle timer, before any asynchronous gap.
+    // fillRecent awaits warmRecent too; keep every run until it finishes or is
+    // cancelled, even if a newer timer fires while an older run is unwinding.
+    var work = driveFillRecent.apply(this, arguments);
+    driveSettles.add(work);
+    return work.finally(function () { driveSettles.delete(work); });
+};
+async function driveWaitSettled() {
+    for (var i=0; i<100; i++) {
+        await Promise.allSettled([settleWait, ...driveSettles, ...filling.values()]);
+        if (!settleTimer && !driveSettles.size && !filling.size && !inFlight) return;
+    }
+    throw Error('pan never settled');
+}
 self.addEventListener('message', function (event) {
     if (event.data.trails !== 'drive-settled') return;
-    event.waitUntil(Promise.resolve(settleWait || driveFill).then(function () {
-        return Promise.allSettled(Array.from(filling.values()));
-    }).then(function () { event.ports[0].postMessage({idle: settleTimer === null, filling: filling.size}); }));
+    event.waitUntil(driveWaitSettled().then(function () {
+        event.ports[0].postMessage({idle: settleTimer === null && !driveSettles.size, filling: filling.size});
+    }));
 });
 """
             if "drive-pan" in self.path:
@@ -9036,11 +9050,7 @@ self.addEventListener('message', function (event) {
     if (!action.startsWith('drive-pan-')) return;
     event.waitUntil((async function () {
         if (action === 'drive-pan-settle') {
-            for (var i=0; i<100; i++) {
-                await (settleWait || driveFill);
-                if (!settleTimer && !warmTransaction && !filling.size && !inFlight) break;
-                if (i===99) throw Error('pan never settled');
-            }
+            await driveWaitSettled();
         }
         if (action === 'drive-pan-reset' || action === 'drive-pan-cold') {
             drivePan = {transactions:0, gets:0, network:0, warms:[], peak:packBytes};
@@ -9050,7 +9060,7 @@ self.addEventListener('message', function (event) {
         }
         if (action === 'drive-pan-cancel') driveCancel = event.data.tile;
         event.ports[0].postMessage({tally:told, bytes:packBytes, limit:PACK_BYTES, packs:packs.size,
-            directories:directories.size, addresses:askedPacks.size, ...drivePan});
+            directories:directories.size, addresses:askedPacks.size, settling:driveSettles.size>0, ...drivePan});
     })());
 });
 """

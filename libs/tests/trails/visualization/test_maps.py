@@ -1,5 +1,6 @@
 """Tests for Folium map building."""
 
+import ast
 import base64
 import json
 import math
@@ -9592,6 +9593,48 @@ class TestPackWorker:
         source += worker + "\n" + script
         result = subprocess.run([node, "-"], input=source, text=True, capture_output=True, check=True, timeout=15)
         return json.loads(result.stdout)
+
+    @pytest.mark.parametrize("cancelled", [False, True])
+    def test_drive_waits_for_overlapping_settles_between_transactions(self, tmp_path, cancelled):
+        """A completed old settle cannot hide a newer run awaiting its warm-up."""
+        drive = pathlib.Path(__file__).resolve().parents[4] / "analysis" / "scripts" / "drive_map.py"
+        probes = [
+            node.value
+            for node in ast.walk(ast.parse(drive.read_text(encoding="utf-8")))
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and "async function driveWaitSettled()" in node.value
+        ]
+        assert len(probes) == 1
+        result = self.run_worker(
+            tmp_path,
+            """
+            // Controlled asynchronous gates stand in for fillRecent's awaits.
+            // There is no timer, network fill, tile request or open transaction.
+            const oldGate=Promise.withResolvers(), newGate=Promise.withResolvers();
+            fillRecent=async function (gate) { await gate.promise; };
+            """
+            + probes[0]
+            + """
+            (async () => {
+                const oldRun=fillRecent(oldGate);
+                let returned=false;
+                const idle=driveWaitSettled().then(()=>{returned=true;});
+                const newRun=fillRecent(newGate).catch(()=>{});
+                oldGate.resolve();await oldRun;
+                // Let the barrier resume from the old promise, without a sleep.
+                await new Promise(setImmediate);
+                const during={returned,settles:driveSettles.size,timer:settleTimer,
+                    transaction:warmTransaction,fills:filling.size,requests:inFlight};
+                if (__CANCELLED__) newGate.reject(Error('cancelled')); else newGate.resolve();
+                await newRun;await idle;
+                console.log(JSON.stringify({during,returned,settles:driveSettles.size}));
+            })().catch(error=>{console.error(error);process.exitCode=1;});
+            """.replace("__CANCELLED__", json.dumps(cancelled)),
+        )
+        assert result == {
+            "during": {"returned": False, "settles": 1, "timer": None, "transaction": None, "fills": 0, "requests": 0},
+            "returned": True,
+            "settles": 0,
+        }
 
     def test_pack_bytes_count_replacement_eviction_oversize_and_clear(self, tmp_path):
         result = self.run_worker(
