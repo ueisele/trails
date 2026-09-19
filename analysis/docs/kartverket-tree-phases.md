@@ -859,7 +859,10 @@ scale so overzoom is covered; emitted before the tile layers. Measured at z15 on
 a pan of half a tile and of a full tile asks for 7 / 6 tiles — the ring's new outer column —
 all from memory, no store transaction, and every tile that became visible (5 / 4) was
 complete at `moveend`; the overview and whole-map counts are unchanged. Two older readings
-that assumed one pack a layer were widened. 887 readings a page, hooks 1,799 + 97 tests.
+that assumed one pack a layer were widened. 887 readings a page, hooks 1,799 + 97 tests. The reviewer's parallel drives then caught a wait gap in the drive: between the settle
+timer firing and the warm-up's transaction opening nothing was pending, so a pan could start
+against an unwarmed store (two of fourteen answers from the store on Abisko); the drive now
+tracks every settle through fill and warm-up and waits on that (`7e24e55`, hooks 1,801 + 97).
 
 ## 5. Not in this plan
 
