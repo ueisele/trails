@@ -645,7 +645,9 @@ async function warmRecent(urls, generation) {
         var queue = neighbours.values(), reads = 0;
         function next() {
             for (var step = queue.next(); !step.done && reads < 32 && generation === requestGeneration; step = queue.next()) {
-                var url = step.value, held = packs.get(url);
+                // Already complete neighbours are part of this warm working set.
+                // Refresh their LRU position before later gets can evict them.
+                var url = step.value, held = recent(packs, url);
                 if (held && held.complete) { continue; }
                 reads += 1;
                 var ask = store.get(url);

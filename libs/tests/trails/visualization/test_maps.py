@@ -9734,6 +9734,58 @@ class TestPackWorker:
         }
 
     @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    def test_warmup_refreshes_complete_neighbours_before_loading_more_packs(self, tmp_path, provider):
+        """An already complete neighbour must not stay cold in the byte-budget LRU."""
+        result = self.run_worker(
+            tmp_path,
+            """
+            (async()=>{
+                const asked=packFor(TILE_PREFIX+'14/4/4.png'), neighbour=packFor(TILE_PREFIX+'14/3/3.png'),
+                    incoming=packFor(TILE_PREFIX+'14/4/3.png');
+                const body=a=>PackIO.write(new Map([[a.id,new Uint8Array(8).fill(7).buffer]]));
+                const neighbourBody=body(neighbour), incomingBody=body(incoming);
+                holdPack(neighbour.url,neighbourBody);
+                holdPack('old ground',PackIO.write(new Map([[0,new ArrayBuffer(1024)]])));
+                holdPack(asked.url,body(asked));
+                PACK_BYTES=packBytes;
+                let reads=[],active=0,transactions=0,lookups=0,network=0;
+                const paths=[];
+                fetch=async()=>{network++;throw Error('network forbidden');};
+                setTimeout=()=>1;clearTimeout=()=>{};switched=Promise.resolve(true);
+                const tx={objectStore:()=>({get:url=>{
+                    reads.push(url);active++;const ask={};
+                    setImmediate(()=>{
+                        active--;ask.result=url===incoming.url?{pack:incomingBody,complete:true}:undefined;
+                        ask.onsuccess();if(!active)setImmediate(()=>tx.oncomplete());
+                    });return ask;
+                }})};
+                base=async()=>({transaction:(store,mode)=>{
+                    if(store!==KEPT||mode!=='readonly')throw Error('wrong transaction');transactions++;return tx;
+                }});
+                await warmRecent([asked.url],requestGeneration);
+                const retained=packs.has(neighbour.url),coldGone=!packs.has('old ground');
+                lookup=async()=>{lookups++;return {body:neighbourBody,complete:true,path:'db'};};
+                tally=path=>paths.push(path);
+                await tileFor(new Request(neighbour.tile));
+                console.log(JSON.stringify({retained,coldGone,paths,lookups,network,transactions,
+                    reads:reads.length,reread:reads.includes(neighbour.url),bounded:packBytes<=PACK_BYTES}));
+            })().catch(e=>{console.error(e);process.exitCode=1;});
+            """,
+            provider,
+        )
+        assert result == {
+            "retained": True,
+            "coldGone": True,
+            "paths": ["mem"],
+            "lookups": 0,
+            "network": 0,
+            "transactions": 1,
+            "reads": 7,
+            "reread": False,
+            "bounded": True,
+        }
+
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
     def test_addresses_at_every_level_and_box_edge(self, tmp_path, provider):
         own = maps.PROVIDERS[provider]
         west, south, east, north = own.extent

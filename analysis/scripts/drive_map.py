@@ -9000,6 +9000,46 @@ self.addEventListener('message', function (event) {
             if "drive-pan" in self.path:
                 probe += """
 var drivePan = {transactions:0, gets:0, network:0, warms:[], peak:0}, driveWarm = null, driveCancel = null;
+var driveTrace = null, driveReplacing = null;
+function driveRecord(kind, details) {
+    if (!driveTrace) return;
+    if (driveTrace.events.length >= 4096) throw Error('pan trace exceeded its bound');
+    var item = {seq:driveTrace.events.length,kind:kind,bytes:packBytes,...details};
+    driveTrace.events.push(item);return item;
+}
+function driveTileRequest(request) {
+    if (!driveTrace || driveTrace.pan === null) return null;
+    var address;
+    try { address=packFor(request.url.split('?')[0]); } catch (_) { return null; }
+    var held=packs.get(address.url);
+    return driveRecord('request',{tile:request.url,pack:address.url,inMemory:!!held,
+        complete:held ? held.complete : null,hasTile:!!(held && held.entries.has(address.id))});
+}
+function driveTileAnswer(request, path) {
+    if (!request || !driveTrace) return;
+    request.path=path;
+    if (path === 'mem') return;
+    driveTrace.answers.push({...request,path:path,answer:driveRecord('answer',{tile:request.tile,path:path}).seq,
+        answerBytes:packBytes,
+        warmReads:driveTrace.events.filter(e=>e.kind==='get' && e.warm && e.pack===request.pack && e.seq<driveTrace.pan),
+        packHistory:driveTrace.events.filter(e=>e.pack===request.pack),
+        removals:driveTrace.events.filter(e=>e.kind==='drop')});
+}
+var driveRecent = recent;
+recent = function (cache, key) {
+    var held=driveRecent.apply(this,arguments);
+    if (cache===packs && held && driveWarm && warmTransaction) {
+        driveRecord('touch',{pack:key,complete:held.complete,size:held.body.byteLength});
+    }
+    return held;
+};
+var driveDrop = dropPack;
+dropPack = function (url) {
+    var held=packs.get(url);
+    if (held) driveRecord('drop',{pack:url,complete:held.complete,size:held.body.byteLength,
+        reason:driveReplacing===url?'replace':driveReplacing?'budget':'remove'});
+    return driveDrop.apply(this,arguments);
+};
 var driveTransaction = IDBDatabase.prototype.transaction, driveGet = IDBObjectStore.prototype.get;
 IDBDatabase.prototype.transaction = function (stores) {
     var tx = driveTransaction.apply(this, arguments);
@@ -9013,6 +9053,12 @@ IDBObjectStore.prototype.get = function (key) {
     var ask = driveGet.apply(this, arguments);
     if (this.name === KEPT) {
         drivePan.gets++;
+        var warming=this.transaction===warmTransaction, warm=warming && driveWarm;
+        ask.addEventListener('success',function () {
+            driveRecord('get',{pack:key,warm:!!warming,run:warm ? warm.trace : null,
+                found:!!ask.result,complete:ask.result ? ask.result.complete : null,
+                size:ask.result ? ask.result.pack.byteLength : 0});
+        });
         if (this.transaction === warmTransaction && driveWarm) {
             var run = driveWarm;
             run.gets++; run.active++; run.peak = Math.max(run.peak, run.active); run.urls.push(key);
@@ -9033,7 +9079,11 @@ var driveFetch = fetch;
 fetch = function () { drivePan.network++; if (driveWarm) driveWarm.network++; return driveFetch.apply(this, arguments); };
 var driveHold = holdPack;
 holdPack = function () {
-    var result = driveHold.apply(this, arguments);
+    var previous=driveReplacing;driveReplacing=arguments[0];
+    var result;
+    try { result = driveHold.apply(this, arguments); }
+    finally { driveReplacing=previous; }
+    driveRecord('hold',{pack:arguments[0],complete:result.complete,size:result.body.byteLength,warm:!!(driveWarm && warmTransaction)});
     drivePan.peak = Math.max(drivePan.peak, packBytes);
     if (driveWarm && warmTransaction) driveWarm.warmed++;
     return result;
@@ -9041,9 +9091,14 @@ holdPack = function () {
 var driveWarmRecent = warmRecent;
 warmRecent = async function () {
     var run = {gets:0, rows:0, warmed:0, active:0, peak:0, network:0, transactions:0, urls:[], cancelled:false};
+    var start=driveRecord('warm-start',{asked:arguments[0],generation:arguments[1]});
+    run.trace=start ? start.seq : null;
     driveWarm = run;
     try { return await driveWarmRecent.apply(this, arguments); }
-    finally { drivePan.warms.push(run); if (driveWarm === run) driveWarm = null; }
+    finally {
+        driveRecord('warm-end',{run:run.trace,gets:run.gets,warmed:run.warmed,cancelled:run.cancelled});
+        drivePan.warms.push(run); if (driveWarm === run) driveWarm = null;
+    }
 };
 self.addEventListener('message', function (event) {
     var action = event.data.trails;
@@ -9053,18 +9108,38 @@ self.addEventListener('message', function (event) {
             await driveWaitSettled();
         }
         if (action === 'drive-pan-reset' || action === 'drive-pan-cold') {
+            if (driveTrace) {
+                driveTrace.pan=driveTrace.events.length;
+                driveTrace.bytes=packBytes;
+                driveRecord('pan-start',{});
+            }
             drivePan = {transactions:0, gets:0, network:0, warms:[], peak:packBytes};
             if (action === 'drive-pan-cold') { clearPacks(); askedPacks.clear(); drivePan.peak=0; }
             for (var key of ['mem','db','seen','net','blank']) { told[key]=0; told.time[key]={total:0,worst:0}; }
             told.why=null; told.deadlines=0; told.peak=0;
         }
+        if (action === 'drive-pan-trace') driveTrace={events:[],answers:[],pan:null};
         if (action === 'drive-pan-cancel') driveCancel = event.data.tile;
         event.ports[0].postMessage({tally:told, bytes:packBytes, limit:PACK_BYTES, packs:packs.size,
-            directories:directories.size, addresses:askedPacks.size, settling:driveSettles.size>0, ...drivePan});
+            directories:directories.size, addresses:askedPacks.size, settling:driveSettles.size>0, trace:driveTrace, ...drivePan});
+        if (action === 'drive-pan-trace-off') driveTrace=null;
     })());
 });
 """
-            body = (path.read_text() + probe).encode()
+            worker_source = path.read_text()
+            if "drive-pan" in self.path:
+                # Only the served drive copy associates a tally with its request.
+                for before, after in (
+                    ("function tileFor(request, event) {", "function tileFor(request, event) { var driveRequest=driveTileRequest(request);"),
+                    (
+                        "function answered(which, why) { tally(which, why, began); }",
+                        "function answered(which, why) { driveTileAnswer(driveRequest,which); tally(which, why, began); }",
+                    ),
+                ):
+                    if worker_source.count(before) != 1:
+                        raise ValueError(f"worker pan trace anchor changed: {before}")
+                    worker_source = worker_source.replace(before, after)
+            body = (worker_source + probe).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/javascript")
             self.send_header("Content-Length", str(len(body)))
@@ -10521,10 +10596,12 @@ def the_kept_pan(page: Any) -> list[Reading]:
     }"""
     page.wait_for_function(loaded, timeout=60_000)
     page.evaluate("() => window.panProbe('settle')")
-    page.evaluate("() => window.panProbe('cold')")
+    page.evaluate("() => window.panProbe('trace')")
+    empty = page.evaluate("() => window.panProbe('cold')")
     page.evaluate("() => { window.panSheet.setUrl(window.panOriginal.url.split('?')[0]+'?phase8=cold'); }")
     page.wait_for_function(loaded, timeout=60_000)
     cold = page.evaluate("() => window.panProbe('state')")
+    page.evaluate("() => window.panProbe('trace-off')")
     settled = page.evaluate("() => window.panProbe('settle')")
     page.evaluate("() => window.panProbe('reset')")
     page.evaluate(with_map("() => { __MAP__.panBy([__MAP__.getSize().x,0],{animate:false}); }"))
@@ -10539,8 +10616,19 @@ def the_kept_pan(page: Any) -> list[Reading]:
             for path in ("mem", "db")
         )
 
+    # A later tile may legitimately hit a pack loaded by an earlier request.
+    # Only the first request for each pack must pay for the store on a cold screen.
+    first_requests: dict[str, dict[str, Any]] = {}
+    for event in cold["trace"]["events"]:
+        if event["kind"] == "request":
+            first_requests.setdefault(event["pack"], event)
     readings = [
-        Reading("cold kept screen has no false memory hits", cold["tally"]["mem"], 0, note=figures(cold)),
+        Reading(
+            "cold kept screen has no false memory hits",
+            empty["bytes"] == 0 and bool(first_requests) and all(r["path"] == "db" for r in first_requests.values()),
+            True,
+            note=figures(cold) + "; " + json.dumps(cold["trace"]),
+        ),
         Reading("cold kept screen is answered by the store", cold["tally"]["db"] > 0 and cold["tally"]["blank"] == 0, True),
         Reading("one-screen pan after the settle draws every sheet tile", drawn, True),
         Reading("one-screen pan answers new sheet tiles from memory", pan["tally"]["mem"] > 0, True, note=figures(pan)),
@@ -10662,6 +10750,7 @@ def the_tile_ring(page: Any) -> list[Reading]:
     })"""
     readings: list[Reading] = []
     for pixels in (128, 256):
+        page.evaluate("() => window.panProbe('trace')")
         # Each pan starts with a fresh view at the scene position, not tiles retained
         # from the previous pan. A unique URL also keeps the browser cache out of the tally.
         page.evaluate(
@@ -10734,11 +10823,17 @@ def the_tile_ring(page: Any) -> list[Reading]:
             )
         readings.extend(
             [
-                Reading(f"ring {pixels}px pan: every request is answered from memory", answered["tally"]["mem"], requests),
+                Reading(
+                    f"ring {pixels}px pan: every request is answered from memory",
+                    answered["tally"]["mem"],
+                    requests,
+                    note=json.dumps(answered["trace"]),
+                ),
                 Reading(f"ring {pixels}px pan: no other tile answers", [answered["tally"][p] for p in ("db", "seen", "net", "blank")], [0] * 4),
                 Reading(f"ring {pixels}px pan: no pack-store transaction", answered["transactions"], 0),
             ]
         )
+        page.evaluate("() => window.panProbe('trace-off')")
     page.evaluate("async cap => await trailsOffline.choose('all',cap)", SCENE.cap)
     page.wait_for_function(counted, timeout=120_000)
     scope_after = page.evaluate("() => trailsOffline.state().counted")
