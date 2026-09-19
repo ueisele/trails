@@ -820,6 +820,32 @@ readings a page (closed on open, open after the tap with the tally readable, key
 no such button on the other panels), the opening-cost reading opens the fold first; 864
 readings a page, hooks 1,795 + 97 tests.
 
+### Phase 8c — A ring of tiles past the edge
+
+Decided 2026-09-19, 10:40 (Uwe): after 8 and 8b, clearly better, and still a pan shows tiles
+arriving at the leading edge. The cause is what 8 could not do: Leaflet loads only the tiles
+that cut the viewport (`_getTiledPixelBounds` is the map's own pixel bounds, no margin), and
+`keepBuffer` keeps what is loaded, it loads nothing — so at the front of every pan each tile
+is asked for as it comes into view, and each costs the worker round trip and a PNG decode
+even from memory.
+
+1. **A ring of one tile past the viewport is loaded**, on every tile layer: an
+   `L.GridLayer.include` override of `_getTiledPixelBounds` that pads the bounds by one tile
+   (256 px at the tile's scale) on every side, in the shape of `js/tile_retention.js` — one
+   named constant, the ring's width in tiles, 1. On the phone's screen that is roughly 8–12
+   visible tiles plus about 14 in the ring per layer, all of them memory answers after 8's
+   warm-up. Two rings would be a multiple of the tiles per screen and are not built; the ring
+   is the one figure the phone may move.
+2. **Nothing else changes**: `updateWhenIdle: false`, `keepBuffer: 4`, `updateWhenZooming:
+   false`, the retention override, the worker.
+3. **Drive**, both pages, offline over kept ground: the tiles created for a view are the
+   viewport's plus one ring (the count, read off `_tiles` against the viewport's tile range);
+   a pan of half a tile's width after the settle creates no new tile and sends no request;
+   a pan of a full tile's width creates one new row or column, answered from memory; the
+   overview and whole-map counts on the panel are unchanged (they count the scope, not the
+   view). Readings wait for state and never compare wall-clock figures. Then the full drive on
+   both pages in parallel and hooks.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
