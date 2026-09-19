@@ -840,11 +840,15 @@ even from memory.
    false`, the retention override, the worker.
 3. **Drive**, both pages, offline over kept ground: the tiles created for a view are the
    viewport's plus one ring (the count, read off `_tiles` against the viewport's tile range);
-   a pan of half a tile's width after the settle creates no new tile and sends no request;
-   a pan of a full tile's width creates one new row or column, answered from memory; the
-   overview and whole-map counts on the panel are unchanged (they count the scope, not the
-   view). Readings wait for state and never compare wall-clock figures. Then the full drive on
-   both pages in parallel and hooks.
+   after a pan of half a tile's width every tile that became visible was already loaded
+   before the pan (its `el.complete` at the moment the pan ends), and what the pan asked for
+   is the ring's new outer row or column only, answered from memory; the same after a pan of
+   a full tile's width; the overview and whole-map counts on the panel are unchanged (they
+   count the scope, not the view). Corrected 2026-09-19, 10:50, after codex read Leaflet's
+   `_update`: the padded range moves with the viewport, so a pan always refills the ring —
+   that is the point, and "no request" was the wrong claim; the right one is that nothing the
+   reader sees is still loading. Readings wait for state and never compare wall-clock
+   figures. Then the full drive on both pages in parallel and hooks.
 
 ## 5. Not in this plan
 
