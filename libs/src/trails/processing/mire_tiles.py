@@ -12,22 +12,29 @@ over either map, from the class grid its country's source cuts
 (:mod:`trails.io.sources.mire_sweden`, :mod:`trails.io.sources.mire_norway`;
 analysis/docs/abisko-decisions.md §6.13).
 
-**One hue, two lightness steps, and a hatch for the model.** Drawn as the
+**One hue, two lightness steps, and hatches for the model.** Drawn as the
 vegetation is: a palette PNG with the alpha in it, ``mix-blend-mode:
 multiply``, off until asked. The hue is a violet, OKLCH 285, chosen so it
 stands apart from the vegetation's teal, the forest's sepia and the slope
-classes' pastels; the wet mire is its dark step (lightness 0.44), the firm
-mire its middle one (0.605), and the model's wet ground is the middle one
-again, hatched. The first cut had the wet ground as a third, lighter step,
-which the validator passed at ΔE 16 from the middle one and Uwe could not
-tell apart on the phone: *"Firm mire und wet ground sind kaum auseinander zu
-halten, wenn sie nicht nebeneinander liegen"* (2026-09-19). Two lightness
-steps of one hue are a difference a reader sees side by side and not alone,
-and no second hue was free -- every blue to pink sat within ΔE 6 of the
-violet under simulated colour blindness or on top of the slope pastels. So
-the difference is a texture: diagonal lines two pixels wide with gaps as
-wide, in tile pixels so they read at every zoom, which is also what the
-mark says -- a surveyed mire is a solid fill, a modelled one is hatched.
+classes' pastels; the wet mire is its dark step (lightness 0.44), the mire
+its middle one (0.605), and the model's two classes are the middle one
+again, hatched -- a dense hatch for wet ground, a sparse one for moist. The
+first cut had the wet ground as a third, lighter step, which the validator
+passed at ΔE 16 from the middle one and Uwe could not tell apart on the
+phone: *"Firm mire und wet ground sind kaum auseinander zu halten, wenn sie
+nicht nebeneinander liegen"* (2026-09-19). Two lightness steps of one hue
+are a difference a reader sees side by side and not alone, and no second
+hue was free -- every blue to pink sat within ΔE 6 of the violet under
+simulated colour blindness or on top of the slope pastels. So the
+difference is a texture, which is also what the mark says: a surveyed mire
+is a solid fill, a modelled one is hatched.
+
+**And the hatch is a close-up mark.** At z12 a pixel is 14 m and a mire a
+few pixels wide loses half of itself to the gaps; Uwe: *"Mit Schraffur war
+es bei niedrigem Zoom schon schwer zu erkennen."* So from z8 to z12 the
+wet ground is a solid fill like the mires and the moist ground is not drawn
+at all, and from z13 up both are hatched -- generalisation, the way a sheet
+keeps its finer signatures for its finer scales.
 """
 
 from collections.abc import Iterable
@@ -45,19 +52,24 @@ from .vegetation_tiles import ALPHA
 #: What the tree is called: its segment of every address.
 KIND = "mire"
 
-#: One colour per class, in class order: wet mire darkest, firm mire the
-#: middle step, and the model's wet ground the middle step again, hatched. A
-#: violet in OKLCH at hue 285, chroma 0.13, lightness 0.44 and 0.605.
-COLOURS: tuple[str, ...] = ("#4d4496", "#7b75cc", "#7b75cc")
+#: One colour per class, in class order: wet mire darkest, the mire the
+#: middle step, and the model's wet and moist ground the middle step again,
+#: hatched. A violet in OKLCH at hue 285, chroma 0.13, lightness 0.44 and 0.605.
+COLOURS: tuple[str, ...] = ("#4d4496", "#7b75cc", "#7b75cc", "#7b75cc")
 
-#: The classes drawn hatched rather than solid: the model's.
-HATCHED: tuple[int, ...] = (mire.WET_GROUND,)
+#: The classes drawn hatched rather than solid, the model's, each with its
+#: hatch as line and gap in tile pixels: dense for wet, sparse for moist.
+HATCHED: dict[int, tuple[int, int]] = {mire.WET_GROUND: (2, 2), mire.MOIST_GROUND: (2, 6)}
 
-#: The hatch's line and gap, in tile pixels.
-HATCH_PX = 2
+#: The first zoom the hatches are drawn at; below it the wet ground is a solid
+#: fill and the moist ground is left out.
+FINE_FROM = 13
+
+#: The classes drawn only from :data:`FINE_FROM` up.
+FINE_ONLY: tuple[int, ...] = (mire.MOIST_GROUND,)
 
 #: What each class is, for the legend, in class order.
-LABELS: tuple[str, ...] = ("wet mire, hard going", "firm mire", "wet ground outside the mires")
+LABELS: tuple[str, ...] = ("wet mire, hard going", "mire", "wet ground, soft", "moist ground, usually passable")
 
 #: Cell size of the classes, in metres.
 CELL_M = mire.CELL_M
@@ -107,10 +119,11 @@ def build_tiles(
         alpha=alpha,
         cell_m=CELL_M,
         hatched=HATCHED,
-        hatch_px=HATCH_PX,
+        fine_from=FINE_FROM,
+        fine_only=FINE_ONLY,
         extra={
             "labels": list(LABELS),
-            "encoding": "palette PNG of one entry per class; index 0 transparent, then wet mire, firm mire, and the wet ground the model adds,"
-            " the last hatched",
+            "encoding": "palette PNG of one entry per class; index 0 transparent, then wet mire, mire, and the wet and moist ground the model"
+            " adds, both hatched from z13 and the moist ground left out below it",
         },
     )

@@ -2491,11 +2491,11 @@ class TestTwoMapsOnOneOrigin:
     def test_the_mire_legend_lists_the_classes_the_tree_carries(self):
         """Three over Sweden, one over Norway (§6.13): a class the data cannot support is not a row."""
         swedish = maps.PROVIDERS["lantmateriet"].mire.classes()
-        assert [row["label"] for row in swedish] == ["wet mire, hard going", "firm mire", "wet ground outside the mires"]
+        assert [row["label"] for row in swedish] == ["wet mire, hard going", "mire", "wet ground, soft", "moist ground, usually passable"]
         assert [row["colour"] for row in swedish] == list(mire_tiles.COLOURS)
-        assert [row["hatched"] for row in swedish] == [False, False, True]
+        assert [row["hatch"] for row in swedish] == [None, None, [2, 2], [2, 6]]
         norwegian = maps.PROVIDERS["kartverket"].mire.classes()
-        assert norwegian == [{"colour": mire_tiles.COLOURS[1], "hatched": False, "label": "firm mire"}]
+        assert norwegian == [{"colour": mire_tiles.COLOURS[1], "hatch": None, "label": "mire"}]
         fmap = maps.create_map(bounds=(18.15, 68.17, 19.0, 68.46), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=())
         maps.add_legend(fmap, "Abisko", [maps.LegendRow("a line", "#000", None)])
         html = fmap.get_root().render()
@@ -2503,6 +2503,7 @@ class TestTwoMapsOnOneOrigin:
         assert written == swedish
         assert "mireWord.textContent = 'Mire and wet ground';" in html
         assert "repeating-linear-gradient(45deg," in html
+        assert "solid below z13, and the moist ground from z13 up only" in html
         assert "follows the weather" in html
         layer = getattr(fmap, maps.MAP_MIRE_ATTR)
         assert layer.options["class_name"] == "trails-mire-tiles" and layer.options["z_index"] == 266
@@ -10430,8 +10431,8 @@ class TestPackPanel:
     @pytest.mark.parametrize(
         "provider,position,overview,tiny",
         [
-            ("kartverket", (65.55, 13.05), {"packs": 73, "bytes": 42198804}, {"packs": 131, "bytes": 83582696}),
-            ("lantmateriet", (68.32, 18.72), {"packs": 23, "bytes": 16700730}, {"packs": 81, "bytes": 51217477}),
+            ("kartverket", (65.55, 13.05), {"packs": 73, "bytes": 42219642}, {"packs": 131, "bytes": 83626772}),
+            ("lantmateriet", (68.32, 18.72), {"packs": 23, "bytes": 16723884}, {"packs": 81, "bytes": 51462724}),
         ],
     )
     def test_overview_keeps_the_sheet_and_overlays_but_only_scope_heights(self, tmp_path, provider, position, overview, tiny):

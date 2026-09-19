@@ -439,13 +439,14 @@ class MireTiles:
     """Mire tiles beside a provider's map tiles: where the ground is bog and marsh, and whether it carries a boot.
 
     Palette PNGs cut by :mod:`trails.processing.mire_tiles`
-    (analysis/docs/abisko-decisions.md §6.13): the sheet's wetlands, wet or
-    firm, and over Sweden the wet ground the soil-moisture model finds
-    beyond them, in three steps of one violet, drawn multiplied over the
-    sheet like the vegetation and off until the reader asks. Over Norway
-    the sheet makes no wet-or-firm distinction and there is no model, so
-    only the firm class is ever drawn there and the legend says nothing of
-    the other two.
+    (analysis/docs/abisko-decisions.md §6.13): the sheet's mires, the ones
+    its survey calls wet apart, and over Sweden the wet and moist ground the
+    soil-moisture model finds beyond them, one violet in two steps and two
+    hatches, drawn multiplied over the sheet like the vegetation and off
+    until the reader asks. A class is the same statement in the same colour
+    and hatch on every map, and a map's legend lists the classes its tree
+    carries: all four over Sweden, the mire alone over Norway, whose sheet
+    draws one kind of bog and has no model behind it.
     """
 
     #: What every mire tile's address starts with, root-relative.
@@ -456,8 +457,8 @@ class MireTiles:
     weight: dict[int, int]
     #: Mean bytes per pack at each parent level, measured from the pack index.
     pack_weight: dict[int, int] = dataclasses.field(default_factory=dict)
-    #: Which classes the tree carries, in class order: all three over Sweden,
-    #: the firm mire alone over Norway. The legend lists these and no other.
+    #: Which classes the tree carries, in class order: all four over Sweden,
+    #: the mire alone over Norway. The legend lists these and no other.
     drawn: tuple[int, ...] = mire.CLASSES
     #: Whose data the tree is cut from, shown in the map's attribution line
     #: while the overlay is on: the surveys' terms ask for it by name.
@@ -482,13 +483,18 @@ class MireTiles:
         }
 
     def classes(self) -> list[dict[str, object]]:
-        """The legend's rows: each drawn class's colour, whether it is hatched, and what it is, wettest first.
+        """The legend's rows: each drawn class's colour, its hatch if any, and what it is, wettest first.
 
         Returns:
-            One row per class the tree carries, ``label``, ``colour`` and ``hatched``
+            One row per class the tree carries: ``label``, ``colour`` and
+            ``hatch`` as ``[line, gap]`` in pixels or None for a solid fill
         """
         return [
-            {"colour": mire_tiles.COLOURS[index - 1], "hatched": index in mire_tiles.HATCHED, "label": mire_tiles.LABELS[index - 1]}
+            {
+                "colour": mire_tiles.COLOURS[index - 1],
+                "hatch": list(mire_tiles.HATCHED[index]) if index in mire_tiles.HATCHED else None,
+                "label": mire_tiles.LABELS[index - 1],
+            }
             for index in mire.CLASSES
             if index in self.drawn
         ]
@@ -564,12 +570,13 @@ _WEIGHT_LV_FOREST = {8: 1037, 9: 1770, 10: 1803, 11: 1962, 12: 2153, 13: 1683, 1
 #: second vegetation build and the first forest build, 2026-09-18.
 _WEIGHT_AB_VEGETATION = {8: 1173, 9: 1605, 10: 3284, 11: 5653, 12: 7559, 13: 6096, 14: 3045, 15: 1525}
 _WEIGHT_AB_FOREST = {8: 262, 9: 312, 10: 486, 11: 625, 12: 718, 13: 581, 14: 358, 15: 232}
-#: The mire trees (§6.13), z8 to z15, the mean per zoom of the second build,
-#: 2026-09-19: Lomsdal-Visten's 37,915 tiles off N50's bogs, 10.1 MB, and
-#: Abisko's 9,330 off Lantmäteriet's wetlands and SLU's wet ground hatched,
-#: 5.6 MB (4.0 before the hatch, which the PNG packs less well).
-_WEIGHT_LV_MIRE = {8: 399, 9: 872, 10: 1107, 11: 1167, 12: 902, 13: 586, 14: 327, 15: 216}
-_WEIGHT_AB_MIRE = {8: 268, 9: 378, 10: 753, 11: 1162, 12: 1206, 13: 1037, 14: 780, 15: 509}
+#: The mire trees (§6.13), z8 to z15, the mean per zoom of the third build,
+#: 2026-09-19: Lomsdal-Visten's 37,915 tiles off N50's bogs, 11.4 MB, and
+#: Abisko's 9,330 off Lantmäteriet's wetlands and SLU's wet and moist ground
+#: hatched from z13, 8.5 MB (4.0 unhatched and without the moist ground; a
+#: hatch is what a PNG's filters pack worst).
+_WEIGHT_LV_MIRE = {8: 408, 9: 897, 10: 1186, 11: 1295, 12: 1004, 13: 651, 14: 366, 15: 243}
+_WEIGHT_AB_MIRE = {8: 360, 9: 544, 10: 1127, 11: 1742, 12: 1703, 13: 1566, 14: 1172, 15: 793}
 
 
 #: Where each map's own trees are cut, written once and read here so the page,
@@ -634,7 +641,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_LOMSDAL_VISTEN.prefix("mire"),
             top=_LOMSDAL_VISTEN.ground_max_zoom,
             weight=_WEIGHT_LV_MIRE,
-            pack_weight={8: 36004, 12: 21183},
+            pack_weight={8: 39477, 12: 23765},
             drawn=(mire.FIRM_MIRE,),
             attribution="Mire: © Kartverket (N50)",
         ),
@@ -708,7 +715,7 @@ PROVIDERS: dict[str, Provider] = {
             tiles=_ABISKO.prefix("mire"),
             top=_ABISKO.ground_max_zoom,
             weight=_WEIGHT_AB_MIRE,
-            pack_weight={8: 23750, 12: 46638},
+            pack_weight={8: 35327, 12: 71315},
             attribution="Mire: © Lantmäteriet (Marktäcke), © Skogsstyrelsen/SLU (Markfuktighetskarta)",
         ),
     ),

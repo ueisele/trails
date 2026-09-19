@@ -313,11 +313,12 @@
                         var line = document.createElement('div');
                         line.style.cssText = 'display:flex;align-items:center;gap:6px';
                         var swatch = document.createElement('span');
-                        // The modelled class is hatched on the tiles, two
-                        // pixels of line and two of gap, and its swatch is
-                        // hatched the same way.
-                        var fill = row.hatched
-                            ? 'repeating-linear-gradient(45deg,' + row.colour + ' 0 2px,transparent 2px 4px)'
+                        // The model's classes are hatched on the tiles from
+                        // z13 up, dense for wet and sparse for moist, and the
+                        // swatch carries the same hatch.
+                        var fill = row.hatch
+                            ? 'repeating-linear-gradient(45deg,' + row.colour + ' 0 ' + row.hatch[0] + 'px,transparent '
+                                + row.hatch[0] + 'px ' + (row.hatch[0] + row.hatch[1]) + 'px)'
                             : row.colour;
                         swatch.style.cssText = 'display:inline-block;width:18px;height:11px;flex:none;border:1px solid #999;'
                             + 'background:' + fill + ';opacity:0.6';
@@ -330,8 +331,9 @@
                     var mireNote = document.createElement('div');
                     mireNote.style.cssText = 'color:#666;margin-top:2px';
                     mireNote.textContent = mireClasses.length > 1
-                        ? 'The sheet\'s wetlands, wet or firm, and the ground a soil-moisture model calls wet in the year\'s mean; '
-                            + 'how wet it is this week follows the weather.'
+                        ? 'The sheet\'s mires, the wet ones marked, and hatched the ground a soil-moisture model calls wet or moist '
+                            + 'in the year\'s mean: solid below z13, and the moist ground from z13 up only. '
+                            + 'How wet it is this week follows the weather.'
                         : 'The sheet\'s bogs, which it draws as one kind; how wet one is this week follows the weather.';
                     mireRows.appendChild(mireNote);
                     mireRows.style.display = mireTick.checked ? '' : 'none';

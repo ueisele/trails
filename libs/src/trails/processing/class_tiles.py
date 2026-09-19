@@ -13,7 +13,7 @@ for both.
 
 import json
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -34,23 +34,26 @@ from .slope_tiles import rgb
 MARGIN_PX = 2
 
 
-def hatch_mask(hatch_px: int, side: int = TILE_PX) -> np.ndarray:
+def hatch_mask(line_px: int, gap_px: int, side: int = TILE_PX) -> np.ndarray:
     """Where a hatched class is left transparent: diagonal lines in the tile's own pixels.
 
-    Lines ``hatch_px`` wide with gaps as wide, running north-east, drawn in
-    tile pixels rather than on the ground so they read as a texture at every
-    zoom. The tile side is a multiple of twice the pitch, so the pattern
+    Lines ``line_px`` wide with gaps of ``gap_px``, running north-east, drawn
+    in tile pixels rather than on the ground so they read as a texture at
+    every zoom. The tile side is a multiple of the pitch, so the pattern
     continues across tile edges.
 
     Args:
-        hatch_px: Width of a line and of the gap after it
+        line_px: Width of a line
+        gap_px: Width of the gap after it
         side: The tile's side in pixels
 
     Returns:
         ``(side, side)`` booleans, True where a pixel is dropped
     """
+    if side % (line_px + gap_px):
+        raise ValueError(f"a pitch of {line_px + gap_px} px does not divide the tile side of {side}")
     rows, cols = np.indices((side, side))
-    mask: np.ndarray = ((rows + cols) // hatch_px) % 2 == 1
+    mask: np.ndarray = (rows + cols) % (line_px + gap_px) >= line_px
     return mask
 
 
@@ -132,8 +135,9 @@ def write_tree(
     alpha: int,
     cell_m: float,
     extra: dict[str, object] | None = None,
-    hatched: Sequence[int] = (),
-    hatch_px: int = 2,
+    hatched: Mapping[int, tuple[int, int]] | None = None,
+    fine_from: int | None = None,
+    fine_only: Sequence[int] = (),
 ) -> dict[str, object]:
     """Cut a class image into one tree of palette PNGs, one per ``{z}/{x}/{y}``.
 
@@ -154,8 +158,14 @@ def write_tree(
         extra: More keys for the index: what the classes mean
         hatched: Classes drawn as a diagonal hatch rather than a solid fill,
             so a reader tells them from a solid class of the same colour
-            when the two do not lie side by side
-        hatch_px: The hatch's line and gap width, in tile pixels
+            when the two do not lie side by side: class to ``(line, gap)``
+            in tile pixels
+        fine_from: The first zoom the hatch is drawn at; below it a hatched
+            class is a solid fill, since a patch a few pixels wide loses
+            half of itself to the gaps and reads as nothing. None hatches
+            every zoom.
+        fine_only: Classes not drawn at all below ``fine_from``: the detail
+            a reader wants close up and not from afar
 
     Returns:
         The index that was written: bounds, zooms, classes, per-zoom counts and bytes
@@ -164,7 +174,7 @@ def write_tree(
     out_dir.mkdir(parents=True, exist_ok=True)
     source_crs = CRS.from_user_input(crs)
     flat, clear = palette(colours, alpha)
-    dropped = hatch_mask(hatch_px) if hatched else None
+    masks = {index: hatch_mask(line, gap) for index, (line, gap) in (hatched or {}).items()}
     middle = (bounds[1] + bounds[3]) / 2.0
     started = time.time()
     total = tile_count(bounds, levels)
@@ -173,6 +183,7 @@ def write_tree(
     for zoom in levels:
         x0, y0, x1, y1 = tile_range(bounds, zoom)
         ground_m = tile_resolution(zoom, middle)
+        fine = fine_from is None or zoom >= fine_from
         written = skipped = empty = 0
         size = 0
         level_started = time.time()
@@ -186,8 +197,11 @@ def write_tree(
                     size += target.stat().st_size
                     continue
                 tile = cut(classes, transform, source_crs, zoom, x, y, ground_m, cell_m)
-                if dropped is not None:
-                    tile[np.isin(tile, hatched) & dropped] = 0
+                if fine:
+                    for index, dropped in masks.items():
+                        tile[(tile == index) & dropped] = 0
+                elif fine_only:
+                    tile[np.isin(tile, fine_only)] = 0
                 if not tile.any():
                     empty += 1
                 image = Image.fromarray(np.ascontiguousarray(tile), mode="P")
@@ -214,8 +228,9 @@ def write_tree(
         "colours": list(colours),
         "alpha": alpha,
         "cell_m": cell_m,
-        "hatched": list(hatched),
-        "hatch_px": hatch_px if hatched else 0,
+        "hatched": {str(index): list(pitch) for index, pitch in (hatched or {}).items()},
+        "fine_from": fine_from,
+        "fine_only": list(fine_only),
         **(extra or {}),
         "seconds": round(time.time() - started, 1),
     }

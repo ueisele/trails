@@ -227,7 +227,7 @@ class Scene:
     #: And what a mire tile's has in it (§6.13), where the map's country draws
     #: its mires; None where not.
     mire_path: str | None = None
-    #: How many classes the mire legend lists over this page: three over
+    #: How many classes the mire legend lists over this page: four over
     #: Sweden, one over Norway, whose sheet draws one kind of bog.
     mire_classes: int = 0
 
@@ -355,9 +355,9 @@ SCENES: dict[str, Scene] = {
             # All seven pack trees, including the overview, at the z17 cap.
             "packs the whole map holds at its cap": 9651,
             "packs kept for the tiny scope and overview": 131,
-            "estimated bytes for the tiny scope and overview": 83582696,
+            "estimated bytes for the tiny scope and overview": 83626772,
             "packs in the sheet and overlay overview": 73,
-            "estimated bytes in the sheet and overlay overview": 42198804,
+            "estimated bytes in the sheet and overlay overview": 42219642,
         },
         # On the network, 2.8 m from a node; and two taps 135.5 m and 163.3 m
         # from the nearest node to them, 28 m apart.
@@ -423,9 +423,9 @@ SCENES: dict[str, Scene] = {
         vegetation_path="/vegetation/",
         forest_path="/forest/",
         # And where the ground is mire, off Lantmäteriet's wetlands and SLU's
-        # wet ground, three classes (§6.13).
+        # wet and moist ground, four classes (§6.13).
         mire_path="/mire/",
-        mire_classes=3,
+        mire_classes=4,
         base_maps=1,
         borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
         search_for="Abiskojaure",
@@ -509,9 +509,9 @@ SCENES: dict[str, Scene] = {
             # All seven pack trees, including the overview, at the z17 cap.
             "packs the whole map holds at its cap": 2396,
             "packs kept for the tiny scope and overview": 81,
-            "estimated bytes for the tiny scope and overview": 51217477,
+            "estimated bytes for the tiny scope and overview": 51462724,
             "packs in the sheet and overlay overview": 23,
-            "estimated bytes in the sheet and overlay overview": 16700730,
+            "estimated bytes in the sheet and overlay overview": 16723884,
         },
         # A bay of Torneträsk east of Abisko Östra: two nodes of the network
         # 1.18 km apart with 95 % of the line over the lake, and the road round
@@ -6400,7 +6400,7 @@ def the_mire_over_the_relief(page: Any) -> Check:
             Reading("the rows explain the colours while it is on", rows_on, "block"),
             Reading("one row per class the tree carries", len(classes), SCENE.mire_classes, note="; ".join(classes)),
             Reading("and the note says this week's wetness is the weather's", weather, True),
-            Reading("and the modelled class alone is hatched", hatched, 1 if SCENE.mire_classes == 3 else 0),
+            Reading("and the model's classes alone are hatched", hatched, 2 if SCENE.mire_classes == 4 else 0),
             Reading("it is multiplied over the sheet", blend is not None and blend["blend"] == "multiply", True),
             Reading(
                 "and sits over the relief, above the forest's 264",

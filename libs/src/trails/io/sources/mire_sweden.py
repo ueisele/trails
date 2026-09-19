@@ -5,8 +5,9 @@ outlines (:mod:`.marktacke`), firm or wet, burnt in first so the survey's
 word is the cell's whatever the model says; then the cells the soil-moisture
 model (:mod:`.slu_moisture`) calls moist-to-wet in most of their 2 m
 sub-cells, where no outline has claimed them and the model does not call
-them water, as *wet ground*. Water is nothing, as in the vegetation codes:
-the sheet draws its own lakes.
+them water, as *wet ground*, and those it calls fresh-to-moist in most of
+them as *moist ground*. Water is nothing, as in the vegetation codes: the
+sheet draws its own lakes.
 
 **Most of the 2 m cells, not any of them.** A 10 m cell is 25 of the model's,
 and the model is noisy at its own grain -- a single wet cell among 24 dry
@@ -29,7 +30,8 @@ from . import marktacke, mire, slu_moisture
 CRS = "EPSG:3006"
 
 #: How many of a cell's 2 m sub-cells the model must call moist-to-wet for
-#: the cell to be wet ground, as a share.
+#: the cell to be wet ground, or fresh-to-moist for it to be moist ground,
+#: as a share.
 WET_SHARE = 0.5
 
 
@@ -93,13 +95,16 @@ class Source:
             raise ValueError(f"the moisture model covers {fine.shape} of the {(rows, cols)} sub-cells the box needs")
         blocks = fine.reshape(shape[0], per_cell, shape[1], per_cell)
         wet_share = (blocks == slu_moisture.MOIST_WET).mean(axis=(1, 3))
+        moist_share = (blocks == slu_moisture.FRESH_MOIST).mean(axis=(1, 3))
         water = (blocks == slu_moisture.WATER).mean(axis=(1, 3)) > 0.5
         classes[(wet_share >= WET_SHARE) & (classes == 0) & ~water] = mire.WET_GROUND
+        classes[(moist_share >= WET_SHARE) & (classes == 0) & ~water] = mire.MOIST_GROUND
         land = int(shape[0] * shape[1] - water.sum())
-        modelled = int((classes == mire.WET_GROUND).sum())
+        wet_ground = int((classes == mire.WET_GROUND).sum())
+        moist_ground = int((classes == mire.MOIST_GROUND).sum())
         print(
             f"Mire over {bounds}: {surveyed / land * 100:.2f} % of the land is surveyed wetland,"
-            f" {modelled / land * 100:.2f} % wet ground the model adds beyond it",
+            f" {wet_ground / land * 100:.2f} % wet ground the model adds beyond it and {moist_ground / land * 100:.2f} % moist",
             flush=True,
         )
         self.cache_dir.mkdir(parents=True, exist_ok=True)

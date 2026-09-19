@@ -1508,22 +1508,29 @@ legend's note says in words that how wet one is this week follows the weather, w
 already shows. Sentinel-1 radar could see standing water on open mires every six days at 10 m,
 cloud or no cloud; that is a project of its own and was not begun.
 
-**Three classes, each a property of the place and never a source.** Lantmäteriet's sheet has
-always drawn two kinds of wetland and named them in its legend: *Sankmark, fast*, peat-forming
-ground on comparatively firm peat that usually carries a boot, and *Sankmark, våt*, ground often
-or always under water that usually does not. That is the distinction a walker wants, and the
-product the sheet draws them from — *Marktäcke Nedladdning, vektor*, CC BY 4.0, a GeoPackage per
-municipality updated weekly, ordered once in Geotorget (Uwe did, 2026-09-19) and read with the
-same login as the heights — carries them as a layer of their own. Kartverket's N50 draws its
-bogs, *Myr*, as one kind, so over Norway every bog is *firm mire* and no wet class is drawn: a
-distinction the data cannot support is not a row in the legend. The third class is the reason
-the Swedish overlay has two sources. SLU's *Markfuktighetskarta*, made for Skogsstyrelsen and
+**Four classes, each a statement about the place and never about a source.** Lantmäteriet's
+sheet has always drawn two kinds of wetland and named them in its legend: *Sankmark, fast*,
+peat-forming ground on comparatively firm peat that usually carries a boot, and *Sankmark, våt*,
+ground often or always under water that usually does not. That is the distinction a walker wants,
+and the product the sheet draws them from — *Marktäcke Nedladdning, vektor*, CC BY 4.0, a
+GeoPackage per municipality updated weekly, ordered once in Geotorget (Uwe did, 2026-09-19) and
+read with the same login as the heights — carries them as a layer of their own. Kartverket's N50
+draws its bogs, *Myr*, as one kind. So the survey's two classes are *wet mire*, which only
+Sweden's survey marks, and *mire*, a mire the survey draws without calling it wet: Sweden's
+*Sankmark, fast* and every Norwegian *Myr*. The first cut called the second class *firm mire*,
+which over Norway said more than N50 says; Uwe, 2026-09-19: *"Norwegen sollte für das, was es
+sagt, dieselbe Farbe und Art bekommen wie Schweden. Es wird bald nur noch eine Anwendung für alle
+Länder geben."* So a class is one statement in one colour and one hatch on every map, and a map's
+legend lists the classes its tree carries — a distinction the data cannot support is not a row.
+The model's two classes are the reason the Swedish overlay has two sources. SLU's *Markfuktighetskarta*, made for Skogsstyrelsen and
 published as open data, is the national laser scan's terrain model run through a hydrological
 model and a classifier trained on 20,000 forest-inventory plots, at 2 m, answering how likely the
 ground is to be wet in the year's mean (kappa 0.69 on the plots held back). Its moist-to-wet class
 is drawn as *wet ground* wherever no surveyed wetland claims the cell: the seepage lines, brook
-banks and small mires under the sheet's threshold. It is a model and not a survey, which is why it
-is never drawn as a mire.
+banks and small mires under the sheet's threshold; its fresh-to-moist class as *moist ground*,
+ground that gives but carries — Uwe's *"nass, aber gehbar"*, added on 2026-09-19 after the first
+cut left it out as no obstacle and he found more wet path than the map showed. It is a model and
+not a survey, which is why neither is ever drawn as a mire.
 
 **Measured over the Abisko box, 2026-09-18 and -19.** The surveyed wetlands are 357 firm outlines
 of 8.3 km² and 34 wet ones of 0.17 km² — 0.63 % of the land. The model calls 3.4 % of the land wet
@@ -1574,11 +1581,20 @@ difference seen in comparison and not in isolation. A second hue was tried and i
 have: every candidate from blue to pink (OKLCH 240–350) sat within ΔE 6 of the violet under
 simulated colour blindness or within ΔE 5 of the slope classes' light purple and blue. So the
 difference is a texture, which is also the honest mark: **a surveyed mire is a solid fill, a
-modelled one is hatched** — the firm mire's colour in diagonal lines two tile pixels wide with
-gaps as wide, drawn in tile pixels rather than on the ground so the hatch reads the same at every
-zoom, the tile side a multiple of the pitch so it runs on across tile edges. The legend's swatch
-is the same colour under the same hatch. Both trees went to version 2 for it: Norway's tiles
-carry the palette too, and a tree whose bytes change is a new address (§9.20).
+modelled one is hatched** — the mire's colour in diagonal lines two tile pixels wide, with gaps
+as wide for the wet ground and three times as wide for the moist, drawn in tile pixels rather
+than on the ground so the hatch reads the same at every zoom, the tile side a multiple of the
+pitch so it runs on across tile edges. The legend's swatch is the same colour under the same
+hatch. Both trees went to version 2 for it: Norway's tiles carry the palette too, and a tree
+whose bytes change is a new address (§9.20).
+
+**And the hatch is a close-up mark.** Uwe, on the phone: *"Mit Schraffur war es jetzt bei
+niedrigem Zoom schon schwer zu erkennen. Wenn wir es noch weiter machen, wird es nicht mehr gut."*
+At z12 a pixel is 14 m and a mire a few pixels wide loses half of itself to the gaps; a coarser
+hatch would only look like a fence at z15. So the tree is cut the way a sheet keeps its finer
+signatures for its finer scales: from z8 to z12 the wet ground is a solid fill like the mires and
+the moist ground is not drawn at all, and from z13 up — 7 m a pixel — the wet ground is hatched
+dense and the moist ground sparse. The legend's note says so. Version 3 of both trees.
 
 **What was cut and packed, 2026-09-19:**
 
@@ -1588,18 +1604,32 @@ carry the palette too, and a tree whose bytes change is a new address (§9.20).
 | `mire/kartverket/1/` | 8–15 | 37,915 | 25,011 | **10.1 MB** | 455 s | 489, 10.4 MB |
 | `mire/lantmateriet/2/`, the wet ground hatched | 8–15 | 9,330 | 2,675 | **5.6 MB** | 116 s | 122, 5.6 MB |
 | `mire/kartverket/2/`, the palette alone changed | 8–15 | 37,915 | 25,011 | **10.1 MB** | 455 s | 489, 10.4 MB |
+| `mire/lantmateriet/3/`, the moist ground added, hatches from z13 | 8–15 | 9,330 | 2,286 | **8.5 MB** | 124 s | 122, 8.6 MB |
+| `mire/kartverket/3/`, the palette alone changed | 8–15 | 37,915 | 25,011 | **11.4 MB** | 449 s | 489, 11.7 MB |
 
 A blank tile is 163 bytes of palette, and over Norway two thirds of the tree is blank: the bogs are
 the valley floors. The hatch costs Abisko's tree 1.6 MB — a diagonal every four pixels is what a
-PNG's filters pack worst — and Norway's nothing, since no cell there is hatched. Version 1 of both
-was dropped from the bucket the same day, nobody having kept it. The tree is the slope tree's shape and is packed, kept, priced and swept with
+PNG's filters pack worst — and Norway's nothing, since no cell there is hatched; the moist ground
+and its sparse hatch another 2.9 MB over Abisko. Versions 1 and 2 of both were dropped from the
+bucket the same day, nobody having kept them. The tree is the slope tree's shape and is packed, kept, priced and swept with
 the others — one more prefix in the worker's list, one more kind on the panel, nothing new in the
 store (§6.12). A `mire` reading joins the drive's suite: nothing drawn until asked, every tile
 answered, one row per class the page's country carries, the note about the weather, multiplied
 over the sheet above the forest, priced by the panel, standing after a reload and remembered off.
 
-**Left aside, with the reason.** SLU's moist class (*frisk-fuktig*, 4.4 % of the land) is moist
-ground and no obstacle, so it is not drawn. The 0–100 index behind the classes is a 74 GB mosaic;
+**What the model does not see.** Uwe, back from the path at 68.3478 N 18.7071 E on Nuolja's
+slope at 808 m: more of it was wet than the map showed, passable but sinking. The model calls
+99.7 % of the land within 500 m dry-to-fresh and draws only a 10 m rivulet through the point;
+neither threshold nor the moist class changes that, since no cell there is moist. That is the
+fjäll: the classifier's 20,000 training plots are the forest inventory's, almost all below the
+tree line, and above it *torr-frisk* covers 92 % of the box's land, heath that gives underfoot in
+August included. A terrain index off the height models this map already reads — the ground under
+SLU's own classifier — would be the one source with a word there; it is a model of ours and was
+left aside on 2026-09-19 with Uwe's *"nicht zu viel machen"*. SLU's stream networks at 2, 10 and
+30 ha of catchment (the same server, 19,700 files in 100 km sheets) would add the seepage lines
+that cross a path, as lines, and were not taken up either.
+
+**Left aside, with the reason.** The 0–100 index behind the classes is a 74 GB mosaic;
 the three classes are what a walker can act on. Norway has no moisture model; a wetness index
 could be computed off the terrain model this map already reads, but that would be a model of ours
 and not a survey. NMD 2018's *öppen våtmark* stays where it is, as the water mask's source. VMI,
@@ -3700,6 +3730,12 @@ removed once phase 1b had its answer.
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
+
+- **2026-09-19, fifth** — the mire overlay says the same thing the same way on every map (§6.13):
+  the survey's second class is *mire*, not *firm mire*, since N50 says nothing of firmness; the
+  model's moist ground joins as a fourth class, sparsely hatched; and the hatch is a close-up
+  mark — solid below z13, the moist ground drawn from z13 up only — after it was hard to read at
+  low zoom. Both mire trees at version 3.
 
 - **2026-09-19, fourth** — the modelled wet ground is hatched, in the firm mire's colour, after a
   lighter third step could not be told from the middle one alone on the phone (§6.13); both mire

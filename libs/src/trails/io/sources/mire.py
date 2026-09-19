@@ -1,4 +1,4 @@
-"""What the mire sources agree on: three classes on a 10 m grid, and how outlines become cells.
+"""What the mire sources agree on: four classes on a 10 m grid, and how outlines become cells.
 
 **The question.** Bog and marsh are the other thing a walker off the path
 wants to know about the ground, beside what stands on it (§6.11): whether the
@@ -10,18 +10,23 @@ the two country sources (:mod:`.mire_sweden`, :mod:`.mire_norway`) stand on,
 so the tile cutter (:mod:`trails.processing.mire_tiles`) does not know which
 country it is cutting -- analysis/docs/abisko-decisions.md §6.13.
 
-**Three classes, each a property of the place and never a source.** *Wet
-mire* is what Lantmäteriet's surveyors marked *Sankmark, våt*: often or
-always under water, hard going. *Firm mire* is their *Sankmark, fast* --
-peat that carries -- and, over Norway, every N50 *Myr*, since Kartverket
-draws no such distinction and a class the data cannot support is not drawn
-([[map-symbols-must-say-something]]). *Wet ground* is what the model calls
-moist-to-wet in the year's mean and the survey did not call a mire at all:
-seepage lines, brook banks, and the small mires under the sheet's threshold.
-Measured over the Abisko box (2026-09-19): the surveyed mires are 0.63 % of
-the land, the model's wet ground 3.4 %, and 87 % of the latter lies outside
-the former -- which is why the third class exists. Over Norway there is no
-model, so the third class is empty there and the legend says nothing of it.
+**Four classes, each a statement about the place and never about a source.**
+Two are the survey's: *wet mire* is what Lantmäteriet's surveyors marked
+*Sankmark, våt*, often or always under water, hard going; *mire* is a mire
+the survey draws without calling it wet -- Lantmäteriet's *Sankmark, fast*,
+and every N50 *Myr*, since Kartverket draws one kind of bog and says nothing
+of its wetness. The same statement gets the same class in both countries,
+and a class a country's data cannot support is simply absent from its tree
+([[map-symbols-must-say-something]]): Uwe, 2026-09-19, *"Norwegen sollte für
+das, was es sagt, dieselbe Farbe und Art bekommen wie Schweden."* Two are
+the model's, where the survey drew nothing: *wet ground* is what it calls
+moist-to-wet in the year's mean -- seepage lines, brook banks, the small
+mires under the sheet's threshold -- and *moist ground* what it calls
+fresh-to-moist, ground that gives but carries. Measured over the Abisko box
+(2026-09-19): the surveyed mires are 0.63 % of the land, the model's wet
+ground 3.4 % with 87 % of it outside the outlines, its moist ground 3.9 %
+more. Over Norway there is no model, so the two model classes are empty
+there and the legend says nothing of them.
 
 **What is not here.** How wet a mire is *this week*. A mire is a landform; its
 water table follows the snowmelt and the last fortnight's rain, and no survey
@@ -41,14 +46,18 @@ from ...utils.tiles import Bounds
 #: The class of a cell inside a wet mire: *Sankmark, våt*.
 WET_MIRE = 1
 
-#: The class of a cell inside a firm mire: *Sankmark, fast*, or N50's *Myr*.
+#: The class of a cell inside a mire the survey does not call wet: *Sankmark,
+#: fast*, or N50's *Myr*.
 FIRM_MIRE = 2
 
 #: The class of a cell the model calls wet that no survey calls a mire.
 WET_GROUND = 3
 
+#: The class of a cell the model calls moist that no survey calls a mire.
+MOIST_GROUND = 4
+
 #: Every class, in palette order.
-CLASSES = (WET_MIRE, FIRM_MIRE, WET_GROUND)
+CLASSES = (WET_MIRE, FIRM_MIRE, WET_GROUND, MOIST_GROUND)
 
 #: Cell size of every mire grid, in metres: the vegetation codes' (§6.11), so
 #: the two overlays are cut over the same ground at the same grain.
