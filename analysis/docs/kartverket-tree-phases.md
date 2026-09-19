@@ -936,6 +936,37 @@ the class removed; a zoom with quick tiles cancels the 1,500 ms fallback without
 readings that fail before the change. 926 readings a page, hooks 1,841 + 97, the reviewer's own
 hooks and parallel drives green. Whether the phone holds under the fast cycle is Uwe's reading.
 
+### Phase 8e — The blend rests until the old ground is gone, and a switch to test it
+
+8d did not hold: on the newest page (Uwe, the panel's build line under an hour old), the same
+fast cycle with every overlay on still ends the page after two or three zooms. The mire's tiles
+are ordinary — 256 px, a 4-bit palette, 500 bytes median at z15, smaller than the slope's — so
+the fourth blended layer is what matters, not the mire. Where 8d stopped short: the class comes
+off at the layers' `load`, but Leaflet keeps the left level's tiles, scaled, for 250 ms more
+before `_pruneTiles` runs, and fades the new ones in over that time. The blend returns in that
+window with two levels in every blended layer, one of them scaled up to 16×, and a blended
+layer's group buffer follows the bounds of its content. Slow cycles free it in between; fast
+ones stack four of them. This phase assumes that reading; item 2 exists to test it.
+
+1. **The class stays until every blended layer holds tiles of its current zoom only** — read
+   off the layer's `_tiles` (every `coords.z === _tileZoom`), checked after each `load` and
+   then on a short poll until it holds, 3,000 ms at most. The `load` wait of 8d stays as the
+   first gate.
+2. **A switch in the address, for measuring only**: `?blend=never` draws the four overlays
+   normally at all times; `?blend=always` multiplies at all times, as before 8d; without it
+   the page behaves as item 1. Read once at page build from `location.search`, no panel, no
+   hint. It is removed when the reading is taken — it is the bench store's kind of thing.
+3. Nothing else changes.
+4. **Drive**, both pages, every overlay on: the class stays after `load` while a blended
+   layer still holds a tile of another zoom, and comes off once none does (state, not a
+   clock); `?blend=never` shows no multiply at any point of a zoom, `?blend=always` shows
+   multiply throughout; the plain page multiplies at rest. Then hooks and the full drive on
+   both pages in parallel.
+
+The phone's readings, in order: the plain page under the fast cycle; if it still dies,
+`?blend=never` — dies too, and the blend is not the cause at all; holds, and the wait is the
+part to look at again, with `?blend=always` as the control.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
