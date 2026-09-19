@@ -487,8 +487,11 @@ def drop_tree(prefix: str, output_dir: Path, config: dict[str, str], dry_run: bo
     (decisions §9.20); the old one stays for every phone that kept it and for
     every installed page that still names it, and comes down when Uwe says
     so -- 700 MB a stand. Two guards: the prefix must be a version directory
-    of a tree this script knows, and it may not be the version the tree on
-    disk says is current, which is the one the next page build draws.
+    of a tree this script knows, and a version of ``packs`` may not be the one
+    the tree on disk says is current, which is the one the next page build
+    draws. The six per-tile trees are not drawn by any page since the packs
+    (decisions 6.12): their objects may go at any version, the packs are cut
+    from the copy on disk, not from the bucket.
 
     Args:
         prefix: The version directory's key prefix, ``tiles/<provider>/<sheet>/<n>``
@@ -508,7 +511,7 @@ def drop_tree(prefix: str, output_dir: Path, config: dict[str, str], dry_run: bo
 
     root = output_dir / Path(*parts[:-1])
     current = lantmateriet.current_version(root)
-    if current is not None and int(parts[-1]) == current:
+    if parts[0] == "packs" and current is not None and int(parts[-1]) == current:
         sys.exit(f"{clean} is the version the tree at {root} calls current, which the next page build draws — not deleted.")
     bucket = config["TRAILS_MAP_BUCKET"]
     if dry_run:
@@ -586,7 +589,7 @@ def main() -> None:
         "--drop-tree",
         default=None,
         metavar="PREFIX",
-        help="Delete one version of a tree from the bucket, e.g. tiles/lantmateriet/topowebb/1; refused for the version the built page draws",
+        help="Delete one version of a tree from the bucket, e.g. tiles/lantmateriet/topowebb/1; refused for the packs version the built page draws",
     )
     parser.add_argument("--no-purge", action="store_true", help="Upload without purging the edge")
     parser.add_argument("--dry-run", action="store_true", help="Say what would happen and change nothing")
