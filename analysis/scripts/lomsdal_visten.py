@@ -3589,9 +3589,11 @@ def load_swedish_remains(park: Park, bounds: maps.Bounds, cache_dir: str, force_
         versions.append(source.version)
     if not frames:
         return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"), None
-    # A remain on a county boundary can be in both deliveries.
+    # A remain on a county boundary can be in both deliveries. The reader has
+    # already renamed the register's uuid to ``remain_id``, and that is the
+    # column it hands out (the first build stopped on the register's own name).
     joined = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs="EPSG:4326")
-    remains = joined.drop_duplicates(subset=kulturmiljoregistret.ID).reset_index(drop=True)
+    remains = joined.drop_duplicates(subset="remain_id").reset_index(drop=True)
     version = versions[0] if len(versions) == 1 else "; ".join(f"{county}: {stamp}" for county, stamp in zip(park.county, versions, strict=True))
     return remains, version
 

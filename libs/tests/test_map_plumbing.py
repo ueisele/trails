@@ -60,13 +60,13 @@ def test_boundary_loader_asks_for_the_form_and_the_union(builder, capsys):
     assert "Nature conservation area: Malingsbo-Kloten" in capsys.readouterr().out
 
 
-def test_county_remains_are_read_once_per_uuid(builder, monkeypatch):
+def test_county_remains_are_read_once_per_remain_id(builder, monkeypatch):
     which = builder.PARKS["malingsbo-kloten"]
     sources = {}
     for county in which.county:
         source = Mock(version="2026-09-20")
         source.remains.return_value = gpd.GeoDataFrame(
-            {"uuid": ["shared", county], "kind": ["farmstead site", "summer farm"]},
+            {"remain_id": ["shared", county], "kind": ["farmstead site", "summer farm"]},
             geometry=[Point(15.2, 60.0), Point(15.3, 60.0)],
             crs="EPSG:4326",
         )
@@ -74,7 +74,7 @@ def test_county_remains_are_read_once_per_uuid(builder, monkeypatch):
     factory = Mock(side_effect=lambda county, cache_dir: sources[county])
     monkeypatch.setattr(builder.kulturmiljoregistret, "Source", factory)
     found, version = builder.load_swedish_remains(which, which.bounds, "unused")
-    assert found["uuid"].tolist() == ["shared", *which.county]
+    assert found["remain_id"].tolist() == ["shared", *which.county]
     assert found.crs.to_epsg() == 4326
     assert [call.args[0] for call in factory.call_args_list] == list(which.county)
     for source in sources.values():
