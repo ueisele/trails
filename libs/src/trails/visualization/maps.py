@@ -3273,13 +3273,19 @@ def _script_json(value: object) -> str:
     the one character shuts that door; a JavaScript parser reads ``\\u003c``
     back as ``<``, so any HTML carried in the value survives intact.
 
+    **A backtick goes the same way.** :func:`_squeezed` walks the page by
+    backtick parity to keep out of the JavaScript's template literals, and a
+    raw backtick inside a JSON string throws that count off -- the first
+    Malingsbo-Kloten build stopped on an OSM path named ``EkMalm`sStig``
+    (2026-09-20). ``\\u0060`` reads back as the same character.
+
     Args:
         value: Anything JSON can represent
 
     Returns:
         A JavaScript literal safe to paste into a script block
     """
-    return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c")
+    return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace("`", "\\u0060")
 
 
 def _layer_label(group: folium.FeatureGroup) -> str:
@@ -3727,7 +3733,11 @@ def add_boundary(
     # also puts its fill on top of them for hit-testing — and a faint fill still
     # swallows clicks. Since the outline carries no popup, it opts out of pointer
     # events entirely and lets clicks reach the trails underneath.
-    layer = folium.GeoJson(gdf.to_json(), name=name, style_function=style, show=show, interactive=False)
+    # The same two escapes as _script_json, for the same two reasons: folium
+    # pastes this text into a script block as it is.
+    layer = folium.GeoJson(
+        gdf.to_json().replace("<", "\\u003c").replace("`", "\\u0060"), name=name, style_function=style, show=show, interactive=False
+    )
     layer.add_to(fmap)
     return layer
 

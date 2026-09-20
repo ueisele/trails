@@ -10982,3 +10982,19 @@ class TestPackPanel:
             "restored": "z17 · 1 m/px",
             "zoomed": "z18 · 1 m/px · tiles z17",
         }
+
+
+class TestScriptJson:
+    def test_a_backtick_in_a_value_never_reaches_the_page_raw(self):
+        """The squeezer walks the page by backtick parity, so a raw backtick
+        inside a JSON string -- an OSM path named EkMalm`sStig stopped the first
+        Malingsbo-Kloten build -- would be read as a template literal opening.
+        Escaped, it reads back as the same character."""
+        out = maps._script_json({"name": "EkMalm`sStig", "html": "</script>"})
+        assert "`" not in out
+        assert "</script>" not in out
+        assert json.loads(out) == {"name": "EkMalm`sStig", "html": "</script>"}
+
+    def test_the_squeezer_holds_its_parity_over_such_a_value(self):
+        page = "<script>\n  const data = " + maps._script_json(["EkMalm`sStig"]) + ";\n  const t = `a\n  b`;\n</script>"
+        assert maps._squeezed(page).count("`") == 2
