@@ -155,6 +155,74 @@ national collection and needs nothing.
   Trafikverket's board (`f2c2dcb`). Phase 3, the build, started 17:03 as the unit
   `malingsbo-kloten-build`.
 
+- **2026-09-20 — Phase 3, built.** The successful run in
+  `~/mockups/malingsbo-kloten-box/runs/phase-3.build.log` ends `exit 0`. It is a resumed
+  run: every tile and pack was already there, and the graph was read back from the cache.
+  Its seconds are the cost of checking those trees, not of their first build. The sheet is
+  version 1, Lantmäteriet's stand of 2026-06-23 11:05: **152,055 tiles, none missing**,
+  checked in **1.9 s**. The height, relief and slope steps read a **13,750 × 13,125** model;
+  the vegetation and forest read 5,371 × 5,015 cells, the mire 5,371 × 5,014. The six trees:
+
+  | tree | tiles | resumed step, s | packs | pack bytes | resumed pack step, s |
+  |---|---:|---:|---:|---:|---:|
+  | sheet | 152,055 | 1.9 | 1,861 | 733,723,548 | 5.946 |
+  | heights | 692 | 0.0 | 13 | 61,320,991 | 0.037 |
+  | relief | 9,756 | 0.1 | 134 | 108,212,017 | 0.342 |
+  | slope | 9,756 | 0.1 | 134 | 12,738,445 | 0.328 |
+  | vegetation | 9,756 | 0.2 | 134 | 36,088,143 | 0.335 |
+  | forest | 9,756 | 0.1 | 134 | 13,445,716 | 0.380 |
+  | mire | 9,756 | 0.1 | 134 | 20,871,648 | 0.350 |
+
+  **2,544 packs, 986,400,508 bytes**, summing the log's seven rows. No tile was reported
+  without ground or blank. The log records no first-copy or first-cut times, mosaic file
+  size, graph or page elapsed time, or total wall time.
+
+  **The graph:** Leder 96 lines → 78 chains, Topografi 50 marked trails 298 → 129,
+  paths 3,837 → 2,387, roads 14,418 → 5,999, OSM 5,292 → 4,186; no ferries or winter
+  lines. **12,779 chains, 153,447 edges, 84,177 nodes**, 684,292 vertices, 5,291 bridged
+  loose ends, 9,705 km. **107 components**, with or without ferries; the largest is
+  **9,659 km**, printed as **100 %** of the network, reaching **28.5 km, 99 %** of the
+  area's 28.8 km. **Kopparberg sits on it**, 1.48 m away. Heights: **2,049,236 samples**
+  every 5 m, all read, **65.8–408.3 m**, gains under 5 m ignored; every chain carries a
+  profile. The route check is skipped because this map names no check route.
+
+  **The page:** the log lists roads and the register's trails, Topografi 50 marked trails,
+  Topografi 50 paths and OSM paths split inside and outside the area, but prints no
+  legend-row total. Its place counts are **518 transport stops** (9 rail, 516 bus,
+  overlapping modes; 9 with a Trafikverket board), **99 OSM shelters and huts**, 344
+  settlements, no quays, 12 campsites, **31 Topografi 50 cabins and huts** (3 named from
+  the register, 9 more from OSM), **376 dwelling remains**, **126 register facilities**
+  and no Topografi 50 trail points. These are the loader's counts; the log gives no
+  combined pin total. **6,375 names**, none paired with a second language, 2,771 matched
+  to the sheet's lettering; **6,259 labels** after 116 were thinned, 1,951 repeated along
+  extended features. The water grid is 2,130 × 1,991 cells of 25 m, 9.5 % water, 79 kB;
+  109 river outlines at 5,074 vertices. The graph is 6.06 MB encoded, 5.21 MB gzipped and
+  base64 in a **23.3 MB page**, with a 57.9 kB worker, a 0.5 kB manifest and four icons.
+  Five GPX files, 78 / 129 / 2,387 / 4,186 / 5,999 tracks. The label report names one
+  value it did not know: `Vandringsled / Vandringsled`.
+
+- **2026-09-20 — Phase 6, measured.** The sheet and all six version 1 trees under the
+  main checkout's `analysis/output/` were read without writing there. Every PNG's byte
+  count agrees with its `index.json`; the weights are `per_zoom` bytes / tiles, rounded
+  to whole bytes, as for Abisko. Every PMTiles file agrees with the pack inventory;
+  `packs.weights_from_index` gives the rounded mean bytes per pack at each level.
+  `maps.py` now carries those figures in the Malingsbo-Kloten provider instead of Abisko's:
+
+  | tree | mean bytes per tile, min–max over zooms | mean bytes per pack, by level |
+  |---|---:|---|
+  | sheet | 3,671–37,065 | z6 206,942; z10 1,256,316; z14 388,767 |
+  | heights | 33,548–93,195 | z6 316,305; z10 5,083,724 |
+  | relief | 6,628–20,248 | z8 449,768; z12 812,973 |
+  | slope | 1,189–1,390 | z8 34,142; z12 95,986 |
+  | vegetation | 862–13,430 | z8 186,682; z12 270,567 |
+  | forest | 910–4,779 | z8 112,488; z12 100,157 |
+  | mire | 820–3,603 | z8 70,510; z12 157,050 |
+
+  The pack count was recounted from the PNGs' parent addresses under `packs.pack_levels`
+  and checked against the PMTiles addresses: **1,861 + 13 + 5 × 134 = 2,544**. Both
+  parametrised tests already carried that figure from phase 1; it stands. The analysis
+  README now names all three maps in the build, drive and publish instructions.
+
 ## 11. How the figures here were obtained
 
 Scratch in `~/mockups/malingsbo-kloten-box/`: `reserve.py` reads the cached register forms

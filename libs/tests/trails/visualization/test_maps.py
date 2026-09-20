@@ -10784,6 +10784,8 @@ class TestPackPanel:
             setup += self.function(name)
         return setup
 
+    # Malingsbo-Kloten, recounted from the version 1 trees on 2026-09-20:
+    # 1,861 sheet + 13 height + 5 × 134 overlay packs; both counts below use the whole box.
     @pytest.mark.parametrize("provider,count", [("kartverket", 9651), ("lantmateriet", 2396), ("lantmateriet-malingsbo-kloten", 2544)])
     def test_whole_box_iterator_counts_packs_once_with_measured_weights(self, tmp_path, provider, count):
         setup = self.setup(provider)

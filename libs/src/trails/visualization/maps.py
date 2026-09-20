@@ -575,6 +575,19 @@ _WEIGHT_AB_FOREST = {8: 262, 9: 312, 10: 486, 11: 625, 12: 718, 13: 581, 14: 358
 _WEIGHT_LV_MIRE = {8: 408, 9: 897, 10: 1186, 11: 1295, 12: 1004, 13: 651, 14: 366, 15: 243}
 _WEIGHT_AB_MIRE = {8: 360, 9: 544, 10: 1127, 11: 1742, 12: 1703, 13: 1566, 14: 1172, 15: 793}
 
+#: Malingsbo-Kloten's version 1 trees, measured 2026-09-20 in the main
+#: checkout's analysis/output/: every PNG's size checked against index.json,
+#: then per_zoom bytes / tiles rounded to whole bytes, as for Abisko.
+#: The pack_weight tables below use packs.weights_from_index: per_level
+#: bytes / packs, rounded, also checked against every PMTiles file on disk.
+_WEIGHT_MK_SHEET = {8: 37065, 9: 33160, 10: 22169, 11: 27258, 12: 21040, 13: 21829, 14: 18300, 15: 11295, 16: 6466, 17: 3671}
+_WEIGHT_MK_DEM = {8: 33548, 9: 62254, 10: 76892, 11: 93195, 12: 92259, 13: 88029}
+_WEIGHT_MK_SHADE = {8: 6628, 9: 11282, 10: 14593, 11: 18482, 12: 19926, 13: 20248, 14: 14086, 15: 9469}
+_WEIGHT_MK_SLOPE = {8: 1189, 9: 1194, 10: 1238, 11: 1265, 12: 1309, 13: 1390, 14: 1332, 15: 1282}
+_WEIGHT_MK_VEGETATION = {8: 862, 9: 2764, 10: 5126, 11: 8283, 12: 13430, 13: 12290, 14: 5925, 15: 2312}
+_WEIGHT_MK_FOREST = {8: 2150, 9: 3509, 10: 3947, 11: 4403, 12: 4779, 13: 4049, 14: 2104, 15: 910}
+_WEIGHT_MK_MIRE = {8: 820, 9: 1826, 10: 2544, 11: 2795, 12: 2075, 13: 3603, 14: 2707, 15: 1876}
+
 
 #: Where each map's own trees are cut, written once and read here so the page,
 #: its worker, the offline panel and the three build scripts all name one box.
@@ -726,19 +739,31 @@ assert _ABISKO_PROVIDER.vegetation is not None
 assert _ABISKO_PROVIDER.forest is not None
 assert _ABISKO_PROVIDER.mire is not None
 
-# The weight and pack_weight tables for the sheet and all six trees are
-# borrowed from Abisko until phase 6 measures them for Malingsbo-Kloten.
 PROVIDERS["lantmateriet-malingsbo-kloten"] = dataclasses.replace(
     PROVIDERS["lantmateriet"],
     key="lantmateriet-malingsbo-kloten",
     extent=_MALINGSBO_KLOTEN.box,
     tiles="/tiles/lantmateriet-malingsbo-kloten/topowebb/1/",
-    heights=dataclasses.replace(_ABISKO_PROVIDER.heights, tiles=_MALINGSBO_KLOTEN.prefix("dem")),
-    shade=dataclasses.replace(_ABISKO_PROVIDER.shade, tiles=_MALINGSBO_KLOTEN.prefix("shade")),
-    slope=dataclasses.replace(_ABISKO_PROVIDER.slope, tiles=_MALINGSBO_KLOTEN.prefix("slope")),
-    vegetation=dataclasses.replace(_ABISKO_PROVIDER.vegetation, tiles=_MALINGSBO_KLOTEN.prefix("vegetation")),
-    forest=dataclasses.replace(_ABISKO_PROVIDER.forest, tiles=_MALINGSBO_KLOTEN.prefix("forest")),
-    mire=dataclasses.replace(_ABISKO_PROVIDER.mire, tiles=_MALINGSBO_KLOTEN.prefix("mire")),
+    weight=_WEIGHT_MK_SHEET,
+    pack_weight={6: 206942, 10: 1256316, 14: 388767},
+    heights=dataclasses.replace(
+        _ABISKO_PROVIDER.heights, tiles=_MALINGSBO_KLOTEN.prefix("dem"), weight=_WEIGHT_MK_DEM, pack_weight={6: 316305, 10: 5083724}
+    ),
+    shade=dataclasses.replace(
+        _ABISKO_PROVIDER.shade, tiles=_MALINGSBO_KLOTEN.prefix("shade"), weight=_WEIGHT_MK_SHADE, pack_weight={8: 449768, 12: 812973}
+    ),
+    slope=dataclasses.replace(
+        _ABISKO_PROVIDER.slope, tiles=_MALINGSBO_KLOTEN.prefix("slope"), weight=_WEIGHT_MK_SLOPE, pack_weight={8: 34142, 12: 95986}
+    ),
+    vegetation=dataclasses.replace(
+        _ABISKO_PROVIDER.vegetation, tiles=_MALINGSBO_KLOTEN.prefix("vegetation"), weight=_WEIGHT_MK_VEGETATION, pack_weight={8: 186682, 12: 270567}
+    ),
+    forest=dataclasses.replace(
+        _ABISKO_PROVIDER.forest, tiles=_MALINGSBO_KLOTEN.prefix("forest"), weight=_WEIGHT_MK_FOREST, pack_weight={8: 112488, 12: 100157}
+    ),
+    mire=dataclasses.replace(
+        _ABISKO_PROVIDER.mire, tiles=_MALINGSBO_KLOTEN.prefix("mire"), weight=_WEIGHT_MK_MIRE, pack_weight={8: 70510, 12: 157050}
+    ),
 )
 
 

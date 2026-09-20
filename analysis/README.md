@@ -34,6 +34,8 @@ Each notebook is self-contained and downloads/caches its own data.
   Start here if you are coming back to this after a while.
 - `docs/abisko-decisions.md` — the second map, Abisko in Sweden: what was decided,
   what is open, and a log of how each open point was settled
+- `docs/malingsbo-kloten-decisions.md` — the third map, Malingsbo-Kloten in Bergslagen:
+  the box, the sources, the decisions and the build's figures
 - `docs/garmin-decisions.md` — getting a planned track, and possibly a map, onto a
   Garmin fēnix 7 without an internet connection: what works today, why the phone
   route is shut, what Coros and the other watches do instead, and the eleven-gram
@@ -43,13 +45,14 @@ Each notebook is self-contained and downloads/caches its own data.
 ### Scripts
 
 **The map** — builds `analysis/output/lomsdal-visten.html` from seven sources,
-or `abisko.html` from five, plus one GPX per source beside it. Every line it
+or `abisko.html` and `malingsbo-kloten.html` from five each, plus one GPX per source beside it. Every line it
 draws is a chain out of the routing graph below, so a drawn line and a
 selectable track are the same object; the two scripts share one cached build:
 
 ```bash
 command make map
 command make map ARGS="--park abisko"
+command make map ARGS="--park malingsbo-kloten"
 ```
 
 Everything it downloads is cached, so a second run does not fetch again and takes
@@ -58,7 +61,7 @@ and Overpass and takes considerably longer. Re-fetch on purpose with
 `--force-download`; `command make cache-clean` throws the cache away entirely,
 which is rarely what you want.
 
-**The ground under a map** is five more targets, and **both maps have all five**.
+**The ground under a map** is five more targets, and **all three maps have all five**.
 `command make dem` builds z8–z13 height tiles from the country's height model,
 `command make shade` cuts the relief shadow the page lays under the contours out of the
 same cached model, z8–z15, `command make slope` colours how steep that ground is,
@@ -72,8 +75,9 @@ them. All five take `PARK=<map>` — default
 and out of which model is `trails.processing.trees.TREES`, written once and read by the
 scripts and by `maps.PROVIDERS` alike. All five resume, all write under
 `analysis/output/<tree>/<provider>/<version>/`, and `command make packs` packs what they
-wrote. `analysis/docs/abisko-decisions.md` carries every figure — §6.3, §6.6,
-§6.7, §6.11 and §6.13 for the shapes, §6.10 for the Norwegian model and its box. The Swedish
+wrote. `analysis/docs/abisko-decisions.md` carries Abisko's and Lomsdal-Visten's figures — §6.3, §6.6,
+§6.7, §6.11 and §6.13 for the shapes, §6.10 for the Norwegian model and its box;
+`analysis/docs/malingsbo-kloten-decisions.md` §10 carries the third map's. The Swedish
 vegetation comes off Naturvårdsverket's nationwide NMD 2018 rasters, fetched and converted
 once into the cache by `command make nmd` (7.2 GB down, no login); the Norwegian off
 `hoydedata.no`'s surface model, no login either. The Swedish mire needs two logins on a cold
@@ -84,22 +88,26 @@ one Skogsstyrelsen publishes on its download page for the 8.4 GB soil-moisture m
 `sops exec-env secrets.sops.env 'cd ../../trails && command make mire PARK=abisko'` — and the
 Norwegian none, off N50's bogs.
 
-**Both maps copy their sheet, and only Abisko needs a login.** `command make tiles PARK=abisko`
+**All three maps copy their sheet, and the Swedish height models need a login.** `command make tiles PARK=abisko`
 copies Lantmäteriet's tiles for the box out of its open download over FTP (no login), and its
 height model does need the Geotorget login, so run that from `home/trails-map` as
 `sops exec-env secrets.sops.env 'cd ../../trails && command make dem PARK=abisko'`.
+For Malingsbo-Kloten both commands take `PARK=malingsbo-kloten`; its sheet and height tiles
+stand under `lantmateriet-malingsbo-kloten/`, apart from Abisko's `lantmateriet/`.
 `command make tiles PARK=lomsdal-visten` renders Kartverket's sheet for the box off the WMS,
 without its hillshade (§6.12), and Lomsdal-Visten's height model comes off `hoydedata.no` with
-no login, no order and no key at all. What the page draws is neither tree tile by tile:
+no login, no order and no key at all. Every page draws its trees from packs:
 `command make packs PARK=…` writes every tree of a map as packs of 85 tiles — PMTiles
 archives under `analysis/output/packs/` — and `just deploy --tree packs` uploads those.
 
 **Or the whole chain at once**: `command make abisko` runs tiles, dem, shade, slope, vegetation, mire, the graph
 with its report and the page, in that order, and from `home/trails-map`
 `just abisko` is the same with the login supplied. `command make lomsdal-visten` is the same
-chain without any credential. Every step resumes or reads
-the cache, so a rerun costs a few minutes of checking and the page; both build
-and neither publishes.
+chain without any credential. `command make malingsbo-kloten` runs the Swedish chain for
+the third map; with a cold cache, run it from `home/trails-map` as
+`sops exec-env secrets.sops.env 'cd ../../trails && command make malingsbo-kloten'`.
+Every step resumes or reads the cache, so a rerun costs a few minutes of checking and the
+page; all three build and none publishes.
 
 Both targets pass `ARGS` through, so `command make map ARGS="--approach-km 10"`
 works; the script itself is `analysis/scripts/lomsdal_visten.py`. Which map is
@@ -111,7 +119,7 @@ register's files and the height mosaic off the cache, and needs the Geotorget
 login only when one of those is missing (`command make dem` is what puts the
 mosaic there). Everything a Swedish page differs in — which registers, what a
 popup says, what a file credits, where a straight leg's heights come from — is
-`build_sweden`; the page itself is assembled by one function for both.
+`build_sweden`; the page itself is assembled by one function for all three.
 
 Worth knowing:
 
@@ -151,7 +159,8 @@ Both scripts build it through `trails.network.norway`, with the same parameters
 and therefore the same cache key, so whichever runs first pays and the second is
 instant. The parameters the map does not offer fall to that module's defaults
 rather than to the map's own, which is what keeps the two agreeing. It takes
-`--park` too, and reports Abisko's graph against its own landmarks.
+`--park` too, and reports each map's graph against its own landmarks: Abisko for that map,
+Kopparberg for Malingsbo-Kloten.
 
 **Sweden has its own module**, `trails.network.sweden`, built on the same shared
 core (`trails.network.graphs`: parameters, fingerprint, derived fields, the build)
@@ -163,7 +172,7 @@ no login — and OSM. Heights come off the cached 1 m model rather than a point
 service; the place names are Lantmäteriet's *Ortnamn* (`io/sources/ortnamn.py`, the
 country file fetched once with the login).
 
-**Both pages read their heights off tiles, and both draw the relief and the slope classes.**
+**All three pages read their heights off tiles, and all draw the relief and the slope classes.**
 The page reads the model off the height tiles `make dem` cut (`maps.HeightTiles`, beside the
 provider's map tiles; the worker keeps them and the offline panel counts them), so a leg
 planned with no network still has a profile and a tap anywhere is told its own height.
@@ -230,8 +239,8 @@ coordinates is a name here too: `68.39275, 18.68033` — the form the *Copy a
 position* tool writes to the clipboard — or `68°23'34"N 18°40'49"E` is read as
 the place it names, marked on the map, and can be set as a goal like any hut.
 
-**A tap says how high it is**, beside the position it copies. The Abisko page reads the tapped
-place itself off the height model under it, which covers the whole box, so a spot on an open flank
+**A tap says how high it is**, beside the position it copies. The Abisko and Malingsbo-Kloten pages read the tapped
+place itself off the height model under it, which covers each whole box, so a spot on an open flank
 has its own figure; Lomsdal-Visten carries heights along the paths alone, so a tap near one reads
 the nearest sample, marked `~` where that sample is more than 25 m off, and a tap far from any path
 says nothing rather than a number about somewhere else. Only the position goes to the clipboard —
@@ -311,6 +320,8 @@ route has settled the map goes to it.
 ```bash
 command make drive                                          # the Lomsdal-Visten page
 command make drive ARGS="--page analysis/output/abisko.html"   # the Abisko page
+command make drive ARGS="--page analysis/output/malingsbo-kloten.html"
+command make drive-all                                      # every built page with a scene
 ```
 
 Drives the built map in a browser and reports **some 700 readings** (689 on the
@@ -325,8 +336,10 @@ Abisko, loaded twice over for the offline check — and about two minutes of it
 fetching real tiles from Kartverket on the first page, which is what it costs to
 prove that a kept tile is terrain and not the worker's own blank. Run it as a
 transient unit (`systemd-run --user --unit=abisko-drive …`); its output is
-buffered until the unit ends, and the two pages are worth driving side by side in
-two units rather than one after the other.
+buffered until the unit ends, and the pages are worth driving side by side in
+separate units rather than one after the other. `command make drive-all` does that for every
+built page whose scene is recorded and keeps a log per page. Malingsbo-Kloten's first build
+is 23.3 MB (2026-09-20); its drive readings are recorded in phase 5.
 
 **Drive it once, into a file, and grep the file.** Running it twice to see two
 parts of one report costs two runs. And **build before driving**: the run reads
@@ -347,10 +360,10 @@ rule being driven.
 `drive_map.py`, chosen by the page's stem: the long chain the profile checks select, the
 ground the position and offline checks stand on and look at, the request pattern its heights
 come by, and the figures its last build recorded. A page whose sheets are addressed from the
-root — Abisko's — is served from its directory rather than opened off the disk. A reading whose
+root — Abisko's and Malingsbo-Kloten's — is served from its directory rather than opened off the disk. A reading whose
 figure the scene has not recorded yet is reported as **new**, with what was read, so the first
 drive of a page is the run that fills its scene in. A check that needs ground a scene does not
-have is named in the scene's `skips` and reported as skipped by it (both scenes have all their
+have is named in the scene's `skips` and reported as skipped by it (the Lomsdal-Visten and Abisko scenes have all their
 ground today); **any other skip is reported as GONE and exits 1**, because a
 chain the page no longer holds takes every check past it along, and a short green run is the
 one failure nobody reads.
@@ -374,7 +387,7 @@ It **does not build**. That separation is deliberate: a deploy that rebuilt firs
 worth publishing.
 
 It puts up **the page and its companions**: the compressed page, the worker (`sw.js`, or
-`abisko-sw.js` for the second map; uncompressed, `no-cache`, so an edge holding yesterday's
+`abisko-sw.js` or `malingsbo-kloten-sw.js` for the Swedish maps; uncompressed, `no-cache`, so an edge holding yesterday's
 worker cannot hold yesterday's map with it), the manifest (`application/manifest+json`) and the
 four icons. `ARGS="--map abisko --tree tiles --tree dem"` mirrors the two trees first.
 Without the last of those the map cannot be added to a Home Screen — and without
@@ -391,8 +404,14 @@ drives the deploy: its own `just deploy` reads them out of state, unlocks the cr
 this target. Publishing is therefore **`command make map` here, then `just deploy` there** — two
 steps, in that order, because this one does not build.
 
+For Malingsbo-Kloten, build and review `command make map ARGS="--park malingsbo-kloten"`
+here, then run `just deploy --map malingsbo-kloten --tree packs` from `home/trails-map`.
+Add `--tree dem` if the page reads heights per tile. Abisko takes `--park abisko` and
+`--map abisko`; Lomsdal-Visten is the default for both commands.
+
 A map named `<name>` is uploaded as `<name>.html` and is then readable at `https://<host>/<name>`.
-Publishing a second map needs nothing but a second upload.
+The pages are `/lomsdal-visten`, `/abisko` and `/malingsbo-kloten`; publishing another map
+needs nothing but another upload.
 
 **Tile trees** are the other thing it uploads — the base-map tiles `command make tiles` copied,
 the height tiles `command make dem` built, the relief `command make shade` cut, the slope
