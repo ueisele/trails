@@ -127,6 +127,17 @@ raw either — not needed by the new squeezer, kept because it costs nothing.
 
 ## 6. Open
 
+- **A stop on water makes two totals of one way.** Found by the phase 5 drive, 2026-09-20,
+  measured in the browser by codex: a goal's way with a stop that the water grid holds as
+  water crosses 33 m of it on the way in and 33 m on the way out, as a straight leg. The
+  drawn line and the rows at the foot of the profile count those metres (`metresInto`,
+  23,514 m); the heading does not (`composeRoute` gives a water part no height and so no
+  walking length, 23,449 m). Neither is wrong on its own — the water is not walked, and the
+  way is that long — but a reader sees 23.51 km in one place and 23.45 km in the other. Not
+  new with this map: Abisko's code is the same, its scene's stop merely stands on land.
+  Options: the heading counts the water too, with the profile keeping the gap in height
+  only (the way's length is a fact, the height over water is unknown); or the rows exclude it
+  as the heading does. Uwe's call; the scene's stop moved to land meanwhile.
 - The phone readings, once published: install, keep an area, the offline switch.
 - The icon: Uwe's pick among candidates A–D (plan phase 2); A stands until then.
 
