@@ -1131,9 +1131,12 @@ quarter of a second later.
    and zoom before the animation), the end is the view of the centre and zoom handed in, and
    for 250 ms each frame draws the view whose scale and offset are interpolated linearly in
    the eased time, easing `cubic-bezier(0,0,0.25,1)` — the same interpolation the level
-   containers' `transform` transition does on translate and scale. A second call with the
-   same end (Leaflet fires `zoom` right after `zoomanim`) does not restart the snap.
-   `zoomend` cancels and resets as today; `moveend` redraws in the new projection as today.
+   containers' `transform` transition does on translate and scale. Leaflet's order at the
+   end: after 250 ms `_onZoomTransitionEnd` clears `_animatingZoom`, then fires `zoom` (one
+   more `_updateTransform` with the end, drawn as the end, which is where the curve stands
+   by then), then `zoomend`, which cancels and resets as today, then `moveend`, which
+   redraws in the new projection as today. During the animation itself `_move` runs with
+   its events suppressed, so nothing but the curve draws.
    Strokes, dashes and radii keep their widths through the snap as through the pinch.
 2. Nothing else changes: the pinch drawing itself, the retention, the ring, the worker.
 3. **Drive**, both pages: after a driven release from a fractional zoom (as above), the canvas
