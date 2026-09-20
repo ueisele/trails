@@ -4329,7 +4329,7 @@
                 // series nobody described cannot write a file, and a mark that
                 // does nothing is worse than no mark.
                 download.style.display = writable ? 'flex' : 'none';
-                garminDownload.disabled = true;
+                if (garminDownload) { garminDownload.disabled = true; }
                 noted.textContent = '';
                 // A place has no walk to write out and no sources of its own --
                 // its popup names them itself -- so the row underneath the
@@ -4365,7 +4365,7 @@
                     // button is already hidden above -- so there is nothing to
                     // refuse and nothing to say about refusing it.
                     download.disabled = !plan || points < 2 || !!plan.why;
-                    garminDownload.disabled = download.disabled;
+                    if (garminDownload) { garminDownload.disabled = download.disabled; }
                     // Only what the header does not already say. It carried
                     // the climb, the crossings and the distance a second time,
                     // word for word, in the row underneath the row that said

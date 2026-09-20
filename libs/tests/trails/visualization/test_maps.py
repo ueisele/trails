@@ -4736,6 +4736,60 @@ class TestProfilePanel:
         assert "CC BY-NC 4.0" not in html
         assert "Høydedata" not in html
 
+    @pytest.mark.parametrize("export_enabled,has_garmin", [(False, False), (True, False), (True, True)])
+    def test_render_handles_an_absent_export_or_garmin_entry(self, group, export_enabled, has_garmin):
+        """Execute the emitted offer renderer with the optional menu entry absent.
+
+        No export must leave the original hidden controls untouched. An export
+        with no entry also exercises both defensive writes; a present entry
+        must still follow the ordinary button's refusal state.
+        """
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("Node is needed to execute the profile render test")
+        fmap, layer = group
+        maps.add_profile_panel(fmap, [layer], export=self.exported() if export_enabled else None)
+        html = fmap.get_root().render()
+        settings = re.search(r"var EXPORT = [^\n]+;", html)
+        assert settings is not None
+        source = settings[0] + "\n" + export_javascript(html, "offered")
+        source += "\nvar garminDownload = " + ("{disabled: false}" if has_garmin else "undefined") + ";"
+        source += r"""
+            var offer = {style: {display: 'none'}}, download = {style: {display: 'none'}, disabled: false};
+            var noted = {textContent: ''}, carries = {textContent: ''}, licensed = {textContent: ''};
+            // Supply geometry/credits rather than the DOM or the router: only
+            // the production render path and its optional controls are at issue.
+            function runsOf(shape) { return shape.runs; }
+            function pointsIn(runs) { return runs.length; }
+            function routeCredits() { return []; }
+            function creditsOf() { return []; }
+            function licenceLine() { return ''; }
+            function markingLine() { return ''; }
+            var shape = {runs: [1, 2], tally: {}}, selected, states = [];
+            [null, {detail: true}, {}, {figure: {}, shape: shape},
+             {composed: true, shape: shape, plan: {why: 'unsettled'}},
+             {composed: true, shape: shape, plan: {}}].forEach(function (selection) {
+                selected = selection;
+                offered();
+                states.push({display: download.style.display, disabled: download.disabled,
+                             garmin: garminDownload ? garminDownload.disabled : null,
+                             offer: offer.style.display, text: carries.textContent});
+            });
+            console.log(JSON.stringify(states));
+        """
+        result = subprocess.run([node, "-"], input=source, text=True, capture_output=True, timeout=15)
+        assert result.returncode == 0, result.stderr
+        states = json.loads(result.stdout)
+        if not export_enabled:
+            assert states == [{"display": "none", "disabled": False, "garmin": None, "offer": "none", "text": ""}] * 6
+        else:
+            assert states[-2]["disabled"] is True
+            assert states[-1]["disabled"] is False
+            assert states[-1]["display"] == "flex"
+            assert states[-1]["text"] == "2 points"
+            assert states[-2]["garmin"] is (True if has_garmin else None)
+            assert states[-1]["garmin"] is (False if has_garmin else None)
+
     def test_an_export_missing_a_setting_is_refused(self, group):
         """A page that quietly wrote 'undefined' into a licence is worse than
         one that was never built."""
