@@ -50,7 +50,7 @@ what shapes the rest. Point 6 is §6, points 7 and 8 are §8, point 9 is §7. Po
 
 ---
 
-## 3. The track, offline — Garmin Explore, and no code here
+## 3. The course, offline — Garmin Explore
 
 **Garmin Connect will not do this.** It creates a course in the cloud first, so it needs the
 network. **Garmin Explore does**, and its App Store description is explicit that it works "with or
@@ -116,16 +116,31 @@ export cuts it to 200 itself. Decided: **variant A is the shape of the Garmin ex
   and end are the course's own ends, and a pass worth marking would be a Garmin course point,
   which GPX cannot carry. Left in, "Point 1, 2, 3" would pile up on the wrist as nameless
   locations, one set per route. Uwe asked whether they are needed, 2026-09-19; they are not.
-- None of the `trails:` extensions. The Garmin file is for a watch, not for loading back into the
-  map; the ordinary export is the one that carries provenance and can be re-read.
+- None of the route’s `trails:` extensions: no legs, areas or figures. The source credits and
+  licences in `<metadata>` remain unchanged. The ordinary export carries the plan’s waypoints
+  and leg provenance and is the one that can be loaded back into the map.
 - The watch shows the first **15 characters** of a course name (Garmin, "Importing a Third-Party
   Course into Garmin Connect"), so *Abisko to Björkliden via pass* is *Abisko to Björk* on the
   wrist. A name is the reader's; the file does not shorten it.
 
-Where it goes: a second button beside the route export in `profile_panel.js` (`saveNow`, the
-`routeGpxOf` writer), sharing `metadataOf`, `waypoint` and `saveFile`. Nothing in the Python
-writer, which never exports a planned route. **Not built yet** — recorded here on 2026-09-19 so
-the build is a build and not a re-measurement.
+**Built 2026-09-20.** *For Garmin (course)* is offered beside the ordinary export for the whole
+tour and each stage, and in the composed route’s profile panel. *All stages (zip)* carries both
+variants of every stage and the whole tour. The browser’s `garminGpxOf` writer shares the ordinary
+writer’s runs, `openGpx`, `metadataOf`, number formatting and `saveFile`; the ordinary writer and
+the Python writer are unchanged. Filenames add `-garmin` before `.gpx`, after the stage suffix
+where there is one. No page setting was added.
+
+The tests execute the emitted JavaScript in Node and read its GPX and ZIP files independently in
+Python. On the synthetic winding test chain, including two walked segments separated by a
+crossing, **1,336 ordinary points become 200 course points at 0.936 m maximum deviation**. That
+is measured from the rounded coordinates written to the files in a local projection; the test
+requires less than 15 m. Every retained coordinate and height comes from the ordinary file,
+including vertices without a height. The tests also validate GPX 1.1, unchanged metadata and
+licences, stage names and endpoints, both archive variants, lines already at or below the cap,
+closed and repeated lines, and refusal while the profile’s route is unfinished. Frozen-time
+hashes match the pre-change ordinary route bytes; the JavaScript/Python chain geometry and
+credits comparison passes. These are file tests; device behaviour remains the 2026-09-19
+measurement above, and the full browser drive is a separate review check.
 
 One figure to know from the same test: Explore's list header showed **9.2 km** for the imported
 track while its own statistics said 12.9 km and the file holds 12.87 km in one segment. The
@@ -567,3 +582,6 @@ day and are measured, not reported.
   cause is that Explore makes a Track of a `<trk>` and a Course of a `<rte>`, and it condenses a
   course to 200 points worse than we do. The Garmin variant is specified in §3 and not yet built.
   §12's first block closed.
+- **2026-09-20** — built §3’s Garmin course export for tours and stages, alongside the ordinary
+  GPX and in the archive. Tests measure 1,336 → 200 points at 0.936 m maximum deviation on the
+  synthetic test chain, validate GPX 1.1 and preserve the ordinary export’s bytes.

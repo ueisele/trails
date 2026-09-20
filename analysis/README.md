@@ -255,14 +255,19 @@ to unfold the list: one row a point, with what it is called and how far into the
 walk it comes, draggable to reorder and with its own button to take one out. The
 route's own profile is drawn in the same panel and marks each of your points on
 it, and *Download GPX* writes it with its waypoints, its legs and the protected
-areas it enters and leaves.
+areas it enters and leaves. *For Garmin (course)* adds a GPX course for Garmin
+Explore, with at most 200 points, their heights and the same source credits.
+It is offered for the whole tour and each stage, and in the profile panel;
+its filename ends in `-garmin.gpx`. Keep the ordinary GPX to load the plan back:
+the Garmin course carries no waypoints or leg provenance. The measurement and
+format decision are in [garmin-decisions §3](docs/garmin-decisions.md#3-the-course-offline--garmin-explore).
 
 **A tour can be walked in stages.** Mark a point in the list as the end of one and
 the route falls into stages, each with a heading carrying its own kilometres, its
 climb, a name you can give it and its own file. A point where one stage hands over
 to the next carries a second ring, on the map and on the profile. *All stages (zip)* writes every
-stage and the whole tour with its marks in one archive. Name the tour in the box
-above the list; the marks travel in the file, so loading it back gives you the
+stage and the whole tour with its marks, plus their Garmin courses, in one archive.
+Name the tour in the box above the list; the marks travel in the file, so loading it back gives you the
 tour and its stages.
 
 **The ground can be kept on the device**, under *Offline* in the menu. It says

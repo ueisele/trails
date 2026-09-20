@@ -1637,6 +1637,22 @@ worked out, or one the height service refused, would break the track somewhere
 that is not a crossing, and nothing in the file would say so. The button says
 which and stays disabled.
 
+### A Garmin file is a course, not a track
+
+Built 2026-09-20: *For Garmin (course)* adds a second GPX for the whole tour and
+for each stage, including the profile panel’s download. It writes one `<rte>`
+with at most 200 original vertices, chosen by Douglas-Peucker in metres, with
+their heights and the full tour or stage name. Crossings join that single line.
+The source credits and licences travel unchanged in `<metadata>`. The reason
+for a course and for doing the thinning here is measured in
+[garmin-decisions §3](garmin-decisions.md#3-the-course-offline--garmin-explore).
+
+This file cannot be loaded back into the map: it has no track, no set waypoints
+and no leg provenance to reconstruct the plan from. The ordinary export keeps
+all of those and its full geometry, unchanged. The Garmin filename adds
+`-garmin` before `.gpx`; *All stages (zip)* carries both files for every stage
+and the whole tour.
+
 ### A loaded recording is a fifth kind of leg, and a chain export is one too
 
 Phase 8 reads a GPX back, and reading and writing the same format in one phase

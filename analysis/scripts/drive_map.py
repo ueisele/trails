@@ -3689,7 +3689,9 @@ def files_from_the_page(page: Any) -> Check:
     page.set_viewport_size({"width": 1400, "height": 900})
     page.wait_for_timeout(900)
 
-    stages = [name for name in members if name != written.suggested_filename]
+    ordinary = [name for name in members if not name.endswith("-garmin.gpx")]
+    garmin = [name for name in members if name.endswith("-garmin.gpx")]
+    stages = [name for name in ordinary if name != written.suggested_filename]
     return Check(
         "files written and read back",
         [
@@ -3717,7 +3719,8 @@ def files_from_the_page(page: Any) -> Check:
             # panel is drawn is `chrome layout`'s reading, not this one's.
             Reading("the archive is offered", offered["there"] if offered else None, True, note=str(offered)),
             Reading("the archive opens", broken, None),
-            Reading("holding a stage each and the tour", len(members), 3, note="; ".join(members)),
+            Reading("holding a stage each and the tour", len(ordinary), 3, note="; ".join(ordinary)),
+            Reading("and a Garmin course for each", sorted(garmin), sorted(name[:-4] + "-garmin.gpx" for name in ordinary)),
             # The defect this check exists for: a stage's file name must carry
             # the stage once. `stem` is the file's name and `name` is the
             # track's, and neither is the other's fallback.
