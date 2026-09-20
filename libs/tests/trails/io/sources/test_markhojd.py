@@ -12,6 +12,7 @@ ABISKO = (18.15, 68.139, 19.10, 68.46)
 def _item(east: float, north: float, href: str) -> dict:
     return {
         "id": f"{int(north / 10000)}_{int(east / 10000)}_{int(east % 10000):04d}",
+        "collection": "mhm-75_6",
         "properties": {"proj:bbox": [east, north, east + 2500.0, north + 2500.0], "proj:code": "EPSG:5845"},
         "assets": {"data": {"href": href, "type": "image/tiff; application=geotiff; profile=cloud-optimized"}},
     }
@@ -27,12 +28,26 @@ class TestSearch:
 
         def fetch(url):
             asked.append(url)
-            return pages["first" if "items?" in url else url]
+            return pages["first" if "search?" in url else url]
 
         squares = markhojd.search(ABISKO, fetch)
         assert [square.href for square in squares] == ["a.tif", "b.tif"]
         assert squares[0].bounds == (640000.0, 7580000.0, 642500.0, 7582500.0)
-        assert asked[0].startswith(f"{markhojd.STAC_URL}/collections/{markhojd.COLLECTION}/items?bbox=18.150000,68.139000,19.100000,68.460000")
+        assert asked[0].startswith(f"{markhojd.STAC_URL}/search?bbox=18.150000,68.139000,19.100000,68.460000")
+
+    def test_it_keeps_the_models_squares_and_passes_the_other_collections_over(self):
+        """The search spans every collection, and two of them are not the model: the
+        10 km sheets and the point cloud carry no proj:bbox, so they are skipped rather
+        than read."""
+        other = {
+            "id": "667_53",
+            "collection": "dtm-cog",
+            "properties": {"datetime": "2023-01-30T00:00:00Z"},
+            "assets": {"data": {"href": "m667_53.tif"}},
+        }
+        page = {"features": [other, _item(640000.0, 7580000.0, "a.tif")], "links": []}
+        squares = markhojd.search(ABISKO, lambda url: page)
+        assert [square.href for square in squares] == ["a.tif"]
 
 
 @pytest.fixture

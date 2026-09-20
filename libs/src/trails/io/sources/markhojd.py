@@ -41,8 +41,14 @@ from ...utils.tiles import Bounds
 #: The STAC API, keyless: search by bbox needs no login.
 STAC_URL = "https://api.lantmateriet.se/stac-hojd/v1"
 
-#: The collection the 1 m model is in.
-COLLECTION = "mhm-75_6"
+#: The 1 m model is one STAC collection per 100 km index square -- ``mhm-75_6`` holds
+#: Abisko, ``mhm-66_4`` and ``mhm-66_5`` share Malingsbo-Kloten -- so a box is searched
+#: across every collection and the squares kept by this prefix. The same API also lists
+#: ``dtm-cog`` (10 km sheets of a coarser product) and ``dsm-skoglig-copc`` (the point
+#: cloud), whose items carry no ``proj:bbox`` and are not the model. Measured 2026-09-20,
+#: when the second Swedish box answered "no squares" out of the one collection Abisko
+#: had been read from.
+COLLECTION_PREFIX = "mhm-"
 
 #: Environment variables carrying the Geotorget login. They live in
 #: ``home/trails-map``'s sops file and reach the build through ``sops exec-env``.
@@ -108,12 +114,15 @@ def squares_from(page: dict[str, object]) -> list[Square]:
         page: The page, as the API answers it
 
     Returns:
-        The squares, in the page's order
+        The squares of the model's collections, in the page's order; items of
+        any other collection the search answers with are passed over
     """
     found = []
     features = page.get("features", [])
     assert isinstance(features, list)
     for feature in features:
+        if not str(feature.get("collection", "")).startswith(COLLECTION_PREFIX):
+            continue
         properties = feature["properties"]
         bbox = properties["proj:bbox"]
         found.append(Square(id=feature["id"], href=feature["assets"]["data"]["href"], bounds=(bbox[0], bbox[1], bbox[2], bbox[3])))
@@ -131,7 +140,7 @@ def search(bounds: Bounds, fetch: Callable[[str], dict[str, object]] = _get_json
         The squares, sorted by id, every page followed
     """
     query = urllib.parse.urlencode({"bbox": ",".join(f"{value:.6f}" for value in bounds), "limit": PAGE_SIZE}, safe=",")
-    url: str | None = f"{STAC_URL}/collections/{COLLECTION}/items?{query}"
+    url: str | None = f"{STAC_URL}/search?{query}"
     found: list[Square] = []
     while url:
         page = fetch(url)
@@ -197,7 +206,7 @@ class Source:
                 return kept.read(1), kept.transform
         squares = search(bounds, self.fetch)
         if not squares:
-            raise RuntimeError(f"no squares of {COLLECTION} cover {bounds}")
+            raise RuntimeError(f"no squares of the {COLLECTION_PREFIX}* collections cover {bounds}")
         if not (self.username and self.password):
             raise RuntimeError(f"the files need the Geotorget login; set {USERNAME_VAR} and {PASSWORD_VAR}")
         min_east = min(square.bounds[0] for square in squares)

@@ -97,7 +97,18 @@ build refuses a map without a drawing of its own.
 
 ## 7. Settled
 
-*(none yet)*
+### 7.1 The height model is a collection per 100 km square — fixed, 2026-09-20
+
+The build's first run ended in the height step: *no squares of mhm-75_6 cover
+(14.967, 59.729, 15.922, 60.176)*. Lantmäteriet's STAC lists the 1 m model as **one
+collection per 100 km index square** — `mhm-75_6` holds Abisko, and this box lies across
+`mhm-66_4` and `mhm-66_5` — and `markhojd.search` had asked the one collection Abisko was
+read from. Measured on the API: the same catalogue also lists `dtm-cog`, 10 km sheets of a
+coarser product, and `dsm-skoglig-copc`, the point cloud, neither carrying `proj:bbox`.
+Fixed: the search goes to `/search?bbox=` across every collection and keeps the items whose
+collection begins `mhm-`; the others are passed over, tested. Over this box 462 squares out
+of the two collections; over Abisko's, 259 out of `mhm-75_6` as before. Marktäcke is one
+national collection and needs nothing.
 
 ## 10. Changes
 

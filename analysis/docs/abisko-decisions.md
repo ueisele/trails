@@ -503,7 +503,9 @@ Shape, following `atlas` §3.6 where it has decided and choosing where it has no
 
 - **Source** Lantmäteriet *Markhöjdmodell Nedladdning*, Avgift Nej, CC BY 4.0, RH 2000 —
   measured 2026-09-12: a keyless STAC API at `https://api.lantmateriet.se/stac-hojd/v1`
-  (search by bbox works without a login; the box returns items in collection `mhm-75_6`, 1 m
+  (search by bbox works without a login; the box returns items in collection `mhm-75_6` — one
+  collection per 100 km index square, which the second Swedish box found out, see
+  `malingsbo-kloten-decisions.md` §7.1 — 1 m
   GeoTIFF/COG per 2.5 km square, about 20 MB each, roughly 180 squares over the box), and the
   data URLs on `dl1.lantmateriet.se` answer **401** until authenticated with **HTTP basic auth
   and the Geotorget username and password**, after the product has been ordered (free) in
