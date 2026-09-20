@@ -2092,7 +2092,7 @@ class TestManifest:
         screen showing a screenshot. Every size in `ICON_SIZES` is a link
         somewhere — the document, the manifest — so a missing one is a broken
         reference and this raises rather than shipping it."""
-        for mark in (maps.ROOT.mark, maps.Companions.of("abisko").mark):
+        for mark in (maps.ROOT.mark, maps.Companions.of("abisko").mark, maps.Companions.of("malingsbo-kloten").mark):
             for side in maps.ICON_SIZES:
                 source = maps.ICON_DIR / f"{mark}-{side}.png"
                 assert source.is_file(), f"no source icon for {mark} at {side}"
