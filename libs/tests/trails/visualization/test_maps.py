@@ -122,6 +122,21 @@ class TestCreateMap:
         assert html.count('"keepBuffer": 4') == len(layers)
         assert html.count('"errorTileUrl": "data:image/png;base64,') == len(layers)
 
+    @pytest.mark.parametrize("base", list(maps.BaseMap))
+    def test_only_base_tile_layers_retain_ground(self, base):
+        fmap = maps.create_map(center=(68.30, 18.70), base=base, extra_bases=tuple(maps.BaseMap))
+        layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
+        assert layers[0].overlay is False
+        for layer in layers:
+            if layer.overlay:
+                assert "retain_ground" not in layer.options
+            else:
+                assert layer.options["retain_ground"] is True
+        html = ours(fmap.get_root().render())
+        assert html.count('"retainGround": true') == sum(not layer.overlay for layer in layers)
+        for removed in ("trails-zoom-blend", "trails-tiles-plain", "URLSearchParams(location.search)"):
+            assert removed not in html
+
     def test_only_the_base_with_its_own_tree_is_bounded(self):
         fmap = maps.create_map(center=(68.30, 18.70), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=tuple(maps.BaseMap))
         layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
@@ -133,7 +148,7 @@ class TestCreateMap:
             else:
                 assert "bounds" not in layer.options, "OSM answers beyond the tree"
 
-    def test_retention_and_its_address_switch_precede_any_tile_layer(self):
+    def test_sheet_retention_precedes_any_tile_layer(self):
         html = ours(maps.create_map(center=(65.55, 13.05)).get_root().render())
         start = html.index("L.GridLayer.include({")
         end = html.index("L.tileLayer(", start)
@@ -142,7 +157,7 @@ class TestCreateMap:
         assert "zoom > this.options.maxZoom || zoom < this.options.minZoom" in pruning
         assert "this._removeAllTiles();" in pruning
         assert "tile.retain = tile.current;" in pruning
-        assert "if (!dropGround && tile.current && !tile.active)" in pruning
+        assert "if (this.options.retainGround && tile.current && !tile.active)" in pruning
         assert "if (!this._retainParent(coords.x, coords.y, coords.z, coords.z - 5))" in pruning
         assert "this._retainChildren(coords.x, coords.y, coords.z, coords.z + 3);" in pruning
         assert "if (!this._tiles[key].retain) { this._removeTile(key); }" in pruning

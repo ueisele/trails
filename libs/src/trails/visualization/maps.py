@@ -1491,27 +1491,6 @@ class _TileRetention(MacroElement):
         self._name = "TileRetention"
 
 
-class _TileRendering(MacroElement):
-    """Read the temporary tile-rendering switch before any tile layer is added."""
-
-    _template = Template(
-        """
-        {% macro script(this, kwargs) %}
-        (function () {
-            if (new URLSearchParams(location.search).get('tiles') === 'plain') {
-                {{ this._parent.get_name() }}.getContainer().classList.add('trails-tiles-plain');
-            }
-        })();
-        {% endmacro %}
-        """
-    )
-
-    def __init__(self) -> None:
-        """Initialize the address switch."""
-        super().__init__()
-        self._name = "TileRendering"
-
-
 class _TileRing(MacroElement):
     """Load one tile beyond each viewport edge at the layer's tile scale."""
 
@@ -1546,24 +1525,6 @@ class _PinchDraw(MacroElement):
         """Initialize the canvas zoom override."""
         super().__init__()
         self._name = "PinchDraw"
-
-
-class _ZoomBlend(MacroElement):
-    """Suspend overlay multiplication until loading and old-zoom pruning finish."""
-
-    _template = Template(
-        """
-        {% macro script(this, kwargs) %}
-"""
-        + files("trails.visualization").joinpath("js", "zoom_blend.js").read_text(encoding="utf-8")
-        + """        {% endmacro %}
-    """
-    )
-
-    def __init__(self) -> None:
-        """Initialize the zoom, tile-load and pruning wait, or the address override."""
-        super().__init__()
-        self._name = "ZoomBlend"
 
 
 class _TileStart(MacroElement):
@@ -1776,13 +1737,6 @@ class _Theme(MacroElement):
            own alpha keeps the darkening partial -- see SlopeTiles. */
         .leaflet-layer.trails-slope-tiles, .leaflet-layer.trails-vegetation-tiles,
         .leaflet-layer.trails-forest-tiles, .leaflet-layer.trails-mire-tiles { mix-blend-mode: multiply; }
-        /* Avoid multiplying old ground until pruning, or throughout blend=never. */
-        .trails-zoom-blend .leaflet-layer.trails-slope-tiles,
-        .trails-zoom-blend .leaflet-layer.trails-vegetation-tiles,
-        .trails-zoom-blend .leaflet-layer.trails-forest-tiles,
-        .trails-zoom-blend .leaflet-layer.trails-mire-tiles { mix-blend-mode: normal; }
-        /* Temporary tiles=plain measurement: override Leaflet's Safari rule. */
-        .leaflet-container.trails-tiles-plain .leaflet-tile { image-rendering: auto; }
         :root {
             color-scheme: light;
             --trails-panel: rgba(255,255,255,0.94);
@@ -2334,10 +2288,8 @@ def create_map(
         header.add_child(_Head(title, companions), name="head")
 
     _TileRetention().add_to(fmap)
-    _TileRendering().add_to(fmap)
     _TileRing().add_to(fmap)
     _PinchDraw().add_to(fmap)
-    _ZoomBlend().add_to(fmap)
     if provider is not None:
         _TileStart().add_to(fmap)
 
@@ -2351,6 +2303,7 @@ def create_map(
             overlay=False,
             control=True,
             show=index == 0,
+            retain_ground=True,
             # **Held to the source's finest level.** Leaflet asks for the real
             # tile at every zoom up to `maxNativeZoom` and scales past it, so a
             # sheet that ends at z17 is drawn magnified at z18 rather than
