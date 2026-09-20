@@ -1146,6 +1146,60 @@ quarter of a second later.
    within a frame of the curve; every painted stroke keeps its width during the snap; the 8f
    readings after `zoomend` hold unchanged; an animated `setZoom` glides the same way.
 
+### Phase 8j — No tiles while the finger pinches, and one level of old ground for the overlays
+
+Measured 2026-09-20, 11:00, in Chromium against the 8h build (`/tmp/vec-measure/snap.py`,
+every overlay on, a pinch from z12 towards z16 driven as TouchZoom drives it): phase 2's rule
+— *a pinch asks for the level it lands on and no other* — has not held since phase 8. With
+`updateWhenIdle: false` Leaflet also runs its throttled `move` update during a pinch, and
+`GridLayer._update` hands over to `_setView` as soon as the map's zoom is more than one level
+from the tile zoom (its own guard for exactly this pairing of options). So a pinch across
+four levels creates and loads the levels between (35 to 54 old tiles per overlay at the
+next pruning), and for the overlays, which keep no old ground since 8h, that pruning runs 50
+to 270 ms **before** the finger lifts: the overlay goes blank mid-pinch and stays blank until
+the level it lands on has loaded and faded in — 400 to 670 ms here from the pruning to the
+last tile faded, longer on the phone out of IndexedDB. That blank is the flicker the phone
+shows. The sheet keeps its ground, so it only flickers lightly. Uwe's choice (2026-09-20,
+option C): both of the following, the second behind a switch until the phone has read it.
+
+1. **No tile is asked for while a zoom is in progress.** From `zoomstart` to `zoomend` the
+   grid layers' throttled `move` update does nothing (a flag on the map set by those two
+   events, read by an override of `GridLayer._onMoveEnd` in `js/tile_retention.js` beside
+   Leaflet's own `_animatingZoom` check). The `zoom` event's path is untouched: a pinch's
+   `zoom` events carry `pinch` and update nothing, as today; the `zoom` fired when the snap
+   ends does the one update and pruning of the level landed on, as today; a `setZoom`, a
+   double tap, a wheel and the buttons update as today through `zoomanim` and `zoom`. The
+   drag's ring (phase 8) is untouched: `move` updates run whenever no zoom is in progress.
+   Effect: no level between the one left and the one landed on is ever created, every layer
+   shows its old ground scaled until the snap ends, and the tiles of the landed level are
+   the only requests of the gesture — phase 2's rule, measured again.
+2. **Behind `?ground=overlays`, each overlay keeps one level of old ground.** The switch is
+   read once by `js/tile_retention.js`, as 8g's were. With it, an overlay's pruning retains
+   the loaded tiles of the level it left that lie under a current tile that is not active
+   yet — the nearest loaded ancestor when the level left is coarser, the loaded descendants
+   at that level when it is finer, both reached with Leaflet's `_retainParent` and
+   `_retainChildren` at a depth of exactly the distance to the level left (which, with item
+   1, is the only other level a layer can hold) — and removes every tile of any other level.
+   Once every current tile is active, the old level goes, as Leaflet's rule already has it.
+   Without the switch the overlays keep none, as 8h. The sheet keeps ground exactly as 8h
+   (parents to −5, children to +3) with and without the switch. What this bounds: at most
+   one screen of old ground per overlay, five beside the sheet's, no chains, no levels
+   between — against the eighteen screens that ended the page. Whether it holds on the phone
+   is the reading this switch exists for; if it holds, a later phase makes it the default and
+   removes the switch, and if it dies, the switch goes and 8h stands.
+3. Nothing else changes: the pinch drawing (8f, 8i), the ring, `keepBuffer`,
+   `updateWhenIdle`, `updateWhenZooming`, the worker.
+4. **Drive**, both pages, every overlay on. Item 1: through a driven pinch from z12 to past
+   z15 no layer creates a tile (`tileloadstart` counted, and the levels held) until the
+   release, and the release creates tiles of the landed level only; after a driven drag with
+   no zoom the ring still fills during the drag as phase 8 measured. Item 2, page opened with
+   the switch: after a release from z12 to z16 each overlay holds z12 tiles under its
+   unloaded z16 tiles and no tile of z13–z15, and after a release from z16 to z12 it holds
+   z16 tiles under its unloaded z12 tiles and nothing else; once loaded and faded every
+   overlay holds its level only; without the switch every overlay holds nothing across the
+   change, as 8h; the sheet's 8h readings hold with and without. Then hooks and the full
+   drive on both pages in parallel.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
