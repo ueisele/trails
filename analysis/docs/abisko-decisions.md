@@ -3799,6 +3799,14 @@ clock the CSS transition starts on, and the zoom it is drawn at agrees with the 
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-20, third** — both maps published with the stage menus (`garmin-decisions.md` §3):
+  a stage's download icon opens a menu, *This stage (GPX)* then *For Garmin (course)*, in place
+  of the wrapped Garmin chip that cost every stage a second line on the phone; the menu flips
+  upward where the list's lower edge would clip it; both tour menus list *All stages (zip)*
+  first. Uwe's decision from the published page, 2026-09-20. Page-and-companions deploy, workers,
+  stores, addresses and trees untouched, both pages and both workers byte-identical at the edge.
+  Full drive of both maps green. codex on `garmin-stage-menu`, `b24b95d`, `ac260a8`.
+
 - **2026-09-20, second** — both maps published with the Garmin course export
   (`garmin-decisions.md` §3): *For Garmin (course)* beside every route download — the whole
   tour, each stage, the profile's save menu, and the archive — writes one `<rte>` of at most 200
