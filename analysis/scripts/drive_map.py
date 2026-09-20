@@ -2848,7 +2848,8 @@ def planning_keeps_what_it_had(page: Any) -> Check:
     cut = page.evaluate(
         """() => ({heads: document.querySelectorAll('.trails-plan-stage').length,
         names: document.querySelectorAll('.trails-plan-stage-name').length,
-        files: document.querySelectorAll('.trails-plan-stage button').length,
+        files: document.querySelectorAll('.trails-plan-stage-file').length,
+        garmin: document.querySelectorAll('.trails-plan-stage-garmin').length,
         drawn: [...document.querySelectorAll('.trails-plan-stage')].every(n => n.getClientRects().length > 0),
         stages: window.trailsPlan.stages()})"""
     )
@@ -2912,6 +2913,7 @@ def planning_keeps_what_it_had(page: Any) -> Check:
             Reading("and the stage is drawn", cut["heads"], cut["stages"]),
             Reading("with a name to give it", cut["names"], cut["stages"]),
             Reading("and a file of its own", cut["files"], cut["stages"]),
+            Reading("and a Garmin course of its own", cut["garmin"], cut["stages"]),
             Reading("all of them on the screen", cut["drawn"], True),
             # 7 px of bar is what a mouse needs; a finger needs the strip.
             Reading("px of handle to drag the panel by", grip["h"], 30, within=8),
