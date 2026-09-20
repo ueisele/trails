@@ -1102,6 +1102,16 @@ sheet blanks too.
 If the phone still ends the page after this, the next step is the sheet's children depth
 back to Leaflet's two, then one — each a number in `tile_retention.js`.
 
+**Built 2026-09-20, 00:50 (codex, gpt-6-astra; `2ba9136`, landed by fast-forward).**
+`retainGround` on the base tile layer, read by `tile_retention.js`; `_ZoomBlend`,
+`_TileRendering`, `zoom_blend.js`, both theme rules, the three switches and their tests and
+readings removed, 849 lines fewer. Driven on both pages with every overlay on: after 15 → 12
+the sheet holds 28 (Abisko) / 24 (Lomsdal-Visten) tiles of the left zoom while its level
+loads and every overlay none; after 12 → 15 the sheet holds 2 and the overlays none; once
+loaded and faded every count is zero; the four overlays multiply at rest and during a zoom.
+Sixteen readings that fail before the change. 965 readings a page, hooks 1,849 + 97; the
+reviewer's own hooks and parallel drives green. Published 01:05. The phone's reading is open.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).

@@ -1636,28 +1636,30 @@ and not a survey. NMD 2018's *öppen våtmark* stays where it is, as the water m
 the wetland inventory of 1981–2005, classes the mire types but only above a size threshold and is
 being vectorised county by county; it may one day tell a raised bog from a fen.
 
-**Four multiplied layers end the page on the phone, so the blend rests while the map zooms**
-(2026-09-19, plan phase 8d). With the mire on, every overlay on, Safari ended both pages —
-*"A problem repeatedly occurred"*, the quiet reload to the initial zoom first — and only when
-zooming in and out several times in a row; any level, any pan, any length of time was fine. What
-it was not, measured on `forge` and by six one-minute experiments on the phone: not the page (heap
-and DOM flat), not the tile count (a zoom holds fewer tiles than a pan, Leaflet drops the left
-level's unloaded tiles), not the kernel (no `JetsamEvent`), not the online pack fill (airplane
-mode dies too), not the requests (over unkept, empty ground it holds), not the vectors (off, it
-still dies). What it was: **five layers with all four multiplied overlays on die; five with the
-mire off hold.** A layer under `mix-blend-mode` is not composited straight from its tiles; WebKit
-renders it into a buffer of its own and multiplies that with the ground on every frame it changes,
-and through a pinch the layer is scaled up to 16× and the old ground is kept scaled until the new
-level has loaded. Four such buffers reach a limit that three do not. So the map's container
-carries a class from `zoomstart` until every tile layer that started loading has fired `load`
-and no blended layer holds a tile of another zoom any more (phase 8e, after 8d's wait to `load`
-alone did not hold on the phone: Leaflet prunes the left level 250 ms after `load` and fades the
-new one in, and the blend came back with two levels in every blended layer; 3,000 ms at most —
-Leaflet's own `leaflet-zoom-anim` covers only the snap after the finger lifts, not the pinch),
-and under it the four overlays composite normally. `?blend=never` and `?blend=always` in the
-address are a measuring switch for the phone and go when the reading is taken. At rest nothing changes;
-the ring, `keepBuffer` and the warm-up stay as decided. During a pinch the overlays lie a little
-lighter over the lettering. `js/zoom_blend.js`, `_ZoomBlend`, the theme's second blend rule.
+**Old ground across a zoom is the sheet's only** (2026-09-19/20, plan phases 8d–8h). With
+the mire on, every overlay on, Safari ended both pages — *"A problem repeatedly occurred"*, the
+quiet reload to the initial zoom first — when the finger lifted after zooming in and out several
+times in a row; any level, any pan, any length of time, and two tile layers, were fine. Found by
+measuring on `forge` and by Uwe's one-minute experiments on the phone, and named only at the
+third attempt: not the page (heap and DOM flat), not the tile count (a zoom holds fewer tiles
+than a pan, Leaflet drops the left level's unloaded tiles), not the kernel (no `JetsamEvent`),
+not the online pack fill (airplane mode dies), not the requests (over unkept, empty ground it
+holds), not the vectors, and — after two phases built on it — **not the blend**: with four
+multiplied overlays it died where three held, the blend was suspended through the zoom (8d)
+and to the pruning of the old level (8e), and `?blend=never` still died. Not Leaflet's Safari
+`image-rendering` rule either (`?tiles=plain` died). **`?ground=drop` held**, with a flicker at
+every zoom: what Leaflet keeps across a zoom change — the nearest loaded parent on a zoom in,
+up to three levels of children on a zoom out, the depth three being phase 2's — is scaled up
+to 16× and rasterised by WebKit at the new scale when the finger lifts, a screen's worth of
+pixels a level a layer, eighteen screens at once with six layers, freed later than the next
+release comes. Settled (8h): the retention override keeps old ground for the sheet only
+(`retainGround` on the base tile layer), the overlays let their old level go at the zoom
+change and fade in afresh — three screens instead of eighteen, the sheet never blank. The
+blend machinery and the measuring switches of 8d–8g are gone; the four overlays multiply at all
+times as before. If the fast cycle still ends the page, the sheet's children depth goes back to
+Leaflet's two, then one. Two rules this cost: a fix that takes back a decided behaviour is
+discussed before it is built, and a theory that fits the correlation is tested with a switch
+before a phase is built on it.
 
 ## 7. The order of work
 
@@ -3775,6 +3777,11 @@ A line per change to this document or to the decisions in it, newest first.
   model's moist ground joins as a fourth class, sparsely hatched; and the hatch is a close-up
   mark — solid below z13, the moist ground drawn from z13 up only — after it was hard to read at
   low zoom. Both mire trees at version 3.
+
+- **2026-09-20** — old ground across a zoom is the sheet's only (§6.13, plan phase 8h): the
+  scaled ground Leaflet keeps while the new level loads is what ended the page when the finger
+  lifted; the overlays keep none now. The blend machinery of 8d/8e and the switches of 8g are
+  gone; the overlays multiply at all times again.
 
 - **2026-09-19, sixth** — the pinch is drawn, not scaled (§9.45, plan phase 8f): the canvas
   is redrawn each frame at the pinch's scale with widths and radii held, instead of being
