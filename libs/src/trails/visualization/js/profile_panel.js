@@ -18,6 +18,7 @@
             var startingChartHeight = {{ this.chart_height }};
             var chartHeight = startingChartHeight;
             var GRADE = {{ this.gradient_json }};
+            var LENGTH_ICONS = {{ this.length_icons_json }};
             var NARROW = {{ this.narrow_px }};
             var SHORT = {{ this.short_px }};
             var open = {{ 'false' if this.collapsed else 'true' }};
@@ -4181,6 +4182,37 @@
             function planning() { return !!(planNow && planNow.on); }
             function paintSummary() {
                 summary.textContent = readingNow || (planning() ? planHint() : saidText);
+                if (!readingNow && !planning() && saidLines.length && selected && selected.shape) {
+                    // The figures and the file keep their words; only the
+                    // heading trades them for outlines to fit its one line.
+                    summary.textContent = '';
+                    function lengthFigure(length, icon, words) {
+                        var part = document.createElement('span');
+                        part.className = 'trails-profile-length';
+                        part.setAttribute('data-metres', length);
+                        part.setAttribute('aria-label', (length / 1000).toFixed(2) + ' km ' + words);
+                        part.textContent = (length / 1000).toFixed(2) + ' km ';
+                        var outline = LENGTH_ICONS[icon], glyph = document.createElementNS(SVG, 'svg');
+                        glyph.setAttribute('viewBox', outline[0]);
+                        glyph.setAttribute('aria-hidden', 'true');
+                        glyph.style.cssText = 'display:inline-block;height:1em;width:' +
+                            (Number(outline[0].split(' ')[2]) / Number(outline[0].split(' ')[3])) +
+                            'em;vertical-align:-0.125em;fill:currentColor';
+                        var path = document.createElementNS(SVG, 'path');
+                        path.setAttribute('d', outline[1]);
+                        glyph.appendChild(path);
+                        part.appendChild(glyph);
+                        summary.appendChild(part);
+                    }
+                    lengthFigure(selected.shape.total, 'person-walking', 'on foot');
+                    if (selected.shape.crossed > 0) {
+                        summary.appendChild(document.createTextNode(' \u00b7 '));
+                        lengthFigure(selected.shape.crossed, 'water', 'over water');
+                    }
+                    if (saidLines.length > 1) {
+                        summary.appendChild(document.createTextNode(' \u00b7 ' + saidLines.slice(1, 3).join(' \u00b7 ')));
+                    }
+                }
                 summary.style.color = readingNow ? 'var(--trails-accent)' : 'var(--trails-ink-2)';
                 // **Which of the two it is saying, as a fact and not as a
                 // colour.** A probe comparing a computed `rgb()` against the
@@ -4242,6 +4274,9 @@
             function planned(figure, shape, extra) {
                 var told = [];
                 told.push((shape.total / 1000).toFixed(2) + ' km on foot');
+                if (shape.crossed > 0) {
+                    told[0] += ' \u00b7 ' + (shape.crossed / 1000).toFixed(2) + ' km over water';
+                }
                 if (shape.read) {
                     told.push(climb(figure));
                     var worst = steepestOf(shape);

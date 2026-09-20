@@ -6624,6 +6624,7 @@
                         // and not about the journey.
                         failed: (goalLegs.filter(function (leg) { return leg.failed; })[0] || {}).failed || null,
                         from: goalFrom, metres: goalShape ? goalShape.total : null,
+                        waterMetres: goalShape ? goalShape.crossed : null,
                         ascent: goalShape ? figuresOf(goalShape).ascent : null,
                         // **How much of it is not a path.** Where the network
                         // does not reach the goal, the way is routed as far as

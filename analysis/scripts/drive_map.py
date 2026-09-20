@@ -62,6 +62,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import functools
+import hashlib
 import http.server
 import io
 import json
@@ -196,6 +197,9 @@ class Scene:
     #: A dry stop for the goal-editing check, on or beside the network. None
     #: keeps the offset from the goal leg's midpoint used by the first maps.
     goal_stop: tuple[float, float] | None = None
+    #: A stop on a lake for the two-length reading. None uses the scene's open
+    #: water pair or sound as the whole way; the goal-editing check keeps its dry stop.
+    water_stop: tuple[float, float] | None = None
     #: A fix beside a bend or an end of the planned route, where different
     #: accuracies give distinct bearings. None uses the first point's north side.
     aim_from: tuple[float, float] | None = None
@@ -298,6 +302,9 @@ SCENES: dict[str, Scene] = {
         # has not got.
         over_http=True,
         figures={
+            # Before the length glyphs: the dry figures page and every GPX description.
+            "dry way figures bytes": "e24bd985bef142fc74864daa9305db229dc872fa747b9ef3be27444024421fcb",
+            "dry way GPX description bytes": "9354b7766db85243a925d38c015e80227cfb78480c52354319f9ce4906bcc467",
             # A regression ceiling for two parallel drives, not an idle-box baseline.
             "map build ceiling in ms (Firefox on forge)": 4000,
             # Re-recorded 2026-09-01, from 11,589 and 11,290: the source cache
@@ -451,6 +458,9 @@ SCENES: dict[str, Scene] = {
         # Recorded 2026-09-12 from the first build of the page: 813 chains,
         # 19 legend rows, one base map.
         figures={
+            # Before the length glyphs: the dry figures page and every GPX description.
+            "dry way figures bytes": "0ba5de6bd3b5d7d47d5528d3bf025b4578f8ab8768e216c117fb6da3871e655f",
+            "dry way GPX description bytes": "6dd6e29c9e11ded8b563527b7bfefd154fbbbbbc4efefa68d9dab521721c7c24",
             # A regression ceiling for two parallel drives, not an idle-box baseline.
             "map build ceiling in ms (Firefox on forge)": 1500,
             # Clipped to the box since the review (§9.15): one point chain and
@@ -616,6 +626,9 @@ SCENES: dict[str, Scene] = {
         over_http=True,
         cap=17,
         figures={
+            # Before the length glyphs: the dry figures page and every GPX description.
+            "dry way figures bytes": "3158990d95dd325fc211dee7c1a2473a12c38fd2f906b0c37f8e484d9d17d063",
+            "dry way GPX description bytes": "06ef1cf796a83eeccd0e12f85890064bd1c238ac193e55628f19ec8c32458969",
             # Twice the rebuilt page's measured 1,240 ms, allowing two drives.
             "map build ceiling in ms (Firefox on forge)": 2480,
             "paths in the overlay pane": 13149,
@@ -659,6 +672,7 @@ SCENES: dict[str, Scene] = {
         way_over_flight=1.2,
         # The tap lands on a dry path; both legs are routed, with no water parts.
         goal_stop=(59.902132, 15.211080),
+        water_stop=(59.8979350821, 15.2139186859),
         # 201 m beyond the route's end: the 120 m and 15 m fixes span 72.7° and 8.5°.
         aim_from=(59.882007, 15.060653),
         # A 3.436 km road edge; the half and quarter legs stay on it end to end.
@@ -7299,6 +7313,122 @@ def a_way_across_a_sound_goes_round_by_land(page: Any) -> Check:
     )
 
 
+def goal_lengths(page: Any, water: bool) -> dict[str, Any]:
+    """Read a way's two lengths, its words and the heading at phone width.
+
+    The lake stop reproduces the disagreement found on Malingsbo-Kloten. The
+    other scenes use their measured sound or open-water pair.
+
+    Args:
+        page: The driven page
+        water: Whether to ask for a way that includes water
+
+    Returns:
+        The goal, heading, rows, figures page and GPX descriptions
+    """
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("() => { trailsChrome.close(); trailsPlan.toggle(false); trailsGoal.clear(); }")
+    if water and SCENE.water_stop is None:
+        here, there = ({"lat": lat, "lon": lon} for lat, lon in SCENE.open_water)
+        # The old sea pair can lie beyond the carried water grid. The sound
+        # reading already measures a crossing inside it on that scene.
+        in_water = page.evaluate("pair => pair.every(at => trailsGraph.waterAt(at.lon, at.lat))", [here, there])
+        if not in_water and SCENE.sound is not None:
+            here, there = ({"lat": at["lat"], "lon": at["lng"]} for at in SCENE.sound[:2])
+    else:
+        if not select(page, SCENE.long_chain):
+            raise ValueError(f"the length reading needs {SCENE.long_chain}")
+        here, there = page.evaluate(
+            """() => { const s = trailsProfile.shape;
+            return [0.1, 0.7].map(f => Math.floor(f * (s.lon.length - 1)))
+              .map(i => ({lat: s.lat[i], lon: s.lon[i]})); }"""
+        )
+    page.context.set_geolocation({"latitude": here["lat"], "longitude": here["lon"], "accuracy": 20})
+    page.evaluate("() => trailsChrome.here(true)")
+    page.wait_for_function(
+        """at => { const p = trailsChrome.position();
+        return p && Math.abs(p.lat - at.lat) < 1e-9 && Math.abs(p.lon - at.lon) < 1e-9; }""",
+        arg=here,
+    )
+    page.evaluate("at => { trailsGoal.set(at.lat, at.lon); trailsGoal.way('routed'); }", there)
+    page.wait_for_function("() => trailsGoal.state().line && !trailsGoal.state().working", timeout=180_000)
+    stop = SCENE.water_stop if water else SCENE.goal_stop
+    if stop is not None:
+        page.evaluate("at => trailsGoal.addStop(at[0], at[1])", stop)
+        page.wait_for_function("() => trailsGoal.state().line && !trailsGoal.state().working", timeout=180_000)
+    page.evaluate("() => { trailsGoal.showProfile(); trailsProfilePanel.page('details'); }")
+    painted(page)
+    read: dict[str, Any] = page.evaluate(
+        r"""() => {
+        const s = trailsProfile, goal = trailsGoal.state(), heading = document.querySelector('.trails-profile-figures');
+        // The writer describes this shape; waypoints and leg metadata do not
+        // enter its descriptions, so they need no second composer here.
+        const file = trailsProfilePanel.routeFile(s.figure, s.shape, s.told, {waypoints: [], legs: []}).text;
+        const spans = [...heading.querySelectorAll('.trails-profile-length')];
+        const legs = goal.stops.map((stop, i) => {
+          const walked = s.shape.stations[i + 1] - s.shape.stations[i];
+          return {foot: walked, water: stop.into - (i ? goal.stops[i - 1].into : 0) - walked};
+        });
+        return {goal, legs, lengths: spans.map(n => Number(n.dataset.metres)),
+          labels: spans.map(n => n.getAttribute('aria-label')),
+          glyphs: spans.map(n => n.querySelector('svg path').getAttribute('d')),
+          heading: heading.textContent, nowrap: getComputedStyle(heading).whiteSpace,
+          height: heading.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(heading).lineHeight),
+          figures: document.querySelector('.trails-profile-detail').innerHTML,
+          words: document.querySelector('.trails-profile-detail').textContent,
+          desc: file.match(/<desc>[\s\S]*?<\/desc>/g),
+          lastRow: [...document.querySelectorAll('.trails-profile-stop-far')].slice(-1)[0].textContent};
+        }"""
+    )
+    return read
+
+
+def a_way_counts_foot_and_water(page: Any) -> Check:
+    """The water has its own figure, and both add up to the last stop."""
+    got = goal_lengths(page, water=True)
+    goal = got["goal"]
+    whole = goal["metres"] + goal["waterMetres"]
+    expected = [f"{goal['metres'] / 1000:.2f} km on foot", f"{goal['waterMetres'] / 1000:.2f} km over water"]
+    wording = " · ".join(expected)
+    return Check(
+        "a way counts foot and water",
+        [
+            Reading("there is water in this way", goal["waterMetres"] > 0, True),
+            Reading("both heading figures carry the goal's lengths", got["lengths"], [goal["metres"], goal["waterMetres"]]),
+            Reading("the heading names both glyphs accessibly", got["labels"], expected),
+            Reading(
+                "the heading draws the two Font Awesome outlines",
+                got["glyphs"] == [maps.LENGTH_ICONS[k][1] for k in ("person-walking", "water")],
+                True,
+            ),
+            Reading("the heading sum and the last stop agree to the metre", round(sum(got["lengths"])), round(goal["stops"][-1]["into"])),
+            Reading("the last row counts the whole way", got["lastRow"], f"{whole / 1000:.2f} km"),
+            Reading("the figures page spells out both lengths", got["words"].startswith(wording), True),
+            Reading("the GPX description spells out both lengths", f"<desc>{wording} · " in got["desc"][-1], True),
+            Reading("the heading stays on one line at phone width", got["nowrap"] == "nowrap" and got["height"] <= got["lineHeight"] + 1, True),
+            noted("each leg's metres on foot and over water", got["legs"]),
+        ],
+    )
+
+
+def a_dry_way_keeps_its_words(page: Any) -> Check:
+    """The dry way gains one glyph and changes no figures-page or GPX words."""
+    got = goal_lengths(page, water=False)
+    goal = got["goal"]
+    return Check(
+        "a dry way keeps its words",
+        [
+            Reading("there is no water in this way", goal["waterMetres"], 0),
+            Reading("the heading carries only the walking length", got["lengths"], [goal["metres"]]),
+            Reading("the walking glyph has its words for a screen reader", got["labels"], [f"{goal['metres'] / 1000:.2f} km on foot"]),
+            Reading("the dry heading draws the walking outline", got["glyphs"] == [maps.LENGTH_ICONS["person-walking"][1]], True),
+            stands("dry way figures bytes", hashlib.sha256(got["figures"].encode()).hexdigest()),
+            stands("dry way GPX description bytes", hashlib.sha256("\n".join(got["desc"]).encode()).hexdigest()),
+            Reading("the dry heading stays on one line", got["nowrap"] == "nowrap" and got["height"] <= got["lineHeight"] + 1, True),
+        ],
+    )
+
+
 def a_goal_the_reader_sets(page: Any) -> Check:
     """A point set while walking, read two ways, and what the mark makes of it.
 
@@ -13438,6 +13568,10 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(the_position_is_over_the_plan, page))
     if wanted(the_way_to_the_next_goal):
         checks.append(timed(the_way_to_the_next_goal, page))
+    if wanted(a_way_counts_foot_and_water):
+        checks.append(timed(a_way_counts_foot_and_water, page))
+    if wanted(a_dry_way_keeps_its_words):
+        checks.append(timed(a_dry_way_keeps_its_words, page))
     if wanted(a_goal_the_reader_sets):
         checks.append(timed(a_goal_the_reader_sets, page))
     if wanted(a_way_across_a_sound_goes_round_by_land):

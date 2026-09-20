@@ -955,6 +955,23 @@ MARKER_ICONS: dict[str, tuple[str, str]] = {
 }
 
 
+#: The heading names its two lengths with the same outlines as the pins.
+#: Font Awesome Free 6.2.0 by @fontawesome, https://fontawesome.com --
+#: Icons: CC BY 4.0. Copyright 2022 Fonticons, Inc.
+LENGTH_ICONS: dict[str, tuple[str, str]] = {
+    "person-walking": (
+        "0 0 320 512",
+        "M256 48c0 26.5-21.5 48-48 48s-48-21.5-48-48s21.5-48 48-48s48 21.5 48 48zM126.5 199.3c-1 .4-1.9 .8-2.9 1.2l-8 3.5c-16.4 7.3-29 21.2"
+        "-34.7 38.2l-2.6 7.8c-5.6 16.8-23.7 25.8-40.5 20.2s-25.8-23.7-20.2-40.5l2.6-7.8c11.4-34.1 36.6-61.9 69.4-76.5l8-3.5c20.8-9.2 43.3-1"
+        "4 66.1-14c44.6 0 84.8 26.8 101.9 67.9L281 232.7l21.4 10.7c15.8 7.9 22.2 27.1 14.3 42.9s-27.1 22.2-42.9 14.3L247 287.3c-10.3-5.2-18"
+        ".4-13.8-22.8-24.5l-9.6-23-19.3 65.5 49.5 54c5.4 5.9 9.2 13 11.2 20.8l23 92.1c4.3 17.1-6.1 34.5-23.3 38.8s-34.5-6.1-38.8-23.3l-22-8"
+        "8.1-70.7-77.1c-14.8-16.1-20.3-38.6-14.7-59.7l16.9-63.5zM68.7 398l25-62.4c2.1 3 4.5 5.8 7 8.6l40.7 44.4-14.5 36.2c-2.4 6-6 11.5-10."
+        "6 16.1L54.6 502.6c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L68.7 398z",
+    ),
+    "water": MARKER_ICONS["water"],
+}
+
+
 #: What awesome-markers called each colour, as the colour it drew.
 #:
 #: **The whole palette and not the five this map uses.** `add_points` takes a
@@ -4160,6 +4177,12 @@ class _ProfilePanel(MacroElement):
         self._name = "ProfilePanel"
         self.group_names = [group.get_name() for group in groups]
         self.figures_json = _script_json(_packed_figures(figures))
+        self.length_icons_json = _script_json(
+            {
+                **LENGTH_ICONS,
+                "licence": "Font Awesome Free 6.2.0 by @fontawesome, https://fontawesome.com -- Icons: CC BY 4.0. Copyright 2022 Fonticons, Inc.",
+            }
+        )
         self.title_json = _script_json(title)
         self.chart_height = int(chart_height)
         self.narrow_px = NARROW_PX

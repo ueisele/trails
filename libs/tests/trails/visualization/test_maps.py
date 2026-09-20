@@ -4614,8 +4614,8 @@ class TestProfilePanel:
         """A charting library from a CDN does not load on a file:// page: it
         fails silently, the way the OpenStreetMap tiles once did.
 
-        Every URL the panel does carry is a **namespace**, and a namespace names
-        a language rather than a place: the SVG one, which is what
+        Apart from the outlines' licence notice, every URL the panel carries
+        is a namespace, which names a language rather than a place: the SVG one, which is what
         createElementNS takes, and GPX's own, which the panel writes into the
         file it produces. Nothing resolves either, and the schema location
         beside the second is a hint to a validator that will never see this
@@ -4632,6 +4632,8 @@ class TestProfilePanel:
             compares two different questions.
             """
             bare_text = ours(html)
+            # Attribution is carried as text, never fetched by the heading.
+            bare_text = re.sub(r'"licence": "Font Awesome Free [^"]+"', "", bare_text)
             for namespace in namespaces:
                 bare_text = bare_text.replace(namespace, "")
             return bare_text.count("://")
@@ -7984,7 +7986,12 @@ class TestGarminExport:
             "Tour-short": "b166e18904dd59f0eb06ea3bcf6f868ba0cbf3504355488eea53e3ff6b305c6e",
         }
         for stem, digest in expected.items():
-            assert hashlib.sha256((garmin_exports / f"lomsdal-visten-{stem}.gpx").read_bytes()).hexdigest() == digest
+            body = (garmin_exports / f"lomsdal-visten-{stem}.gpx").read_bytes()
+            # Only the wet tour gains words in phase 9; removing those must
+            # recover every byte of the writer's original output.
+            water_words = " · 0.10 km over water".encode()
+            assert body.count(water_words) == (1 if stem == "Tour" else 0)
+            assert hashlib.sha256(body.replace(water_words, b"")).hexdigest() == digest
 
     def test_profile_downloads_match_the_plan_and_refuse_unfinished_routes(self, garmin_exports):
         delivered = json.loads((garmin_exports / "profile-files.json").read_text())
@@ -11091,3 +11098,58 @@ class TestSqueezed:
         # the JSON strings as the characters themselves.
         assert "EkMalm&#96;sStig &quot;quoted&quot; &#x27;apostrophe&#x27; &#36;{x} &lt;/script&gt; &lt;b&gt;bold&lt;/b&gt;" in page
         assert page.count("EkMalm`sStig") >= 2
+
+
+class TestWayLengths:
+    """The water stays apart from walking, in the composer and in its words."""
+
+    def test_the_panel_carries_both_outlines_and_their_licence(self):
+        """The heading needs no webfont, and the ford's outline is reused."""
+        fmap, layer = TestProfilePanel().drawn()
+        maps.add_profile_panel(fmap, [layer])
+        html = fmap.get_root().render()
+        match = re.search(r"var LENGTH_ICONS = ([^\n]+);", html)
+        assert match is not None
+        icons = json.loads(match[1])
+        assert icons["water"] == list(maps.MARKER_ICONS["water"])
+        assert icons["person-walking"] == list(maps.LENGTH_ICONS["person-walking"])
+        assert "Font Awesome Free 6.2.0" in icons["licence"]
+        assert "Icons: CC BY 4.0. Copyright 2022 Fonticons, Inc." in icons["licence"]
+
+    def test_water_breaks_the_walk_but_a_river_annotation_does_not(self):
+        """Use the measured lake connector's parts; rivers remain land parts."""
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("Node is needed to execute the route composer")
+        source = files("trails.visualization").joinpath("js", "plan_mode.js").read_text()
+        panel = files("trails.visualization").joinpath("js", "profile_panel.js").read_text()
+        script = export_javascript(source, "composeRoute") + export_javascript(panel, "planned")
+        script += r"""
+            var points = [], PLAN = {gpx: {trackKind: 'gpx'}};
+            function blankTally() { return {}; }
+            function addTally() {}
+            function reportedAreas() { return []; }
+            function protectedIn() { return []; }
+            // Malingsbo-Kloten's stop at 59.8979350821 N, 15.2139186859 E:
+            // the final land part and the lake part, before this change.
+            var land = {kind: 'land', length: 357.07758958297006, lon: [], lat: [],
+                        along: [], height: [], distance: [], read: false, rivers: []};
+            var water = {kind: 'water', length: 32.922047266514994, lon: [], lat: [], height: null};
+            var wet = composeRoute(null, null, [{parts: [land, water]}, {parts: [water, land]}]);
+            var river = Object.assign({}, land, {rivers: [{name: 'river'}]});
+            var dry = composeRoute(null, null, [{parts: [river]}]);
+            console.log(JSON.stringify({wet: {foot: wet.total, water: wet.crossed, stations: wet.stations,
+                stretches: wet.stretches.length, gaps: wet.gaps.length, words: planned({}, wet)[0]},
+                dry: {foot: dry.total, water: dry.crossed, rivers: dry.rivers.length, words: planned({}, dry)[0]}}));
+        """
+        result = subprocess.run([node, "-"], input=script, text=True, capture_output=True, timeout=15)
+        assert result.returncode == 0, result.stderr
+        got = json.loads(result.stdout)
+        land = 357.07758958297006
+        water = 32.922047266514994
+        assert got["wet"]["foot"] == land + land
+        assert got["wet"]["water"] == water + water
+        assert got["wet"]["stations"] == [0, land, land + land]
+        assert got["wet"]["gaps"] == got["wet"]["stretches"] == 2
+        assert got["wet"]["words"] == f"{(land + land) / 1000:.2f} km on foot · {(water + water) / 1000:.2f} km over water"
+        assert got["dry"] == {"foot": land, "water": 0, "rivers": 1, "words": f"{land / 1000:.2f} km on foot"}
