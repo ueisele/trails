@@ -3743,32 +3743,33 @@
             }
 
             function saveStages() {
-                var made = stagesOf().map(function (stage) {
+                var made = [];
+                stagesOf().forEach(function (stage) {
                     var shape = composeRoute(stage.from, stage.to);
-                    return panel().routeFile(figuresOf(shape), shape, told(shape),
-                                             writableRange(stage.from, stage.to, stageTitle(stage)),
-                                             stageName(stage));
+                    var figure = figuresOf(shape), extra = told(shape);
+                    var plan = writableRange(stage.from, stage.to, stageTitle(stage)), suffix = stageName(stage);
+                    made.push(panel().routeFile(figure, shape, extra, plan, suffix));
+                    made.push(panel().garminFile(figure, shape, extra, plan, suffix));
                 });
-                var whole = composeRoute();
-                made.push(panel().routeFile(figuresOf(whole), whole, told(whole), writable()));
-                return panel().saveZip(made, writable()).catch(fileFailed);
+                var whole = composeRoute(), figure = figuresOf(whole), extra = told(whole), plan = writable();
+                made.push(panel().routeFile(figure, whole, extra, plan));
+                made.push(panel().garminFile(figure, whole, extra, plan));
+                return panel().saveZip(made, plan).catch(fileFailed);
             }
 
-            // **The whole route as one file, composed and not gathered.** The
-            // same call the archive makes for its tour member and the same one
-            // the profile panel's own button makes, so the three cannot come
-            // apart: one writer, asked from three places.
-            function saveWhole() {
+            // Both files use the same composer, for a whole tour or a stage.
+            function saveWhole(garmin) {
                 var shape = composeRoute();
-                var made = panel().routeFile(figuresOf(shape), shape, told(shape), writable());
+                var writer = garmin ? panel().garminFile : panel().routeFile;
+                var made = writer(figuresOf(shape), shape, told(shape), writable());
                 panel().save(made.name, made.text);
             }
 
-            function saveStage(stage) {
+            function saveStage(stage, garmin) {
                 var shape = composeRoute(stage.from, stage.to);
-                var made = panel().routeFile(figuresOf(shape), shape, told(shape),
-                                             writableRange(stage.from, stage.to, stageTitle(stage)),
-                                             stageName(stage));
+                var writer = garmin ? panel().garminFile : panel().routeFile;
+                var made = writer(figuresOf(shape), shape, told(shape),
+                                  writableRange(stage.from, stage.to, stageTitle(stage)), stageName(stage));
                 panel().save(made.name, made.text);
             }
 
@@ -4957,7 +4958,7 @@
                 var figure = figuresOf(shape);
                 var head = document.createElement('div');
                 head.className = 'trails-plan-stage';
-                head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:4px;' +
+                head.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;' +
                     'padding:2px 3px;border-top:1px solid var(--trails-rule);color:var(--trails-ink-3)';
 
                 // The name, and the two points it runs between where nobody has
@@ -5013,6 +5014,20 @@
                     }
                 });
 
+                var garmin = file.cloneNode(false);
+                garmin.className = 'trails-plan-stage-garmin';
+                garmin.textContent = 'For Garmin (course)';
+                garmin.title = 'One line of at most 200 points; Garmin Explore imports it as a course that syncs to the watch';
+                garmin.setAttribute('aria-label', 'For Garmin (course)');
+                garmin.style.width = 'auto';
+                garmin.style.height = 'auto';
+                garmin.style.fontSize = '11px';
+                garmin.style.padding = '3px 5px';
+                garmin.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    try { saveStage(stage, true); } catch (failure) { fileFailed(failure); }
+                });
+
                 // **A field where it can be typed in, and text where it cannot.**
                 // A read-only input still looks like something to type into, and
                 // a stage a reader cannot rename should not offer a caret. The
@@ -5030,6 +5045,7 @@
                 }
                 head.appendChild(says);
                 head.appendChild(file);
+                head.appendChild(garmin);
                 return head;
             }
 
@@ -5074,6 +5090,13 @@
                     fileFailed(failure);
                 }
             });
+            var garminFile = oneFile.cloneNode(false);
+            garminFile.className = 'trails-plan-garmin';
+            garminFile.textContent = 'For Garmin (course)';
+            garminFile.title = 'One line of at most 200 points; Garmin Explore imports it as a course that syncs to the watch';
+            garminFile.addEventListener('click', function () {
+                try { saveWhole(true); } catch (failure) { fileFailed(failure); }
+            });
             // Offered only where there are stages to gather. With one stage it
             // would hand over the same file the button already offers, twice,
             // under two names.
@@ -5081,7 +5104,7 @@
             everything.type = 'button';
             everything.className = 'trails-plan-zip';
             everything.textContent = 'All stages (zip)';
-            everything.title = 'Every stage on its own, and the whole tour with its stages, in one archive';
+            everything.title = 'Every stage and the whole tour, as ordinary GPX and Garmin courses, in one archive';
             everything.style.cssText = 'display:block;width:100%;text-align:left;font:inherit;font-size:12px;' +
                 'padding:7px 10px;border:0;background:none;color:var(--trails-ink-2);cursor:pointer;white-space:nowrap';
             everything.addEventListener('click', function () {
@@ -5105,6 +5128,7 @@
                 'border-radius:7px;padding:3px;box-shadow:0 2px 10px rgba(0,0,0,0.22)';
             L.DomEvent.disableClickPropagation(saveMenu);
             saveMenu.appendChild(oneFile);
+            saveMenu.appendChild(garminFile);
             saveMenu.appendChild(everything);
 
             var save = document.createElement('button');
@@ -5466,6 +5490,8 @@
                 var refusing = writable().why;
                 oneFile.style.display = (writes && listShowing() && points.length > 1) ? '' : 'none';
                 oneFile.disabled = !!refusing;
+                garminFile.style.display = oneFile.style.display;
+                garminFile.disabled = oneFile.disabled;
                 // Why it is refused, where it is: 'still working out 2 legs' is
                 // the difference between a button that is waiting and one that
                 // is broken.

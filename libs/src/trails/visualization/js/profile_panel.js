@@ -901,6 +901,88 @@
                 return out.join('\n') + '\n';
             }
 
+            // Garmin Explore caps a course at 200 points; see garmin-decisions
+            // §3. Simplify the joined runs in metres, retaining original vertices
+            // and their heights. A crossing joins the line rather than breaking it.
+            function garminPoints(runs) {
+                var points = [];
+                runs.forEach(function (run) {
+                    for (var i = 0; i < run.lon.length; i += 1) {
+                        points.push({lon: run.lon[i], lat: run.lat[i], ele: run.ele[i]});
+                    }
+                });
+                var cap = 200;
+                if (points.length <= cap) { return points; }
+                var mean = points.reduce(function (sum, point) { return sum + point.lat; }, 0) / points.length;
+                var perLon = metresBetween(0, mean, 1, mean);
+                var perLat = metresBetween(0, mean - 0.5, 0, mean + 0.5);
+                var xy = points.map(function (point) {
+                    return [(point.lon - points[0].lon) * perLon, (point.lat - mean) * perLat];
+                });
+                function simplified(tolerance) {
+                    var kept = new Uint8Array(points.length), last = points.length - 1;
+                    kept[0] = 1; kept[last] = 1;
+                    var stack = [[0, last]], limit = tolerance * tolerance, count = 2;
+                    // Each split consumes an interior vertex; avoid recursive
+                    // calls so a long route cannot exhaust the browser's stack.
+                    for (var step = 0; stack.length && step < 2 * points.length; step += 1) {
+                        var range = stack.pop(), a = range[0], b = range[1];
+                        var dx = xy[b][0] - xy[a][0], dy = xy[b][1] - xy[a][1];
+                        var length = dx * dx + dy * dy, farthest = limit, at = null;
+                        for (var i = a + 1; i < b; i += 1) {
+                            var x = xy[i][0] - xy[a][0], y = xy[i][1] - xy[a][1];
+                            var t = length ? Math.max(0, Math.min(1, (x * dx + y * dy) / length)) : 0;
+                            var distance = (x - t * dx) * (x - t * dx) + (y - t * dy) * (y - t * dy);
+                            if (distance > farthest) { farthest = distance; at = i; }
+                        }
+                        if (at !== null) {
+                            kept[at] = 1;
+                            // Once too many vertices are essential, this
+                            // tolerance cannot fit; do not finish a long walk
+                            // whose result the search would discard anyway.
+                            count += 1;
+                            if (count > cap) { return null; }
+                            stack.push([a, at], [at, b]);
+                        }
+                    }
+                    if (stack.length) { throw new Error('course simplification exceeded its vertex bound'); }
+                    return points.filter(function (point, index) { return kept[index]; });
+                }
+                var exact = simplified(0);
+                if (exact) { return exact; }
+                // Twice the furthest radius bounds every point-to-segment
+                // distance, including a closed line whose ends coincide.
+                var high = 2 * xy.reduce(function (radius, point) {
+                    return Math.max(radius, Math.hypot(point[0], point[1]));
+                }, 0);
+                var low = 0, fitting = simplified(high);
+                for (var search = 0; search < 40; search += 1) {
+                    var middle = (low + high) / 2, candidate = simplified(middle);
+                    if (!candidate) { low = middle; }
+                    else { high = middle; fitting = candidate; }
+                }
+                return fitting;
+            }
+
+            function garminGpxOf(figure, shape, runs, plan, extra) {
+                var titled = (plan && plan.name) ? plan.name : EXPORT.route.name;
+                var told = planned(figure, shape, extra).concat([markingLine(shape.tally)]);
+                var out = [];
+                openGpx(out);
+                metadataOf(out, titled, EXPORT.route.description, routeCredits(shape, runs));
+                out.push('  <rte>');
+                out.push('    <name>' + escaped(titled) + '</name>');
+                out.push('    <desc>' + escaped(told.join(' \u00b7 ')) + '</desc>');
+                garminPoints(runs).forEach(function (point) {
+                    out.push('    <rtept lat="' + point.lat.toFixed(EXPORT.coordinateDecimals) +
+                        '" lon="' + point.lon.toFixed(EXPORT.coordinateDecimals) + '">' +
+                        (isNaN(point.ele) ? '' : '<ele>' + fixedEle(point.ele) + '</ele>') + '</rtept>');
+                });
+                out.push('  </rte>');
+                out.push('</gpx>');
+                return out.join('\n') + '\n';
+            }
+
             // **The name is the point, and an anchor does not always carry
             // one.** `a.download` names the file on a desktop browser. On iOS
             // Safari a `blob:` URL is saved under the blob's own identifier and
@@ -1835,6 +1917,12 @@
             offer.appendChild(carries);
             offer.appendChild(licensed);
             offer.appendChild(noted);
+            var garminDownload = saveEntry('For Garmin (course)',
+                'One line of at most 200 points; Garmin Explore imports it as a course that syncs to the watch',
+                function () { saveGarminNow(); });
+            garminDownload.className = 'trails-profile-garmin';
+            garminDownload.style.display = 'none';
+            offer.appendChild(garminDownload);
             // The button and what the file carries on the left, the colour key
             // on the right: one row of things about the drawing rather than
             // three stacked above it. `key` keeps its own margins, so it is
@@ -4247,6 +4335,8 @@
                 // series nobody described cannot write a file, and a mark that
                 // does nothing is worse than no mark.
                 download.style.display = writable ? 'flex' : 'none';
+                garminDownload.style.display = writable && selected.composed ? 'block' : 'none';
+                garminDownload.disabled = true;
                 noted.textContent = '';
                 // A place has no walk to write out and no sources of its own --
                 // its popup names them itself -- so the row underneath the
@@ -4282,6 +4372,7 @@
                     // button is already hidden above -- so there is nothing to
                     // refuse and nothing to say about refusing it.
                     download.disabled = !plan || points < 2 || !!plan.why;
+                    garminDownload.disabled = download.disabled;
                     // Only what the header does not already say. It carried
                     // the climb, the crossings and the distance a second time,
                     // word for word, in the row underneath the row that said
@@ -4302,6 +4393,12 @@
             }
 
             if (EXPORT) {
+                function saveGarminNow() {
+                    if (!selected || !selected.composed || !selected.runs ||
+                        !selected.plan || selected.plan.why || pointsIn(selected.runs) < 2) { return; }
+                    saveFile(fileNameOf((selected.plan.stem || EXPORT.route.fileStem) + '-garmin'),
+                             garminGpxOf(selected.figure, selected.shape, selected.runs, selected.plan, selected.told));
+                }
                 function saveNow() {
                     if (!selected || !selected.runs) { return; }
                     if (selected.composed) {
@@ -4346,7 +4443,7 @@
                     'The whole route as one GPX file, its stage marks and all',
                     function () { saveNow(); }));
                 saveMenu.appendChild(saveEntry('All stages (zip)',
-                    'Every stage on its own, and the whole tour with its stages, in one archive',
+                    'Every stage and the whole tour, as ordinary GPX and Garmin courses, in one archive',
                     function () { if (window.trailsPlan && window.trailsPlan.saveStages) { window.trailsPlan.saveStages(); } }));
             }
 
@@ -4656,6 +4753,13 @@
                     return {name: fileNameOf(stem + (suffix ? '-' + suffix : '')),
                             text: routeGpxOf(figure, shape, runs, plan, told || [],
                                              crossingsOf(shape, runs))};
+                },
+                garminFile: function (figure, shape, told, plan, suffix) {
+                    if (!EXPORT) { throw new Error('this panel was given nothing to write a file with'); }
+                    var runs = runsOf(shape);
+                    var stem = (plan && plan.stem) || EXPORT.route.fileStem;
+                    return {name: fileNameOf(stem + (suffix ? '-' + suffix : '') + '-garmin'),
+                            text: garminGpxOf(figure, shape, runs, plan, told || [])};
                 },
                 // What a tour is called where nobody has called it anything, so
                 // the plan can offer it as a placeholder and tell a name a

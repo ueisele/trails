@@ -2,6 +2,7 @@
 
 import ast
 import base64
+import hashlib
 import json
 import math
 import pathlib
@@ -10,13 +11,16 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import zipfile
 import zlib
 from importlib.resources import files
 
 import folium
 import geopandas as gpd
 import pytest
+from lxml import etree
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
+from trails.io.export.gpx import export_to_gpx
 from trails.processing import mire_tiles, packs, slope_tiles, vegetation_tiles
 from trails.routing.sources import BRIDGE, FERRY
 from trails.visualization import maps
@@ -6615,7 +6619,8 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "oneFile.textContent = 'Whole tour (GPX)';" in planning
-        assert "var made = panel().routeFile(figuresOf(shape), shape, told(shape), writable());" in planning
+        assert "var made = writer(figuresOf(shape), shape, told(shape), writable());" in planning
+        assert "var writer = garmin ? panel().garminFile : panel().routeFile;" in planning
         # Why it is refused, where it is: 'still working out 2 legs' is the
         # difference between a button that is waiting and one that is broken.
         assert "oneFile.title = refusing ||" in planning
@@ -7686,6 +7691,301 @@ class TestRoutingGraphAreas:
         maps.add_routing_graph(fmap, {"version": 3, "edges": 0}, "")
 
         assert "header.protected || []" in fmap.get_root().render()
+
+
+def export_javascript(source: str, name: str, indent: int = 12) -> str:
+    """Extract an emitted function for the Node export tests without rewriting it."""
+    match = re.search(rf"^{' ' * indent}function {name}\([^\n]*\) \{{.*?^{' ' * indent}\}}", source, re.M | re.S)
+    assert match is not None, name
+    return match[0]
+
+
+@pytest.fixture(scope="module")
+def garmin_exports(tmp_path_factory):
+    """Execute the page's composers' file entries and ZIP writer with fixed shapes.
+
+    Like the worker tests below, this uses the installed Node, not a browser
+    dependency. Only composition and delivery are supplied by the harness: the
+    emitted runs, metadata, writers, file names and archive bytes are exercised.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed to execute the GPX writer tests")
+    directory = tmp_path_factory.mktemp("garmin-exports")
+    panel = TestProfilePanel()
+    fmap, layer = panel.drawn()
+    maps.add_profile_panel(fmap, [layer], export=panel.exported())
+    html = fmap.get_root().render()
+    html = html[html.index("            function metres(value)") :]
+    # Function declarations have no DOM side effects. Keeping the emitted
+    # bodies tests the production code, including its common densification.
+    functions = re.findall(r"^            function \w+\([^\n]*\) \{(?:[^\n]*\}$|.*?^            \})", html, re.M | re.S)
+    entries = []
+    for name in ("routeFile", "garminFile"):
+        match = re.search(rf"{name}: function \(.*?^                \}},", html, re.M | re.S)
+        assert match is not None
+        entries.append(match[0])
+    planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
+    saves = "\n".join(export_javascript(planning, name) for name in ("saveWhole", "saveStage", "saveStages"))
+    source = "\n".join(functions)
+    source += "\n" + export_javascript(html, "saveNow", 16)
+    source += "\n" + export_javascript(html, "saveGarminNow", 16)
+    source += "\nvar EXPORT = " + json.dumps(panel.exported()) + ";"
+    source += "\nvar outputDirectory = " + json.dumps(str(directory)) + ";"
+    source += "\nvar entry = {" + "\n".join(entries) + "};\n" + saves
+    source += r"""
+        var window = {}, GRADE = {window: 25, minRun: 10};
+        var RealDate = Date;
+        Date = class extends RealDate {
+            constructor(...args) { super(...(args.length ? args : ['2026-09-20T12:00:00Z'])); }
+        };
+        var figure = {id: 'test-chain', name: 'Test & chain', source: 'UT.no',
+                      ascent: 300, descent: 290, high: 140, low: 80};
+        // A winding 4.8 km chain with a crossing between two walked runs.
+        // Every 41st sample has no height, so both kinds of vertex are tested.
+        function shapeOf(from, to, breaks) {
+            var shape = {lon: [], lat: [], along: [], height: [], distance: [], stretches: [],
+                         read: true, crossed: breaks ? 100 : 0, straight: 0, protected: [],
+                         tally: {sources: {'UT.no': (to - from) * 4}, marked: 0, unmarked: 0,
+                                 unknown: (to - from) * 4, undrawn: 0, unrecorded: 0, recorded: 0}};
+            var distance = 0;
+            for (var i = from; i <= to; i += 1) {
+                var x = 13 + i * 4 / 46270;
+                var y = 65.5 + (60 * Math.sin(i / 30) + 12 * Math.sin(i / 7)) / 111492;
+                if (i > from) {
+                    distance += metresBetween(shape.lon[i - from - 1], shape.lat[i - from - 1], x, y);
+                }
+                shape.lon.push(x); shape.lat.push(y); shape.along.push(distance); shape.distance.push(distance);
+                shape.height.push(i % 41 === 0 ? NaN : 110 + 25 * Math.sin(i / 50));
+            }
+            var n = shape.lon.length;
+            shape.total = distance;
+            shape.stretches = breaks
+                ? [{from: 0, to: 591, sampleFrom: 0, sampleTo: 591},
+                   {from: 610, to: n, sampleFrom: 610, sampleTo: n}]
+                : [{from: 0, to: n, sampleFrom: 0, sampleTo: n}];
+            return shape;
+        }
+        var whole = shapeOf(0, 1200, true);
+        var stages = [{from: 0, to: 1, name: 'Over the pass'}, {from: 1, to: 2, name: 'Down & home'}];
+        var stageShapes = [shapeOf(0, 590, false), shapeOf(610, 1200, false)];
+        function composeRoute(from) { return from === undefined ? whole : stageShapes[from]; }
+        function figuresOf() { return figure; }
+        function told(shape) { return shape.crossed ? ['1 crossing, 0.10 km'] : []; }
+        function stagesOf() { return stages; }
+        function stageName(stage) { return stage.name; }
+        function stageTitle(stage) { return 'A tour with its full name — ' + stage.name; }
+        function planOf(shape, name) {
+            return {name: name, stem: 'Tour', waypoints: [
+                {lon: shape.lon[0], lat: shape.lat[0], name: 'Start & quay'},
+                {lon: shape.lon.at(-1), lat: shape.lat.at(-1), name: 'End'}
+            ], legs: [[{kind: 'routed', length: shape.total}]], why: null};
+        }
+        function writable() { return planOf(whole, 'A tour with its full name'); }
+        function writableRange(from, to, name) { return planOf(stageShapes[from], name); }
+        function fileFailed(failure) { throw failure; }
+        function saveFile(name, body) { require('node:fs').writeFileSync(outputDirectory + '/' + name, body); }
+        entry.save = saveFile;
+        entry.saveZip = function (made) {
+            return zipOf(made).then(async function (blob) {
+                saveFile('everything.zip', Buffer.from(await blob.arrayBuffer()));
+            });
+        };
+        function panel() { return entry; }
+        saveWhole(); saveWhole(true);
+        var selected = {composed: true, figure: figure, shape: whole, runs: runsOf(whole),
+                        plan: writable(), told: told(whole)};
+        var delivered = [];
+        function saveProfile(name, text) { delivered.push({name: name, text: text}); }
+        var diskSave = saveFile;
+        saveFile = saveProfile;
+        saveNow(); saveGarminNow();
+        selected.plan.why = 'still working out a leg';
+        saveNow(); saveGarminNow();
+        saveFile = diskSave;
+        saveFile('profile-files.json', JSON.stringify(delivered));
+        stages.forEach(function (stage) { saveStage(stage); saveStage(stage, true); });
+        var short = shapeOf(0, 19, false), shortPlan = planOf(short, 'Short <walk>');
+        [false, true].forEach(function (garmin) {
+            var made = (garmin ? entry.garminFile : entry.routeFile)(figure, short, [], shortPlan, 'short');
+            saveFile(made.name, made.text);
+        });
+        var runs = runsOf(short);
+        saveFile('chain.gpx', gpxOf(figure, short, runs));
+        saveFile('chain-points.json', JSON.stringify(runs));
+        var cases = [];
+        [0, 1, 2, 199, 200, 201, 1000].forEach(function (n) {
+            ['straight', 'closed', 'repeated'].forEach(function (kind) {
+                var run = {lon: [], lat: [], ele: []};
+                for (var i = 0; i < n; i += 1) {
+                    var angle = 2 * Math.PI * i / Math.max(n - 1, 1);
+                    run.lon.push(kind === 'straight' ? 13 + i / 100000 :
+                                 kind === 'closed' ? 13 + Math.cos(angle) / 100 : 13);
+                    run.lat.push(kind === 'closed' ? 65.5 + Math.sin(angle) / 100 : 65.5);
+                    run.ele.push(i);
+                }
+                cases.push({kind: kind, n: n, kept: garminPoints([run]).map(function (p) { return p.ele; })});
+            });
+        });
+        saveFile('simplification.json', JSON.stringify(cases));
+        saveStages().catch(function (error) { console.error(error); process.exitCode = 1; });
+    """
+    # Kept only in pytest's temporary directory, for diagnosis on failure.
+    (directory / "writer.js").write_text(source, encoding="utf-8")
+    result = subprocess.run([node, "-"], input=source, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    return directory
+
+
+class TestGarminExport:
+    """Read the written GPX and ZIP independently of the JavaScript writer."""
+
+    @staticmethod
+    def read(directory, stem="Tour", garmin=False):
+        suffix = "-garmin" if garmin else ""
+        return etree.parse(str(directory / f"lomsdal-visten-{stem}{suffix}.gpx"))
+
+    @staticmethod
+    def vertices(tree, tag):
+        return [(p.get("lon"), p.get("lat"), p.findtext("{*}ele")) for p in tree.findall(f".//{{*}}{tag}")]
+
+    @pytest.mark.parametrize("stem", ["Tour", "Tour-Over-the-pass", "Tour-Down-home", "Tour-short"])
+    def test_course_schema_structure_metadata_and_original_vertices(self, garmin_exports, stem):
+        ordinary = self.read(garmin_exports, stem)
+        course = self.read(garmin_exports, stem, True)
+        schema = pathlib.Path(__file__).resolve().parents[2] / "fixtures/trails/io/export/gpx_1_1.xsd"
+        etree.XMLSchema(etree.parse(str(schema))).assertValid(course)
+        root = course.getroot()
+        assert len(root.findall("{*}rte")) == 1
+        assert not root.findall(".//{*}wpt")
+        assert not root.findall(".//{*}trk")
+        assert not root.findall("{*}rte/{*}extensions")
+        assert {etree.QName(child).localname for child in root.find("{*}rte")} == {"name", "desc", "rtept"}
+        assert etree.tostring(root.find("{*}metadata")) == etree.tostring(ordinary.find("{*}metadata"))
+        assert course.findtext("{*}rte/{*}name") == ordinary.findtext("{*}trk/{*}name")
+        assert course.findtext("{*}rte/{*}desc") == ordinary.findtext("{*}trk/{*}desc")
+        full, kept = self.vertices(ordinary, "trkpt"), self.vertices(course, "rtept")
+        assert 2 <= len(kept) <= 200
+        assert (kept[0], kept[-1]) == (full[0], full[-1])
+        assert set(kept) <= set(full)
+        # Order matters too: the same points shuffled would pass set membership.
+        cursor = iter(full)
+        assert all(any(vertex == point for vertex in cursor) for point in kept)
+        assert any(point[2] is None for point in kept)
+        assert any(point[2] is not None for point in kept)
+        if len(full) <= 200:
+            assert kept == full
+
+    def test_deviation_in_metres_across_the_joined_runs(self, garmin_exports):
+        ordinary = self.read(garmin_exports)
+        assert len(ordinary.findall(".//{*}trkseg")) == 2
+        full = self.vertices(ordinary, "trkpt")
+        kept = self.vertices(self.read(garmin_exports, garmin=True), "rtept")
+        # Independent local projection, followed by Shapely point-to-line
+        # distance on the coordinates actually written, including rounding.
+        phi = math.radians(sum(float(p[1]) for p in full) / len(full))
+        per_lat = 111132.92 - 559.82 * math.cos(2 * phi) + 1.175 * math.cos(4 * phi) - 0.0023 * math.cos(6 * phi)
+        per_lon = 111412.84 * math.cos(phi) - 93.5 * math.cos(3 * phi) + 0.118 * math.cos(5 * phi)
+
+        def projected(p):
+            return ((float(p[0]) - 13) * per_lon, (float(p[1]) - 65.5) * per_lat)
+
+        line = LineString([projected(p) for p in kept])
+        deviation = max(Point(projected(p)).distance(line) for p in full)
+        assert len(full) > 1000
+        assert len(kept) == 200
+        assert deviation < 15, f"{len(full)} -> {len(kept)} points, maximum deviation {deviation:.3f} m"
+        print(f"Garmin test chain: {len(full)} -> {len(kept)} points; maximum deviation {deviation:.3f} m")
+
+    def test_stages_keep_their_own_ends_names_and_archive_members(self, garmin_exports):
+        whole = self.vertices(self.read(garmin_exports), "trkpt")
+        first = self.read(garmin_exports, "Tour-Over-the-pass", True)
+        last = self.read(garmin_exports, "Tour-Down-home", True)
+        assert first.findtext("{*}rte/{*}name") == "A tour with its full name — Over the pass"
+        assert last.findtext("{*}rte/{*}name") == "A tour with its full name — Down & home"
+        assert self.vertices(first, "rtept")[0] == whole[0]
+        assert self.vertices(last, "rtept")[-1] == whole[-1]
+        assert self.vertices(first, "rtept")[-1] != whole[-1]
+        assert self.vertices(last, "rtept")[0] != whole[0]
+        expected = {f"lomsdal-visten-{stem}{suffix}.gpx" for stem in ("Tour", "Tour-Over-the-pass", "Tour-Down-home") for suffix in ("", "-garmin")}
+        with zipfile.ZipFile(garmin_exports / "everything.zip") as archive:
+            assert set(archive.namelist()) == expected
+            assert archive.testzip() is None
+            for name in expected:
+                assert archive.read(name) == (garmin_exports / name).read_bytes()
+
+    def test_ordinary_route_bytes_match_the_pre_garmin_writer(self, garmin_exports):
+        # SHA-256 of these deterministic files produced by the writer before
+        # Garmin was added (2026-09-20), with the same fixed metadata timestamp.
+        expected = {
+            "Tour": "f7cfdb2ab0f3c12729d174b71fbd3204f446bf8beb9001fde3233ebdcfabcf21",
+            "Tour-Over-the-pass": "e04b32dbbf9a212e72bbb8f275ec655860b36ab02f31a37c2ec013c2bbb45a5d",
+            "Tour-Down-home": "0237ed3c728d77c8d6765ca64ee2d66848cf690ddfd3afe23e65e0b333777fec",
+            "Tour-short": "b166e18904dd59f0eb06ea3bcf6f868ba0cbf3504355488eea53e3ff6b305c6e",
+        }
+        for stem, digest in expected.items():
+            assert hashlib.sha256((garmin_exports / f"lomsdal-visten-{stem}.gpx").read_bytes()).hexdigest() == digest
+
+    def test_profile_downloads_match_the_plan_and_refuse_unfinished_routes(self, garmin_exports):
+        delivered = json.loads((garmin_exports / "profile-files.json").read_text())
+        assert [file["name"] for file in delivered] == ["lomsdal-visten-Tour.gpx", "lomsdal-visten-Tour-garmin.gpx"]
+        for file in delivered:
+            assert file["text"] == (garmin_exports / file["name"]).read_text()
+
+    def test_short_degenerate_closed_and_repeated_lines(self, garmin_exports):
+        for case in json.loads((garmin_exports / "simplification.json").read_text()):
+            n, kept = case["n"], case["kept"]
+            if n <= 200:
+                assert kept == list(range(n))
+            else:
+                assert 2 <= len(kept) <= 200
+                assert (kept[0], kept[-1]) == (0, n - 1)
+                assert kept == sorted(set(kept))
+                if case["kind"] == "repeated":
+                    assert len(kept) == 2
+
+    def test_ordinary_javascript_and_python_chain_geometry_and_credits_agree(self, garmin_exports, tmp_path):
+        runs = json.loads((garmin_exports / "chain-points.json").read_text())
+        coordinates = [(x, y, float("nan") if z is None else z) for x, y, z in zip(runs[0]["lon"], runs[0]["lat"], runs[0]["ele"], strict=True)]
+        frame = gpd.GeoDataFrame(
+            {"name": ["Test & chain"], "id": ["test-chain"], "ascent": [300.0]}, geometry=[LineString(coordinates)], crs="EPSG:4326"
+        )
+        settings = TestProfilePanel().exported()
+        path, _ = export_to_gpx(
+            frame,
+            tmp_path / "python.gpx",
+            name_field="name",
+            title="Test & chain",
+            description=settings["description"],
+            sources=settings["credits"]["UT.no"] + settings["heights"],
+            extension_fields=dict(settings["fields"]),
+            ascent_method=settings["ascentMethod"],
+        )
+        python = etree.parse(str(path))
+        javascript = etree.parse(str(garmin_exports / "chain.gpx"))
+        python_points, javascript_points = self.vertices(python, "trkpt"), self.vertices(javascript, "trkpt")
+        assert len(python_points) == len(javascript_points)
+        for expected, actual in zip(python_points, javascript_points, strict=True):
+            assert (float(actual[0]), float(actual[1])) == pytest.approx((float(expected[0]), float(expected[1])), abs=5.1e-8, rel=0)
+            assert actual[2] == expected[2]
+        assert python.findtext("{*}trk/{*}name") == javascript.findtext("{*}trk/{*}name")
+        assert python.findtext("{*}metadata/{*}desc") == javascript.findtext("{*}metadata/{*}desc")
+        for query in ("{*}metadata/{*}extensions/{*}source", "{*}trk/{*}extensions/*"):
+            assert [(p.tag, dict(p.attrib), p.text) for p in python.findall(query)] == [
+                (p.tag, dict(p.attrib), p.text) for p in javascript.findall(query)
+            ]
+
+    def test_every_download_entry_offers_the_course_with_the_same_refusal(self):
+        panel = files("trails.visualization").joinpath("js", "profile_panel.js").read_text(encoding="utf-8")
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
+        assert "garminDownload.disabled = download.disabled;" in panel
+        assert "writable && selected.composed ? 'block' : 'none'" in panel
+        assert "function () { saveGarminNow(); }" in panel
+        assert "garminFile.disabled = oneFile.disabled;" in planning
+        assert "var garmin = file.cloneNode(false);" in planning
+        assert "saveStage(stage, true);" in planning
+        assert "saveWhole(true);" in planning
+        assert "For Garmin (course)" in panel and "For Garmin (course)" in planning
 
 
 class TestComposedProfile:
