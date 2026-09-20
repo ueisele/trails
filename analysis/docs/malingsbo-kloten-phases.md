@@ -439,6 +439,18 @@ Lomsdal-Visten box at all, and the Norwegian map names its routes off Turrutebas
 route name, which reaches FKB through the route-name join, with 35 UT.no pages in its
 catalogue. There is nothing there for a relation reader to add.
 
+**Built 2026-09-20** (one codex run, two precise stops: the Swiss mirror's empty answer, and
+the chains that a route identity ends). The relation reader with the third mirror; the
+membership on the chains as a route identity — 57 named relations name 191 chains, 11 with
+a website on 72 of them, no chain broken inside a stage, the Bergslagsleden's four stages
+on 2, 5, 5 and 2 chains; the popup's *Route page* from the relation's own `website` and
+the Naturkartan pages from the catalogue by name, the guide and all four stage pages found
+through the site's own search and answering 200 at 22:11 UTC; the search finding the chain
+under *Bergslagsleden* (matches 9 → 29). The scene's moved figures re-recorded (+25 paths
+and chains), road 233 unchanged, 48 readings green on the rebuilt page. Landed with the
+facility labels and the information-board filter of the same evening (§7.4 of the record),
+and republished with them.
+
 ### Phase 9 — A way's two lengths: on foot, and over water
 
 *Agent, one worktree, after phase 8. Uwe's word 2026-09-20, on the measurement in the
