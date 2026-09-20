@@ -199,6 +199,10 @@ opened with the area (§3.1), the decisions of §1 as decided, the source table 
 measurements' provenance; a *Changes* section left empty for the phases' built-notes.
 Touches nothing but that file.
 
+**Built 2026-09-20.** Uwe's word on §1, all seven as proposed; the record opened as
+`malingsbo-kloten-decisions.md` (`20c3f49`). The `/mire/` cache-rule note that stood here was
+wrong and is gone: the mire has only ever been published as packs.
+
 ### Phase 1 — The plumbing
 
 *Agent, one worktree. Files: `trees.py`, `maps.py` (by region), `lomsdal_visten.py`,
@@ -237,6 +241,18 @@ Touches nothing but that file.
 Stops if the agent finds the provider split needs more than `dataclasses.replace` — that is a
 question for §1.2, not a thing to patch round.
 
+**Built 2026-09-20** (`682234d`, one codex run and one correction; the run stopped once, rightly,
+on the icon assertion that phase 2 owned). `Park` gained `form`, `gateway`, `check_route`, and
+`county` became a tuple; `find_one` dissolves several objects of one name and form (`dissolve=True`),
+and the two Swedish lookups are exact — measured against the cache: *Abisko* one object,
+*Malingsbo-Kloten* three, 49,034 ha. `kind_label` gives the page's word for the area, so
+Abisko's legend rows now read *national park* where they read *park*. The provider entry
+`lantmateriet-malingsbo-kloten` is `dataclasses.replace` of Lantmäteriet's, weights borrowed
+from Abisko until phase 6. `lantmateriet_tiles.py` takes `--park`; `drive-all` drives every
+page with a scene, `drive-both` is its alias. Recounted: 692 / 9,756 / 152,055 tiles, 2,544
+packs. A landing commit (`f2c2dcb`) added phase 4's nine stations and restored the reasoning
+the drive recipe's comment had carried.
+
 ### Phase 2 — The icon
 
 *Agent or the reviewing session. Files: `docs/draw.ts`, `libs/src/trails/visualization/icons/`,
@@ -247,6 +263,12 @@ renderer from `weather-cards/scripts/lib/renderer`), served from the mockup host
 in the box's CLAUDE.md, Uwe picks. The chosen set lands as `atlas-malingsbo-kloten-{32,180,192,512}.png`,
 the 32 scaled from the 512 as the Abisko set was. The first candidate is copied in before phase
 3 starts so the build and `test_maps.py:2095` have files; the pick replaces PNGs only.
+
+**Built 2026-09-20** (`c473d24`, `de63c09`). Four candidates A–D drawn by `draw.ts
+--candidates`, varying the spruces' height and tone, the lake as a line or a band, and a
+distant shore; on the mockup host at `forge-mockups.uweeisele.dev/malingsbo-kloten-icon/out/`.
+Candidate A is in the repository; the cairn's clearance inside the maskable circle is 11.6 px
+at 512. **Open: Uwe's pick.**
 
 ### Phase 3 — The builds
 
@@ -280,6 +302,15 @@ Trafikverket's board knows them under: Kopparberg, Grängesberg, Ludvika, Smedje
 Skinnskatteberg, Fagersta C, Fagersta Norra, Söderbärke, Vad — each opened and seen, as
 Abisko's six were (§9.34). Without this the stops still draw and link Resrobot; with it the
 train board links too.
+
+**Built 2026-09-20** (`f2c2dcb`). Measured how the board resolves a name: the page POSTs a
+`TrainStation` query to Trafikverket's API and matches `?Station=` against
+`AdvertisedLocationName`, exact and case-sensitive; a miss draws neither heading nor error. The
+box's nine rail stops — one stop id each, train and bus alike, no twins on one coordinate —
+were each opened in Playwright Firefox and seen to draw the heading; *Fagersta C* is the board's
+name, the register's *Fagersta Central* draws nothing. Fagersta Norra's feed point is 1 km off
+the register's, which is the right one. Hedemora, Storå, Ställdalen and Ängelsberg, outside the
+box, also draw, and are not in the dict. Scratch in `~/mockups/malingsbo-kloten-box/stations/`.
 
 ### Phase 5 — The scene, and the drive
 

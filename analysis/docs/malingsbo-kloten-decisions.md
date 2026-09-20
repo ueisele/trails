@@ -93,7 +93,7 @@ build refuses a map without a drawing of its own.
 ## 6. Open
 
 - The phone readings, once published: install, keep an area, the offline switch.
-- Trafikverket's board names for the box's nine rail stops (plan phase 4).
+- The icon: Uwe's pick among candidates A–D (plan phase 2); A stands until then.
 
 ## 7. Settled
 
@@ -101,7 +101,13 @@ build refuses a map without a drawing of its own.
 
 ## 10. Changes
 
-*(the phases' built-notes go here, newest last)*
+- **2026-09-20** — Phase 0: this record opened (`20c3f49`). Phase 2: the mark drawn, four
+  candidates, A in the repository (`c473d24`, `de63c09`). Phase 1: the plumbing (`682234d`);
+  `Park` carries form, gateway and route check, the boundary lookup dissolves the three county
+  objects, the provider entry `lantmateriet-malingsbo-kloten` stands beside Lantmäteriet's,
+  `drive-all` drives every page with a scene. Phase 4: the nine stations named for
+  Trafikverket's board (`f2c2dcb`). Phase 3, the build, started 17:03 as the unit
+  `malingsbo-kloten-build`.
 
 ## 11. How the figures here were obtained
 
