@@ -125,6 +125,19 @@ Two faults, both fixed and both tested with a hostile name through the whole pag
 `_script_json` escapes the backtick as it escapes ``<``, so the page's own JSON carries none
 raw either — not needed by the new squeezer, kept because it costs nothing.
 
+### 7.4 A sign is not a place to go to — decided, 2026-09-20
+
+Uwe, seeing *Kind: Områdesskyddsinformation* on a pin: what is it, and why is it drawn? It
+is the register's facility type *Information* — the board at a reserve's entrance saying
+what is protected and why, a map board, brochures, a QR code, audio — 77 of the 129
+facilities over this box (every one a protected-area board), one of Abisko's 25 (a map
+board). A pin for each says nothing a planner acts on. Decided: the type is dropped from
+the facilities layer as a whole; a visitor centre (*Naturum*) or an information building
+is a type of its own and stays. What remains over this box: 30 car parks, 6 fireplaces, 6
+wind shelters, 6 rest areas, 3 bridges, a wood store. The label table keeps every word the
+register uses nationwide — 61 types, 75 subtypes, read 2026-09-20 — so nothing reaches the
+page as the register spelt it, drawn or not.
+
 ## 6. Open
 
 - **A stop on water makes two totals of one way.** Found by the phase 5 drive, 2026-09-20,

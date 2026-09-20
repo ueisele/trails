@@ -3872,6 +3872,13 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
 
     print("\nLoading the register's facilities (Leder)...")
     facilities = gpd.clip(register.facilities(bounds, force_download=args.force_download), inside).reset_index(drop=True)
+    # **A sign is not a place to go to.** The register's type *Information* is
+    # the board at a reserve's entrance, a map board, brochures, a QR code -- 77
+    # of the 129 facilities over Malingsbo-Kloten, one of Abisko's 25 -- and a
+    # pin for each says nothing a planner acts on. Dropped as a type, Uwe's word
+    # 2026-09-20 (malingsbo-kloten decisions §7.4); a visitor centre or an
+    # information building is a type of its own and stays.
+    facilities = facilities[facilities[naturvardsregistret.FACILITY_TYPE] != "Information"].reset_index(drop=True)
     facilities["name"] = facilities[naturvardsregistret.FACILITY_NAME]
     facilities["kind"] = known(facilities[naturvardsregistret.FACILITY_TYPE], FACILITY_LABELS)
     facilities["subtype"] = known(facilities[naturvardsregistret.FACILITY_SUBTYPE], FACILITY_LABELS)
