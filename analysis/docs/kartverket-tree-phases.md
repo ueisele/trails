@@ -1239,6 +1239,45 @@ after the release, at the snap's end, instead of before it. Published 13:25. **T
 reading is open: the fast cycle with every overlay on, once on the plain address and once
 with `?ground=overlays` opened online.**
 
+### Phase 8k — Old ground for the overlays on the way out, replaced without a fade
+
+The phone's reading of 8j (2026-09-20, afternoon, every overlay on, the fast cycle): the plain
+page holds, and **`?ground=overlays` holds too** — no end of the page in either. Without the
+switch the overlays show "kurz nicht da und komplett neu gezeichnet"; with it the change is
+much softer, but everything goes a little darker and then bright again. Measured against the
+tile trees (`/tmp/vec-measure/brightness.py`, four z12 tiles against their 64 z15 children
+each, every overlay of Abisko): the coarse tiles are not darker than the fine ones — seen over
+white they differ by under one percent — but every overlay is translucent (shade black at
+alpha 0.04–0.14, vegetation at 0.08–0.12), and two copies of a translucent layer stacked have
+more cover than one: 14 % twice is 26 %. That is the darkening, plain compositing in any
+browser, not WebKit's blending (WebKit isolates a blending element with composited children as
+its own layer; `isolation: isolate` would change nothing and is not done). On a zoom in the
+old coarse tile lies under 64 new ones and stays until the last is active, so the dark lasts
+the whole load; on a zoom out the old fine tiles go as soon as the one new tile over them is
+active, so it lasts the 200 ms fade. Uwe's choice, option B:
+
+1. **An overlay keeps its old ground on the way out only.** In `tile_retention.js` the
+   one-level rule of 8j applies when the level left is finer than the level landed on (a zoom
+   out); when it is coarser (a zoom in) the overlay keeps nothing, as 8h — no shape of kept
+   ground there avoids the stack short of cutting the old tile apart. The sheet keeps ground
+   both ways exactly as 8h. The `?ground=overlays` switch goes; this is the default.
+2. **A tile that replaces kept ground is not faded.** When an overlay's tile loads and the
+   layer holds loaded tiles of a finer, non-current level under it, the tile is shown at full
+   opacity at once, made active, and the pruning runs in the same frame, so the old tiles
+   beneath go with the new one's appearance: the coarse picture becomes the fine one in one
+   frame, never two translucent pictures at once. A tile with nothing kept under it — a zoom
+   in, a drag — fades over 200 ms as today. The sheet fades as today in every case; its
+   ground is opaque and the fade over it costs nothing.
+3. Nothing else changes: the silence during a pinch (8j), the snap (8i), the ring, the worker.
+4. **Drive**, both pages, every overlay on: after a driven release from z16 to z12 each
+   overlay holds its z15 tiles under its unloaded z12 tiles; as each z12 tile loads it is at
+   full opacity in the first frame it is shown and the z15 tiles under it are gone in that
+   same frame (state per tile: never a frame with the new tile below full opacity while a tile
+   under it is held); after a release from z12 to z16 each overlay holds nothing, as 8h; on a
+   drag with no old ground an overlay's tile is seen below full opacity while it fades, as
+   today; the sheet's 8h readings hold both ways and its tiles fade as today; no reading or
+   code refers to `?ground=`. Then hooks and the full drive on both pages in parallel.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
