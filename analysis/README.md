@@ -264,9 +264,12 @@ format decision are in [garmin-decisions §3](docs/garmin-decisions.md#3-the-cou
 
 **A tour can be walked in stages.** Mark a point in the list as the end of one and
 the route falls into stages, each with a heading carrying its own kilometres, its
-climb, a name you can give it and its own file. A point where one stage hands over
+climb, a name you can give it and a download icon, all on one line. The icon opens
+a menu with *This stage (GPX)* followed by *For Garmin (course)*. A point where one stage hands over
 to the next carries a second ring, on the map and on the profile. *All stages (zip)* writes every
 stage and the whole tour with its marks, plus their Garmin courses, in one archive.
+It comes first in both the plan and profile download menus, followed by *Whole tour (GPX)*
+and *For Garmin (course)*; with only one stage, the archive entry is hidden.
 Name the tour in the box above the list; the marks travel in the file, so loading it back gives you the
 tour and its stages.
 

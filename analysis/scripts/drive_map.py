@@ -2849,9 +2849,32 @@ def planning_keeps_what_it_had(page: Any) -> Check:
         """() => ({heads: document.querySelectorAll('.trails-plan-stage').length,
         names: document.querySelectorAll('.trails-plan-stage-name').length,
         files: document.querySelectorAll('.trails-plan-stage-file').length,
-        garmin: document.querySelectorAll('.trails-plan-stage-garmin').length,
+        garmin: document.querySelectorAll('.trails-plan-stagemenu .trails-plan-stage-garmin').length,
         drawn: [...document.querySelectorAll('.trails-plan-stage')].every(n => n.getClientRects().length > 0),
         stages: window.trailsPlan.stages()})"""
+    )
+    menus = page.evaluate(
+        """() => { const stages = [...document.querySelectorAll('.trails-plan-stage')];
+        const chosen = window.trailsPlan.state().chosen;
+        const open = () => [...document.querySelectorAll(
+            '.trails-plan-stagemenu, .trails-plan-savemenu, .trails-profile-savemenu')]
+            .filter(menu => menu.style.display !== 'none');
+        const labels = menu => [...menu.querySelectorAll('button')]
+            .filter(button => button.style.display !== 'none').map(button => button.textContent);
+        stages[0].querySelector('.trails-plan-stage-file').click();
+        const stageLabels = labels(open()[0]);
+        stages[1].querySelector('.trails-plan-stage-file').click();
+        const another = open().length === 1 && stages[1].contains(open()[0]);
+        document.querySelector('.trails-profile-gpx').click();
+        const profileLabels = labels(open()[0]);
+        const profileAlone = open().length === 1;
+        document.querySelector('.trails-plan-save').click();
+        const planLabels = labels(open()[0]);
+        const planAlone = open().length === 1;
+        document.body.click();
+        return {stageLabels, profileLabels, planLabels, another, profileAlone, planAlone,
+            closed: open().length === 0, chosen: chosen === window.trailsPlan.state().chosen,
+            oneLine: stages.every(stage => getComputedStyle(stage).flexWrap === 'nowrap')}; }"""
     )
 
     # The strip above the pages, which is what a finger drags the panel by.
@@ -2914,6 +2937,13 @@ def planning_keeps_what_it_had(page: Any) -> Check:
             Reading("with a name to give it", cut["names"], cut["stages"]),
             Reading("and a file of its own", cut["files"], cut["stages"]),
             Reading("and a Garmin course of its own", cut["garmin"], cut["stages"]),
+            Reading("both stage files are behind its icon", menus["stageLabels"], ["This stage (GPX)", "For Garmin (course)"]),
+            Reading("the stage heading stays on one line", menus["oneLine"], True),
+            Reading("opening another menu closes the first", [menus["another"], menus["profileAlone"], menus["planAlone"]], [True] * 3),
+            Reading("a tap elsewhere closes the menu", menus["closed"], True),
+            Reading("the file icon does not select a point", menus["chosen"], True),
+            Reading("the profile offers the archive first", menus["profileLabels"], ["All stages (zip)", "Whole tour (GPX)", "For Garmin (course)"]),
+            Reading("and the plan offers the same order", menus["planLabels"], menus["profileLabels"]),
             Reading("all of them on the screen", cut["drawn"], True),
             # 7 px of bar is what a mouse needs; a finger needs the strip.
             Reading("px of handle to drag the panel by", grip["h"], 30, within=8),
@@ -3463,6 +3493,20 @@ def the_point_list_takes_the_room(page: Any) -> Check:
     )
 
 
+def download_stage_file(page: Any, *, garmin: bool = False) -> tuple[str, str]:
+    """Choose a file from the first stage's icon menu and read the download."""
+    stage = page.locator(".trails-plan-stage").first
+    stage.locator(".trails-plan-stage-file").click()
+    label = "For Garmin (course)" if garmin else "This stage (GPX)"
+    with page.expect_download(timeout=25_000) as caught:
+        stage.locator(".trails-plan-stagemenu").get_by_role("button", name=label, exact=True).click()
+    written = caught.value
+    try:
+        return written.suggested_filename, pathlib.Path(written.path()).read_text(encoding="utf-8")
+    finally:
+        written.delete()
+
+
 def files_from_the_page(page: Any) -> Check:
     """Writing a file and reading one back, on a phone-sized page.
 
@@ -3513,9 +3557,11 @@ def files_from_the_page(page: Any) -> Check:
     )
     page.evaluate("() => window.trailsPlan.toggle(true)")
     page.wait_for_timeout(600)
+    # Undo also restores edits and stage cuts. Remove the inherited points
+    # explicitly so this check starts empty whichever checks preceded it.
     page.evaluate(
         """() => { const standing = window.trailsPlan.state().points.length;
-        for (let i = 0; i < standing; i += 1) { window.trailsPlan.undo(); } }"""
+        for (let i = standing - 1; i >= 0; i -= 1) { window.trailsPlan.remove(i); } }"""
     )
     settled(page)
     for at in places:
@@ -3624,6 +3670,8 @@ def files_from_the_page(page: Any) -> Check:
     # there are stages to gather, so a cut that quietly did nothing reads as an
     # archive that was never offered -- which says nothing about why.
     marks = page.evaluate("() => window.trailsPlan.state().points.filter(point => typeof point.stage === 'string').length")
+    stage_name, stage_text = download_stage_file(page)
+    course_name, course_text = download_stage_file(page, garmin=True)
     offered = page.evaluate(
         """() => { const zip = document.querySelector('.trails-plan-zip');
         const box = zip ? zip.getBoundingClientRect() : null;
@@ -3719,6 +3767,10 @@ def files_from_the_page(page: Any) -> Check:
             Reading("carrying its waypoints", text.count("<wpt ") > 0, True, note=f"{text.count('<wpt ')} wpt"),
             Reading("the list lists the points", rows, 4),
             Reading("a stage is cut", marks, 1),
+            Reading("its icon offers the ordinary stage file", "<trk>" in stage_text, True, note=stage_name),
+            Reading("and its Garmin course", "<rte>" in course_text and "<trk>" not in course_text and "<wpt " not in course_text, True),
+            Reading("with the Garmin filename suffix", course_name, stage_name[:-4] + "-garmin.gpx"),
+            Reading("both stage files are also in the archive", [stage_name in members, course_name in members], [True, True]),
             # **Whether the button is there, and not whether it is drawn.**
             # The guard here used to be `offsetParent !== null`, which is a lie
             # about a panel the chrome adopts into a holder: driven on its own,
@@ -8588,6 +8640,8 @@ def a_route_read_after_planning(page: Any) -> Check:
     page.evaluate("() => window.trailsProfilePanel.page('list')")
     page.wait_for_timeout(700)
     listed = page.evaluate(THE_ROUTE_PAGES)
+    stage_name, stage_text = download_stage_file(page)
+    course_name, course_text = download_stage_file(page, garmin=True)
 
     # **The route's own points, drawn while the route is.** Reported from the
     # phone: after plan mode was left the numbered discs stayed on the map,
@@ -8626,6 +8680,8 @@ def a_route_read_after_planning(page: Any) -> Check:
             Reading("the row of edits is away", listed["edits"], "none", note=f"{planning['edits']} while planning"),
             # What is not an edit stays.
             Reading("the stage files stay", listed["files"], planning["files"], note=f"{listed['files']} stages"),
+            Reading("and the ordinary stage file still downloads", "<trk>" in stage_text, True, note=stage_name),
+            Reading("and the Garmin course still downloads", "<rte>" in course_text, True, note=course_name),
             # And the points on the ground follow what the panel is showing.
             Reading("the route's points are drawn while it is shown", on_panel, planning["rows"]),
             Reading("a line chosen instead takes them away", (away, elsewhere), (True, 0)),

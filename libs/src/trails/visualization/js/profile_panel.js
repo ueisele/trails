@@ -4428,6 +4428,10 @@
                 });
                 // The same choices and order as the plan panel's save menu,
                 // using the existing writers for both files and the archive.
+                var stagesDownload = saveEntry('All stages (zip)',
+                    'Every stage and the whole tour, as ordinary GPX and Garmin courses, in one archive',
+                    function () { if (window.trailsPlan && window.trailsPlan.saveStages) { window.trailsPlan.saveStages(); } });
+                saveMenu.appendChild(stagesDownload);
                 saveMenu.appendChild(saveEntry('Whole tour (GPX)',
                     'The whole route as one GPX file, its stage marks and all',
                     function () { saveNow(); }));
@@ -4436,10 +4440,6 @@
                     function () { saveGarminNow(); });
                 garminDownload.className = 'trails-profile-garmin';
                 saveMenu.appendChild(garminDownload);
-                var stagesDownload = saveEntry('All stages (zip)',
-                    'Every stage and the whole tour, as ordinary GPX and Garmin courses, in one archive',
-                    function () { if (window.trailsPlan && window.trailsPlan.saveStages) { window.trailsPlan.saveStages(); } });
-                saveMenu.appendChild(stagesDownload);
             }
 
             // Everything that happens whatever is selected. Two things reach

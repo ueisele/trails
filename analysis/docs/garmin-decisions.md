@@ -129,7 +129,9 @@ tour and each stage, and in the composed route’s profile panel. *All stages (z
 variants of every stage and the whole tour. The browser’s `garminGpxOf` writer shares the ordinary
 writer’s runs, `openGpx`, `metadataOf`, number formatting and `saveFile`; the ordinary writer and
 the Python writer are unchanged. Filenames add `-garmin` before `.gpx`, after the stage suffix
-where there is one. No page setting was added.
+where there is one. No page setting was added. Since 2026-09-20, a stage’s download icon opens
+a menu for its two files (Uwe: the Garmin chip cost a second line per stage), and the archive
+entry leads both tour menus.
 
 The tests execute the emitted JavaScript in Node and read its GPX and ZIP files independently in
 Python. On the synthetic winding test chain, including two walked segments separated by a
@@ -586,3 +588,5 @@ day and are measured, not reported.
 - **2026-09-20** — built §3’s Garmin course export for tours and stages, alongside the ordinary
   GPX and in the archive. Tests measure 1,336 → 200 points at 0.936 m maximum deviation on the
   synthetic test chain, validate GPX 1.1 and preserve the ordinary export’s bytes.
+- **2026-09-20** — moved the stage’s Garmin file into its download icon’s menu at Uwe’s request;
+  put the archive first in both tour menus.

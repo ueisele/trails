@@ -4690,11 +4690,25 @@
                 return 'along a path';
             }
 
-            // One menu open at a time, and none of them across a redraw.
-            function shutMenus() {
-                var open = box ? box.querySelectorAll('.trails-plan-rowmenu, .trails-plan-savemenu') : [];
-                for (var at = 0; at < open.length; at += 1) { open[at].style.display = 'none'; }
+            // The list can be lent to the profile, outside `box`. Close menus
+            // wherever they are shown, including the profile's tour menu.
+            var PLAN_MENUS = '.trails-plan-rowmenu, .trails-plan-savemenu, .trails-plan-stagemenu, .trails-profile-savemenu';
+            function shutMenus(keep) {
+                var open = document.querySelectorAll(PLAN_MENUS);
+                for (var at = 0; at < open.length; at += 1) {
+                    if (open[at] !== keep) { open[at].style.display = 'none'; }
+                }
             }
+            // Capture outside taps before Leaflet or a row stops propagation.
+            // Preserve a trigger's own menu until its handler decides whether
+            // to toggle it shut; every other menu closes first.
+            document.addEventListener('click', function (event) {
+                var target = event.target;
+                if (!target || !target.closest) { shutMenus(); return; }
+                var trigger = target.closest('.trails-plan-more, .trails-plan-save, .trails-plan-stage-file, .trails-profile-gpx');
+                var keep = trigger ? trigger.parentNode.querySelector(PLAN_MENUS) : target.closest(PLAN_MENUS);
+                shutMenus(keep);
+            }, true);
 
             function drawList(stations) {
                 listStations = stations || [];
@@ -4958,7 +4972,7 @@
                 var figure = figuresOf(shape);
                 var head = document.createElement('div');
                 head.className = 'trails-plan-stage';
-                head.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;' +
+                head.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:4px;' +
                     'padding:2px 3px;border-top:1px solid var(--trails-rule);color:var(--trails-ink-3)';
 
                 // The name, and the two points it runs between where nobody has
@@ -5005,28 +5019,42 @@
                 // reason the whole tour's is: a file that states it breaks its
                 // track only at crossings must not be written over a hole.
                 file.disabled = !!writable().why;
+                var menu = document.createElement('div');
+                menu.className = 'trails-plan-stagemenu';
+                menu.style.cssText = saveMenu.style.cssText;
+                menu.style.display = 'none';
+                L.DomEvent.disableClickPropagation(menu);
+                function stageFileEntry(label, explains, garmin) {
+                    var made = oneFile.cloneNode(false);
+                    made.textContent = label;
+                    made.title = explains;
+                    made.style.display = 'block';
+                    made.disabled = file.disabled;
+                    made.addEventListener('click', function (event) {
+                        event.stopPropagation();
+                        shutMenus();
+                        try { saveStage(stage, garmin); } catch (failure) { fileFailed(failure); }
+                    });
+                    return made;
+                }
+                var ordinary = stageFileEntry('This stage (GPX)', 'Download this stage on its own', false);
+                ordinary.className = 'trails-plan-stage-gpx';
+                var garmin = stageFileEntry('For Garmin (course)',
+                    'One line of at most 200 points; Garmin Explore imports it as a course that syncs to the watch', true);
+                garmin.className = 'trails-plan-stage-garmin';
+                menu.appendChild(ordinary);
+                menu.appendChild(garmin);
                 file.addEventListener('click', function (event) {
                     event.stopPropagation();
-                    try {
-                        saveStage(stage);
-                    } catch (failure) {
-                        fileFailed(failure);
-                    }
+                    var wasOpen = menu.style.display !== 'none';
+                    shutMenus();
+                    if (!wasOpen) { menu.style.display = 'block'; }
                 });
-
-                var garmin = file.cloneNode(false);
-                garmin.className = 'trails-plan-stage-garmin';
-                garmin.textContent = 'For Garmin (course)';
-                garmin.title = 'One line of at most 200 points; Garmin Explore imports it as a course that syncs to the watch';
-                garmin.setAttribute('aria-label', 'For Garmin (course)');
-                garmin.style.width = 'auto';
-                garmin.style.height = 'auto';
-                garmin.style.fontSize = '11px';
-                garmin.style.padding = '3px 5px';
-                garmin.addEventListener('click', function (event) {
-                    event.stopPropagation();
-                    try { saveStage(stage, true); } catch (failure) { fileFailed(failure); }
-                });
+                var fileWrap = document.createElement('div');
+                fileWrap.className = 'trails-plan-stage-save';
+                fileWrap.style.cssText = 'position:relative;flex:none';
+                fileWrap.appendChild(file);
+                fileWrap.appendChild(menu);
 
                 // **A field where it can be typed in, and text where it cannot.**
                 // A read-only input still looks like something to type into, and
@@ -5044,8 +5072,7 @@
                     head.appendChild(named);
                 }
                 head.appendChild(says);
-                head.appendChild(file);
-                head.appendChild(garmin);
+                head.appendChild(fileWrap);
                 return head;
             }
 
@@ -5117,19 +5144,17 @@
 
             titleRow.appendChild(title);
 
-            // **One mark, and the choice behind it.** Two file buttons side by
-            // side asked the reader to choose before they had asked for
-            // anything; and where a route has one stage there is nothing to
-            // choose, so the second was furniture for most of a tour's life.
+            // One mark opens the file choices. The archive leads where there
+            // are multiple stages; ordinary GPX and Garmin are always offered.
             var saveMenu = document.createElement('div');
             saveMenu.className = 'trails-plan-savemenu';
             saveMenu.style.cssText = 'display:none;position:absolute;right:0;top:100%;z-index:6;' +
                 'min-width:170px;background:var(--trails-solid);border:1px solid var(--trails-edge);' +
                 'border-radius:7px;padding:3px;box-shadow:0 2px 10px rgba(0,0,0,0.22)';
             L.DomEvent.disableClickPropagation(saveMenu);
+            saveMenu.appendChild(everything);
             saveMenu.appendChild(oneFile);
             saveMenu.appendChild(garminFile);
-            saveMenu.appendChild(everything);
 
             var save = document.createElement('button');
             save.type = 'button';

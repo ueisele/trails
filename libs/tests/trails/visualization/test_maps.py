@@ -6014,7 +6014,7 @@ class TestPlanMode:
         assert "if (!editable) { return; }" in html
         # The stage keeps its name and its file, and loses its caret.
         assert "named.textContent = stage.name || stageName(stage);" in html
-        assert "head.appendChild(file);" in html
+        assert "head.appendChild(fileWrap);" in html
 
     def test_the_highlight_can_be_told_a_tap_was_not_its_own(self):
         """The panel takes a tap in reach of a planned route for the route, and
@@ -7159,7 +7159,7 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        naming = planning[planning.index("function groundInto(index) {") : planning.index("function shutMenus() {")]
+        naming = planning[planning.index("function groundInto(index) {") : planning.index("function shutMenus(keep) {")]
         assert "var crossing = false, recorded = false, straight = 0, walked = 0;" in naming
         assert "if (straight > 0 && straight >= walked / 2) { return 'drawn straight'; }" in naming
         assert "if (crossing) { return 'over a crossing'; }" in naming
@@ -8039,17 +8039,44 @@ class TestGarminExport:
         assert "garminDownload.disabled = download.disabled;" in panel
         assert "saveMenu.appendChild(garminDownload);" in panel
         assert "offer.appendChild(garminDownload);" not in panel
-        assert (
-            panel.index("saveEntry('Whole tour (GPX)',")
-            < panel.index("saveEntry('For Garmin (course)',")
-            < panel.index("saveEntry('All stages (zip)',")
-        )
         assert "function () { saveGarminNow(); }" in panel
         assert "garminFile.disabled = oneFile.disabled;" in planning
-        assert "var garmin = file.cloneNode(false);" in planning
-        assert "saveStage(stage, true);" in planning
+        assert "made.disabled = file.disabled;" in planning
+        assert "saveStage(stage, garmin);" in planning
         assert "saveWhole(true);" in planning
         assert "For Garmin (course)" in panel and "For Garmin (course)" in planning
+
+    def test_stage_files_are_ordered_entries_behind_one_icon(self):
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
+        stage = export_javascript(planning, "stageHead")
+        assert "flex-wrap:wrap" not in stage
+        assert "menu.className = 'trails-plan-stagemenu';" in stage
+        assert "stageFileEntry('This stage (GPX)', 'Download this stage on its own', false)" in stage
+        assert "stageFileEntry('For Garmin (course)'," in stage
+        assert stage.index("menu.appendChild(ordinary);") < stage.index("menu.appendChild(garmin);")
+        assert "head.appendChild(fileWrap);" in stage
+        assert "head.appendChild(garmin);" not in stage
+        assert "made.disabled = file.disabled;" in stage
+        assert "event.stopPropagation();" in stage
+        assert "shutMenus();" in stage
+        assert "if (!wasOpen) { menu.style.display = 'block'; }" in stage
+        assert "menu.style.cssText = saveMenu.style.cssText;" in stage
+
+    def test_both_tour_menus_offer_the_archive_first(self):
+        panel = files("trails.visualization").joinpath("js", "profile_panel.js").read_text(encoding="utf-8")
+        planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
+        assert (
+            panel.index("saveMenu.appendChild(stagesDownload);")
+            < panel.index("saveMenu.appendChild(saveEntry('Whole tour (GPX)',")
+            < panel.index("saveMenu.appendChild(garminDownload);")
+        )
+        assert (
+            planning.index("saveMenu.appendChild(everything);")
+            < planning.index("saveMenu.appendChild(oneFile);")
+            < planning.index("saveMenu.appendChild(garminFile);")
+        )
+        assert "stagesDownload.style.display = cut > 1 ? 'block' : 'none';" in panel
+        assert "everything.style.display = gathered ? '' : 'none';" in planning
 
 
 class TestComposedProfile:
