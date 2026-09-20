@@ -3772,6 +3772,14 @@ were never affected: Leaflet places them afresh at every `zoom` event.
 
 A line per change to this document or to the decisions in it, newest first.
 
+- **2026-09-20, second** — both maps published with the Garmin course export
+  (`garmin-decisions.md` §3): *For Garmin (course)* beside every route download — the whole
+  tour, each stage, the profile's save menu, and the archive — writes one `<rte>` of at most 200
+  points, which Garmin Explore imports as a Course that syncs to the fēnix without a manual
+  *Copy as Course*. The ordinary export is byte-identical to before. Page-and-companions deploy;
+  workers, stores, addresses and trees untouched; both pages and both workers byte-identical at
+  the edge. Built by codex on `garmin-export` over four review rounds, `f668b5b`..`e89a8a9`.
+
 - **2026-09-19, fifth** — the mire overlay says the same thing the same way on every map (§6.13):
   the survey's second class is *mire*, not *firm mire*, since N50 says nothing of firmness; the
   model's moist ground joins as a fourth class, sparsely hatched; and the hatch is a close-up
