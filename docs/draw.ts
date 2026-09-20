@@ -1,3 +1,6 @@
+// bun docs/draw.ts [output-directory] [--candidates]
+// The candidate sheet uses the same drawings as the installed mark; choosing another is one
+// change to the style in the output table. Smaller previews and favicons use ImageMagick below.
 import { loadRenderer } from "/home/eiseleu/repositories/weather-cards/scripts/lib/renderer"
 const { Canvas, encodePng } = await loadRenderer()
 
@@ -11,6 +14,43 @@ const MOSS: Rgb = [58, 158, 112]
 /** The gate behind the Abisko cairn: a deep blue-grey, dark enough to stay behind the stones and
  *  cool enough to read at 60 px, which the stone-grey version did not. */
 const RIDGE: Rgb = [33, 66, 104]
+
+const FOREST_STYLES = [
+  { label: "A", heights: [0.57, 0.49], spruce: [45, 87, 65], lakeDepth: 0.018, distant: false },
+  { label: "B", heights: [0.67, 0.59], spruce: [29, 63, 48], lakeDepth: 0.018, distant: false },
+  { label: "C", heights: [0.57, 0.49], spruce: [45, 87, 65], lakeDepth: 0.10, distant: false },
+  { label: "D", heights: [0.63, 0.55], spruce: [38, 76, 61], lakeDepth: 0.08, distant: true },
+] as const
+
+/** Broad, drooping boughs keep the spruce outline legible when the mark becomes a Home Screen tile. */
+function spruce(c: any, size: number, cx: number, height: number, tone: Rgb) {
+  const base = 0.80, top = base - height
+  c.fill(size * (cx - 0.010), size * (top + height * 0.15), size * 0.020, size * height * 0.85, tone)
+  for (const [tip, foot, halfWidth] of [[0, 0.42, 0.080], [0.22, 0.62, 0.115], [0.42, 0.80, 0.145], [0.60, 0.94, 0.165]]) {
+    c.band([
+      [size * (cx - halfWidth), size * (top + height * foot), size * (top + height * foot)],
+      [size * cx, size * (top + height * tip), size * (top + height * (foot - 0.06))],
+      [size * (cx + halfWidth), size * (top + height * foot), size * (top + height * foot)],
+    ], tone)
+  }
+}
+
+/** Forest and still water take the place of Lapporten; the foreground stays the same in every map. */
+function forest(c: any, size: number, style: number) {
+  const chosen = FOREST_STYLES[style]
+  if (!chosen) throw new Error(`Unknown forest style: ${style}`)
+  if (chosen.distant) {
+    const points: [number, number, number][] = []
+    for (let x = 0; x <= size; x++) {
+      const t = x / size
+      points.push([x, size * (0.38 + 0.035 * Math.sin(t * Math.PI * 2.5)), size * 0.80])
+    }
+    c.band(points, [28, 45, 50])
+  }
+  c.fill(size * 0.07, size * 0.46, size * 0.86, size * chosen.lakeDepth, [61, 105, 130])
+  spruce(c, size, 0.18, chosen.heights[0], chosen.spruce)
+  spruce(c, size, 0.82, chosen.heights[1], chosen.spruce)
+}
 
 const smooth = (t: number) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t) }
 
@@ -65,7 +105,7 @@ function cairn(c: any, s: number, cx: number, base: number, height: number, tone
   return y
 }
 
-function icon(kind: "almanac" | "atlas" | "abisko", size: number, style: number) {
+function icon(kind: "almanac" | "atlas" | "abisko" | "malingsbo-kloten", size: number, style: number) {
   const c = new Canvas(size, size, GROUND)
   const cx = size * 0.5
   const base = size * (kind === "almanac" ? 0.855 : 0.80)
@@ -76,7 +116,8 @@ function icon(kind: "almanac" | "atlas" | "abisko", size: number, style: number)
   // second map is the same cairn on the same path, standing in Lapporten's gate**: two maps on a
   // Home Screen must not wear one icon, and what tells Abisko from anywhere else is the gate.
   if (kind === "abisko") gate(c, size, RIDGE)
-  if (kind === "atlas" || kind === "abisko") {
+  if (kind === "malingsbo-kloten") forest(c, size, style)
+  if (kind !== "almanac") {
     const stroke = Math.max(1.8, size * 0.045)
     let prev: [number, number] | undefined
     for (let step = 0; step <= 100; step++) {
@@ -101,13 +142,26 @@ function icon(kind: "almanac" | "atlas" | "abisko", size: number, style: number)
   return encodePng(c)
 }
 
-for (const [name, kind, style] of [
+const args = process.argv.slice(2)
+const output = args.find(arg => arg !== "--candidates") ?? "/tmp/icons"
+const drawings = [
   ["almanac", "almanac", 0], ["atlas", "atlas", 0], ["atlas-abisko", "abisko", 0],
-] as const) {
+  ["atlas-malingsbo-kloten", "malingsbo-kloten", 0],
+] as const
+const candidates = args.includes("--candidates")
+  ? FOREST_STYLES.map(({ label }, style) => [`candidate-${label}`, "malingsbo-kloten", style] as const)
+  : []
+for (const [name, kind, style] of [...drawings, ...candidates]) {
   // 32 is not drawn: this rasteriser has no antialiasing to speak of at that size, so the tab icon
   // is the 512 scaled down — `magick atlas-abisko-512.png -filter Lanczos -resize 32x32 …`.
   for (const size of [512, 192, 180]) {
-    await Bun.write(`/tmp/icons/${name}-${size}.png`, icon(kind, size, style))
+    await Bun.write(`${output}/${name}-${size}.png`, icon(kind, size, style))
+  }
+  const scaled = args.includes("--candidates") ? [32, 60] : [32]
+  for (const size of scaled) {
+    const result = Bun.spawnSync(["magick", `${output}/${name}-512.png`, "-filter", "Lanczos", "-resize", `${size}x${size}`,
+      `${output}/${name}-${size}.png`])
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString())
   }
 }
-console.log("gezeichnet")
+console.log(`Icons written to ${output}`)
