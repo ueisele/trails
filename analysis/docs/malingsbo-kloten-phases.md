@@ -415,8 +415,15 @@ its stage pages are linked by script only and are researched by hand as Abisko's
 2. `network/sweden.py`: a way that is a member carries the relation's name, its `ref` and
    `from`–`to` on the OSM chains, as a route identity the way Turrutebasen's route name is
    one for Norway; a chain of several relations lists them joined by the identity separator.
-   The identity rule must not cut chains where it did not before — measured before and after
-   on the graph's report (chains, edges, components).
+   Measured before and after on the graph's report: **a chain is one identity, so a chain
+   ends where a named route begins or ends** — 12,779 → 12,804 chains, 153,447 → 153,481
+   edges, 107 components unchanged (codex, 2026-09-20); that is the rule's own answer, as
+   Turrutebasen's route name ends a chain in Norway, and it is accepted. What must hold is
+   the components, and that no chain breaks *inside* a route. The box holds 57 named
+   hiking relations, not the Bergslagsleden's four alone: the reserve's marked loops among
+   them, 11 with a website, naming 191 chains. `overpass.osm.ch` is a regional mirror and
+   answers nothing for Sweden; `maps.mail.ru`'s instance answered when both listed mirrors
+   were busy and is the third in `MIRRORS`.
 3. The popup on such a chain links the relation's own `website` where it has one, headed as
    the source names it, and the Naturkartan pages from a catalogue keyed by the relation's
    name — `analysis/routes/malingsbo-kloten-naturkartan.toml`, the guide and the stage pages

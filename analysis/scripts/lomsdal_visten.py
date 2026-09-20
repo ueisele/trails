@@ -1349,16 +1349,92 @@ T50_LABEL_BASE_PX = 9.0
 LETTERING_M = 500.0
 
 #: How the register's facility types read.
+#: Every word the register's ``TYP`` and ``UNDERTYP`` use, nationwide (read off
+#: the Anordningar file 2026-09-20: 61 types, 75 subtypes), in English. The
+#: first table knew the nine of Abisko's box, and *Områdesskyddsinformation* --
+#: the board at a reserve's entrance that says what is protected and why, 77
+#: of the 129 facilities over Malingsbo-Kloten -- reached the page as the
+#: register spelt it, uncounted, because the subtype went through
+#: ``translate_joined`` rather than ``known``. Uwe asked what it was.
 FACILITY_LABELS = {
+    "Information": "information",
+    "Områdesskyddsinformation": "protected-area information board",
+    "Platsinformation": "site information board",
+    "Informationsbyggnad": "information building",
+    "Ljudinformation": "audio information",
+    "Taktil information": "tactile information",
+    "Karta": "map board",
+    "Broshyrer": "brochures",
+    "Ledterminal": "trailhead board",
+    "Qr-kod": "QR code",
+    "3d-modell": "3D model",
+    "Nationalparksmarkör": "national park marker",
+    "Portal": "entrance portal",
+    "Guldkrona": "Guldkrona mark",
+    "Gästbok/obs.bok": "guest book",
+    "Parkering": "car park",
+    "Parkering för rörelsehindrade": "disabled parking",
+    "Bussparkering": "bus parking",
+    "Cykelparkering": "bicycle parking",
+    "Laddningsstation för elbilar": "EV charging station",
+    "Hållplats": "bus stop",
+    "Helikopterplatta": "helipad",
+    "Rastplats": "rest area",
+    "Bänkbord": "picnic table",
+    "Bänk": "bench",
+    "Bord": "table",
+    "Rastskydd": "rest shelter",
+    "Raststuga": "rest cabin",
+    "Vindskydd": "wind shelter",
+    "Tak": "roof",
+    "Koja": "hut",
+    "Kåta": "kåta",
+    "Övernattningsstuga": "overnight cabin",
+    "Fäbodstuga": "summer-farm cabin",
+    "Tältplats": "tent site",
+    "Vandrarhem": "hostel",
+    "Bostad": "dwelling",
+    "Eldstad": "fireplace",
+    "Vedförvaring/vedbod": "wood store",
+    "Dass": "privy",
+    "Toalett": "toilet",
+    "Soptunna": "litter bin",
+    "Sopstation": "waste station",
+    "Dricksvatten": "drinking water",
+    "Brunn": "well",
+    "Servicebyggnad": "service building",
+    "Bastu": "sauna",
+    "Café": "café",
+    "Naturum": "visitor centre (naturum)",
     "Bro": "bridge",
     "Hängbro": "suspension bridge",
-    "Dass": "privy",
-    "Rastskydd": "rest shelter",
-    "Vindskydd": "wind shelter",
-    "Eldstad": "fireplace",
+    "Vadställe": "ford",
+    "Brygga": "jetty",
+    "Pir": "pier",
+    "Hamn": "harbour",
+    "Ankringsplats": "anchorage",
+    "Kajakramp": "kayak ramp",
+    "Badplats": "bathing place",
+    "Livboj": "lifebuoy",
+    "Fyr": "lighthouse",
     "Ramp": "ramp",
-    "Information": "information",
-    "Karta": "map board",
+    "Tillgänglighetsramp": "accessibility ramp",
+    "Trappa": "stairs",
+    "Grind": "gate",
+    "Stätta": "stile",
+    "Stängselgenomgång": "fence crossing",
+    "Vägbom": "road barrier",
+    "Utsikt": "viewpoint",
+    "Utsiktstorn": "lookout tower",
+    "Fågeltorn": "bird tower",
+    "Observationsplattform": "observation platform",
+    "Gömsle": "hide",
+    "Lekplats": "playground",
+    "Motorikbana": "activity trail",
+    "Pulkabacke": "sledging slope",
+    "Barnens skog": "children's forest",
+    "Hjälptelefon": "emergency telephone",
+    "Okänd": "unknown",
 }
 
 #: Column identifying which chain a drawn line belongs to. A chain is linear by
@@ -3797,8 +3873,8 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     print("\nLoading the register's facilities (Leder)...")
     facilities = gpd.clip(register.facilities(bounds, force_download=args.force_download), inside).reset_index(drop=True)
     facilities["name"] = facilities[naturvardsregistret.FACILITY_NAME]
-    facilities["kind"] = translate_joined(facilities[naturvardsregistret.FACILITY_TYPE], FACILITY_LABELS)
-    facilities["subtype"] = translate_joined(facilities[naturvardsregistret.FACILITY_SUBTYPE], FACILITY_LABELS)
+    facilities["kind"] = known(facilities[naturvardsregistret.FACILITY_TYPE], FACILITY_LABELS)
+    facilities["subtype"] = known(facilities[naturvardsregistret.FACILITY_SUBTYPE], FACILITY_LABELS)
     facilities["description"] = facilities[naturvardsregistret.TRAIL_DESCRIPTION]
     facilities["route"] = facilities[naturvardsregistret.TRAIL_ROUTE]
     facilities["glyph"] = joined_glyphs(facilities["kind"], FACILITY_GLYPHS, FACILITY_DEFAULT_GLYPH)
