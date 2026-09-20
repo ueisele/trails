@@ -8059,7 +8059,7 @@ class TestGarminExport:
         assert "made.disabled = file.disabled;" in stage
         assert "event.stopPropagation();" in stage
         assert "shutMenus();" in stage
-        assert "if (!wasOpen) { menu.style.display = 'block'; }" in stage
+        assert "if (!wasOpen) {" in stage
         assert "menu.style.cssText = saveMenu.style.cssText;" in stage
 
     def test_both_tour_menus_offer_the_archive_first(self):

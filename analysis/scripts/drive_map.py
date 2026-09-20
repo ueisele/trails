@@ -3691,6 +3691,44 @@ def files_from_the_page(page: Any) -> Check:
             broken = opened.testzip()
             members = opened.namelist()
 
+    # The first stage's menu fits below its icon. The last of three stages
+    # reaches the scroller's foot: both choices must be reachable immediately,
+    # without the reader scrolling to discover the second one.
+    page.evaluate(
+        """() => { const rows = [...document.querySelectorAll('.trails-plan-points > div')]
+          .filter(row => !row.classList.contains('trails-plan-stage'));
+        rows[2].querySelector('.trails-plan-cut').click(); }"""
+    )
+    settled(page)
+    painted(page)
+    last_before = page.evaluate(
+        """() => { const list = document.querySelector('.trails-plan-points');
+        const icon = [...list.querySelectorAll('.trails-plan-stage-file')].at(-1);
+        const box = list.getBoundingClientRect();
+        const bottom = box.top + list.clientTop + list.clientHeight;
+        list.scrollTop += icon.getBoundingClientRect().bottom - (bottom - 12);
+        return {top: icon.getBoundingClientRect().top, scroll: list.scrollTop}; }"""
+    )
+    page.locator(".trails-plan-stage-file").last.click()
+    last_menu = page.evaluate(
+        """() => { const list = document.querySelector('.trails-plan-points');
+        const stages = [...list.querySelectorAll('.trails-plan-stage')];
+        const stage = stages.at(-1), icon = stage.querySelector('.trails-plan-stage-file');
+        const menu = stage.querySelector('.trails-plan-stagemenu');
+        const box = list.getBoundingClientRect(), shown = menu.getBoundingClientRect();
+        const top = box.top + list.clientTop, bottom = top + list.clientHeight;
+        return {stages: stages.length, top: icon.getBoundingClientRect().top, scroll: list.scrollTop,
+            bounds: {list: [top, bottom], menu: [shown.top, shown.bottom],
+                icon: [icon.getBoundingClientRect().top, icon.getBoundingClientRect().bottom]},
+            upward: shown.bottom <= icon.getBoundingClientRect().top + 0.5,
+            inside: shown.top >= top - 0.5 && shown.bottom <= bottom + 0.5,
+            hits: [...menu.querySelectorAll('button')].map(entry => {
+                const r = entry.getBoundingClientRect();
+                return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === entry;
+            })}; }"""
+    )
+    page.locator(".trails-plan-stage-file").last.click()
+
     # And read one back, through the picker rather than around it.
     page.evaluate("() => { window.trailsPlan.toggle(false); window.trailsPlan.toggle(true); }")
     page.wait_for_timeout(700)
@@ -3771,6 +3809,14 @@ def files_from_the_page(page: Any) -> Check:
             Reading("and its Garmin course", "<rte>" in course_text and "<trk>" not in course_text and "<wpt " not in course_text, True),
             Reading("with the Garmin filename suffix", course_name, stage_name[:-4] + "-garmin.gpx"),
             Reading("both stage files are also in the archive", [stage_name in members, course_name in members], [True, True]),
+            Reading("the last menu is tested with three stages", last_menu["stages"], 3),
+            Reading("both last-stage entries take a tap", last_menu["hits"], [True, True]),
+            Reading(
+                "the last menu opens upward inside the list", [last_menu["upward"], last_menu["inside"]], [True, True], note=str(last_menu["bounds"])
+            ),
+            Reading(
+                "opening it leaves the icon under the finger", [last_menu["top"], last_menu["scroll"]], [last_before["top"], last_before["scroll"]]
+            ),
             # **Whether the button is there, and not whether it is drawn.**
             # The guard here used to be `offsetParent !== null`, which is a lie
             # about a panel the chrome adopts into a holder: driven on its own,

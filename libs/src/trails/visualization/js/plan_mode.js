@@ -5048,7 +5048,21 @@
                     event.stopPropagation();
                     var wasOpen = menu.style.display !== 'none';
                     shutMenus();
-                    if (!wasOpen) { menu.style.display = 'block'; }
+                    if (!wasOpen) {
+                        menu.style.top = '100%';
+                        menu.style.bottom = 'auto';
+                        menu.style.display = 'block';
+                        // Keep the last stage's choices inside the scroller,
+                        // without moving the icon under the reader's finger.
+                        var iconBox = file.getBoundingClientRect();
+                        var menuBox = menu.getBoundingClientRect();
+                        var listRect = listBox.getBoundingClientRect();
+                        var below = listRect.top + listBox.clientTop + listBox.clientHeight - iconBox.bottom;
+                        var upward = below < menuBox.height;
+                        menu.style.top = upward ? 'auto' : '100%';
+                        menu.style.bottom = upward ? '100%' : 'auto';
+                        menu.style.boxShadow = '0 ' + (upward ? '-2px' : '2px') + ' 10px rgba(0,0,0,0.22)';
+                    }
                 });
                 var fileWrap = document.createElement('div');
                 fileWrap.className = 'trails-plan-stage-save';
