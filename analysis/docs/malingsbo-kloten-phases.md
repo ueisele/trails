@@ -451,6 +451,12 @@ and chains), road 233 unchanged, 48 readings green on the rebuilt page. Landed w
 facility labels and the information-board filter of the same evening (§7.4 of the record),
 and republished with them.
 
+**Republished 2026-09-20, 23:30, all three maps** on the code of phase 8, the facility labels
+and the information-board filter: rebuilt, driven together (none broken, none moved once the
+Swedish scenes' figures were re-recorded, `151b6e0`), published one after the other, read
+back byte-identical. The `just` recipes need `sops`, which is trails-map's toolchain and not
+trails': a unit that runs them starts with trails-map as its working directory.
+
 ### Phase 9 — A way's two lengths: on foot, and over water
 
 *Agent, one worktree, after phase 8. Uwe's word 2026-09-20, on the measurement in the

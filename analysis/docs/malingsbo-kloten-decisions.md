@@ -261,6 +261,16 @@ national collection and needs nothing.
   6.22 MB brotli; read back byte-identical. **https://atlas.cairn.zone/malingsbo-kloten.**
   Open: the phone, the icon pick, phase 8 (the Bergslagsleden), phase 9 (two lengths).
 
+- **2026-09-20, 23:30 — Phase 8 and the evening's decisions, all three maps republished.**
+  The Bergslagsleden and every other named hiking relation off OSM (`1628d65`), the
+  register's information boards dropped (§7.4, `9173796`), every facility word labelled
+  (`bfe1d3e`), a trail type split on a slash (`0571f8e`). All three pages rebuilt on that
+  code and driven together — 1,372 / 1,364 / 1,330 readings, none broken, none moved after
+  the Swedish scenes' figures were re-recorded (`151b6e0`: Abisko two chains more where a
+  route begins, one marker fewer, the search finding route names; here 75 markers fewer and
+  the long edge renumbered) — then published one after the other, the packs' sync finding
+  nothing new, each page read back byte-identical from the edge.
+
 ## 11. How the figures here were obtained
 
 Scratch in `~/mockups/malingsbo-kloten-box/`: `reserve.py` reads the cached register forms
