@@ -1188,7 +1188,10 @@ option C): both of the following, the second behind a switch until the phone has
    drag's ring (phase 8) is untouched: `move` updates run whenever no zoom is in progress.
    Effect: no level between the one left and the one landed on is ever created, every layer
    shows its old ground scaled until the snap ends, and the tiles of the landed level are
-   the only requests of the gesture — phase 2's rule, measured again.
+   the only requests of the gesture — phase 2's rule, measured again. *Level* is the
+   layer's tile zoom, which is the map's zoom clamped to the layer: the overlays carry
+   `maxNativeZoom: 15` on both pages, so a map at z16 is z15 for an overlay and z16 for the
+   sheet, and a pinch from z12 to z16 is one level change for every layer all the same.
 2. **Behind `?ground=overlays`, each overlay keeps one level of old ground.** The switch is
    read once by `js/tile_retention.js`, as 8g's were. With it, an overlay's pruning retains
    the loaded tiles of the level it left that lie under a current tile that is not active
@@ -1210,11 +1213,12 @@ option C): both of the following, the second behind a switch until the phone has
    release, and the release creates tiles of the landed level only; after a driven drag with
    no zoom the ring still fills during the drag as phase 8 measured. Item 2, page opened with
    the switch: after a release from z12 to z16 each overlay holds z12 tiles under its
-   unloaded z16 tiles and no tile of z13–z15, and after a release from z16 to z12 it holds
-   z16 tiles under its unloaded z12 tiles and nothing else; once loaded and faded every
-   overlay holds its level only; without the switch every overlay holds nothing across the
-   change, as 8h; the sheet's 8h readings hold with and without. Then hooks and the full
-   drive on both pages in parallel.
+   unloaded tiles of the landed level (z15, its native ceiling) and no tile of z13–z14, and
+   after a release from z16 to z12 it holds the tiles of the level it left (z15) under its
+   unloaded z12 tiles and nothing else; once loaded and faded every overlay holds its level
+   only; without the switch every overlay holds nothing across the change, as 8h; the
+   sheet's 8h readings hold with and without (its levels are z12 and z16). Then hooks and
+   the full drive on both pages in parallel.
 
 ## 5. Not in this plan
 
