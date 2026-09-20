@@ -1069,6 +1069,39 @@ cannot pass for it; every level loads real images under every combination; witho
 nothing changes. 1,003 readings a page, hooks 1,880 + 97; the reviewer's own hooks and
 parallel drives green. Published 20:55. The four phone readings are open.
 
+### Phase 8h — Old ground is the sheet's only
+
+8g's readings on the phone (2026-09-20, 00:20, every overlay on, the fast cycle, online):
+plain page dies; **`?ground=drop` holds**, with a flicker at every zoom; `?tiles=plain` dies.
+So the ground Leaflet keeps scaled across a zoom change is the cost, Leaflet's Safari
+`image-rendering` rule is not, and neither was the blend. What is kept today, per layer: on
+a zoom in, the nearest loaded parent; on a zoom out, up to three levels of children — the
+depth three is this plan's phase 2 (Leaflet keeps two) — each level a screen's worth of
+pixels once WebKit rasterises it at the new scale when the finger lifts. Six layers, three
+levels: eighteen screens of old ground at once. `drop` keeps none and flickers because the
+sheet blanks too.
+
+1. **The retention override keeps old ground for the sheet only.** `js/tile_retention.js`
+   retains parents and children as today (parents to −5, children to +3) for the layer that
+   carries the sheet — marked by an option set in `maps.py` (`retainGround: true` on the base
+   tile layer, nothing on an overlay) — and retains nothing across levels for every other
+   grid layer: their old level's tiles go at the zoom change and the new level fades in as
+   it loads. Three screens of old ground instead of eighteen, the sheet never blank.
+2. **The measuring switches go**: `?ground=`, `?tiles=` and `_TileRendering` (8g), and
+   `?blend=` with the whole `_ZoomBlend` machinery and `js/zoom_blend.js` (8d, 8e) — the
+   blend was not the cause, and the page carries nothing that explains nothing. The theme
+   keeps its one multiply rule as before 8d. The drive's readings for those go with them.
+3. Nothing else changes: the ring, `keepBuffer`, the pinch drawing (8f), the worker.
+4. **Drive**, both pages, every overlay on: after a driven zoom out of three levels the sheet
+   holds tiles of the left zoom while its new level loads and no overlay holds any (state,
+   not a clock); after a zoom in the sheet holds its parent and the overlays none; once
+   loaded no layer holds another zoom; the blend readings of 8d/8e and the switch readings
+   of 8g are removed; the four overlays multiply at rest and during a zoom, as before 8d.
+   Then hooks and the full drive on both pages in parallel.
+
+If the phone still ends the page after this, the next step is the sheet's children depth
+back to Leaflet's two, then one — each a number in `tile_retention.js`.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
