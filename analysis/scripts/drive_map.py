@@ -193,6 +193,15 @@ class Scene:
     #: round by land.
     sound: tuple[dict[str, float], dict[str, float], dict[str, float]] | None = None
     river_goal: RiverGoal | None = None
+    #: A dry stop for the goal-editing check, on or beside the network. None
+    #: keeps the offset from the goal leg's midpoint used by the first maps.
+    goal_stop: tuple[float, float] | None = None
+    #: A fix beside a bend or an end of the planned route, where different
+    #: accuracies give distinct bearings. None uses the first point's north side.
+    aim_from: tuple[float, float] | None = None
+    #: A walked edge whose routed cost beats its straight alternative at both
+    #: taps. None uses the longest walked edge, as on the first maps.
+    long_edge: int | None = None
     #: The source that takes its names from a register, and the register's own
     #: layer, as class-name prefixes: Topografi 50's marked trails and *Leder*
     #: here, FKB's paths and Turrutebasen there. None where a page has no such
@@ -563,6 +572,106 @@ SCENES: dict[str, Scene] = {
             label="Across Abiskojåkka",
             river="Abiskojåkka (Ábeskoeatnu)",
             straight=(400, 900),
+        ),
+    ),
+    "malingsbo-kloten": Scene(
+        stem="malingsbo-kloten",
+        # Road 233 from Kopparberg past Kloten, 45.885 km in the rebuilt page
+        # of 2026-09-20. Its name also exercises the heading and detail checks.
+        long_chain="trail-group-topografi-50-roads-499680-6637622-45885",
+        # A marked-trail node by Kloten, with the register's Kloten in view.
+        position=(59.900241, 15.269114),
+        view=(59.899402, 15.266861),
+        # Norra Barken is outside the chain's bounds, 928 m from the network.
+        off_route=(60.126323, 15.491086),
+        # Stora Kloten, 862 m from the network.
+        nowhere=(59.874705, 15.277326),
+        # Read through the page's heightAt, on the lake's register position.
+        nowhere_height=266.390625,
+        # Norra Barken, 928 m and 1,014 m from the network: another lake so
+        # the picker has not already read the height tile the timeout check holds.
+        open_water=((60.126323, 15.491086), (60.128123, 15.491086)),
+        # One straight road segment, with its midpoint: two 120 m steps north-east.
+        walk=((59.883340, 15.297157), (59.8844055, 15.297524), (59.885471, 15.297891)),
+        standing=(59.900241, 15.269114),
+        a_step=(59.900261, 15.269134),
+        a_walk=(59.902041, 15.269114),
+        # Measured in SWEREF 99 TM: 5.01 x 8.96 km around Kloten.
+        kept_area=((59.875, 15.20), (59.920, 15.20), (59.920, 15.36), (59.875, 15.36)),
+        unkept=(60.16, 15.90),
+        far_off_the_map=(58.900241, 15.269114),
+        heights_path="/dem/lantmateriet-malingsbo-kloten/1/",
+        relief_path="/shade/lantmateriet-malingsbo-kloten/1/",
+        slope_path="/slope/lantmateriet-malingsbo-kloten/1/",
+        vegetation_path="/vegetation/lantmateriet-malingsbo-kloten/1/",
+        forest_path="/forest/lantmateriet-malingsbo-kloten/1/",
+        mire_path="/mire/lantmateriet-malingsbo-kloten/1/",
+        mire_classes=4,
+        mire_sources=("Marktäcke Nedladdning, vektor", "SLU Markfuktighetskarta, klassad"),
+        base_maps=1,
+        borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
+        search_for="Kloten",
+        # A graph node by Kloten; the seconds form rounds 0.37 m from it.
+        typed=(59.89850, 15.26709),
+        over_http=True,
+        cap=17,
+        figures={
+            # Twice the rebuilt page's measured 1,240 ms, allowing two drives.
+            "map build ceiling in ms (Firefox on forge)": 2480,
+            "paths in the overlay pane": 13124,
+            "of them chains drawn as lines": 12779,
+            "and chains drawn as circle markers": 344,
+            "things in the marker pane": 653,
+            "words the label tables did not know": 0,
+            "checkboxes in the legend": 21,
+            "of them switched off": 4,
+            "zoom before": 10,
+            "zoom after": 12,
+            "desktop: map free with nothing asked for": 97.8,
+            "upright: map free with nothing asked for": 98,
+            "sideways: map free with nothing asked for": 97.8,
+            "and the legend is what is in it": 21,
+            "m shown by a quarter-width drag": 12111,
+            "sideways: px the drawing takes": 109,
+            "sideways: px the panel is": 189,
+            "px of map left above it": 562,
+            "links to pages published elsewhere": 0,
+            "and it still finds a name": 9,
+            "rows the list draws for the scene's name": 9,
+            "and what width it says": 66,
+            "readable in the light set": 15.1,
+            "what it weighs": 647,
+            "packs kept for the tiny scope and overview": 81,
+            "estimated bytes for the tiny scope and overview": 53754310,
+            "packs in the sheet and overlay overview": 23,
+            "estimated bytes in the sheet and overlay overview": 16989914,
+            "packs the whole map holds at its cap": 2544,
+        },
+        # No measured tap pair, loop or sound; the page's marked trails carry
+        # no names borrowed from Leder, so there is no name to compare either.
+        skips=(
+            "a tap beside a path in plan mode",
+            "a planned leg that is not worth routing",
+            "a way across a sound goes round by land",
+            "a borrowed name has its register under it",
+        ),
+        # The measured 29.3 % detour leaves margin above this scene's 20 % floor.
+        way_over_flight=1.2,
+        # The tap lands on a dry path; both legs are routed, with no water parts.
+        goal_stop=(59.902132, 15.211080),
+        # 201 m beyond the route's end: the 120 m and 15 m fixes span 72.7° and 8.5°.
+        aim_from=(59.882007, 15.060653),
+        # A 3.436 km road edge; the half and quarter legs stay on it end to end.
+        long_edge=65792,
+        # Two nodes across Dammtjärnsbäcken, measured against the page's own
+        # router and water grid: 357 m straight, crossing a 66 m river outline;
+        # stay on paths takes 2.343 km round with no straight part.
+        river_goal=RiverGoal(
+            standing=(59.826928, 15.173356),
+            goal=(59.828695, 15.168055),
+            label="Across Dammtjärnsbäcken",
+            river="Dammtjärnsbäcken",
+            straight=(300, 400),
         ),
     ),
 }
@@ -5767,7 +5876,7 @@ def the_way_to_the_next_goal(page: Any) -> Check:
     # identical twice. The hold is one-way, so vague then sharp drives both
     # circles; and a watch switched off keeps nothing, which is what gets the
     # first of them onto the screen.
-    off = (places[0]["lat"] + 0.0018, places[0]["lon"])
+    off = SCENE.aim_from or (places[0]["lat"] + 0.0018, places[0]["lon"])
     page.evaluate("() => window.trailsChrome.here(false)")
     page.wait_for_timeout(400)
     page.context.set_geolocation({"latitude": off[0], "longitude": off[1], "accuracy": 120})
@@ -6772,22 +6881,23 @@ def a_tap_beside_a_path_in_plan_mode(page: Any) -> Check:
 
 
 #: The ground a tap on a long stretch of trail is driven on, chosen from the
-#: page's own graph so it needs no measuring by hand: the longest edge that is
-#: walked ground (no crossing, no connector), its two ends, and the places a
-#: half and three quarters of the way along it.
-A_LONG_EDGE = """() => window.trailsGraph.ready.then(g => {
+#: page's own graph: the scene's measured edge, or the longest walked edge
+#: (no crossing, no connector), and places half and three quarters along it.
+A_LONG_EDGE = """(chosen) => window.trailsGraph.ready.then(g => {
   const E = g.header.edges, co = g.coordinates, at = g.vertexAt;
   const m = (aLon, aLat, bLon, bLat) => { const s = Math.cos(aLat * Math.PI / 180);
     const dx = (bLon - aLon) * s, dy = bLat - aLat; return Math.sqrt(dx * dx + dy * dy) * 111320; };
   const crossing = g.header.crossingKind || 'ferry', connector = g.header.connectorKind || 'connector';
   let best = -1, longest = 0;
   for (let i = 0; i < E; i++) {
+    if (chosen !== null && i !== chosen) continue;
     const kind = g.header.sources[g.sources[i]].kind;
     if (kind === 'ferry' || kind === 'bridge' || kind === 'crossing' || kind === 'connector') continue;
     let run = 0;
     for (let v = at[i] + 1; v < at[i + 1]; v++) run += m(co[2 * v - 2], co[2 * v - 1], co[2 * v], co[2 * v + 1]);
     if (run > longest) { longest = run; best = i; }
   }
+  if (best < 0) return null;
   const along = (want) => { let run = 0;
     for (let v = at[best] + 1; v < at[best + 1]; v++) {
       const seg = m(co[2 * v - 2], co[2 * v - 1], co[2 * v], co[2 * v + 1]);
@@ -6811,8 +6921,8 @@ def a_tap_in_the_middle_of_a_long_edge(page: Any) -> Check:
     length and 32 % of Lomsdal's lie more than 21 m -- a finger at z15 -- from
     any node.
 
-    The ground is the page's own longest walked edge, so it needs no measuring
-    by hand and moves with the graph. Driven: a tap half way along it stands on
+    The ground is the scene's measured edge, or the page's longest walked edge
+    where that beats walking straight. Driven: a tap half way along it stands on
     the edge and not on a node, its leg from the edge's own end is path end to
     end and as long as the metres along the edge say, a second tap further along
     is path again, and a place put down exactly beside the line -- a hut's
@@ -6828,7 +6938,7 @@ def a_tap_in_the_middle_of_a_long_edge(page: Any) -> Check:
     Returns:
         Where the taps landed, what their legs are made of, and what is drawn
     """
-    ground = page.evaluate(A_LONG_EDGE)
+    ground = page.evaluate(A_LONG_EDGE, SCENE.long_edge)
     if not ground or ground["metres"] < 400:
         return Check("a tap in the middle of a long edge", skipped="this page has no walked edge of 400 m to tap into")
     page.set_viewport_size({"width": 390, "height": 844})
@@ -7248,6 +7358,8 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     # figures have to say so. Set through the switch the button in the row arms,
     # because that is the gesture a reader performs.
     aside = {"lat": (here["lat"] + there["lat"]) / 2 + 0.012, "lng": (here["lng"] + there["lng"]) / 2}
+    if SCENE.goal_stop is not None:
+        aside = {"lat": SCENE.goal_stop[0], "lng": SCENE.goal_stop[1]}
     page.evaluate("() => window.trailsChrome.aiming('stop')")
     page.wait_for_timeout(300)
     armed_stop = page.evaluate("() => window.trailsChrome.state().aimingFor")
@@ -8876,7 +8988,7 @@ THE_RELIEF = """() => { const svg = document.querySelector('.trails-profile-char
   const mark = document.querySelector('.trails-profile-lift');
   return {said: window.trailsProfilePanel.scale(),
           mark: mark && mark.offsetParent !== null ? mark.textContent.trim() : null,
-          band: isFinite(top) ? Math.round(bottom - top) : null,
+          band: isFinite(top) ? bottom - top : null,
           chart: Math.round(svg.getBoundingClientRect().height),
           bands: bands}; }"""
 
@@ -8948,7 +9060,8 @@ def two_scales_for_one_profile(page: Any) -> Check:
                 note=f"{readable['band']} px of {readable['chart']} at \u00d7{round(readable['said']['lift'])}",
             ),
             Reading("the ground's own scale draws a ribbon", ground["band"] < 12, True, note=f"{ground['band']} px"),
-            Reading("and it is the factor apart", round(readable["band"] / max(1, ground["band"])), round(readable["said"]["lift"]), within=2),
+            # Rounding the bands before division distorts the ratio on flat ground.
+            Reading("and it is the factor apart", readable["band"] / ground["band"], readable["said"]["lift"], within=2),
             # The mark is the way there and back, and it says which scale it is
             # at rather than which one it offers.
             Reading("the mark presses through to the ground's own", ground["said"]["mode"], "true"),
@@ -10457,11 +10570,10 @@ def the_zoom_the_scale_says(page: Any) -> Check:
     what it is showing, and a number nobody ever meets again is a number nobody
     can choose between.
 
-    The pairing is arithmetic and not a lookup: ``L.control.scale`` uses
-    ``maxWidth: 100``, and at 65.5 N the ground resolution is 64,917 / 2^z. So
-    the bar reads 100 m at z15, 50 m at z16 and 30 m at z17, and no reading is
-    shared by two zooms -- which is what makes a screenshot readable back to a
-    zoom, something every report about this page has so far had to guess at.
+    The pairing follows Leaflet's metric scale: measure the ground under its
+    hundred-pixel width at the view's middle, then round down to a preferred
+    length. The latitude belongs to the scene, so a northern map's bar is not
+    the expectation for every map.
 
     Args:
         page: A page already loaded and settled
@@ -10472,9 +10584,17 @@ def the_zoom_the_scale_says(page: Any) -> Check:
     """
     was = page.evaluate(with_map("() => ({at: __MAP__.getCenter(), z: __MAP__.getZoom()})"))
     readings = []
-    for zoom, bar in ((15, "100 m"), (16, "50 m")):
+    for zoom in (15, 16):
         page.evaluate(with_map("(v) => { __MAP__.setView([v[0], v[1]], v[2]); }"), [*SCENE.position, zoom])
         page.wait_for_timeout(400)
+        metres = page.evaluate(
+            with_map("""() => { const y = __MAP__.getSize().y / 2;
+              return __MAP__.distance(__MAP__.containerPointToLatLng([0, y]),
+                                     __MAP__.containerPointToLatLng([100, y])); }""")
+        )
+        magnitude = 10 ** (len(str(math.floor(metres))) - 1)
+        length = next(step for step in (10, 5, 3, 2, 1) if step <= metres / magnitude) * magnitude
+        bar = f"{length} m" if length < 1000 else f"{length / 1000:g} km"
         said = page.evaluate(
             """() => ({
                 zoom: (document.querySelector('.trails-scale-zoom') || {}).textContent,
