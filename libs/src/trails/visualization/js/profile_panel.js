@@ -1917,12 +1917,6 @@
             offer.appendChild(carries);
             offer.appendChild(licensed);
             offer.appendChild(noted);
-            var garminDownload = saveEntry('For Garmin (course)',
-                'One line of at most 200 points; Garmin Explore imports it as a course that syncs to the watch',
-                function () { saveGarminNow(); });
-            garminDownload.className = 'trails-profile-garmin';
-            garminDownload.style.display = 'none';
-            offer.appendChild(garminDownload);
             // The button and what the file carries on the left, the colour key
             // on the right: one row of things about the drawing rather than
             // three stacked above it. `key` keeps its own margins, so it is
@@ -4335,7 +4329,6 @@
                 // series nobody described cannot write a file, and a mark that
                 // does nothing is worse than no mark.
                 download.style.display = writable ? 'flex' : 'none';
-                garminDownload.style.display = writable && selected.composed ? 'block' : 'none';
                 garminDownload.disabled = true;
                 noted.textContent = '';
                 // A place has no walk to write out and no sources of its own --
@@ -4420,31 +4413,33 @@
                 }
                 download.addEventListener('click', function (event) {
                     event.stopPropagation();
-                    // **One mark, and the choice behind it -- but only where
-                    // there is a choice.** A tour cut into stages can be had as
-                    // one file or as an archive of them; a tour that is one
-                    // stage would be offered the same file twice under two
-                    // names, which is what the plan panel's own save has always
-                    // said and is said once here rather than twice.
-                    var cut = planning() && window.trailsPlan && window.trailsPlan.stages
-                        ? window.trailsPlan.stages() : 0;
-                    if (cut > 1) {
+                    // Every composed route has a choice: the ordinary GPX or
+                    // a Garmin course. Only the archive needs multiple stages;
+                    // a chain still saves directly from this mark.
+                    if (selected && selected.composed) {
+                        var cut = planning() && window.trailsPlan && window.trailsPlan.stages
+                            ? window.trailsPlan.stages() : 0;
+                        stagesDownload.style.display = cut > 1 ? 'block' : 'none';
                         saveMenu.style.display = saveMenu.style.display === 'block' ? 'none' : 'block';
                         return;
                     }
                     saveMenu.style.display = 'none';
                     saveNow();
                 });
-                // The two files a planned tour can be, in the row it is being
-                // planned from. Both are plan mode's own writers: a second
-                // writer would eventually disagree with the first about a route
-                // it was handed the same way.
+                // The same choices and order as the plan panel's save menu,
+                // using the existing writers for both files and the archive.
                 saveMenu.appendChild(saveEntry('Whole tour (GPX)',
                     'The whole route as one GPX file, its stage marks and all',
                     function () { saveNow(); }));
-                saveMenu.appendChild(saveEntry('All stages (zip)',
+                var garminDownload = saveEntry('For Garmin (course)',
+                    'One line of at most 200 points; Garmin Explore imports it as a course that syncs to the watch',
+                    function () { saveGarminNow(); });
+                garminDownload.className = 'trails-profile-garmin';
+                saveMenu.appendChild(garminDownload);
+                var stagesDownload = saveEntry('All stages (zip)',
                     'Every stage and the whole tour, as ordinary GPX and Garmin courses, in one archive',
-                    function () { if (window.trailsPlan && window.trailsPlan.saveStages) { window.trailsPlan.saveStages(); } }));
+                    function () { if (window.trailsPlan && window.trailsPlan.saveStages) { window.trailsPlan.saveStages(); } });
+                saveMenu.appendChild(stagesDownload);
             }
 
             // Everything that happens whatever is selected. Two things reach

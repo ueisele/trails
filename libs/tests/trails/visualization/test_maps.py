@@ -4064,7 +4064,11 @@ class TestProfilePanel:
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "if (cut > 1) {" in html
+        assert "stagesDownload.style.display = cut > 1 ? 'block' : 'none';" in html
+        clicking = html.split("download.addEventListener('click', function (event) {")[1].split("\n                });")[0]
+        assert "if (selected && selected.composed) {" in clicking
+        assert "if (cut > 1)" not in clicking
+        assert "saveNow();" in clicking
         assert "saveEntry('Whole tour (GPX)'," in html
         assert "saveEntry('All stages (zip)'," in html
         # Plan mode's own writer, asked for by name: a second writer would
@@ -7979,7 +7983,13 @@ class TestGarminExport:
         panel = files("trails.visualization").joinpath("js", "profile_panel.js").read_text(encoding="utf-8")
         planning = files("trails.visualization").joinpath("js", "plan_mode.js").read_text(encoding="utf-8")
         assert "garminDownload.disabled = download.disabled;" in panel
-        assert "writable && selected.composed ? 'block' : 'none'" in panel
+        assert "saveMenu.appendChild(garminDownload);" in panel
+        assert "offer.appendChild(garminDownload);" not in panel
+        assert (
+            panel.index("saveEntry('Whole tour (GPX)',")
+            < panel.index("saveEntry('For Garmin (course)',")
+            < panel.index("saveEntry('All stages (zip)',")
+        )
         assert "function () { saveGarminNow(); }" in panel
         assert "garminFile.disabled = oneFile.disabled;" in planning
         assert "var garmin = file.cloneNode(false);" in planning

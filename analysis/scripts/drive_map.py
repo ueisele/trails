@@ -3546,7 +3546,14 @@ def files_from_the_page(page: Any) -> Check:
     # every other tool on this page, so there is no text to match on -- and a
     # probe that aims by what a control *says* is a probe with an expiry date,
     # which this suite has already learned twice about aiming by position.
-    press_download = """() => { document.querySelector('.trails-profile-gpx').click(); }"""
+    # A composed route always offers ordinary GPX and Garmin; choose the
+    # ordinary file for this round-trip check and for the share-sheet check.
+    press_download = """() => {
+        document.querySelector('.trails-profile-gpx').click();
+        const whole = [...document.querySelectorAll('.trails-profile-savemenu button')]
+            .find(button => button.textContent === 'Whole tour (GPX)');
+        whole.click();
+    }"""
     with page.expect_download(timeout=25_000) as caught:
         page.evaluate(press_download)
     written = caught.value

@@ -14,7 +14,8 @@ on. Where a claim comes from this repository instead, it names the file, and tho
 
 ## 1. The decision in one paragraph
 
-**The track is already solved and needs no code. The map is a project, and only the small half of
+**The export imports into Explore as a Track; the Garmin course file, built on 2026-09-20, is
+the small piece of code that was needed (§3). The map is a project, and only the small half of
 it is worth doing.** A GPX reaches the fēnix 7 offline through **Garmin Explore** over Bluetooth,
 and the map's existing share sheet already feeds it: `saveFile` in
 `libs/src/trails/visualization/maps.py:5997` hands a named `File` to `navigator.share`, and Explore
@@ -493,8 +494,8 @@ the successes from desktop machines. Nothing here has been run on a Pi with a f�
 
 Not a schedule. The order the pieces depend on each other.
 
-1. **Measure §12 first.** Especially the Explore questions, which are free and which may remove work
-   from §3.
+1. **Measure the remaining §12 questions first.** The Explore questions were answered on
+   2026-09-19; they established the need for §3’s course export, built on 2026-09-20.
 2. **The bridge.** `ogr2osm` converts an OGR-readable source to OSM XML, which is the only thing
    mkgmap reads. It takes a Python translation file mapping source attributes to OSM tags. Half of
    this exists already: `io/sources/geonorge_codes.py` and `geonorge_translations.py` have the N50
