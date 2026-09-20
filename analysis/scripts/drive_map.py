@@ -460,8 +460,8 @@ SCENES: dict[str, Scene] = {
             # 72 to 74, OSM 486 to 494, the register's own 17 either way.
             # Twelve paths and twelve circle markers fewer since §9.31: the
             # register's facilities were dots in the overlay pane and are pins.
-            "paths in the overlay pane": 891,
-            "of them chains drawn as lines": 886,
+            "paths in the overlay pane": 893,
+            "of them chains drawn as lines": 888,
             "and chains drawn as circle markers": 4,
             # Of the sixty longest marked-trail chains (§9.26).
             "chains named after a register trail": 32,
@@ -476,7 +476,7 @@ SCENES: dict[str, Scene] = {
             # the station 251 m to where it is and they are two again.
             # 233 with §9.40: 50 remains off Norrbotten's Kulturmiljöregistret
             # file -- 26 house foundations and 24 kåta sites -- as pins and on.
-            "things in the marker pane": 233,
+            "things in the marker pane": 232,
             "words the label tables did not know": 0,
             # Nineteen: the relief shadow had a row here for a day and is a
             # checkbox under the sheet in the base-map panel since (§6.6).
@@ -496,12 +496,12 @@ SCENES: dict[str, Scene] = {
             "px of map left above it": 562,
             "sideways: px the drawing takes": 109,
             "sideways: px the panel is": 189,
-            "and it still finds a name": 16,
+            "and it still finds a name": 23,
             # The sixteen matches for *Abiskojaure* are twelve rows: one row per
             # named thing, and Topografi 50 draws BD 26 in four chains and BD 21
             # in two (§9.27). The names that carry two register numbers are rows
             # of their own, because they are other names.
-            "rows the list draws for the scene's name": 12,
+            "rows the list draws for the scene's name": 18,
             "m shown by a quarter-width drag": 8114,
             "readable in the light set": 15.1,
             "what it weighs": 463,
@@ -621,7 +621,7 @@ SCENES: dict[str, Scene] = {
             "paths in the overlay pane": 13149,
             "of them chains drawn as lines": 12804,
             "and chains drawn as circle markers": 344,
-            "things in the marker pane": 653,
+            "things in the marker pane": 578,
             "words the label tables did not know": 0,
             "checkboxes in the legend": 21,
             "of them switched off": 4,
@@ -662,7 +662,9 @@ SCENES: dict[str, Scene] = {
         # 201 m beyond the route's end: the 120 m and 15 m fixes span 72.7° and 8.5°.
         aim_from=(59.882007, 15.060653),
         # A 3.436 km road edge; the half and quarter legs stay on it end to end.
-        long_edge=65792,
+        # Renumbered 65792 → 65812 when the route identities of phase 8 added 34
+        # edges before it; the same 3,436 m Topografi 50 road at 59.8839 N 15.7402 E.
+        long_edge=65812,
         # Two nodes across Dammtjärnsbäcken, measured against the page's own
         # router and water grid: 357 m straight, crossing a 66 m river outline;
         # stay on paths takes 2.343 km round with no straight part.
