@@ -272,7 +272,7 @@ PARKS: dict[str, Park] = {
         companions=maps.Companions.of("malingsbo-kloten"),
         bounds=(14.967, 59.729, 15.922, 60.176),
         ut_routes=None,
-        naturkartan=None,
+        naturkartan="malingsbo-kloten-naturkartan.toml",
         county=("örebro", "dalarna", "västmanland"),
     ),
 }
@@ -1048,6 +1048,9 @@ UT_LINK_FIELDS = {
 #: which none does.
 NATURKARTAN_LINK_FIELDS = {"naturkartan": "→ On Naturkartan"}
 
+#: The relation names its own page; OSM records the link, not its publisher.
+OSM_ROUTE_LINK_FIELDS = {"route_pages": "→ Route page", **NATURKARTAN_LINK_FIELDS}
+
 TRAIL_POPUP_FIELDS = {
     "trail_name": "Route",
     "trail_number": "Number",
@@ -1074,6 +1077,10 @@ TRAIL_POPUP_FIELDS = {
 
 OSM_POPUP_FIELDS = {
     "name": "Name",
+    "route_ref": "Route reference",
+    "route_from": "From",
+    "route_to": "To",
+    "route_operator": "Maintained by",
     "highway": "Type",
     "surface": "Surface",
     "sac_scale": "SAC scale",
@@ -2657,23 +2664,43 @@ def describe_norway(frames: dict[str, gpd.GeoDataFrame]) -> dict[str, gpd.GeoDat
     return frames
 
 
-def naturkartan_links(numbers: object, pages: dict[str, str]) -> tuple[tuple[str, str], ...] | None:
-    """The Naturkartan pages describing a chain of the register's state trails.
+def naturkartan_links(identities: object, pages: dict[str, str]) -> tuple[tuple[str, str], ...] | None:
+    """The Naturkartan pages describing a chain's route numbers or names.
 
     Args:
-        numbers: The chain's ``route_id``: one state trail number, or several
-            joined by :data:`IDENTITY_SEPARATOR` where trails run on into each
-            other, or nothing
-        pages: The catalogue, page URL by number
+        identities: State trail numbers or OSM relation names, joined by
+            :data:`IDENTITY_SEPARATOR` where routes run into each other
+        pages: The catalogue, page URL by number or name
 
     Returns:
-        One ``(text, url)`` pair per number the catalogue has a page for, in
+        One ``(text, url)`` pair per identity the catalogue has a page for, in
         the chain's order -- or None, so the popup writes no heading over
         nothing
     """
-    if not isinstance(numbers, str):
-        return None
-    links = tuple((f"→ {number} on Naturkartan", pages[number]) for number in numbers.split(IDENTITY_SEPARATOR) if number in pages)
+    links = tuple((f"→ {identity} on Naturkartan", pages[identity]) for identity in parts_of(identities) if identity in pages)
+    return links or None
+
+
+def hiking_relation_links(ids: object, pages: dict[str, tuple[str, str]]) -> tuple[tuple[str, str], ...] | None:
+    """Link a chain's hiking relations under their own names.
+
+    Args:
+        ids: Relation ids joined by the chain identity separator
+        pages: Relation id to its name and website, kept together so a chain
+            with several relations cannot pair one name with another's URL
+
+    Returns:
+        Named http(s) links, or None where no relation has a website
+    """
+    links = tuple(
+        dict.fromkeys(
+            (f"→ {name}", url)
+            for identity in parts_of(ids)
+            if identity in pages
+            for name, url in [pages[identity]]
+            if name.strip() and url.startswith(naturkartan.URL_SCHEMES)
+        )
+    )
     return links or None
 
 
@@ -3723,6 +3750,15 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     # where the line runs along it, so this links what it is.
     marked = by_source[T50_TRAILS]
     marked["naturkartan"] = pd.Series([naturkartan_links(numbers, pages) for numbers in marked["route_id"]], index=marked.index, dtype=object)
+    relations = overpass.Source(cache_dir=args.cache_dir).fetch_hiking_relations(bounds_of(zone))
+    route_pages = {
+        str(row.osm_id): (row.name.strip(), row.website)
+        for row in relations.itertuples()
+        if isinstance(row.name, str) and isinstance(row.website, str)
+    }
+    osm = by_source[OSM]
+    osm["route_pages"] = pd.Series([hiking_relation_links(ids, route_pages) for ids in osm["route_osm_id"]], index=osm.index, dtype=object)
+    osm["naturkartan"] = pd.Series([naturkartan_links(name, pages) for name in osm["identity"]], index=osm.index, dtype=object)
     roads = by_source[T50_ROADS]
     ferries = by_source[sweden.FERRIES]
     layer_of = split_at_the_boundary(
@@ -3917,7 +3953,16 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         TrailLayer(
             winter, "Winter trails, not routable [Leder+Topografi 50]", "#90caf9", 2.0, WINTER_POPUP_FIELDS, dash="6,6", chains=False, show=False
         ),
-        TrailLayer(layer_of[f"{OSM}/approach"], f"Paths, outside {which.kind_label} [OSM]", "#ce93d8", 1.5, OSM_POPUP_FIELDS, search_field="name"),
+        TrailLayer(
+            layer_of[f"{OSM}/approach"],
+            f"Paths, outside {which.kind_label} [OSM]",
+            "#ce93d8",
+            1.5,
+            OSM_POPUP_FIELDS,
+            OSM_ROUTE_LINK_FIELDS,
+            search_field="name",
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
+        ),
         TrailLayer(layer_of[f"{T50_PATHS}/approach"], f"Paths, outside {which.kind_label} [Topografi 50]", "#80cbc4", 1.5, T50_PATH_POPUP_FIELDS),
         TrailLayer(
             layer_of[f"{T50_TRAILS}/approach"],
@@ -3939,7 +3984,16 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             search_field="trail_name",
             link_heading=PUBLISHED_ELSEWHERE_HEADING,
         ),
-        TrailLayer(layer_of[f"{OSM}/park"], f"Paths in {which.kind_label} [OSM]", "#8e24aa", 2.5, OSM_POPUP_FIELDS, search_field="name"),
+        TrailLayer(
+            layer_of[f"{OSM}/park"],
+            f"Paths in {which.kind_label} [OSM]",
+            "#8e24aa",
+            2.5,
+            OSM_POPUP_FIELDS,
+            OSM_ROUTE_LINK_FIELDS,
+            search_field="name",
+            link_heading=PUBLISHED_ELSEWHERE_HEADING,
+        ),
         TrailLayer(layer_of[f"{T50_PATHS}/park"], f"Paths in {which.kind_label} [Topografi 50]", "#00796b", 2.5, T50_PATH_POPUP_FIELDS),
         TrailLayer(
             layer_of[f"{T50_TRAILS}/park"],

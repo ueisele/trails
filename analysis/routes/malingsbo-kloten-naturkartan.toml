@@ -1,0 +1,37 @@
+# Naturkartan's pages for the Bergslagsleden over the Malingsbo-Kloten box.
+#
+# Researched by hand on 2026-09-20 through naturkartan.se's own live search,
+# by Kloten, Gillersklack, Stjärnfors, Nyberget and Uskavi. All four stages
+# were found; none needs the guide as a fallback. The search's /sv/unknown/
+# links redirect to the canonical pages below. Every stage and the guide
+# answered 200 on 2026-09-20, checked at 22:11 UTC.
+#
+# The ids are OSM's relation names, with the guide under Bergslagsleden.
+# Other named hiking relations in the box were not researched on Naturkartan;
+# their own website, where OSM records one, is linked separately. Nothing but
+# the link is taken from Naturkartan: the lines and membership come from OSM.
+
+name = "Malingsbo-Kloten"
+compiled = "2026-09-20"
+source = "https://www.naturkartan.se"
+publisher = "Region Örebro län"
+
+[[trail]]
+id = "Bergslagsleden"
+url = "https://www.naturkartan.se/sv/bergslagsleden"
+
+[[trail]]
+id = "Bergslagsleden Etapp 1"
+url = "https://www.naturkartan.se/sv/orebro-lan/kloten-gillersklack-bergslagsleden-etapp-1"
+
+[[trail]]
+id = "Bergslagsleden Etapp 2"
+url = "https://www.naturkartan.se/sv/orebro-lan/gillersklack-stjarnfors-bergslagsleden-etapp-2"
+
+[[trail]]
+id = "Bergslagsleden Etapp 3"
+url = "https://www.naturkartan.se/sv/orebro-lan/stjarnfors-nyberget-bergslagsleden-etapp-3"
+
+[[trail]]
+id = "Bergslagsleden Etapp 4"
+url = "https://www.naturkartan.se/sv/orebro-lan/nyberget-uskavi-bergslagsleden-etapp-4"

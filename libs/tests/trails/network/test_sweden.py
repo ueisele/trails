@@ -125,3 +125,76 @@ class TestSharedUnderSwedishNames:
         zone = zone_around(area, 10.0)
         assert zone.to_crs(METRIC_CRS).area.sum() > area.to_crs(METRIC_CRS).area.sum()
         assert naturvardsregistret.CRS == METRIC_CRS
+
+
+class TestHikingRelations:
+    def test_membership_names_several_routes_and_keeps_way_names(self):
+        ways = gpd.GeoDataFrame(
+            {"osm_id": [10, 20, 30], "name": ["Local name", "Other way", None]},
+            geometry=[LineString([(0, 0), (1, 0)])] * 3,
+            crs=METRIC_CRS,
+            index=[3, 5, 7],
+        )
+        relations = pd.DataFrame(
+            [
+                {
+                    "osm_id": 1,
+                    "way_ids": (10,),
+                    "name": "Stage A",
+                    "ref": "A",
+                    "from": "Start",
+                    "to": "End",
+                    "website": "https://example.org/a",
+                    "operator": "Region",
+                },
+                {"osm_id": 2, "way_ids": (10, 30), "name": "Stage B", "ref": "B", "from": "End", "to": "Next", "website": None, "operator": None},
+                {"osm_id": 3, "way_ids": (20,), "name": None, "ref": None, "from": None, "to": None, "website": None, "operator": None},
+            ]
+        )
+        named = sweden.with_hiking_relations(ways, relations)
+        assert named["route_name"].tolist() == ["Stage A / Stage B", "Other way", "Stage B"]
+        assert named.loc[3, "route_osm_id"] == "1 / 2"
+        assert named.loc[3, "route_ref"] == "A / B"
+        assert named.loc[3, "route_from"] == "End / Start"
+        assert named.loc[3, "route_to"] == "End / Next"
+        assert named.loc[3, "route_website"] == "https://example.org/a"
+        assert named.loc[3, "name"] == "Local name"
+        assert named.loc[5, "route_osm_id"] is None
+        assert "route_name" not in ways
+        assert named.geometry.equals(ways.geometry)
+
+    def test_no_relations_preserves_names(self):
+        ways = gpd.GeoDataFrame({"osm_id": [10], "name": [None]}, geometry=[LineString([(0, 0), (1, 0)])], crs=METRIC_CRS)
+        named = sweden.with_hiking_relations(ways, pd.DataFrame())
+        assert named["route_name"].isna().all()
+        assert named["route_osm_id"].isna().all()
+
+
+def test_relation_identity_continues_inside_a_stage():
+    """A way boundary with different local names is still one hiking stage."""
+    from trails.routing.chains import chains_of
+
+    ways = gpd.GeoDataFrame(
+        {"osm_id": [10, 20], "name": ["Local path", None]},
+        geometry=[LineString([(0, 0), (100, 0)]), LineString([(100, 0), (200, 0)])],
+        crs=METRIC_CRS,
+    )
+    relations = pd.DataFrame(
+        [
+            {
+                "osm_id": 2343343,
+                "way_ids": (10, 20),
+                "name": "Bergslagsleden Etapp 1",
+                "ref": "1",
+                "from": "Kloten",
+                "to": "Gillersklack",
+                "website": "https://www.bergslagsleden.se/etapper/leden/etapp-1/",
+                "operator": None,
+            }
+        ]
+    )
+    named = sweden.with_hiking_relations(ways, relations)
+    chains = chains_of(NetworkSource(sweden.OSM, named, identity_field="route_name"), metric_crs=METRIC_CRS)
+    assert len(chains) == 1
+    assert chains.iloc[0]["identity"] == "Bergslagsleden Etapp 1"
+    assert chains.iloc[0]["length_m"] == ways.length.sum()

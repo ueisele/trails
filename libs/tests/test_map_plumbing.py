@@ -31,7 +31,8 @@ def test_each_map_names_its_gateway_form_and_check(builder):
     assert builder.PARKS["abisko"].county == ("norrbotten",)
     which = builder.PARKS["malingsbo-kloten"]
     assert which.gateway == "Kopparberg"
-    assert which.check_route is None and which.naturkartan is None
+    assert which.check_route is None
+    assert which.naturkartan == "malingsbo-kloten-naturkartan.toml"
     assert which.form == nvr.NATURE_CONSERVATION_AREA
     assert which.kind_label == "nature conservation area"
     assert which.app_name == "Malingsbo-Kloten Atlas"
@@ -200,3 +201,28 @@ def test_drive_all_filters_scenes_runs_together_and_sums_statuses(tmp_path, targ
     assert result.returncode != 0
     assert not (tmp_path / "no-scene.started").exists()
     assert not (tmp_path / "unbuilt.started").exists()
+
+
+def test_naturkartan_links_accept_names_and_numbers(builder):
+    pages = {"BD 21": "https://example.org/bd21", "Bergslagsleden Etapp 1": "https://example.org/etapp1"}
+    assert builder.naturkartan_links("BD 21 / Bergslagsleden Etapp 1 / Uncatalogued", pages) == (
+        ("→ BD 21 on Naturkartan", pages["BD 21"]),
+        ("→ Bergslagsleden Etapp 1 on Naturkartan", pages["Bergslagsleden Etapp 1"]),
+    )
+    assert builder.naturkartan_links(None, pages) is None
+    assert builder.naturkartan_links("Uncatalogued", pages) is None
+
+
+def test_relation_links_keep_each_name_with_its_website(builder):
+    pages = {
+        "2343343": ("Bergslagsleden Etapp 1", "https://www.bergslagsleden.se/etapper/leden/etapp-1/"),
+        "2343621": ("Bergslagsleden Etapp 2", "https://www.bergslagsleden.se/etapper/leden/etapp-2/"),
+        "unsafe": ("Unsafe", "javascript:alert(1)"),
+        "unnamed": (" ", "https://example.org/"),
+    }
+    assert builder.hiking_relation_links("2343621 / absent / unsafe / unnamed / 2343343 / 2343621", pages) == (
+        ("→ Bergslagsleden Etapp 2", pages["2343621"][1]),
+        ("→ Bergslagsleden Etapp 1", pages["2343343"][1]),
+    )
+    assert builder.hiking_relation_links(None, pages) is None
+    assert builder.hiking_relation_links("absent / unsafe / unnamed", pages) is None

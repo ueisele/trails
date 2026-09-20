@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 
 import geopandas as gpd
+import pandas as pd
 import requests
 from shapely.geometry import LineString, Point
 
@@ -22,6 +23,8 @@ from ..cache import Object as ObjectCache
 MIRRORS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    # Answered for Sweden on 2026-09-20 when the first two mirrors were busy.
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
 )
 
@@ -276,6 +279,49 @@ class Source:
         self.cache.save(cache_key, gdf, metadata={"bbox": bbox, "highway_types": list(highway_types), "count": len(gdf)})
         self.loaded_at = self.cache.cached_at(cache_key)
         return gdf
+
+    def fetch_hiking_relations(self, bounds: Bounds, force_download: bool = False) -> pd.DataFrame:
+        """Fetch hiking routes and the ways that belong to them.
+
+        Args:
+            bounds: (min_lon, min_lat, max_lon, max_lat) in WGS84
+            force_download: Bypass the cache and re-query Overpass
+
+        Returns:
+            One row per relation, with ``osm_id``, ``way_ids`` and the tags
+            ``name``, ``ref``, ``from``, ``to``, ``website`` and ``operator``.
+            Members are way ids only; unnamed relations are kept.
+        """
+        bbox = _to_overpass_bbox(bounds)
+        cache_key = f"osm_relations_{bbox.replace(',', '_')}_hiking"
+        if not force_download and self.cache.exists(cache_key):
+            print("Loading OSM hiking relations from cache...")
+            cached = self.cache.load(cache_key)
+            assert isinstance(cached, pd.DataFrame)
+            self.loaded_at = self.cache.cached_at(cache_key)
+            return cached
+
+        ql = f'[out:json][timeout:180];relation["route"="hiking"]({bbox});out body;'
+        print(f"Querying Overpass for hiking relations in {bbox}...")
+        payload = self.query(ql)
+        fields = ("name", "ref", "from", "to", "website", "operator")
+        records = []
+        for element in payload["elements"]:
+            if element.get("type") != "relation":
+                continue
+            tags = element.get("tags", {})
+            records.append(
+                {
+                    "osm_id": element["id"],
+                    "way_ids": tuple(dict.fromkeys(member["ref"] for member in element.get("members", []) if member.get("type") == "way")),
+                    **{field: tags.get(field) for field in fields},
+                }
+            )
+        relations = pd.DataFrame(records, columns=["osm_id", "way_ids", *fields])
+        print(f"Fetched {len(relations)} OSM hiking relations")
+        self.cache.save(cache_key, relations, metadata={"bbox": bbox, "route": "hiking", "count": len(relations)})
+        self.loaded_at = self.cache.cached_at(cache_key)
+        return relations
 
     def fetch_shelters(
         self,

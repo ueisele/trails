@@ -455,3 +455,45 @@ class TestFetchCampSites:
         assert set(gdf["osm_id"]) == {5001, 5002}
         assert gdf["kind"].unique().tolist() == ["camp_site"]
         assert gdf.geometry.geom_type.unique().tolist() == ["Point"]
+
+
+class TestFetchHikingRelations:
+    def test_members_tags_and_warm_cache(self, tmp_path):
+        source = overpass.Source(cache_dir=str(tmp_path))
+        tags = {"name": "Stage", "ref": "1", "from": "Start", "to": "End", "website": "https://example.org/stage", "operator": "Region"}
+        payload = {
+            "elements": [
+                {
+                    "type": "relation",
+                    "id": 1,
+                    "tags": tags,
+                    "members": [
+                        {"type": "way", "ref": 10},
+                        {"type": "node", "ref": 20},
+                        {"type": "way", "ref": 10},
+                        {"type": "relation", "ref": 30},
+                    ],
+                },
+                {"type": "relation", "id": 2, "members": []},
+                {"type": "way", "id": 10},
+            ]
+        }
+        bounds = (12.4, 65.3, 13.3, 65.7)
+        with patch.object(source, "query", return_value=payload) as query:
+            fetched = source.fetch_hiking_relations(bounds)
+            cached = source.fetch_hiking_relations(bounds)
+        query.assert_called_once_with('[out:json][timeout:180];relation["route"="hiking"](65.3,12.4,65.7,13.3);out body;')
+        assert fetched.iloc[0].to_dict() == {"osm_id": 1, "way_ids": (10,), **tags}
+        assert pd.isna(fetched.iloc[1]["name"])
+        assert fetched.iloc[1]["way_ids"] == ()
+        pd.testing.assert_frame_equal(fetched, cached)
+        assert source.loaded_at is not None
+
+    def test_empty_and_force_download(self, tmp_path):
+        source = overpass.Source(cache_dir=str(tmp_path))
+        with patch.object(source, "query", return_value={"elements": []}) as query:
+            source.fetch_hiking_relations((0, 0, 1, 1))
+            empty = source.fetch_hiking_relations((0, 0, 1, 1), force_download=True)
+        assert query.call_count == 2
+        assert empty.empty
+        assert list(empty.columns) == ["osm_id", "way_ids", "name", "ref", "from", "to", "website", "operator"]

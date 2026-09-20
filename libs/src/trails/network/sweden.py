@@ -27,6 +27,7 @@ kept out of the graph and handed back apart, for a legend row that is off by
 default: a line over a frozen lake is nothing to walk in August.
 """
 
+from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
@@ -36,7 +37,8 @@ import pandas as pd
 from trails.io.sources import markhojd, naturvardsregistret, overpass, topografi50
 from trails.network import graphs
 from trails.network.graphs import PROTECTED_SIMPLIFY_M, SURVEYED_FIELD, Masks, Rules
-from trails.routing import DEFAULT_MARKED_M, DEFAULT_MIN_SHARE, DEFAULT_RECORDED_M, Network, NetworkSource, with_elevation
+from trails.routing import DEFAULT_MARKED_M, DEFAULT_MIN_SHARE, DEFAULT_RECORDED_M, IDENTITY_SEPARATOR, Network, NetworkSource, with_elevation
+from trails.routing.chains import parts_of
 from trails.routing.noding import clip_lines
 from trails.routing.sources import FERRY
 from trails.utils.geo import attach_nearest
@@ -254,6 +256,40 @@ def _classes(gdf: gpd.GeoDataFrame, classes: tuple[str, ...]) -> gpd.GeoDataFram
     return gdf[gdf[topografi50.TYPE].isin(classes)]
 
 
+def with_hiking_relations(ways: gpd.GeoDataFrame, relations: pd.DataFrame) -> gpd.GeoDataFrame:
+    """Name OSM ways from the hiking routes they belong to.
+
+    Args:
+        ways: Walkable ways carrying ``osm_id`` and ``name``
+        relations: Hiking relations from Overpass, including their way ids
+
+    Returns:
+        A copy with ``route_name`` as the identity, falling back to the way's
+        own name, and the relations' ids, stage references, ends and websites.
+        Several memberships are joined with the chain identity separator;
+        relations without a name are left out.
+    """
+    members: dict[int, list[dict[Hashable, Any]]] = {}
+    for relation in relations.to_dict("records"):
+        if not parts_of(relation["name"]):
+            continue
+        for way_id in relation["way_ids"]:
+            members.setdefault(way_id, []).append(relation)
+
+    result = ways.copy()
+    for tag in ("name", "osm_id", "ref", "from", "to", "website", "operator"):
+        result[f"route_{tag}"] = pd.Series(
+            [
+                IDENTITY_SEPARATOR.join(sorted({part for relation in members.get(way_id, []) for part in parts_of(relation[tag])})) or None
+                for way_id in ways["osm_id"]
+            ],
+            index=ways.index,
+            dtype=object,
+        )
+    result["route_name"] = result["route_name"].fillna(result["name"])
+    return result
+
+
 def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     """Load every dataset the network is built from.
 
@@ -333,6 +369,7 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     print("\nLoading OpenStreetMap paths...")
     osm_source = overpass.Source(cache_dir=params.cache_dir)
     osm = clip_lines(osm_source.fetch_paths(bounds, force_download=download), extent)
+    osm = with_hiking_relations(osm, osm_source.fetch_hiking_relations(bounds, force_download=download))
 
     sources = [
         # The official marked trails. Their published unit is the state trail,
@@ -374,8 +411,21 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
             OSM,
             osm,
             cost_factor=COST_FACTORS[OSM],
-            identity_field="name",
-            attributes=("highway", "surface", "sac_scale", "trail_visibility", "osm_id"),
+            identity_field="route_name",
+            attributes=(
+                "highway",
+                "surface",
+                "sac_scale",
+                "trail_visibility",
+                "osm_id",
+                "name",
+                "route_osm_id",
+                "route_ref",
+                "route_from",
+                "route_to",
+                "route_website",
+                "route_operator",
+            ),
         ),
         NetworkSource(FERRIES, ferries, kind=FERRY, attributes=(topografi50.TYPE, "destination", SURVEYED_FIELD)),
     ]

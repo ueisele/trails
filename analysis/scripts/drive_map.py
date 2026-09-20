@@ -610,7 +610,7 @@ SCENES: dict[str, Scene] = {
         mire_sources=("Marktäcke Nedladdning, vektor", "SLU Markfuktighetskarta, klassad"),
         base_maps=1,
         borrowed_name=("trail-group-topografi-50-trails", "trail-group-leder"),
-        search_for="Kloten",
+        search_for="Bergslagsleden",
         # A graph node by Kloten; the seconds form rounds 0.37 m from it.
         typed=(59.89850, 15.26709),
         over_http=True,
@@ -618,8 +618,8 @@ SCENES: dict[str, Scene] = {
         figures={
             # Twice the rebuilt page's measured 1,240 ms, allowing two drives.
             "map build ceiling in ms (Firefox on forge)": 2480,
-            "paths in the overlay pane": 13124,
-            "of them chains drawn as lines": 12779,
+            "paths in the overlay pane": 13149,
+            "of them chains drawn as lines": 12804,
             "and chains drawn as circle markers": 344,
             "things in the marker pane": 653,
             "words the label tables did not know": 0,
@@ -636,8 +636,8 @@ SCENES: dict[str, Scene] = {
             "sideways: px the panel is": 189,
             "px of map left above it": 562,
             "links to pages published elsewhere": 0,
-            "and it still finds a name": 9,
-            "rows the list draws for the scene's name": 9,
+            "and it still finds a name": 29,
+            "rows the list draws for the scene's name": 23,
             "and what width it says": 66,
             "readable in the light set": 15.1,
             "what it weighs": 647,
@@ -1635,6 +1635,44 @@ def sea_level(page: Any) -> Check:
             Reading("the floor stands below nought", seen["floor stands at m"] < 0, True, note=f"{seen['floor stands at m']:.0f} m"),
             Reading("the 0 m line is drawn", seen["sea level drawn"], 1),
             Reading("px it stands clear of the floor", seen["clear of the floor px"] or 0, 18, within=1),
+        ],
+    )
+
+
+def bergslagsleden_pages(page: Any) -> Check:
+    """Read the stage's own page and Naturkartan's from its chain's detail.
+
+    Args:
+        page: The Malingsbo-Kloten page, before the scene's long chain is selected
+
+    Returns:
+        Whether the two published pages retain their names and URLs
+    """
+    # The 19.592 km chain of Etapp 1, measured on 2026-09-20.
+    chain = "trail-group-osm-502376-6642726-19592"
+    rows = page.evaluate("() => window.trailsSearch.find('Bergslagsleden')")
+    found = any("Bergslagsleden Etapp 1" in row["name"] and "[OSM]" in row["kind"] for row in rows)
+    page.evaluate("() => window.trailsSearch.find('')")
+    if not select(page, chain):
+        return Check("Bergslagsleden carries its published pages", skipped=f"{chain} is absent")
+    page.evaluate("() => window.trailsProfilePanel.page('details')")
+    seen = page.evaluate(
+        """() => { const detail = document.querySelector('.trails-profile-detail');
+        return {text: detail.textContent,
+                links: [...detail.querySelectorAll('a[href]')].map(a => [a.textContent.trim(), a.href])}; }"""
+    )
+    official = ["→ Bergslagsleden Etapp 1", "https://www.bergslagsleden.se/etapper/leden/etapp-1/"]
+    naturkartan = [
+        "→ Bergslagsleden Etapp 1 on Naturkartan",
+        "https://www.naturkartan.se/sv/orebro-lan/kloten-gillersklack-bergslagsleden-etapp-1",
+    ]
+    return Check(
+        "Bergslagsleden carries its published pages",
+        [
+            Reading("the search finds the stage as an OSM chain", found, True),
+            Reading("the relation's own website under its name", official in seen["links"], True),
+            Reading("the stage's page on Naturkartan", naturkartan in seen["links"], True),
+            Reading("the links say who published them", "Published elsewhere, not by this map" in seen["text"], True),
         ],
     )
 
@@ -13269,6 +13307,9 @@ def drive(page: Any) -> list[Check]:
     # Before the long chain is selected, because it selects chains of its own.
     if wanted(a_borrowed_name_has_its_register_under_it):
         checks.append(timed(a_borrowed_name_has_its_register_under_it, page))
+
+    if SCENE.stem == "malingsbo-kloten" and wanted(bergslagsleden_pages):
+        checks.append(timed(bergslagsleden_pages, page))
 
     if not select(page, SCENE.long_chain):
         # Everything past this point stands on the long chain, so it goes with

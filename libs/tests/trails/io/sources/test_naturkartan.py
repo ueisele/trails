@@ -59,3 +59,12 @@ class TestLoadCatalogue:
 
         with pytest.raises(ValueError, match="appears twice"):
             naturkartan.load_catalogue(path)
+
+
+def test_catalogue_accepts_a_relation_name(tmp_path):
+    path = tmp_path / "pages.toml"
+    path.write_text(
+        '[[trail]]\nid = "Bergslagsleden Etapp 1"\nurl = "https://www.naturkartan.se/sv/orebro-lan/kloten-gillersklack-bergslagsleden-etapp-1"\n',
+        encoding="utf-8",
+    )
+    assert list(naturkartan.load_catalogue(path)) == ["Bergslagsleden Etapp 1"]
