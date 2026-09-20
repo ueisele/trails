@@ -21,6 +21,7 @@ Everything is delivered in SWEREF 99 TM and handed on in WGS 84, which is what
 the rest of the build expects a register to speak.
 """
 
+import re
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -148,7 +149,10 @@ def trail_type_label(value: object) -> str:
     """Say what a trail type is, word by word, in English."""
     if not isinstance(value, str) or not value.strip():
         return ""
-    words = [word.strip() for word in value.split(",")]
+    # A comma joins several words; one row in Bergslagen joins the same word
+    # to itself with a slash, *Vandringsled / Vandringsled* (read 2026-09-20),
+    # so a slash splits too and a repeat is said once.
+    words = list(dict.fromkeys(word.strip() for word in re.split(r"[,/]", value) if word.strip()))
     UNTRANSLATED.update(word for word in words if word not in TRAIL_TYPE_LABELS)
     return ", ".join(TRAIL_TYPE_LABELS.get(word, word) for word in words)
 

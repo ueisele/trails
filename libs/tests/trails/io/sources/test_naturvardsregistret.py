@@ -149,3 +149,11 @@ class TestFormLabel:
 
     def test_an_unknown_form_passes_through(self):
         assert nvr.form_label("Nytt skydd") == "Nytt skydd"
+
+
+class TestTrailTypeLabelSlash:
+    def test_a_word_joined_to_itself_with_a_slash_is_said_once(self):
+        """One Bergslagen row reads *Vandringsled / Vandringsled* (2026-09-20)."""
+        assert nvr.trail_type_label("Vandringsled / Vandringsled") == "hiking trail"
+        assert nvr.trail_type_label("Naturstig, Vandringsled") == "nature trail, hiking trail"
+        assert "Vandringsled / Vandringsled" not in nvr.UNTRANSLATED
