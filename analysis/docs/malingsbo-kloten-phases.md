@@ -292,6 +292,25 @@ What the report says — chains, components, the gateway on the largest one, hei
 mosaic — goes into the record. `/tmp` is a 7.7 GB tmpfs; the builds write under
 `analysis/output/` and `.cache/`, not there.
 
+**Built 2026-09-20, in five runs of the unit `malingsbo-kloten-build`**, each restart finding
+the earlier steps in the cache. The sheet: 152,055 tiles, 730 MB, 20 minutes off the FTP
+(z17 alone 113,774 tiles at 160 tiles/s). The heights: 462 squares of the 1 m model out of
+two collections, a 13,750 × 13,125 mosaic at 4 m, 692 tiles; relief, slope, vegetation and
+forest (9,756 each, from 5,371 × 5,015 NMD cells) and mire cut after it; the packs off every
+tree. The graph: **12,779 chains over 153,447 edges on 84,177 nodes**, 107 components, the
+largest 9,659 km and 100 % of the network, reaching 99 % of the area's 28.8 km north to
+south, **Kopparberg 1.5 m from it**. The page: 518 stops (9 with a Trafikverket board), 376
+remains of 7 dwelling types out of three county files, 2,771 names lettered, a water grid of
+2,130 × 1,991 cells (9.5 % water, 79 kB), 109 rivers; the graph 6.06 MB encoded, 5.21 MB
+gzipped in a **23.3 MB page** — seven times Abisko's, which is the network: Bergslagen's
+forest roads and tracks against the fell's few paths. Four stops on the way, each a fault the
+plan had not seen and each fixed on `main` before the next run: the height model is one STAC
+collection per 100 km square (`1ad1ca1`, record §7.1); the counties' remains de-duplicated by
+a column the reader does not hand out (`0f3ed01`); and an OSM path named ``EkMalm`sStig``,
+which stopped the page twice and ended in the squeezer reading a script block as a parser does
+and every tooltip escaped (`427e0fb`, `726b552`, record §7.3). One label the tables did not
+know: *Vandringsled*, the register's trail type, which Abisko's fell never carried.
+
 ### Phase 4 — The stations, by hand
 
 *Parallel with 1–3; an opencode research run or the reviewing session in Firefox.
@@ -332,6 +351,14 @@ whole; every reading green or its skip named; then `drive-all`, three pages, gre
 The byte-per-zoom tables of the six trees measured off `analysis/output/` as Abisko's were
 and written in place of the borrowed ones; the pack count per provider in the test; the build's
 figures and timings into the record's *Changes*; the READMEs' two-map prose made three-map.
+
+**Built 2026-09-20** (`0d71d87`, one codex run, no correction). The seven byte tables measured
+off the version 1 trees — every PNG against its `index.json`, every PMTiles file against the
+pack inventory — replace the borrowed ones; the pack count 2,544 (1,861 sheet, 13 heights,
+5 × 134 overlays) recounted and standing; the record's §10 carries the build's figures from
+the log; the analysis README names three maps. The build log codex read was the resumed
+run's, so its "no first-copy times" is right about the log and wrong about the build — the
+cold costs are in phase 3's note above.
 
 ### Phase 7 — Publish
 

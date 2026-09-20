@@ -175,7 +175,12 @@ national collection and needs nothing.
 
   **2,544 packs, 986,400,508 bytes**, summing the log's seven rows. No tile was reported
   without ground or blank. The log records no first-copy or first-cut times, mosaic file
-  size, graph or page elapsed time, or total wall time.
+  size, graph or page elapsed time, or total wall time — those were read off the first run
+  as it went (the reviewing session's watch, 2026-09-20): the sheet **20 minutes** off the
+  FTP for 152,055 tiles and 730 MB, z17 alone 113,774 tiles in 711 s at 160 tiles/s; the
+  heights, relief, slope, vegetation, forest and mire some 25 minutes together after the
+  mosaic; the graph and the page about a quarter of an hour on a cold cache, most of it
+  Overpass and the three county files.
 
   **The graph:** Leder 96 lines → 78 chains, Topografi 50 marked trails 298 → 129,
   paths 3,837 → 2,387, roads 14,418 → 5,999, OSM 5,292 → 4,186; no ferries or winter
