@@ -1112,6 +1112,37 @@ loaded and faded every count is zero; the four overlays multiply at rest and dur
 Sixteen readings that fail before the change. 965 readings a page, hooks 1,849 + 97; the
 reviewer's own hooks and parallel drives green. Published 01:05. The phone's reading is open.
 
+### Phase 8i — The snap is drawn too
+
+Measured 2026-09-20, 11:00, in Chromium against the 8h build (`/tmp/vec-measure/snap.py`: a
+pinch driven as TouchZoom drives it — `zoomstart`, fractional `_move` frames with `pinch`,
+`_animateZoom(center, snapped, true, zoomSnap)` at the release): in the first frame after
+the release every canvas is drawn at the snapped zoom (view scale 16 from z12) while the
+tile levels still stand at the release's (the sheet's level at 1.57 of its 2.0), and the
+levels glide there over 250 ms on Leaflet's `cubic-bezier(0,0,0.25,1)`. 8f's
+`_updateTransform` draws whatever centre and zoom it is handed at once, and the snap hands
+it the end. So the paths jump at every release, by up to √2, and the ground catches up a
+quarter of a second later.
+
+1. **During the zoom animation the canvas is drawn each frame along Leaflet's own curve.**
+   In `pinch_draw.js`, an `_updateTransform` call while `map._animatingZoom` is set starts a
+   snap rather than drawing the end: the start is the view drawn now (`_pinchView`, or when
+   no pinch preceded — a double tap, the buttons, a wheel — the stock view of the map's centre
+   and zoom before the animation), the end is the view of the centre and zoom handed in, and
+   for 250 ms each frame draws the view whose scale and offset are interpolated linearly in
+   the eased time, easing `cubic-bezier(0,0,0.25,1)` — the same interpolation the level
+   containers' `transform` transition does on translate and scale. A second call with the
+   same end (Leaflet fires `zoom` right after `zoomanim`) does not restart the snap.
+   `zoomend` cancels and resets as today; `moveend` redraws in the new projection as today.
+   Strokes, dashes and radii keep their widths through the snap as through the pinch.
+2. Nothing else changes: the pinch drawing itself, the retention, the ring, the worker.
+3. **Drive**, both pages: after a driven release from a fractional zoom (as above), the canvas
+   view in the first frame lies strictly between the release's scale and the snapped one; on
+   each frame of the animation the zoom the canvas is drawn at (`_zoom + log2(view scale)`)
+   agrees with the zoom the sheet's level stands at (`level.zoom + log2(its CSS scale)`)
+   within a frame of the curve; every painted stroke keeps its width during the snap; the 8f
+   readings after `zoomend` hold unchanged; an animated `setZoom` glides the same way.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).
