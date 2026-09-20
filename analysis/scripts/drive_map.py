@@ -9650,6 +9650,190 @@ def the_pinch_is_drawn(page: Any) -> Check:
     return Check("the pinch is drawn", readings)
 
 
+def the_snap_is_drawn(page: Any) -> Check:
+    """Compare painted canvas zoom with the sheet on each frame of a real release."""
+    original = page.evaluate(with_map("() => ({center: __MAP__.getCenter(), zoom: __MAP__.getZoom()})"))
+    page.evaluate(with_map("at => { __MAP__.setView(at, 12, {animate: false}); }"), SCENE.position)
+    page.wait_for_function(
+        with_map("""() => !__MAP__._animatingZoom && Object.values(__MAP__._layers)
+            .filter(l => l instanceof L.Canvas).every(r => !r._redrawRequest && r._zoom === 12)""")
+    )
+    try:
+        result = page.evaluate(
+            with_map("""async () => {
+            const map = __MAP__, frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+            const sheet = Object.values(map._layers).find(l => l instanceof L.TileLayer &&
+                !['Shade', 'Slope', 'Vegetation', 'Forest', 'Mire'].some(n => l.options['trails' + n]));
+            if (!sheet || !sheet._level) throw new Error('No sheet level to measure');
+            const reference = L.canvas().addTo(map), circleRenderer = L.canvas().addTo(map), center = map.getCenter();
+            const line = L.polyline([[center.lat, center.lng - 0.1], [center.lat, center.lng + 0.1]],
+                {renderer: reference}).addTo(map);
+            const circle = L.circleMarker([center.lat + 0.002, center.lng],
+                {renderer: circleRenderer, dashArray: '6 2'}).addTo(map);
+            await frame(); await frame();
+            let frameNumber = 0, active = false, strokes = [], circles = [], projections = 0;
+            const renderers = Object.values(map._layers).filter(l => l instanceof L.Canvas);
+            const saved = renderers.map(r => {
+                const s = {r, draw: r._draw, fill: r._fillStroke, circle: r._updateCircle, counts: new Map(), painted: r._zoom};
+                r._draw = function () {
+                    s.painted = this._zoom + Math.log2(this._pinchView ? this._pinchView.scale : 1);
+                    if (active) s.counts.set(frameNumber, (s.counts.get(frameNumber) || 0) + 1);
+                    return s.draw.call(this);
+                };
+                r._fillStroke = function (ctx, layer) {
+                    const stroke = ctx.stroke;
+                    ctx.stroke = function () {
+                        if (active) {
+                            const t = this.getTransform(), scale = Math.hypot(t.a, t.b) / (L.Browser.retina ? 2 : 1);
+                            strokes.push({width: this.lineWidth * scale, want: layer.options.weight,
+                                dash: this.getLineDash().map(v => v * scale), wantDash: layer.options._dashArray || []});
+                        }
+                        return stroke.call(this);
+                    };
+                    try { return s.fill.call(this, ctx, layer); } finally { ctx.stroke = stroke; }
+                };
+                r._updateCircle = function (layer) {
+                    const ctx = this._ctx, arc = ctx.arc;
+                    ctx.arc = function (x, y, radius, ...rest) {
+                        if (active) {
+                            const t = this.getTransform();
+                            circles.push({radius: radius * Math.hypot(t.a, t.b) / (L.Browser.retina ? 2 : 1),
+                                want: Math.max(Math.round(layer._radius), 1)});
+                        }
+                        return arc.call(this, x, y, radius, ...rest);
+                    };
+                    try { return s.circle.call(this, layer); } finally { ctx.arc = arc; }
+                };
+                return s;
+            });
+            const projected = renderers.flatMap(r => Object.values(r._layers)).map(layer => {
+                const project = layer._project;
+                layer._project = function () { if (active) projections++; return project.call(this); };
+                return {layer, project};
+            });
+            const cssScale = el => { const t = new DOMMatrix(getComputedStyle(el).transform); return Math.hypot(t.a, t.b); };
+            const pixelWidth = () => {
+                const c = reference._container, ratio = L.Browser.retina ? 2 : 1;
+                const at = map.latLngToLayerPoint(center).subtract(L.DomUtil.getPosition(c));
+                const pixels = reference._ctx.getImageData(Math.round(at.x * ratio), 0, 1, c.height).data;
+                let width = 0;
+                for (let y = Math.round(at.y * ratio) - 12 * ratio; y <= Math.round(at.y * ratio) + 12 * ratio; y++) {
+                    width += pixels[y * 4 + 3] / 255;
+                }
+                return width / ratio;
+            };
+            const cycles = [], before = pixelWidth();
+            try {
+                for (const [kind, target] of [['release', 16], ['release', 12], ['setZoom', 13], ['setZoom', 12]]) {
+                    const start = map.getZoom();
+                    if (kind === 'release') {
+                        map._moveStart(true, false);
+                        const end = target - 0.35 * Math.sign(target - start);
+                        for (let step = 1; step <= 10; step++) {
+                            await frame(); map._move(center, start + (end - start) * step / 10, {pinch: true, round: false});
+                        }
+                        await frame(); await frame();
+                    }
+                    // Keep this level: setZoom can create a different target level.
+                    const level = sheet._level;
+                    const snapshot = () => ({sheet: level.zoom + Math.log2(cssScale(level.el)),
+                        canvas: saved.map(s => s.painted), css: renderers.map(r => cssScale(r._container))});
+                    const release = snapshot(), samples = [release];
+                    strokes = []; circles = []; projections = 0;
+                    saved.forEach(s => s.counts.clear());
+                    let ended = false, endProjections = 0;
+                    const end = () => { ended = true; active = false; endProjections = projections; };
+                    // Capture projections before zoomend's normal reprojection.
+                    const zoom = () => { if (!map._animatingZoom) active = false; };
+                    map.once('zoomend', end); map.on('zoom', zoom);
+                    active = true;
+                    if (kind === 'release') map._animateZoom(center, map._limitZoom(map.getZoom()), true, map.options.zoomSnap);
+                    else map.setZoom(target, {animate: true});
+                    // Force style resolution at the release, as a rendered frame would.
+                    snapshot();
+                    let started = kind === 'release';
+                    for (let step = 0; step < 120 && !ended; step++) {
+                        await frame(); frameNumber++;
+                        if (map._animatingZoom) {
+                            // setZoom starts in its own RAF; sample from its following paint.
+                            if (started) samples.push(snapshot());
+                            started = true;
+                        }
+                    }
+                    map.off('zoom', zoom); map.off('zoomend', end);
+                    if (!ended) throw new Error('Zoom did not end within 120 frames');
+                    await frame(); await frame();
+                    const settled = snapshot();
+                    // Retention may have removed the measured old level at zoomend.
+                    settled.sheet = sheet._level.zoom + Math.log2(cssScale(sheet._level.el));
+                    cycles.push({kind, start, target, samples, settled, after: pixelWidth(), projections: endProjections,
+                        widths: [...new Set(strokes.map(s => Number(s.width.toFixed(6))))], strokes: strokes.length,
+                        correctWidths: strokes.length > 0 && strokes.every(s => Math.abs(s.width - s.want) < 1e-6),
+                        correctDashes: strokes.some(s => s.dash.length) && strokes.every(s =>
+                            s.dash.length === s.wantDash.length && s.dash.every((v, i) => Math.abs(v - s.wantDash[i]) < 1e-6)),
+                        correctRadii: circles.length > 0 && circles.every(c => Math.abs(c.radius - c.want) < 1e-6),
+                        maxDraws: Math.max(0, ...saved.flatMap(s => [...s.counts.values()])),
+                        reset: renderers.every(r => !r._pinchDrawing && !r._pinchView && !r._redrawRequest && r._zoom === target)});
+                }
+            } finally {
+                active = false;
+                saved.forEach(s => { s.r._draw = s.draw; s.r._fillStroke = s.fill; s.r._updateCircle = s.circle; });
+                projected.forEach(s => { s.layer._project = s.project; });
+                map.removeLayer(line); map.removeLayer(circle); map.removeLayer(reference); map.removeLayer(circleRenderer);
+            }
+            return {before, cycles, renderers: renderers.length};
+        }""")
+        )
+        readings = [Reading("before the snaps: reference raster width", result["before"], 3, within=0.1)]
+        for cycle in result["cycles"]:
+            label = f"{cycle['kind']} {cycle['start']} → {cycle['target']}"
+            samples = cycle["samples"]
+            first = samples[1] if len(samples) > 1 else samples[0]
+            lo, hi = sorted((samples[0]["canvas"][0], cycle["target"]))
+            readings.extend(
+                [
+                    Reading(f"{label}: first painted frame is strictly between start and end", all(lo < z < hi for z in first["canvas"]), True),
+                    Reading(f"{label}: multiple animation frames measured", len(samples) > 2, True, note=f"{len(samples) - 1} frames"),
+                ]
+            )
+            # One frame's allowance comes from the adjacent measured sheet transforms,
+            # never elapsed milliseconds or an assumed refresh rate.
+            for index, sample in enumerate(samples[1:], 1):
+                neighbors = [
+                    samples[index - 1]["sheet"],
+                    sample["sheet"],
+                    (samples[index + 1] if index + 1 < len(samples) else cycle["settled"])["sheet"],
+                ]
+                readings.append(
+                    Reading(
+                        f"{label}: frame {index} canvas zoom follows the sheet within one frame",
+                        all(min(neighbors) - 0.0001 <= z <= max(neighbors) + 0.0001 for z in sample["canvas"]),
+                        True,
+                        note=f"sheet {sample['sheet']:.6f}; canvases {', '.join(f'{z:.6f}' for z in sample['canvas'])}",
+                    )
+                )
+            readings.extend(
+                [
+                    Reading(f"{label}: unit CSS scale throughout", all(s["css"] == [1] * result["renderers"] for s in samples), True),
+                    Reading(
+                        f"{label}: every painted stroke keeps its width",
+                        cycle["correctWidths"],
+                        True,
+                        note=f"{cycle['strokes']} strokes; widths {cycle['widths']}",
+                    ),
+                    Reading(f"{label}: dashes keep their lengths", cycle["correctDashes"], True),
+                    Reading(f"{label}: circles keep their radii", cycle["correctRadii"], True),
+                    Reading(f"{label}: no projection during the animation", cycle["projections"], 0),
+                    Reading(f"{label}: at most one draw per renderer per frame", cycle["maxDraws"], 1),
+                    Reading(f"{label}: zoomend resets the canvas", cycle["reset"], True),
+                    Reading(f"{label}: raster width after zoomend", cycle["after"], result["before"], within=0.1),
+                ]
+            )
+        return Check("the snap is drawn", readings)
+    finally:
+        page.evaluate(with_map("view => { __MAP__.setView(view.center, view.zoom, {animate: false}); }"), original)
+
+
 def the_sheet_retains_ground(page: Any) -> Check:
     """Read each layer's old ground through a three-level zoom out and back in.
 
@@ -12592,6 +12776,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(zoom_out_requests, page))
     if wanted(the_sheet_retains_ground):
         checks.append(timed(the_sheet_retains_ground, page))
+    if wanted(the_snap_is_drawn):
+        checks.append(timed(the_snap_is_drawn, page))
     if wanted(the_pinch_is_drawn):
         checks.append(timed(the_pinch_is_drawn, page))
     if wanted(the_zoom_the_scale_says):

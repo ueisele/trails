@@ -21,6 +21,8 @@ def test_pinch_draw_is_emitted_before_layers(base):
 
 HARNESS = """
 const assert = require('node:assert/strict');
+let clock = 0;
+const document = {timeline: {get currentTime() { return clock; }}};
 class Point {
     constructor(x, y) { this.x = x; this.y = y; }
     add(p) { return new Point(this.x + p.x, this.y + p.y); }
@@ -42,7 +44,7 @@ class Canvas {
 Canvas.include = methods => Object.assign(Canvas.prototype, methods);
 const L = {Canvas, Browser: {retina: false}, bounds,
     DomUtil: {setPosition: (element, position) => { element.position = position; }},
-    Util: {requestAnimFrame: (fn, self) => { queue.set(++next, () => fn.call(self)); return next; },
+    Util: {requestAnimFrame: (fn, self) => { queue.set(++next, () => fn.call(self, clock)); return next; },
         cancelAnimFrame: id => queue.delete(id)}};
 function flush() { const pending = [...queue.values()]; queue.clear(); pending.forEach(fn => fn()); }
 const canvas = new Canvas();
@@ -50,6 +52,7 @@ canvas.options = {padding: 0.1};
 canvas._bounds = bounds(new Point(-40, -80), new Point(440, 880));
 canvas._container = {}; canvas._center = new Point(200, 400); canvas._zoom = 10;
 canvas._map = {getZoomScale: z => 2 ** (z - 10), getSize: () => new Point(400, 800),
+    getCenter: () => canvas._center, getZoom: () => 10,
     project: (p, z) => p.multiplyBy(2 ** (z - 10)), _getNewPixelOrigin: () => new Point(0, 0),
     containerPointToLayerPoint: p => p};
 let draws = 0, clears = 0, transforms = [], saves = 0, arcs = [], strokes = [];
@@ -116,6 +119,75 @@ def test_pinch_restores_context_if_drawing_throws():
         canvas._draw = () => { throw new Error('draw failed'); };
         assert.throws(flush, /draw failed/);
         assert.equal(saves, 0); assert.equal(canvas._pinchScale, null); assert.equal(canvas._redrawBounds, null);
+    """)
+
+
+@pytest.mark.parametrize("pinched", [False, True])
+@pytest.mark.parametrize("retina", [False, True])
+def test_snap_follows_leaflet_curve_and_finishes_in_event_order(pinched, retina):
+    """Interpolate scale and translation, keep paint sizes, and hand back at zoomend."""
+    run_script(
+        f"""
+        L.Browser.retina = {str(retina).lower()};
+        canvas._pinchStart();
+        if ({str(pinched).lower()}) {{ canvas._updateTransform(canvas._center, 10.65); flush(); }}
+        const start = canvas._pinchView || canvas._pinchViewAt(canvas._map.getCenter(), canvas._map.getZoom());
+        const targetCenter = new Point(230, 410);
+        canvas._map._getNewPixelOrigin = (center, zoom) => center.subtract(canvas._center).multiplyBy(2 ** (zoom - 10));
+        const end = canvas._pinchViewAt(targetCenter, 11);
+        canvas._map._animatingZoom = true;
+        canvas._updateTransform(targetCenter, 11);
+        assert.equal(queue.size, 1);
+        // Parameter t=.5 on cubic-bezier(0,0,.25,1) gives x=.21875, y=.5.
+        clock = 250 * 0.21875; flush();
+        assert.ok(Math.abs(canvas._pinchView.scale - (start.scale + end.scale) / 2) < 1e-6);
+        assert.ok(Math.abs(canvas._pinchView.offset.x - (start.offset.x + end.offset.x) / 2) < 1e-5);
+        assert.ok(Math.abs(canvas._pinchView.offset.y - (start.offset.y + end.offset.y) / 2) < 1e-5);
+        assert.equal(queue.size, 1);
+        const scale = canvas._pinchView.scale;
+        assert.ok(Math.abs(strokes.at(-1).width * scale - 3) < 1e-9);
+        assert.ok(strokes.at(-1).dash.every((v, i) => Math.abs(v * scale - [6, 2][i]) < 1e-9));
+        assert.ok(Math.abs(arcs.at(-1)[2] * scale - 10) < 1e-9);
+        clock = 250; flush();
+        assert.deepEqual(canvas._pinchView, end); assert.equal(queue.size, 0);
+        // _onZoomTransitionEnd: clear flag, zoom (end transform), zoomend, moveend.
+        canvas._map._animatingZoom = false;
+        canvas._updateTransform(targetCenter, 11);
+        assert.deepEqual(canvas._pinchView, end); assert.equal(canvas._pinchSnap, null);
+        assert.equal(queue.size, 1);
+        canvas._onZoomEnd();
+        assert.equal(queue.size, 0); assert.equal(canvas._pinchView, null);
+        assert.equal(canvas._pinchSnap, null); assert.equal(oldEnd, 1);
+        canvas._redraw(); assert.equal(oldRedraw, 1);
+        """
+    )
+
+
+def test_zoomend_cancels_an_unfinished_snap():
+    """An early transition end must not leave a drawing callback behind."""
+    run_script("""
+        canvas._pinchStart(); canvas._map._animatingZoom = true;
+        canvas._updateTransform(canvas._center, 11);
+        clock = 30; flush(); assert.equal(queue.size, 1);
+        canvas._map._animatingZoom = false;
+        canvas._updateTransform(canvas._center, 11);
+        assert.equal(canvas._pinchView.scale, 2);
+        canvas._onZoomEnd(); assert.equal(queue.size, 0);
+        const count = draws; clock = 300; flush(); assert.equal(draws, count);
+        assert.equal(canvas._pinchSnap, null);
+    """)
+
+
+def test_snap_uses_the_frame_timestamp_when_other_handlers_take_time():
+    """Paint the frame shared with CSS, regardless of when a callback executes."""
+    run_script("""
+        canvas._pinchStart(); canvas._map._animatingZoom = true;
+        canvas._updateTransform(canvas._center, 11);
+        queue.clear(); clock = 200;
+        canvas._redraw(250 * 0.21875);
+        assert.ok(Math.abs(canvas._pinchView.scale - 1.5) < 1e-6);
+        assert.equal(queue.size, 1);
+        canvas._onZoomEnd(); assert.equal(queue.size, 0);
     """)
 
 
