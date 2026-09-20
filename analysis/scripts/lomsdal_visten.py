@@ -911,6 +911,19 @@ TRAFIKVERKET_BOARD_NAMES = {
     "740001433": "Låktatjåkka",
     "740001432": "Katterjåkk",
     "740000208": "Vassijaure",
+    # Malingsbo-Kloten's nine, established the same way on 2026-09-20: the box's
+    # rail stops out of the feed (here one stop id carries train and bus alike,
+    # so there are no twins on one coordinate), each opened and seen to draw a
+    # board. The board wants *Fagersta C*, not the register's *Fagersta Central*.
+    "740000280": "Kopparberg",
+    "740000162": "Grängesberg",
+    "740000291": "Ludvika",
+    "740000062": "Smedjebacken",
+    "740000024": "Söderbärke",
+    "740000683": "Vad",
+    "740020094": "Fagersta Norra",
+    "740000266": "Fagersta C",
+    "740000186": "Skinnskatteberg",
 }
 
 #: A station's links, the drawn board first and the complete one under it. At a

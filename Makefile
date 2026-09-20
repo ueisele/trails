@@ -315,9 +315,16 @@ drive:
 	@echo "🖱️  Driving the built map in a browser (about eight minutes a page)..."
 	uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py $(ARGS)
 
-# Each drive owns its browser and port. Only pages with a measured scene can
-# be driven; new pages join when their scene lands. Keep each complete log so
-# one run answers every reading without driving the page again.
+# **Every page at once, which they may be since no reading is a wall clock.** A run
+# owns its browser and serves the page on a port the kernel picks, so several of them
+# share nothing but the machine -- eight cores against one Firefox apiece. What used
+# to forbid this was the suite itself: four readings compared elapsed seconds against
+# figures recorded on an idle box, so two runs at once reported the contention as a
+# change in the page. Those are printed and no longer compared, and what is claimed
+# about a timeout is counted instead. Only a page with a scene is driven; a new page
+# joins when its scene lands. Each log is kept whole, so one run answers every reading
+# without driving the page again; `-u` because the output is buffered the moment it is
+# not a terminal, and a log that arrives only at the end reads like a run that has hung.
 drive-all:
 	@echo "🖱️  Driving every built page with a scene at once..."
 	@scenes=$$(uv run python -c 'import sys; sys.path.insert(0, "analysis/scripts"); from drive_map import SCENES; print(" ".join(SCENES))') || exit $$?; \
