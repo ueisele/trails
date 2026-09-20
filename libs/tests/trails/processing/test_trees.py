@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 from trails.processing import trees
-from trails.utils.tiles import tile_range
+from trails.utils.tiles import tile_count
 
 
 class TestPrefix:
@@ -15,27 +15,28 @@ class TestPrefix:
         # Two since the seven classes and the light palette (§6.7).
         assert abisko.prefix("slope") == "/slope/lantmateriet/2/"
 
-    def test_the_two_maps_are_stacked_and_never_mixed(self):
-        """A directory per source, which is what §6.3's address line is for."""
-        for tree in ("dem", "shade", "slope", "vegetation", "forest", "mire"):
-            swedish = trees.TREES["abisko"].prefix(tree)
-            norwegian = trees.TREES["lomsdal-visten"].prefix(tree)
-            assert swedish != norwegian
-            assert swedish.startswith(f"/{tree}/") and norwegian.startswith(f"/{tree}/")
+    def test_every_map_has_its_own_tree_directories(self):
+        """A version change in one box must never replace another box's tiles."""
+        for layer in ("dem", "shade", "slope", "vegetation", "forest", "mire"):
+            prefixes = [tree.prefix(layer) for tree in trees.TREES.values()]
+            assert len(set(prefixes)) == len(trees.TREES)
+            assert all(prefix.startswith(f"/{layer}/") for prefix in prefixes)
 
     def test_a_tree_nobody_cuts_is_a_named_failure(self):
         with pytest.raises(KeyError):
             trees.TREES["abisko"].prefix("heather")
 
-    def test_both_maps_name_a_vegetation_source(self):
+    def test_every_map_names_a_vegetation_source(self):
         """Sweden's classes come published, Norway's are computed; both are cut (§6.11)."""
-        assert trees.TREES["abisko"].structure == "nmd"
+        for tree in trees.TREES.values():
+            assert tree.structure == ("nmd" if tree.provider.startswith("lantmateriet") else "hoydedata-vegetation")
         assert trees.TREES["lomsdal-visten"].structure == "hoydedata-vegetation"
         assert set(trees.STRUCTURES) == {"nmd", "hoydedata-vegetation"}
 
-    def test_both_maps_name_a_mire_source_and_the_tree_is_addressed_like_the_others(self):
+    def test_every_map_names_a_mire_source_and_the_tree_is_addressed_like_the_others(self):
         """Sweden's off the sheet's wetlands and the moisture model, Norway's off N50's bogs (§6.13)."""
-        assert trees.TREES["abisko"].mire == "marktacke-slu"
+        for tree in trees.TREES.values():
+            assert tree.mire == ("marktacke-slu" if tree.provider.startswith("lantmateriet") else "n50")
         assert trees.TREES["lomsdal-visten"].mire == "n50"
         assert set(trees.MIRES) == {"marktacke-slu", "n50"}
         assert trees.TREES["abisko"].prefix("mire") == "/mire/lantmateriet/3/"
@@ -82,14 +83,13 @@ class TestBoxes:
     def test_what_the_boxes_cost_in_tiles(self):
         """Recorded so that a box quietly widened shows up as a number rather
         than as an afternoon of building."""
-        counted = {}
-        for park, tree in trees.TREES.items():
-            total = 0
-            for zoom in tree.zooms("shade"):
-                x0, y0, x1, y1 = tile_range(tree.box, zoom)
-                total += (x1 - x0 + 1) * (y1 - y0 + 1)
-            counted[park] = total
-        assert counted == {"lomsdal-visten": 37_915, "abisko": 9_330}
+        counted = {park: tile_count(tree.box, tree.zooms("shade")) for park, tree in trees.TREES.items()}
+        assert counted == {"lomsdal-visten": 37_915, "abisko": 9_330, "malingsbo-kloten": 9_756}
+
+    def test_the_new_map_starts_each_tree_at_version_one(self):
+        tree = trees.TREES["malingsbo-kloten"]
+        for layer in ("dem", "shade", "slope", "vegetation", "forest", "mire"):
+            assert tree.prefix(layer) == f"/{layer}/lantmateriet-malingsbo-kloten/1/"
 
 
 class TestModels:

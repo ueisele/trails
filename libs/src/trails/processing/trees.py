@@ -254,4 +254,12 @@ TREES: dict[str, Tree] = {
         mire="marktacke-slu",
         mire_version=3,
     ),
+    "malingsbo-kloten": Tree(
+        park="malingsbo-kloten",
+        provider="lantmateriet-malingsbo-kloten",
+        box=(14.967, 59.729, 15.922, 60.176),
+        model="markhojd",
+        structure="nmd",
+        mire="marktacke-slu",
+    ),
 }

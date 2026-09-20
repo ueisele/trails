@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         for layer in selected:
             if layer == "tiles":
-                sheet = {"lantmateriet": "topowebb", "kartverket": "topo"}[tree.provider]
+                sheet = {"lantmateriet": "topowebb", "lantmateriet-malingsbo-kloten": "topowebb", "kartverket": "topo"}[tree.provider]
                 root = args.input_dir / layer / tree.provider / sheet
                 versions = [int(p.name) for p in root.iterdir() if p.is_dir() and p.name.isdigit()]
                 if not versions:

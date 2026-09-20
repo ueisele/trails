@@ -107,7 +107,7 @@ class TestCreateMap:
     def test_every_tile_layer_waits_for_the_pinch_and_has_a_transparent_error_tile(self, base):
         fmap = maps.create_map(center=(68.30, 18.70), base=base, extra_bases=tuple(maps.BaseMap))
         layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
-        assert len(layers) == (4 if base is maps.BaseMap.OPENSTREETMAP else 9)
+        assert len(layers) == len(maps.BaseMap) + (0 if base is maps.BaseMap.OPENSTREETMAP else 5)
         for layer in layers:
             assert layer.options["update_when_zooming"] is False
             assert layer.options["update_when_idle"] is False
@@ -145,10 +145,12 @@ class TestCreateMap:
         fmap = maps.create_map(center=(68.30, 18.70), base=maps.BaseMap.LANTMATERIET_TOPO, extra_bases=tuple(maps.BaseMap))
         layers = [child for child in fmap._children.values() if isinstance(child, folium.TileLayer)]
         for layer in layers:
-            if layer.overlay or layer.layer_name == "Lantmäteriet Topo":
+            if layer.overlay:
                 assert layer.options["bounds"] == [[68.139, 18.15], [68.46, 19.1]]
-            elif layer.layer_name.startswith("Kartverket"):
-                assert layer.options["bounds"] == [[65.15, 12.0], [65.95, 13.75]]
+            elif layer.tiles.startswith("/tiles/"):
+                provider = maps.PROVIDERS[layer.tiles.split("/")[2]]
+                west, south, east, north = provider.extent
+                assert layer.options["bounds"] == [[south, west], [north, east]]
             else:
                 assert "bounds" not in layer.options, "OSM answers beyond the tree"
 
@@ -2802,7 +2804,7 @@ class TestHeightTiles:
         a row of 404s (§8.2). Written once in `processing.trees` and read here."""
         from trails.processing import trees as tree_table
 
-        for key, park in (("lantmateriet", "abisko"), ("kartverket", "lomsdal-visten")):
+        for key, park in (("lantmateriet", "abisko"), ("kartverket", "lomsdal-visten"), ("lantmateriet-malingsbo-kloten", "malingsbo-kloten")):
             provider, tree = maps.PROVIDERS[key], tree_table.TREES[park]
             assert provider.extent == tree.box
             assert provider.heights is not None and provider.heights.tiles == tree.prefix("dem")
@@ -10167,7 +10169,7 @@ class TestPackWorker:
             "sheetFirst": True,
         }
 
-    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet", "lantmateriet-malingsbo-kloten"])
     def test_warmup_refreshes_complete_neighbours_before_loading_more_packs(self, tmp_path, provider):
         """An already complete neighbour must not stay cold in the byte-budget LRU."""
         result = self.run_worker(
@@ -10219,7 +10221,7 @@ class TestPackWorker:
             "bounded": True,
         }
 
-    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet", "lantmateriet-malingsbo-kloten"])
     def test_addresses_at_every_level_and_box_edge(self, tmp_path, provider):
         own = maps.PROVIDERS[provider]
         west, south, east, north = own.extent
@@ -10289,7 +10291,7 @@ class TestPackWorker:
         assert result.pop("answers") == [base64.b64encode(reader.read_tile(*address)).decode() for address in tiles]
         assert result == {"rejected": 7, "packs": 8, "directories": 48, "oldestGone": True, "touchedStays": True, "missing": None}
 
-    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet", "lantmateriet-malingsbo-kloten"])
     def test_all_worker_placeholders_are_filled(self, tmp_path, provider):
         page = tmp_path / "map.html"
         page.write_text("page", encoding="utf-8")
@@ -10732,7 +10734,7 @@ class TestPackPanel:
         panel = files("trails.visualization").joinpath("js", "offline_panel.js").read_text(encoding="utf-8")
         return "function " + name + "(" + panel.split("function " + name + "(", 1)[1].split("\n                }", 1)[0] + "\n}"
 
-    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet", "lantmateriet-malingsbo-kloten"])
     def test_worker_and_panel_use_the_same_level_rule_at_every_zoom(self, tmp_path, provider):
         panel_rule = self.function("packLevel")
         own = maps.PROVIDERS[provider]
@@ -10782,7 +10784,7 @@ class TestPackPanel:
             setup += self.function(name)
         return setup
 
-    @pytest.mark.parametrize("provider,count", [("kartverket", 9651), ("lantmateriet", 2396)])
+    @pytest.mark.parametrize("provider,count", [("kartverket", 9651), ("lantmateriet", 2396), ("lantmateriet-malingsbo-kloten", 2544)])
     def test_whole_box_iterator_counts_packs_once_with_measured_weights(self, tmp_path, provider, count):
         setup = self.setup(provider)
         setup += """
@@ -10795,7 +10797,7 @@ class TestPackPanel:
         assert result["total"] == result["unique"] == count
         assert result["weighed"] == {"packs": count, "bytes": result["bytes"]}
 
-    @pytest.mark.parametrize("provider,count", [("kartverket", 9651), ("lantmateriet", 2396)])
+    @pytest.mark.parametrize("provider,count", [("kartverket", 9651), ("lantmateriet", 2396), ("lantmateriet-malingsbo-kloten", 2544)])
     def test_whole_box_to_z17_never_builds_a_set(self, tmp_path, provider, count):
         script = (
             self.setup(provider)
@@ -10812,7 +10814,7 @@ class TestPackPanel:
         )
         assert TestPackWorker.run_worker(tmp_path, script, provider) == {"count": count, "weighed": count}
 
-    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet", "lantmateriet-malingsbo-kloten"])
     def test_whole_map_budget_waits_for_a_request_and_is_counted_once(self, tmp_path, provider):
         panel = files("trails.visualization").joinpath("js", "offline_panel.js").read_text(encoding="utf-8")
         budget = "var memo = {};" + panel.split("var memo = {};", 1)[1].split("var chosen = null;", 1)[0]
@@ -10883,7 +10885,7 @@ class TestPackPanel:
         assert len(result["heights"]) == 4
         assert result["heights"] == result["expected"]
 
-    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet"])
+    @pytest.mark.parametrize("provider", ["kartverket", "lantmateriet", "lantmateriet-malingsbo-kloten"])
     def test_sparse_scope_addresses_match_worker_at_every_zoom(self, tmp_path, provider):
         script = (
             self.setup(provider)

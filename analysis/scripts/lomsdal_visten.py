@@ -1,4 +1,4 @@
-"""Build an interactive hiking map for a national park: Lomsdal-Visten, or Abisko.
+"""Build an interactive hiking map for a protected area named in PARKS.
 
 Every line on this map is a **chain** out of the routing graph
 (:mod:`trails.network.norway` or :mod:`trails.network.sweden`), so a drawn line
@@ -168,6 +168,12 @@ class Park:
     #: The word after the name in the legend's title: what the place is, in the
     #: language of the map it is drawn on.
     kind: str
+    #: The register's protection form; Norway reads its boundary from Naturbase.
+    form: str | None
+    #: Where a traveller reaches the map, checked against the graph's main component.
+    gateway: str
+    #: A named route whose elevation figures the graph reports, when there is one.
+    check_route: str | None
     #: The sheet drawn underneath, and with it the tile provider.
     base: maps.BaseMap
     #: Sheets offered beside it in the picker.
@@ -184,10 +190,14 @@ class Park:
     #: The catalogue of Naturkartan pages for the register's state trails under
     #: ``analysis/routes``, if there is one -- links only, nothing drawn.
     naturkartan: str | None = None
-    #: The Swedish county whose file of the Kulturmiljöregistret holds the
-    #: box, as the file names it (``norrbotten``); None for a Norwegian map,
-    #: whose places people left come out of SSR (§9.39).
-    county: str | None = None
+    #: The Swedish counties whose Kulturmiljöregistret files cover the box;
+    #: empty for Norway, whose places people left come out of SSR (§9.39).
+    county: tuple[str, ...] = ()
+
+    @property
+    def kind_label(self) -> str:
+        """The protection kind in the page's English prose."""
+        return "national park" if self.kind == "nasjonalpark" else naturvardsregistret.form_label(self.kind.capitalize())
 
     @property
     def app_name(self) -> str:
@@ -211,6 +221,9 @@ PARKS: dict[str, Park] = {
         stem="lomsdal-visten",
         country="NO",
         kind="nasjonalpark",
+        form=None,
+        gateway="Mosjøen",
+        check_route="Sjøbergmarsj",
         base=maps.BaseMap.KARTVERKET_TOPO,
         # The colour sheet only. The grey one was offered from the first build
         # and never chosen -- and since §6.10 the panel's second control is the
@@ -227,6 +240,9 @@ PARKS: dict[str, Park] = {
         stem="abisko",
         country="SE",
         kind="nationalpark",
+        form=naturvardsregistret.NATIONAL_PARK,
+        gateway="Abisko",
+        check_route="BD 21",
         base=maps.BaseMap.LANTMATERIET_TOPO,
         # The colour sheet only: the grey one was never used on the first map.
         extras=(),
@@ -241,7 +257,23 @@ PARKS: dict[str, Park] = {
         ut_routes=None,
         # The county's pages for its state trails, one per BD number (§9.22).
         naturkartan="abisko-naturkartan.toml",
-        county="norrbotten",
+        county=("norrbotten",),
+    ),
+    "malingsbo-kloten": Park(
+        name="Malingsbo-Kloten",
+        stem="malingsbo-kloten",
+        country="SE",
+        kind="naturvårdsområde",
+        form=naturvardsregistret.NATURE_CONSERVATION_AREA,
+        gateway="Kopparberg",
+        check_route=None,
+        base=maps.BaseMap.LANTMATERIET_TOPO_MALINGSBO_KLOTEN,
+        extras=(),
+        companions=maps.Companions.of("malingsbo-kloten"),
+        bounds=(14.967, 59.729, 15.922, 60.176),
+        ut_routes=None,
+        naturkartan=None,
+        county=("örebro", "dalarna", "västmanland"),
     ),
 }
 
@@ -2193,7 +2225,7 @@ def load_park_boundary(park: Park, cache_dir: str) -> gpd.GeoDataFrame:
 
 
 def load_swedish_boundary(park: Park, register: naturvardsregistret.Source) -> gpd.GeoDataFrame:
-    """Load a national park's boundary from Naturvårdsregistret, by name.
+    """Load a protected area's boundary from Naturvårdsregistret, by name and form.
 
     Args:
         park: Which park
@@ -2202,9 +2234,14 @@ def load_swedish_boundary(park: Park, register: naturvardsregistret.Source) -> g
     Returns:
         Single-row GeoDataFrame in EPSG:4326
     """
-    found = register.find_one(park.name)
+    if park.form is None:
+        raise ValueError(f"{park.name} declares no register form")
+    found = register.find_one(park.name, form=park.form, exact=True, dissolve=True)
     area_km2 = found.to_crs(sweden.METRIC_CRS).area.iloc[0] / 1e6
-    print(f"Park: {found[naturvardsregistret.AREA_NAME].iloc[0]} ({naturvardsregistret.form_label(found[naturvardsregistret.AREA_FORM].iloc[0])})")
+    print(
+        f"{park.kind_label.capitalize()}: {found[naturvardsregistret.AREA_NAME].iloc[0]} "
+        f"({naturvardsregistret.form_label(found[naturvardsregistret.AREA_FORM].iloc[0])})"
+    )
     print(f"  Area: {area_km2:,.0f} km2 (the register says {float(found['AREA_HA'].iloc[0]) / 100:,.0f})")
     print(f"  County and municipality: {found['LAN'].iloc[0]}, {found['KOMMUN'].iloc[0]}")
     # The three columns the page and the report read, and not the decision
@@ -2896,12 +2933,15 @@ def laid_out(network: Network) -> tuple[pd.DataFrame, gpd.GeoSeries]:
     return order, tracks
 
 
-def split_at_the_boundary(by_source: dict[str, gpd.GeoDataFrame], sources: tuple[tuple[str, str], ...]) -> dict[str, gpd.GeoDataFrame]:
+def split_at_the_boundary(
+    by_source: dict[str, gpd.GeoDataFrame], sources: tuple[tuple[str, str], ...], kind: str = "park"
+) -> dict[str, gpd.GeoDataFrame]:
     """Put each source's chains into a park layer and an approach layer, and say how many.
 
     Args:
         by_source: One frame per source, described
         sources: Each source with the word its labels use for it
+        kind: The protected area's kind in the report
 
     Returns:
         The frames keyed ``{source}/park`` and ``{source}/approach``
@@ -2911,7 +2951,7 @@ def split_at_the_boundary(by_source: dict[str, gpd.GeoDataFrame], sources: tuple
         frame = by_source[source]
         layer_of[f"{source}/park"] = frame[frame["in_park"]]
         layer_of[f"{source}/approach"] = frame[~frame["in_park"]]
-        summarize(f"{word} inside park", layer_of[f"{source}/park"])
+        summarize(f"{word} inside {kind}", layer_of[f"{source}/park"])
         summarize(f"{word} in approach zone", layer_of[f"{source}/approach"])
     return layer_of
 
@@ -3517,6 +3557,32 @@ def lettered_size(names: gpd.GeoDataFrame, lettered: gpd.GeoDataFrame, within_m:
     return pd.Series(hits["size"].to_numpy(), index=hits["place"]).reindex(names.index).astype(float)
 
 
+def load_swedish_remains(park: Park, bounds: maps.Bounds, cache_dir: str, force_download: bool = False) -> tuple[gpd.GeoDataFrame, str | None]:
+    """Read the counties covering a map, retaining each registered remain once.
+
+    Args:
+        park: The map and its counties
+        bounds: The box in WGS 84
+        cache_dir: Where the county files are cached
+        force_download: Fetch the county files again
+
+    Returns:
+        The remains in WGS 84 and the county files' dates
+    """
+    frames, versions = [], []
+    for county in park.county:
+        source = kulturmiljoregistret.Source(county, cache_dir=cache_dir)
+        frames.append(source.remains(bounds, force_download=force_download))
+        versions.append(source.version)
+    if not frames:
+        return gpd.GeoDataFrame(geometry=[], crs="EPSG:4326"), None
+    # A remain on a county boundary can be in both deliveries.
+    joined = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs="EPSG:4326")
+    remains = joined.drop_duplicates(subset=kulturmiljoregistret.ID).reset_index(drop=True)
+    version = versions[0] if len(versions) == 1 else "; ".join(f"{county}: {stamp}" for county, stamp in zip(park.county, versions, strict=True))
+    return remains, version
+
+
 def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Built:
     """Read the Swedish registers and put everything they say on the map.
 
@@ -3569,7 +3635,9 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     roads = by_source[T50_ROADS]
     ferries = by_source[sweden.FERRIES]
     layer_of = split_at_the_boundary(
-        by_source, ((LEDER, "State trails"), (T50_TRAILS, "Topografi 50 marked trails"), (T50_PATHS, "Topografi 50 paths"), (OSM, "OSM paths"))
+        by_source,
+        ((LEDER, "State trails"), (T50_TRAILS, "Topografi 50 marked trails"), (T50_PATHS, "Topografi 50 paths"), (OSM, "OSM paths")),
+        which.kind_label,
     )
     named = leder[naturvardsregistret.TRAIL_NAME].notna()
     print(f"  state trails named by the register: {int(named.sum()):,} of {len(leder):,} chains")
@@ -3706,11 +3774,8 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     # **Sweden's word for a place people left is the heritage register's, not
     # the name file's** (§9.39, §9.40): a fäbod, a farmstead, a kåta, a house
     # foundation from historic time. One row per remain, over the box.
-    remains = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    remains, loaded.versions[KMR] = load_swedish_remains(which, bounds, args.cache_dir, args.force_download)
     if which.county:
-        remains_source = kulturmiljoregistret.Source(which.county, cache_dir=args.cache_dir)
-        remains = remains_source.remains(bounds, force_download=args.force_download)
-        loaded.versions[KMR] = remains_source.version
         by_kind = remains["kind"].value_counts().to_dict() if len(remains) else {}
         print(f"  {len(remains)} remains of {len(kulturmiljoregistret.DWELLING_TYPES)} dwelling types: {by_kind}")
 
@@ -3754,11 +3819,11 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         TrailLayer(
             winter, "Winter trails, not routable [Leder+Topografi 50]", "#90caf9", 2.0, WINTER_POPUP_FIELDS, dash="6,6", chains=False, show=False
         ),
-        TrailLayer(layer_of[f"{OSM}/approach"], "Paths, outside park [OSM]", "#ce93d8", 1.5, OSM_POPUP_FIELDS, search_field="name"),
-        TrailLayer(layer_of[f"{T50_PATHS}/approach"], "Paths, outside park [Topografi 50]", "#80cbc4", 1.5, T50_PATH_POPUP_FIELDS),
+        TrailLayer(layer_of[f"{OSM}/approach"], f"Paths, outside {which.kind_label} [OSM]", "#ce93d8", 1.5, OSM_POPUP_FIELDS, search_field="name"),
+        TrailLayer(layer_of[f"{T50_PATHS}/approach"], f"Paths, outside {which.kind_label} [Topografi 50]", "#80cbc4", 1.5, T50_PATH_POPUP_FIELDS),
         TrailLayer(
             layer_of[f"{T50_TRAILS}/approach"],
-            "Marked trails, outside park [Topografi 50]",
+            f"Marked trails, outside {which.kind_label} [Topografi 50]",
             "#f9a825",
             2.5,
             T50_TRAIL_POPUP_FIELDS,
@@ -3768,7 +3833,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         ),
         TrailLayer(
             layer_of[f"{LEDER}/approach"],
-            "State trails, outside park [Leder]",
+            f"State trails, outside {which.kind_label} [Leder]",
             "#ef6c00",
             3.5,
             LEDER_POPUP_FIELDS,
@@ -3776,11 +3841,11 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
             search_field="trail_name",
             link_heading=PUBLISHED_ELSEWHERE_HEADING,
         ),
-        TrailLayer(layer_of[f"{OSM}/park"], "Paths in park [OSM]", "#8e24aa", 2.5, OSM_POPUP_FIELDS, search_field="name"),
-        TrailLayer(layer_of[f"{T50_PATHS}/park"], "Paths in park [Topografi 50]", "#00796b", 2.5, T50_PATH_POPUP_FIELDS),
+        TrailLayer(layer_of[f"{OSM}/park"], f"Paths in {which.kind_label} [OSM]", "#8e24aa", 2.5, OSM_POPUP_FIELDS, search_field="name"),
+        TrailLayer(layer_of[f"{T50_PATHS}/park"], f"Paths in {which.kind_label} [Topografi 50]", "#00796b", 2.5, T50_PATH_POPUP_FIELDS),
         TrailLayer(
             layer_of[f"{T50_TRAILS}/park"],
-            "Marked trails in park [Topografi 50]",
+            f"Marked trails in {which.kind_label} [Topografi 50]",
             "#1b5e20",
             3.5,
             T50_TRAIL_POPUP_FIELDS,
@@ -3793,7 +3858,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         # trails under it were named from.
         TrailLayer(
             layer_of[f"{LEDER}/park"],
-            "State trails in park [Leder]",
+            f"State trails in {which.kind_label} [Leder]",
             "#c62828",
             4.0,
             LEDER_POPUP_FIELDS,
@@ -3949,7 +4014,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         areas=sweden.protected_table(loaded.protected),
         credits=credits,
         heights=tile_plan_heights(which.base),
-        boundary_label="National park boundary [Naturvårdsregistret]",
+        boundary_label=f"{which.kind_label.capitalize()} boundary [Naturvårdsregistret]",
         exports=exports,
     )
 

@@ -580,6 +580,7 @@ _WEIGHT_AB_MIRE = {8: 360, 9: 544, 10: 1127, 11: 1742, 12: 1703, 13: 1566, 14: 1
 #: its worker, the offline panel and the three build scripts all name one box.
 _LOMSDAL_VISTEN = trees.TREES["lomsdal-visten"]
 _ABISKO = trees.TREES["abisko"]
+_MALINGSBO_KLOTEN = trees.TREES["malingsbo-kloten"]
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -715,6 +716,30 @@ PROVIDERS: dict[str, Provider] = {
         ),
     ),
 }
+
+
+_ABISKO_PROVIDER = PROVIDERS["lantmateriet"]
+assert _ABISKO_PROVIDER.heights is not None
+assert _ABISKO_PROVIDER.shade is not None
+assert _ABISKO_PROVIDER.slope is not None
+assert _ABISKO_PROVIDER.vegetation is not None
+assert _ABISKO_PROVIDER.forest is not None
+assert _ABISKO_PROVIDER.mire is not None
+
+# The weight and pack_weight tables for the sheet and all six trees are
+# borrowed from Abisko until phase 6 measures them for Malingsbo-Kloten.
+PROVIDERS["lantmateriet-malingsbo-kloten"] = dataclasses.replace(
+    PROVIDERS["lantmateriet"],
+    key="lantmateriet-malingsbo-kloten",
+    extent=_MALINGSBO_KLOTEN.box,
+    tiles="/tiles/lantmateriet-malingsbo-kloten/topowebb/1/",
+    heights=dataclasses.replace(_ABISKO_PROVIDER.heights, tiles=_MALINGSBO_KLOTEN.prefix("dem")),
+    shade=dataclasses.replace(_ABISKO_PROVIDER.shade, tiles=_MALINGSBO_KLOTEN.prefix("shade")),
+    slope=dataclasses.replace(_ABISKO_PROVIDER.slope, tiles=_MALINGSBO_KLOTEN.prefix("slope")),
+    vegetation=dataclasses.replace(_ABISKO_PROVIDER.vegetation, tiles=_MALINGSBO_KLOTEN.prefix("vegetation")),
+    forest=dataclasses.replace(_ABISKO_PROVIDER.forest, tiles=_MALINGSBO_KLOTEN.prefix("forest")),
+    mire=dataclasses.replace(_ABISKO_PROVIDER.mire, tiles=_MALINGSBO_KLOTEN.prefix("mire")),
+)
 
 
 #: The glyphs the markers ask for, as Font Awesome's own outlines.
@@ -1963,6 +1988,7 @@ class BaseMap(Enum):
     #: its open download into our own bucket (analysis/docs/abisko-decisions.md
     #: §3, §6.1). Root-relative, so the page names no host.
     LANTMATERIET_TOPO = "lantmateriet_topo"
+    LANTMATERIET_TOPO_MALINGSBO_KLOTEN = "lantmateriet_topo_malingsbo_kloten"
     OPENSTREETMAP = "openstreetmap"
 
 
@@ -1999,6 +2025,12 @@ _BASE_LAYERS: dict[BaseMap, dict[str, str | None]] = {
         "attr": "&copy; OpenStreetMap contributors",
         "name": "OpenStreetMap",
         "provider": None,
+    },
+    BaseMap.LANTMATERIET_TOPO_MALINGSBO_KLOTEN: {
+        "tiles": "/tiles/lantmateriet-malingsbo-kloten/topowebb/1/{z}/{x}/{y}.png",
+        "attr": _LANTMATERIET_ATTRIBUTION,
+        "name": "Lantmäteriet Topo",
+        "provider": "lantmateriet-malingsbo-kloten",
     },
 }
 

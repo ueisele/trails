@@ -19,7 +19,7 @@ ifneq ($(MISE),)
 export PATH := $(shell $(MISE) bin-paths | tr '\n' ':')$(PATH)
 endif
 
-.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive drive-both deploy tiles packs dem shade slope nmd vegetation mire abisko lomsdal-visten
+.PHONY: help check format lint test test-all test-integration test-cov test-cov-all test-cov-html type clean cache-clean cache-clean-all install install-core install-dev install-all hooks-install hooks-uninstall hooks-run update update-all update-package notebook-clean fixtures fixtures-info fixtures-clean map graph drive drive-all drive-both deploy tiles packs dem shade slope nmd vegetation mire abisko malingsbo-kloten lomsdal-visten
 
 # Default target
 help:
@@ -44,17 +44,19 @@ help:
 	@echo "  make cache-clean-all Remove entire .cache directory"
 	@echo "  make notebook      Start JupyterLab"
 	@echo "  make notebook-clean Clear all notebook outputs"
-	@echo "  make map           Build a map into analysis/output/: Lomsdal-Visten, or Abisko with --park abisko"
+	@echo "  make map           Build a map into analysis/output/: ARGS=\"--park <map>\""
 	@echo "  make graph         Build a park's routing graph and report it (--park likewise)"
 	@echo "                     both take ARGS=\"...\", e.g. make map ARGS=\"--approach-km 10\""
-	@echo "  make tiles         Copy the Abisko base-map tiles out of Lantmäteriet's open download"
+	@echo "  make tiles         Build the selected map's sheet tiles: PARK=<map>"
 	@echo "  make dem           Build a map's height tiles; make shade its relief, make slope its steepness"
 	@echo "                     all three take PARK=<map> (default lomsdal-visten) and are resumable"
+	@echo "  make malingsbo-kloten  The whole Swedish chain for Malingsbo-Kloten (needs the Geotorget login)"
 	@echo "  make abisko        The whole Abisko chain: tiles, dem, shade, slope, graph, map (needs the Geotorget login)"
 	@echo "  make lomsdal-visten  The whole Lomsdal-Visten chain: dem, shade, slope, graph, map (no login)"
 	@echo "  make drive         Drive one built page in a browser: ARGS=\"--page analysis/output/abisko.html\""
 	@echo "                     ARGS=\"--only <word>,<word>\" runs just those checks, which is seconds not minutes"
-	@echo "  make drive-both    Drive both pages at once; ARGS goes to both"
+	@echo "  make drive-all     Drive every built page with a scene at once; ARGS goes to each"
+	@echo "  make drive-both    Alias of drive-all"
 	@echo "  make deploy        Publish the built map and purge the edge (needs .env)"
 	@echo "                     ARGS=\"--tree tiles\" mirrors a tile tree instead; --tree dem the heights"
 	@echo "  make fixtures      Generate/update test fixtures from real data"
@@ -277,6 +279,16 @@ abisko:
 	uv run python analysis/scripts/lomsdal_visten.py --park abisko
 	@echo "✅ analysis/output/abisko.html — publish with: just deploy --map abisko --tree packs (from home/trails-map)"
 
+malingsbo-kloten:
+	$(MAKE) tiles PARK=malingsbo-kloten
+	$(MAKE) dem shade slope vegetation mire PARK=malingsbo-kloten
+	$(MAKE) packs PARK=malingsbo-kloten
+	@echo "🕸️  Building and reporting the Malingsbo-Kloten routing graph..."
+	uv run python analysis/scripts/route_graph.py --park malingsbo-kloten
+	@echo "🗺️  Building the Malingsbo-Kloten map..."
+	uv run python analysis/scripts/lomsdal_visten.py --park malingsbo-kloten
+	@echo "✅ analysis/output/malingsbo-kloten.html — publish with: just deploy --map malingsbo-kloten --tree packs (from home/trails-map)"
+
 # The whole Lomsdal-Visten chain, in the same order and with the same properties: the sheet
 # rendered off Kartverket's WMS without its hillshade into our own tree (§6.12, no login), the
 # height model off hoydedata.no (no login, no order), the heights, the relief and the slope classes
@@ -303,28 +315,27 @@ drive:
 	@echo "🖱️  Driving the built map in a browser (about eight minutes a page)..."
 	uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py $(ARGS)
 
-# **Both pages at once, which they may be since no reading is a wall clock.** A run
-# owns its browser and serves the page on a port the kernel picks, so two of them
-# share nothing but the machine -- and the machine has eight cores against one
-# Firefox apiece. What used to forbid this was the suite itself: four readings
-# compared elapsed seconds against figures recorded on an idle box, so two runs
-# at once reported the contention as a change in the page. Those are printed and
-# no longer compared, and what is claimed about a timeout is counted instead.
-#
-# `-u` because the output is buffered the moment it is not a terminal, and a log
-# that arrives only at the end reads exactly like a run that has hung.
-drive-both:
-	@echo "🖱️  Driving both pages at once..."
-	@uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py \
-		--page analysis/output/lomsdal-visten.html $(ARGS) > /tmp/drive-lomsdal-visten.txt 2>&1 & \
-	 lomsdal=$$!; \
-	 uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py \
-		--page analysis/output/abisko.html $(ARGS) > /tmp/drive-abisko.txt 2>&1 & \
-	 abisko=$$!; \
-	 wait $$lomsdal; lomsdal_said=$$?; \
-	 wait $$abisko; abisko_said=$$?; \
-	 cat /tmp/drive-lomsdal-visten.txt /tmp/drive-abisko.txt; \
-	 exit $$((lomsdal_said + abisko_said))
+# Each drive owns its browser and port. Only pages with a measured scene can
+# be driven; new pages join when their scene lands. Keep each complete log so
+# one run answers every reading without driving the page again.
+drive-all:
+	@echo "🖱️  Driving every built page with a scene at once..."
+	@scenes=$$(uv run python -c 'import sys; sys.path.insert(0, "analysis/scripts"); from drive_map import SCENES; print(" ".join(SCENES))') || exit $$?; \
+	 pids=""; logs=""; status=0; \
+	 for page in analysis/output/*.html; do \
+		[ -f "$$page" ] || continue; \
+		stem=$${page##*/}; stem=$${stem%.html}; \
+		case " $$scenes " in *" $$stem "*) ;; *) continue ;; esac; \
+		log="/tmp/drive-$$stem.txt"; \
+		uv run --with "playwright==1.62.0" python -u analysis/scripts/drive_map.py \
+			--page "$$page" $(ARGS) > "$$log" 2>&1 & \
+		pids="$$pids $$!"; logs="$$logs $$log"; \
+	 done; \
+	 for pid in $$pids; do wait $$pid; said=$$?; status=$$((status + said)); done; \
+	 if [ -n "$$logs" ]; then cat $$logs; fi; \
+	 exit $$status
+
+drive-both: drive-all
 
 cache-clean:
 	@echo "🗑️  Cleaning cache directory (.cache)..."

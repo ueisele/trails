@@ -10,8 +10,8 @@ fresh snapshot of the continuously updated map. A normal run resumes the
 latest directory, keeping its start date. No map-data change is detected.
 The weights command reads only the inventory and makes no service requests.
 
-``make tiles`` dispatches here on Tree.provider; Abisko invokes the existing
-Lantmäteriet script with its arguments unchanged.
+``make tiles`` dispatches here on Tree.provider; Swedish maps invoke the
+Lantmäteriet script with the selected map and the remaining arguments.
 """
 
 import argparse
@@ -37,8 +37,10 @@ def main(argv: list[str] | None = None) -> int:
     dispatch.add_argument("--park", choices=TREES, default="lomsdal-visten")
     selection, remaining = dispatch.parse_known_args(argv)
     tree = TREES[selection.park]
-    if tree.provider == "lantmateriet":
-        return subprocess.run([sys.executable, str(Path(__file__).with_name("lantmateriet_tiles.py")), *remaining], check=False).returncode
+    if tree.provider.startswith("lantmateriet"):
+        return subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("lantmateriet_tiles.py")), "--park", selection.park, *remaining], check=False
+        ).returncode
     if tree.provider != "kartverket":
         dispatch.error(f"no base tile cutter for provider {tree.provider}")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, parents=[dispatch])

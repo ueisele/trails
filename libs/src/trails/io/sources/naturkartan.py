@@ -31,7 +31,7 @@ class SourceMetadata:
     """Where the links point, and why nothing else is taken from there."""
 
     name: str = "Naturkartan"
-    provider: str = "Outdoormap AB, pages by Länsstyrelsen Norrbotten"
+    provider: str = "Outdoormap AB, pages by the county administrative board"
     country: str = "SE"
     url: str = "https://www.naturkartan.se"
     #: Private use only; the map links to the pages and copies nothing.

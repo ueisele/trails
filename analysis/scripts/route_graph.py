@@ -57,25 +57,11 @@ class Country(NamedTuple):
         graph: The network module, :mod:`trails.network.norway` or
             :mod:`trails.network.sweden`; both spell the same names
         form_label: How a protection form reads in a sign's words
-        gateway: The town the graph has to contain: it is where anyone
-            arrives from, and it lies outside the park, which is what sets the
-            extent -- Mosjøen 9.8 km out; Abisko on the E10, inside the box
-        check_route: The route the elevation work is checked against, matched
-            on a stem, because it resolves to several chains and several
-            digitisations give several ascents. A single figure against a name
-            that resolves three ways is not a check, so all of them are printed.
-            Norway: UT.no publishes *Sjøbergmarsjruta* and Turrutebasen
-            *Sjøbergmarsjen*, which reaches FKB through the route-name join,
-            three chains of 20.48 km. Sweden: *Abisko - Abiskojaure (BD 21)*,
-            the state trail's number, which the register's chains and Topografi
-            50's named from it both carry.
         credits: What the sources are licensed under, for the foot of the report
     """
 
     graph: ModuleType
     form_label: Callable[[object], str]
-    gateway: str
-    check_route: str
     credits: tuple[str, ...]
 
 
@@ -83,8 +69,6 @@ COUNTRIES = {
     "NO": Country(
         graph=norway,
         form_label=naturbase.verneform_label,
-        gateway="Mosjøen",
-        check_route="Sjøbergmarsj",
         credits=(
             "Turrutebasen (CC0) | N50 Kartdata (CC BY 4.0) | Traktorveg og Skogsbilveg (CC BY 4.0)",
             # Every figure in the ELEVATION section comes out of the height
@@ -97,8 +81,6 @@ COUNTRIES = {
     "SE": Country(
         graph=sweden,
         form_label=naturvardsregistret.form_label,
-        gateway="Abisko",
-        check_route="BD 21",
         credits=(
             f"{naturvardsregistret.METADATA.name} ({naturvardsregistret.METADATA.license})",
             f"{topografi50.METADATA.name} ({topografi50.METADATA.license}) | {ortnamn.METADATA.name} ({ortnamn.METADATA.license})",
@@ -198,6 +180,7 @@ def report(
     protected: gpd.GeoDataFrame,
     country: Country,
     park_name: str,
+    which: Park,
 ) -> None:
     """Print everything the phase is checked against.
 
@@ -212,6 +195,7 @@ def report(
         protected: The protected areas the edges were measured against
         country: Whose registers these are
         park_name: The park, as the register names it
+        which: The map whose kind, gateway and route check the report names
     """
     metric_crs = country.graph.METRIC_CRS
     edges = network.edges
@@ -251,13 +235,16 @@ def report(
         print(f"\n  {label}")
         print(f"    components         {component.nunique():,}")
         print(f"    largest            {main['length_m'].sum() / 1000:,.0f} km = {share:.0f} % of the network")
-        print(f"    its reach          {reach / 1000:,.1f} km = {reach / park_extent * 100:.0f} % of the park's {park_extent / 1000:,.1f} km")
+        print(
+            f"    its reach          {reach / 1000:,.1f} km = {reach / park_extent * 100:.0f} % "
+            f"of the {which.kind_label}'s {park_extent / 1000:,.1f} km"
+        )
 
         reachable = _within(landmarks.quays, main, reach_m, metric_crs)
         print(f"    quays reached      {reachable} of {len(landmarks.quays)} (within {reach_m:g} m)")
         if len(town):
             distance = main.distance(town.geometry.iloc[0]).min()
-            print(f"    {country.gateway:<18} {distance:,.2f} m away{' — it sits on it' if distance < reach_m else ''}")
+            print(f"    {which.gateway:<18} {distance:,.2f} m away{' — it sits on it' if distance < reach_m else ''}")
 
     print("\n  cost")
     print(f"    {'source':<12} {'factor':>7} {'edges':>9} {'km':>8}")
@@ -267,8 +254,8 @@ def report(
 
     report_attributes(network.chains, sources)
     report_derived(network, country.graph)
-    report_protection(network, protected, country, park_name)
-    report_elevation(network, params, country.check_route)
+    report_protection(network, protected, country, park_name, which.kind_label)
+    report_elevation(network, params, which.check_route)
 
 
 def _filled(values: pd.Series) -> float:
@@ -361,7 +348,7 @@ def report_derived(network: Network, graph: ModuleType) -> None:
         print(f"      {'the other ' + str(len(per_route) - 8) + ' together':<52} {per_route.iloc[8:].sum() / 1000:>5,.1f} km")
 
 
-def report_protection(network: Network, protected: gpd.GeoDataFrame, country: Country, park_name: str) -> None:
+def report_protection(network: Network, protected: gpd.GeoDataFrame, country: Country, park_name: str, kind: str) -> None:
     """Print which protected areas the network runs through, and for how far.
 
     **The extent is named because the figures cannot be re-derived without it.**
@@ -376,6 +363,7 @@ def report_protection(network: Network, protected: gpd.GeoDataFrame, country: Co
         protected: The areas the edges were measured against
         country: Whose register it is, for its columns and its words
         park_name: The park, as the register names it
+        kind: The protected area's kind in the report
     """
     graph = country.graph
     edges = network.edges
@@ -399,7 +387,7 @@ def report_protection(network: Network, protected: gpd.GeoDataFrame, country: Co
     print("  area is a legal line with a published geometry, so how much of an edge lies")
     print("  inside one is a length and not a share. A crossing is asked nothing — there")
     print("  is no walking distance under a ferry — and a connector is asked.")
-    print(f"\n  register       {len(protected)} areas meeting the park and its approach zone")
+    print(f"\n  register       {len(protected)} areas meeting the {kind} and its approach zone")
     print(f"  walked         {walked['length_m'].sum() / 1000:,.1f} km, of which {drawn['length_m'].sum() / 1000:,.1f} on ground a source drew")
     print(f"  touched        {len(metres)} of them, {sum(metres.values()) / 1000:,.1f} km")
     print(f"  over {DEFAULT_TOUCHED_M:g} m       {len(over)} of them, {sum(over.values()) / 1000:,.1f} km   <- what a route reports")
@@ -439,7 +427,7 @@ def report_protection(network: Network, protected: gpd.GeoDataFrame, country: Co
             print("    overlap it in area:    none   <- so the figures above may be added up")
 
 
-def report_elevation(network: Network, params: graphs.Params, check_route: str) -> None:
+def report_elevation(network: Network, params: graphs.Params, check_route: str | None) -> None:
     """Print what the ground under the network came out as.
 
     Args:
@@ -498,13 +486,16 @@ def report_elevation(network: Network, params: graphs.Params, check_route: str) 
     report_check_route(chains, check_route)
 
 
-def report_check_route(chains: gpd.GeoDataFrame, check_route: str) -> None:
+def report_check_route(chains: gpd.GeoDataFrame, check_route: str | None) -> None:
     """Print every chain the checked route resolves to.
 
     Args:
         chains: The chains of every source
         check_route: The stem the route is matched on
     """
+    if check_route is None:
+        print("\n  Route elevation check skipped: this map names no check route")
+        return
     named = chains[chains["identity"].astype("string").str.contains(check_route, na=False, regex=False)]
     print(f"\n  {check_route}… — one route, every digitisation of the same ground")
     if named.empty:
@@ -569,7 +560,7 @@ def graph_norway(which: Park, args: argparse.Namespace, country: Country, repo_r
     park = naturbase.Source(cache_dir=params.cache_dir).find_one(which.name, layer=naturbase.Layer.NATIONAL_PARK)
     zone = norway.zone_around(park, params.approach_km)
     loaded = norway.load_sources(params, zone)
-    landmarks = load_norwegian_landmarks(params, loaded.municipalities, zone, country.gateway)
+    landmarks = load_norwegian_landmarks(params, loaded.municipalities, zone, which.gateway)
     network, chains = norway.build(loaded.sources, norway.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
     return Graphed(
         network,
@@ -609,10 +600,12 @@ def graph_sweden(which: Park, args: argparse.Namespace, country: Country) -> Gra
     # whenever the docstring's own `--approach-km 5` was typed (§8.2).
     params = dataclasses.replace(sweden.Params.from_args(args), approach_km=0.0)
     register = naturvardsregistret.Source(cache_dir=params.cache_dir)
-    park = register.find_one(which.name)
+    if which.form is None:
+        raise ValueError(f"{which.name} declares no register form")
+    park = register.find_one(which.name, form=which.form, exact=True, dissolve=True)
     zone = gpd.GeoDataFrame(geometry=[box(*which.bounds)], crs="EPSG:4326")
     loaded = sweden.load_sources(params, zone)
-    landmarks = load_swedish_landmarks(params, zone, country.gateway)
+    landmarks = load_swedish_landmarks(params, zone, which.gateway)
     network, chains = sweden.build(loaded.sources, sweden.masks_from(loaded.sources), zone, params, name=which.stem, protected=loaded.protected)
     return Graphed(
         network,
@@ -690,7 +683,7 @@ def main() -> int:
 
     graphed = graph_norway(which, args, country, repo_root) if which.country == "NO" else graph_sweden(which, args, country)
     network, chains, sources, park, landmarks, params, protected, park_name, versions = graphed
-    report(network, chains, sources, park, landmarks, params, args.reach_m, protected, country, park_name)
+    report(network, chains, sources, park, landmarks, params, args.reach_m, protected, country, park_name, which)
 
     print("\n" + "=" * 78)
     print(f"Sources: {versions}")

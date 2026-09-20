@@ -1,6 +1,6 @@
 """Copy Lantmäteriet's map tiles for one box out of the open download into a tile tree.
 
-The tiles are the base map of the Abisko page, served from our own bucket
+The tiles are the base map of each Swedish page, served from our own bucket
 rather than from Lantmäteriet's paid service — see
 analysis/docs/abisko-decisions.md §3 and §6.1. This reads the whole-Sweden
 GeoPackage over FTP by byte range and writes ``{z}/{x}/{y}.png`` under the
@@ -8,8 +8,8 @@ output directory, resuming where it left off. The deploy uploads the tree.
 
 Run with::
 
-    command make tiles                              # the Abisko box, z8 to z17
-    command make tiles ARGS="--max-zoom 13"         # a quick look at the coarse levels
+    command make tiles PARK=abisko                  # the Abisko box, z8 to z17
+    command make tiles PARK=malingsbo-kloten ARGS="--max-zoom 13"
 """
 
 import argparse
@@ -17,32 +17,31 @@ import sys
 from pathlib import Path
 
 from trails.io.sources import lantmateriet
-
-#: The Abisko box: west on the border at 18.15 E, south on the tile row that
-#: takes Kårsavagge's hut, east past Lapporten's valley path, north with the
-#: E10 inside. Its reasons are in analysis/docs/abisko-decisions.md §2 and §9.24.
-ABISKO: lantmateriet.Bounds = (18.15, 68.139, 19.10, 68.46)
-
-#: Where the tiles go, under analysis/output/: the bucket prefix the page will
-#: fetch them from. The version segment is chosen per run: the stand of the
-#: file on the server names it, a new stand gets the next number and the
-#: page built afterwards draws that one (§6.1, §9.20 of the decisions).
-DEFAULT_ROOT = Path("analysis") / "output" / "tiles" / "lantmateriet" / "topowebb"
+from trails.processing.trees import TREES
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Copy the tiles.
+
+    Args:
+        argv: CLI arguments; None reads the process arguments
 
     Returns:
         Process exit status
     """
     repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--bounds", nargs=4, type=float, metavar=("MIN_LON", "MIN_LAT", "MAX_LON", "MAX_LAT"), default=list(ABISKO))
+    parser.add_argument("--park", choices=[key for key, tree in TREES.items() if tree.provider.startswith("lantmateriet")], default="abisko")
+    parser.add_argument("--bounds", nargs=4, type=float, metavar=("MIN_LON", "MIN_LAT", "MAX_LON", "MAX_LAT"))
     parser.add_argument("--min-zoom", type=int, default=lantmateriet.MIN_ZOOM)
     parser.add_argument("--max-zoom", type=int, default=lantmateriet.MAX_ZOOM)
-    parser.add_argument("--tree-root", type=Path, default=repo_root / DEFAULT_ROOT, help="The tree's root; the version directory is chosen under it")
-    args = parser.parse_args()
+    parser.add_argument("--tree-root", type=Path, help="The tree's root; the version directory is chosen under it")
+    args = parser.parse_args(argv)
+    tree = TREES[args.park]
+    if args.bounds is None:
+        args.bounds = tree.box
+    if args.tree_root is None:
+        args.tree_root = repo_root / "analysis/output/tiles" / tree.provider / "topowebb"
 
     bounds: lantmateriet.Bounds = (args.bounds[0], args.bounds[1], args.bounds[2], args.bounds[3])
     zooms = range(args.min_zoom, args.max_zoom + 1)

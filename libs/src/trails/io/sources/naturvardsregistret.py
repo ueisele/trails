@@ -65,6 +65,7 @@ FORM_LABELS = {
 }
 
 NATIONAL_PARK = "Nationalpark"
+NATURE_CONSERVATION_AREA = "Naturvårdsområde"
 
 #: What names an area, what it is called and which form it is.
 AREA_ID, AREA_NAME, AREA_FORM = "NVRID", "NAMN", "SKYDDSTYP"
@@ -273,7 +274,9 @@ class Source:
         joined = gpd.GeoDataFrame(gpd.pd.concat(kept, ignore_index=True), geometry="geometry", crs="EPSG:4326")
         return joined.sort_values(AREA_ID).reset_index(drop=True)
 
-    def find_one(self, name: str, form: str = NATIONAL_PARK, exact: bool = False, force_download: bool = False) -> gpd.GeoDataFrame:
+    def find_one(
+        self, name: str, form: str = NATIONAL_PARK, exact: bool = False, force_download: bool = False, *, dissolve: bool = False
+    ) -> gpd.GeoDataFrame:
         """Find exactly one protected area by name.
 
         Args:
@@ -281,12 +284,13 @@ class Source:
             form: Which form to look among, as the register spells it
             exact: Require the whole name rather than a part
             force_download: Fetch the file again rather than reading the cache
+            dissolve: Unite county objects of one name and form; distinct names still raise
 
         Returns:
             One row, in WGS 84
 
         Raises:
-            LookupError: If nothing matches, or more than one thing does
+            LookupError: If nothing matches, or several match without a single name to dissolve
         """
         code = next(code for code, spelled in FORMS.items() if spelled == form)
         archive = self._archive(f"naturvardsregistret/{code}.zip", force_download)
@@ -297,8 +301,17 @@ class Source:
         hits = every[names.str.casefold() == name.casefold()] if exact else every[names.str.contains(name, case=False, regex=False)]
         if not len(hits):
             raise LookupError(f"no {form_label(form)} matches '{name}'")
-        if len(hits) > 1:
+        if len(hits) > 1 and (not dissolve or hits[AREA_NAME].str.casefold().nunique() != 1 or hits[AREA_FORM].nunique() != 1):
             raise LookupError(f"'{name}' is ambiguous among the {form_label(form)}s, matched {len(hits)}: {', '.join(hits[AREA_NAME].astype(str))}")
+        if len(hits) > 1:
+            # County objects describe one area; retain their ids and jurisdictions
+            # and sum the registered hectares beside the union's measured area.
+            joined = hits.iloc[[0]].copy()
+            joined.loc[joined.index[0], "geometry"] = hits.geometry.union_all()
+            for column in (AREA_ID, "LAN", "KOMMUN"):
+                joined[column] = ", ".join(dict.fromkeys(hits[column].dropna().astype(str)))
+            joined["AREA_HA"] = hits["AREA_HA"].sum()
+            hits = joined
         found: gpd.GeoDataFrame = hits.reset_index(drop=True).to_crs("EPSG:4326")
         return found
 

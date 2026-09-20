@@ -362,12 +362,14 @@ def test_weights_count_skipped_bytes_and_reject_missing(tmp_path):
         wms.weights_from_index(path)
 
 
-def test_abisko_dispatch_preserves_original_arguments(script, monkeypatch):
+@pytest.mark.parametrize("park", ["abisko", "malingsbo-kloten"])
+def test_swedish_dispatch_preserves_the_map_and_arguments(script, monkeypatch, park):
     run = Mock(return_value=subprocess.CompletedProcess([], 7))
     monkeypatch.setattr(script.subprocess, "run", run)
-    assert script.main(["--park", "abisko", "--max-zoom", "13", "--tree-root", "/tmp/a tree"]) == 7
+    assert script.main(["--park", park, "--max-zoom", "13", "--tree-root", "/tmp/a tree"]) == 7
     run.assert_called_once_with(
-        [sys.executable, str(SCRIPT.with_name("lantmateriet_tiles.py")), "--max-zoom", "13", "--tree-root", "/tmp/a tree"], check=False
+        [sys.executable, str(SCRIPT.with_name("lantmateriet_tiles.py")), "--park", park, "--max-zoom", "13", "--tree-root", "/tmp/a tree"],
+        check=False,
     )
 
 

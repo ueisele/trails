@@ -59,7 +59,17 @@ def source(tmp_path):
         },
         crs=nvr.CRS,
     )
+    conservation = gpd.GeoDataFrame(
+        [
+            _area("west", "Malingsbo-Kloten", nvr.NATURE_CONSERVATION_AREA, 650000),
+            _area("middle", "Malingsbo-Kloten", nvr.NATURE_CONSERVATION_AREA, 651000),
+            _area("east", "Malingsbo-Kloten", nvr.NATURE_CONSERVATION_AREA, 652000),
+        ],
+        crs=nvr.CRS,
+    )
+    conservation["LAN"] = ["Örebro", "Dalarna", "Västmanland"]
     archives = {
+        "NVO.zip": _zipped_shapefile(tmp_path, "NVO", "NVO", "NVO_polygon.shp", conservation),
         "NP.zip": _zipped_shapefile(tmp_path, "NP", "NP", "NP_polygon.shp", parks),
         "NR.zip": _zipped_shapefile(tmp_path, "NR", "NR", "NR_polygon.shp", reserves),
         "Leder_shp.zip": _zipped_shapefile(tmp_path, "Leder_shp", "", "Leder.shp", trails),
@@ -98,6 +108,32 @@ class TestFindOne:
     def test_more_than_one_matching_says_which(self, source):
         with pytest.raises(LookupError, match="Abisko, Vadvetjåkka"):
             source.find_one("a")
+
+    def test_county_objects_are_strict_until_dissolving_is_requested(self, source):
+        with pytest.raises(LookupError, match="matched 3"):
+            source.find_one("Malingsbo-Kloten", form=nvr.NATURE_CONSERVATION_AREA, exact=True)
+
+    def test_dissolving_unites_the_geometry_and_retains_the_county_ids(self, source):
+        found = source.find_one("Malingsbo-Kloten", form=nvr.NATURE_CONSERVATION_AREA, exact=True, dissolve=True)
+        shapes = [_area("", "", "", east)["geometry"] for east in (650000, 651000, 652000)]
+        expected = gpd.GeoSeries(shapes, crs=nvr.CRS).union_all()
+        assert len(found) == 1
+        assert found.crs.to_epsg() == 4326
+        # Reprojection bends an edge: compare the union in the register's CRS.
+        metric = found.to_crs(nvr.CRS).geometry.iloc[0]
+        assert metric.area == pytest.approx(expected.area)
+        assert metric.symmetric_difference(expected).area / expected.area < 1e-9
+        assert found[nvr.AREA_ID].iloc[0] == "west, middle, east"
+        assert found["LAN"].iloc[0] == "Örebro, Dalarna, Västmanland"
+        assert found["KOMMUN"].iloc[0] == "Kiruna"
+        assert found["AREA_HA"].iloc[0] == sum(_area("", "", "", east)["AREA_HA"] for east in (650000, 651000, 652000))
+
+    def test_dissolving_still_refuses_distinct_names(self, source):
+        with pytest.raises(LookupError, match="Abisko, Vadvetjåkka"):
+            source.find_one("a", dissolve=True)
+
+    def test_dissolving_does_not_change_a_single_object(self, source):
+        assert source.find_one("Abisko").equals(source.find_one("Abisko", dissolve=True))
 
 
 class TestTrails:
