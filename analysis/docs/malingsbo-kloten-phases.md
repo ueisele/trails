@@ -342,6 +342,19 @@ reports — read off the built page and the build's own output, never guessed. T
 `command make drive ARGS="--page analysis/output/malingsbo-kloten.html"` to a file, read
 whole; every reading green or its skip named; then `drive-all`, three pages, green.
 
+**Built 2026-09-20** (`305de6f`, one codex run and five resumptions, each a precise stop).
+The scene: road 233 as the long chain (45.885 km), positions at Kloten, a kept area of
+5.01 × 8.96 km, Dammtjärnsbäcken as the river goal (357 m straight, 66 m of river, 2.343 km
+staying on paths), edge 65792 for the long-edge readings, `way_over_flight=1.2`. Three
+findings on the way, two of them the suite's and one the page's: the scale-bar check had
+65.5° N hard-coded and now derives the bar from the page's own rule at the scene's latitude;
+the profile-scale check rounded pixel bands before dividing and read 13 for a true 9.92 — the
+fractional bands are kept now, and the three scenes read 9.93 / 10.04 / 9.92; and a stop on
+water gave the way two totals (record §6, decided as phase 9). The pack-weight readings
+disagreed until the page was rebuilt on phase 6's measured tables. **Two consecutive full
+drives green: 1,329 readings, none broken, none moved, four named skips** (no tap pair
+beside a path, no leg not worth routing, no sound, no named Topografi 50 trail to borrow).
+
 ### Phase 6 — The weights, the counts, the record
 
 *Agent, one worktree, after phase 3, parallel with 5. Files: `maps.py` (weight tables only),
