@@ -382,6 +382,18 @@ it). Read back from the edge: the page, a pack, a height tile, byte-identical. T
 `atlas.cairn.zone` lists the third map on its own. Then Uwe's phone: install, keep an area,
 walk the offline switch — the readings that are his to take.
 
+**Published 2026-09-20, 21:50.** `drive-all` over the three pages first: Malingsbo-Kloten
+1,326 readings and four named skips, Abisko 1,366, Lomsdal-Visten 1,368 with one broken —
+*the first visit downloads the map once: 2* — which passed alone (`--only
+the_map_opens_with_the_network_off`, 126 readings green): three browsers at once race the
+worker's first fetch, a contention the suite's counted readings are not yet proof against.
+Then `just deploy --map malingsbo-kloten --tree packs`: **2,544 of 14,591 packs uploaded,
+986.4 MB in 57 s**, the page 23.3 → 6.22 MB at brotli 11, the worker, the manifest, the four
+icons, the edge purged. Read back: the page byte-identical to the file, a height pack
+byte-identical, manifest and worker 200, and the index at `atlas.cairn.zone` lists
+`/malingsbo-kloten` beside the two. **https://atlas.cairn.zone/malingsbo-kloten**. Uwe's phone
+readings are the open half: install, keep an area, the offline switch.
+
 ### Phase 8 — Named routes off OSM's relations: the Bergslagsleden
 
 *Agent, one worktree, after phase 7. Uwe's word 2026-09-20, on the measurement below.*

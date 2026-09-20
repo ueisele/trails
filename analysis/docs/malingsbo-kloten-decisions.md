@@ -241,6 +241,13 @@ national collection and needs nothing.
   parametrised tests already carried that figure from phase 1; it stands. The analysis
   README now names all three maps in the build, drive and publish instructions.
 
+- **2026-09-20, 21:50 — Phase 5 and phase 7.** The scene measured and two drives green
+  (`305de6f`; 1,329 readings, four named skips); `drive-all` over three pages, one reading
+  broken by three browsers racing and green alone; published with
+  `just deploy --map malingsbo-kloten --tree packs` — 2,544 packs, 986.4 MB, 57 s; the page
+  6.22 MB brotli; read back byte-identical. **https://atlas.cairn.zone/malingsbo-kloten.**
+  Open: the phone, the icon pick, phase 8 (the Bergslagsleden), phase 9 (two lengths).
+
 ## 11. How the figures here were obtained
 
 Scratch in `~/mockups/malingsbo-kloten-box/`: `reserve.py` reads the cached register forms
