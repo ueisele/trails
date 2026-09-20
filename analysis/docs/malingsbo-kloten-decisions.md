@@ -135,9 +135,11 @@ raw either — not needed by the new squeezer, kept because it costs nothing.
   walking length, 23,449 m). Neither is wrong on its own — the water is not walked, and the
   way is that long — but a reader sees 23.51 km in one place and 23.45 km in the other. Not
   new with this map: Abisko's code is the same, its scene's stop merely stands on land.
-  Options: the heading counts the water too, with the profile keeping the gap in height
-  only (the way's length is a fact, the height over water is unknown); or the rows exclude it
-  as the heading does. Uwe's call; the scene's stop moved to land meanwhile.
+  **Decided, Uwe 2026-09-20:** a way carries both lengths, on foot and over water; the
+  heading shows them as glyphs (*23.45 km 🚶 · 0.07 km 🛶*, the water only when there is
+  any), the figures page and the files in words. The water stays out of the walking length,
+  as it always was — a lake is crossed by boat, a river on foot. Plan phase 9. A kayak
+  mode, where the water is the way, comes after the map is finished (plan §5).
 - The phone readings, once published: install, keep an area, the offline switch.
 - The icon: Uwe's pick among candidates A–D (plan phase 2); A stands until then.
 

@@ -66,7 +66,7 @@ onto `main` and fast-forwarded at review, so the history stays linear. `maps.py`
 region and never whole. Review, hooks, the drive and the landing are the reviewing session's.
 
 **Order and parallelism, in one line.**
-0 → { 1 ∥ 2 ∥ 4 } → 3 → { 5 ∥ 6 } → 7 → 8.
+0 → { 1 ∥ 2 ∥ 4 } → 3 → { 5 ∥ 6 } → 7 → 8 → 9.
 
 - Phase 1 (plumbing), 2 (icon) and 4 (research) touch disjoint files and run at once.
 - Phase 3 (the builds) needs phase 1 landed and phase 2's first candidate on disk; it is a
@@ -407,7 +407,38 @@ Lomsdal-Visten box at all, and the Norwegian map names its routes off Turrutebas
 route name, which reaches FKB through the route-name join, with 35 UT.no pages in its
 catalogue. There is nothing there for a relation reader to add.
 
+### Phase 9 — A way's two lengths: on foot, and over water
+
+*Agent, one worktree, after phase 8. Uwe's word 2026-09-20, on the measurement in the
+record's §6.*
+
+A lake is not walked, so its metres were never in the walking total — deliberately, since
+what crosses it is a boat. The fault is that the page shows one figure with the water and
+another without, in two places, without saying so. Decided: a way carries both lengths.
+
+1. `composeRoute` keeps its rule — a water part has no height and no walking length — and
+   the way records the water's length beside it, summed from the same parts; `goalState`
+   hands both out, and `metresInto` counts along the whole way, as the drawn line is.
+2. **The heading shows glyphs, the figures page shows words.** The heading is one line of
+   forty characters at 390 px (§9.37) and holds no fourth word-pair. Two Font Awesome
+   outlines join the four the page already carries inline — *person-walking* and *water* —
+   and the first figure reads *23.45 km 🚶 · 0.07 km 🛶*, the water only when it is more
+   than nought, so a way without water reads as it does today. The figures page, the GPX
+   description and the SVG's `<desc>` say *on foot* and *over water* in words. Rivers are
+   crossed on foot and stay in the walking length.
+3. The drive: a reading that the goal's heading and the last row at the foot agree with the
+   water in, on a way that crosses water — the stop on water of phase 5's first try, on this
+   map, is that reading; and a reading that a way without water reads as before. All three
+   pages green.
+
 ## 5. Not in this plan
+
+- **A kayak mode**, where water is the way and land the portage: the costs reversed, the
+  water grid a surface to cross rather than a bar, a profile flat at the lake's level (the
+  height model has it: a lake is a plane with a value, not a hole), and the two sums *over
+  water* and *portage on foot* by the mechanism of phase 9. Uwe, 2026-09-20: after the map
+  is finished. A measurement over this map's lake chains first, and a section in the
+  decisions before anyone builds; whether it lives here or in `atlas` is part of that.
 
 - Linking the reserve's own trails (*Vandringsleder i Klackberg* and the like) to Naturkartan
   pages: the register names them, but no page for them is known; the Bergslagsleden is phase 8.
