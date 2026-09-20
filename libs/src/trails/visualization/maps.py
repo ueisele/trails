@@ -1349,6 +1349,25 @@ def _squeezed(html: str) -> str:
     whitespace outside a string means nothing -- and only whole-line whitespace
     is removed, so a newline still stands between any two tags that had one.
 
+    **Which lines those are is read the way a JavaScript parser reads them**,
+    not by counting backticks: inside a ``<script>`` block the walk knows a
+    quoted string, a comment and a template literal with its ``${...}``
+    expressions from one another, so a backtick that is *data* -- an OSM path
+    named ``EkMalm`sStig`` stopped the first Malingsbo-Kloten build, 2026-09-20,
+    when the walk was a parity count -- is a character in a string and opens
+    nothing. Any text may stand in a name. Outside a script block nothing is
+    lexed at all: markup carries apostrophes in prose and no template literal.
+    A regular-expression literal is told from a division the way every
+    lexer without a parser does it, by the character before the slash: after
+    an operand (a name, a number, a closing bracket) it divides, after anything
+    else it opens a pattern, which runs to its closing slash with a character
+    class read whole -- the page's own ``/[&<>"']/g`` would otherwise leave a
+    quote open (it did, 2026-09-20). A block left open stops the build loudly
+    below rather than guessing. The vendored files -- Leaflet, jQuery and the rest, between the
+    ``<!-- vendored:name -->`` fences -- do carry such regular expressions
+    (Leaflet's left a quote open for the walk), and they are minified with
+    nothing to squeeze, so a fenced block is copied whole and not read.
+
     Args:
         html: The rendered page.
 
@@ -1356,29 +1375,205 @@ def _squeezed(html: str) -> str:
         The same page with its whitespace taken out.
 
     Raises:
-        AssertionError: If a template literal is still open at the end, which
-            means the parity this walks by does not hold and nothing was safe
-            to remove.
+        AssertionError: If a script block ends inside a string, a comment or a
+            template literal, which means the walk lost its place and nothing
+            was safe to remove.
     """
+    walk = _ScriptWalk()
     out: list[str] = []
-    inside = False
     for line in html.split("\n"):
-        odd = line.count("`") % 2 == 1
-        if inside:
-            # Inside the string: every character of it is the string's.
+        in_template = walk.in_template
+        opaque = walk.opaque
+        walk.feed(line)
+        if opaque or walk.opaque:
+            # Somebody else's file, minified and fenced: copied as it is, since
+            # its regular expressions are not ours to read (Leaflet's leave a
+            # quote open for this walk) and it holds nothing worth squeezing.
             out.append(line)
-            inside = not odd
-            continue
-        if odd:
+        elif in_template:
+            # Inside the string: every character of the line is the string's.
+            out.append(line)
+        elif walk.in_template:
             # The indentation is still the document's; the tail is the string's.
-            inside = True
             out.append(line.lstrip())
-            continue
-        line = line.strip()
-        if line:
-            out.append(line)
-    assert not inside, "a template literal was left open, so the page's backtick parity does not hold"
+        else:
+            stripped = line.strip()
+            if stripped:
+                out.append(stripped)
+    assert walk.settled, "a script block is still open inside a string, a comment or a template literal, so nothing was safe to remove"
     return "\n".join(out)
+
+
+class _ScriptWalk:
+    """Where a JavaScript parser would be after reading a page line by line.
+
+    Markup until ``<script``; inside the block, code, a single- or double-quoted
+    string, a line or block comment, a regular expression, or a template
+    literal -- the last with a stack, since ``${...}`` re-enters code and may
+    hold strings and templates of its own. Only ``in_template`` matters to the
+    squeezer; the rest is tracked so that a backtick inside a string, a comment
+    or a pattern counts for nothing.
+    """
+
+    #: What may stand before a slash that divides: the end of an operand. After
+    #: anything else -- an operator, a bracket, a comma, the start of a
+    #: statement -- a slash opens a regular expression.
+    _OPERAND_END = re.compile(r"[\w$)\]]$")
+    #: Words that end in a word character and are not operands: a slash after
+    #: ``return`` opens a pattern.
+    _KEYWORDS = frozenset({"return", "typeof", "case", "in", "of", "do", "else", "instanceof", "void", "delete", "throw", "new", "await", "yield"})
+
+    _OPEN = re.compile(r"<script\b[^>]*>", re.IGNORECASE)
+    _CLOSE = "</script>"
+    _FENCE_OPEN = "<!-- vendored:"
+    _FENCE_CLOSE = "<!-- /vendored:"
+
+    def __init__(self) -> None:
+        self.in_script = False
+        #: Between the fences of a vendored file, which is not read at all.
+        self.opaque = False
+        #: The last character of code seen, for telling a division from a
+        #: pattern; whitespace and comments do not count.
+        self.last_code = ""
+        #: The word that character ends, if it is a word character.
+        self.word = ""
+        # The stack of open constructs inside a script block: "'", '"', "`",
+        # "//", "/*", or "{" for a template expression. Empty means code.
+        self.stack: list[str] = []
+
+    @property
+    def in_template(self) -> bool:
+        return bool(self.stack) and self.stack[-1] == "`"
+
+    @property
+    def settled(self) -> bool:
+        """True while no script block is open inside anything."""
+        return not (self.in_script and self.stack)
+
+    def feed(self, line: str) -> None:
+        """Advance over one line (its newline implied at the end)."""
+        if self.opaque:
+            if self._FENCE_CLOSE in line:
+                self.opaque = False
+            return
+        if not self.in_script and self._FENCE_OPEN in line:
+            self.opaque = self._FENCE_CLOSE not in line
+            return
+        i = 0
+        n = len(line)
+        while i < n:
+            if not self.in_script:
+                found = self._OPEN.search(line, i)
+                if found is None:
+                    return
+                self.in_script = True
+                i = found.end()
+                continue
+            top = self.stack[-1] if self.stack else None
+            if top is None or top == "{":
+                # Code. A closing script tag ends the block; nothing inside a
+                # string can spell one, since _script_json escapes the bracket.
+                if line.startswith(self._CLOSE, i) and top is None:
+                    self.in_script = False
+                    i += len(self._CLOSE)
+                    continue
+                ch = line[i]
+                if line.startswith("//", i):
+                    self.stack.append("//")
+                    i += 2
+                elif line.startswith("/*", i):
+                    self.stack.append("/*")
+                    i += 2
+                elif ch == "/" and (not self._OPERAND_END.search(self.last_code) or self.word in self._KEYWORDS):
+                    i = self._over_pattern(line, i + 1)
+                    self.last_code = ")"
+                    self.word = ""
+                elif ch in ("'", '"', "`"):
+                    self.stack.append(ch)
+                    i += 1
+                elif ch == "{" and top == "{":
+                    # Braces inside a template expression nest; count them so the
+                    # matching close does not end the expression early.
+                    self.stack.append("{")
+                    self.last_code = ch
+                    self.word = ""
+                    i += 1
+                elif ch == "}" and top == "{":
+                    self.stack.pop()
+                    self.last_code = ch
+                    self.word = ""
+                    i += 1
+                else:
+                    if not ch.isspace():
+                        self.last_code = ch
+                        self.word = self.word + ch if ch.isalnum() or ch in "_$" else ""
+                    i += 1
+            elif top == "//":
+                # To the end of the line, and the newline ends it.
+                break
+            elif top == "/*":
+                close = line.find("*/", i)
+                if close < 0:
+                    return
+                self.stack.pop()
+                i = close + 2
+            elif top in ("'", '"'):
+                ch = line[i]
+                if ch == "\\":
+                    i += 2
+                elif ch == top:
+                    self.stack.pop()
+                    # A string is an operand: a slash after it divides.
+                    self.last_code = ")"
+                    i += 1
+                else:
+                    i += 1
+            else:  # a template literal
+                ch = line[i]
+                if ch == "\\":
+                    i += 2
+                elif ch == "`":
+                    self.stack.pop()
+                    self.last_code = ")"
+                    i += 1
+                elif line.startswith("${", i):
+                    self.stack.append("{")
+                    i += 2
+                else:
+                    i += 1
+        if self.stack and self.stack[-1] == "//":
+            self.stack.pop()
+
+    @staticmethod
+    def _over_pattern(line: str, i: int) -> int:
+        """Where a regular expression that opened before ``i`` ends on this line.
+
+        Args:
+            line: The line
+            i: The index after the opening slash
+
+        Returns:
+            The index after the closing slash and its flags; the line's end if
+            the pattern is not closed, which a parser would refuse too
+        """
+        in_class = False
+        n = len(line)
+        while i < n:
+            ch = line[i]
+            if ch == "\\":
+                i += 2
+                continue
+            if in_class:
+                in_class = ch != "]"
+            elif ch == "[":
+                in_class = True
+            elif ch == "/":
+                i += 1
+                while i < n and line[i].isalpha():
+                    i += 1
+                return i
+            i += 1
+        return n
 
 
 #: Folium's own map template, which is where the page's viewport meta comes from.
@@ -1454,6 +1649,29 @@ def save_map(fmap: folium.Map, path: pathlib.Path) -> pathlib.Path:
     """
     path.write_text(_viewport(_squeezed(fmap.get_root().render())), encoding="utf-8")
     return path
+
+
+def _tooltip(text: str, **options: Any) -> folium.Tooltip:
+    """A hover tooltip carrying any text at all.
+
+    **Folium writes the tooltip's text raw into a JavaScript template literal**
+    (``bindTooltip(`<div>{{ this.text }}</div>`)``), so a name holding a
+    backtick, a ``${`` or a closing script tag would end the literal, the
+    expression or the block and break the page -- measured with a hostile name
+    through the whole page, 2026-09-20, after an OSM path named ``EkMalm`sStig``
+    stopped a build. The text is the tooltip's markup, so it is HTML-escaped,
+    and the two characters that mean something to a template literal go as
+    character references too: the browser reads ``&#96;`` and ``&#36;`` back as
+    the characters, and the parser never sees them.
+
+    Args:
+        text: The text as the data has it
+        options: Passed on to :class:`folium.Tooltip`
+
+    Returns:
+        The tooltip, safe to bind
+    """
+    return folium.Tooltip(escape(text).replace("`", "&#96;").replace("$", "&#36;"), **options)
 
 
 def _pin(colour: str, icon: str) -> str:
@@ -3124,7 +3342,7 @@ def add_trails(
                 weight=weight,
                 opacity=opacity,
                 dash_array=dash_array,
-                tooltip=tooltip,
+                tooltip=_tooltip(tooltip) if tooltip else None,
                 class_name=class_name,
             )
             polyline.options = _lean(polyline.options, filled=False)
@@ -3510,7 +3728,7 @@ def add_points(
 
         marker = folium.Marker(
             location=(round(geometry.y, DRAWN_DECIMALS), round(geometry.x, DRAWN_DECIMALS)),
-            tooltip=tooltip,
+            tooltip=_tooltip(tooltip) if tooltip else None,
             icon=folium.DivIcon(html=_pin(color, glyph), icon_size=(PIN_WIDTH, PIN_HEIGHT), icon_anchor=(PIN_WIDTH // 2, PIN_HEIGHT)),
             **options,
         )
@@ -3603,7 +3821,7 @@ def add_labelled_points(
             fill_color=color,
             fill_opacity=0.9,
             class_name=class_name,
-            tooltip=folium.Tooltip(label, permanent=permanent, direction="right"),
+            tooltip=_tooltip(label, permanent=permanent, direction="right"),
         )
         marker.options = _lean(marker.options, filled=True)
 

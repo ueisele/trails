@@ -98,6 +98,33 @@ Decided: read the relations, carry their name, stage and `website` onto the memb
 link the stage's own page and Naturkartan's from a catalogue keyed by name, no layer of its
 own. Plan phase 8, after the publish.
 
+### 7.3 Any text may stand in a name — fixed, 2026-09-20
+
+The third build stopped writing the page: *a template literal was left open, so the page's
+backtick parity does not hold*. An OSM path in the box is named ``EkMalm`sStig``, and the
+page's whitespace squeezer, which keeps out of the JavaScript's template literals, told them
+apart by counting backticks per line — so a backtick in *data* opened one. Uwe: the page
+cannot depend on which characters a name holds; any text must be carried and escaped.
+
+Two faults, both fixed and both tested with a hostile name through the whole page
+(backtick, both quotes, ``${x}``, a closing script tag, markup):
+
+- **The squeezer now reads a script block the way a parser does** (`_ScriptWalk`): quoted
+  strings, line and block comments, template literals with their ``${...}`` expressions. A
+  backtick inside a string or a comment counts for nothing; outside a script block nothing is
+  lexed at all. A pattern is told from a division by the character or keyword before the
+  slash, the usual heuristic — the page's own ``/[&<>"']/g`` had left a quote open on the
+  first try — and the vendored files between the ``<!-- vendored:… -->`` fences are copied
+  whole and not read, since Leaflet's minified source does the same and holds nothing to
+  squeeze. A block left open still stops the build loudly rather than guessing.
+- **Folium writes a tooltip's text raw into a template literal** — so a name with a backtick,
+  a ``${`` or a closing script tag did not merely trip the squeezer, it broke the page. Every
+  tooltip the map binds now goes through `_tooltip`: HTML-escaped, with the backtick and the
+  dollar as character references, which the browser reads back as the characters.
+
+`_script_json` escapes the backtick as it escapes ``<``, so the page's own JSON carries none
+raw either — not needed by the new squeezer, kept because it costs nothing.
+
 ## 6. Open
 
 - The phone readings, once published: install, keep an area, the offline switch.

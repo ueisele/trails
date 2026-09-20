@@ -10995,6 +10995,97 @@ class TestScriptJson:
         assert "</script>" not in out
         assert json.loads(out) == {"name": "EkMalm`sStig", "html": "</script>"}
 
-    def test_the_squeezer_holds_its_parity_over_such_a_value(self):
-        page = "<script>\n  const data = " + maps._script_json(["EkMalm`sStig"]) + ";\n  const t = `a\n  b`;\n</script>"
-        assert maps._squeezed(page).count("`") == 2
+
+HOSTILE = "EkMalm`sStig \"quoted\" 'apostrophe' ${x} </script> <b>bold</b>"
+
+
+class TestSqueezed:
+    """The squeezer reads a script block the way a parser does, so what a name
+    holds cannot move it. The first Malingsbo-Kloten build stopped on an OSM
+    path named EkMalm`sStig when the walk was a parity count (2026-09-20)."""
+
+    PAGE = """<html>
+  <p>Kårsavagge's hut, in prose with an apostrophe</p>
+  <script>
+    const a = "EkMalm`sStig";   // a comment with a ` in it
+    const b = 'it`s';
+    /* a block
+       with ` inside */
+    const t = `line one
+      line two ${ {x: "`"}.x } still
+    end`;
+    const u = `${a}`;
+  </script>
+  <style>
+    .x::before { content: "'"; }
+  </style>
+</html>"""
+
+    def test_a_template_literal_keeps_its_lines_and_everything_else_loses_its_indentation(self):
+        out = maps._squeezed(self.PAGE)
+        assert '\n      line two ${ {x: "`"}.x } still\n    end`;\n' in out
+        assert '\nconst a = "EkMalm`sStig";' in out
+        assert "\n<p>Kårsavagge's hut, in prose with an apostrophe</p>\n" in out
+        assert "\n\n" not in out
+
+    def test_a_backtick_in_a_string_or_a_comment_opens_nothing(self):
+        for line in ('const a = "a`b";', "const a = 'a`b';", "// a ` here", "/* a ` here */"):
+            walk = maps._ScriptWalk()
+            walk.feed("<script>")
+            walk.feed(line)
+            assert not walk.in_template, line
+            assert walk.settled, line
+
+    def test_a_pattern_is_told_from_a_division(self):
+        """The page's own JavaScript escapes markup with /[&<>"']/g; a slash
+        after an operand divides, and the quotes in a pattern open nothing."""
+        for line in ("var MARKUP = /[&<>\"']/g;", "return /a'b/.test(x);", "x = y / 2 / z;", "x = (a) / b; s = 'c';", "f(/[/]'/)"):
+            walk = maps._ScriptWalk()
+            walk.feed("<script>")
+            walk.feed(line)
+            assert walk.settled and not walk.stack, line
+
+    def test_a_vendored_file_is_copied_whole_and_not_read(self):
+        """Leaflet's minified source carries a regular expression with a quote
+        in it, which the walk cannot tell from a string; between the fences
+        nothing is read and nothing is squeezed."""
+        page = (
+            "<!-- vendored:x -->\n<script>var r=/'/; // Leaflet does this\n   kept as is</script>\n<!-- /vendored:x -->\n"
+            "  <script>\n    const a = 1;\n  </script>"
+        )
+        out = maps._squeezed(page)
+        assert "\n   kept as is</script>\n" in out
+        assert "\nconst a = 1;\n" in out
+
+    def test_a_block_left_open_stops_the_build_rather_than_guessing(self):
+        with pytest.raises(AssertionError):
+            maps._squeezed("<script>\nconst t = `open\n</script>")
+
+    def test_any_text_survives_the_whole_page(self, trails, shelters, tmp_path):
+        """Names carrying a backtick, both quotes, a template expression, a
+        closing script tag and markup go through a trail layer, a point layer
+        with its tooltip and the search, and the page is written and carries
+        them escaped -- no raw backtick, no raw closing tag inside a script."""
+        trails = trails.copy()
+        trails.loc[0, "trail_name"] = HOSTILE
+        shelters = shelters.copy()
+        shelters.loc[0, "name"] = HOSTILE
+        fmap = maps.create_map(bounds=(12.4, 65.3, 13.4, 65.7))
+        maps.add_trails(fmap, trails, name="Trails", popup_fields={"trail_name": "Route"}, search_field="trail_name")
+        maps.add_points(fmap, shelters, name="Huts", popup_fields={"name": "Name"}, search_field="name")
+        written = maps.save_map(fmap, tmp_path / "map.html")
+        page = written.read_text(encoding="utf-8")
+        # Our own blocks open and close in pairs (jQuery's code spells "<script" twice).
+        assert ours(page).count("<script") == ours(page).count("</script>")
+        # Nowhere raw where it would mean something: a template literal (the
+        # tooltip is one) holds no backtick, no expression and no closing tag;
+        # a JSON string may hold "${x}", since it means nothing there.
+        literals = re.findall(r"bindTooltip\(\s*`(.*?)`", page, re.S)
+        assert literals
+        assert not any("`" in text or "${" in text or "</script>" in text or "<b>" in text for text in literals)
+        assert "</script> <b>" not in page
+        assert "<b>bold</b>" not in page
+        # And nowhere lost: the tooltip carries it as markup with references,
+        # the JSON strings as the characters themselves.
+        assert "EkMalm&#96;sStig &quot;quoted&quot; &#x27;apostrophe&#x27; &#36;{x} &lt;/script&gt; &lt;b&gt;bold&lt;/b&gt;" in page
+        assert page.count("EkMalm`sStig") >= 2
