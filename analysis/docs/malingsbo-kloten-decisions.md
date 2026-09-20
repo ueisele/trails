@@ -90,6 +90,14 @@ between two spruce silhouettes with a lake's line behind — Bergslagen's forest
 where Abisko has Lapporten's gate. Candidates are drawn by `docs/draw.ts` and Uwe picks; the
 build refuses a map without a drawing of its own.
 
+### 7.2 The Bergslagsleden is named off OSM's relations — decided, 2026-09-20
+
+Uwe, on the plan's measurement: the Bergslagsleden's four stages through the area are OSM
+`route=hiking` relations and nothing else names the way; the Swedish loader reads ways only.
+Decided: read the relations, carry their name, stage and `website` onto the member chains,
+link the stage's own page and Naturkartan's from a catalogue keyed by name, no layer of its
+own. Plan phase 8, after the publish.
+
 ## 6. Open
 
 - The phone readings, once published: install, keep an area, the offline switch.

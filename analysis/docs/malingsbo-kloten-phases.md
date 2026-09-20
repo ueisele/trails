@@ -66,7 +66,7 @@ onto `main` and fast-forwarded at review, so the history stays linear. `maps.py`
 region and never whole. Review, hooks, the drive and the landing are the reviewing session's.
 
 **Order and parallelism, in one line.**
-0 → { 1 ∥ 2 ∥ 4 } → 3 → { 5 ∥ 6 } → 7.
+0 → { 1 ∥ 2 ∥ 4 } → 3 → { 5 ∥ 6 } → 7 → 8.
 
 - Phase 1 (plumbing), 2 (icon) and 4 (research) touch disjoint files and run at once.
 - Phase 3 (the builds) needs phase 1 landed and phase 2's first candidate on disk; it is a
@@ -342,10 +342,48 @@ it). Read back from the edge: the page, a pack, a height tile, byte-identical. T
 `atlas.cairn.zone` lists the third map on its own. Then Uwe's phone: install, keep an area,
 walk the offline switch — the readings that are his to take.
 
+### Phase 8 — Named routes off OSM's relations: the Bergslagsleden
+
+*Agent, one worktree, after phase 7. Uwe's word 2026-09-20, on the measurement below.*
+
+The Bergslagsleden runs through the area from Kloten and stands in neither register the map
+reads names from: Naturvårdsverket's Leder file has no row of that name in the box, Topografi
+50 carries it in no name column. Both draw the way as a marked trail without knowing what it
+is. OSM knows: four `route=hiking` relations in the box — *Bergslagsleden Etapp 1* Kloten →
+Gillersklack, *Etapp 2* → Stjärnfors, *Etapp 3* → Nyberget, *Etapp 4* → Uskavi — each with
+`ref`, `from`, `to` and a `website` on the stage's page at bergslagsleden.se (Region Örebro
+län's own site), plus a connector relation at the county border. The Swedish loader reads
+ways only, so no chain knows it is a member (measured 2026-09-20, Overpass and the cached
+paths object). Naturkartan has a Bergslagsleden guide at `naturkartan.se/sv/bergslagsleden`;
+its stage pages are linked by script only and are researched by hand as Abisko's were.
+
+1. `io/sources/overpass.py` gains a reader for the box's hiking relations with their
+   members' way ids and tags (`name`, `ref`, `from`, `to`, `website`, `operator`), cached
+   like the paths are.
+2. `network/sweden.py`: a way that is a member carries the relation's name, its `ref` and
+   `from`–`to` on the OSM chains, as a route identity the way Turrutebasen's route name is
+   one for Norway; a chain of several relations lists them joined by the identity separator.
+   The identity rule must not cut chains where it did not before — measured before and after
+   on the graph's report (chains, edges, components).
+3. The popup on such a chain links the relation's own `website` where it has one, headed as
+   the source names it, and the Naturkartan pages from a catalogue keyed by the relation's
+   name — `analysis/routes/malingsbo-kloten-naturkartan.toml`, the guide and the stage pages
+   found — through `naturkartan_links` widened to take a name as well as a number. The search
+   finds the chain under *Bergslagsleden*.
+4. No layer of its own: the line is drawn already, as Topografi 50's marked trail and OSM's
+   path; what was missing is the name and the link. The legend does not change.
+5. The scene and the drive: `search_for` may move to *Bergslagsleden*; a reading that the
+   popup carries the links. `drive-all` green, the page rebuilt and published as phase 7 did.
+
+**Not for Norway.** Measured 2026-09-20: OSM has **no** `route=hiking` relation over the
+Lomsdal-Visten box at all, and the Norwegian map names its routes off Turrutebasen's own
+route name, which reaches FKB through the route-name join, with 35 UT.no pages in its
+catalogue. There is nothing there for a relation reader to add.
+
 ## 5. Not in this plan
 
-- Linking the reserve's trails or Bergslagsleden's stages to their Naturkartan pages by name;
-  the catalogue mechanism keys on state-trail numbers and there are none here.
+- Linking the reserve's own trails (*Vandringsleder i Klackberg* and the like) to Naturkartan
+  pages: the register names them, but no page for them is known; the Bergslagsleden is phase 8.
 - Ställdalen, unless the box is widened by Uwe's word.
 - Moving `extent` and the weights off `Provider` onto `Tree` for all three maps — the
   alternative in §1.2, worth doing only if a fourth Swedish map comes.
