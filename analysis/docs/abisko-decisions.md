@@ -3768,6 +3768,15 @@ canvas keeps a unit CSS scale, the reference stroke measures 3.0 px on the canva
 screen before, during and after, one draw per renderer per frame and none while idle. Markers
 were never affected: Leaflet places them afresh at every `zoom` event.
 
+**The snap is drawn the same way** (2026-09-20, plan phase 8i). When the finger lifts, Leaflet
+animates the tiles to the nearest integer zoom over 250 ms on `cubic-bezier(0,0,0.25,1)`; the
+first build of 8f drew that end at once, so the trails jumped by up to √2 and the ground caught
+up a quarter of a second later — the reviewer's Chromium probe read the canvas at the snapped
+zoom in the first frame while the sheet's level stood at 1.57 of 2.0. Now the canvas draws each
+frame of the animation at the view interpolated in Leaflet's own easing, timed from the frame
+clock the CSS transition starts on, and the zoom it is drawn at agrees with the level's within
+0.0001 on every frame. A double tap and the buttons glide the same way.
+
 ## 10. Changes
 
 A line per change to this document or to the decisions in it, newest first.
@@ -3785,6 +3794,10 @@ A line per change to this document or to the decisions in it, newest first.
   model's moist ground joins as a fourth class, sparsely hatched; and the hatch is a close-up
   mark — solid below z13, the moist ground drawn from z13 up only — after it was hard to read at
   low zoom. Both mire trees at version 3.
+
+- **2026-09-20, second** — the snap is drawn too (§9.45, plan phase 8i): the canvas follows
+  Leaflet's 250 ms curve frame by frame when the finger lifts, instead of drawing the end at
+  once while the tiles glide.
 
 - **2026-09-20** — old ground across a zoom is the sheet's only (§6.13, plan phase 8h): the
   scaled ground Leaflet keeps while the new level loads is what ended the page when the finger

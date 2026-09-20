@@ -1146,6 +1146,22 @@ quarter of a second later.
    within a frame of the curve; every painted stroke keeps its width during the snap; the 8f
    readings after `zoomend` hold unchanged; an animated `setZoom` glides the same way.
 
+**Built 2026-09-20, 11:20 (codex, gpt-6-astra; `fa2688a`, landed by fast-forward as
+`0957a57`).** A first run stopped, rightly, on a wrong sentence in the phase text — Leaflet
+suppresses its events during the animation and fires `zoom` only after the 250 ms, with
+`_animatingZoom` already cleared — and the text was corrected before the second. In
+`pinch_draw.js` an `_updateTransform` call under `_animatingZoom` starts a snap from the
+view drawn now (or the stock view of the map's centre and zoom before the animation) to the
+view handed in, and each frame draws the view interpolated in the eased time — the easing
+found by bisection on the curve's x — timed from the frame's `document.timeline.currentTime`,
+which is the clock the CSS transition starts on. Driven on both pages: through a release from
+z12 towards z16 and back, the zoom the canvases are drawn at agrees with the zoom the sheet's
+level stands at within 0.0001 on every frame (6 to 9 frames a release); the first frame lies
+strictly between the release and the snap; every stroke keeps its width, dashes and radii
+too; the 8f readings after `zoomend` hold; an animated `setZoom` glides the same way.
+Confirmed in Chromium with the reviewer's own probe: canvas 12.55 → 14.5 → 15.3 → 15.7 → 16
+while the level scales 1.57 → 1.97. Hooks green; 1,030 / 1,032 readings, none broken.
+
 ### Phase 8j — No tiles while the finger pinches, and one level of old ground for the overlays
 
 Measured 2026-09-20, 11:00, in Chromium against the 8h build (`/tmp/vec-measure/snap.py`,
