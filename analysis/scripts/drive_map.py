@@ -9834,6 +9834,209 @@ def the_snap_is_drawn(page: Any) -> Check:
         page.evaluate(with_map("view => { __MAP__.setView(view.center, view.zoom, {animate: false}); }"), original)
 
 
+def the_pinch_waits_for_release(page: Any) -> Check:
+    """Drive throttled pinch moves, held tile completions, and a drag on both addresses.
+
+    Args:
+        page: The plain page supplying the browser and address.
+
+    Returns:
+        Requests by level, retained coverage before activation, and the drag's ring.
+    """
+    readings: list[Reading] = []
+    for switched in (False, True):
+        probe = page.context.browser.new_page(viewport={"width": 390, "height": 844})
+        errors: list[str] = []
+        probe.on("pageerror", lambda error, errors=errors: errors.append(str(error)))
+        mode = "ground=overlays" if switched else "plain"
+        try:
+            probe.goto(page.url.split("?")[0] + ("?ground=overlays" if switched else ""), timeout=120_000)
+            ready(probe)
+            probe.evaluate(
+                with_map("""() => {
+                const map = __MAP__;
+                const boxes = [...document.querySelectorAll('.trails-basemap input[type=checkbox], .trails-legend-body input[type=checkbox]')];
+                boxes.forEach(box => { if (!box.checked) box.click(); });
+                const names = ['sheet', 'shade', 'slope', 'vegetation', 'forest', 'mire'];
+                const name = l => names.slice(1).find(n => l.options['trails' + n[0].toUpperCase() + n.slice(1)]) || 'sheet';
+                const layers = Object.values(map._layers).filter(l => l instanceof L.TileLayer)
+                    .sort((a, b) => names.indexOf(name(a)) - names.indexOf(name(b)));
+                const p = window.pinchGroundProbe = {map, layers, names: layers.map(name), hold: false, pending: [],
+                    moves: layers.map(() => 0), asked: layers.map(() => ({})), phase: 'rest', early: layers.map(() => ({}))};
+                const count = (counts, z) => { counts[z] = (counts[z] || 0) + 1; };
+                layers.forEach((layer, i) => {
+                    // Rebind the same Leaflet throttle so we can observe its actual
+                    // callback, including a suppressed update, rather than sleep 200 ms.
+                    map.off('move', layer._onMove, layer);
+                    const moveEnd = layer._onMoveEnd;
+                    layer._onMove = L.Util.throttle(function () {
+                        p.moves[i]++; return moveEnd.call(this);
+                    }, layer.options.updateInterval, layer);
+                    map.on('move', layer._onMove, layer);
+                    layer.on('tileloadstart', e => {
+                        count(p.asked[i], e.coords.z);
+                        if (p.phase === 'snap' && map._animatingZoom) count(p.early[i], e.coords.z);
+                    });
+                    // Hold completion, not creation or the image request: the new
+                    // tiles must still be unloaded at the zoomend observation.
+                    const tileReady = layer._tileReady;
+                    layer._tileReady = function (...args) {
+                        if (p.hold) p.pending.push(() => tileReady.apply(this, args));
+                        else tileReady.apply(this, args);
+                    };
+                });
+                p.levels = () => layers.map(l => Object.values(l._tiles).reduce((a, t) => {
+                    count(a, t.coords.z); return a;
+                }, {}));
+                p.clean = () => layers.every(l => !l.isLoading() && Object.values(l._tiles).length > 0 &&
+                    Object.values(l._tiles).every(t => t.coords.z === l._tileZoom && t.active));
+                p.reset = () => { p.asked = layers.map(() => ({})); p.early = layers.map(() => ({})); };
+                p.releaseLoads = () => { p.hold = false; p.pending.splice(0).forEach(done => done()); };
+            }""")
+            )
+            probe.evaluate("at => { pinchGroundProbe.map.setView(at, 12, {animate: false}); }", SCENE.position)
+            clean = "() => pinchGroundProbe.clean()"
+            probe.wait_for_function(clean, timeout=60_000)
+            names = probe.evaluate("() => pinchGroundProbe.names")
+            readings.append(Reading(f"{mode}: all six layers drawn", names, ["sheet", "shade", "slope", "vegetation", "forest", "mire"]))
+            # The last two jumps also read the sheet's unchanged three-level children.
+            for target in (16, 12, 15, 12):
+                result = probe.evaluate(
+                    """async target => {
+                    const p = pinchGroundProbe, map = p.map, center = map.getCenter(), start = map.getZoom();
+                    const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+                    p.reset(); p.hold = true; p.phase = 'pinch';
+                    const before = p.levels(), held = [], left = p.layers.map(l => l._tileZoom);
+                    const landed = p.layers.map(l => l._clampZoom(target));
+                    const startingTiles = p.layers.map(l => Object.values(l._tiles).map(t => ({coords: t.coords, loaded: !!t.loaded})));
+                    map._moveStart(true, false);
+                    const end = target - 0.35 * Math.sign(target - start);
+                    for (let step = 1; step <= 10; step++) {
+                        const moves = p.moves.slice();
+                        map._move(center, start + (end - start) * step / 10, {pinch: true, round: false});
+                        for (let f = 0; f < 240 && !p.moves.every((n, i) => n > moves[i]); f++) await frame();
+                        if (!p.moves.every((n, i) => n > moves[i])) throw new Error('Pinch move throttle did not run');
+                        held.push(p.levels());
+                    }
+                    const during = structuredClone(p.asked);
+                    p.phase = 'snap';
+                    let ended = false;
+                    map.once('zoomend', () => { ended = true; });
+                    map._animateZoom(center, map._limitZoom(map.getZoom()), true, map.options.zoomSnap);
+                    for (let f = 0; f < 240 && !ended; f++) await frame();
+                    if (!ended) throw new Error('Pinch release did not end');
+                    const released = p.layers.map((l, i) => {
+                        const tiles = Object.values(l._tiles), old = tiles.filter(t => t.coords.z !== l._tileZoom);
+                        const pending = tiles.filter(t => t.current && !t.active);
+                        const covers = (a, b) => a.z < b.z ?
+                            Math.floor(b.x / 2 ** (b.z - a.z)) === a.x && Math.floor(b.y / 2 ** (b.z - a.z)) === a.y :
+                            Math.floor(a.x / 2 ** (a.z - b.z)) === b.x && Math.floor(a.y / 2 ** (a.z - b.z)) === b.y;
+                        return {old: old.length, levels: [...new Set(old.map(t => t.coords.z))], pending: pending.length,
+                            unloaded: pending.every(t => !t.loaded),
+                            eligible: startingTiles[i].filter(t => t.loaded && pending.some(n => covers(t.coords, n.coords))).length,
+                            covered: old.every(t => t.loaded && pending.some(n => covers(t.coords, n.coords)))};
+                    });
+                    const answer = {start, target, left, landed, before, held, during, early: p.early, asked: p.asked, released};
+                    p.phase = 'rest'; p.releaseLoads();
+                    return answer;
+                }""",
+                    target,
+                )
+                probe.wait_for_function(clean, timeout=60_000)
+                settled = probe.evaluate("""() => pinchGroundProbe.layers.map(l => ({
+                    old: Object.values(l._tiles).filter(t => t.coords.z !== l._tileZoom).length,
+                    images: Object.values(l._tiles).filter(t => t.active && t.el.complete && t.el.naturalWidth === 256).length
+                }))""")
+                label = f"{mode} {result['start']} → {target}"
+                for i, name in enumerate(names):
+                    prefix = f"{label} {name}"
+                    old = result["released"][i]
+                    left, landed = result["left"][i], result["landed"][i]
+                    expected_old = switched if i else left < landed or left - landed <= 3
+                    readings.extend(
+                        [
+                            Reading(f"{prefix}: creates nothing during the pinch", result["during"][i], {}),
+                            Reading(
+                                f"{prefix}: holds exactly its starting tiles through every pinch move",
+                                all(row[i] == result["before"][i] for row in result["held"]),
+                                True,
+                                note=f"levels held: {[row[i] for row in result['held']]}",
+                            ),
+                            Reading(f"{prefix}: creates nothing during the moving snap", result["early"][i], {}),
+                            Reading(
+                                f"{prefix}: release creates the landed level only",
+                                list(result["asked"][i]),
+                                [str(landed)],
+                                note=f"created per level: {result['asked'][i]}",
+                            ),
+                            Reading(f"{prefix}: new tiles are still unloaded", old["pending"] > 0 and old["unloaded"], True),
+                            Reading(
+                                f"{prefix}: old ground is exactly the allowed level",
+                                old["levels"],
+                                [left] if expected_old else [],
+                                note=f"old tiles: {old['old']}",
+                            ),
+                            Reading(f"{prefix}: retains every eligible old tile", old["old"], old["eligible"] if expected_old else 0),
+                            Reading(f"{prefix}: retained loaded tiles cover inactive current tiles", old["covered"], True),
+                            Reading(f"{prefix}: loaded and faded leaves no old ground", settled[i]["old"], 0),
+                            Reading(
+                                f"{prefix}: real images load", settled[i]["images"] > 0, True, note=f"active 256 px images: {settled[i]['images']}"
+                            ),
+                        ]
+                    )
+            # A drag at z15 must refill the outer ring before moveend.
+            probe.evaluate("() => { pinchGroundProbe.map.setZoom(15, {animate: false}); }")
+            probe.wait_for_function(clean, timeout=60_000)
+            probe.evaluate("""() => {
+                const p = pinchGroundProbe, map = p.map;
+                p.reset(); p.phase = 'drag'; p.dragEnded = false;
+                map.once('moveend', () => { p.dragEnded = true; });
+                map._moveStart(false, false);
+                const center = map.unproject(map.project(map.getCenter()).add([256, 0]));
+                p.dragMoves = p.moves.slice(); map._move(center, map.getZoom());
+            }""")
+            probe.wait_for_function("() => pinchGroundProbe.moves.every((n, i) => n > pinchGroundProbe.dragMoves[i])", timeout=10_000)
+            probe.wait_for_function(clean, timeout=60_000)
+            drag = probe.evaluate("""() => {
+                const p = pinchGroundProbe, map = p.map;
+                const layers = p.layers.map((l, i) => {
+                    const size = l.getTileSize(), center = map.project(map.getCenter(), l._tileZoom).floor();
+                    const half = map.getSize().divideBy(2), bounds = L.bounds(center.subtract(half), center.add(half));
+                    const range = l._pxBoundsToTileRange(L.bounds(bounds.min.subtract(size), bounds.max.add(size)));
+                    const expected = [];
+                    for (let y = range.min.y; y <= range.max.y; y++) for (let x = range.min.x; x <= range.max.x; x++) {
+                        const coords = L.point(x, y); coords.z = l._tileZoom;
+                        if (l._isValidTile(coords)) expected.push(l._tileCoordsToKey(coords));
+                    }
+                    return {asked: p.asked[i], ring: expected.length, filled: expected.every(k => l._tiles[k] && l._tiles[k].active)};
+                });
+                const ended = p.dragEnded; map._moveEnd(false); p.phase = 'rest';
+                return {ended, layers};
+            }""")
+            readings.append(Reading(f"{mode}: ring read before drag ends", drag["ended"], False))
+            for name, layer in zip(names, drag["layers"], strict=True):
+                readings.extend(
+                    [
+                        Reading(
+                            f"{mode} drag {name}: asks for the new column while dragging",
+                            layer["asked"].get("15", 0) > 0,
+                            True,
+                            note=f"created per level: {layer['asked']}",
+                        ),
+                        Reading(
+                            f"{mode} drag {name}: viewport and one ring active before moveend",
+                            layer["filled"],
+                            True,
+                            note=f"ring plus viewport: {layer['ring']}",
+                        ),
+                    ]
+                )
+            readings.append(Reading(f"{mode}: no script errors", errors, []))
+        finally:
+            probe.close()
+    return Check("the pinch waits for release and overlays can keep one level", readings)
+
+
 def the_sheet_retains_ground(page: Any) -> Check:
     """Read each layer's old ground through a three-level zoom out and back in.
 
@@ -12774,6 +12977,8 @@ def drive(page: Any) -> list[Check]:
     ]
     if wanted(zoom_out_requests):
         checks.append(timed(zoom_out_requests, page))
+    if wanted(the_pinch_waits_for_release):
+        checks.append(timed(the_pinch_waits_for_release, page))
     if wanted(the_sheet_retains_ground):
         checks.append(timed(the_sheet_retains_ground, page))
     if wanted(the_snap_is_drawn):
