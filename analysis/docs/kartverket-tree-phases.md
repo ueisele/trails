@@ -1278,6 +1278,23 @@ active, so it lasts the 200 ms fade. Uwe's choice, option B:
    today; the sheet's 8h readings hold both ways and its tiles fade as today; no reading or
    code refers to `?ground=`. Then hooks and the full drive on both pages in parallel.
 
+**Built 2026-09-20, 16:10 (codex, gpt-6-astra; `946e5a0`, landed by fast-forward).** In
+`tile_retention.js` an overlay's pruning walks children only when the level left is finer;
+`_tileReady` marks a loading overlay tile that has loaded, finer, non-current tiles under it
+(ancestor by floor division), shows it at full opacity after Leaflet's own bookkeeping,
+makes it active and prunes at once; Leaflet's fade loop is copied with that one exception so
+a later frame does not fade it back. The switch and its readings are gone. Driven on both
+pages: after 16 → 12 each overlay holds its 20 / 16 tiles of z15 under its unloaded z12
+tiles and every replacing tile is at opacity 1 in its first shown frame with no held tile
+under it; after 12 → 16 each overlay holds nothing; on a drag every layer shows a fading
+tile (opacity 0.01–0.07 sampled) with no ground under it; the sheet holds 2 parents in and
+28 / 24 children out and fades as before; no tile is created during a pinch. Hooks 1,897 +
+97; 1,367 / 1,369 readings, none broken. Confirmed in Chromium with the reviewer's probe:
+after a release to z12 the overlays' held z15 tiles go stepwise as their replacements land
+(20 → 10 → 0), after a release to z16 they hold none. Published 16:25. The phone's reading
+is open: the zoom out should show the coarse picture sharpen, never darken, never blank in
+the middle; the zoom in as 8h.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).

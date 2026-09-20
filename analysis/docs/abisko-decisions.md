@@ -1679,6 +1679,24 @@ the page. Whether that holds on the phone is the reading the switch exists for; 
 it becomes the default and the switch goes, and if it does not, the switch goes and the
 overlays keep none.
 
+**An overlay keeps its old ground on the way out, and replaces it without a fade**
+(2026-09-20, plan phase 8k). `?ground=overlays` held on the phone in the fast cycle, and
+showed why one level of kept ground cannot simply be the default for the overlays: with it
+everything went a little darker and then bright again. Measured against the trees, the coarse
+tiles are not darker than the fine ones (under one percent apart seen over white); but every
+overlay is translucent — the shade is black at alpha 0.04 to 0.14 — and two copies of a
+translucent layer stacked have more cover than one, 14 % twice is 26 %. Plain compositing,
+not WebKit's blending: WebKit isolates a blending element with composited children as its
+own layer, and `isolation: isolate` would have changed nothing, which is why it was measured
+before it was built. On a zoom in an old coarse tile lies under 64 new ones and the stack
+would last the whole load; on a zoom out the old fine tiles lie under one new tile and go
+when it is active. So: an overlay keeps the finer level it left on a zoom out only, and a
+tile that replaces kept ground is shown at full opacity in the frame it loads, with the
+kept tiles under it removed in that same frame — the coarse picture sharpens into the fine
+one, never two translucent pictures at once. On a zoom in the overlays keep nothing, as
+before, over the sheet's kept ground; a tile with nothing under it fades as it always has.
+The switch is gone.
+
 ## 7. The order of work
 
 1. **Geotorget account** — done 2026-09-12 as a private person, `lantmateriet@uweeisele.eu`.
@@ -3820,6 +3838,10 @@ A line per change to this document or to the decisions in it, newest first.
   model's moist ground joins as a fourth class, sparsely hatched; and the hatch is a close-up
   mark — solid below z13, the moist ground drawn from z13 up only — after it was hard to read at
   low zoom. Both mire trees at version 3.
+
+- **2026-09-20, fourth** — an overlay keeps its old ground on the way out and replaces it
+  without a fade (§6.13, plan phase 8k): the darkening under `?ground=overlays` was two
+  translucent copies stacked, not the browser; the switch is gone.
 
 - **2026-09-20, third** — no tile is asked for while the finger pinches (§6.13, plan phase
   8j): phase 8's `move` update had undone phase 2's rule and blanked the overlays mid-pinch;
