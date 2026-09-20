@@ -1220,6 +1220,25 @@ option C): both of the following, the second behind a switch until the phone has
    sheet's 8h readings hold with and without (its levels are z12 and z16). Then hooks and
    the full drive on both pages in parallel.
 
+**Built 2026-09-20, 13:10 (codex, gpt-6-astra; `dffeb6b`, landed by fast-forward).** A
+first run stopped, rightly, on the phase text naming z16 for the overlays, whose levels end
+at their native z15; corrected, resumed. `tile_retention.js` now sets a flag on the map from
+`zoomstart` to `zoomend`, records each grid layer's level at `zoomstart`, lets the throttled
+`move` update do nothing while the flag stands, and under `?ground=overlays` retains for an
+overlay the loaded tiles of the level left under its not-yet-active current tiles (Leaflet's
+parent and child walks bounded at that level, every other level removed first). Driven on
+both pages: through a pinch from z12 to z16 and back **no layer creates a tile before the
+release** (before: the sheet 24 each at z13, z14 and z15, each overlay 24 each at z13 and
+z14); the release creates the landed level only (sheet 24 / 30 at z16, each overlay 20 / 16
+at z15; 28 / 30 at z12 the other way); a drag still fills its ring before `moveend`. With
+the switch, after 12 → 16 each overlay holds 2 tiles of z12 under its loading z15 tiles and
+after 16 → 12 its 20 / 16 tiles of z15; without it none, as 8h; the sheet as 8h either way;
+once loaded and faded, nothing. Hooks 1,905 + 97; 1,555 / 1,554 readings, none broken.
+Confirmed in Chromium with the reviewer's probe: every layer's pruning now runs 260–290 ms
+after the release, at the snap's end, instead of before it. Published 13:25. **The phone's
+reading is open: the fast cycle with every overlay on, once on the plain address and once
+with `?ground=overlays` opened online.**
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).

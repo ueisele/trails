@@ -1661,6 +1661,24 @@ Leaflet's two, then one. Two rules this cost: a fix that takes back a decided be
 discussed before it is built, and a theory that fits the correlation is tested with a switch
 before a phase is built on it.
 
+**And no tile is asked for while the finger pinches** (2026-09-20, plan phase 8j). Phase 2
+turned `updateWhenZooming` off so a pinch asks only for the level it lands on; phase 8's
+`updateWhenIdle: false`, wanted for the ring during a drag, quietly undid that: Leaflet's
+throttled `move` update runs during a pinch too, and its `_update` re-levels the layer once
+the map's zoom is more than one level off — measured, a pinch from z12 to z16 created and
+loaded z13, z14 and z15 on every layer. For the overlays, which keep no old ground, that
+re-levelling pruned their old tiles 50 to 270 ms *before* the finger lifted and left them
+blank until the landed level had loaded and faded, 400 to 670 ms in Chromium and longer on
+the phone: the light flicker the phone showed after 8h. Now a flag on the map stands from
+`zoomstart` to `zoomend` and the `move` update does nothing under it; every layer shows its
+old ground scaled until the snap ends and then loads the landed level only. Beside it, as a
+measuring switch, `?ground=overlays` lets each overlay keep one level of old ground — the
+loaded tiles of the level it left, under its current tiles that are not yet active, no
+chain, no level between — five screens beside the sheet's against the eighteen that ended
+the page. Whether that holds on the phone is the reading the switch exists for; if it does,
+it becomes the default and the switch goes, and if it does not, the switch goes and the
+overlays keep none.
+
 ## 7. The order of work
 
 1. **Geotorget account** — done 2026-09-12 as a private person, `lantmateriet@uweeisele.eu`.
@@ -3794,6 +3812,10 @@ A line per change to this document or to the decisions in it, newest first.
   model's moist ground joins as a fourth class, sparsely hatched; and the hatch is a close-up
   mark — solid below z13, the moist ground drawn from z13 up only — after it was hard to read at
   low zoom. Both mire trees at version 3.
+
+- **2026-09-20, third** — no tile is asked for while the finger pinches (§6.13, plan phase
+  8j): phase 8's `move` update had undone phase 2's rule and blanked the overlays mid-pinch;
+  and `?ground=overlays` as a measuring switch, one level of old ground per overlay.
 
 - **2026-09-20, second** — the snap is drawn too (§9.45, plan phase 8i): the canvas follows
   Leaflet's 250 ms curve frame by frame when the finger lifts, instead of drawing the end at
