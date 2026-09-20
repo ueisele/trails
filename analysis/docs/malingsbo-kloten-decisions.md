@@ -1,0 +1,112 @@
+# Malingsbo-Kloten: what has been decided, what is open, and what changed
+
+*Opened 2026-09-20. The plan that produced it is `malingsbo-kloten-phases.md`; once a phase
+lands, its built-note goes under §10 here, and this file is the record — the plan is not.*
+
+## 1. The decision in one paragraph
+
+A third map, the second Swedish one: the Malingsbo-Kloten protected area in Bergslagen with
+the town of Kopparberg inside the box, built the way Abisko is built — Lantmäteriet's sheet
+copied into a tree of our own, the heights, relief and slope off the 1 m model, the
+vegetation off NMD 2018, the mire off the wetlands and SLU's moisture, Topografi 50 and the
+register and OSM for the network, the place names, the heritage register, Trafiklab's stops —
+with every layer and overlay the Abisko page has and nothing the Abisko page lacks. Decided by
+Uwe 2026-09-20, the seven points of the plan's §1 as proposed.
+
+## 2. The area
+
+Not a naturreservat: a **Naturvårdsområde** of 1981, three objects in Naturvårdsverket's
+register, one per county, read from the cached nightly file `NVO.zip` (SWEREF 99 TM):
+
+| NVRID | Län | Kommun | ha |
+|---|---|---|---|
+| 2000023 | Örebro | Lindesberg, Ljusnarsberg | 14,157 |
+| 2002595 | Västmanland | Fagersta, Skinnskatteberg | 8,413 |
+| 2002711 | Dalarna | Smedjebacken | 26,464 |
+
+Union 49,034 ha, bounding box `15.1511, 59.8231, 15.7349, 60.0836`, 32.4 × 28.8 km. The
+boundary the page draws is the union of the three; `Park.kind` says `naturvårdsområde` and
+the register's form is carried on the park so the lookup asks for it by name and form.
+
+**The box** is Uwe's rule: the area's bounding box widened on all four sides by the distance
+from Kopparberg to it. Kopparberg's built-up area (OSM, 2026-09-20: the town node and the
+residential, industrial, retail and commercial land use within 2.5 km, 54 ha, no building
+west of it) overhangs the area's box on the west alone, by **10,247 m**. So:
+
+**`(14.967, 59.729, 15.922, 60.176)`** — EPSG:3006 `498223, 6621686, 551135, 6670977`,
+52.9 × 49.3 km, rounded outward to three decimals as Abisko's is. Ställdalen's station is
+1.3 km outside the west edge and stays out; Kopparberg, Grängesberg, Ludvika, Smedjebacken,
+Skinnskatteberg and Fagersta C are inside, with the halts Fagersta Norra, Söderbärke and Vad.
+The box touches three counties, Örebro (T), Dalarna (W) and Västmanland (U).
+
+Tile counts by `trails.utils.tiles.tile_count`: 692 height tiles z8–13, 9,756 per overlay
+z8–15, 152,055 for the sheet z8–17 — five per cent over Abisko's 610 / 9,330 / 146,995.
+
+## 3. The sources
+
+Nothing had to be ordered. Every Swedish source Abisko reads is national on disk or an
+account-level *Behörighet* at Geotorget: Topografi 50 as the whole-country subscription
+(`.cache/topografi50/2026-09-08/`), the height model and the wetlands by STAC over the box
+with the login, the place names as one country file, NMD 2018 converted nationwide, SLU's
+moisture as one mosaic, the register's forms and trails, the GTFS feed and the stop register.
+New for this box: the height mosaic, the wetlands' municipal files, three county files of the
+Kulturmiljöregistret (`örebro`, `dalarna`, `västmanland`, all answering 200), OSM, the placed
+stops and the graph.
+
+**The state-trail register is empty here** (`Statliga_Leder`: 0 rows in the box), so the
+Naturkartan catalogue, which links state trails by their BD number, has nothing to key on and
+the map carries none (`naturkartan=None`). The register's other trails are there — 98 rows,
+60.1 km, 85 *Vandringsled* and 12 *Naturstig*, *Vandringsleder i Klackberg*, *Bruksleden genom
+Jättåsarna* among them — and draw as the *Leder* layer. Topografi 50's `*_fjall` layers read
+empty here and the Sámi name pairing is inert; neither needs a branch.
+
+**The gateway is Kopparberg**, a tätort in the place-name register (`BEBTÄTTX`, Ljusnarsberg,
+län 18, 500306 E 6637425 N) with its station inside the box. `gateway` and `check_route`
+move from the country row onto the park, and `check_route` is `None` here: there is no state
+trail to check a route against.
+
+## 4. A tree per map
+
+`maps.PROVIDERS` binds a box to a provider — the extent the offline panel rings, the tile
+root, every tree prefix, the byte tables — so a second Swedish map on `lantmateriet` would
+collide with Abisko on all of them. Decided: a provider entry of its own,
+`lantmateriet-malingsbo-kloten`, derived from Lantmäteriet's by `dataclasses.replace` with
+its own extent and roots (`tiles/lantmateriet-malingsbo-kloten/topowebb/1/`,
+`dem/lantmateriet-malingsbo-kloten/1/`, …), and a `BaseMap` member for it. Nothing of
+Abisko's moves, no bucket object is renamed, a version bump of one map never recuts the
+other. The alternative — one shared Swedish tree with the box per map — is recorded in the
+plan's §1.2 and not taken.
+
+## 5. The names
+
+Stem `malingsbo-kloten`: `--park malingsbo-kloten`, `malingsbo-kloten.html` served at
+`/malingsbo-kloten`, companions by `Companions.of` — `malingsbo-kloten-sw.js`,
+`malingsbo-kloten.webmanifest`, `malingsbo-kloten-icon-*.png`, database
+`trails-malingsbo-kloten` — and the app name *Malingsbo-Kloten Atlas*. The index Worker lists
+it unasked and titles it *Malingsbo-Kloten*.
+
+**The icon** is a variant of the cairn, as Abisko's is: the same cairn on the same moss path,
+between two spruce silhouettes with a lake's line behind — Bergslagen's forest and water
+where Abisko has Lapporten's gate. Candidates are drawn by `docs/draw.ts` and Uwe picks; the
+build refuses a map without a drawing of its own.
+
+## 6. Open
+
+- The phone readings, once published: install, keep an area, the offline switch.
+- Trafikverket's board names for the box's nine rail stops (plan phase 4).
+
+## 7. Settled
+
+*(none yet)*
+
+## 10. Changes
+
+*(the phases' built-notes go here, newest last)*
+
+## 11. How the figures here were obtained
+
+Scratch in `~/mockups/malingsbo-kloten-box/`: `reserve.py` reads the cached register forms
+and writes `reserve_3006.gpkg`; `box.py` the overhang, the box and the counts; `counts.py`
+the repository's own `tile_count`, the boundaries and the stations; `leder.py` the trail
+register over the box through `naturvardsregistret.Source.trails`; the Overpass queries and
+their answers beside them, `final.json` the result. Measured 2026-09-20.

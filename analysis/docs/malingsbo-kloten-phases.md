@@ -1,0 +1,321 @@
+# Malingsbo-Kloten: the third map, in phases
+
+*Drafted 2026-09-20. Status: **§1 decided by Uwe the same day, as proposed.** The built-notes of each phase
+are recorded under the phase; the decisions and the measurements live on in
+`malingsbo-kloten-decisions.md`.*
+
+The third map, and the second Swedish one: the Malingsbo-Kloten protected area in Bergslagen,
+with the town of Kopparberg inside the box, carrying every layer and overlay the Abisko map
+has. The record of what was decided for Abisko is `abisko-decisions.md`; this file is the plan
+for the third map, and once it lands its decisions and built-notes go to
+`malingsbo-kloten-decisions.md`, which phase 0 opens.
+
+## 1. Decided
+
+*All seven as proposed, Uwe's word 2026-09-20.*
+
+1. **The box.** Uwe's rule: the protected area's bounding box, widened by the distance from
+   Kopparberg to the area's boundary, on all four sides. Measured (§3.1):
+   **`(14.967, 59.729, 15.922, 60.176)`**, 52.9 × 49.3 km. Ställdalen's station lies 1.3 km
+   outside the west edge; the rule puts it out, and it stays out unless Uwe says otherwise.
+2. **A tree per map, not per provider — recommended.** `maps.PROVIDERS` is keyed by provider
+   and carries the `extent`, the tile paths, every tree prefix and the byte tables of *one* box.
+   A second map on `lantmateriet` collides on all of them (§3.4). The cheapest cut, in §6.2's
+   own spirit of "the cheapest arrangement that meets all four": a provider entry of its own
+   for the new map, `dataclasses.replace(PROVIDERS["lantmateriet"], …)` with its own extent,
+   tile root `tiles/lantmateriet-malingsbo-kloten/topowebb/1/`, tree prefixes
+   `dem/lantmateriet-malingsbo-kloten/1/` and so on, and a `BaseMap` member for it. Nothing
+   Abisko has moves, no bucket object is renamed, a version bump of one map never recuts the
+   other, and `--delete-version` and the packs' sheet table stay per map. The alternative —
+   one shared Swedish tree at `lantmateriet/…` with the box per map — needs the extent, the
+   prefixes and the weights moved off `Provider` onto `Tree`, couples the two maps' versions,
+   and leaves `lantmateriet_tiles.py`'s `index.json` recording only the last box copied.
+3. **The gateway is Kopparberg.** The graph's report names the place the map is reached from;
+   Abisko's is *Abisko*, and it sits on `COUNTRIES["SE"]` today, per country rather than per
+   map, together with `check_route="BD 21"`. Both move onto `Park`. Kopparberg is in the
+   place-name register as a tätort in Ljusnarsberg (`BEBTÄTTX`, län 18), and its station is
+   inside the box. There is no state trail here to check a route against, so `check_route`
+   is `None` for this map.
+4. **The area is a *Naturvårdsområde*, not a naturreservat**, and it is three objects, one per
+   county (§3.2). `Park.kind` says `naturvårdsområde`; the boundary is the union of the three.
+   The page's wording wherever it says *park* is checked in phase 1 and follows `kind`.
+5. **The icon.** The build refuses a map without a drawing of its own (§6.2 of the Abisko
+   record), and the test asserts the art differs from the first map's. Proposed motif: the same
+   cairn on the same moss path, standing between two spruce silhouettes with a lake's flat
+   line behind — Bergslagen's forest and water where Abisko has Lapporten's gate. Three or
+   four candidates on the mockup host, Uwe picks (phase 2).
+6. **No Naturkartan catalogue at first.** The catalogue links the register's *state* trails by
+   their BD number, and the box holds none (`Statliga_Leder`: 0 rows). The register's other
+   trails are there — 98 rows, 60 km, *Vandringsleder i Klackberg*, *Bruksleden genom
+   Jättåsarna*, nature trails — and draw as the *Leder* layer without a link.
+   `Park.naturkartan=None`. Linking Bergslagsleden's stages or the reserve's own trails to their
+   Naturkartan pages by name is a feature of its own, listed in §5.
+7. **Stem and names.** `malingsbo-kloten` everywhere the stem goes: `--park`, the page
+   `malingsbo-kloten.html` at `/malingsbo-kloten`, companions `malingsbo-kloten-sw.js`,
+   `malingsbo-kloten.webmanifest`, database `trails-malingsbo-kloten`, app name
+   *Malingsbo-Kloten Atlas*. The index Worker lists it on its own and titles it
+   *Malingsbo-Kloten* (its `title()` capitalises each hyphenated part).
+
+## 2. How to work through them
+
+The rules of `kartverket-tree-phases.md` §2 apply unchanged: one phase at a time per worktree,
+a review over each, `command make hooks-run` green, anything touching the browser driven,
+stop at the end of a phase. A phase an agent runs is one `codex exec -C <worktree>` as a
+transient unit (`systemd-run --user … /usr/bin/mise exec -- …`), the worktree's branch rebased
+onto `main` and fast-forwarded at review, so the history stays linear. `maps.py` is read by
+region and never whole. Review, hooks, the drive and the landing are the reviewing session's.
+
+**Order and parallelism, in one line.**
+0 → { 1 ∥ 2 ∥ 4 } → 3 → { 5 ∥ 6 } → 7.
+
+- Phase 1 (plumbing), 2 (icon) and 4 (research) touch disjoint files and run at once.
+- Phase 3 (the builds) needs phase 1 landed and phase 2's first candidate on disk; it is a
+  `make` run on this box, hours long, in a transient unit, and no agent.
+- Phases 5 and 6 need the built page and trees; they touch disjoint files
+  (`drive_map.py` against `maps.py`'s weight tables, tests and docs) and run at once.
+- Phase 7 publishes, after 5 and 6 and a green `drive-all`.
+
+## 3. What was measured, and with what
+
+Scratch in `~/mockups/malingsbo-kloten-box/` (`reserve.py`, `box.py`, `counts.py`, `leder.py`,
+the Overpass queries and their answers, `final.json`). Nothing in the checkout was touched.
+
+### 3.1 The box
+
+The three objects named Malingsbo-Kloten, read from the cached nightly file
+`.cache/naturvardsregistret/NVO.zip` (SWEREF 99 TM):
+
+| NVRID | Län | Kommun | ha |
+|---|---|---|---|
+| 2000023 | Örebro | Lindesberg, Ljusnarsberg | 14,157 |
+| 2002595 | Västmanland | Fagersta, Skinnskatteberg | 8,413 |
+| 2002711 | Dalarna | Smedjebacken | 26,464 |
+
+Union 49,034 ha; bounding box `15.1511, 59.8231, 15.7349, 60.0836` (32.4 × 28.8 km).
+
+Kopparberg's built-up area, OSM via Overpass on 2026-09-20: the `place=town` node plus the
+residential, industrial, retail and commercial land use within 2.5 km, 54 ha, bounding box
+`14.9683, 59.8735, 15.0099, 59.885`; of 440 buildings within 2.5 km none lies west of that
+land use's west edge (the nearest is 25 m inside it), so that edge is the town's far edge.
+
+| quantity | value |
+|---|---|
+| town's overhang past the area's box, west | **10,247 m** (south, east, north: inside) |
+| town's nearest edge to the area's polygon | 9,809 m |
+| town's far edge to the area's polygon | 12,135 m |
+| **d**, the rule's margin | **10,247 m** |
+| final box, EPSG:3006 | `498223, 6621686, 551135, 6670977` |
+| final box, WGS84, rounded outward | **`(14.967, 59.729, 15.922, 60.176)`** |
+| width × height | 52.9 × 49.3 km (Abisko: 39 × 36) |
+
+Tile counts with `trails.utils.tiles.tile_count`, against Abisko's current box:
+
+| box | z8–13 (heights) | z8–15 (overlays) | z8–17 (sheet) |
+|---|---|---|---|
+| Malingsbo-Kloten | 692 | **9,756** | **152,055** |
+| Abisko `(18.15, 68.139, 19.10, 68.46)` | 610 | 9,330 | 146,995 |
+
+About five per cent more tiles than Abisko at every level, and more ground per tile at 60° N.
+At Abisko's measured pace (118,967 tiles in 916 s off the FTP, 25–60 objects/s into R2), the
+sheet copy is some twenty minutes and its upload about an hour and a half — though packs are
+what is published since §6.12, and those are far fewer objects.
+
+Administrative: the box touches **Örebro (T), Dalarna (W) and Västmanland (U)**, eight county
+and four municipal boundary segments of `administrativindelning_sverige.gpkg` inside it.
+Railway stations inside: Kopparberg, Grängesberg, Ludvika, Smedjebacken, Skinnskatteberg,
+Fagersta C, and the halts Fagersta Norra, Söderbärke, Vad. Outside: Ställdalen (1.3 km west),
+Skäret, Storå.
+
+### 3.2 The sources, and what the new box needs of each
+
+Nothing has to be ordered. Topografi 50 is a whole-country subscription on disk
+(`.cache/topografi50/2026-09-08/gpkg/*_sverige.gpkg`, 11 GB); the height model, the place
+names and the wetlands are account-level *Behörighet* orders already placed and read by box;
+NMD 2018 is converted nationwide (`.cache/vegetation/nmd2018/`, 4.3 GB); SLU's moisture
+mosaic is on disk whole (7.9 GB); the register's forms and trails, the GTFS feed and the stop
+register are national files. The one Swedish thing that is per area by hand — the Naturkartan
+catalogue — the box does not need (§1.6).
+
+| source | what the new box costs |
+|---|---|
+| Lantmäteriet's sheet (FTP GeoPackage) | a fresh copy of 152,055 tiles into the map's own root |
+| Markhöjd 1 m COGs | a fresh mosaic by range request, about twice Abisko's 175–215 MB |
+| Marktäcke wetlands | STAC finds the municipalities itself; four to six files of some hundred MB each |
+| Kulturmiljöregistret | **three county files** — `örebro` 71 MB, `dalarna` 105 MB, `västmanland` 71 MB, all answering 200 |
+| OSM, Trafiklab's placed stops, the graph | per-box objects, fetched and cached as for Abisko |
+| Topografi 50's `*_fjall` layers | empty here; `network/sweden.py` reads them into empty frames |
+| Sámi name pairing in Ortnamn | inert here |
+
+Credentials: Geotorget and Skogsstyrelsen come through `sops exec-env` from
+`home/trails-map/secrets.sops.env`, which this box decrypts; Trafiklab's two keys come from
+`trails/.env`, which `just abisko` does not supply and `make` reads on its own.
+
+### 3.3 The gateway and the trails
+
+`ortnamn_se.gpkg` holds *Kopparberg* as `BEBTÄTTX` at 500306 E, 6637425 N (Ljusnarsberg,
+län 18), inside the box; a second *Kopparberg* row in the box is a `TRAKTTX`, and the
+settlement-type match takes the first. The trail register over the box: 98 rows, 60.1 km,
+85 *Vandringsled*, 12 *Naturstig*; `Statliga_Leder` 0.
+
+### 3.4 Where the code knows a map, and what collides
+
+The inventory of 2026-09-20, by file. Every JavaScript mention of either map is prose; every
+name reaches the page by injection from `maps.py`.
+
+- `maps.py:546-716` — `Provider.extent`, `tiles`, the six tree prefixes and the two byte
+  tables are per provider; `PROVIDERS["lantmateriet"]` binds `_ABISKO.box`. **The collision.**
+  `tile_tree_version` (2007-2033) mutates the provider globally. `Companions` (75-158) is per
+  stem and just works. `ICON_DIR` (1136-1176) wants `atlas-malingsbo-kloten-{32,180,192,512}.png`.
+  `BaseMap` (1949-2005) needs a member and a `_BASE_LAYERS` row.
+- `trees.py:214-256` — `TREES` entry; `provider` doubles as the bucket directory (100).
+- `lomsdal_visten.py:157-244` — `Park` and `PARKS`; `load_swedish_boundary` (2195-2207) calls
+  `find_one(park.name)` with the *Nationalpark* default and refuses several matches;
+  `county` is one string (190, used 3710) and three are needed; `TRAFIKVERKET_BOARD_NAMES`
+  (875-882) is Abisko's six stations by hand, others fall back to the Resrobot link alone.
+- `route_graph.py:82-110` — `gateway` and `check_route` on the country row; `graph_sweden`
+  (604-616) repeats the `find_one` call.
+- `lantmateriet_tiles.py:24,30` — `ABISKO` as the `--bounds` default and one `DEFAULT_ROOT`;
+  `kartverket_tiles.py:40-43` dispatches on `provider == "lantmateriet"`;
+  `pack_tiles.py:38` maps provider → sheet in a two-row table.
+- `drive_map.py:243-571` — `SCENES`; 10781 finds the provider by tile prefix, so the extent
+  follows the provider entry. A `Scene` is some forty measured figures and a dozen positions.
+- `Makefile` — `abisko:` chain (270-278), `drive-both` hard-codes two pages (315-327), the
+  help text.
+- `home/trails-map` — `justfile:128-149` recipe `abisko` calls `make abisko` under sops;
+  `worker/index.js` lists every `*.html` and needs nothing; `main.tf:96-102`'s cache rule
+  names no `/mire/` prefix and needs none: the mire came after §6.12 and has only ever been
+  published as packs, so no per-tile mire object exists in the bucket.
+- Tests — `test_trees.py:12-44` pairwise assertions and `86-92` exact tile counts per map;
+  `test_maps.py:2095` the marks that must exist on disk, `2805` the provider/park pairs, six
+  `parametrize("provider", …)` suites at 10170-10886, and `10785/10798` measured pack counts.
+- `analysis/README.md`, `abisko-decisions.md` — prose naming two maps.
+
+## 4. The phases
+
+### Phase 0 — Decide and open the record
+
+Uwe's word on §1. Then, by the reviewing session and not an agent: `malingsbo-kloten-decisions.md`
+opened with the area (§3.1), the decisions of §1 as decided, the source table (§3.2) and the
+measurements' provenance; a *Changes* section left empty for the phases' built-notes.
+Touches nothing but that file.
+
+### Phase 1 — The plumbing
+
+*Agent, one worktree. Files: `trees.py`, `maps.py` (by region), `lomsdal_visten.py`,
+`route_graph.py`, `naturvardsregistret.py`, `lantmateriet_tiles.py`, `kartverket_tiles.py`,
+`pack_tiles.py`, `Makefile`, `test_trees.py`, `test_maps.py`, `test_kartverket_wms.py`.*
+
+1. `TREES["malingsbo-kloten"]`: `provider="lantmateriet-malingsbo-kloten"`, the box of §3.1,
+   `model="markhojd"`, `structure="nmd"`, `mire="marktacke-slu"`, every version 1.
+2. `maps.py`: `_MALINGSBO_KLOTEN`, the provider entry by `dataclasses.replace` of Lantmäteriet's
+   with its own extent, tile root and prefixes, the byte tables **borrowed from Abisko's** with
+   a comment saying so until phase 6 measures them; `BaseMap.LANTMATERIET_TOPO_MALINGSBO_KLOTEN`
+   (or a name the agent argues better) and its `_BASE_LAYERS` row; `tile_tree_version` keyed on
+   the new provider works unchanged.
+3. `Park`: a `form` field (the register's form: *Nationalpark* for Abisko,
+   *Naturvårdsområde* here) threaded into `load_swedish_boundary` and `graph_sweden`;
+   `find_one` gains a path that dissolves several rows of one name and form into one boundary;
+   `county` becomes a tuple, the three files concatenated and de-duplicated by `uuid`;
+   `gateway` and `check_route` move from `COUNTRIES["SE"]` onto `Park` (Abisko keeps
+   *Abisko* and *BD 21*; Lomsdal-Visten's stay where Norway's row had them, moved the same
+   way); the new `PARKS` entry per §1.7 with `naturkartan=None`; the page's wording checked
+   for *park* / *national park* where `kind` should speak; Naturkartan's `SourceMetadata`
+   provider text no longer names Norrbotten when the county is another.
+4. `lantmateriet_tiles.py` takes `--park` and reads box and root off the tree; the dispatch
+   in `kartverket_tiles.py` sends any `lantmateriet*` provider there; `pack_tiles.py`'s sheet
+   table gains the row.
+5. `Makefile`: `malingsbo-kloten:` chain target on `abisko:`'s pattern; `drive-both` becomes
+   `drive-all` over every page in `analysis/output/*.html` whose stem is a scene, `drive-both`
+   kept as an alias; help text and `.PHONY`.
+6. Tests: the pairwise assertions in `test_trees.py` become n-way, tile counts gain
+   `"malingsbo-kloten": 9_756` (the agent recounts), `test_maps.py:2095` and `2805` gain the
+   third entry, the six parametrised suites the third provider, the pack count measured.
+7. `command make hooks-run` green; `command make map ARGS="--park malingsbo-kloten"` is
+   expected to run to the boundary and the sources and fail only where trees are absent —
+   the agent reports where it stops, and does not build trees.
+
+Stops if the agent finds the provider split needs more than `dataclasses.replace` — that is a
+question for §1.2, not a thing to patch round.
+
+### Phase 2 — The icon
+
+*Agent or the reviewing session. Files: `docs/draw.ts`, `libs/src/trails/visualization/icons/`,
+`~/mockups/malingsbo-kloten-icon/`.*
+
+Three or four candidates of the §1.5 motif at 512 and 60 px, drawn by `draw.ts` (it needs the
+renderer from `weather-cards/scripts/lib/renderer`), served from the mockup host by the recipe
+in the box's CLAUDE.md, Uwe picks. The chosen set lands as `atlas-malingsbo-kloten-{32,180,192,512}.png`,
+the 32 scaled from the 512 as the Abisko set was. The first candidate is copied in before phase
+3 starts so the build and `test_maps.py:2095` have files; the pick replaces PNGs only.
+
+### Phase 3 — The builds
+
+*This box, a transient unit, no agent. Needs phase 1 landed and a candidate icon on disk.*
+
+A `malingsbo-kloten:` recipe in `home/trails-map/justfile` on `abisko`'s pattern (six lines,
+the reviewing session), then:
+
+```bash
+systemd-run --user --unit=malingsbo-kloten-build \
+  --working-directory=/home/eiseleu/repositories/home/trails-map \
+  /usr/bin/mise exec -- just malingsbo-kloten
+```
+
+which runs `make malingsbo-kloten` under sops: the sheet copy (152,055 tiles, ~20 min), the
+height mosaic and the 692 height tiles, relief and slope off the same mosaic, NMD's window,
+the wetlands' municipal files and the moisture window into the mire, the packs off every tree,
+the graph with its report (the register, Topografi 50, OSM, three KMR files, Trafiklab's stops
+placed), and the page. Every step is resumable, so a step that dies is rerun, not restarted.
+What the report says — chains, components, the gateway on the largest one, heights within the
+mosaic — goes into the record. `/tmp` is a 7.7 GB tmpfs; the builds write under
+`analysis/output/` and `.cache/`, not there.
+
+### Phase 4 — The stations, by hand
+
+*Parallel with 1–3; an opencode research run or the reviewing session in Firefox.
+File: `lomsdal_visten.py` (the one dict) — or, if phase 1 is still open, a note for it.*
+
+`TRAFIKVERKET_BOARD_NAMES` gains the box's rail stops by Samtrafiken id with the name
+Trafikverket's board knows them under: Kopparberg, Grängesberg, Ludvika, Smedjebacken,
+Skinnskatteberg, Fagersta C, Fagersta Norra, Söderbärke, Vad — each opened and seen, as
+Abisko's six were (§9.34). Without this the stops still draw and link Resrobot; with it the
+train board links too.
+
+### Phase 5 — The scene, and the drive
+
+*Agent, one worktree, after phase 3. File: `drive_map.py`.*
+
+`SCENES["malingsbo-kloten"]` on Abisko's model: a long chain, positions on and off the
+network, open water, a walk, a kept area of some 5 × 9 km, a place to search for, a typed
+coordinate, the overlay paths, `borrowed_name` for a Swedish map, and the figures the build
+reports — read off the built page and the build's own output, never guessed. Then
+`command make drive ARGS="--page analysis/output/malingsbo-kloten.html"` to a file, read
+whole; every reading green or its skip named; then `drive-all`, three pages, green.
+
+### Phase 6 — The weights, the counts, the record
+
+*Agent, one worktree, after phase 3, parallel with 5. Files: `maps.py` (weight tables only),
+`test_maps.py` (pack counts), `malingsbo-kloten-decisions.md`, `analysis/README.md`,
+`home/trails-map/README.md`.*
+
+The byte-per-zoom tables of the six trees measured off `analysis/output/` as Abisko's were
+and written in place of the borrowed ones; the pack count per provider in the test; the build's
+figures and timings into the record's *Changes*; the READMEs' two-map prose made three-map.
+
+### Phase 7 — Publish
+
+*The reviewing session, after 5 and 6.* `command make map ARGS="--park malingsbo-kloten"`,
+then from `home/trails-map`: `just deploy --map malingsbo-kloten --tree packs` (and `--tree
+dem` if the page reads heights per tile rather than from packs — as Abisko's last publish did
+it). Read back from the edge: the page, a pack, a height tile, byte-identical. The index at
+`atlas.cairn.zone` lists the third map on its own. Then Uwe's phone: install, keep an area,
+walk the offline switch — the readings that are his to take.
+
+## 5. Not in this plan
+
+- Linking the reserve's trails or Bergslagsleden's stages to their Naturkartan pages by name;
+  the catalogue mechanism keys on state-trail numbers and there are none here.
+- Ställdalen, unless the box is widened by Uwe's word.
+- Moving `extent` and the weights off `Provider` onto `Tree` for all three maps — the
+  alternative in §1.2, worth doing only if a fourth Swedish map comes.
+- Sweden's KMR terms and Statskog's feed — open on the Abisko record already.
