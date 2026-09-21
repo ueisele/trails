@@ -234,6 +234,11 @@ the lake's registered level and the sea's 0 m on top. And a pond is not kayak wa
 surface under 1 ha takes no part in the paddle network (Norway had 21,507 pieces and
 55,401 chords, tarns nearly all), and stays in the grid for pricing alone.*
 
+*Built 2026-09-21 (codex, `9bb67c0`): edges per map — Abisko 75,463 (Shore 13,274, Open water
+14,722, Streams 432, Portages 869, ties 249), Malingsbo-Kloten 217,122, Lomsdal-Visten
+339,136 (no streams); Lomsdal-Visten's graph offline under 8 GiB at a 4.2 GB peak; pages
+1.82 MB and 7.12 MB brotli.*
+
 ### Phase 2b — A portage is not a path
 
 *Added 2026-09-21 after phase 4's stop: the walking modes routed over the portage chords
