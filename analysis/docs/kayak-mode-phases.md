@@ -294,6 +294,10 @@ body, set in the build — Topografi 50's `hojd_over_havet` where a surface carr
 page is flat at the lowest of its own samples. §1's "read from the height tiles" was right
 about the plane and wrong about the shore.*
 
+*Built 2026-09-21 (codex, `7f68137`): lakes levelled per body in the build, paddled parts,
+words and files; the bank case reads 219.56 m six times; dry artifacts byte-identical. The
+scene's stored dry hashes moved with phase 1's noding — phase 4's to reconcile.*
+
 ### Phase 4 — The scene and the drive
 
 *File: `analysis/scripts/drive_map.py`.* A kayak triple on each scene that has water the graph
