@@ -364,6 +364,11 @@ The long-edge check takes the longest walkable edge; the moved figures re-record
 the noding is the reason; the kayak triples on Torneträsk and the fjord. Codex, in
 `drive_map.py` alone, driving the main checkout's rebuilt pages by path.
 
+*Built 2026-09-21 (codex, `aee7804`): shore / bay / carry — Abisko 2,116 / 1,408 / 336 m,
+Lomsdal-Visten 932 / 715 / 960 m, profiles flat at 342 m and 0 m; the dry ways the same to
+6 cm, their words re-recorded (resampling after the noding; Lomsdal-Visten's mosaic); a
+walking pair near Torneträsk finds a cheaper way in through the new nodes (7,982 → 7,739).*
+
 ### Phase 5 — Rebuild, drive, publish
 
 The three graphs and pages rebuilt on this box (`make graph` and `make map` per map, the last
