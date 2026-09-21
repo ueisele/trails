@@ -83,10 +83,10 @@ would draw it without a change.
   chords remain on the 10 m shore ring, with no separate ring setting. The
   neighbour portages and 1 ha cutoff stand. The comparison remains under §5
   as the reason for retaining 10 m; the built-note gives the final figures.
-- **Norway's heights over the sea.** The Høydedata point reader rejects a depth as a missing
-  height, so a Lomsdal-Visten water edge over the fjord may come back without one; phase 5's
-  build measures it, and the sea's answer is 0 m (the page's `seaTerrain` says as much for a
-  straight leg).
+- ~~Norway's heights over the sea~~ — phase 1b: the sea is 0 m, lakes their registered
+  level, everything else the cached 4 m mosaic; the point service left the network build.
+- **Uwe's phone reading of the kayak mode** on the three published maps: the switch, a bay,
+  a portage.
 
 ## 5. Changes
 
@@ -100,6 +100,7 @@ would draw it without a change.
 - 2026-09-21 — phase 3 stopped: the water grid and the height tiles do not guarantee a lake plane. One straight water part near the measured bay changes height by 0.96516 m in about 25 m; the stop-note below. No runtime change retained.
 - 2026-09-21 — phase 0: the plan and this record opened.
 - 2026-09-21 — phase R: the research in §3.5; there is no phase 6.
+- 2026-09-21 — phase 5: the three graphs and pages rebuilt on `be43818`'s code (Abisko 4.68 MB, 1.82 MB brotli, 1.26 before; Lomsdal-Visten 19.71 MB, 7.08 brotli, 5.71 before; Malingsbo-Kloten 24.50 MB, 7.12 brotli, 6.23 before); `drive-all` 1,447 / 1,452 / 1,415 readings, none broken (the one Lomsdal-Visten reading was the three-browser race and is green alone); all three published ~15:20 UTC with `just deploy --map <map>` and read back identical to the built pages after the edge's own brotli. Uwe's phone reading is open.
 - 2026-09-21 — phase 4b (`aee7804`): Abisko's and Lomsdal-Visten's kayak triples (Torneträsk, Tosen), the long-edge check on walkable edges, the goal-stop invariant on foot plus water, the overview check reading after Keep, the dry hashes re-recorded for the noding's resampling and Lomsdal-Visten's mosaic; suites 1,452 / 1,454 / 1,418 readings, none broken.
 - 2026-09-21 — phase 4 (`c766ceb`): the Malingsbo-Kloten scene's kayak triple (Storsjön's shore, Övre Skärsjön's bay, the portage west of Holmtjärnen to Rågåstjärnen) and five readings; the dry way 22,957 m, 2 mm longer from the noding; the suite 1,417 readings, none broken.
 - 2026-09-21 — phase 2b (`b95d708`): a `PORTAGE` kind of its own, unreachable and unsnappable in the walking modes, priced as undrawn ground under a kayak, tallied as a connector; the dry scene's way reads 22,957 m on foot and no portage again in both walking settings; the sweep's portage leg 52 m paddled, 1,221 m on foot, 1,009 m of it mapped path.

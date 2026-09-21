@@ -381,6 +381,11 @@ byte-identical, then Uwe's phone: the switch, a bay, a portage.
 A source of `PADDLE` kind with names and links, like the Bergslagsleden off OSM's relations,
 from whatever phase R found. Planned when R reports.
 
+*Built 2026-09-21 (this session): the three graphs and pages rebuilt on `be43818` (pages
+1.82 / 7.08 / 7.12 MB brotli against 1.26 / 5.71 / 6.23 published before), `drive-all` 1,447 /
+1,452 / 1,415 readings and none broken, published ~15:20 UTC and read back identical.
+Uwe's phone reading is the open item.*
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.
