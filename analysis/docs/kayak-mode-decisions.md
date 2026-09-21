@@ -360,7 +360,7 @@ Tosen's walking figures are exactly the published ones: **1,074.646 / 0 /
 747.568 m** and **1,593.360 / 0 / 496.858 m**. Neither setting credits a water
 source or snaps to a paddle or portage edge.
 
-**The published dry hashes are deliberately not re-recorded.** Published page
+**The dry hashes are re-recorded after review.** Published page
 bytes were fetched once per map and served offline beside the existing trees.
 Their figures and GPX-description hashes reproduce the scene's recorded hashes.
 Using fractional vertex indices on the rebuilt pages chose different endpoints:
@@ -377,7 +377,7 @@ All **1,122 / 2,271** published geometry vertices remain in the rebuilt walks,
 which have **1,132 / 2,299** vertices. Their metric Hausdorff distances are
 **0.064509 / 0.050511 m**. Abisko still has two routed parts, Lomsdal-Visten
 three; both have zero water, and source-credit changes are confined to those
-millimetres. But the words changed beyond metres:
+millimetres. The words also changed:
 
 - Abisko: **+385 / −335 m → +382 / −332 m**, steepest **84 % → 76 %**,
   **6,425 → 6,420** profile points. The remaining figures HTML and the source
@@ -387,19 +387,36 @@ millimetres. But the words changed beyond metres:
   draws a path **2,471.681429 → 2,395.321856 m**. The remaining figures HTML
   and source description are identical.
 
-These do not meet this phase's condition that only the noded metres moved.
-The reviewing session must resolve the height and coverage drift before
-accepting new dry hashes. No height, coverage, router or page code was changed
-to make these figures agree. `*-dry-before.json` and `*-dry-fixed.json` retain
-the parts, geometry, sampled profile, exact HTML and descriptions.
+Review accepted the new hashes for these same horizontal ways: noding restarts
+the profile's 5 m sampling at each new edge's start, shifting the samples and
+therefore ascent, steepest and point count. Lomsdal-Visten also reads heights
+from the decided 4 m mosaic rather than the point service (phase 1b, median
+sample change 0.09 m), accounting for its +636 → +614 m ascent. The field's
+docstring records these reasons. No height, coverage, router or page code was
+changed to make the figures agree. `*-dry-before.json` and `*-dry-fixed.json`
+retain the parts, geometry, sampled profile, exact HTML and descriptions.
+
+The coverage change is the re-cut's per-edge answer, not a transfer from a
+connector to a source: published UT.no edge **502, 2,471.681429 m**, all flagged
+as having no recorded path, becomes edges **546–550, 2,471.681525 m** on the
+same line; edge **546, 76.359670 m**, now has that flag clear, while the other
+four retain it. `no_path_recorded` tests the share of each edge near a recorded
+physical way, so splitting changes the extent each answer describes. Inferred
+ground remains **0.257603 m**, and UT.no's credit grows only **0.011192 m**;
+the net reduction in ground with no recorded path is **76.359573 m**.
+`review/coverage.json` retains these edges and their flags.
 
 One rejected Abisko shore pair is also a finding, rather than an accepted
 new walking snapshot: **(68.400732, 18.698912) → (68.393226, 18.715936)**.
 Ordinary walking grows 0.000496 m, but Stay on paths changes from
 **1,967.052128 m foot / 7.539939 m water / 656.648381 m straight land** to
 **2,262.415460 / 2.520330 / 590.308964 m**. The final scene uses the longer
-shore pair above, whose walking ways stand; this additional change remains
-for review in `abisko-walk-{before,current}.json`.
+shore pair above, whose walking ways stand. At identical prices (ground 10,
+water 30 and the same walking-source factors), the page's routing cost falls
+from **7,982.499022 to 7,739.278843 cost-metres**, so the new way is cheaper by
+**243.220179**: the added nodes let Stay on paths enter with more path and less
+straight ground. `review/abisko-{before,current}.json` records the router's
+price alongside the reproduced walking lengths and restored page state.
 
 **The whole suites, once per page, read through in full.** The reports are
 `abisko-all.log`, `lomsdal-all.log` and `malingsbo-all.log`; their 1,806, 1,808
@@ -412,17 +429,22 @@ files. No whole suite was repeated.
 | Lomsdal-Visten | 1,454 | 0 | 2 | 0 | 0 |
 | Malingsbo-Kloten | 1,418 | 0 | 0 | 0 | 4 |
 
-The four moved figures are precisely the unaccepted dry hashes above. The
+The four moved figures were precisely the dry hashes since accepted above. The
 goal's 11.89 km row passes on Lomsdal-Visten; all three long edges and overview
 checks pass. Each northern scene gains 66 kayak readings; Lomsdal-Visten also
 captures three more snap frames than the supplied run, Malingsbo-Kloten one
 more, which explains the small difference in totals. The four Malingsbo-Kloten
 skips are its existing scene choices.
 
+After re-recording, the dry check alone passes **12 readings on each northern
+page, none broken or moved** (`review/abisko-dry.log` and
+`review/lomsdal-visten-dry.log`, both read in full). The whole suites above
+remain the single runs; these focused checks resolve their four moved hashes.
+
 `command make hooks-run` passed formatting, lint, mypy, pytest and every
-remaining hook (`hooks.log`). Nothing was rebuilt or published; no tile build
-or shared-cache write was made. The dry height/coverage drift and the rejected
-Abisko walking pair remain the reviewing session's decisions.
+remaining hook (`hooks.log`, then `review/hooks.log` after these resolutions).
+Nothing was rebuilt or published; no tile build
+or shared-cache write was made.
 
 ### Phase 4 — Stopped at the dry walking way, 2026-09-21
 

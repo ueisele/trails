@@ -189,8 +189,11 @@ class Scene:
     #: is to record it here once it has been looked at.
     #: Malingsbo-Kloten's dry HTML changes from 9,084 to 9,076 points after water
     #: noding. Its fixed journey grows 0.001898 m; the GPX description is unchanged.
-    #: Abisko and Lomsdal-Visten retain their published dry hashes: phase 4b's
-    #: built-note records height and coverage changes beyond the route's metres.
+    #: Abisko and Lomsdal-Visten keep their dry ways, but noding restarts each
+    #: edge's 5 m profile sampling, shifting ascent, steepest and point count.
+    #: Lomsdal-Visten also reads the decided 4 m mosaic rather than the point
+    #: service; its per-edge path-coverage flags change when edges are re-cut.
+    #: Phase 4b's built-note measures these reasons for the new dry hashes.
     figures: dict[str, Any]
     #: What the page's own height model says at :attr:`nowhere`, where the page
     #: carries one over the whole box rather than along the network alone: the
@@ -358,9 +361,8 @@ SCENES: dict[str, Scene] = {
             "stay on paths: shore-pair foot, m": 1593.360,
             "stay on paths: shore-pair water, m": 0,
             "stay on paths: shore-pair straight land, m": 496.858,
-            # Before the length glyphs: the dry figures page and every GPX description.
-            "dry way figures bytes": "e24bd985bef142fc74864daa9305db229dc872fa747b9ef3be27444024421fcb",
-            "dry way GPX description bytes": "9354b7766db85243a925d38c015e80227cfb78480c52354319f9ce4906bcc467",
+            "dry way figures bytes": "947b637bac5278a41f57909091389c92e3f61ad4c5e6030e71ae50236b74f763",
+            "dry way GPX description bytes": "48f83b5bc2c2edc445641aa4ce17c445121330e4df7bda3c96190002ecdef5a7",
             # A regression ceiling for two parallel drives, not an idle-box baseline.
             "map build ceiling in ms (Firefox on forge)": 4000,
             # Re-recorded 2026-09-01, from 11,589 and 11,290: the source cache
@@ -528,9 +530,8 @@ SCENES: dict[str, Scene] = {
             "stay on paths: shore-pair foot, m": 2963.410,
             "stay on paths: shore-pair water, m": 15.283,
             "stay on paths: shore-pair straight land, m": 510.746,
-            # Before the length glyphs: the dry figures page and every GPX description.
-            "dry way figures bytes": "0ba5de6bd3b5d7d47d5528d3bf025b4578f8ab8768e216c117fb6da3871e655f",
-            "dry way GPX description bytes": "6dd6e29c9e11ded8b563527b7bfefd154fbbbbbc4efefa68d9dab521721c7c24",
+            "dry way figures bytes": "1415f8f3f206b2051cfbb0946b410a01db711a1b11b1f996cdccde410a0f834a",
+            "dry way GPX description bytes": "b07496c3129f74d2fcd5ee366a8acaf53f13a8a86bcde2b94f49ce2de86be62c",
             # A regression ceiling for two parallel drives, not an idle-box baseline.
             "map build ceiling in ms (Firefox on forge)": 1500,
             # Clipped to the box since the review (§9.15): one point chain and
