@@ -275,8 +275,8 @@ and unsnappable in the walking modes; a stream taken downstream and refused upst
 case is byte-identical: `a_dry_way_keeps_its_words` and the phase 9 readings stay green.*
 
 1. **Parts.** A routed part over `PADDLE` edges and, in the kayak mode, a straight part the
-   grid holds as water are parts of kind `paddled`: heights sampled from the tiles like a land
-   part (the lake's plane, so the profile is flat over water and climbs on the portage), their
+   grid holds as water are parts of kind `paddled`: level over the water (the lake's plane,
+   so the profile is flat over water and climbs on the portage), their
    metres counted into `crossed` and not into `total`, a leg over land in the kayak mode a
    land or routed part as today. Rivers waded stay on foot in the walking modes; in the kayak
    mode a class-2 river is paddled and a river surface is water.
@@ -286,6 +286,13 @@ case is byte-identical: `a_dry_way_keeps_its_words` and the phase 9 readings sta
 3. **The files.** A paddled part is written into the GPX track and the Garmin course as the
    way it is, unlike a ferry, and the description says which metres were paddled. Stations
    on the water are anchored to the track, since now there is one under them.
+
+*Corrected 2026-09-21 after codex's stop: the tiles blur the bank into the water, and a
+straight part of six samples at a shore rose 0.97 m in 25 m. The level is one figure per
+body, set in the build — Topografi 50's `hojd_over_havet` where a surface carries one, the
+10th percentile of its shore edges' samples otherwise — and a straight paddled part in the
+page is flat at the lowest of its own samples. §1's "read from the height tiles" was right
+about the plane and wrong about the shore.*
 
 ### Phase 4 — The scene and the drive
 
