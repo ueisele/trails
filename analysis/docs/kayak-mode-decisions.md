@@ -62,9 +62,11 @@ would draw it without a change.
 
 ## 4. Open
 
-- **The flow's direction** in Topografi 50's lines — measured in phase 1, but unresolved.
-  Neither the digitized direction nor the endpoint-height fallback passes the test below;
-  phase 1 stopped before adding sources.
+- **The flow's direction — closed by review, 2026-09-21.** Use the digitised direction of
+  every class-2 line, including the single opposing-arrow case; the conclusion is below.
+- **Preserving that direction through the graph** — the shared chain builder reverses
+  lines, and the edge builder carries no direction field. The resumed phase stopped at
+  the file-scope mismatch recorded below.
 - **k and P** — phase 2's sweep; 1.5 and 4 until then.
 - **Whether N50's river lines carry a size class** — phase 1, for Norway's streams.
 - ~~Whether anybody publishes the canoe trails as lines~~ — phase R, 2026-09-21: nobody (§3.5).
@@ -200,9 +202,19 @@ revisit the actual features rather than a count. Heights below are first minus l
 | `f31c159c-f594-4b97-95b7-b6a89c49d206` | -0.266411 |
 | `f71ebaac-ca31-40c9-a70b-b644b2f4bfeb` | -0.195319 |
 
-**Needed before resuming:** a rule for resolving near-level endpoints and arrow conflicts,
-or a further measurement that establishes a clean direction test. No threshold, reversal
-exception or exclusion was chosen here.
+**Review's conclusion, 2026-09-21: the digitised direction is the flow.** The evidence is
+Lantmäteriet's own arrows: 62 of 63 agree under `bearing = 90 - rotation`, the ordinary
+counterclockwise-from-east rotation of a map symbol. Review accepts the 98.41% fit among
+the eight conventions as evidence for that direction. The endpoint-height test did not
+resolve flow: it sampled the resampled z13 tiles, not native 1 m posts, and 210 of the 347
+lines differ by at most a metre between their ends. A bilinear reading at that resolution
+cannot settle which end of a 0.3 m fall is higher. Review reads the 61 apparent uphill
+lines as a resolution effect, not contrary flow, and closes the direction question.
+
+All class-2 lines are to run as digitised, without height-based reversals or exclusions.
+This includes `ff1bf090-d2c9-45f3-a255-774f646002e8`, the one line with a 4.744 m fall and
+an opposing arrow 37.952 m away. The figures above remain the measurement; this conclusion
+supersedes the initial stop's interpretation of them.
 
 **Code checked before the measurement.** `encoding._source_table` already writes the name
 and kind together, as the plan says. The ferry sources, `graphs.edge_costs` and the inferred
@@ -222,6 +234,39 @@ unresolved measurement for which step 1 explicitly provides a stop.
 Measurement scratch: `~/mockups/kayak-mode/phase1-flow.py` and `phase1-flow.json`. The JSON
 holds every line's id, endpoints, heights, nearest arrow id, distance, rotation and local
 bearing. It contains 347 rows, including all the disagreements above.
+
+### Phase 1 resumed — The shared graph reverses digitised lines, 2026-09-21
+
+With flow settled by review, inspection of the path a new source takes through the graph
+found a separate obstacle to steps 4 and 6. `routing.chains.chains_of` sends even a
+`keep_whole=True` source through `_assemble`, which calls `_canonical` on every line.
+For an open chain, `_canonical` orders the endpoints lexicographically and reverses the
+coordinates when necessary. Keeping a stream whole does not preserve its direction.
+
+**Measured on the cached class-2 features:** 347 input features become 347 whole chains,
+of which **101 have their coordinates reversed**. This check used the delivered features
+over the same box in EPSG:3006, without clipping, and matched chains back to
+`objektidentitet`. For example, `04ce645c-3a18-409c-a66c-388368d13c27` runs from
+`(498572.5899963379, 6647589.303985596)` to `(498515.12899780273, 6647524.693969727)` in
+the source; a single-source `build_network` with inferred bridges disabled returns an
+edge with those endpoints reversed. The check read the cache and built in memory, under
+an 8 GiB address-space limit; it saved no graph.
+
+The edge's columns are `from_node`, `to_node`, `cost`, `source`, `kind`, `chain_id`,
+`length_m`, `geometry` and `component`. `routing.graph._split_into_edges` constructs those
+fields explicitly, and `_split_edges` constructs them again when an inferred connector
+cuts an edge. Neither carries a one-way field or arbitrary chain attributes. Merely
+marking every Streams edge one-way in `encoding.py` would make the reversed lines run
+against the flow accepted by review.
+
+**Stopped under the phase's wrong-premise rule.** The permitted files include neither
+`libs/src/trails/routing/chains.py` nor `libs/src/trails/routing/graph.py`. Review must extend
+the scope to preserve directed source geometry through chaining and carry direction
+through both edge-splitting paths, or specify another intended integration. Recovering
+discarded direction after graph construction was not substituted for that missing path.
+The source table's existing kind encoding is correct; the obstacle is direction before
+encoding. No water sources were added, and the end-of-phase graph and page builds remain
+unrun. The earlier measurement and the review's flow decision are retained.
 
 ## 6. How the figures here were obtained
 
