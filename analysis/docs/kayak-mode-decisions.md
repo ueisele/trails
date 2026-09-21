@@ -85,10 +85,73 @@ would draw it without a change.
 
 ## 5. Changes
 
+- 2026-09-21 — phase 3 stopped: the water grid and the height tiles do not guarantee a lake plane. One straight water part near the measured bay changes height by 0.96516 m in about 25 m; the stop-note below. No runtime change retained.
 - 2026-09-21 — phase 0: the plan and this record opened.
 - 2026-09-21 — phase R: the research in §3.5; there is no phase 6.
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
+
+### Phase 3 — Stopped at the water profile, 2026-09-21
+
+**The premise that tile sampling makes a water part flat does not hold at the
+shore.** Phase 3 step 1 calls for a paddled part sampled from the existing height
+tiles, and the acceptance asks for water flat within 0.5 m. A straight part that
+the page's grid holds entirely as water changes by **0.9651607896 m** in about
+25 m. No rule for resolving that disagreement is in the plan.
+
+The phase 2 worktree and its built page had been removed. The permitted
+`command make map ARGS="--park malingsbo-kloten"` was started in this worktree
+under an 8 GiB address-space limit. While it ran, the existing main-checkout
+Malingsbo-Kloten page supplied its water grid and cached height tiles for a
+read-only check in Firefox, with all external requests blocked. This did not
+measure a new kayak route: it tested the water/height premise before completing
+one. The in-memory build was stopped after the disagreement was found; no map
+or tiles were published or built to completion.
+
+The first probe sampled 101 positions along phase 2's bay pair, from
+(59.844846, 15.546195) to (59.852644, 15.540811). Its 95 positions marked as water
+range from 219.53125 to 220.4062229349 m. That alone is not a within-part test:
+the grid splits this line with land. Repeating with the production
+`heightsFor()` sampler gives 184 positions, 171 wet, and three water runs; each
+individual run spans less than 0.5 m. A local probe beside the raised readings
+then isolates the disagreement in **one continuous water part**, rather than
+comparing water on opposite sides of a land part.
+
+Both endpoints of that part have latitude **59.84547894974684**. The longitude
+runs from **15.54560276** to **15.546050339490117**. Production `heightsFor()`
+lays six samples along it; `trailsGraph.waterAt()` returns true at every one.
+Their tile heights, in order, are:
+
+| sample | height m |
+|---|---:|
+| 1 | 220.5216982613 |
+| 2 | 220.4376995500 |
+| 3 | 220.2155094370 |
+| 4 | 219.8346055229 |
+| 5 | 219.6249027445 |
+| 6 | 219.5565374717 |
+
+Under step 1's grid rule this is one paddled run. Retaining the tile heights
+would retain that slope. The measurement establishes the disagreement; it does
+not settle whether the water grid, shoreline position,
+or height interpolation should change. **Review must decide how near-shore
+water gets its level, or revise the flatness acceptance.** No flattening,
+shoreline adjustment, or alternative sampling rule was added.
+
+The draft changes to `plan_mode.js`, `profile_panel.js`, `maps.py`, and tests
+were saved outside the repository as `~/mockups/kayak-mode/phase3-draft.patch`
+and removed from the worktree. Its initial hooks run passed formatting, lint
+and mypy; tests reported 1,968 passed and four assertions still expecting the
+old source text. That draft is not an accepted implementation. Validation of
+the retained record-only change is in `phase3-stop-hooks-final.log`. The kayak figures,
+heading, GPX and Garmin files, station anchoring, dry byte comparison and the two
+unchanged drive checks were not completed. No mode, goal or chosen way was
+changed by the tile probes, and their fresh browser contexts were closed.
+
+Scratch: `~/mockups/kayak-mode/phase3-bay-tiles.py`, `phase3-bay-exact-tiles.py`,
+`phase3-bank-grid.py`, and `phase3-bank-straight.py`, with their JSON readings and
+logs. The decisive six readings are in `phase3-bank-straight.json`; the stopped
+build is `phase3-map.log`, and the discarded draft's hooks are `phase3-hooks.log`.
 
 ### Phase 1 — Stopped at the flow measurement, 2026-09-21
 
