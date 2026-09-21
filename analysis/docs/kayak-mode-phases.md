@@ -396,6 +396,10 @@ word: "Das soll auch gehen im Plan-Modus."* The same two switches, one state, on
 painted from the same closure so that both places always show the same knob; a drive reading
 that switches on one page and reads the other; the three pages rebuilt and published.
 
+*Built 2026-09-21 (codex, `8d864eb`): shared switches on both pages, hidden when read-only;
+switching Kayak on the plan's page re-priced the way (2,123 m paddled on the scene's shore
+pair); 85 readings twice.*
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.
