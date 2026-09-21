@@ -4,7 +4,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, box
 from trails.routing.graph import EDGE_COLUMNS, build_network, label_components
-from trails.routing.sources import BRIDGE, FERRY, PATH, NetworkSource
+from trails.routing.sources import BRIDGE, FERRY, PATH, PORTAGE, NetworkSource
 
 CRS = "EPSG:25833"
 
@@ -370,3 +370,21 @@ def test_clipping_a_directed_line_retains_the_flow():
     network = build_network([source(LineString([(100, 0), (0, 0)]), directed=True)], clip=box(25, -50, 75, 50), bridge_m=0)
     assert network.edges["one_way"].all()
     assert list(network.edges.geometry.iloc[0].coords) == [(75, 0), (25, 0)]
+
+
+@pytest.mark.parametrize("kind", [BRIDGE, PORTAGE])
+def test_inferred_sources_connect_without_becoming_selectable_chains(kind):
+    network = build_network(
+        [
+            source(LineString([(0, 0), (100, 0)]), name="inferred", kind=kind),
+            source(LineString([(50, -50), (50, 50)]), name="path"),
+        ],
+        bridge_m=0,
+    )
+    inferred = network.edges[network.edges["source"] == "inferred"]
+    assert len(inferred) == 2
+    assert inferred["kind"].eq(kind).all()
+    assert inferred["chain_id"].isna().all()
+    assert set(network.chains["source"]) == {"path"}
+    assert network.edges["component"].nunique() == 1
+    assert network.edges.loc[network.edges["source"] == "path", "chain_id"].notna().all()

@@ -367,14 +367,19 @@ def test_a_crossing_carries_no_heights_at_all() -> None:
     assert decode(payload)["heights"] == [[]]
 
 
-def test_a_connector_lies_on_no_chain_and_sorts_after_every_one() -> None:
+@pytest.mark.parametrize("kind", ["bridge", "portage"])
+def test_a_connector_lies_on_no_chain_and_sorts_after_every_one(kind: str) -> None:
     chain = LineString([(13.0, 65.6), (13.001, 65.6)])
     edges = graph(
         (LineString([(13.001, 65.6), (13.001, 65.6005)]), None, 1, 2, "bridge", [10.0, 11.0]),
         (chain, "a", 0, 1, "FKB", [10.0, 10.0]),
     )
-    read = decode(encoded(chains((chain, "a")), edges))
+    edges.loc[0, "kind"] = kind
+    payload = encoded(chains((chain, "a")), edges)
+    read = decode(payload)
 
+    assert payload.header["sources"][1]["kind"] == kind
+    assert read["heights"] == [[10.0, 10.0], [10.0, 11.0]]
     assert read["chain_at"].tolist() == [0, 1]  # type: ignore[union-attr]
     assert read["sources"] == [0, 1]
     assert read["from_node"] == [0, 1]

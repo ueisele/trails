@@ -3040,6 +3040,7 @@ PLAN_SETTINGS = (
     "crossingKind",
     "connectorKind",
     "paddleKind",
+    "portageKind",
     "portageFactor",
     "touchedM",
     "namedM",
@@ -4501,7 +4502,9 @@ def add_plan_mode(fmap: folium.Map, plan: dict[str, Any], points: list[folium.Fe
             an inferred connector, which the page tests every edge it routes over
             against — spelled in the page instead, a rename would leave it
             reading a ferry as walked ground; ``paddleKind`` identifies water edges,
-            reachable only in kayak mode; ``portageFactor`` multiplies walking
+            reachable only in kayak mode; ``portageKind`` identifies inferred
+            carries, also kayak-only, priced and tallied as undrawn ground;
+            ``portageFactor`` multiplies walking
             prices in that mode, while paddled edges keep their source factor
             and ferries keep their flat price; ``touchedM`` is how much of a
             route has to lie inside a protected area before it says so, and

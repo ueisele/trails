@@ -147,7 +147,7 @@ from trails.routing import (
     translate_joined,
     whole_way_length,
 )
-from trails.routing.sources import PADDLE
+from trails.routing.sources import PADDLE, PORTAGE
 from trails.utils.geo import attach_nearest, compass_points, endpoint_bearings, thin_points
 from trails.visualization import maps
 from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
@@ -2163,6 +2163,7 @@ def plan_settings(params: graphs.Params, layers: list[TrailLayer], heights: dict
         "crossingKind": FERRY,
         "connectorKind": BRIDGE,
         "paddleKind": PADDLE,
+        "portageKind": PORTAGE,
         "portageFactor": PORTAGE_FACTOR,
         # How much of a route has to lie inside a protected area before it says
         # so. Handed over rather than spelled in the page, so that the figure

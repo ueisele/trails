@@ -38,6 +38,7 @@
                 // the points and are made afresh under the new price; the way
                 // to a goal is asked for from where the reader stands, as any
                 // fix would ask for it.
+                routing = null;
                 if (points.length > 1) {
                     legs.forEach(function (leg) { if (leg) { undraw(leg.layers); } });
                     legs = [];
@@ -100,7 +101,7 @@
             // connector, handed in rather than spelled here: renaming either in
             // trails.routing.sources would otherwise leave this page reading
             // every ferry as walked ground, and nothing would look wrong.
-            var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind, PADDLE = PLAN.paddleKind;
+            var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind, PADDLE = PLAN.paddleKind, PORTAGE = PLAN.portageKind;
 
             // How each kind is drawn. Routed is a line; ground drawn straight
             // across is dashed exactly as the profile dashes it; a crossing is a
@@ -168,10 +169,11 @@
 
                 for (i = 0; i < edges; i += 1) {
                     var source = graph.header.sources[graph.sources[i]];
-                    if (source.kind !== CROSSING && source.kind !== CONNECTOR && (kayak() || source.kind !== PADDLE)) {
+                    if (source.kind !== CROSSING && source.kind !== CONNECTOR && (kayak() || (source.kind !== PADDLE && source.kind !== PORTAGE))) {
                         snapNodes[graph.fromNode[i]] = 1; snapNodes[graph.toNode[i]] = 1;
                     }
-                    if (source.kind === PADDLE && !kayak()) { cost[i] = Infinity; }
+                    if ((source.kind === PADDLE || source.kind === PORTAGE) && !kayak()) { cost[i] = Infinity; }
+                    else if (source.kind === PORTAGE) { cost[i] = length[i] * offPath() * PLAN.portageFactor; }
                     else if (source.flatM === undefined) {
                         cost[i] = length[i] * source.factor * (kayak() && source.kind !== PADDLE && source.kind !== CROSSING
                             ? PLAN.portageFactor : 1);
@@ -274,14 +276,15 @@
             // Both searches keep both arcs; it is the journey's direction that
             // matters, even when the search works back from its destination.
             function allowed(graph, edge, downstream) {
-                return (kayak() || graph.header.sources[graph.sources[edge]].kind !== PADDLE) &&
+                var kind = graph.header.sources[graph.sources[edge]].kind;
+                return (kayak() || (kind !== PADDLE && kind !== PORTAGE)) &&
                     (!graph.oneWay[edge] || downstream);
             }
 
             function endsOf(graph, point, entering) {
                 if (point.edge >= 0) {
                     var kind = graph.header.sources[graph.sources[point.edge]].kind;
-                    if (kind === CROSSING || (kind === PADDLE && !kayak())) { return []; }
+                    if (kind === CROSSING || ((kind === PADDLE || kind === PORTAGE) && !kayak())) { return []; }
                 }
                 if (point.node >= 0) { return [{node: point.node, cost: 0, cut: null}]; }
                 if (!(point.edge >= 0)) { return []; }
@@ -764,7 +767,7 @@
                 // which is what a connector is — so it names no source and
                 // answers nothing about marking. Its ground is walked and
                 // counted, apart, under its own name.
-                if (source.kind === CONNECTOR) { out.undrawn += metres; return; }
+                if (source.kind === CONNECTOR || source.kind === PORTAGE) { out.undrawn += metres; return; }
                 out.sources[source.name] = (out.sources[source.name] || 0) + metres;
                 // No register marks water. Both kinds keep their source
                 // credit without a marking bucket; paddling, unlike a ferry,
@@ -1002,7 +1005,7 @@
                         for (var e = index.at[cell]; e < index.at[cell + 1]; e += 1) {
                             var edge = index.item[e];
                             var kind = graph.header.sources[graph.sources[edge]].kind;
-                            if (kind === CROSSING || kind === CONNECTOR || (kind === PADDLE && !kayak())) { continue; }
+                            if (kind === CROSSING || kind === CONNECTOR || ((kind === PADDLE || kind === PORTAGE) && !kayak())) { continue; }
                             var v = index.vert[e];
                             var ax = co[2 * v], ay = co[2 * v + 1];
                             var ex = (co[2 * v + 2] - ax) * lonScale, ey = co[2 * v + 3] - ay;

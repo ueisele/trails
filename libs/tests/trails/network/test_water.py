@@ -9,7 +9,7 @@ from shapely.geometry import LineString, Point, Polygon, box
 from trails.network import water
 from trails.routing.elevation import PROFILE_COLUMNS, with_elevation
 from trails.routing.graph import build_network
-from trails.routing.sources import BRIDGE, PADDLE, NetworkSource
+from trails.routing.sources import PADDLE, PORTAGE, NetworkSource
 
 CRS = "EPSG:3006"
 
@@ -52,12 +52,12 @@ def test_portages_join_components_once_and_tie_their_feet_to_path_nodes():
     assert chords.gdf.length.iloc[0] == pytest.approx(100)
     assert len(ties.gdf) == 2
     assert ties.gdf.length.max() <= water.PATH_JOIN_M
-    assert chords.kind == ties.kind == BRIDGE
+    assert chords.kind == ties.kind == PORTAGE
     joined = build_network([*paddle, chords, ties], metric_crs=CRS, bridge_m=0)
-    carried = joined.edges[joined.edges["kind"] == BRIDGE]
+    carried = joined.edges[joined.edges["kind"] == PORTAGE]
     assert carried["chain_id"].isna().all()
     assert not carried["one_way"].any()
-    assert not (joined.chains["kind"] == BRIDGE).any()
+    assert not (joined.chains["kind"] == PORTAGE).any()
 
 
 def test_no_chord_reaches_beyond_the_portage_distance():
@@ -125,7 +125,7 @@ def test_lake_levels_use_only_their_own_shores_and_leave_other_profiles_alone():
         crs=CRS,
     )
     items = water.sources(surfaces, metric_crs=CRS, class_field="class", lake_classes=("lake",), level_field="level")
-    for name, kind, y in ((water.STREAMS, PADDLE, -100), (water.PORTAGES, BRIDGE, -200), ("path", "path", -300)):
+    for name, kind, y in ((water.STREAMS, PADDLE, -100), (water.PORTAGES, PORTAGE, -200), ("path", "path", -300)):
         items.append(NetworkSource(name, gpd.GeoDataFrame(geometry=[LineString([(0, y), (100, y)])], crs=CRS), kind=kind))
     network = with_elevation(build_network(items, metric_crs=CRS, bridge_m=0), lambda coordinates: coordinates[:, 0] + coordinates[:, 1])
     # Chord readings cannot influence the shore percentile.

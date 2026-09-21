@@ -50,6 +50,10 @@ def parts():
         (async()=>{
             const out = {};
             out.routed = routedParts(graph,{edges:[0,1,2,1],reversed:[false,false,false,false]});
+            graph.header.sources[0].kind = 'portage';
+            out.portage = routedParts(graph,{edges:[0],reversed:[false]});
+            out.portageCut = cutPart(graph,{edge:0,from:15,to:5});
+            graph.header.sources[0].kind = 'path';
             out.cut = cutPart(graph,{edge:1,from:15,to:5});
             const answered = {laid:{lon:[0,10,20],lat:[0,0,0],along:[0,10,20],length:20},
                 points:[{height:12},{height:12},{height:12}]};
@@ -148,3 +152,12 @@ def test_a_ferry_still_breaks_the_track(parts):
     assert None in shape["height"]
     assert shape["profileLength"] == shape["total"] == 10
     assert shape["crossed"] == 20
+
+
+def test_a_portage_keeps_its_routed_land_profile_including_partial_edges(parts):
+    part = parts["portage"][0]
+    assert part["kind"] == parts["portageCut"]["kind"] == "routed"
+    assert part["height"] == parts["routed"][0]["height"]
+    assert part["distance"] == parts["routed"][0]["distance"]
+    assert parts["portageCut"]["height"] == [7, 7, 7]
+    assert parts["portageCut"]["lon"] == [15, 5]

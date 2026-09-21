@@ -90,6 +90,8 @@ would draw it without a change.
 
 ## 5. Changes
 
+- 2026-09-21 — phase 2b built: inferred portages have their own kayak-only kind and undrawn-ground price. Both walking settings recover 22,957 m with zero portage; the kayak leg retains its mapped path. The built-note records the graph scope extension and the remaining phase 4 snapshot detail.
+
 - 2026-09-21 — phase 1b built: review retains the 10 m chord ring after the 25 m sweep changed two ways. Ponds stay outside the paddle network, portages join Delaunay neighbours, and Norway reads cached 4 m ground. The final three graphs, Swedish page bytes and completed Norway memory measurement are in the built-note below.
 
 - 2026-09-21 — phase 3 built: connected lakes levelled from the lowest register or shore p10; paddled parts, figures and tracks; dry artifacts byte-identical in both walking settings. The drive's two saved dry hashes already differ with the pre-phase-3 scripts on this graph; the built-note records that review item.
@@ -102,6 +104,120 @@ would draw it without a change.
 - 2026-09-21 — phase 3 (`7f68137`): lakes levelled per connected body in the build (150 bodies from the register, 1,005 from the shore's 10th percentile; median difference 0.25 m, largest 2.82 m), paddled parts flat and continuous in the profile, the heading *2.47 km 🛶 · 3.51 km 🚶*, *by kayak* and *portage on foot* in words, paddled points in the GPX and the Garmin course; the dry way byte-identical in both walking settings. Two stops (the shore's tiles, the body's identity).
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
+
+### Phase 2b built — A portage is not a path, 2026-09-21
+
+**The inferred kind.** `routing/sources.py` gives carried ground its own
+`PORTAGE` kind. In `network/water.py`, only the kind declared by Portages and
+Portage paths changes; the geometry, source factors and ordinary bridges do
+not. `encoding.py` already carries arbitrary source kinds, so it needs no
+change. `maps.py` requires `portageKind`, supplied by
+`lomsdal_visten.plan_settings()` beside `paddleKind`.
+
+**The scope stop and its resolution.** The graph removed only `BRIDGE`
+chains and cleared only their edge chain ids. Changing the source kind alone
+would have turned the existing two-lake fixture's inferred geometry into
+three selectable chains, with all five portage edges carrying chain ids;
+the old kind had zero of each. Review extended this phase to the two places
+in `routing/graph.py`: one `_inferred()` predicate now recognises both kinds.
+`_with_bridges` is untouched. The regression tests cover both inferred kinds,
+their noding against a path and the path's retained identity.
+
+**The page.** In both walking settings, portage edges have infinite cost,
+cannot be traversed in either search or as partial edges, and cannot supply
+a snap segment or make a node eligible for snapping. In kayak mode they cost
+length × `offPath()` × P. They count protected ground and `undrawn`, without
+source credit or a marking bucket; their full and partial routed land parts
+retain the payload's heights. Ordinary bridges keep their existing prices.
+
+The new edge price depends on *Stay on paths*, so that switch must now drop
+the cached cost table before recomputing a way. This small follow-on decision
+stays within `plan_mode.js`; without it, the portage price would retain the
+previous switch's ground factor. The executable page tests exercise both
+switch positions without manually clearing that table. Further tests cover
+walking exclusion, snapping, partial edges, unchanged bridge prices, tallying,
+payload round trips and routed portage heights.
+
+**One build, read offline.**
+`command make map ARGS="--park malingsbo-kloten"` completed in **1,113.098 s**,
+with **3,031,432 KiB** peak resident memory under an 8 GiB address-space limit.
+An audit hook blocked network access and writes to the shared cache. No input
+was fetched or rewritten and no tiles were built. The graph has **217,122
+edges**, including **2,240 Portages and 1,163 Portage paths**; all **3,629,083**
+height samples came from the cached 4 m mosaic. Its encoded stream remains
+**9,884,753 raw bytes and 6,406,460 base64 bytes**, as in phase 1b.
+
+The phase 3 Firefox harness serves that one page locally with external
+requests blocked. Before uses the planner from `HEAD` and changes just the
+two source-table kinds back to `BRIDGE`; after uses the final planner and
+`PORTAGE`. Geometry, ordering, heights and prices in the payload are shared.
+A scratch-only tally field counts metres on the two portage source names,
+including partial edges, without changing any routing or public tally rule.
+
+**The same dry journey, not a moving vertex index.** This checkout's
+`SCENES["malingsbo-kloten"]` gives the stop, but `goal_lengths()` chooses its
+two endpoints at vertex indices 0.1 and 0.7 along the long chain. Noding
+changes those endpoints. The initial unadjusted harness therefore measured
+a different journey: 22,975.089704 m before, 23,018.562799 m after. The scratch
+harness now fixes the endpoints to those saved by phase 4 in
+`phase4-dry-main.json` and `phase4-dry-fixed.json`; `drive_map.py` is unchanged.
+In journey order, latitude and longitude:
+
+- Start: **59.870408, 15.047954**.
+- Scene's stop: **59.902132, 15.211080**.
+- Goal: **59.901463, 15.379916**.
+
+| setting | before: foot m / portage-edge m | after: foot m / portage-edge m |
+|---|---:|---:|
+| Walking | 22,913.954902 / 730.416712 | **22,957.427997 / 0** |
+| Stay on paths | 22,913.954902 / 730.416712 | **22,957.427997 / 0** |
+
+Water is zero in all four readings. Both final settings give the requested
+**22,957 m on foot with 0 m of portage**. The saved published page reads
+22,957.426099 m, a difference of 0.001899 m. The before value differs from
+phase 4's 22,251.447685 m because that earlier combined graph predates the
+phase 1b reduction of portage chords. This comparison measures phase 2b on
+the accepted phase 1b graph, not the superseded chord set.
+
+**The kayak leg still takes the path.** At **k = 1.5, P = 2**, with *Stay on
+paths* off, the phase 2 portage leg runs from (59.821858, 15.502671) to
+(59.824603, 15.518341). The new inferred-ground price is **6 per metre**,
+instead of the old bridge price **2.6**.
+
+| public assembled way | before | after |
+|---|---:|---:|
+| Paddled | 126.499682 m | **51.555412 m** |
+| On foot | 1,152.330304 m | **1,220.934436 m** |
+| Mapped paths | 315.869153 m | **1,009.380945 m** |
+| Inferred portage edges | 663.166623 m | **0 m** |
+
+The final path is OSM. Its routed land part has **198 height samples**, all
+read; the other land parts are straight connectors. A dearer inferred carry
+therefore sends more of this leg along the mapped path, as intended. The
+inferred-edge tally and profile rules are separately covered by the tests.
+Both browser runs restored and compared the mode, path setting, goal and
+its persisted way, and plan state. Only spatial-index statistics and the
+cumulative height-request counter are excluded, as in the phase 3 harness.
+
+**The remaining phase 4 snapshot detail is now precise.** The final dry GPX
+description matches the saved hash
+`06ef1cf796a83eeccd0e12f85890064bd1c238ac193e55628f19ec8c32458969` in both
+walking settings. The entire figures-page HTML differs from the published
+capture only in its point count: **9,076 points instead of 9,084**. Replacing
+that one text value reproduces the old HTML exactly. Its new hash is
+`d3051c9e206aa2822e5e91206e1ad95f6fe254a8fcdd7739d04829a95ea00dd2`.
+The unchanged dry check consequently reports 14 readings, zero broken
+invariants and two moved figures (the same HTML hash in both settings),
+returning 2. Review should carry the fixed endpoints and the measured point
+count into phase 4's scene/snapshot work; neither is changed in this phase.
+
+Scratch, the adapted harness, captures and restoration comparisons are in
+`~/mockups/kayak-mode/phase2b/`. `map.log` and `map.time` record the only build;
+`before-fixed.log` and `after-fixed.log` are the accepted browser runs, with
+`before-portage.json` and `after-portage.json` for the kayak leg. The first
+hooks invocation passed both mypy checks and the tests, but pre-commit marked
+the type hook failed because the decision record was edited during that
+hook. The final run, with all files held unchanged, is `hooks-final.log`.
 
 ### Phase 3 built — Lake levels and what a paddled way says, 2026-09-21
 

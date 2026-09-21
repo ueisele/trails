@@ -18,6 +18,8 @@ def readings():
     source = files("trails.visualization").joinpath("js", "plan_mode.js").read_text()
     names = (
         "kayak",
+        "staying",
+        "stayOnPaths",
         "paddle",
         "router",
         "allowed",
@@ -44,18 +46,18 @@ def readings():
     heap = source[source.index("            function Heap()") : source.index("            // Dijkstra over the weighted graph")]
     script = (
         r"""
-        var routing = null, gridded = null, paddling = true, paths = false;
+        var routing = null, gridded = null, paddling = true, stayingOnPaths = false;
         var points = [], goalAt = null, refreshes = 0;
         const storage = new Map();
         const window = {localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)}};
         function keptKey() { return 'fixture'; }
         function refresh() { refreshes++; }
         function refreshGoal() {}
-        var CROSSING = 'ferry', CONNECTOR = 'bridge', PADDLE = 'paddle', NODE_FIRST_M = 2;
+        var CROSSING = 'ferry', CONNECTOR = 'bridge', PADDLE = 'paddle', PORTAGE = 'portage', NODE_FIRST_M = 2;
         var PLAN = {portageFactor:4, offPathFactor:3, waterFactor:30, indexCellM:100, snapM:150};
         var MARKING = ['marked', 'unmarked', 'unknown'];
         var TALLIED = MARKING.concat(['undrawn', 'recorded', 'unrecorded']);
-        function offPath() { return paths ? 10 : PLAN.offPathFactor; }
+        function offPath() { return staying() ? 10 : PLAN.offPathFactor; }
         function panel() { return {metresBetween:(x,y,a,b) => Math.hypot(x-a,y-b)*100000}; }
         function graph(kind, directed) {
             routing = null; gridded = null;
@@ -91,16 +93,33 @@ def readings():
         out.cutReverse = routeBetween(g,{...middle,along:15},{...middle,along:5});
         out.walking = [];
         for (const staying of [false,true]) {
-            paddle(false); paths = staying; routing = null;
+            paddle(false); stayingOnPaths = staying; routing = null;
             out.walking.push({reachable:Number.isFinite(router(g).cost[0]),
                 route:routeBetween(g,at(0),at(1)),ends:endsOf(g,middle),
                 line:nearestOnNetwork(g,0,0.0001,1),tap:snapped(g,0,0,1)});
         }
-        paddle(true); paths = false; routing = null;
+        paddle(true); stayingOnPaths = false; routing = null;
         out.kayakLine = nearestOnNetwork(g,0,0.0001,1);
         out.kayakTap = snapped(g,0,0,1);
         g = graph('path',false);
         out.portage = router(g).cost[0];
+        out.inferred = [];
+        for (const kind of ['bridge', 'portage']) {
+            g = graph(kind,false);
+            g.header.sources[1].factor = 1.3;
+            for (const mode of [false,true]) {
+                paddle(mode);
+                for (const staying of [false,true]) {
+                    stayOnPaths(staying);
+                    out.inferred.push({kind,mode,staying,length:router(g).length[0],cost:router(g).cost[0],
+                        allowed:allowed(g,0,true),route:routeBetween(g,at(0),at(1)),
+                        cut:routeBetween(g,{...middle,along:5},{...middle,along:15}),
+                        ends:endsOf(g,middle),nodeEnds:endsOf(g,{...middle,node:0}),
+                        line:nearestOnNetwork(g,0,0.0001,1),tap:snapped(g,0,0,1)});
+                }
+            }
+        }
+        stayOnPaths(false);
         g = graph('ferry',false);
         out.ferryKayak = router(g).cost[0];
         paddle(false); routing = null;
@@ -120,7 +139,7 @@ def readings():
         out.patchedFloor = cheapestMetre(g);
         out.patchedWater = priced(g,0,0,0.0002,0);
         out.tallies = {};
-        for (const kind of ['paddle', 'ferry', 'path']) {
+        for (const kind of ['paddle', 'ferry', 'path', 'bridge', 'portage']) {
             g = graph(kind, false);
             g.header.protected = [{id:'reserve'}];
             g.protectedAt = [0,1]; g.protectedArea = [0]; g.protectedShare = [1];
@@ -192,3 +211,48 @@ def test_switching_rebuilds_prices_and_remembers_the_mode(readings):
     assert readings["dropped"] is True
     assert readings["walkTableDifferent"] is True
     assert readings["persisted"] == "yes"
+
+
+def test_portages_are_unreachable_and_unsnappable_in_both_walking_settings(readings):
+    for row in readings["inferred"]:
+        if row["kind"] != "portage" or row["mode"]:
+            continue
+        assert row["cost"] is None
+        assert row["allowed"] is False
+        assert row["route"] is row["cut"] is row["line"] is None
+        assert row["ends"] == row["nodeEnds"] == []
+        assert row["tap"]["node"] == -1
+        assert "edge" not in row["tap"]
+
+
+def test_carrying_an_inferred_portage_pays_ground_and_reprices_with_the_switch(readings):
+    for row in readings["inferred"]:
+        if row["kind"] != "portage" or not row["mode"]:
+            continue
+        ground = 10 if row["staying"] else 3
+        assert row["cost"] == row["length"] * ground * 4
+        assert row["route"]["cost"] == row["cost"]
+        assert row["cut"]["cost"] == row["cost"] / 2
+        assert row["allowed"] is True
+        assert len(row["ends"]) == 2
+        assert row["line"]["edge"] == 0
+        assert row["tap"]["node"] == 0
+
+
+def test_ordinary_bridges_keep_their_prices_and_walking_access(readings):
+    for row in readings["inferred"]:
+        if row["kind"] != "bridge":
+            continue
+        assert row["cost"] == row["length"] * 1.3 * (4 if row["mode"] else 1)
+        assert row["allowed"] is True
+        assert row["route"]["edges"] == [0]
+        assert row["line"] is None
+
+
+def test_a_portage_counts_undrawn_ground_and_protection_without_source_or_marking(readings):
+    tally = readings["tallies"]["portage"]
+    assert tally == readings["tallies"]["bridge"]
+    assert tally["undrawn"] == readings["forward"]["cost"]
+    assert tally["protected"] == {"reserve": tally["undrawn"]}
+    assert tally["sources"] == {}
+    assert all(tally[field] == 0 for field in ("marked", "unmarked", "unknown", "recorded", "unrecorded"))

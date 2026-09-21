@@ -33,7 +33,7 @@ from trails.routing.noding import (
     intersection_points,
     lines_of,
 )
-from trails.routing.sources import BRIDGE, FERRY, NetworkSource
+from trails.routing.sources import BRIDGE, FERRY, PORTAGE, NetworkSource
 from trails.routing.topology import UnionFind, cluster_points, dense_ids
 
 #: Loose ends closer than this to another node are joined. Sources disagree
@@ -57,6 +57,10 @@ MIN_EDGE_M = 0.5
 
 #: Columns of the edge frame.
 EDGE_COLUMNS = ("from_node", "to_node", "cost", "source", "kind", "chain_id", "length_m", "one_way")
+
+
+def _inferred(kind: str) -> bool:
+    return kind in (BRIDGE, PORTAGE)
 
 
 @dataclass(frozen=True)
@@ -137,7 +141,7 @@ def build_network(
     edges, nodes = _with_bridges(edges, nodes, stopped, bridge_m, bridge_cost_factor, tolerance_m)
 
     # Inferred chords take part in noding but are never a selectable way.
-    chains = chains[chains["kind"] != BRIDGE].reset_index(drop=True)
+    chains = chains[~chains["kind"].map(_inferred).astype(bool)].reset_index(drop=True)
     edges["component"] = label_components(edges)
     nodes = _describe_nodes(nodes, edges)
     return Network(chains=chains, edges=edges, nodes=nodes)
@@ -238,7 +242,7 @@ def _split_into_edges(
                     "cost": _cost(piece.length, chain_lengths[position], source, ferry_cost_m),
                     "source": source.name,
                     "kind": source.kind,
-                    "chain_id": None if source.kind == BRIDGE else chain_ids[position],
+                    "chain_id": None if _inferred(source.kind) else chain_ids[position],
                     "one_way": source.directed,
                     "length_m": piece.length,
                 }

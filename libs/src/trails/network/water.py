@@ -18,7 +18,7 @@ from trails.routing.coverage import CHAIN_COVERAGE_COLUMNS, chain_coverage
 from trails.routing.elevation import PROFILE_COLUMNS, chain_profiles
 from trails.routing.graph import DEFAULT_BRIDGE_COST_FACTOR, Network, build_network
 from trails.routing.noding import lines_of, working_lines
-from trails.routing.sources import BRIDGE, PADDLE, PATH, NetworkSource
+from trails.routing.sources import BRIDGE, PADDLE, PATH, PORTAGE, NetworkSource
 
 SHORE = "Shore"
 OPEN_WATER = "Open water"
@@ -199,7 +199,7 @@ def portages(water_sources: list[NetworkSource], walking: Network, *, distance_m
         distance_m: Largest inferred carry between connected water pieces
 
     Returns:
-        Inferred chords and their walking-network ties, both kind BRIDGE
+        Inferred chords and their walking-network ties, both kind PORTAGE
     """
     if walking.edges.crs is None or not walking.edges.crs.is_projected:
         raise ValueError("portages need a projected walking network")
@@ -258,7 +258,7 @@ def portages(water_sources: list[NetworkSource], walking: Network, *, distance_m
         )
     return [
         NetworkSource(
-            name, gpd.GeoDataFrame(geometry=geometries, crs=walking.edges.crs), kind=BRIDGE, cost_factor=DEFAULT_BRIDGE_COST_FACTOR, keep_whole=True
+            name, gpd.GeoDataFrame(geometry=geometries, crs=walking.edges.crs), kind=PORTAGE, cost_factor=DEFAULT_BRIDGE_COST_FACTOR, keep_whole=True
         )
         for name, geometries in ((PORTAGES, chords), (PORTAGE_PATHS, list(ties.values())))
     ]

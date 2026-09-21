@@ -5445,6 +5445,7 @@ class TestPlanMode:
             "crossingKind": "ferry",
             "connectorKind": "bridge",
             "paddleKind": "paddle",
+            "portageKind": "portage",
             "portageFactor": 4.0,
             "touchedM": 100.0,
             "namedM": 50.0,
@@ -6237,7 +6238,7 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         protecting = planning.index("addProtected(out, graph, edge, metres)")
-        connector = planning.index("if (source.kind === CONNECTOR) { out.undrawn += metres; return; }")
+        connector = planning.index("if (source.kind === CONNECTOR || source.kind === PORTAGE) { out.undrawn += metres; return; }")
         assert protecting < connector
 
     def test_a_leg_drawn_straight_reads_its_areas_off_its_own_samples(self):
@@ -6381,7 +6382,7 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned(crossingKind=FERRY, connectorKind=BRIDGE))
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind, PADDLE = PLAN.paddleKind;" in planning
+        assert "var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind, PADDLE = PLAN.paddleKind, PORTAGE = PLAN.portageKind;" in planning
         assert f'"crossingKind": "{FERRY}"' in fmap.get_root().render()
         assert f'"connectorKind": "{BRIDGE}"' in fmap.get_root().render()
 
@@ -7115,7 +7116,7 @@ class TestPlanMode:
         # The line, over the index, and never a crossing or a connector.
         assert "function nearestOnNetwork(graph, lat, lon, withinM) {" in planning
         assert "var index = edgeIndex(graph);" in planning
-        assert "if (kind === CROSSING || kind === CONNECTOR || (kind === PADDLE && !kayak())) { continue; }" in planning
+        assert "if (kind === CROSSING || kind === CONNECTOR || ((kind === PADDLE || kind === PORTAGE) && !kayak())) { continue; }" in planning
         assert "return {edge: best, along: along, lon: foot.lon, lat: foot.lat, m: Math.sqrt(closest) * 111320};" in planning
         # A junction as near as the line is the junction.
         assert "var NODE_FIRST_M = 2;" in planning
