@@ -248,6 +248,9 @@ ties: unreachable and unsnappable in the walking modes as a paddle edge is, and 
 mode priced as undrawn ground under a kayak, `offPath() × P`, tallied as a connector. After
 1b lands (both touch `water.py`); phase 4 resumes after it.
 
+*Built 2026-09-21 (codex, `b95d708`): the kind, the exclusion, the price, the tally; the dry
+way is 22,957 m on foot with no portage in both walking settings once more.*
+
 ### Phase R — Where the canoe trails are
 
 *No code. Output: a section §3.5 in the record, and a `analysis/routes/malingsbo-kloten-canoe.toml`
