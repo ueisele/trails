@@ -63,7 +63,7 @@ a transient unit; the worktree's branch is rebased onto `main` and fast-forwarde
 the landing are the reviewing session's. The scratch for this plan is `~/mockups/kayak-mode/`.
 
 **Order and parallelism, in one line.**
-0 → { 1 ∥ R } → 2 → 3 → 1b → 2b → 4 → 5. (R found no lines, so there is no 6; 1b came out of 5's first build, 2b out of 4's first drive.)
+0 → { 1 ∥ R } → 2 → 3 → 1b → 2b → 4 → 5 (rebuild, drive) → 4b → 5 (publish). (R found no lines, so there is no 6; 1b came out of 5's first build, 2b out of 4's first drive.)
 
 - Phase 1 (the water network, Python) and phase R (research, no code) touch nothing in
   common and run at once.
@@ -353,6 +353,16 @@ at the end, as the goal helper does (`malingsbo-kloten-decisions.md` §10, phase
 — a shore of 2,123 m all paddled, a bay cut at 1,066 m against 2,502 m round, a portage of
 1,275 m on mapped paths, water profiles flat, the walking modes unchanged; the dry way moved
 2 mm with the noding; 1,417 readings, none broken.*
+
+### Phase 4b — The other two scenes, on the rebuilt pages
+
+*Added 2026-09-21 after phase 5's first drive over the three rebuilt pages: Malingsbo-Kloten
+1,417 readings and none broken; Abisko 6 broken and 2 moved (the long-edge check took a
+Shore edge as the graph's longest, the offline-scope race, the dry hashes moved by the
+noding); Lomsdal-Visten 1 broken and 2 moved (a stop's distance 10 m on, the dry hashes).*
+The long-edge check takes the longest walkable edge; the moved figures re-recorded where
+the noding is the reason; the kayak triples on Torneträsk and the fjord. Codex, in
+`drive_map.py` alone, driving the main checkout's rebuilt pages by path.
 
 ### Phase 5 — Rebuild, drive, publish
 
