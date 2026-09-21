@@ -243,8 +243,16 @@ the flag unread, tests. A page rebuilt once from phase 1's graph.*
    The cost table is rebuilt when the mode changes (`routing` dropped), not on every search.
    `priced()` in the kayak mode charges a water cell at the open-water factor and a ground
    cell at `offPath()` times P. `worthRouting` is unchanged in form.
-3. **Direction.** The arc table honours a one-way edge: the arc from `to_node` back is not
-   filled for it. Nothing else in the search changes.
+3. **Direction.** A predicate, not a missing arc: a step over a one-way edge is allowed
+   only when the journey runs `from_node → to_node`, which `joinedRoute` (searching
+   backwards from the destination) and `routeBetween` each ask with their own direction; a
+   point on a one-way edge exits only downstream and is entered only from upstream, and the
+   on-edge shortcut stands only downstream. And the search's floor is the cheapest metre
+   the mode allows — `offPath()` walking, `min(k, offPath() × P)` paddling, k read off the
+   *Open water* source's factor in the header — or the bound would prune the water.
+   *Corrected 2026-09-21 after codex's stop: the first wording removed the reverse arc and
+   left the floor at the walking price; the backward search would have followed streams
+   upstream and pruned every answer cheaper than ground.*
 4. **Snapping.** `nearestOnNetwork` and `endsOf` take `PADDLE` edges in the kayak mode and
    skip them in the walking modes, as they skip a ferry today, so a tap on a lake in the
    walking mode still means open ground and in the kayak mode means the shore.
