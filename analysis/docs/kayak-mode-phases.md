@@ -63,7 +63,7 @@ a transient unit; the worktree's branch is rebased onto `main` and fast-forwarde
 the landing are the reviewing session's. The scratch for this plan is `~/mockups/kayak-mode/`.
 
 **Order and parallelism, in one line.**
-0 → { 1 ∥ R } → 2 → 3 → { 4 ∥ 1b } → 5. (R found no lines, so there is no 6; 1b came out of 5's first build.)
+0 → { 1 ∥ R } → 2 → 3 → 1b → 2b → 4 → 5. (R found no lines, so there is no 6; 1b came out of 5's first build, 2b out of 4's first drive.)
 
 - Phase 1 (the water network, Python) and phase R (research, no code) touch nothing in
   common and run at once.
@@ -225,6 +225,19 @@ a third piece of water; the open-water chords drawn on the ring thinned to 25 m 
 sweep legs answer the same (record §4's chord-bytes item); Lomsdal-Visten's graph under an
 8 GiB limit, the peak measured; all three graphs measured, two pages' brotli bytes. Codex,
 in `water.py` and the record alone, in parallel with phase 4.
+
+*Amended 2026-09-21: Norway's water edges never go to the height service (the first
+build ran thirteen minutes fetching before it died) — a lake body takes N50's registered
+`hoyde`, the rest is sampled off the built DEM tree, the sea is 0 m.*
+
+### Phase 2b — A portage is not a path
+
+*Added 2026-09-21 after phase 4's stop: the walking modes routed over the portage chords
+(a `BRIDGE` is walked as undrawn ground at 1.3), and the dry scene's way fell from 22,957 m
+to 22,251 m taking 2,359 m of them.* A kind of its own, `PORTAGE`, for the chords and their
+ties: unreachable and unsnappable in the walking modes as a paddle edge is, and in the kayak
+mode priced as undrawn ground under a kayak, `offPath() × P`, tallied as a connector. After
+1b lands (both touch `water.py`); phase 4 resumes after it.
 
 ### Phase R — Where the canoe trails are
 
