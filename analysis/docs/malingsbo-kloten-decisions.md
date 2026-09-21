@@ -156,9 +156,15 @@ page as the register spelt it, drawn or not.
   equals the heading's two lengths to the metre. A kayak mode, where the water is the way,
   comes after the map is finished (plan §5).
 - ~~The phone readings, once published.~~ Uwe, 2026-09-21: *funktioniert korrekt*.
-- The icon: Uwe's pick among candidates A–D (plan phase 2); A stands until then.
+- ~~The icon.~~ Uwe, 2026-09-21: candidate A, the one published, is the pick.
 
 ## 7. Settled
+
+### 7.0 The mark — settled, 2026-09-21
+
+Candidate A of the four drawn (plan phase 2): the cairn on the moss path between two spruces
+of 57 % and 49 % of the square's height in `#2d5741`, a lake as a 1.8 % line, open background.
+Uwe's word after seeing it installed. The three others stay in `draw.ts` as parameters.
 
 ### 7.1 The height model is a collection per 100 km square — fixed, 2026-09-20
 

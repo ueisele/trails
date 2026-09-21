@@ -268,7 +268,7 @@ the 32 scaled from the 512 as the Abisko set was. The first candidate is copied 
 --candidates`, varying the spruces' height and tone, the lake as a line or a band, and a
 distant shore; on the mockup host at `forge-mockups.uweeisele.dev/malingsbo-kloten-icon/out/`.
 Candidate A is in the repository; the cairn's clearance inside the maskable circle is 11.6 px
-at 512. **Open: Uwe's pick.**
+at 512. **Uwe's pick, 2026-09-21: A**, the one published.
 
 ### Phase 3 — The builds
 
