@@ -155,7 +155,7 @@ page as the register spelt it, drawn or not.
   always was — a lake is crossed by boat, a river on foot — and the last row at the foot
   equals the heading's two lengths to the metre. A kayak mode, where the water is the way,
   comes after the map is finished (plan §5).
-- The phone readings, once published: install, keep an area, the offline switch.
+- ~~The phone readings, once published.~~ Uwe, 2026-09-21: *funktioniert korrekt*.
 - The icon: Uwe's pick among candidates A–D (plan phase 2); A stands until then.
 
 ## 7. Settled
