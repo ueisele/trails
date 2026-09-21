@@ -386,6 +386,16 @@ from whatever phase R found. Planned when R reports.
 1,452 / 1,415 readings and none broken, published ~15:20 UTC and read back identical.
 Uwe's phone reading is the open item.*
 
+### Phase 6 — The switches in plan mode
+
+*Added 2026-09-21 from Uwe's phone: "Ich habe im Plan-Panel weder Stay on paths noch Kayak."
+Both switches live on the profile panel's *Places on the way* page, which exists only while
+the panel shows the way to a goal; a reader planning in plan mode never sees them. Uwe's
+word: "Das soll auch gehen im Plan-Modus."* The same two switches, one state, on the plan's
+*Points and stages* page as well — under its heading, above the list, in the same form —
+painted from the same closure so that both places always show the same knob; a drive reading
+that switches on one page and reads the other; the three pages rebuilt and published.
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.
