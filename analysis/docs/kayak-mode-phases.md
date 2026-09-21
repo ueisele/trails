@@ -63,7 +63,7 @@ a transient unit; the worktree's branch is rebased onto `main` and fast-forwarde
 the landing are the reviewing session's. The scratch for this plan is `~/mockups/kayak-mode/`.
 
 **Order and parallelism, in one line.**
-0 → { 1 ∥ R } → 2 → 3 → 4 → 5 → (6, if R finds lines).
+0 → { 1 ∥ R } → 2 → 3 → 4 → 5. (R found no lines, so there is no 6.)
 
 - Phase 1 (the water network, Python) and phase R (research, no code) touch nothing in
   common and run at once.
@@ -208,6 +208,10 @@ open data. For each canoe trail or landing place found: its name, who publishes 
 whether a line or GPX is published and under what terms, and whether landing places, rest
 places and portages are named. Nothing is guessed; a trail without a page is not a finding.
 The report says what a phase 6 could add as a named source, or that nothing publishes lines.
+
+*Built 2026-09-21, this session: nothing publishes lines — record §3.5. The register's
+`Kanotled` type is empty in the box; Nordic Discovery's two trails are a raster map under
+copyright; Naturkartan has one place. There is no phase 6.*
 
 ### Phase 2 — The switch and the prices in the page
 
