@@ -7536,7 +7536,10 @@ def a_dry_way_keeps_its_words(page: Any) -> Check:
 KAYAK_PAGE_STATE = """() => {
     const s = trailsPlan.state();
     return {kayak: trailsPlan.kayak(), paths: trailsPlan.stayOnPaths(), goal: trailsGoal.state(),
-      plan: {on: s.on, chosen: s.chosen, points: s.points, undoable: s.undoable, loaded: s.loaded}};
+      // `loaded.said` is the toast under a loaded route ("Back as you left it.") and fades
+      // on its own; a restoration reads the same plan whether the words have faded yet.
+      plan: {on: s.on, chosen: s.chosen, points: s.points, undoable: s.undoable,
+             loaded: s.loaded && Object.assign({}, s.loaded, {said: null})}};
 }"""
 
 
