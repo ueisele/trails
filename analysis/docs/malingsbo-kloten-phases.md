@@ -481,6 +481,18 @@ another without, in two places, without saying so. Decided: a way carries both l
    map, is that reading; and a reading that a way without water reads as before. All three
    pages green.
 
+**Built 2026-09-21** (`7434a44`, one codex run, two precise stops on my own prompt: the dry
+heading cannot both carry the glyph and stay byte-identical — the glyph always, decided; and
+the profile's SVG has no `<desc>`, only the GPX has — nothing added). The heading's first
+figure is `23.45 km 🚶`, and `· 0.07 km 🛶` follows only where the way crosses water; the
+outlines are Font Awesome Free 6.2.0's *person-walking* (new) and *water* (already inline),
+CC BY 4.0, 2,659 bytes with the licence, each figure carrying its words as an `aria-label`.
+The figures page and the GPX description say *on foot* and *over water* in words and are
+byte-identical on a dry way. Measured on the stop in the lake: 12,637.898 + 32.922 and
+10,810.863 + 32.922 m, the unrounded sum 23,514.604 m equal to the last row to the metre.
+Two readings, `a_way_counts_foot_and_water` and `a_dry_way_keeps_its_words`, 22 readings on
+each of the three pages. All three rebuilt, driven together and republished after.
+
 ## 5. Not in this plan
 
 - **A kayak mode**, where water is the way and land the portage: the costs reversed, the

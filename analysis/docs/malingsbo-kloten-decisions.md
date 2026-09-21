@@ -148,11 +148,13 @@ page as the register spelt it, drawn or not.
   walking length, 23,449 m). Neither is wrong on its own — the water is not walked, and the
   way is that long — but a reader sees 23.51 km in one place and 23.45 km in the other. Not
   new with this map: Abisko's code is the same, its scene's stop merely stands on land.
-  **Decided, Uwe 2026-09-20:** a way carries both lengths, on foot and over water; the
-  heading shows them as glyphs (*23.45 km 🚶 · 0.07 km 🛶*, the water only when there is
-  any), the figures page and the files in words. The water stays out of the walking length,
-  as it always was — a lake is crossed by boat, a river on foot. Plan phase 9. A kayak
-  mode, where the water is the way, comes after the map is finished (plan §5).
+  **Decided, Uwe 2026-09-20, built 2026-09-21 (`7434a44`, plan phase 9):** a way carries
+  both lengths, on foot and over water; the heading shows them as inline outlines
+  (*23.45 km 🚶 · 0.07 km 🛶*, the water only when there is any, the walking glyph always),
+  the figures page and the GPX in words. The water stays out of the walking length, as it
+  always was — a lake is crossed by boat, a river on foot — and the last row at the foot
+  equals the heading's two lengths to the metre. A kayak mode, where the water is the way,
+  comes after the map is finished (plan §5).
 - The phone readings, once published: install, keep an area, the offline switch.
 - The icon: Uwe's pick among candidates A–D (plan phase 2); A stands until then.
 
@@ -270,6 +272,10 @@ national collection and needs nothing.
   route begins, one marker fewer, the search finding route names; here 75 markers fewer and
   the long edge renumbered) — then published one after the other, the packs' sync finding
   nothing new, each page read back byte-identical from the edge.
+
+- **2026-09-21 — Phase 9, the two lengths** (`7434a44`): the walking and the water glyph in
+  the heading, words on the figures page and in the GPX, the sum equal to the last row. All
+  three pages rebuilt, driven together and republished after.
 
 ## 11. How the figures here were obtained
 
