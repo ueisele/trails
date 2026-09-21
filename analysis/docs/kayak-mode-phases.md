@@ -63,7 +63,7 @@ a transient unit; the worktree's branch is rebased onto `main` and fast-forwarde
 the landing are the reviewing session's. The scratch for this plan is `~/mockups/kayak-mode/`.
 
 **Order and parallelism, in one line.**
-0 → { 1 ∥ R } → 2 → 3 → 4 → 5. (R found no lines, so there is no 6.)
+0 → { 1 ∥ R } → 2 → 3 → { 4 ∥ 1b } → 5. (R found no lines, so there is no 6; 1b came out of 5's first build.)
 
 - Phase 1 (the water network, Python) and phase R (research, no code) touch nothing in
   common and run at once.
@@ -212,6 +212,19 @@ counts. Not `plan_mode.js`, not `maps.py`.*
 14,564 / 1,517 km from 2,942 chords, Portage paths 4,177 / 161 km from 2,161 ties; 247,210
 edges in all; the page 8.11 MB brotli against 6.23 (an open item in the record §4). Norway's
 sources are assembled but its map is not built until phase 5.*
+
+### Phase 1b — The portages and the chords, cut to size
+
+*Added 2026-09-21 after the first rebuild of the other two maps on phase 3's code: Abisko's
+graph took 10,042 portage chords for 1,640 pieces of water — 164,664 edges once noded, the
+page 4.34 MB brotli against 1.26 published — and Lomsdal-Visten's graph build was OOM-killed
+at 8.2 GB. Step 5's "one chord per pair within 1 km" is quadratic in tarn country.*
+
+Portage chords only between Delaunay-neighbouring pieces, within `PORTAGE_M`, never across
+a third piece of water; the open-water chords drawn on the ring thinned to 25 m if the three
+sweep legs answer the same (record §4's chord-bytes item); Lomsdal-Visten's graph under an
+8 GiB limit, the peak measured; all three graphs measured, two pages' brotli bytes. Codex,
+in `water.py` and the record alone, in parallel with phase 4.
 
 ### Phase R — Where the canoe trails are
 
