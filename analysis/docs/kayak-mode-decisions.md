@@ -219,6 +219,88 @@ Scratch, the adapted harness, captures and restoration comparisons are in
 hooks invocation passed both mypy checks and the tests, but pre-commit marked
 the type hook failed because the decision record was edited during that
 hook. The final run, with all files held unchanged, is `hooks-final.log`.
+
+### Phase 4 built — The scene and the drive, 2026-09-21
+
+**The dry way stands after phases 1b and 2b.** One rebuilt Malingsbo-Kloten
+page was compared with the main checkout's published page at the published
+start (59.870408, 15.047954), stop (59.902132, 15.211080) and goal
+(59.901463, 15.379916). Both walking settings read **22,957.427997 m on
+foot**, against **22,957.426099 m** published: **0.001898 m longer** after
+noding, with no water or inferred portage. The mapped way and its descriptions
+stand. The figures HTML differs only in its point count, **9,076 instead of
+9,084**; replacing that text reproduces the published HTML exactly. The scene
+records its new hash, `d3051c9e206aa2822e5e91206e1ad95f6fe254a8fcdd7739d04829a95ea00dd2`.
+The GPX-description hash remains
+`06ef1cf796a83eeccd0e12f85890064bd1c238ac193e55628f19ec8c32458969`.
+`goal_lengths()` uses those fixed endpoints on this scene and restores the
+goal's previous way. A fractional vertex index would choose a different walk
+when noding inserts vertices.
+
+**Three measured legs in `drive_map.py`.** The positions are nodes read from
+the page's decoded network; its 25 m water grid verifies the direct crossings.
+Shore references are shortest paths using only the page's Shore edges.
+
+| scene leg | positions, latitude and longitude | reading |
+|---|---|---|
+| Storsjön, Karl-Ersviken to the west bank below Hult-Pelles vik | (59.887213, 15.675327) → (59.895929, 15.650716) | 2,122.779 m, all Shore, round the northern end; the shore reference is the same |
+| Övre Skärsjön, Fyrkantviken towards Hästviken | (59.844846, 15.546195) → (59.852644, 15.540811) | 1,066.143 m over water against 2,502.242 m round the shore; 720.934 m of Open water and 345.209 m of Shore |
+| Unnamed lake west of Holmtjärnen to Rågåstjärnen | (59.906173, 15.465869) → (59.914508, 15.462779) | 1,274.726 m on mapped paths and 5.912 m of Shore; no straight or inferred land |
+
+The carry uses **516.540 m of Topografi 50 roads, 503.685 m of Topografi 50
+trails, 13.531 m of Topografi 50 paths and 240.970 m of Leder**. Storsjön's
+direct crossing measures **1,685.596 m**, entirely wet by the grid, but the
+chosen way follows the shore and takes no Open water edge. The water profiles
+have **417 samples at 110 m** on Storsjön and **212 samples at 220 m** on
+Övre Skärsjön: both ranges are **0 m**, and both profiles reach the leg's end.
+
+In both walking settings, the Storsjön pair has **3,266.273552 m on foot,
+8.023914 m over water and 70.878695 m of straight land**, exactly as on the
+published page, with identical geometry. Neither way has a paddled part or a
+water-network source credit; neither tap snaps to a paddle or portage edge.
+The small existing water crossing belongs to the walking way, not the new
+water network.
+
+The five checks borrow and restore the mode, path preference, goal way, plan
+and map view. Each checks its restoration. A separate drive also passed with
+Kayak and Stay on paths already on, a routed goal preference and a selected
+point in an existing plan. Abisko and Lomsdal-Visten have `None` for the new
+fields and five named scene skips explaining the pending phase 5 rebuild and
+measurement. Their pages were not rebuilt. The existing long-edge reading
+retains its same 3.436 km Topografi 50 road at (59.883874, 15.740213): noding
+renumbered it from edge 65812 to 66935; the old index now names a 72 m edge.
+
+**The whole drive found one displaced pixel reading.** The first two focused
+runs each passed **98 readings**, including the five kayak checks, the two
+length checks and the long edge. The whole suite then ran once to
+`drive-all.log`, read through: **1,417 readings, one broken invariant, no moved
+or new figures, four expected scene skips**. Every kayak reading passed, as
+did the later goal and offline checks. The failed chosen-line colour reading
+also failed alone on the new page and passed on the published page.
+
+Its middle-vertex sample moved from (59.896514, 15.230398) to
+(59.896277, 15.231515) after noding. The published sample is opaque; the new
+sample has **alpha 139**, with rounded RGB **(176, 188, 196)** instead of the
+line's **(176, 190, 197)**. One pixel below it is opaque and has exactly the
+line's colour, with the route opaque underneath. The driver now chooses the
+nearest opaque shared pixel in a square as wide as the picked stroke, by
+coverage alone. It asserts opacity and retains the exact colour comparison.
+No renderer or colour changes were needed.
+
+The final focused runs, `drive-3.log` and `drive-4.log`, include that corrected
+reading beside the original eight checks: **108 readings green twice in a
+row**, with no moved or new figures and no skips. Both read the opaque pixel
+at offset (0, 1). The whole suite was not repeated. No phase 5 work or
+publishing was done, and this phase leaves no decision for review.
+`command make hooks-run` passed formatting, lint, mypy, pytest and all
+remaining hooks; its report is `hooks.log` beside the drive logs.
+
+The one warm-cache build has **217,122 edges, 113,013 nodes, 820,435 vertices,
+43,700 chains and 3,629,083 height samples**. Its encoded graph matches the
+accepted phase 1b graph; the source header carries phase 2b's portage kind.
+No tiles were built, inputs fetched or shared cache files rewritten. Scratch,
+captures and logs are in `~/mockups/kayak-mode/phase4-resumed/`.
+
 ### Phase 4 — Stopped at the dry walking way, 2026-09-21
 
 **The inherited hashes cannot be re-recorded as a noding-only change.** The
