@@ -219,6 +219,82 @@ Scratch, the adapted harness, captures and restoration comparisons are in
 hooks invocation passed both mypy checks and the tests, but pre-commit marked
 the type hook failed because the decision record was edited during that
 hook. The final run, with all files held unchanged, is `hooks-final.log`.
+### Phase 4 — Stopped at the dry walking way, 2026-09-21
+
+**The inherited hashes cannot be re-recorded as a noding-only change.** The
+published main-checkout page reproduces both stored hashes exactly. The new
+worktree page reproduces phase 3's dry length, **22,435.423253 m**, but its
+walking route has changed. Holding the published start, stop and goal fixed
+makes the change larger: **705.978414 m shorter**, taking the new inferred
+portages. These are measurements from the two pages, with kayak and Stay on
+paths both off:
+
+| dry way reading | published page | new page, helper's endpoints | new page, published endpoints |
+|---|---:|---:|---:|
+| on foot, m | 22,957.426099 | 22,435.423253 | 22,251.447685 |
+| over water, m | 0 | 0 | 0 |
+| inferred connectors, m | 0.459513 | 2,358.845478 | 2,358.845478 |
+| Topografi 50 paths, m | 1,578.674083 | 0.963762 | 0.963762 |
+| ascent, m | 283.160004 | 365.750015 | 365.750015 |
+
+Both new-page journeys use **2,305.204001 m of Portages**, **53.418656 m of
+Portage paths** and **0.222821 m of ordinary bridge connectors**. Source
+counters added only to the served response's edge tally identify those metres;
+they change no edge cost or route choice. The published and helper-endpoint
+captures also retain the figures HTML and every GPX description. The new
+build's ascent is 2.089996 m below the phase-3 capture; that additional
+difference is recorded, not reconciled by changing an expectation at this stop.
+
+There are two mechanisms to separate. `goal_lengths()` in `drive_map.py`
+chooses its start and goal at 10 % and 70 % of the long chain's vertex count.
+Noding changes that count, moving the chosen start from
+(59.870408, 15.047954) to (59.871559, 15.049899), and the goal from
+(59.901463, 15.379916) to (59.901394, 15.380159). The intermediate stop stays
+at (59.902132, 15.211080). These are different journeys before routing begins.
+
+Separately, `network/water.py:portages()` gives both Portages and Portage paths
+kind `BRIDGE`. `plan_mode.js:router()` excludes PADDLE edges from walking,
+but gives those inferred connectors finite walking costs. `tallyEdge()` counts
+them as undrawn ground and omits their source names from the public credits.
+Thus a dry way can acquire the new portage shortcuts without reporting any
+water or naming a new source. The phase-3 before/after byte equality uses the
+same combined graph and does not establish equality with the published
+walking graph.
+
+**Review must decide whether the new inferred portage connectors belong in
+walking routes.** If the published walking way must stand, their availability
+needs correcting outside this phase's permitted files. If the changed walking
+route is intended, accepting it requires an explicit decision; it cannot be
+recorded as noding alone. The dry scene also needs stable coordinates when it
+is meant to compare the same journey across builds.
+
+`drive_map.py` and its saved hashes remain untouched. The five kayak checks,
+their two acceptance runs and the whole drive are deferred at this stop.
+
+**Build and validation.** One `command make map ARGS="--park malingsbo-kloten"`
+completed under an 8 GiB address-space limit: 247,210 edges, 3,960,895 height
+samples and 1,155 levelled lakes, of which 150 have registered levels. Only
+cached inputs were used; no tiles were built or shared cache files rewritten.
+The existing main-checkout tiles and height tiles were made visible through
+worktree-output symlinks. The long build delay was in the existing
+`ortnamn.paired()` loop; a stack snapshot and stdout flush diagnosed it without
+changing the build's calculations. No other map was built by this phase.
+
+The browser measurements blocked external requests and restored the mode,
+path setting and goal way. The unmodified `a_way_counts_foot_and_water` and
+`a_dry_way_keeps_its_words` were then driven by the requested absolute-page
+`command make drive` invocation: **22 readings, zero broken invariants, two
+recorded figures moved, zero new figures and zero skips**, exit 2. The complete
+report was read. Its figures hash is
+`5767e9c27efdd484cb6bf3fc76bc23679c72b52cfca0b59836b5081be6706a30`
+and its GPX-description hash is
+`b8b52a1d5590a15aa8a55518ab2d2265f1810be4066781ab88dc2a0bebd59c5b`,
+matching the instrumented capture. Neither has been accepted into the scene.
+`command make hooks-run` passed formatting, lint, mypy, pytest and every
+remaining hook. Scratch and logs are in
+`~/mockups/kayak-mode/`: `phase4-map.log`, `phase4-dry.py`,
+`phase4-dry-main.json`, `phase4-dry-current.json`, `phase4-dry-fixed.json`,
+their logs, `phase4-dry-drive.log` and `phase4-hooks.log`.
 
 ### Phase 3 built — Lake levels and what a paddled way says, 2026-09-21
 
