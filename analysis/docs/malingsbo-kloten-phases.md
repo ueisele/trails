@@ -491,7 +491,8 @@ The figures page and the GPX description say *on foot* and *over water* in words
 byte-identical on a dry way. Measured on the stop in the lake: 12,637.898 + 32.922 and
 10,810.863 + 32.922 m, the unrounded sum 23,514.604 m equal to the last row to the metre.
 Two readings, `a_way_counts_foot_and_water` and `a_dry_way_keeps_its_words`, 22 readings on
-each of the three pages. All three rebuilt, driven together and republished after.
+each of the three pages. All three rebuilt, driven together (once the helper put the goal's
+way back, `e0c20af`) and republished 2026-09-21 01:00, read back byte-identical.
 
 ## 5. Not in this plan
 

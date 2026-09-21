@@ -273,9 +273,13 @@ national collection and needs nothing.
   the long edge renumbered) — then published one after the other, the packs' sync finding
   nothing new, each page read back byte-identical from the edge.
 
-- **2026-09-21 — Phase 9, the two lengths** (`7434a44`): the walking and the water glyph in
-  the heading, words on the figures page and in the GPX, the sum equal to the last row. All
-  three pages rebuilt, driven together and republished after.
+- **2026-09-21, 01:00 — Phase 9, the two lengths, all three maps republished** (`7434a44`,
+  `e0c20af`): the walking and the water glyph in the heading, words on the figures page and
+  in the GPX, the sum equal to the last row. The first `drive-all` after it found the goal
+  check reading *routed* on all three pages — the new helper had left the goal's way set —
+  fixed by putting the page back; then 1,381 / 1,384 / 1,350 readings, none broken but the
+  three-browser race on Lomsdal-Visten's first fetch, green alone; published one after the
+  other, read back byte-identical.
 
 ## 11. How the figures here were obtained
 
