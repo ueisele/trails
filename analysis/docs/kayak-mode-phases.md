@@ -263,6 +263,12 @@ the flag unread, tests. A page rebuilt once from phase 1's graph.*
    four sentences at a cost a drag can carry go into `OPEN_WATER_FACTOR` (with a note that the
    graph is rebuilt in phase 5) and `portageFactor`; the sweep goes into the record.
 
+*Built 2026-09-21 (codex, `bea479c`): the switch, the prices, the predicate, the floor, the
+snapping, the tally rule (a paddled edge is credited to its source, counted in no marking
+bucket, and inside the reserve); the sweep over a bay, a lake and a portage at k ∈ {1.2, 1.5,
+2, 3} × P ∈ {2, 4, 8} settled k = 1.5, P = 2 (record §5); all 65,633 paddle edges unreachable
+and unsnappable in the walking modes; a stream taken downstream and refused upstream.*
+
 ### Phase 3 — What a paddled way says
 
 *Files: `plan_mode.js`, `profile_panel.js`, `maps.py` by region (the words), tests. The dry
