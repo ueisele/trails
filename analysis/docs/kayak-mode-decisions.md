@@ -85,11 +85,78 @@ would draw it without a change.
 
 ## 5. Changes
 
+- 2026-09-21 — phase 3 resumed and stopped at surface identity: review settled how water is levelled, but two Topografi 50 water-body ids carry conflicting registered levels, and N50 leaves many water-body numbers empty. The resumed stop-note below; no build started and no runtime change made.
 - 2026-09-21 — phase 3 stopped: the water grid and the height tiles do not guarantee a lake plane. One straight water part near the measured bay changes height by 0.96516 m in about 25 m; the stop-note below. No runtime change retained.
 - 2026-09-21 — phase 0: the plan and this record opened.
 - 2026-09-21 — phase R: the research in §3.5; there is no phase 6.
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
+
+### Phase 3 resumed — Registered levels and surface identity, 2026-09-21
+
+**Review resolved the tile-height stop.** Shore and Open water are to carry
+their surface's id and take one level per body after sampling: the registered
+level where present, otherwise the 10th percentile of that body's shore
+samples. Streams keep their sampled fall and portages remain ground. A straight
+paddled part takes the lowest of its own tile samples; routed paddled parts use
+the levelled payload. The six-sample case from the first stop must become one level
+six times. The 0.5 m acceptance remains.
+
+**The attachment point is `trails.network.water.build()`, after
+`network = measure(network)`.** Sweden's `measure()` reads the cached mosaic;
+Norway's reads the height service. Both call
+`trails.routing.elevation.with_elevation()`, which attaches edge samples and
+derives edge and chain figures. Surface attributes can travel on the generated
+chains and be associated with the sampled edges through `chain_id`; no change
+to the graph's fixed edge schema is needed for that association. Levelling must
+also update the derived figures.
+
+**Two bodies have no single registered level to use.** The cached Topografi 50
+delivery of 2026-09-08 was read over `(14.967, 59.729, 15.922, 60.176)` and clipped
+to that box. Two `vattenytaid` values each appear on two lake features with
+different, nonempty `hojd_over_havet` values. All four features intersect the
+box; these are not conflicting rows outside the map extent.
+
+| water-body id (`vattenytaid`) | feature id (`objektidentitet`) | registered level m |
+|---|---|---:|
+| `40b2d64f-976b-424d-b487-e87c778bf61e` | `40dd5412-f8c9-4c34-904c-51f0d205ef0c` | 207 |
+| `40b2d64f-976b-424d-b487-e87c778bf61e` | `5407e790-d0f5-4f83-aa78-2722aff825ec` | 208 |
+| `f677b013-7477-43b0-bbfa-fe5f926ad355` | `9c370939-239a-49d4-8bf9-f37de82ec7dc` | 150 |
+| `f677b013-7477-43b0-bbfa-fe5f926ad355` | `80e16336-9862-494c-91c5-4f77149e0809` | 149 |
+
+The requested rule does not choose between these levels. Taking a minimum,
+using the shore percentile despite a registered level, or separating the
+features would each add a decision. **Review must choose how conflicting
+registered levels on the same body are resolved.** No aggregation was added.
+
+**Norway has levels, but not an identifier on every surface.** Read directly
+from cached `n50_1813.zip`, layer `N50_Arealdekke_omrade`:
+
+| kind | polygons | with `vatnlopenummer` | with `hoyde` | missing both |
+|---|---:|---:|---:|---:|
+| Havflate | 247 | 0 | 0 | 247 |
+| Innsjø | 4,670 | 726 | 4,528 | 126 |
+| InnsjøRegulert | 5 | 5 | 5 | 0 |
+
+`vatnlopenummer` names 721 distinct ordinary lakes and five regulated lakes.
+The reader `n50.Source.load_water()` currently discards both fields, returning
+only `objtype`, `kommune` and geometry; the underlying `load_layers()` retains
+them. Keeping those fields alone does not identify the 3,944 ordinary-lake
+polygons and 247 sea polygons whose body number is absent. **Review must decide
+what identifies a body there**, so that the shore percentile is grouped by
+the intended body rather than all missing ids together or an invented split.
+
+Only this record changed. The permitted map build was not started on this
+resumption, preserving the single build for the resolved implementation. No
+browser state changed, no tile build or download was started, and the cache was
+read only. Consequently no surface-level totals, register/percentile difference
+statistics, six-sample remeasurement, kayak exports or dry-byte comparisons are
+claimed. Validation of this record-only change is in
+`~/mockups/kayak-mode/phase3-identity-stop-hooks.log`.
+
+The input summaries are `~/mockups/kayak-mode/phase3-sweden-fields.json` and
+`phase3-n50-fields.json`; the four conflicting features, including their bounds
+and clipped areas, are in `phase3-register-conflicts.json` in that directory.
 
 ### Phase 3 — Stopped at the water profile, 2026-09-21
 
