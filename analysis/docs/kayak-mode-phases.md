@@ -207,6 +207,12 @@ counts. Not `plan_mode.js`, not `maps.py`.*
    (`command make map ARGS="--park malingsbo-kloten"`, warm cache, minutes); run both once at
    the end and put the figures in the record under §5 with the phase's built-note.
 
+*Built 2026-09-21 (codex, `ac467b2`): Malingsbo-Kloten's graph gains Shore 31,706 edges /
+2,382 km, Open water 33,082 / 5,078 km, Streams 845 / 116 km (directed as digitised), Portages
+14,564 / 1,517 km from 2,942 chords, Portage paths 4,177 / 161 km from 2,161 ties; 247,210
+edges in all; the page 8.11 MB brotli against 6.23 (an open item in the record §4). Norway's
+sources are assembled but its map is not built until phase 5.*
+
 ### Phase R — Where the canoe trails are
 
 *No code. Output: a section §3.5 in the record, and a `analysis/routes/malingsbo-kloten-canoe.toml`
