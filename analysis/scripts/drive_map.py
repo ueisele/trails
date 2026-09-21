@@ -112,15 +112,6 @@ class WaterLeg:
     shore_m: float
 
 
-KAYAK_CHECKS = (
-    "a kayak way follows the shore",
-    "a bay is cut and a lake is not",
-    "a portage takes the path",
-    "a paddled profile is flat",
-    "the walking modes never take the water",
-)
-
-
 @dataclass(frozen=True)
 class Scene:
     """What one page has that the checks need and the checks cannot find alone.
@@ -198,6 +189,8 @@ class Scene:
     #: is to record it here once it has been looked at.
     #: Malingsbo-Kloten's dry HTML changes from 9,084 to 9,076 points after water
     #: noding. Its fixed journey grows 0.001898 m; the GPX description is unchanged.
+    #: Abisko and Lomsdal-Visten retain their published dry hashes: phase 4b's
+    #: built-note records height and coverage changes beyond the route's metres.
     figures: dict[str, Any]
     #: What the page's own height model says at :attr:`nowhere`, where the page
     #: carries one over the whole box rather than along the network alone: the
@@ -222,22 +215,31 @@ class Scene:
     #: A stop on a lake for the two-length reading. None uses the scene's open
     #: water pair or sound as the whole way; the goal-editing check keeps its dry stop.
     water_stop: tuple[float, float] | None = None
-    #: Fixed endpoints for the two-length readings. Malingsbo-Kloten uses the
-    #: published dry journey's two positions on Road 233: noding the water into
-    #: the graph changes vertex indices, which must not choose a different walk.
-    #: None retains the long chain's fractional vertex indices on the other maps.
+    #: Fixed endpoints for the two-length readings, read from each published
+    #: dry journey: noding the water into the graph changes vertex indices,
+    #: which must not choose a different walk.
     length_endpoints: tuple[tuple[float, float], tuple[float, float]] | None = None
     #: Storsjön, from Karl-Ersviken on the east bank to the west bank below
     #: Hult-Pelles vik: the measured Shore-only way goes round the northern end.
+    #: Abisko follows Torneträsk northwest towards Björkliden, round the shore's
+    #: indentation rather than cutting the shorter line across the lake.
+    #: Lomsdal-Visten follows the north shore of Tosen southwest from Bekkevoll;
+    #: the direct line is over the fjord, whose profile is sea level.
     #: None until a kayak shore has been measured on this scene's rebuilt page.
     kayak_shore: WaterLeg | None = None
     #: Övre Skärsjön's western bays, from Fyrkantviken towards Hästviken: the
     #: water way cuts the indentation rather than following the Shore-only way.
+    #: Abisko crosses the bay east of Abisko Östra, between the west bank and
+    #: the opposite headland on Torneträsk. Lomsdal-Visten crosses the narrow
+    #: inlet south of Bekkevoll, on Tosen, instead of rounding its eastern shore.
     #: None until this scene's rebuilt page has a measured bay.
     kayak_bay: WaterLeg | None = None
     #: The unnamed lake west of Holmtjärnen to Rågåstjärnen, at the forest road
     #: and marked trail recorded by Topografi 50 and Leder. Both taps are shore
     #: nodes; the carry can stay on that mapped way without a straight land leg.
+    #: Abisko joins the two lakes west of Valfojåkka shelter on OSM and Leder's
+    #: path. Lomsdal-Visten joins the two lakes south of Gardsjorda on the path
+    #: credited to FKB, UT.no and N50; neither carry uses an inferred portage.
     #: None until this scene's rebuilt page has a measured path between lakes.
     kayak_portage: tuple[tuple[float, float], tuple[float, float]] | None = None
     #: A fix beside a bend or an end of the planned route, where different
@@ -296,7 +298,10 @@ class Scene:
 SCENES: dict[str, Scene] = {
     "lomsdal-visten": Scene(
         stem="lomsdal-visten",
-        skips=KAYAK_CHECKS,
+        length_endpoints=((65.327587, 13.129687), (65.407534, 13.180339)),
+        kayak_shore=WaterLeg(((65.330996, 12.938274), (65.324721, 12.926333)), shore_m=932.1275606650958),
+        kayak_bay=WaterLeg(((65.330996, 12.938274), (65.325983, 12.939154)), shore_m=2028.3727803706906),
+        kayak_portage=((65.742431, 13.002636), (65.734636, 13.004338)),
         long_chain="trail-group-ut-no-414306-7244296-42442",
         position=(65.55, 13.05),
         view=(65.60, 13.20),
@@ -343,6 +348,16 @@ SCENES: dict[str, Scene] = {
         # has not got.
         over_http=True,
         figures={
+            "kayak shore water, m": 932.128,
+            "kayak bay water, m": 715.252,
+            "kayak portage on foot, m": 959.690,
+            "kayak portage water, m": 0,
+            "walking: shore-pair foot, m": 1074.646,
+            "walking: shore-pair water, m": 0,
+            "walking: shore-pair straight land, m": 747.568,
+            "stay on paths: shore-pair foot, m": 1593.360,
+            "stay on paths: shore-pair water, m": 0,
+            "stay on paths: shore-pair straight land, m": 496.858,
             # Before the length glyphs: the dry figures page and every GPX description.
             "dry way figures bytes": "e24bd985bef142fc74864daa9305db229dc872fa747b9ef3be27444024421fcb",
             "dry way GPX description bytes": "9354b7766db85243a925d38c015e80227cfb78480c52354319f9ce4906bcc467",
@@ -450,7 +465,10 @@ SCENES: dict[str, Scene] = {
     ),
     "abisko": Scene(
         stem="abisko",
-        skips=KAYAK_CHECKS,
+        length_endpoints=((68.436158, 18.606154), (68.327135, 18.753069)),
+        kayak_shore=WaterLeg(((68.393226, 18.715936), (68.407071, 18.697511)), shore_m=2116.109666223599),
+        kayak_bay=WaterLeg(((68.355318, 18.836408), (68.358208, 18.865112)), shore_m=2988.741971415684),
+        kayak_portage=((68.268452, 18.179781), (68.271026, 18.180649)),
         # Kungsleden from Abisko to Abiskojaure and Rallarvägen on to Tornehamn,
         # one register chain of 30.7 km.
         long_chain="trail-group-leder-647291-7598453-30741",
@@ -500,6 +518,16 @@ SCENES: dict[str, Scene] = {
         # Recorded 2026-09-12 from the first build of the page: 813 chains,
         # 19 legend rows, one base map.
         figures={
+            "kayak shore water, m": 2116.110,
+            "kayak bay water, m": 1408.028,
+            "kayak portage on foot, m": 335.952,
+            "kayak portage water, m": 0,
+            "walking: shore-pair foot, m": 2940.880,
+            "walking: shore-pair water, m": 15.273,
+            "walking: shore-pair straight land, m": 514.362,
+            "stay on paths: shore-pair foot, m": 2963.410,
+            "stay on paths: shore-pair water, m": 15.283,
+            "stay on paths: shore-pair straight land, m": 510.746,
             # Before the length glyphs: the dry figures page and every GPX description.
             "dry way figures bytes": "0ba5de6bd3b5d7d47d5528d3bf025b4578f8ab8768e216c117fb6da3871e655f",
             "dry way GPX description bytes": "6dd6e29c9e11ded8b563527b7bfefd154fbbbbbc4efefa68d9dab521721c7c24",
@@ -1370,6 +1398,10 @@ def ready(page: Any, within_ms: int = 180_000) -> float:
     page and ten times too long for the other, five times a run. This waits for
     what it actually needs, which is shorter on one page and honest on both.
 
+    Await the decode without returning the graph: the water network makes
+    serialising its typed arrays into Python costly, and readiness needs none
+    of those values.
+
     Args:
         page: The driven page, just loaded or reloaded
         within_ms: How long to allow before giving up
@@ -1381,7 +1413,7 @@ def ready(page: Any, within_ms: int = 180_000) -> float:
     page.wait_for_function(DRIVABLE, timeout=within_ms)
     # The promise itself, which is the decode: `wait_for_function` above proves
     # only that it exists.
-    page.evaluate("() => window.trailsGraph.ready")
+    page.evaluate("() => window.trailsGraph.ready.then(() => {})")
     painted(page)
     return time.monotonic() - began
 
@@ -6998,12 +7030,11 @@ A_LONG_EDGE = """(chosen) => window.trailsGraph.ready.then(g => {
   const E = g.header.edges, co = g.coordinates, at = g.vertexAt;
   const m = (aLon, aLat, bLon, bLat) => { const s = Math.cos(aLat * Math.PI / 180);
     const dx = (bLon - aLon) * s, dy = bLat - aLat; return Math.sqrt(dx * dx + dy * dy) * 111320; };
-  const crossing = g.header.crossingKind || 'ferry', connector = g.header.connectorKind || 'connector';
   let best = -1, longest = 0;
   for (let i = 0; i < E; i++) {
     if (chosen !== null && i !== chosen) continue;
     const kind = g.header.sources[g.sources[i]].kind;
-    if (kind === 'ferry' || kind === 'bridge' || kind === 'crossing' || kind === 'connector') continue;
+    if (kind !== 'path') continue;
     let run = 0;
     for (let v = at[i] + 1; v < at[i + 1]; v++) run += m(co[2 * v - 2], co[2 * v - 1], co[2 * v], co[2 * v + 1]);
     if (run > longest) { longest = run; best = i; }
@@ -7033,7 +7064,9 @@ def a_tap_in_the_middle_of_a_long_edge(page: Any) -> Check:
     any node.
 
     The ground is the scene's measured edge, or the page's longest walked edge
-    where that beats walking straight. Driven: a tap half way along it stands on
+    where that beats walking straight. The header's kinds exclude water,
+    portages and crossings: the combined graph's longest edge can be a shore
+    that a walking tap cannot stand on. Driven: a tap half way along it stands on
     the edge and not on a node, its leg from the edge's own end is path end to
     end and as long as the metres along the edge say, a second tap further along
     is path again, and a place put down exactly beside the line -- a hut's
@@ -7511,6 +7544,9 @@ def read_water_leg(
 ) -> dict[str, Any]:
     """Borrow the plan for a scene leg, read its parts and restore its state.
 
+    Restore the view without returning Leaflet's map: serialising its layer
+    tree back through the browser driver can exceed Python's recursion limit.
+
     Args:
         page: The driven page
         points: The scene's two positions, in journey order
@@ -7563,7 +7599,7 @@ def read_water_leg(
             saved,
         )
         page.wait_for_function("() => !trailsPlan.busy() && !trailsGoal.state().working", timeout=120_000)
-        page.evaluate(with_map("view => __MAP__.setView(view.center, view.zoom, {animate: false})"), view)
+        page.evaluate(with_map("view => { __MAP__.setView(view.center, view.zoom, {animate: false}); }"), view)
         painted(page)
     got["restored"] = page.evaluate(KAYAK_PAGE_STATE) == saved
     return got
@@ -7714,6 +7750,9 @@ def a_goal_the_reader_sets(page: Any) -> Check:
     **And on a route, which way to walk is the route.** Measured here: the
     bearing to the goal and the bearing of the path under the reader's feet are
     tens of degrees apart over a long way, and the path is right.
+
+    A stop's row counts along the drawn line, including water. Its last row
+    therefore compares with both goal lengths, as the two-length check does.
 
     Args:
         page: The driven page, at any state
@@ -8267,7 +8306,7 @@ def a_goal_the_reader_sets(page: Any) -> Check:
             Reading(
                 "and each says how far into the way it comes",
                 (listed["rows"][0]["far"].endswith(" km"), listed["rows"][-1]["far"]),
-                (True, f"{(stopped['goal']['metres'] or 0) / 1000:.2f} km"),
+                (True, f"{((stopped['goal']['metres'] or 0) + (stopped['goal']['waterMetres'] or 0)) / 1000:.2f} km"),
                 note=", ".join(row["far"] for row in listed["rows"]),
             ),
             # A stop offers a move, the two steps and its removal; the goal
@@ -11335,6 +11374,11 @@ def what_the_chooser_draws(page: Any) -> list[Reading]:
 def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
     """Keep a tiny scope, then repeat with only its pre-overview ground in store.
 
+    Read reused packs after Keep: the worker can complete a browsed pack
+    between an earlier snapshot and Keep, even after network-idle. Every key
+    must still be accounted for by a request or a complete stored pack, and
+    the kept keys must be exactly the expected scope.
+
     Args:
         browser: The browser for a fresh, isolated store.
         page_path: The built page, served beside its trees.
@@ -11416,17 +11460,17 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
                 return fetch.apply(this, arguments);
             };
         }""")
-        complete_before = page.evaluate(
+        page.evaluate("() => window.trailsOffline.keep()")
+        first = page.evaluate("() => window.trailsOffline.state().run")
+        fetched = page.evaluate("() => window.trailsOverviewFetches.slice().sort()")
+        complete_reused = page.evaluate(
             """async keys => {
             const ready=[];
             for(const key of keys) if((await window.trailsOffline.dbRead('packs',key))?.complete) ready.push(key);
             return ready;
         }""",
-            sorted(expected),
+            sorted(set(expected) - set(fetched)),
         )
-        page.evaluate("() => window.trailsOffline.keep()")
-        first = page.evaluate("() => window.trailsOffline.state().run")
-        fetched = page.evaluate("() => window.trailsOverviewFetches.slice().sort()")
         # Remove only the overview the old scope did not include. The remaining
         # rows are exactly what the same scope kept before phase 4, including z11.
         held = page.evaluate(
@@ -11500,9 +11544,9 @@ def the_overview_is_kept(browser: Any, page_path: pathlib.Path) -> Check:
                 Reading("the overview line names its packs", line.startswith(f"overview, {len(overview):,} packs, "), True),
                 Reading(
                     "the first run completes the exact scope and z8–z11 box",
-                    set(fetched) == set(expected) - set(complete_before),
+                    set(fetched) | set(complete_reused) == set(expected),
                     True,
-                    note=f"{len(fetched)} requests, {len(complete_before)} complete rows reused",
+                    note=f"{len(fetched)} requests, {len(complete_reused)} complete rows reused",
                 ),
                 Reading("Keep asks only for whole packs across both runs", page.evaluate("() => window.trailsOverviewRanges"), []),
                 Reading("and keeps every one in the store", held == sorted(expected), True, note=f"{len(held)} rows, {first['failed']} refused"),
@@ -14044,7 +14088,7 @@ def main() -> int:
         if thrown:
             browser.close()
             return report(checks)
-        page.evaluate("() => window.trailsGraph.ready")
+        page.evaluate("() => window.trailsGraph.ready.then(() => {})")
         checks += drive(page)
         # **And nothing threw while it was driven.** The reading above is about
         # loading; everything after it -- every handler a click reaches, every
