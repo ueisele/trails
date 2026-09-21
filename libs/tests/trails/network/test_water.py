@@ -27,6 +27,8 @@ def test_chords_stay_in_water_and_do_not_duplicate_the_shore():
     assert opened.gdf.covered_by(polygon).all()
     assert not opened.gdf.covered_by(polygon.boundary).any()
     assert shore.gdf.length.sum() == pytest.approx(polygon.boundary.length)
+    vertices = set(map(tuple, shapely.get_coordinates(shore.gdf.geometry)))
+    assert set(map(tuple, shapely.get_coordinates(opened.gdf.geometry))) <= vertices
 
 
 def test_dam_intervals_merge_and_cuts_keep_digitised_flow():
@@ -160,3 +162,44 @@ def test_an_unread_lake_needs_a_registered_level():
     result, levels = water.level_lakes(network, threshold_m=3)
     assert levels["percentile"].isna().all()
     assert all((values == 207).all() for values in result.edges["elevations"])
+
+
+def test_portages_only_join_delaunay_neighbours_and_never_cross_a_third_lake():
+    surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(500, 0, 600, 100), box(250, -100, 350, 1000)], crs=CRS)
+    paddle = water.sources(surfaces, metric_crs=CRS)
+    walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
+    chords, _ = water.portages(paddle, walking)
+    assert not chords.gdf.empty
+    for chord in chords.gdf.geometry:
+        assert sum(chord.intersects(surface) for surface in surfaces.geometry) == 2
+    collinear = gpd.GeoDataFrame(geometry=[box(x, 0, x + 100, 100) for x in (0, 200, 400, 600)], crs=CRS)
+    chords, _ = water.portages(water.sources(collinear, metric_crs=CRS), walking)
+    assert len(chords.gdf) == len(collinear) - 1
+    assert not any(one.crosses(other) for one in chords.gdf.geometry for other in chords.gdf.geometry)
+
+
+def test_one_water_piece_needs_no_portages():
+    surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100)], crs=CRS)
+    walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
+    assert all(source.gdf.empty for source in water.portages(water.sources(surfaces, metric_crs=CRS), walking))
+
+
+def test_a_closed_stream_does_not_turn_the_land_inside_it_into_water():
+    surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(200, 0, 300, 100)], crs=CRS)
+    paddle = water.sources(surfaces, metric_crs=CRS)
+    stream = gpd.GeoDataFrame(geometry=[box(-200, -200, 800, 800).boundary], crs=CRS)
+    paddle.append(NetworkSource(water.STREAMS, stream, kind=PADDLE, directed=True))
+    walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
+    chords, _ = water.portages(paddle, walking)
+    assert any(all(chord.intersects(surface) for surface in surfaces.geometry) for chord in chords.gdf.geometry)
+
+
+def test_ponds_leave_no_paddle_lines_or_portages_but_do_not_change_the_input():
+    surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 99), box(200, 0, 300, 100)], crs=CRS)
+    before = surfaces.copy()
+    paddle = water.sources(surfaces, metric_crs=CRS)
+    assert all(source.gdf.geometry.intersects(surfaces.geometry.iloc[1]).all() for source in paddle)
+    assert not any(source.gdf.geometry.intersects(surfaces.geometry.iloc[0]).any() for source in paddle)
+    walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
+    assert all(source.gdf.empty for source in water.portages(paddle, walking))
+    assert surfaces.equals(before)

@@ -516,15 +516,61 @@ class TestProtectedTable:
 class TestFingerprintIsAContract:
     """The key text is what every graph already in a cache was stored under."""
 
-    def test_the_keys_measured_before_the_shared_module_existed_still_hold(self):
-        """Test three keys recorded on 2026-09-12, before the build moved to graphs.py.
+    def test_the_mosaic_layout_has_its_own_measured_keys(self):
+        """Test three keys recorded after switching Norway to the cached 4 m mosaic.
 
         A different value here means every cached graph is orphaned; that is
         allowed, but only on purpose, by changing GRAPH_LAYOUT and these three.
         """
         assert (
             fingerprint([source(), source("N50 roads", "route_name", ("1", "2"))], masks(), params(), protected(("A", 100.0), ("B", 40.0)))
-            == "dfcad4870181be8d"
+            == "c5163c47ea58d0cc"
         )
-        assert fingerprint([source()], masks(), params(), protected()) == "9bd89236b7ec0988"
-        assert fingerprint([source()], masks(), params(stroke_deg=30.0), protected(*AREAS)) == "d13a56b851afb315"
+        assert fingerprint([source()], masks(), params(), protected()) == "02a1700545325b3d"
+        assert fingerprint([source()], masks(), params(stroke_deg=30.0), protected(*AREAS)) == "49516b1f183b127f"
+
+
+def test_the_whole_network_reads_the_mosaic_before_water_levels(monkeypatch, tmp_path):
+    import numpy as np
+    from shapely.geometry import box
+    from trails.io.sources import hoydedata
+    from trails.network import norway, water
+    from trails.routing.elevation import sample_count
+    from trails.routing.graph import build_network
+
+    surfaces = gpd.GeoDataFrame(
+        {"objtype": ["Innsjø", "Innsjø", "Elv", "Havflate"], "hoyde": [120, np.nan, np.nan, np.nan]},
+        geometry=[box(x, 100, x + 100, 200) for x in (0, 200, 400, 600)],
+        crs=METRIC_CRS,
+    )
+    items = water.sources(surfaces, metric_crs=METRIC_CRS, class_field="objtype", lake_classes=("Innsjø",), level_field="hoyde")
+    items.append(NetworkSource("path", gpd.GeoDataFrame(geometry=[LineString([(0, 0), (100, 0)])], crs=METRIC_CRS)))
+    graph = build_network(items, metric_crs=METRIC_CRS, bridge_m=0)
+    calls = []
+
+    def service(self, coordinates):
+        pytest.fail("no network sample may reach the point service")
+
+    def mosaic(source, bounds, posts_m):
+        assert posts_m == norway.HEIGHT_POSTS_M
+
+        def read(coordinates):
+            calls.append(coordinates.copy())
+            return np.where(coordinates[:, 1] == 0, 12.0, 34.0)
+
+        return read
+
+    monkeypatch.setattr(hoydedata.Source, "elevations", service)
+    monkeypatch.setattr(norway.hoydedata_dtm, "heights_over", mosaic)
+    clip = gpd.GeoDataFrame(geometry=[box(12, 65, 14, 66)], crs="EPSG:4326")
+    raw = norway.measure(graph, Params(cache_dir=str(tmp_path / ".cache"), ut_routes=""), clip)
+    result, levels = water.level_lakes(raw, threshold_m=3)
+    assert len(calls) == 1
+    assert len(calls[0]) == sum(sample_count(line.length) for line in graph.edges.geometry)
+    assert (levels["percentile"] == 34).all()
+    assert levels["registered"].dropna().tolist() == [120]
+    classes = result.edges["chain_id"].map(result.chains.set_index("chain_id")[water.SURFACE_CLASS])
+    for index, edge in result.edges.iterrows():
+        expected = 12 if edge["source"] == "path" else 0 if classes[index] == "Havflate" else 120 if edge.geometry.bounds[0] < 200 else 34
+        assert (edge.elevations == expected).all()
+        assert len(edge.elevations) == sample_count(edge.geometry.length)

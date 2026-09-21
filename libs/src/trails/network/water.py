@@ -27,6 +27,8 @@ PORTAGES = "Portages"
 PORTAGE_PATHS = "Portage paths"
 WATER_SOURCES = (SHORE, OPEN_WATER, STREAMS)
 SHORE_SIMPLIFY_M = 10.0
+#: Ponds stay in the pricing grid; their shores are not places to plan a kayak trip.
+MIN_PADDLE_HA = 1.0
 #: Phase 2 measured 1.5: the bay is cut and the lake keeps its shore; the graph is rebuilt in phase 5.
 OPEN_WATER_FACTOR = 1.5
 PORTAGE_M = 1000.0
@@ -35,6 +37,7 @@ DAM_CUT_M = 25.0
 DAM_NEAR_M = 25.0
 LAKE_BODY = "lake_body"
 LAKE_LEVEL = "lake_level"
+SURFACE_CLASS = "water_class"
 
 
 def _registered_level(value: Any) -> float:
@@ -78,6 +81,8 @@ def sources(
     chords: list[dict[str, Any]] = []
     metric = surfaces.to_crs(metric_crs)
     polygons, parents = shapely.get_parts(metric.geometry.to_numpy(), return_index=True)
+    paddled = shapely.area(polygons) >= MIN_PADDLE_HA * 10_000
+    polygons, parents = polygons[paddled], parents[paddled]
     is_lake = np.ones(len(polygons), dtype=bool) if class_field is None else metric[class_field].isin(lake_classes).to_numpy()[parents]
     lake_positions = np.flatnonzero(is_lake)
     lakes = polygons[is_lake]
@@ -95,7 +100,11 @@ def sources(
         surface = original.simplify(SHORE_SIMPLIFY_M)
         assert isinstance(surface, Polygon)
         body = bodies.get(position)
-        attributes = {LAKE_BODY: body, LAKE_LEVEL: registered.get(body, np.nan) if body is not None else np.nan}
+        attributes = {
+            LAKE_BODY: body,
+            LAKE_LEVEL: registered.get(body, np.nan) if body is not None else np.nan,
+            SURFACE_CLASS: metric[class_field].iloc[parents[position]] if class_field else None,
+        }
         rings = [surface.exterior, *surface.interiors]
         shore.extend({**attributes, "geometry": LineString(ring.coords)} for ring in rings)
         ring_edges = {
@@ -109,11 +118,11 @@ def sources(
     result = [
         NetworkSource(
             name,
-            gpd.GeoDataFrame(rows, columns=[LAKE_BODY, LAKE_LEVEL, "geometry"], crs=metric_crs).to_crs(source_crs),
+            gpd.GeoDataFrame(rows, columns=[LAKE_BODY, LAKE_LEVEL, SURFACE_CLASS, "geometry"], crs=metric_crs).to_crs(source_crs),
             kind=PADDLE,
             cost_factor=factor,
             keep_whole=True,
-            attributes=(LAKE_BODY, LAKE_LEVEL),
+            attributes=(LAKE_BODY, LAKE_LEVEL, SURFACE_CLASS),
         )
         for name, rows, factor in ((SHORE, shore, 1.0), (OPEN_WATER, chords, OPEN_WATER_FACTOR))
     ]
@@ -206,16 +215,35 @@ def portages(water_sources: list[NetworkSource], walking: Network, *, distance_m
         labels = _components(len(lines), pairs)
         count = int(labels.max()) + 1
         groups = [shapely.union_all(lines[labels == i]) for i in range(count)]
-        left, right = shapely.STRtree(groups).query(groups, predicate="dwithin", distance=distance_m)
+        # A point on the shore nearest its own box centre remains on its piece,
+        # even around islands, and is independent of the density of its chords.
+        shores = np.concatenate([np.full(len(array), source.name != OPEN_WATER) for source, array in zip(water_sources, arrays, strict=True)])
+        rings = np.concatenate([np.full(len(array), source.name == SHORE) for source, array in zip(water_sources, arrays, strict=True)])
+        representatives = []
+        obstacles = []
+        for i, group in enumerate(groups):
+            outline = shapely.union_all(lines[(labels == i) & shores])
+            if outline.is_empty:
+                outline = group
+            west, south, east, north = outline.bounds
+            representatives.append(shapely.get_point(shapely.shortest_line(outline, Point((west + east) / 2, (south + north) / 2)), 0))
+            # Closed shore rings also bar chords wholly inside a third lake;
+            # checking line crossings alone would miss water around an island.
+            surface = shapely.build_area(shapely.union_all(lines[(labels == i) & rings]))
+            obstacles.append(shapely.union_all([group, surface]))
+        identities = {tuple(point.coords[0]): i for i, point in enumerate(representatives)}
+        neighbours = shapely.get_parts(shapely.delaunay_triangles(shapely.MultiPoint(representatives), only_edges=True))
+        group_tree = shapely.STRtree(obstacles)
         paths = walking.edges[walking.edges["kind"].isin((PATH, BRIDGE))]
         ids = np.unique(paths[["from_node", "to_node"]].to_numpy(dtype=int))
         nodes = walking.nodes.geometry.to_numpy()[ids]
         node_tree = shapely.STRtree(nodes)
-        for one, other in zip(left, right, strict=True):
-            if one >= other:
-                continue
+        for neighbour in neighbours:
+            one, other = (identities[tuple(coord)] for coord in neighbour.coords)
             chord = shapely.shortest_line(groups[one], groups[other])
-            if chord.length == 0:
+            if chord.length == 0 or chord.length > distance_m:
+                continue
+            if any(int(hit) not in (one, other) for hit in group_tree.query(chord, predicate="intersects")):
                 continue
             chords.append(chord)
             for foot in (Point(chord.coords[0]), Point(chord.coords[-1])):

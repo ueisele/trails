@@ -48,6 +48,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,6 +58,7 @@ from affine import Affine
 from rasterio.warp import transform_bounds
 
 from ...utils.tiles import Bounds
+from .markhojd import sample
 
 #: The service, keyless. ``hoydedata.no`` is Kartverket's own height portal and
 #: this is the mosaic behind it.
@@ -289,7 +291,7 @@ class Source:
         partial.replace(cached)
         return heights
 
-    def mosaic(self, bounds: Bounds, posts_m: float = 4.0, force_download: bool = False) -> tuple[np.ndarray, Affine]:
+    def mosaic(self, bounds: Bounds, posts_m: float = 4.0, force_download: bool = False, *, cache_only: bool = False) -> tuple[np.ndarray, Affine]:
         """The model over a box, as one array at the given post spacing.
 
         The box is cut into :data:`CHUNK_M` squares, each read at exactly the
@@ -303,15 +305,22 @@ class Source:
             bounds: The box, WGS 84. Every square touching it is read.
             posts_m: Post spacing wanted, in metres
             force_download: Read the squares again even if they are cached
+            cache_only: Read existing inputs without fetching or writing a mosaic
 
         Returns:
             The heights (rows from the north) and their georeferencing in :data:`CRS`
         """
+        if cache_only and force_download:
+            raise ValueError("a cache-only mosaic cannot force a download")
         cached = self._mosaic_file(bounds, posts_m)
         if cached.exists() and not force_download:
             with rasterio.open(cached) as kept:
                 return kept.read(1), kept.transform
         squares, transform, across, down = squares_over(bounds, posts_m)
+        if cache_only:
+            missing = [self._square_file(square, posts_m) for square in squares if not self._square_file(square, posts_m).is_file()]
+            if missing:
+                raise FileNotFoundError(f"{len(missing)} height squares are not cached; first: {missing[0]}")
         heights = np.full((down, across), SEA_M, dtype=np.float32)
         max_north = transform.f
         min_east = transform.c
@@ -330,6 +339,8 @@ class Source:
             if number % 10 == 0 or number == len(squares):
                 print(f"  {number}/{len(squares)} squares, {time.time() - started:,.0f} s", flush=True)
         print(f"  {empty:,} posts the model leaves empty ({100.0 * empty / heights.size:.1f} %), filled with {SEA_M:g} m — open sea", flush=True)
+        if cache_only:
+            return heights, transform
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         partial = cached.with_suffix(".part.tif")
         with rasterio.open(
@@ -340,6 +351,28 @@ class Source:
         partial.replace(cached)
         print(f"  mosaic cached at {cached} ({cached.stat().st_size / 1e6:,.1f} MB)", flush=True)
         return heights, transform
+
+
+def heights_over(source: Source, bounds: Bounds, posts_m: float = 4.0) -> Callable[[np.ndarray], np.ndarray]:
+    """Hold the cached mosaic once and read every network sample from it.
+
+    Args:
+        source: The cached Norwegian model
+        bounds: The network's box, WGS 84
+        posts_m: Post spacing of the cached squares
+
+    Returns:
+        A bilinear height reader for (n, 2) coordinates in EPSG:25833,
+        with NaN outside the mosaic. Neither inputs nor a mosaic are written.
+    """
+    heights, transform = source.mosaic(bounds, posts_m=posts_m, cache_only=True)
+
+    def read(coordinates: np.ndarray) -> np.ndarray:
+        answered = sample(heights, transform, coordinates, nodata=NODATA)
+        print(f"  {len(coordinates):,} samples read off the {posts_m:g} m mosaic, {int(np.isnan(answered).sum()):,} outside it")
+        return answered
+
+    return read
 
 
 def _get_bytes(url: str) -> bytes:

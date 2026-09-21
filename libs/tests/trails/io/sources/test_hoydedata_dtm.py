@@ -202,3 +202,37 @@ class TestMetadata:
         # the ellipsoid would read 36 m high over this ground with nothing to show.
         assert hoydedata_dtm.METADATA.datum == "NN2000"
         assert hoydedata_dtm.METADATA.country == "NO"
+
+
+class TestHeightsOver:
+    def test_cached_squares_are_held_once_without_writing_a_mosaic(self, service, tmp_path, monkeypatch):
+        source = hoydedata_dtm.Source(cache_dir=tmp_path, fetch=service)
+        heights, transform = source.mosaic(SMALL, posts_m=8.0)
+        source._mosaic_file(SMALL, 8.0).unlink()
+        before = {p: p.stat().st_mtime_ns for p in tmp_path.rglob("*.tif")}
+        requests = len(service.asked)
+        original = source.mosaic
+        reads = []
+
+        def mosaic(*args, **kwargs):
+            reads.append(1)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(source, "mosaic", mosaic)
+        read = hoydedata_dtm.heights_over(source, SMALL, posts_m=8.0)
+        coordinates = np.array([transform * (1.5, 1.5), transform * (heights.shape[1] - 1.5, 1.5), transform * (-2, -2)])
+        expected = [heights[1, 1], heights[1, -2], np.nan]
+        np.testing.assert_allclose(read(coordinates), expected, equal_nan=True)
+        np.testing.assert_allclose(read(coordinates), expected, equal_nan=True)
+        assert len(reads) == 1
+        assert len(service.asked) == requests
+        assert {p: p.stat().st_mtime_ns for p in tmp_path.rglob("*.tif")} == before
+
+    def test_missing_cached_squares_are_not_downloaded(self, tmp_path):
+        def fetch(url):
+            pytest.fail("a network build must not fetch a missing square")
+
+        source = hoydedata_dtm.Source(cache_dir=tmp_path, fetch=fetch)
+        with pytest.raises(FileNotFoundError, match="height squares are not cached"):
+            hoydedata_dtm.heights_over(source, SMALL)
+        assert not list(tmp_path.iterdir())

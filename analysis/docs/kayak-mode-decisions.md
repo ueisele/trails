@@ -73,17 +73,24 @@ would draw it without a change.
   `vannbredde`, with codes 2 and 3; a correspondence to Topografi 50 class 2 is not
   established. Norway's streams remain out; adding them needs that correspondence.
 - ~~Whether anybody publishes the canoe trails as lines~~ — phase R, 2026-09-21: nobody (§3.5).
-- **The open-water chords' bytes.** Phase 1's page is 8,114,150 bytes brotli against
-  6,227,283 before (+1.89 MB, +30 %), the graph stream 5.8 MB gzip against 3.9; the chords
-  are 33,082 edges and 5,078 km against 2,382 km of shore. The plan's remedy is a coarser
-  ring for the chords alone (25 m: 22,584 vertices against 39,226). Measured before phase 5
-  publishes, on the sweep's three legs: the same answers at 25 m, or not.
+- **The open-water chords' bytes — closed by review: 10 m stays.** With
+  neighbouring portages and the 1 ha cutoff, Malingsbo-Kloten measures 7,117,583
+  bytes brotli at 10 m and 6,921,335 at 25 m, against phase 1's 8,114,150 and the
+  earlier 6,227,283. The coarser ring saves 196,248 bytes, but at k = 1.5, P = 2
+  changes the bay from 1,066.143 to 1,049.992 m paddled and the portage leg from
+  126.500 m paddled / 1,152.330 m foot to 51.555 / 1,220.934 m. The lake is
+  unchanged. Review rejected those changed ways for a 2.76 % page saving: the
+  chords remain on the 10 m shore ring, with no separate ring setting. The
+  neighbour portages and 1 ha cutoff stand. The comparison remains under §5
+  as the reason for retaining 10 m; the built-note gives the final figures.
 - **Norway's heights over the sea.** The Høydedata point reader rejects a depth as a missing
   height, so a Lomsdal-Visten water edge over the fjord may come back without one; phase 5's
   build measures it, and the sea's answer is 0 m (the page's `seaTerrain` says as much for a
   straight leg).
 
 ## 5. Changes
+
+- 2026-09-21 — phase 1b built: review retains the 10 m chord ring after the 25 m sweep changed two ways. Ponds stay outside the paddle network, portages join Delaunay neighbours, and Norway reads cached 4 m ground. The final three graphs, Swedish page bytes and completed Norway memory measurement are in the built-note below.
 
 - 2026-09-21 — phase 3 built: connected lakes levelled from the lowest register or shore p10; paddled parts, figures and tracks; dry artifacts byte-identical in both walking settings. The drive's two saved dry hashes already differ with the pre-phase-3 scripts on this graph; the built-note records that review item.
 
@@ -675,6 +682,397 @@ per municipality. The most-vertex sea polygon has **12,440 vertices over 4.79471
 contained edges including rings, and takes **0.050025 s** for simplification,
 triangulation and containment. This sample gives no reason for extra chord-only thinning.
 It is a sample of one cached municipality, not a Norway-wide performance claim.
+
+### Phase 1b built — The 10 m ring stays, 2026-09-21
+
+Review chose the 10 m shore ring. The rejected 25 m variant changed the bay by
+16.152 m and the portage leg by 74.944 m paddled and 68.604 m on foot for
+196,248 bytes brotli, 2.76 % of the page. `OPEN_WATER_SIMPLIFY_M`, the second
+simplification and its experimental test are removed; triangulation again
+uses the shore polygon directly. The comparison below remains the reason
+for that decision, not an available build option. Neighbour portages, the
+1 ha pond cutoff and the cached Norwegian mosaic remain as described below.
+
+**Final graphs.** All three `command make graph ARGS="--park ..."` commands
+completed from the final source files, offline and with the shared cache
+protected against writes. These are noded, clipped edges and their lengths;
+all use the 10 m ring and 1 ha cutoff.
+
+| map | Shore: edges / km | Open water: edges / km | Streams: edges / km | Portages: edges / km | Portage paths: edges / km |
+|---|---:|---:|---:|---:|---:|
+| Abisko | 13,274 / 1,103.094 | 14,722 / 2,167.238 | 432 / 55.807 | 869 / 241.499 | 249 / 11.162 |
+| Malingsbo-Kloten | 25,853 / 2,197.170 | 29,772 / 4,979.224 | 610 / 115.547 | 2,240 / 361.261 | 1,163 / 54.750 |
+| Lomsdal-Visten | 42,872 / 3,893.366 | 53,952 / 9,523.616 | 0 / 0.000 | 1,473 / 477.587 | 440 / 18.863 |
+
+Before noding and final clipping:
+
+| map | connected pieces | open chords: count / km | portage chords: count / km | walking ties: count / km |
+|---|---:|---:|---:|---:|
+| Abisko | 455 | 14,366 / 2,171.915 | 567 / 241.577 | 136 / 11.162 |
+| Malingsbo-Kloten | 728 | 29,178 / 4,984.034 | 807 / 361.683 | 793 / 54.811 |
+| Lomsdal-Visten | 1,213 | 86,901 / 17,791.534 | 1,192 / 575.555 | 265 / 18.915 |
+
+Portage-chord crossing pairs are **zero in all three maps**. Open-water
+crossing pairs are 25, 0, 16, respectively, between the separate source surfaces.
+
+The graph stream excludes the header and water grid:
+
+| map | all edges | raw bytes | gzip bytes | base64 bytes |
+|---|---:|---:|---:|---:|
+| Abisko | 75,463 | 3,023,813 | 1,256,486 | 1,675,316 |
+| Malingsbo-Kloten | 217,122 | 9,884,753 | 4,804,845 | 6,406,460 |
+| Lomsdal-Visten | 339,136 | 13,240,036 | 5,085,146 | 6,780,196 |
+
+**Final pages and sweep.** Abisko was rebuilt with `command make map`:
+**4,680,792 HTML bytes, 1,817,282 brotli bytes**. Its water grid
+has the same hash recorded below. Malingsbo-Kloten retains the completed 10 m
+page: **24,500,988 HTML bytes, 7,117,583 brotli bytes**. Its fresh stand-alone
+graph capture exactly matches that page build in every source count and km,
+pre-noding chord count and km, crossing count, total edge count and payload-size
+field. The removed branch already used this same shore polygon at 10 m; its
+public sweep therefore remains the accepted measurement. At k = 1.5, P = 2,
+bay and lake are 1,066.143 and 1,698.700 m paddled; the portage leg is 126.500 m
+paddled and 1,152.330 m on foot, with mapped paths. That sweep restored all
+page state, as recorded below. No page code changed and no Norway map was built.
+
+**The final Norway build meets the memory limit.** It exited zero in
+**793.010 s**, peaking at **4,402,920 KiB RSS (4.198952 GiB)**
+under the inherited 8 GiB address-space limit. It read **4,251,682 samples**
+from the cached 4 m mosaic, none outside it. No point-service request or cache
+write occurred. As in the comparison, `/usr/bin/time` is absent, so the wrapper
+uses `resource.getrusage(RUSAGE_CHILDREN)` for the kernel peak. The 982 lake
+bodies comprise 980 registered and two shore-percentile levels; the independent
+register/p10 absolute difference is median 0.334448 m and maximum 27.442316 m.
+The earlier 600-point walking comparison still measures the same mosaic reader.
+
+**Files and validation.** `network/water.py` bounds the paddle sources and
+portages while preserving the original chord ring. `network/norway.py` and
+`io/sources/hoydedata_dtm.py` read the whole network from cached ground, with
+lake and sea levels applied afterwards. Their three test files cover the
+geometry, pond boundary, shared reader, independent lake percentile and sea
+zero. `command make hooks-run` is green after removing the variant: formatting,
+lint, mypy, both test suites and repository hooks. Section 4 closes the byte
+question with review's decision; no further decision remains for this phase.
+
+Final logs, captures and timings are in `~/mockups/kayak-mode/phase1b/accepted/`:
+`abisko-10`, `mk-10` and `norway-10` have `.log`, `.time` and `.graph.json`;
+`abisko-10-map` also has `.html` and `.bytes.json`. `hooks.log` is the green
+run. The Malingsbo-Kloten page, byte report and restored public sweep remain
+in `final/mk-10-1.*`. These final figures supersede the experimental build
+figures in the historical stop notes below. No tiles were built, no shared
+inputs or main-checkout HTML were changed, and nothing was pushed.
+
+### Phase 1b resumed — Measured, stopped at the changed 25 m ways, 2026-09-21
+
+**Review settled the height reader and the smallest paddled water.** Norway's
+whole network now reads the cached 4 m DTM, including walking and portage edges.
+`hoydedata_dtm.heights_over()` holds one mosaic and samples every non-ferry edge
+in one call, at the existing 5 m spacing. A missing square fails before assembly;
+the reader neither fetches nor writes an assembled mosaic. The point reader
+remains available to other callers. Norway's graph-cache layout changes with
+its height source, so an old walking graph cannot silently retain point heights.
+The temporary Terrarium reader described in the stop below was removed.
+
+Registered lake levels still override the raw reading, and the shore's p10 is
+again an independent comparison against that register. Unregistered lakes take
+the p10; river surfaces retain their sampled profile; Havflate edges and chains
+are flat at zero. `MIN_PADDLE_HA = 1.0` excludes each smaller input polygon part
+before body grouping and simplification. It produces no shore, chord or portage
+destination. The input water frame, and hence the water-pricing grid, is intact.
+
+Portage neighbours are Delaunay neighbours of one point per connected piece:
+the shore point nearest that piece's bounding-box centre, with stream lines for
+a stream-only piece. It remains on the piece around islands and does not depend
+on chord density. Chords join the nearest points within 1,000 m and refuse any
+third piece; the existing walking ties are unchanged. Only closed **shore** rings
+fill water for that rejection: a closed river loop does not turn its enclosed
+land into a lake. Auditing that distinction changed zero portage geometries in
+both Swedish maps, with and without the pond cutoff, and in the 10 m comparison.
+Norway has no stream source. Open-water chords use retained vertices of a 25 m
+simplification of the 10 m shore, so their ends already meet shore vertices.
+
+**Walking heights against the cached point answers.** From 1,000 evenly spaced
+walking edges in the cached graph, 996 midpoint samples had finite cached point
+answers; 600 evenly spaced members of that set were compared at the point
+store's exact rounded EPSG:25833 coordinates. They cover FKB (206), UT.no (120),
+N50 paths (114), Turrutebasen (68), OSM (63) and N50 roads (29). No mosaic answer
+is missing. Absolute differences have median **0.087187 m**, p95 **0.718050 m**
+and maximum **4.898592 m**; signed median is +0.018642 m and RMSE 0.468174 m.
+The largest difference is at E 415274.84, N 7255207.03: point 771.78 m, mosaic
+766.881408 m. This supports close agreement for most samples, not byte-identical
+walking profiles or a sub-metre bound everywhere. `final/agreement.json` retains
+every reading and the cached graph's identity.
+
+**All three graphs, with and without the pond cutoff.** These are normal
+`command make graph ARGS="--park ..."` builds, using 25 m chord rings.
+Edges and km below are after noding and final clipping; a zero cutoff retains
+ponds. Streams keep their geometry: their changed edge counts reflect noding.
+
+| map | source | no cutoff: edges / km | 1 ha: edges / km |
+|---|---|---:|---:|
+| Abisko | Shore | 14,772 / 1,414.461 | 8,420 / 1,103.094 |
+| Abisko | Open water | 11,306 / 1,767.040 | 8,825 / 1,622.760 |
+| Abisko | Streams | 462 / 55.807 | 433 / 55.807 |
+| Abisko | Portages | 4,561 / 1,203.504 | 868 / 241.499 |
+| Abisko | Portage paths | 1,128 / 45.509 | 242 / 11.162 |
+| Malingsbo-Kloten | Shore | 19,631 / 2,381.547 | 16,073 / 2,197.170 |
+| Malingsbo-Kloten | Open water | 19,511 / 3,718.293 | 17,901 / 3,631.696 |
+| Malingsbo-Kloten | Streams | 646 / 115.547 | 609 / 115.547 |
+| Malingsbo-Kloten | Portages | 4,694 / 781.635 | 2,241 / 361.264 |
+| Malingsbo-Kloten | Portage paths | 2,616 / 118.795 | 1,176 / 54.750 |
+| Lomsdal-Visten | Shore | 100,045 / 6,002.642 | 26,260 / 3,893.366 |
+| Lomsdal-Visten | Open water | 46,763 / 7,341.739 | 30,579 / 6,734.736 |
+| Lomsdal-Visten | Streams | 0 / 0.000 | 0 / 0.000 |
+| Lomsdal-Visten | Portages | 52,729 / 12,312.100 | 1,473 / 477.587 |
+| Lomsdal-Visten | Portage paths | 10,327 / 347.006 | 421 / 18.863 |
+
+Before noding and final clipping, counts and km are:
+
+| map | minimum ha | connected pieces | open chords: count / km | portage chords: count / km | walking ties: count / km |
+|---|---:|---:|---:|---:|---:|
+| Abisko | 0 | 1,639 | 10,657 / 1,770.263 | 3,279 / 1,206.736 | 577 / 45.591 |
+| Abisko | 1 | 454 | 8,495 / 1,625.929 | 566 / 241.576 | 136 / 11.162 |
+| Malingsbo-Kloten | 0 | 1,319 | 18,636 / 3,721.359 | 1,766 / 782.167 | 1,576 / 119.056 |
+| Malingsbo-Kloten | 1 | 729 | 17,306 / 3,634.761 | 808 / 361.685 | 793 / 54.811 |
+| Lomsdal-Visten | 0 | 21,507 | 67,558 / 13,787.514 | 55,401 / 15,280.647 | 4,715 / 348.057 |
+| Lomsdal-Visten | 1 | 1,213 | 50,960 / 13,042.479 | 1,192 / 575.555 | 265 / 18.915 |
+
+With ponds retained, portage-chord crossing pairs are 2, 4 and 47 respectively;
+**with the cutoff they are zero in all three maps**. Open-water crossing pairs
+are 10, 0 and 4 at either cutoff, from the separate input surfaces. The much
+larger Norwegian pre-clipping chord totals must not be compared directly with
+the clipped edge lengths above.
+
+The graph stream, excluding the header and water grid, measures:
+
+| map | minimum ha | all edges | raw bytes | gzip bytes | base64 bytes |
+|---|---:|---:|---:|---:|---:|
+| Abisko | 0 | 80,116 | 3,316,822 | 1,570,303 | 2,093,740 |
+| Abisko | 1 | 64,652 | 2,570,362 | 1,145,012 | 1,526,684 |
+| Malingsbo-Kloten | 0 | 206,660 | 9,350,969 | 4,837,168 | 6,449,560 |
+| Malingsbo-Kloten | 1 | 195,430 | 8,913,341 | 4,607,785 | 6,143,716 |
+| Lomsdal-Visten | 0 | 472,831 | 19,841,234 | 9,791,049 | 13,054,732 |
+| Lomsdal-Visten | 1 | 298,571 | 11,338,484 | 4,709,783 | 6,279,712 |
+
+**Norway completed offline under the memory limit.** The filtered graph command
+exited zero in **721.919 s**, with peak **4,192,876 KiB RSS (3.998638 GiB)**.
+It read **3,672,583 samples**, none outside the mosaic. Without the cutoff it
+also exited zero: **1,075.367 s**, **5,151,628 KiB (4.912975 GiB)**, and
+**6,791,639 samples**, none outside. Both ran with
+`resource.setrlimit(RLIMIT_AS, (8 * 1024**3,) * 2)`, socket access blocked and
+shared-cache writes blocked. `/usr/bin/time` is absent; `timed.py` records the
+kernel's child peak through `resource.getrusage(RUSAGE_CHILDREN)`, rather than
+claiming a `/usr/bin/time -v` run. Neither completed run needed a further
+allocation-profile investigation.
+
+The network box needs 90 of the 104 cached squares: a 22,500 × 25,000 float32
+mosaic, 2.095476 GiB. Assembly fills the existing model's 38,356,989 NODATA posts
+with sea zero, as the tile-build reader already did. With the cutoff, 982 lake
+bodies are levelled: 980 registered and two from shore p10. Registered level
+against independent raw shore p10 has median absolute difference 0.335685 m,
+maximum 27.467468 m. Without the cutoff there are 17,035 bodies, 16,952 registered
+and 83 p10; median difference 0.325567 m, maximum 40.171317 m. The registered
+level keeps priority as decided; these are measured discrepancies, not silently
+replaced register values. No Norway map was built.
+
+**The two Swedish pages.** Each is a completed `command make map` build from
+this worktree, with cached tiles and inputs. Brotli is quality 11 over the HTML.
+The cutoff comparisons use the 25 m chord ring; the final row supplies the
+10 m baseline with the same neighbour and pond rules.
+
+| map | ring m | minimum ha | HTML bytes | brotli bytes |
+|---|---:|---:|---:|---:|
+| Abisko | 25 | 0 | 5,099,335 | 2,133,519 |
+| Abisko | 25 | 1 | 4,532,159 | 1,707,346 |
+| Malingsbo-Kloten | 25 | 0 | 24,544,246 | 7,150,276 |
+| Malingsbo-Kloten | 25 | 1 | 24,238,249 | 6,921,335 |
+| Malingsbo-Kloten | 10 | 1 | 24,500,988 | 7,117,583 |
+
+The decoded water-grid JSON is byte-identical across each map's variants:
+SHA-256 `2cbda1e3280bc020d6962f74e30ecf9431aaf771a757494733f8668115e1df54`
+for Abisko and `7a5813a14e14fe372834095043c7f26cc864a6885921e17d88a2ed9ab2beccc7`
+for Malingsbo-Kloten. Ponds therefore still price a straight leg as water.
+
+**The 10 m / 25 m comparison.** Both have the 1 ha cutoff and the same shore
+geometry. Counts below are open-water chords before noding and clipping;
+bytes are the graph stream without its header or grid.
+
+| ring m | open chords | km | all graph edges | raw bytes | gzip bytes | base64 bytes |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10 | 29,178 | 4,984.034 | 217,122 | 9,884,753 | 4,804,845 | 6,406,460 |
+| 25 | 17,306 | 3,634.761 | 195,430 | 8,913,341 | 4,607,785 | 6,143,716 |
+
+At 10 m the noded sources are Shore 25,853 / 2,197.170 km, Open water
+29,772 / 4,979.224 km, Streams 610 / 115.547 km, Portages 2,240 / 361.261 km,
+and Portage paths 1,163 / 54.750 km. Before noding there are 728 connected
+pieces, 807 portage chords / 361.683 km and 793 ties / 54.811 km; portage
+crossing pairs are zero. The 25 m figures are in the tables above.
+
+**The required stop: the three public answers are not all the same.** The
+existing phase-2 public sweep and harness were adapted to these built pages,
+using the recorded coordinates instead of obsolete graph node ids. The tally
+reads phase 3's `crossed` figure directly, without adding source credits a
+second time. All 36 ways settled at each spacing, and all path/no-path choices
+agree. However, lengths change for every bay and portage case: 24 of 36 answers.
+The lake's lengths agree in all 12 cases. At the accepted k = 1.5, P = 2:
+
+| leg | 10 m: paddled / foot m | 25 m: paddled / foot m | mapped path, both |
+|---|---:|---:|---|
+| bay | 1,066.143 / 0 | 1,049.992 / 0 | no |
+| lake | 1,698.700 / 0 | 1,698.700 / 0 | no |
+| portage | 126.500 / 1,152.330 | 51.555 / 1,220.934 | yes |
+
+The bay changes from 345.209 m Shore + 720.934 m Open water to 123.919 +
+926.073 m. The portage leg's drawn-path credits change from 9.361 m Topografi
+50 paths + 306.508 m OSM to 1,009.381 m OSM. These are different ways, not only
+rounding differences. The 10 m portage also differs from phase 2's old all-pairs,
+all-pond graph; that change belongs to the newly decided neighbour and pond
+rules, which both ring comparisons share.
+
+The instruction says to stop if those three answers differ. No tolerance or
+permission to accept the changed 25 m ways has been inferred. Review must
+choose whether to keep 10 m or accept these changed ways at 25 m. The current
+worktree's 25 m constant is experimental and **uncommitted**; neither a silent
+reversion nor a commit declaring it accepted was made.
+
+**Validation and artifacts.** `command make hooks-run` is green after the last
+code change: ruff format/check, mypy, both test suites and the standard hooks.
+Tests cover neighbour selection, third-lake rejection without filling a river
+loop, retained shore endpoints, the pond threshold, cache-only mosaic reads,
+all network samples going to that mosaic, independent lake p10 and sea zero.
+Both browser sweeps restored the prices, switches, plan, goal and chosen way;
+the harness's before/after assertions passed. All external browser requests
+were blocked. Shared inputs were read without writes; main-checkout HTML was
+neither read nor written. No tiles were built or data fetched, and nothing was
+pushed.
+
+The files in `~/mockups/kayak-mode/phase1b/final/` retain the graph captures,
+page snapshots, byte reports and sweeps. Prefixes are `abisko-25-{0,1}`,
+`mk-25-{0,1}`, `mk-10-1` and `norway-25-{0,1}`; Swedish stand-alone graph captures
+add `-graph`. `agreement.json` holds every walking-height comparison;
+`chord-audit.log` confirms the river-loop correction leaves measured chords
+unchanged; `hooks-final.log` is the green run. The original completed filtered
+Norway timing is `norway-25-1.completed.time`: a scratch-runner edit inadvertently
+restarted that command and its duplicate was cancelled after the original had
+completed, truncating the original log. The original full graph capture and
+completed timing are retained. The unfiltered Norway command's log and timing
+are intact. `mk-25-0-graph.completed.time` likewise preserves its original
+completed graph timing; its duplicate was cancelled. The page measurements
+come from the completed, isolated output directories, never a main-checkout
+page.
+
+### Phase 1b — Stopped at Norway's non-water height samples, 2026-09-21
+
+Review extended the phase after the graph command was found to invoke the same
+height service as the map. The decision keeps Norway's walking reader and takes
+water heights from the body's lowest registered N50 level, otherwise the built
+DEM for lakes and river surfaces, and zero for the sea. The built tree is
+`/home/eiseleu/repositories/trails/analysis/output/dem/kartverket/1/`, with zoom 13
+as its finest level. It was inspected read-only; no Norway map was built.
+
+**The implementation in the worktree.** `network/water.py` selects portage pairs
+from a Delaunay triangulation, using the point on each piece's shore nearest
+its own bounding-box centre. This point stays on its piece around islands and
+its position does not depend on the density of open-water chords. Stream-only
+pieces use their lines. Chords still join the nearest points within 1,000 m,
+refuse a third water piece, and retain the existing walking-node ties. The
+third-piece check includes areas enclosed by shore rings, with holes, so a
+line wholly inside a third lake cannot escape a boundary-intersection test.
+
+The open-water triangulation uses a further 25 m simplification of the 10 m
+shore. Its vertices are retained shore vertices, so the chord ends already
+meet the shore; no shore vertex is moved. The 10 m comparison uses the original
+10 m ring directly. The 25 m setting is experimental until the public sweep
+has completed and review accepts its answers.
+
+Water chains retain their surface class. `network/norway.py` measures the
+non-water and water subsets separately, preserving the original service reader
+for the former. Registered lakes and the sea supply constant sample heights;
+remaining water samples go to `processing/dem_tiles.sample()`, a bilinear reader
+that handles tile boundaries, reads one decoded image at a time, and returns
+NaN for absent tiles or missing posts. All use the existing sample-spacing
+parameter, 5 m by default. The existing lake-body levelling then applies the
+shore's 10th percentile to unregistered lakes. Registered shores are already
+at their assigned level in this path, so their later percentile is not an
+independent comparison with the register.
+
+**The new stop, measured rather than inferred.**
+`command make graph ARGS="--park lomsdal-visten"` ran under an 8 GiB address-space
+limit with socket access and writes into the shared input cache blocked. Noding
+completed, but the non-water height pass requested **4,040,910 samples at
+3,558,126 distinct coordinates**. Only **883,391** coordinates were cached;
+**2,674,735** were missing. `hoydedata.Source.elevations()` reached `_fetch()`
+and the offline guard stopped its first connection attempt. No request was
+sent and no cache write occurred. The water subset had not yet been measured.
+These are non-PADDLE samples: inferred portages and walking edges belong to
+this subset. The run does not establish the missing count for each source.
+
+Review must decide how uncached non-water samples are read offline. Merely
+removing water samples from the height service does not make the full graph
+cache-complete. No fallback, fetch permission, or change to walking heights
+has been inferred from the water-height decision.
+
+Norway reached **472,831 edges**, with the following geometry figures before
+heights:
+
+| source | edges after noding | km |
+|---|---:|---:|
+| Shore | 100,045 | 6,002.642 |
+| Open water | 46,763 | 7,341.739 |
+| Streams | 0 | 0.000 |
+| Portages | 52,729 | 12,312.100 |
+| Portage paths | 10,327 | 347.006 |
+
+Before final clipping and noding: **67,558 open-water chords / 13,787.514 km**,
+**21,507 connected water pieces**, **55,401 portage chords / 15,280.647 km**,
+and **4,715 walking ties**. Water geometry took 14.983 s, the walking graph
+175.007 s, and portages plus combined noding 317.407 s. The stopped command ran
+680.895 s and peaked at **2,146,932 KiB RSS (2.048 GiB)**. `/usr/bin/time` is
+absent on this machine; the wrapper used `resource.getrusage(RUSAGE_CHILDREN)`
+for peak RSS and `resource.setrlimit(RLIMIT_AS, (8 * 1024**3,) * 2)` for the
+limit. This is a peak for the failed command, not a completed-build memory
+acceptance measurement. No allocation-profile conclusion is claimed.
+
+**Malingsbo-Kloten's completed 10 m graph within its interrupted map build.**
+The neighbour rule gives **1,765 portage chords / 782.165 km**, with **four
+crossing pairs** before noding, and **1,576 walking ties / 119.056 km**. Its
+**31,056 open-water chords / 5,082.673 km** reproduce the phase-1 ring. The
+combined graph has **229,532 edges** and the following source totals:
+
+| source | edges after noding | km |
+|---|---:|---:|
+| Shore | 29,953 | 2,381.547 |
+| Open water | 31,965 | 5,077.861 |
+| Streams | 647 | 115.547 |
+| Portages | 4,693 | 781.633 |
+| Portage paths | 2,623 | 118.795 |
+
+The graph stream measures **10,359,633 raw bytes**, **5,046,461 gzip bytes**,
+and **6,728,616 base64 bytes**, excluding its header. The water geometry and
+height pass completed; the map was still matching place names when Norway's
+failure required the stop. Its page bytes and public sweep are unmeasured.
+The separate 25 m Malingsbo-Kloten graph was stopped during combined noding.
+Its water geometry took 1.713 s: 18,636 open-water chords / 3,721.359 km.
+Its walking pass completed in 55.296 s; it had 1,319 connected water pieces,
+1,766 portage chords / 782.167 km, and 1,576 walking ties. Abisko was not started. An earlier 10 m attempt was discarded
+before completion after finding that simplifying the ring twice changed the
+baseline; only the corrected run's figures are reported here.
+
+**Validation and remaining work.** `command make hooks-run` is green: formatting,
+lint, mypy, both test suites and the remaining repository hooks. Added tests
+cover the coarser chord endpoints, neighbour pairs and third-lake rejection,
+unchanged walking ties, tile-boundary interpolation and missing heights, and
+a service spy that refuses every water coordinate. The page was never driven,
+so no mode, goal or chosen way changed. No shared-cache file or main-checkout
+HTML was written or read. The implementation remains uncommitted at this stop;
+the 25 m sweep, both Swedish page-brotli measurements, Abisko's graph, Norway's
+completed height pass and payload, and the phase commit remain outstanding.
+
+Scratch, guards and logs are in `~/mockups/kayak-mode/phase1b/`:
+`norway-graph.log`, `norway-graph.time`, `mk-10-map.log`, `mk-10-graph.json`,
+`mk-25-graph.log`, `hooks.log`, `sitecustomize.py`, `timed.py`, and the prepared
+`browser.py`, `sweep.js` and `bytes.py`. All build commands used the worktree's
+source files; the browser harness has not run.
 
 ## 6. How the figures here were obtained
 

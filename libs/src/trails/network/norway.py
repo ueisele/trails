@@ -23,10 +23,11 @@ from dataclasses import dataclass, replace
 from typing import Any, NamedTuple
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 from shapely.geometry import box
 
-from trails.io.sources import hoydedata, kommuneinfo, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
+from trails.io.sources import hoydedata_dtm, kommuneinfo, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
 from trails.io.sources.geonorge import Source as GeonorgeSource
 from trails.io.sources.language import Language
 from trails.network import graphs, water
@@ -41,6 +42,7 @@ from trails.routing import (
     parts_of,
     with_elevation,
 )
+from trails.routing.elevation import PROFILE_COLUMNS, chain_profiles
 from trails.routing.noding import clip_lines
 from trails.routing.sources import FERRY, PADDLE
 from trails.utils.geo import attach_nearest
@@ -48,6 +50,9 @@ from trails.utils.geo import attach_nearest
 #: Metric CRS for Norway. The routing module works in it, so every length and
 #: distance below is already in metres.
 METRIC_CRS = "EPSG:25833"
+
+#: The cached DTM squares use the same 4 m posts as the map's height tiles.
+HEIGHT_POSTS_M = 4.0
 
 #: What each dataset is called, on every chain and every edge built from it, and
 #: therefore also the prefix of its chain ids. Named here rather than written out
@@ -153,7 +158,7 @@ MARKED_M, RECORDED_M, MIN_SHARE = DEFAULT_MARKED_M, DEFAULT_RECORDED_M, DEFAULT_
 #: *into* a build; this covers what comes out of it. Without it, a graph cached
 #: before a column existed is served to code that reads that column — the
 #: parameters and the sources are unchanged, so nothing else in the key notices.
-GRAPH_LAYOUT = "elevation+coverage+protection+steepness"
+GRAPH_LAYOUT = "elevation+coverage+protection+steepness+dtm4m"
 
 #: What names a protected area, on every edge that lies in one and in every
 #: figure about it. The register's own stable identifier rather than a row
@@ -573,7 +578,7 @@ def build(
     """Build the network, or read back the last build of the same inputs.
 
     :func:`graphs.build` under this country's rules, with the ground read from
-    Kartverket's point service by :func:`measure`.
+    Kartverket's cached 4 m mosaic by :func:`measure`.
 
     Args:
         sources: The datasets
@@ -588,44 +593,57 @@ def build(
         The network and the per-source chain counts
 
     Raises:
-        ValueError: If the height endpoint does not speak the CRS the network is
+        ValueError: If the height model does not use the CRS the network is
             built in
     """
     if any(source.kind == PADDLE or source.directed for source in sources):
-        return water.build(sources, masks, clip, params, RULES, protected=protected, measure=lambda network: measure(network, params))
+        return water.build(sources, masks, clip, params, RULES, protected=protected, measure=lambda network: measure(network, params, clip))
     network, counts = graphs.build(
-        sources, masks, clip, params, RULES, name=name, protected=protected, measure=lambda network: measure(network, params)
+        sources, masks, clip, params, RULES, name=name, protected=protected, measure=lambda network: measure(network, params, clip)
     )
     if "one_way" not in network.edges:
         network = replace(network, edges=network.edges.assign(one_way=False))
     return network, counts
 
 
-def measure(network: Network, params: Params) -> Network:
-    """Read the ground under the network and put it on the edges and chains.
+def measure(network: Network, params: Params, clip: gpd.GeoDataFrame) -> Network:
+    """Read all network heights from the cached mosaic, then set the sea to zero.
 
-    Ferries are skipped rather than filtered afterwards: there is no ground
-    under a crossing, and asked about open water the endpoint answers with a
-    depth from its depth contours — a ferry edge would come back at -276 m.
-    Bridged connectors *are* sampled. Nobody drew one, which is what a connector
-    is, but there is ground under it.
+    Registered lake levels and the independent shore percentile are applied
+    by the shared water build after this reading. Ferries have no samples.
 
     Args:
-        network: The finished network, in :data:`METRIC_CRS`
+        network: The finished network, in the model's metric CRS
         params: What decides the build
+        clip: The network's extent, in EPSG:4326
 
     Returns:
-        A copy carrying ``elevations`` and ``ascent`` on every edge, and
-        ``ascent`` on every chain
-
-    Raises:
-        ValueError: If the endpoint does not speak the CRS the network is in
+        Edges and chains carrying their profiles, with the sea flat at zero
     """
-    if METRIC_CRS != hoydedata.REQUEST_CRS:
-        raise ValueError(f"the height endpoint answers in {hoydedata.REQUEST_CRS}, the network is built in {METRIC_CRS}")
-
-    heights = hoydedata.Source(cache_dir=params.cache_dir)
-    return with_elevation(network, heights.elevations, step_m=params.elevation_step_m, threshold_m=params.ascent_threshold_m)
+    if METRIC_CRS != hoydedata_dtm.CRS:
+        raise ValueError(f"the height model is in {hoydedata_dtm.CRS}, the network is in {METRIC_CRS}")
+    west, south, east, north = (float(value) for value in clip.total_bounds)
+    model = hoydedata_dtm.Source(cache_dir=params.cache_dir)
+    read = hoydedata_dtm.heights_over(model, (west, south, east, north), posts_m=HEIGHT_POSTS_M)
+    measured = with_elevation(network, read, step_m=params.elevation_step_m, threshold_m=params.ascent_threshold_m)
+    del read
+    if water.SURFACE_CLASS not in measured.chains:
+        return measured
+    sea = measured.chains[measured.chains[water.SURFACE_CLASS].eq("Havflate") & measured.chains["kind"].eq(PADDLE)]
+    if sea.empty:
+        return measured
+    edges = measured.edges.copy()
+    sea_edges = edges["chain_id"].isin(sea["chain_id"])
+    elevations = list(edges["elevations"])
+    for position in np.flatnonzero(sea_edges.to_numpy()):
+        elevations[position] = np.zeros(len(elevations[position]))
+    edges["elevations"] = pd.Series(elevations, index=edges.index, dtype=object)
+    edges.loc[sea_edges, ["ascent", "descent"]] = 0.0
+    profiles = chain_profiles(sea, edges[sea_edges], threshold_m=params.ascent_threshold_m)
+    chains = measured.chains.copy()
+    for column in PROFILE_COLUMNS:
+        chains.loc[sea.index, column] = profiles[column]
+    return replace(measured, edges=edges, chains=chains)
 
 
 def derive(edges: gpd.GeoDataFrame, masks: Masks, protected: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
