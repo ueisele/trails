@@ -7380,6 +7380,14 @@ def goal_lengths(page: Any, water: bool) -> dict[str, Any]:
           lastRow: [...document.querySelectorAll('.trails-profile-stop-far')].slice(-1)[0].textContent};
         }"""
     )
+    # **Put the page back as it was found.** The way a goal is read is kept
+    # across goals, so a goal left routed here would make the next check's
+    # fresh goal read routed too -- which is what the goal check found on all
+    # three pages the first time these two ran before it (2026-09-21).
+    page.evaluate("() => { trailsGoal.clear(); trailsGoal.way('direct'); trailsChrome.close(); trailsPlan.toggle(false); }")
+    page.wait_for_timeout(400)
+    page.set_viewport_size({"width": 1400, "height": 900})
+    page.wait_for_timeout(400)
     return read
 
 
