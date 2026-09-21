@@ -113,7 +113,7 @@
             // and an undefined dashArray draws a fjord crossing as a solid line
             // indistinguishable from walked ground — which is the one thing this
             // page must never draw, and nothing about it would look wrong.
-            var DASH = {routed: null, land: '5,4', water: '2,8', waiting: '1,6'};
+            var DASH = {routed: null, paddled: null, land: '5,4', water: '2,8', waiting: '1,6'};
             DASH[CROSSING] = '2,8';
 
             // ---- what the panel owns and this must not write again ----------
@@ -1179,7 +1179,8 @@
                 // and nobody recorded it either. The decisions document settles
                 // that distinction, and restoring a plan is the first thing that
                 // ever had to apply it to a span of somebody's file.
-                if (kind === 'land') { tally.unmarked = run; } else { tally.recorded = run; }
+                if (kind === 'land') { tally.unmarked = run; }
+                else if (kind !== 'paddled') { tally.recorded = run; }
                 var standing = new Array(count);
                 for (i = 0; i < count; i += 1) { standing[i] = graph.areasAt(lon[i], lat[i]); }
                 spreadProtected(tally, graph, standing, along, 0, count, 0, run);
@@ -1378,10 +1379,9 @@
                 return {lon: graph.nodeLon[span.node], lat: graph.nodeLat[span.node]};
             }
 
-            // ---- the four kinds ----------------------------------------------
-            // A routed leg, cut at every change between walking and crossing, so
-            // the ferry inside it is a crossing rather than 8 km of walking with
-            // no ground under it.
+            // ---- the parts of a leg ------------------------------------------
+            // Split where the way changes: walking, paddling, or a ferry whose
+            // metres have no profile and must leave a gap in the track.
             function routedParts(graph, found) {
                 var parts = [], run = [], reversed = [], kind = null;
 
@@ -1396,7 +1396,7 @@
                     parts.push(kind === CROSSING
                         ? {kind: CROSSING, lon: laid.lon, lat: laid.lat, along: laid.along, length: laid.total,
                            height: null, distance: null, read: false, tally: tally}
-                        : {kind: 'routed', lon: laid.lon, lat: laid.lat, along: laid.along, length: laid.total,
+                        : {kind: kind, lon: laid.lon, lat: laid.lat, along: laid.along, length: laid.total,
                            height: laid.height, distance: laid.distance, read: laid.read, tally: tally});
                     run = []; reversed = [];
                 }
@@ -1407,7 +1407,8 @@
                 var head = found.head ? cutPart(graph, found.head) : null;
                 if (head) { parts.push(head); }
                 for (var i = 0; i < found.edges.length; i += 1) {
-                    var here = graph.header.sources[graph.sources[found.edges[i]]].kind === CROSSING ? CROSSING : 'routed';
+                    var sourceKind = graph.header.sources[graph.sources[found.edges[i]]].kind;
+                    var here = sourceKind === CROSSING ? CROSSING : (kayak() && sourceKind === PADDLE ? 'paddled' : 'routed');
                     if (here !== kind) { flush(); kind = here; }
                     run.push(found.edges[i]); reversed.push(found.reversed[i]);
                 }
@@ -1482,7 +1483,8 @@
                 var read = height.some(function (h) { return !isNaN(h); });
                 var tally = blankTally();
                 tallyEdge(tally, graph, edge, hi - lo);
-                return {kind: 'routed', lon: lon, lat: lat, along: along, length: hi - lo,
+                var paddled = kayak() && graph.header.sources[graph.sources[edge]].kind === PADDLE;
+                return {kind: paddled ? 'paddled' : 'routed', lon: lon, lat: lat, along: along, length: hi - lo,
                         height: height, distance: distance, read: read, tally: tally};
             }
 
@@ -1994,8 +1996,9 @@
                 // answers with no network. `points[i].sea` is still honoured,
                 // for a page whose heights do come from a service.
                 //
-                // **A river is waded and not crossed, so a river is not wet
-                // here.** Lantmäteriet draws a watercourse wide enough to have
+                // **A walking river is waded, so it is not wet here.** In kayak
+                // mode the grid's water includes river surfaces too.
+                // Lantmäteriet draws a watercourse wide enough to have
                 // two banks as a water surface, so Abiskojåkka is in the grid
                 // exactly as Torneträsk is, and classifying by the grid alone
                 // cut the leg in two at the bank. That is wrong twice over: a
@@ -2009,18 +2012,18 @@
                 // they apply. Measured: Abisko 14 m → 22 m, Lomsdal-Visten's
                 // Storelva unchanged at 27, since no Norwegian river of this
                 // build is in the grid at all.
-                var wet = new Array(count);
+                var wet = new Array(count), river = new Array(count);
                 for (var w = 0; w < count; w += 1) {
+                    river[w] = !!graph.riverAt(laid.lon[w], laid.lat[w]).length;
                     wet[w] = !!points[w].sea
-                        || (!!graph.waterAt(laid.lon[w], laid.lat[w])
-                            && !graph.riverAt(laid.lon[w], laid.lat[w]).length);
+                        || (!!graph.waterAt(laid.lon[w], laid.lat[w]) && (kayak() || !river[w]));
                 }
                 // Where the samples change their mind about what is under them.
                 // Named for what it is: in this file `edges` means edges of the
                 // graph, and these are the ends of the runs.
                 var changes = [0];
                 for (var i = 1; i < count; i += 1) {
-                    if (wet[i] !== wet[i - 1]) { changes.push(i); }
+                    if (wet[i] !== wet[i - 1] || (kayak() && wet[i] && river[i] !== river[i - 1])) { changes.push(i); }
                 }
                 changes.push(count);
 
@@ -2035,7 +2038,7 @@
                     var began = run === 0 ? 0 : (laid.along[first - 1] + laid.along[first]) / 2;
                     var ended = last === count ? laid.length : (laid.along[last - 1] + laid.along[last]) / 2;
                     var head = positionAt(began), tail = positionAt(ended);
-                    if (wet[first]) {
+                    if (wet[first] && !kayak()) {
                         parts.push({kind: 'water', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
                                     along: [0, ended - began], length: ended - began,
                                     height: null, distance: null, read: false, tally: blankTally()});
@@ -2047,14 +2050,24 @@
                         distance.push(laid.along[s] - began);
                         if (!isNaN(points[s].height)) { read = true; }
                     }
+                    // Shore pixels can include the bank. One water run takes
+                    // its lowest finite reading. River parts keep their fall;
+                    // a run with no finite reading stays unread.
+                    if (wet[first] && kayak() && !river[first]) {
+                        var level = Infinity;
+                        height.forEach(function (h) { if (isFinite(h) && h < level) { level = h; } });
+                        if (isFinite(level)) { height = height.map(function () { return level; }); }
+                    }
                     // Two vertices and no more: the reader drew a straight line,
                     // so the two ends are every corner it has. The file's 5 m
                     // fill lays its points along it from these.
-                    parts.push({kind: 'land', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
+                    var tally = straightTally(graph, laid, standing, first, last, began, ended);
+                    if (wet[first]) { tally.unmarked = 0; }
+                    parts.push({kind: wet[first] ? 'paddled' : 'land', lon: [head.lon, tail.lon], lat: [head.lat, tail.lat],
                                 along: [0, ended - began], length: ended - began,
                                 height: height, distance: distance, read: read,
-                                rivers: riverCrossings(graph, head, tail),
-                                tally: straightTally(graph, laid, standing, first, last, began, ended)});
+                                rivers: wet[first] ? [] : riverCrossings(graph, head, tail),
+                                tally: tally});
                 }
                 return parts;
             }
@@ -2361,7 +2374,7 @@
                 // somebody else's words: `known['constructor']` on an object
                 // literal is a function and reads as a kind this page knows.
                 var known = Object.create(null);
-                known.routed = true; known.land = true; known.water = true;
+                known.routed = true; known.land = true; known.water = true; known.paddled = true;
                 known[CROSSING] = true;
                 known[PLAN.gpx.trackKind] = true;
                 var lists = ours(extensions, PLAN.gpx.legs);
@@ -2674,7 +2687,7 @@
             function restoredWalked(graph, kind, first, last, metres) {
                 if (kind !== 'routed') {
                     return [trackPart(graph, first, last, undefined, undefined, undefined, undefined,
-                                      kind === 'land' ? 'land' : undefined)];
+                                      kind === 'land' ? 'land' : (kind === 'paddled' && kayak() ? 'paddled' : undefined))];
                 }
                 // **Routed between its own two ends first, and checked against
                 // the length the file states.** For a leg the reader clicked
@@ -3052,7 +3065,7 @@
                 loaded.legs.forEach(function (parts) {
                     parts.forEach(function (part) {
                         if (!isFinite(part.m)) { return; }
-                        if (part.kind === 'water' || part.kind === CROSSING) { return; }
+                        if (part.kind === 'water' || part.kind === CROSSING || (kayak() && part.kind === 'paddled')) { return; }
                         walked += part.m;
                         if (part.kind === PLAN.gpx.trackKind) { recorded += part.m; }
                     });
@@ -3171,7 +3184,7 @@
                 var last = toLeg === undefined || toLeg === null ? walking.length : toLeg;
                 var lon = [], lat = [], along = [], height = [], distance = [], free = [];
                 var stretches = [], stretch = null, tally = blankTally(), gaps = [];
-                var walked = 0, crossings = 0, crossed = 0, straight = 0, read = false, joined = false;
+                var walked = 0, paddled = 0, crossings = 0, crossed = 0, straight = 0, read = false, joined = false;
                 var rivers = [];
                 // **Where the heights came from, carried apart from whether
                 // there are any.** A routed part's are the build's DTM1 samples
@@ -3200,21 +3213,22 @@
                 // as a point.
                 function breakHere() {
                     close();
-                    if (height.length) { height.push(NaN); distance.push(walked); free.push(0); }
+                    if (height.length) { height.push(NaN); distance.push(walked + paddled); free.push(0); }
                     joined = false;
                 }
 
-                // **Where the reader's own points sit, in walked metres.**
+                // **Where the reader's own points sit, in profile metres.**
                 // Recorded as the walk happens and not summed from the legs
                 // afterwards: a crossing contributes no walking distance and a
                 // leg still being worked out contributes none either, so a sum
                 // over the legs' own lengths would put every later point too far
                 // along. Leg i runs from point i to point i + 1, so the distance
                 // at the head of leg i is point i's, and the walk's end is the
-                // last point's.
+                // last point's. Paddling has a track and advances this axis;
+                // its length still belongs to water in the two totals.
                 var stations = [];
                 walking.slice(first, last).forEach(function (leg) {
-                    stations.push(walked);
+                    stations.push(walked + paddled);
                     if (!leg.parts) { breakHere(); return; }
                     leg.parts.forEach(function (part) {
                         addTally(tally, part.tally);
@@ -3243,11 +3257,11 @@
                         if (!stretch) { stretch = {from: lon.length, sampleFrom: height.length}; }
                         var mark = part.kind === 'land' ? 1 : 0, at;
                         for (at = (joined ? 1 : 0); at < part.lon.length; at += 1) {
-                            lon.push(part.lon[at]); lat.push(part.lat[at]); along.push(walked + part.along[at]);
+                            lon.push(part.lon[at]); lat.push(part.lat[at]); along.push(walked + paddled + part.along[at]);
                         }
                         for (at = (joined ? 1 : 0); at < part.height.length; at += 1) {
                             height.push(part.height[at]);
-                            distance.push(walked + part.distance[at]);
+                            distance.push(walked + paddled + part.distance[at]);
                             free.push(mark);
                             if (!isNaN(part.height[at])) { read = true; }
                         }
@@ -3255,7 +3269,8 @@
                             if (part.kind === PLAN.gpx.trackKind) { fromFile = true; } else { modelled = true; }
                         }
                         joined = part.height.length > 0 && part.lon.length > 0;
-                        walked += part.length;
+                        if (part.kind === 'paddled') { paddled += part.length; crossed += part.length; }
+                        else { walked += part.length; }
                     });
                 });
                 close();
@@ -3263,10 +3278,11 @@
                 // nothing to mark, and the guard is what says so. A range of one
                 // leg has two stations, which is the same rule counted from the
                 // other end.
-                if (last > first || points.length) { stations.push(walked); }
+                if (last > first || points.length) { stations.push(walked + paddled); }
                 return {lon: lon, lat: lat, along: along, height: height, distance: distance, free: free,
                         stations: stations, gaps: gaps,
                         stretches: stretches, tally: tally, total: walked, read: read,
+                        profileLength: walked + paddled, kayak: kayak(),
                         modelled: modelled, fromFile: fromFile,
                         // Filtered once, here, and read by the sentence above
                         // the button, by the file's description and by the

@@ -1,5 +1,6 @@
 """The shore, open water, streams and the ground joining separate water bodies."""
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -14,6 +15,7 @@ from shapely.ops import substring
 
 from trails.network import graphs
 from trails.routing.coverage import CHAIN_COVERAGE_COLUMNS, chain_coverage
+from trails.routing.elevation import PROFILE_COLUMNS, chain_profiles
 from trails.routing.graph import DEFAULT_BRIDGE_COST_FACTOR, Network, build_network
 from trails.routing.noding import lines_of, working_lines
 from trails.routing.sources import BRIDGE, PADDLE, PATH, NetworkSource
@@ -31,12 +33,26 @@ PORTAGE_M = 1000.0
 PATH_JOIN_M = 150.0
 DAM_CUT_M = 25.0
 DAM_NEAR_M = 25.0
+LAKE_BODY = "lake_body"
+LAKE_LEVEL = "lake_level"
+
+
+def _registered_level(value: Any) -> float:
+    """A register's interval takes its lower level, like conflicting sheets."""
+    if pd.isna(value):
+        return np.nan
+    text = str(value).strip().replace(",", ".")
+    interval = re.fullmatch(r"(-?\d+(?:\.\d+)?)\s*[-–]\s*(-?\d+(?:\.\d+)?)", text)
+    return min(float(interval[1]), float(interval[2])) if interval else float(text)
 
 
 def sources(
     surfaces: gpd.GeoDataFrame,
     *,
     metric_crs: str,
+    class_field: str | None = None,
+    lake_classes: tuple[str, ...] = (),
+    level_field: str | None = None,
     streams: gpd.GeoDataFrame | None = None,
     dams: gpd.GeoDataFrame | None = None,
 ) -> list[NetworkSource]:
@@ -45,6 +61,9 @@ def sources(
     Args:
         surfaces: Water polygons, already clipped to the map's box
         metric_crs: Projection in which the tolerances are metres
+        class_field: Surface classification column, or None when all surfaces are lakes
+        lake_classes: Values of that column identifying lakes, including regulated lakes
+        level_field: Registered height column, or None when no levels are supplied
         streams: Stream lines carrying ``storleksklass``, or None
         dams: Dam points and lock gates, or None where streams are absent
 
@@ -55,14 +74,30 @@ def sources(
         raise ValueError("water surfaces need a coordinate reference system")
     source_crs = surfaces.crs
     started = time.perf_counter()
-    shore: list[LineString] = []
-    chords: list[LineString] = []
-    metric = surfaces.to_crs(metric_crs).geometry.simplify(SHORE_SIMPLIFY_M)
-    for surface in shapely.get_parts(metric.to_numpy()):
-        if not isinstance(surface, Polygon) or surface.is_empty:
+    shore: list[dict[str, Any]] = []
+    chords: list[dict[str, Any]] = []
+    metric = surfaces.to_crs(metric_crs)
+    polygons, parents = shapely.get_parts(metric.geometry.to_numpy(), return_index=True)
+    is_lake = np.ones(len(polygons), dtype=bool) if class_field is None else metric[class_field].isin(lake_classes).to_numpy()[parents]
+    lake_positions = np.flatnonzero(is_lake)
+    lakes = polygons[is_lake]
+    labels = _components(len(lakes), shapely.STRtree(lakes).query(lakes, predicate="intersects"))
+    bodies: dict[int, str] = {int(position): f"lake-{label}" for position, label in zip(lake_positions, labels, strict=True)}
+    levels = metric[level_field].map(_registered_level).to_numpy(dtype=float) if level_field else np.full(len(metric), np.nan)
+    registered: dict[str, float] = {}
+    for position, label in bodies.items():
+        level = levels[parents[position]]
+        if np.isfinite(level):
+            registered[label] = min(registered.get(label, level), level)
+    for position, original in enumerate(polygons):
+        if not isinstance(original, Polygon) or original.is_empty:
             continue
+        surface = original.simplify(SHORE_SIMPLIFY_M)
+        assert isinstance(surface, Polygon)
+        body = bodies.get(position)
+        attributes = {LAKE_BODY: body, LAKE_LEVEL: registered.get(body, np.nan) if body is not None else np.nan}
         rings = [surface.exterior, *surface.interiors]
-        shore.extend(LineString(ring.coords) for ring in rings)
+        shore.extend({**attributes, "geometry": LineString(ring.coords)} for ring in rings)
         ring_edges = {
             tuple(sorted((one[:2], other[:2]))) for ring in rings for one, other in zip(list(ring.coords)[:-1], list(ring.coords)[1:], strict=True)
         }
@@ -70,20 +105,21 @@ def sources(
         shapely.prepare(surface)
         for line in candidates[shapely.covers(surface, candidates)]:
             if tuple(sorted(line.coords)) not in ring_edges:
-                chords.append(line)
+                chords.append({**attributes, "geometry": line})
     result = [
-        NetworkSource(SHORE, gpd.GeoDataFrame(geometry=shore, crs=metric_crs).to_crs(source_crs), kind=PADDLE, keep_whole=True),
         NetworkSource(
-            OPEN_WATER,
-            gpd.GeoDataFrame(geometry=chords, crs=metric_crs).to_crs(source_crs),
+            name,
+            gpd.GeoDataFrame(rows, columns=[LAKE_BODY, LAKE_LEVEL, "geometry"], crs=metric_crs).to_crs(source_crs),
             kind=PADDLE,
-            cost_factor=OPEN_WATER_FACTOR,
+            cost_factor=factor,
             keep_whole=True,
-        ),
+            attributes=(LAKE_BODY, LAKE_LEVEL),
+        )
+        for name, rows, factor in ((SHORE, shore, 1.0), (OPEN_WATER, chords, OPEN_WATER_FACTOR))
     ]
     print(
         f"  Water outlines and triangulation: {time.perf_counter() - started:.3f} s; "
-        f"{len(chords):,} open-water chords, {sum(line.length for line in chords) / 1000:.3f} km"
+        f"{len(chords):,} open-water chords, {sum(row['geometry'].length for row in chords) / 1000:.3f} km"
     )
     if streams is not None:
         if dams is None:
@@ -249,7 +285,19 @@ def build(
     network = replace(network, edges=graphs.derive(network.edges, masks, protected, rules))
     covered = chain_coverage(network.chains, network.edges)
     network = replace(network, chains=network.chains.assign(**{column: covered[column] for column in CHAIN_COVERAGE_COLUMNS}))
-    network = measure(network)
+    network, levels = level_lakes(measure(network), threshold_m=params.ascent_threshold_m)
+    differences = (levels["registered"] - levels["percentile"]).abs().dropna()
+    print(
+        f"  Lake levels: {len(levels):,} bodies; {levels['registered'].notna().sum():,} registered, "
+        f"{levels['registered'].isna().sum():,} shore percentile"
+    )
+    if len(differences):
+        print(
+            f"  Register against shore p10: {len(differences):,} bodies; "
+            f"median absolute difference {differences.median():.6f} m, largest {differences.max():.6f} m"
+        )
+    else:
+        print("  Register against shore p10: no bodies with both readings")
     # Walking sources retain the existing report's comparisons. The generated
     # water geometry already defines its units; a stroke comparison adds no evidence.
     counts = graphs.chain_report(walking_sources, clip, params, rules)
@@ -283,3 +331,49 @@ def report(network: Network) -> None:
     for name in (*WATER_SOURCES, PORTAGES, PORTAGE_PATHS):
         edges = network.edges[network.edges["source"] == name]
         print(f"  {name}: {len(edges):,} edges, {edges['length_m'].sum() / 1000:.3f} km")
+
+
+def level_lakes(network: Network, *, threshold_m: float) -> tuple[Network, pd.DataFrame]:
+    """Replace only lake-edge heights with one level per connected body.
+
+    Args:
+        network: Network after the country's height reader has sampled its edges
+        threshold_m: The same ascent threshold used by that reader
+
+    Returns:
+        A copied network with lake profiles updated, and each body's registered,
+        shore-percentile and chosen levels. Rivers, sea and portages retain their
+        sampled profiles.
+
+    Raises:
+        ValueError: If a lake has neither a registered level nor a finite shore sample
+    """
+    chains = network.chains
+    lakes = chains[chains[LAKE_BODY].notna() & chains["source"].isin((SHORE, OPEN_WATER))]
+    bodies = network.edges["chain_id"].map(lakes.set_index("chain_id")[LAKE_BODY])
+    edges = network.edges.copy()
+    elevations = list(edges["elevations"])
+    rows: list[dict[str, Any]] = []
+    for body, parts in lakes.groupby(LAKE_BODY, sort=True):
+        registered = pd.to_numeric(parts[LAKE_LEVEL], errors="raise").min()
+        positions = np.flatnonzero((bodies == body).to_numpy())
+        shore = edges.iloc[positions]
+        series = [np.asarray(values, dtype=float) for values in shore.loc[shore["source"] == SHORE, "elevations"]]
+        samples = np.concatenate(series) if series else np.empty(0)
+        finite = samples[np.isfinite(samples)]
+        percentile = float(np.percentile(finite, 10)) if len(finite) else np.nan
+        level = float(registered) if pd.notna(registered) else percentile
+        if not np.isfinite(level):
+            raise ValueError(f"{body} has no registered level and no finite shore heights")
+        rows.append({"body": body, "registered": registered, "percentile": percentile, "level": level})
+        for position in positions:
+            elevations[position] = np.full(len(elevations[position]), level)
+    edges["elevations"] = pd.Series(elevations, index=edges.index, dtype=object)
+    edges.loc[bodies.notna(), ["ascent", "descent"]] = 0.0
+    # Recompute only lake chains; walking profiles retain their original figures.
+    measured = chains.copy()
+    if len(lakes):
+        profiles = chain_profiles(lakes, edges[bodies.notna()], threshold_m=threshold_m)
+        for column in PROFILE_COLUMNS:
+            measured.loc[lakes.index, column] = profiles[column]
+    return replace(network, edges=edges, chains=measured), pd.DataFrame(rows, columns=["body", "registered", "percentile", "level"])

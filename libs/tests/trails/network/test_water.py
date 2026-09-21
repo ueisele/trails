@@ -1,10 +1,13 @@
 """Water geometry, dam gaps and the walking choices at a portage."""
 
 import geopandas as gpd
+import numpy as np
+import pandas as pd
 import pytest
 import shapely
 from shapely.geometry import LineString, Point, Polygon, box
 from trails.network import water
+from trails.routing.elevation import PROFILE_COLUMNS, with_elevation
 from trails.routing.graph import build_network
 from trails.routing.sources import BRIDGE, PADDLE, NetworkSource
 
@@ -91,9 +94,69 @@ def test_the_combined_build_reports_water_and_leaves_the_input_cache_alone(tmp_p
         graphs.Params(cache_dir=str(tmp_path / "inputs")),
         rules,
         protected=protected,
-        measure=lambda network: network,
+        measure=lambda network: with_elevation(network, lambda coordinates: coordinates[:, 0]),
     )
     assert not (tmp_path / "inputs").exists()
     assert not network.edges["one_way"].any()
     assert {water.SHORE, water.OPEN_WATER, water.PORTAGES} <= set(counts["source"])
     assert "Portages:" in capsys.readouterr().out
+
+
+def test_touching_lakes_share_the_lowest_register_without_trusting_ids():
+    surfaces = gpd.GeoDataFrame(
+        {"class": ["lake", "lake", "lake", "river", "sea"], "level": ["207", "208", "100-102", None, None]},
+        geometry=[box(0, 0, 100, 100), box(100, 0, 200, 100), box(400, 0, 500, 100), box(200, 0, 300, 100), box(500, 0, 600, 100)],
+        crs=CRS,
+    )
+    shore, opened = water.sources(surfaces, metric_crs=CRS, class_field="class", lake_classes=("lake",), level_field="level")
+    assert shore.gdf[water.LAKE_BODY].iloc[0] == shore.gdf[water.LAKE_BODY].iloc[1]
+    assert shore.gdf[water.LAKE_BODY].iloc[2] != shore.gdf[water.LAKE_BODY].iloc[0]
+    assert shore.gdf[water.LAKE_BODY].iloc[3:].isna().all()
+    assert shore.gdf[water.LAKE_LEVEL].iloc[:3].tolist() == [207, 207, 100]
+    assert set(opened.gdf[water.LAKE_BODY].dropna()) == set(shore.gdf[water.LAKE_BODY].dropna())
+
+
+def test_lake_levels_use_only_their_own_shores_and_leave_other_profiles_alone():
+    surfaces = gpd.GeoDataFrame(
+        {"class": ["lake", "lake", "river", "sea"], "level": [207, np.nan, np.nan, np.nan]},
+        geometry=[box(0, 0, 100, 100), box(200, 0, 300, 100), box(400, 0, 500, 100), box(600, 0, 700, 100)],
+        crs=CRS,
+    )
+    items = water.sources(surfaces, metric_crs=CRS, class_field="class", lake_classes=("lake",), level_field="level")
+    for name, kind, y in ((water.STREAMS, PADDLE, -100), (water.PORTAGES, BRIDGE, -200), ("path", "path", -300)):
+        items.append(NetworkSource(name, gpd.GeoDataFrame(geometry=[LineString([(0, y), (100, y)])], crs=CRS), kind=kind))
+    network = with_elevation(build_network(items, metric_crs=CRS, bridge_m=0), lambda coordinates: coordinates[:, 0] + coordinates[:, 1])
+    # Chord readings cannot influence the shore percentile.
+    for index in network.edges.index[network.edges["source"] == water.OPEN_WATER]:
+        network.edges.at[index, "elevations"] = np.full(len(network.edges.at[index, "elevations"]), -1000.0)
+    before = [values.copy() for values in network.edges["elevations"]]
+    result, levels = water.level_lakes(network, threshold_m=3)
+    bodies = network.edges["chain_id"].map(network.chains.set_index("chain_id")[water.LAKE_BODY])
+    assert len(levels) == 2
+    for row in levels.itertuples():
+        own = bodies == row.body
+        shore = np.concatenate(network.edges.loc[own & (network.edges["source"] == water.SHORE), "elevations"].tolist())
+        assert row.percentile == np.percentile(shore, 10)
+        expected = row.registered if pd.notna(row.registered) else row.percentile
+        for values in result.edges.loc[own, "elevations"]:
+            assert (values == expected).all()
+        assert (result.edges.loc[own, ["ascent", "descent"]] == 0).all().all()
+    for index in network.edges.index[bodies.isna()]:
+        np.testing.assert_array_equal(result.edges.at[index, "elevations"], network.edges.at[index, "elevations"])
+        assert result.edges.loc[index, ["ascent", "descent"]].equals(network.edges.loc[index, ["ascent", "descent"]])
+    unchanged = network.chains[water.LAKE_BODY].isna()
+    pd.testing.assert_frame_equal(result.chains.loc[unchanged, list(PROFILE_COLUMNS)], network.chains.loc[unchanged, list(PROFILE_COLUMNS)])
+    for original, values in zip(before, network.edges["elevations"], strict=True):
+        np.testing.assert_array_equal(original, values)
+
+
+def test_an_unread_lake_needs_a_registered_level():
+    surfaces = gpd.GeoDataFrame({"level": [np.nan]}, geometry=[box(0, 0, 100, 100)], crs=CRS)
+    items = water.sources(surfaces, metric_crs=CRS, level_field="level")
+    network = with_elevation(build_network(items, metric_crs=CRS, bridge_m=0), lambda coordinates: np.full(len(coordinates), np.nan))
+    with pytest.raises(ValueError, match="no registered level and no finite shore heights"):
+        water.level_lakes(network, threshold_m=3)
+    network.chains[water.LAKE_LEVEL] = "207"
+    result, levels = water.level_lakes(network, threshold_m=3)
+    assert levels["percentile"].isna().all()
+    assert all((values == 207).all() for values in result.edges["elevations"])

@@ -433,7 +433,17 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     surfaces = gpd.clip(country.water(bounds, force_download=download), zone)
     streams = clip_lines(country.streams(bounds, force_download=download), extent)
     dams = country.dams(bounds, force_download=download)
-    sources.extend(water.sources(surfaces, metric_crs=METRIC_CRS, streams=streams, dams=dams))
+    sources.extend(
+        water.sources(
+            surfaces,
+            metric_crs=METRIC_CRS,
+            class_field=topografi50.TYPE,
+            lake_classes=(topografi50.LAKE_CLASS,),
+            level_field=topografi50.WATER_LEVEL,
+            streams=streams,
+            dams=dams,
+        )
+    )
 
     versions = {
         LEDER: register.versions.get(naturvardsregistret.TRAILS_FILE),

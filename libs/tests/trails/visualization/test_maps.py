@@ -4302,7 +4302,7 @@ class TestProfilePanel:
 
         html = fmap.get_root().render()
 
-        assert "var spacing = readable > 1 ? shape.total / (readable - 1) : shape.total;" in html
+        assert "var spacing = readable > 1 ? profileLength / (readable - 1) : profileLength;" in html
         assert "var closest = spacing > 0 ? Math.max(1, base / spacing) : 1;" in html
         assert "view.zoom = Math.min(closest, Math.max(1, view.zoom));" in html
 
@@ -4518,7 +4518,7 @@ class TestProfilePanel:
         assert "function positionAt(shape, metres) {" in html
         assert "if (shape.along[middle] < metres) { low = middle + 1; } else { high = middle; }" in html
         # And the arrow asks the same walk rather than keeping one of its own.
-        assert "return positionAt(shape, shape.total / 2);" in html
+        assert "return positionAt(shape, (shape.profileLength === undefined ? shape.total : shape.profileLength) / 2);" in html
 
     def test_the_mark_does_not_outlive_the_reading_that_put_it_there(self, group):
         """A dot left on the map after the pointer has gone claims a position
@@ -6113,11 +6113,11 @@ class TestPlanMode:
         html = fmap.get_root().render()
 
         assert "var stations = [];" in html
-        assert "stations.push(walked);\n                    if (!leg.parts)" in html
+        assert "stations.push(walked + paddled);\n                    if (!leg.parts)" in html
         # One per point and never one per leg: with nothing down there is
         # nothing to mark, and the guard is what says so. A range of one leg has
         # two stations, which is the same rule counted from the other end.
-        assert "if (last > first || points.length) { stations.push(walked); }" in html
+        assert "if (last > first || points.length) { stations.push(walked + paddled); }" in html
         assert "stations: shape.stations," in html
 
     def test_a_waypoint_is_a_marker_because_a_circle_cannot_be_dragged(self):
@@ -6270,10 +6270,10 @@ class TestPlanMode:
         # watercourse as a water surface, so the grid alone cut the leg at
         # Abiskojakka's bank and the width sentence then measured the truncated
         # run -- 14 m where the outline says 22.
-        assert "&& !graph.riverAt(laid.lon[w], laid.lat[w]).length);" in parts
+        assert "&& (kayak() || !river[w]));" in parts
         # And the runs are cut from that reading, not from the flag again.
-        assert "if (wet[i] !== wet[i - 1]) { changes.push(i); }" in parts
-        assert "if (wet[first]) {" in parts
+        assert "if (wet[i] !== wet[i - 1] || (kayak() && wet[i] && river[i] !== river[i - 1])) { changes.push(i); }" in parts
+        assert "if (wet[first] && !kayak()) {" in parts
         assert "points[first].sea" not in parts
 
     def test_the_wheel_still_reaches_the_map(self):
@@ -7611,7 +7611,7 @@ class TestPlanMode:
         assert "var inside = graph.riverAt(from.lon, from.lat).indexOf(which) >= 0;" in crossing
         assert "cuts.sort(function (a, b) { return a - b; });" in crossing
         assert "if (began !== null) { found.push({name: river.name, width: (1 - began) * length, at: began * length}); }" in crossing
-        assert "rivers: riverCrossings(graph, head, tail)," in planning
+        assert "rivers: wet[first] ? [] : riverCrossings(graph, head, tail)," in planning
         # Composed in walking order, said wherever a route is described.
         assert "if (part.rivers) { rivers = rivers.concat(part.rivers); }" in planning
         assert "rivers: rivers};" in planning
@@ -11128,6 +11128,7 @@ class TestWayLengths:
         script = export_javascript(source, "composeRoute") + export_javascript(panel, "planned")
         script += r"""
             var points = [], PLAN = {gpx: {trackKind: 'gpx'}};
+            function kayak() { return false; }
             function blankTally() { return {}; }
             function addTally() {}
             function reportedAreas() { return []; }

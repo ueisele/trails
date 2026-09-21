@@ -262,7 +262,7 @@
 
             // Where to put the arrow: half way along, by distance.
             function midpoint(shape) {
-                return positionAt(shape, shape.total / 2);
+                return positionAt(shape, (shape.profileLength === undefined ? shape.total : shape.profileLength) / 2);
             }
 
             // ---- the file this panel writes ---------------------------------
@@ -3163,7 +3163,8 @@
                 if (!selected || !selected.shape || !selected.shape.read) { return; }
 
                 var shape = selected.shape;
-                if (!(shape.total > 0)) { return; }
+                var profileLength = shape.profileLength === undefined ? shape.total : shape.profileLength;
+                if (!(profileLength > 0)) { return; }
                 var box = {left: PAD.left, right: width - PAD.right, top: PAD.top, bottom: chartHeight - PAD.bottom};
                 var wide = box.right - box.left, tall = box.bottom - box.top;
                 var lowest = Infinity, highest = -Infinity, readable = 0, i;
@@ -3194,7 +3195,7 @@
                 // steep chain then leaves width unused — 561 px of 1,238 for the
                 // 3 km one — and a long gentle chain draws as the ribbon it is,
                 // 20 px tall over 42 km. Both are the truth about the ground.
-                var base = Math.max(shape.total / wide, (highest - lowest) / tall);
+                var base = Math.max(profileLength / wide, (highest - lowest) / tall);
 
                 // **How far in the readings let anyone go.** One per pixel, and
                 // the mean spacing is the honest measure of that: the series is
@@ -3202,13 +3203,13 @@
                 // per render would cost a sort. Where a chain is already drawn
                 // finer than it was measured this is 1 and nothing zooms, which
                 // is 99 % of them.
-                var spacing = readable > 1 ? shape.total / (readable - 1) : shape.total;
+                var spacing = readable > 1 ? profileLength / (readable - 1) : profileLength;
                 var closest = spacing > 0 ? Math.max(1, base / spacing) : 1;
                 view.zoom = Math.min(closest, Math.max(1, view.zoom));
                 var metresPerPixel = base / view.zoom;
                 var holds = wide * metresPerPixel;
-                var shown = Math.min(shape.total, holds);
-                view.at = Math.min(Math.max(0, view.at), Math.max(0, shape.total - holds));
+                var shown = Math.min(profileLength, holds);
+                view.at = Math.min(Math.max(0, view.at), Math.max(0, profileLength - holds));
                 var from = view.at, to = view.at + shown;
 
                 // The band is the **window's** own range and not the chain's.
@@ -3525,7 +3526,7 @@
                 // the whole chain is no longer on the panel.
                 if (view.zoom > 1.001) {
                     chart.appendChild(text(box.left, box.top + 8, (shown / 1000).toFixed(2) + ' km of '
-                        + (shape.total / 1000).toFixed(2), 'start'));
+                        + (profileLength / 1000).toFixed(2), 'start'));
                 }
 
                 // The crosshair's own parts, made once and moved afterwards.
@@ -4234,10 +4235,18 @@
                         part.appendChild(glyph);
                         summary.appendChild(part);
                     }
-                    lengthFigure(selected.shape.total, 'person-walking', 'on foot');
-                    if (selected.shape.crossed > 0) {
-                        summary.appendChild(document.createTextNode(' \u00b7 '));
-                        lengthFigure(selected.shape.crossed, 'water', 'over water');
+                    if (selected.shape.kayak) {
+                        lengthFigure(selected.shape.crossed, 'water', 'by kayak');
+                        if (selected.shape.total > 0) {
+                            summary.appendChild(document.createTextNode(' \u00b7 '));
+                            lengthFigure(selected.shape.total, 'person-walking', 'portage on foot');
+                        }
+                    } else {
+                        lengthFigure(selected.shape.total, 'person-walking', 'on foot');
+                        if (selected.shape.crossed > 0) {
+                            summary.appendChild(document.createTextNode(' \u00b7 '));
+                            lengthFigure(selected.shape.crossed, 'water', 'over water');
+                        }
                     }
                     if (saidLines.length > 1) {
                         summary.appendChild(document.createTextNode(' \u00b7 ' + saidLines.slice(1, 3).join(' \u00b7 ')));
@@ -4303,9 +4312,14 @@
             // description is written from it too, so the two cannot drift.
             function planned(figure, shape, extra) {
                 var told = [];
-                told.push((shape.total / 1000).toFixed(2) + ' km on foot');
-                if (shape.crossed > 0) {
-                    told[0] += ' \u00b7 ' + (shape.crossed / 1000).toFixed(2) + ' km over water';
+                if (shape.kayak) {
+                    told.push((shape.crossed / 1000).toFixed(2) + ' km by kayak');
+                    if (shape.total > 0) { told[0] += ' \u00b7 ' + (shape.total / 1000).toFixed(2) + ' km portage on foot'; }
+                } else {
+                    told.push((shape.total / 1000).toFixed(2) + ' km on foot');
+                    if (shape.crossed > 0) {
+                        told[0] += ' \u00b7 ' + (shape.crossed / 1000).toFixed(2) + ' km over water';
+                    }
                 }
                 if (shape.read) {
                     told.push(climb(figure));
@@ -4315,7 +4329,8 @@
                 }
                 told = told.concat(extra || []).concat(protectedIn(shape));
                 if (!shape.read) {
-                    told.push(shape.total > 0 ? 'no height was read along it' : 'no ground under any of it');
+                    told.push((shape.profileLength === undefined ? shape.total : shape.profileLength) > 0
+                        ? 'no height was read along it' : 'no ground under any of it');
                 }
                 return told;
             }

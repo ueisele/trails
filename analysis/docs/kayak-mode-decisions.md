@@ -85,12 +85,142 @@ would draw it without a change.
 
 ## 5. Changes
 
+- 2026-09-21 — phase 3 built: connected lakes levelled from the lowest register or shore p10; paddled parts, figures and tracks; dry artifacts byte-identical in both walking settings. The drive's two saved dry hashes already differ with the pre-phase-3 scripts on this graph; the built-note records that review item.
+
 - 2026-09-21 — phase 3 resumed and stopped at surface identity: review settled how water is levelled, but two Topografi 50 water-body ids carry conflicting registered levels, and N50 leaves many water-body numbers empty. The resumed stop-note below; no build started and no runtime change made.
 - 2026-09-21 — phase 3 stopped: the water grid and the height tiles do not guarantee a lake plane. One straight water part near the measured bay changes height by 0.96516 m in about 25 m; the stop-note below. No runtime change retained.
 - 2026-09-21 — phase 0: the plan and this record opened.
 - 2026-09-21 — phase R: the research in §3.5; there is no phase 6.
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
+
+### Phase 3 built — Lake levels and what a paddled way says, 2026-09-21
+
+**Both stops resolved by review.** A body is a connected set of touching lake
+polygons, regardless of sheet boundaries or missing and conflicting ids. Its
+level is the lowest registered level among its polygons, otherwise the 10th
+percentile of its own shore samples. Only lakes are levelled: river surfaces,
+streams and the sea keep their sampled profiles, and a portage remains ground.
+This replaces the earlier premise that shoreline tiles alone give a lake plane.
+
+`network/water.py` groups the clipped polygons before shoreline simplification,
+using intersection (including a shared point), so simplifying a bank cannot
+separate a body. Generated Shore and Open water chains carry a local body label
+and its registered level; source ids are not used. `water.build()` calls
+`level_lakes()` immediately after the country's `measure()` has attached heights
+through `routing.elevation.with_elevation()`. Every lake edge's sample is replaced,
+including chord samples; ascent, descent and the lake chain's derived figures
+are recomputed. Other edge and chain profiles are left alone. Percentiles use
+all finite samples on the body's own Shore edges, including their shared ends;
+chords and adjacent bodies do not contribute.
+
+`network/sweden.py` passes `Sjö` and `hojd_over_havet`. Two cached lake entries
+express their levels as intervals, `100-102` and `102-105`; their lower bounds
+are used, for the same reason that review chose the lower of conflicting
+sheet readings. The first build invocation stopped on those strings before
+constructing a graph; the corrected invocation is the one completed build.
+`network/norway.py` keeps `hoyde` from the full cached N50 area layer and levels
+`Innsjø` and `InnsjøRegulert` by the same rule. N50 does carry registered levels:
+the cached 1813 delivery has 4,528 ordinary lake polygons with one and all five
+regulated lake polygons with one. Its absent body numbers are irrelevant now.
+Norway's river source selection has not been expanded by this phase.
+
+**Malingsbo-Kloten's levelled payload.** The combined graph retains 247,210
+edges and samples 3,960,895 heights from the cached 4 m mosaic, none outside it.
+It has **1,155 lake bodies: 150 registered, 1,005 shore percentile**. All 150
+registered bodies also have a shore percentile; the **median absolute difference
+is 0.254997 m and the largest is 2.820000 m**. The comparison is between the raw
+sample percentile and register, before payload quantisation.
+
+**Parts and words.** `plan_mode.js` makes routed PADDLE edges and straight water
+runs `paddled` only in kayak mode. Routed parts read the levelled payload;
+straight lake runs take their lowest finite tile sample. A straight run splits
+at a lake/river boundary as well as at land, so the river keeps its fall and
+cannot supply the lake's level. An entirely unread run stays unread. Paddled
+metres go into `crossed`, not `total`, and advance the profile axis and stations
+without a NaN break. `profile_panel.js` uses that axis, leads with the water
+glyph, and says *by kayak* and *portage on foot* in the figures and shared file
+description. The existing GPX and Garmin writers now receive a continuous
+paddled track; the GPX reader recognises its part kind and includes those metres
+when anchoring stations. Walking mode never creates that kind. `maps.py`'s
+part table describes the distinction. Tests cover the body rules, unchanged
+non-lake profiles, partial paddled edges, rivers, the measured bank samples,
+the continuous axis and the ferry's existing gap.
+
+**The page measurement.** One completed
+`command make map ARGS="--park malingsbo-kloten"` used the warm cache under an
+8 GiB address-space limit. No tiles were built or inputs fetched or rewritten.
+The build captures its JavaScript at import time; the Firefox harness served
+the final scripts against this one levelled payload, and the pre-phase-3 scripts
+from `HEAD` against the same payload for comparison. It served only local files,
+with external requests blocked. No second graph build was run.
+
+The original six-sample bank case at latitude 59.84547894974684, longitude
+15.54560276 to 15.546050339490117 still reads the six raw tile heights in the
+first stop-note. Its single paddled part now reads **219.5565374717 m six times**,
+range **0 m**. The bay-and-portage route used the phase-2 bay backwards, followed
+by the portage pair: (59.852644, 15.540811), (59.844846, 15.546195),
+(59.824603, 15.518341), (59.821858, 15.502671).
+
+| public page reading | measured |
+|---|---:|
+| water (`trailsPlan.state().crossed`) | 2,469.230866 m |
+| foot (`walked`) | 3,506.887899 m |
+| profile span and final sample distance | 5,976.118765 m |
+| bay part | 1,066.143381 m; 212 samples, all 220 m |
+| every paddled part's height range | 0 m |
+| GPX | one segment, 2,340 points |
+| Garmin | 157 course points |
+| profile breaks / unread samples | 0 / 0 |
+
+The heading leads with **2.47 km by kayak · 3.51 km portage on foot** in its
+accessible labels, water glyph before walking glyph. The figures page and both
+file descriptions begin with those words. The GPX has 865 points at the bay's
+220 m level and the Garmin course has 19. The three-station water check reads
+1,632.535604 m paddled and 7.515625 m on foot, one GPX segment with 647 points,
+and 16 Garmin course points. Its middle station is in the water grid; all three
+stations lie on exported trackpoints to numerical precision and reload with
+track indices **0, 357, 646**. Mode, path setting, goal way and plan state were
+restored and compared after each run.
+
+**The dry bytes stand, in both walking settings.** The unchanged
+`goal_lengths()` reading selects the same dry way, 22,435.423253 m on foot and
+zero water, with pre-phase-3 and final scripts. Complete artifacts, including
+all GPX text rather than just its description, compare equal. The clock was
+fixed for file timestamps; no output was normalised before comparison.
+
+| artifact | bytes in each version | SHA-256, equal in both walking settings |
+|---|---:|---|
+| heading | 1,266 | `117f87a2f5e8c91f7324ac0d99e591b1b61477f063471c4855f8e60846288af2` |
+| figures page | 3,377 | `3a8f9304faf12d6c10bf826f7e431f52cdcdbfd1c992ec6b095982286b42ef20` |
+| GPX | 652,513 | `40905dbce9491435a48492dada345e2aa2951b93639ad79168a54c92e64ecf26` |
+| Garmin | 17,185 | `bb29a31235431eb1414bf37d4f469d19c06e582c291e61158bf4cc5b8862c0e3` |
+| profile SVG | 12,522 | `797ccb35c732b962016470c2712d3626c394d3143274df5b02c059ce62ee365d` |
+
+**One inherited acceptance item remains for review.** The unedited
+`a_way_counts_foot_and_water` and `a_dry_way_keeps_its_words` run in both walking
+settings: 34 readings, **zero broken invariants**, but the drive returns **2**
+for its two stored dry hashes, repeated in each setting. This happens with both
+the pre-phase-3 and final scripts, identically. The scene expects figures hash
+`3158990d95dd325fc211dee7c1a2473a12c38fd2f906b0c37f8e484d9d17d063`
+and GPX-description hash
+`06ef1cf796a83eeccd0e12f85890064bd1c238ac193e55628f19ec8c32458969`;
+the readings are the figures hash above and description hash
+`0da928dba1ec2fcfd501933abb4dff852a6d844371b38924ca9d1e4272767ee6`.
+Thus the phase changes no dry byte, but cannot claim that those older recorded
+figures are green. `drive_map.py` remains untouched as required. Review must
+reconcile its saved scene with the combined graph in phase 4; changing that
+scene or the earlier routing rules here would change this phase's scope.
+
+Norway's map was not rebuilt: only Malingsbo-Kloten's build was authorised,
+and a Norway build could need uncached height-service readings. Its shared
+levelling rule is covered by the geometry and profile tests. Scratch is in
+`~/mockups/kayak-mode/`: `phase3-levelled-map-final.log`,
+`phase3-browser.py`, `phase3-measure.js`, `phase3-measure.json`, the
+`phase3-before-*` and `phase3-after-*` captures and restoration checks.
+The initial hooks run passed the tests but found typing errors in the new
+pandas/geometry code; these were corrected. The final required run is recorded
+in `phase3-built-hooks-final.log`.
 
 ### Phase 3 resumed — Registered levels and surface identity, 2026-09-21
 

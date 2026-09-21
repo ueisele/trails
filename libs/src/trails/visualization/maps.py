@@ -4351,7 +4351,7 @@ class _PlanMode(MacroElement):
     already visited, and asking anyway is an uncapped stream of requests to
     somebody else's service.
 
-    **A leg has four kinds and they are parts of a leg, not legs.** That is what
+    **The kinds are parts of a leg, not legs.** That is what
     they are on the ground: a routed leg that takes a ferry is walked, then
     crossed, then walked again, and a leg drawn straight across a strait splits
     at the shoreline into the same two things. A model that knew only whole legs
@@ -4365,12 +4365,17 @@ class _PlanMode(MacroElement):
     land    on foot              sampled on demand
     water   a **crossing**       none
     ferry   a **crossing**       none
+    paddled by kayak             lake level or river profile
     ======= ==================== ==============================
 
     **A crossing is never added to the walking distance and never to an ascent.**
     It is reported beside them — *42 km on foot · 2 crossings, 31 km* — and it
     contributes no curve at all, because a flat line at zero is a claim about
     ground that is not there.
+
+    In kayak mode, paddled metres count into the water length and remain in the
+    profile and exported track. The profile's span includes both water and foot
+    metres; the walking total still counts only the portage.
 
     **Nothing here is drawn into the overlay pane.** The route, its waypoints and
     everything else this adds live in a pane of their own: what goes into the
