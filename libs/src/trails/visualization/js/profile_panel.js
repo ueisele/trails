@@ -1353,62 +1353,49 @@
             // sees the knob, not a colour they would have to remember. The
             // price it sets is the plan's as well as the goal's; the plan
             // reads it from the same closure.
-            var goalPaths = document.createElement('button');
-            goalPaths.type = 'button';
-            goalPaths.className = 'trails-profile-goal-paths';
-            goalPaths.setAttribute('role', 'switch');
-            goalPaths.setAttribute('aria-checked', 'false');
-            goalPaths.title = 'Open ground counts ten times a path, not three: the way keeps to the network wherever one reaches';
-            goalPaths.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;margin:0 0 6px;padding:2px 3px;' +
-                'border:0;background:none;font:inherit;font-size:11px;color:var(--trails-ink-2);cursor:pointer;text-align:left';
-            goalPaths.innerHTML = '<span class="trails-profile-goal-paths-said" style="flex:1 1 auto">Stay on paths' +
-                '<span style="display:block;font-size:10px;color:var(--trails-ink-3)">open ground counts ten times a path</span></span>' +
-                '<span class="trails-profile-goal-paths-track" style="flex:none;position:relative;width:34px;height:20px;' +
-                'border-radius:10px;background:var(--trails-rule);transition:background .15s">' +
-                '<span class="trails-profile-goal-paths-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;' +
-                'border-radius:50%;background:var(--trails-solid);box-shadow:0 1px 2px rgba(0,0,0,0.3);transition:transform .15s"></span></span>';
-            goalPaths.addEventListener('click', function (event) {
-                event.stopPropagation();
-                if (!window.trailsPlan || !window.trailsPlan.stayOnPaths) { return; }
-                window.trailsPlan.stayOnPaths(!window.trailsPlan.stayOnPaths());
-                paintGoal();
-            });
-            function paintPaths() {
-                var on = !!(window.trailsPlan && window.trailsPlan.stayOnPaths && window.trailsPlan.stayOnPaths());
-                goalPaths.setAttribute('aria-checked', String(on));
-                var track = goalPaths.querySelector('.trails-profile-goal-paths-track');
-                var knob = goalPaths.querySelector('.trails-profile-goal-paths-knob');
-                track.style.background = on ? 'var(--trails-accent)' : 'var(--trails-rule)';
-                knob.style.transform = on ? 'translateX(14px)' : 'none';
+            var priceSwitches = [];
+            function priceSwitch(kind) {
+                var paths = kind === 'paths', method = paths ? 'stayOnPaths' : 'kayak';
+                var cls = 'trails-profile-goal-' + kind;
+                var button = document.createElement('button');
+                button.type = 'button';
+                button.className = cls;
+                button.setAttribute('role', 'switch');
+                button.setAttribute('aria-checked', 'false');
+                button.title = paths
+                    ? 'Open ground counts ten times a path, not three: the way keeps to the network wherever one reaches'
+                    : 'Follow the water and carry the kayak over land';
+                button.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;margin:0 0 6px;padding:2px 3px;' +
+                    'border:0;background:none;font:inherit;font-size:11px;color:var(--trails-ink-2);cursor:pointer;text-align:left';
+                button.innerHTML = '<span class="' + cls + '-said" style="flex:1 1 auto">' + (paths ? 'Stay on paths' : 'Kayak') +
+                    '<span style="display:block;font-size:10px;color:var(--trails-ink-3)">' +
+                    (paths ? 'open ground counts ten times a path' : 'paddle the water, carry over land') + '</span></span>' +
+                    '<span class="' + cls + '-track" style="flex:none;position:relative;width:34px;height:20px;' +
+                    'border-radius:10px;background:var(--trails-rule);transition:background .15s">' +
+                    '<span class="' + cls + '-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;' +
+                    'border-radius:50%;background:var(--trails-solid);box-shadow:0 1px 2px rgba(0,0,0,0.3);transition:transform .15s"></span></span>';
+                button.addEventListener('click', function (event) {
+                    event.stopPropagation();
+                    if (!window.trailsPlan || !window.trailsPlan[method]) { return; }
+                    window.trailsPlan[method](!window.trailsPlan[method]());
+                    paintGoal();
+                });
+                priceSwitches.push({button: button, method: method,
+                    track: button.querySelector('.' + cls + '-track'), knob: button.querySelector('.' + cls + '-knob')});
+                return button;
             }
-            var goalKayak = document.createElement('button');
-            goalKayak.type = 'button';
-            goalKayak.className = 'trails-profile-goal-kayak';
-            goalKayak.setAttribute('role', 'switch');
-            goalKayak.setAttribute('aria-checked', 'false');
-            goalKayak.title = 'Follow the water and carry the kayak over land';
-            goalKayak.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;margin:0 0 6px;padding:2px 3px;' +
-                'border:0;background:none;font:inherit;font-size:11px;color:var(--trails-ink-2);cursor:pointer;text-align:left';
-            goalKayak.innerHTML = '<span class="trails-profile-goal-kayak-said" style="flex:1 1 auto">Kayak' +
-                '<span style="display:block;font-size:10px;color:var(--trails-ink-3)">paddle the water, carry over land</span></span>' +
-                '<span class="trails-profile-goal-kayak-track" style="flex:none;position:relative;width:34px;height:20px;' +
-                'border-radius:10px;background:var(--trails-rule);transition:background .15s">' +
-                '<span class="trails-profile-goal-kayak-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;' +
-                'border-radius:50%;background:var(--trails-solid);box-shadow:0 1px 2px rgba(0,0,0,0.3);transition:transform .15s"></span></span>';
-            goalKayak.addEventListener('click', function (event) {
-                event.stopPropagation();
-                if (!window.trailsPlan || !window.trailsPlan.kayak) { return; }
-                window.trailsPlan.kayak(!window.trailsPlan.kayak());
-                paintGoal();
-            });
-            function paintKayak() {
-                var on = !!(window.trailsPlan && window.trailsPlan.kayak && window.trailsPlan.kayak());
-                goalKayak.setAttribute('aria-checked', String(on));
-                var track = goalKayak.querySelector('.trails-profile-goal-kayak-track');
-                var knob = goalKayak.querySelector('.trails-profile-goal-kayak-knob');
-                track.style.background = on ? 'var(--trails-accent)' : 'var(--trails-rule)';
-                knob.style.transform = on ? 'translateX(14px)' : 'none';
+            // A price belongs to both journeys. Paint even the copy on the
+            // other page, so a swipe never exposes the previous setting.
+            function paintPrices() {
+                priceSwitches.forEach(function (each) {
+                    var on = !!(window.trailsPlan && window.trailsPlan[each.method] && window.trailsPlan[each.method]());
+                    each.button.setAttribute('aria-checked', String(on));
+                    each.track.style.background = on ? 'var(--trails-accent)' : 'var(--trails-rule)';
+                    each.knob.style.transform = on ? 'translateX(14px)' : 'none';
+                });
             }
+            var goalPaths = priceSwitch('paths');
+            var goalKayak = priceSwitch('kayak');
             // **The way there, handed to the plan.** Asked for from the phone,
             // and it is the one road between the two halves of this page that
             // was missing: a goal is set in a moment and walked at once, a plan
@@ -1594,8 +1581,7 @@
                 // has worked out a line between them yet.
                 goalToPlan.style.display = standing ? 'block' : 'none';
                 paintStopList();
-                paintPaths();
-                paintKayak();
+                paintPrices();
                 if (!standing) { return; }
                 var routed = goalNow.way === 'routed';
                 // What the row used to say here -- the name, how many places
@@ -2197,6 +2183,10 @@
             });
             undoRow.appendChild(undoOne);
             pointsPage.appendChild(undoRow);
+            var planPaths = priceSwitch('paths');
+            var planKayak = priceSwitch('kayak');
+            pointsPage.appendChild(planPaths);
+            pointsPage.appendChild(planKayak);
 
             // **The way to the goal's own page: the switches over the places.**
             // Built here beside the plan's list page and put into the track
@@ -2349,6 +2339,9 @@
                 // The name of the tour and the way back sit in this row, and
                 // both are edits: away with them where nothing can be edited.
                 undoRow.style.display = (planNow && planNow.on) ? 'flex' : 'none';
+                // A route read after planning cannot be re-priced here.
+                planPaths.style.display = planKayak.style.display = (planNow && planNow.on) ? 'flex' : 'none';
+                paintPrices();
                 if (planNow) {
                     undoOne.disabled = !planNow.undoable;
                     undoOne.style.opacity = planNow.undoable ? '' : '0.35';

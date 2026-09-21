@@ -9226,6 +9226,146 @@ THE_ROUTE_PAGES = """() => {
           edits: undo && undo.parentNode ? getComputedStyle(undo.parentNode).display : null}; }"""
 
 
+def the_plan_page_has_the_price_switches(page: Any) -> Check:
+    """The plan and goal offer the same prices; a route read afterwards does not."""
+    name = "the plan page has the price switches"
+    if SCENE.kayak_shore is None:
+        return Check(name, skipped="this scene has no measured kayak pair")
+    page.wait_for_function("() => !trailsPlan.busy() && !trailsGoal.state().working")
+    saved = page.evaluate(KAYAK_PAGE_STATE)
+    view = page.evaluate(with_map("() => ({center: __MAP__.getCenter(), zoom: __MAP__.getZoom()})"))
+    viewport = page.viewport_size
+    chrome = page.evaluate("() => trailsChrome.state()")
+    panel = page.evaluate("""() => ({pages: trailsProfilePanel.pages(), page: trailsProfilePanel.page(), goal: trailsGoal.showing(),
+        chain: (trailsProfile && trailsProfile.className) || null, planned: !!(trailsProfile && trailsProfile.plan)})""")
+    goal = page.evaluate("""() => {
+        const key = 'trails.plan.' + (trailsProfilePanel.prefix() || 'map') + '.goal';
+        return {key, text: localStorage.getItem(key)};
+    }""")
+    faces = """selector => {
+        const root = document.querySelector(selector);
+        return ['paths', 'kayak'].map(kind => {
+            const button = root && root.querySelector('.trails-profile-goal-' + kind);
+            return button ? {on: button.getAttribute('aria-checked'), shown: button.getClientRects().length > 0,
+                words: button.textContent, knob: button.querySelector('[class$="-knob"]').style.transform} : null;
+        });
+    }"""
+    changed = False
+    try:
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.evaluate("() => { trailsPlan.kayak(false); trailsPlan.stayOnPaths(false); }")
+        page.evaluate("points => trailsPlan.fromPlaces(points.map(p => ({lat: p[0], lon: p[1]})))", SCENE.kayak_shore.points)
+        changed = True
+        page.wait_for_function("() => !trailsPlan.busy() && trailsPlan.state().legs.length === 1", timeout=120_000)
+        page.evaluate("() => { trailsChrome.close(); trailsProfilePanel.page('list'); }")
+        painted(page)
+        before = page.evaluate(faces, ".trails-profile-list")
+        walking = page.evaluate("() => trailsPlan.state()")
+        order = page.evaluate("""() => {
+            const root = document.querySelector('.trails-profile-list');
+            const paths = root.querySelector('.trails-profile-goal-paths'), kayak = root.querySelector('.trails-profile-goal-kayak');
+            const list = root.querySelector('.trails-plan-points'), heading = root.querySelector('.trails-profile-undo').parentNode;
+            return !!(heading.compareDocumentPosition(paths) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+                !!(paths.compareDocumentPosition(kayak) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+                !!(kayak.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING);
+        }""")
+        page.locator(".trails-profile-list .trails-profile-goal-paths").click()
+        page.wait_for_function("() => !trailsPlan.busy()", timeout=120_000)
+        paths_on = page.evaluate("() => trailsPlan.stayOnPaths()")
+        page.locator(".trails-profile-list .trails-profile-goal-kayak").click()
+        page.wait_for_function("() => !trailsPlan.busy()", timeout=120_000)
+        paddling = page.evaluate("() => trailsPlan.state()")
+        on_plan = page.evaluate(faces, ".trails-profile-list")
+        page.evaluate("() => { trailsPlan.toggle(false); trailsPlan.show(); trailsProfilePanel.page('list'); }")
+        painted(page)
+        readonly = page.evaluate(faces, ".trails-profile-list")
+        readonly_page = page.evaluate("() => trailsProfilePanel.page()")
+
+        # A fix handed to the goal needs no change to the browser's position.
+        # Restore its saved journey, including its stops and chosen way, below.
+        page.evaluate("p => { trailsGoal.way('routed'); trailsGoal.set(p[1][0], p[1][1]); }", SCENE.kayak_shore.points)
+        page.wait_for_function("() => !trailsGoal.state().working", timeout=120_000)
+        page.evaluate("p => trailsGoal.stood(p[0], p[1], 0)", SCENE.kayak_shore.points[0])
+        page.wait_for_function("() => !trailsGoal.state().working && trailsGoal.state().line", timeout=120_000)
+        page.evaluate("() => { trailsGoal.show(); trailsProfilePanel.page('places'); }")
+        painted(page)
+        on_goal = page.evaluate(faces, ".trails-profile-places")
+        page.locator(".trails-profile-places .trails-profile-goal-paths").click()
+        page.wait_for_function("() => !trailsPlan.busy() && !trailsGoal.state().working", timeout=120_000)
+        page.evaluate("() => { trailsPlan.toggle(true); trailsProfilePanel.page('list'); }")
+        painted(page)
+        back = page.evaluate(faces, ".trails-profile-list")
+    finally:
+        page.evaluate("() => trailsGoal.clear()")
+        if changed:
+            page.evaluate("() => trailsPlan.undo()")
+            page.wait_for_function("() => !trailsPlan.busy()", timeout=120_000)
+        page.evaluate(
+            """s => {
+            trailsPlan.kayak(s.kayak); trailsPlan.stayOnPaths(s.paths); trailsGoal.way(s.goal.way);
+            trailsPlan.select(s.plan.chosen); trailsPlan.toggle(s.plan.on);
+        }""",
+            saved,
+        )
+        # Restoring sets the goal before reattaching its stops, so keep the
+        # original stored journey as well as the restored live one.
+        page.evaluate(
+            """g => {
+            if (g.text === null) { localStorage.removeItem(g.key); }
+            else {
+                localStorage.setItem(g.key, g.text); trailsGoal.restore();
+                localStorage.setItem(g.key, g.text);
+            }
+        }""",
+            goal,
+        )
+        page.wait_for_function("() => !trailsPlan.busy() && !trailsGoal.state().working", timeout=120_000)
+        if saved["goal"]["from"]:
+            page.evaluate("p => trailsGoal.stood(p.lat, p.lon, 0)", saved["goal"]["from"])
+            page.wait_for_function("() => !trailsGoal.state().working", timeout=120_000)
+        if panel["goal"]:
+            page.evaluate("() => trailsGoal.show()")
+        elif panel["chain"]:
+            select(page, panel["chain"])
+        elif panel["planned"]:
+            page.evaluate("() => trailsPlan.show()")
+        elif not saved["plan"]["on"]:
+            page.evaluate("() => trailsProfilePanel.series(null)")
+        page.evaluate("p => { trailsProfilePanel.page(p.page); trailsProfilePanel.page(p.pages.open); }", panel)
+        page.evaluate(
+            """s => {
+            trailsChrome.close();
+            if (s.tool) { trailsChrome.open(s.tool); }
+            if (s.menu) { trailsChrome.menu(); }
+        }""",
+            chrome,
+        )
+        if viewport:
+            page.set_viewport_size(viewport)
+        page.evaluate(with_map("v => { __MAP__.setView(v.center, v.zoom, {animate: false}); }"), view)
+        painted(page)
+    paddled = sum(part["length"] for leg in paddling["legs"] for part in leg["parts"] if part["kind"] == "paddled")
+    return Check(
+        name,
+        [
+            Reading("the plan has two points and its mode is on", walking["on"] and len(walking["points"]) == 2, True),
+            Reading("both switches are visible and off on the phone", all(f and f["shown"] and f["on"] == "false" for f in before), True),
+            Reading("the switches stand under the heading and above the points", order, True),
+            Reading("Stay on paths changes the plan's preference", paths_on, True),
+            Reading("the walking way has no paddled part", any(p["kind"] == "paddled" for leg in walking["legs"] for p in leg["parts"]), False),
+            Reading("Kayak re-prices the way with paddled metres", paddled > 0 and paddling["walked"] != walking["walked"], True),
+            noted("the plan's paddled metres after the click", round(paddled, 3)),
+            Reading("both plan switches read on", [f["on"] for f in on_plan], ["true", "true"]),
+            Reading("the goal's copies have the same words, state and knobs", on_goal, on_plan),
+            Reading("the read-only points page remains available", readonly_page, "list"),
+            Reading("neither switch is shown on that read-only page", [f["shown"] for f in readonly], [False, False]),
+            Reading("the goal's path switch paints the plan's copy off", [f["on"] for f in back], ["false", "true"]),
+            Reading("the mode, goal way and plan are put back", page.evaluate(KAYAK_PAGE_STATE), saved),
+            Reading("the saved goal and its stops are put back", page.evaluate("key => localStorage.getItem(key)", goal["key"]), goal["text"]),
+        ],
+    )
+
+
 def a_route_read_after_planning(page: Any) -> Check:
     """What a planned route says about itself once plan mode has been left.
 
@@ -13936,6 +14076,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(the_chosen_line_is_on_top, page))
     if wanted(a_line_is_named_at_the_foot_and_not_on_the_ground):
         checks.append(timed(a_line_is_named_at_the_foot_and_not_on_the_ground, page))
+    if wanted(the_plan_page_has_the_price_switches):
+        checks.append(timed(the_plan_page_has_the_price_switches, page))
     if wanted(a_route_read_after_planning):
         checks.append(timed(a_route_read_after_planning, page))
     if wanted(a_sheet_over_a_panel):

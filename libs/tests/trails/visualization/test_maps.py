@@ -5224,25 +5224,30 @@ class TestProfilePanel:
         assert "hide.classList.toggle('trails-profile-hide-goal', goalShown);" in html
         assert '<path d="M5 3.4h8.3l-2.1 3.1 2.1 3.1H5Z"/>' in html.split("var GOAL_STRUCK = ")[1].split(";")[0]
 
-    def test_stay_on_paths_is_a_switch_on_the_goal_page_with_its_state_on_its_face(self):
-        """It was a tool in the menu with a lamp on the rail, and from the
-        phone: *I cannot see whether it is on*. It sits under Direct/Routed,
-        where the way it changes is read, as an on/off switch whose knob says
-        which -- and it turns the one closure that prices open ground, for
-        the plan as well as the goal, reading its state back from there."""
+    def test_the_price_switches_share_their_state_on_the_goal_and_plan_pages(self):
+        """Both journeys offer the same switches; a route read after planning
+        offers no change of price. The browser drive checks clicks and routing."""
         fmap, layer = self.drawn()
         maps.add_profile_panel(fmap, [layer])
 
         html = fmap.get_root().render()
-        assert "goalPaths.className = 'trails-profile-goal-paths';" in html
-        assert "goalPaths.setAttribute('role', 'switch');" in html
-        assert "window.trailsPlan.stayOnPaths(!window.trailsPlan.stayOnPaths());" in html
-        painted = html.split("function paintPaths() {")[1].split("var goalNote")[0]
-        assert "goalPaths.setAttribute('aria-checked', String(on));" in painted
-        assert "knob.style.transform = on ? 'translateX(14px)' : 'none';" in painted
-        row, switch, note = (html.index(f"placesPage.appendChild({each});") for each in ("goalRow", "goalPaths", "goalNote"))
-        assert row < switch < note
-        # And nowhere else: not a tool, not a lamp on the rail.
+        factory = html.split("function priceSwitch(kind) {")[1].split("function paintPrices()")[0]
+        assert "kind === 'paths', method = paths ? 'stayOnPaths' : 'kayak'" in factory
+        assert "var cls = 'trails-profile-goal-' + kind;" in factory
+        assert "button.setAttribute('role', 'switch');" in factory
+        assert "window.trailsPlan[method](!window.trailsPlan[method]());" in factory
+        painted = html.split("function paintPrices() {")[1].split("var goalPaths")[0]
+        assert "window.trailsPlan[each.method]()" in painted
+        assert "each.button.setAttribute('aria-checked', String(on));" in painted
+        assert "each.knob.style.transform = on ? 'translateX(14px)' : 'none';" in painted
+        for prefix in ("goal", "plan"):
+            assert f"var {prefix}Paths = priceSwitch('paths');" in html
+            assert f"var {prefix}Kayak = priceSwitch('kayak');" in html
+        row, paths, kayak, note = (html.index(f"placesPage.appendChild({each});") for each in ("goalRow", "goalPaths", "goalKayak", "goalNote"))
+        assert row < paths < kayak < note
+        heading, paths, kayak, points = (html.index(f"pointsPage.appendChild({each});") for each in ("undoRow", "planPaths", "planKayak", "node"))
+        assert heading < paths < kayak < points
+        assert "planPaths.style.display = planKayak.style.display = (planNow && planNow.on) ? 'flex' : 'none';" in html
         assert "key: 'paths'" not in html
 
     def test_the_goal_profile_marks_its_stations_as_the_map_does(self):

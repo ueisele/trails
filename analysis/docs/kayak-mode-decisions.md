@@ -109,6 +109,49 @@ would draw it without a change.
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
 
+### Phase 6 built — The switches in plan mode, 2026-09-21
+
+`profile_panel.js` builds Stay on paths and Kayak through one factory, with
+one paint function reading `trailsPlan.stayOnPaths()` and `.kayak()` for both
+copies. The Points and stages page offers them below the name/undo row and
+above the points. The Places on the way page keeps its order, wording and
+appearance. On a route read after plan mode has been left, the points page
+hides both switches. The panel's existing refresh suffices; `plan_mode.js`
+needs no hook or change.
+
+`drive_map.py` adds `the_plan_page_has_the_price_switches` beside the plan
+checks. At phone width it lays the scene's shore pair, clicks both switches
+on the plan page, reads the paddled parts, checks the goal page's copies,
+then clicks Stay on paths there and reads the plan's copy again. It also
+checks the read-only page and restores the plan, mode, path preference,
+goal and its chosen way, stored stops, selected route, panel page, menu, viewport
+and map view. The existing rendered-panel test in `test_maps.py` now checks
+the factory, both placements and the read-only guard; its old assertion
+against the single goal button was the first hook run's only failure.
+
+**Measured on one warm-cache Malingsbo-Kloten build.**
+`command make map ARGS="--park malingsbo-kloten"` succeeded under an 8 GiB
+address-space limit, with 217,122 routing edges and a 24.50 MB page. No input
+was fetched or rewritten and no tiles were built. The long part was the
+existing Ortnamn pairing pass over 6,375 cached names, not the panel change.
+
+The focused drive ran twice on this worktree's page, with
+`--only the_plan_page_has_the_price_switches,a_kayak_way_follows_the_shore,a_bay_is_cut_and_a_lake_is_not,a_portage_takes_the_path,a_paddled_profile_is_flat,the_walking_modes_never_take_the_water`:
+**85 readings each time, no broken invariants, moved figures or scene skips.**
+At 390 × 844 the two switches are visible in the intended order. The walking
+plan has no paddled part; clicking Kayak produces **2,122.780 m of paddled
+parts** on the Storsjön pair. Both goal copies then read on, with the same
+words and knob positions. Switching Stay on paths off there paints the plan
+copy off. Both switches disappear on the read-only points page. Live state
+and the stored goal compare equal after restoration. The new check took
+2.0 s and 2.2 s. Its first attempt had the plan menu over the phone panel;
+the reading now closes that menu for the clicks and puts its state back.
+
+`command make hooks-run` passes: formatting, lint, mypy and pytest, plus the
+remaining hooks. No other map was rebuilt or published in this worktree;
+this phase commits the shared panel change and its reading only. No price,
+routing or review decision remains for this change.
+
 ### Phase 2b built — A portage is not a path, 2026-09-21
 
 **The inferred kind.** `routing/sources.py` gives carried ground its own
