@@ -226,9 +226,13 @@ sweep legs answer the same (record §4's chord-bytes item); Lomsdal-Visten's gra
 8 GiB limit, the peak measured; all three graphs measured, two pages' brotli bytes. Codex,
 in `water.py` and the record alone, in parallel with phase 4.
 
-*Amended 2026-09-21: Norway's water edges never go to the height service (the first
-build ran thirteen minutes fetching before it died) — a lake body takes N50's registered
-`hoyde`, the rest is sampled off the built DEM tree, the sea is 0 m.*
+*Amended 2026-09-21, twice: Norway's water edges never go to the height service (the
+first build ran thirteen minutes fetching before it died); then, since noding the water
+into the walking network moves every walking sample too (2,674,735 uncached coordinates),
+Norway's whole network reads its heights off the cached 4 m DTM mosaic as Sweden's does,
+the lake's registered level and the sea's 0 m on top. And a pond is not kayak water: a
+surface under 1 ha takes no part in the paddle network (Norway had 21,507 pieces and
+55,401 chords, tarns nearly all), and stays in the grid for pricing alone.*
 
 ### Phase 2b — A portage is not a path
 
