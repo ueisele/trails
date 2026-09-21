@@ -333,3 +333,40 @@ class TestNodingGeometry:
         crossing = network.edges[network.edges["source"] == "P"]
         for edge in crossing.itertuples():
             assert network.nodes.geometry.iloc[edge.from_node].distance(edge.geometry) < 1e-6
+
+
+@pytest.mark.parametrize("keep_whole", [False, True])
+def test_directed_flow_survives_canonical_reversal_and_a_crossing(keep_whole):
+    stream = source(LineString([(100, 0), (0, 0)]), name="stream", directed=True, keep_whole=keep_whole)
+    path = source(LineString([(50, -50), (50, 50)]), name="path")
+    network = build_network([stream, path], bridge_m=0)
+    water = network.edges[network.edges["source"] == "stream"]
+    assert len(water) == 2
+    assert water["one_way"].all()
+    assert network.chains.loc[network.chains["source"] == "stream", "flow_reversed"].all()
+    assert {tuple(line.coords) for line in water.geometry} == {((100, 0), (50, 0)), ((50, 0), (0, 0))}
+    for row in water.itertuples():
+        assert network.nodes.geometry.iloc[row.from_node].equals(row.geometry.boundary.geoms[0])
+        assert network.nodes.geometry.iloc[row.to_node].equals(row.geometry.boundary.geoms[1])
+    assert not network.edges.loc[network.edges["source"] == "path", "one_way"].any()
+
+
+def test_a_connector_splits_a_directed_edge_without_reversing_either_piece():
+    network = build_network(
+        [
+            source(LineString([(100, 0), (0, 0)]), name="stream", directed=True, keep_whole=True),
+            source(LineString([(50, 10), (50, 50)]), name="path"),
+        ],
+        bridge_m=25,
+    )
+    water = network.edges[network.edges["source"] == "stream"]
+    assert len(water) == 2
+    assert water["one_way"].all()
+    assert {tuple(line.coords) for line in water.geometry} == {((100, 0), (50, 0)), ((50, 0), (0, 0))}
+    assert not network.edges.loc[network.edges["kind"] == BRIDGE, "one_way"].any()
+
+
+def test_clipping_a_directed_line_retains_the_flow():
+    network = build_network([source(LineString([(100, 0), (0, 0)]), directed=True)], clip=box(25, -50, 75, 50), bridge_m=0)
+    assert network.edges["one_way"].all()
+    assert list(network.edges.geometry.iloc[0].coords) == [(75, 0), (25, 0)]

@@ -1,4 +1,4 @@
-"""The walking network Sweden's three registers make between them.
+"""The walking and water network Sweden's registers make between them.
 
 The sibling of :mod:`trails.network.norway`, and a third of its size, because
 Sweden's national map does in one product what Norway's does in four:
@@ -28,19 +28,19 @@ default: a line over a frozen lake is nothing to walk in August.
 """
 
 from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, NamedTuple
 
 import geopandas as gpd
 import pandas as pd
 
 from trails.io.sources import markhojd, naturvardsregistret, overpass, topografi50
-from trails.network import graphs
+from trails.network import graphs, water
 from trails.network.graphs import PROTECTED_SIMPLIFY_M, SURVEYED_FIELD, Masks, Rules
 from trails.routing import DEFAULT_MARKED_M, DEFAULT_MIN_SHARE, DEFAULT_RECORDED_M, IDENTITY_SEPARATOR, Network, NetworkSource, with_elevation
 from trails.routing.chains import parts_of
 from trails.routing.noding import clip_lines
-from trails.routing.sources import FERRY
+from trails.routing.sources import FERRY, PADDLE
 from trails.utils.geo import attach_nearest
 
 #: Metric CRS for Sweden: SWEREF 99 TM, which is what every register here is
@@ -61,7 +61,7 @@ T50_ROADS = "Topografi 50 roads"
 OSM = "OSM"
 FERRIES = "Ferries"
 
-#: Every source, in the order :func:`load_sources` returns them.
+#: The drawn sources, in the order :func:`load_sources` returns them.
 SOURCE_NAMES = (LEDER, T50_TRAILS, T50_PATHS, T50_ROADS, OSM, FERRIES)
 
 #: Cost factor per source, on the same scale as Norway's: an officially marked
@@ -429,6 +429,12 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         ),
         NetworkSource(FERRIES, ferries, kind=FERRY, attributes=(topografi50.TYPE, "destination", SURVEYED_FIELD)),
     ]
+    print("\nLoading water for the paddled network...")
+    surfaces = gpd.clip(country.water(bounds, force_download=download), zone)
+    streams = clip_lines(country.streams(bounds, force_download=download), extent)
+    dams = country.dams(bounds, force_download=download)
+    sources.extend(water.sources(surfaces, metric_crs=METRIC_CRS, streams=streams, dams=dams))
+
     versions = {
         LEDER: register.versions.get(naturvardsregistret.TRAILS_FILE),
         T50_TRAILS: country.version,
@@ -563,7 +569,14 @@ def build(
     Returns:
         The network and the per-source chain counts
     """
-    return graphs.build(sources, masks, clip, params, RULES, name=name, protected=protected, measure=lambda network: measure(network, params, clip))
+    if any(source.kind == PADDLE or source.directed for source in sources):
+        return water.build(sources, masks, clip, params, RULES, protected=protected, measure=lambda network: measure(network, params, clip))
+    network, counts = graphs.build(
+        sources, masks, clip, params, RULES, name=name, protected=protected, measure=lambda network: measure(network, params, clip)
+    )
+    if "one_way" not in network.edges:
+        network = replace(network, edges=network.edges.assign(one_way=False))
+    return network, counts
 
 
 def measure(network: Network, params: Params, clip: gpd.GeoDataFrame) -> Network:

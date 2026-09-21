@@ -16,6 +16,9 @@ PATH = "path"
 #: apart from everything else and carries no elevation.
 FERRY = "ferry"
 
+#: A way paddled over water, priced by length rather than by a boat fare.
+PADDLE = "paddle"
+
 #: A connector inferred between two loose ends that lie close together. It has no
 #: chain, because no source ever drew it.
 BRIDGE = "bridge"
@@ -32,7 +35,8 @@ class NetworkSource:
         cost_factor: Multiplies an edge's length to give its cost, so a route
             prefers a better-surveyed line where the detour is small. Keep close
             to 1.0: a large factor buys real detours.
-        kind: :data:`PATH` or :data:`FERRY`.
+        kind: :data:`PATH`, :data:`FERRY`, :data:`PADDLE` or :data:`BRIDGE`.
+        directed: Whether travel follows only the digitised direction of each line.
         identity_field: Column saying that two lines are the same named or
             registered way — a road id, a route name. Several identities in one
             value are separated by ``" / "``, as the road and trail layers
@@ -64,3 +68,4 @@ class NetworkSource:
     keep_whole: bool = False
     placeholder_identities: frozenset[str] = frozenset()
     node_simplify_m: float = 0.0
+    directed: bool = False

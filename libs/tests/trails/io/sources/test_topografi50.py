@@ -233,3 +233,18 @@ class TestReaders:
         _themed(tmp_path, t50.KOMMUNIKATION, t50.LAYER_TRAIL_POINTS, points)
         source = t50.Source(cache_dir=tmp_path, order="", username="", password="")
         assert source.trail_points(ABISKO)["kind"].tolist() == ["footbridge", "ford"]
+
+
+def test_streams_keep_the_size_class_and_dams_include_only_dams_and_lock_gates(tmp_path):
+    directory = _delivery_on_disk(tmp_path)
+    path = directory / t50.UNPACKED / t50.geopackage_name(t50.HYDROGRAFI)
+    lines = gpd.GeoDataFrame(
+        {t50.TYPE: ["Vattendrag"], "storleksklass": ["2"]}, geometry=[LineString([(650000, 7580000), (651000, 7580000)])], crs=t50.CRS
+    )
+    lines.to_file(path, layer=t50.LAYER_STREAMS, driver="GPKG")
+    points = gpd.GeoDataFrame({t50.TYPE: ["Dammbyggnad, punkt", "Slussport", "Annan anläggning"]}, geometry=[Point(650000, 7580000)] * 3, crs=t50.CRS)
+    points.to_file(path, layer="hydroanlaggningspunkt", driver="GPKG")
+    source = t50.Source(cache_dir=tmp_path, order="", username="", password="")
+    assert source.streams(ABISKO)["storleksklass"].tolist() == ["2"]
+    assert source.streams(ABISKO).crs.to_epsg() == 4326
+    assert source.dams(ABISKO)[t50.TYPE].tolist() == ["Dammbyggnad, punkt", "Slussport"]

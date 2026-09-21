@@ -197,6 +197,9 @@ def report(
         park_name: The park, as the register names it
         which: The map whose kind, gateway and route check the report names
     """
+    from trails.network.water import report as water_report
+
+    water_report(network)
     metric_crs = country.graph.METRIC_CRS
     edges = network.edges
     on_land = edges[edges["kind"] != FERRY]

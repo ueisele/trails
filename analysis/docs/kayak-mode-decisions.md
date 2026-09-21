@@ -64,12 +64,24 @@ would draw it without a change.
 
 - **The flow's direction — closed by review, 2026-09-21.** Use the digitised direction of
   every class-2 line, including the single opposing-arrow case; the conclusion is below.
-- **Preserving that direction through the graph** — the shared chain builder reverses
-  lines, and the edge builder carries no direction field. The resumed phase stopped at
-  the file-scope mismatch recorded below.
+- **Preserving that direction through the graph — closed by review and implementation,
+  2026-09-21.** Review extended the scope to the shared chain and edge builders. Directed
+  sources record canonical reversal; their edges recover the supplied direction and keep
+  it when split. The acceptance test covers a reversed line noded in the middle.
 - **k and P** — phase 2's sweep; 1.5 and 4 until then.
-- **Whether N50's river lines carry a size class** — phase 1, for Norway's streams.
+- **N50's river size class — closed for phase 1 after measurement, 2026-09-21.** The cached lines carry
+  `vannbredde`, with codes 2 and 3; a correspondence to Topografi 50 class 2 is not
+  established. Norway's streams remain out; adding them needs that correspondence.
 - ~~Whether anybody publishes the canoe trails as lines~~ — phase R, 2026-09-21: nobody (§3.5).
+- **The open-water chords' bytes.** Phase 1's page is 8,114,150 bytes brotli against
+  6,227,283 before (+1.89 MB, +30 %), the graph stream 5.8 MB gzip against 3.9; the chords
+  are 33,082 edges and 5,078 km against 2,382 km of shore. The plan's remedy is a coarser
+  ring for the chords alone (25 m: 22,584 vertices against 39,226). Measured before phase 5
+  publishes, on the sweep's three legs: the same answers at 25 m, or not.
+- **Norway's heights over the sea.** The Høydedata point reader rejects a depth as a missing
+  height, so a Lomsdal-Visten water edge over the fjord may come back without one; phase 5's
+  build measures it, and the sea's answer is 0 m (the page's `seaTerrain` says as much for a
+  straight leg).
 
 ## 5. Changes
 
@@ -267,6 +279,139 @@ discarded direction after graph construction was not substituted for that missin
 The source table's existing kind encoding is correct; the obstacle is direction before
 encoding. No water sources were added, and the end-of-phase graph and page builds remain
 unrun. The earlier measurement and the review's flow decision are retained.
+
+### Phase 1 built — The water sources and their direction, 2026-09-21
+
+Review resolved the second stop by extending the scope to `routing/chains.py` and
+`routing/graph.py`. `NetworkSource.directed` defaults to False and is True for Streams.
+Canonicalisation still gives a chain its stable orientation; `flow_reversed` records
+whether that opposes the supplied line. The edge builder restores the line's direction,
+including its node endpoints, and sets `one_way=True`. Both noding and later connector
+splits retain that direction. Undirected edges, including every walking source and
+inferred connector, carry False. No change to `noding.py` or `topology.py` was needed.
+The acceptance test supplies a reversed directed line crossed in the middle and asserts
+both pieces' flags, geometry and node orientation; it runs with both whole-line and
+junction-based chaining. Separate tests cover clipping and a later connector split.
+
+**What the build adds.** `network/water.py` makes 10 m simplified exterior and interior
+rings into Shore (PADDLE, factor 1), and contained, non-ring Delaunay edges into Open water
+(PADDLE, starting factor 1.5 until phase 2). `topografi50.Source.streams()` and `dams()`
+read the cached hydrography layers in the shape of `water()`. Class-2 streams keep their
+digitised direction and lose the merged intervals 25 m either side of dam points or lock
+gates within 25 m. The seventh opposing-arrow line stays directed as digitised too.
+
+The source lists in `network/sweden.py` and `norway.py` add water beside the ferries.
+Connected water pieces after the cuts receive one nearest-point chord per pair within
+1,000 m, and their feet receive ties to the nearest walking node within 150 m. Both
+Portages and Portage paths are BRIDGE sources at the existing inferred-connector factor
+1.3. Their lines take part in shared noding, then leave the selectable chain table; their
+edges have no chain id. The combined build stays in memory, reading the existing inputs
+and height model without writing a graph into the shared cache. Ordinary cached walking
+graphs acquire an all-False column when loaded.
+
+`encoding.py` already carries each source's name and kind together; no second kind
+column was added. It writes a byte per edge for direction, declared by the optional
+`oneWay` header field. The decoder in `routing_graph.js` exposes `graph.oneWay`, and
+supplies zeros for an older payload without the field. Its use by the router remains
+phase 2. `route_graph.py` reports each generated source separately, and `lomsdal_visten.py`
+prints the raw and base64 payload sizes. The browser's mode, routing and drawing code
+have not changed in this phase.
+
+**Malingsbo-Kloten, measured by the requested graph command.**
+
+| source | edges after noding | km |
+|---|---:|---:|
+| Shore | 31,706 | 2,381.547 |
+| Open water | 33,082 | 5,077.861 |
+| Streams | 845 | 115.547 |
+| Portages | 14,564 | 1,516.666 |
+| Portage paths | 4,177 | 160.916 |
+
+Before final clipping and noding there are 31,056 open-water chords, 5,082.673 km;
+outlines and triangulation together take **2.509 s**. The water sources have **1,318
+connected pieces**, joined by **2,942 portage chords**, 1,517.219 km, and **2,161 distinct
+walking ties**. Final edge counts include cuts at every meeting with the other sources;
+they are not counts of the original chords. The combined network holds **247,210 edges**
+and **46,280 chains**, including 2,088 Shore, 31,043 Open water and 345 Streams chains.
+All **3,960,895** height samples were read, with no missing values, at the existing 5 m
+spacing from the 4 m height mosaic.
+
+The same run builds the walking network first for the portage feet: **57.250 s and
+153,481 edges**, compared with **96.217 s** for portages and combined noding. These times
+measure graph construction; they exclude source loading, coverage, height sampling and
+chain reporting. The combined measurement also excludes the separately timed 2.509 s
+outline/triangulation step. The new build still needs the walking pass to locate the
+portage feet: all three measured stages total **155.976 s**, compared with 57.250 s
+for walking noding alone. The walking baseline is 12,804 chains and 153,481 edges,
+matching the existing main-checkout page; the plan's 12,779 and 153,447 are an earlier
+snapshot, not the baseline used for the byte comparison.
+
+**Payload bytes, before and after.** The baseline is the already-built
+`/home/eiseleu/repositories/trails/analysis/output/malingsbo-kloten.html`; the new page
+comes from this worktree's successful map build. These are the graph stream's sizes,
+excluding the JSON header and the rest of the page.
+
+| representation | before | after | increase |
+|---|---:|---:|---:|
+| raw binary | 6,064,255 | 10,872,665 | 4,808,410 |
+| gzip | 3,910,897 | 5,801,346 | 1,890,449 |
+| base64 in the page | 5,214,532 | 7,735,128 | 2,520,596 |
+
+For a map with no directed source, the sole binary change is the column of zeros.
+Inserting 153,481 zeros into the old stream and recompressing at the encoder's gzip level
+9 with timestamp 0 gives **5,215,540 base64 bytes**, an increase of **1,008 bytes**.
+Recompressing the unchanged old stream reproduces its original bytes exactly. The
+optional `,"oneWay":true` header marker adds **14 JSON bytes** separately. The complete
+new HTML file is **25,823,174 bytes**.
+
+**Validation and build conditions.** `command make graph ARGS="--park malingsbo-kloten"`
+succeeded once. The first `command make map ARGS="--park malingsbo-kloten"` completed
+its data work but stopped before encoding because this worktree had no tile-tree
+manifest. A worktree-output symlink made the existing main-checkout `tiles/` tree visible;
+the second map attempt succeeded. No tiles were built, no input was fetched, and neither
+the shared input cache nor the main checkout's output tree was written. The second map
+reproduced the report's counts; its walking and combined graph passes took 56.221 s and
+93.687 s, with 2.255 s for water geometry. Both graph and map commands ran under an
+8 GiB address-space limit. Most of the map's remaining time was the existing place-name
+matching; it was not changed for this phase.
+
+Firefox 153 decoded both payloads with the new decoder in fresh browser contexts with
+network requests blocked. Every source flag was checked: **0 directed edges before,
+845 after, all Streams**, and all other flags zero. All node references were valid, and
+the full coordinate and height checksums matched in both cases. Decoder time was
+**107 ms before, 198 ms after** in this run. No mode, goal or chosen way was changed.
+`command make hooks-run` passed ruff formatting, ruff checking, mypy, the tests and the
+remaining repository hooks. New tests cover the hydrography readers, shore and island
+geometry, contained chords, dam cuts, portage distances and ties, directed splits,
+boolean encoding and the combined build's reports without cache writes.
+
+Abisko and Lomsdal-Visten were not built, as required. The earlier direction/scope
+contradiction is resolved by review's extension; the different baseline counts and N50
+sea-feature count are recorded here. No further phase-1 decision is pending. The N50
+width correspondence and sea-height gaps remain prerequisites for later work on
+Norwegian streams and water profiles; k and P remain phase 2's measurements.
+
+Scratch and logs: `~/mockups/kayak-mode/phase1-graph.log`, `phase1-map.log` (the failed
+attempt), `phase1-map-final.log`, `phase1-final-hooks.log`, `phase1-payload-before.py`
+and its JSON, `phase1-payload-after.json`, `phase1-norway-sea.py` and its JSON, and
+`phase1-decode.py` with `phase1-decode.json`. The flow scratch remains as recorded above.
+
+**Norway, read and sampled without building its map.** The cached municipality 1813 N50
+centreline layer contains 9,041 ElvBekk, 1,672 InnsjøMidtlinje, 461 ElvMidtlinje and 19
+ElvelinjeFiktiv features. `vannbredde` is 2 on 8,086 lines, 3 on 955 and absent on 2,152.
+The cached source and reader establish no equivalence to Topografi 50's class 2, so this
+Sweden-only stream phase leaves Norwegian stream lines out. Its build path would add
+Shore, Open water and inferred portages from the N50 surfaces. It would sample their
+heights through the existing Høydedata point reader, which rejects bathymetric depths as
+missing terrain heights; this phase has not measured the resulting sea-height gaps.
+A full Norway build could request uncached height points and was not run.
+
+The same delivery has **247 Havflate features**, rather than the plan's one sea polygon
+per municipality. The most-vertex sea polygon has **12,440 vertices over 4.794716 km²**;
+10 m simplification leaves **761 vertices**. Its triangulation has 2,115 edges, 1,523
+contained edges including rings, and takes **0.050025 s** for simplification,
+triangulation and containment. This sample gives no reason for extra chord-only thinning.
+It is a sample of one cached municipality, not a Norway-wide performance claim.
 
 ## 6. How the figures here were obtained
 

@@ -123,6 +123,7 @@ def decode(payload: Payload) -> dict[str, object]:
     chain_at = np.cumsum([0, *(cursor.varint() for _ in range(count))])
 
     flags = cursor.take(edges)
+    one_way = list(cursor.take(edges)) if header.get("oneWay") else [0] * edges
     from_node, to_node, tail = [], [], 0
     for edge in range(edges):
         head = tail + cursor.zigzag()
@@ -168,6 +169,7 @@ def decode(payload: Payload) -> dict[str, object]:
         "flags": list(flags),
         "from_node": from_node,
         "to_node": to_node,
+        "one_way": one_way,
         "sources": sources,
         "waymarked": [header["waymarked"][code & 0x03] for code in derived],
         "no_path_recorded": [bool(code & header["noPathBit"]) for code in derived],
@@ -718,3 +720,25 @@ def test_two_areas_with_one_id_are_refused() -> None:
 
     with pytest.raises(ValueError, match="more than once"):
         encoded(chains((line, "a")), graph((line, "a", 0, 1, "FKB", [10.0, 11.0])), areas=twice)
+
+
+def test_direction_travels_in_edge_order_and_is_false_on_older_graphs() -> None:
+    line = LineString([(13.0, 65.6), (13.001, 65.601)])
+    edge_frame = graph((line, "a", 0, 1, "FKB", [10.0, 15.0]))
+    chain_frame = chains((line, "a"))
+    assert decode(encoded(chain_frame, edge_frame))["one_way"] == [0]
+    edge_frame["one_way"] = True
+    payload = encoded(chain_frame, edge_frame)
+    assert payload.sections["oneWay"] == 1
+    assert decode(payload)["one_way"] == [1]
+    assert decode(payload)["from_node"] == [0]
+    assert decode(payload)["to_node"] == [1]
+
+
+@pytest.mark.parametrize("value", [None, "False", 1])
+def test_direction_refuses_a_missing_or_non_boolean_value(value) -> None:
+    line = LineString([(13.0, 65.6), (13.001, 65.601)])
+    edge_frame = graph((line, "a", 0, 1, "FKB", [10.0, 15.0]))
+    edge_frame["one_way"] = value
+    with pytest.raises(ValueError, match="one_way"):
+        encoded(chains((line, "a")), edge_frame)

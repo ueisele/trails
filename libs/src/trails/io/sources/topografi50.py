@@ -457,6 +457,30 @@ class Source:
         """
         return self._placed(MARK, LAYER_LAND, bounds, WATER_CLASSES, force_download)
 
+    def streams(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
+        """Read stream lines, including their size class and digitised flow.
+
+        Args:
+            bounds: The box, WGS 84
+            force_download: Ask the API for the newest delivery first
+
+        Returns:
+            Lines in WGS 84 with ``storleksklass`` and the source's identity
+        """
+        return self._placed(HYDROGRAFI, LAYER_STREAMS, bounds, ("Vattendrag",), force_download)
+
+    def dams(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
+        """Read dam points and lock gates that interrupt a paddled stream.
+
+        Args:
+            bounds: The box, WGS 84
+            force_download: Ask the API for the newest delivery first
+
+        Returns:
+            Points in WGS 84, classified by :data:`TYPE`
+        """
+        return self._placed(HYDROGRAFI, "hydroanlaggningspunkt", bounds, ("Dammbyggnad, punkt", "Slussport"), force_download)
+
     def rivers(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
         """The rivers drawn as a surface over a box, as outlines.
 

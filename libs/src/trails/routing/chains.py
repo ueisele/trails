@@ -217,6 +217,11 @@ def build_chains(
     if not geometries:
         return _assemble(source, [], [], pieces, identities, tolerance_m)
 
+    if source.directed:
+        # A junction may join two incoming streams. Keeping each piece avoids
+        # turning either flow round to manufacture a continuous chain.
+        return _assemble(source, [list(line.coords) for line in geometries], [[i] for i in range(len(geometries))], pieces, identities, tolerance_m)
+
     # An arm is one end of one piece: piece i arrives at the node as arm 2i and
     # leaves it as arm 2i+1.
     ends = np.array([coordinate for geometry in geometries for coordinate in (geometry.coords[0], geometry.coords[-1])], dtype=float)
@@ -696,9 +701,14 @@ def _canonical(coordinates: Sequence[Coordinate], tolerance_m: float) -> list[Co
         The same coordinates, possibly reversed and — for a chain that closes on
         itself, which has no ends to compare — cut at its lowest coordinate
     """
+    return _canonical_direction(coordinates, tolerance_m)[0]
+
+
+def _canonical_direction(coordinates: Sequence[Coordinate], tolerance_m: float) -> tuple[list[Coordinate], bool]:
+    """Canonical coordinates and whether their order opposes the supplied line."""
     points = list(coordinates)
     if len(points) < 3 or math.dist(points[0], points[-1]) > tolerance_m:
-        return points if points[0] <= points[-1] else points[::-1]
+        return (points, False) if points[0] <= points[-1] else (points[::-1], True)
 
     # A ring assembled from several pieces holds two copies of the node it
     # closes at, a fraction of the tolerance apart. Close it exactly.
@@ -707,7 +717,7 @@ def _canonical(coordinates: Sequence[Coordinate], tolerance_m: float) -> list[Co
     start = min(range(len(ring)), key=lambda index: ring[index])
     forward = ring[start:] + ring[:start]
     backward = [forward[0], *reversed(forward[1:])]
-    return (forward if forward <= backward else backward) + [forward[0]]
+    return (forward + [forward[0]], False) if forward <= backward else (backward + [forward[0]], True)
 
 
 def _combine(values: Iterable[object]) -> object:
@@ -763,9 +773,14 @@ def _assemble(
     for attribute in source.attributes:
         columns[attribute] = []
 
+    if source.directed:
+        columns["flow_reversed"] = []
     geometries: list[LineString] = []
     for points, rows in zip(coordinates, members, strict=True):
-        geometry = LineString(_canonical(points, tolerance_m))
+        canonical, reversed_ = _canonical_direction(points, tolerance_m)
+        geometry = LineString(canonical)
+        if source.directed:
+            columns["flow_reversed"].append(reversed_)
         geometries.append(geometry)
 
         columns["source"].append(source.name)

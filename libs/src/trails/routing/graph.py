@@ -56,7 +56,7 @@ DEFAULT_BRIDGE_COST_FACTOR = 1.3
 MIN_EDGE_M = 0.5
 
 #: Columns of the edge frame.
-EDGE_COLUMNS = ("from_node", "to_node", "cost", "source", "kind", "chain_id", "length_m")
+EDGE_COLUMNS = ("from_node", "to_node", "cost", "source", "kind", "chain_id", "length_m", "one_way")
 
 
 @dataclass(frozen=True)
@@ -136,6 +136,8 @@ def build_network(
     edges, nodes, stopped = _split_into_edges(chains, {source.name: source for source in sources}, ferry_cost_m, tolerance_m)
     edges, nodes = _with_bridges(edges, nodes, stopped, bridge_m, bridge_cost_factor, tolerance_m)
 
+    # Inferred chords take part in noding but are never a selectable way.
+    chains = chains[chains["kind"] != BRIDGE].reset_index(drop=True)
     edges["component"] = label_components(edges)
     nodes = _describe_nodes(nodes, edges)
     return Network(chains=chains, edges=edges, nodes=nodes)
@@ -219,9 +221,14 @@ def _split_into_edges(
         for index, (piece, start_cut, end_cut) in enumerate(zip(pieces, cuts[:-1], cuts[1:], strict=True)):
             if piece is None:
                 continue
+            first_stop, last_stop = index == 0, index == len(pieces) - 1
+            if source.directed and bool(chains["flow_reversed"].iloc[position]):
+                piece = shapely.reverse(piece)
+                start_cut, end_cut = end_cut, start_cut
+                first_stop, last_stop = last_stop, first_stop
             meets.extend(((start_cut.x, start_cut.y), (end_cut.x, end_cut.y)))
             lands.extend(((piece.coords[0][0], piece.coords[0][1]), (piece.coords[-1][0], piece.coords[-1][1])))
-            stops.extend((index == 0, index == len(pieces) - 1))
+            stops.extend((first_stop, last_stop))
             exact.extend((not simplified[position], not simplified[position]))
             geometries.append(piece)
             rows.append(
@@ -231,7 +238,8 @@ def _split_into_edges(
                     "cost": _cost(piece.length, chain_lengths[position], source, ferry_cost_m),
                     "source": source.name,
                     "kind": source.kind,
-                    "chain_id": chain_ids[position],
+                    "chain_id": None if source.kind == BRIDGE else chain_ids[position],
+                    "one_way": source.directed,
                     "length_m": piece.length,
                 }
             )
@@ -460,6 +468,7 @@ def _split_edges(
                     "source": row.source,
                     "kind": row.kind,
                     "chain_id": row.chain_id,
+                    "one_way": bool(row.get("one_way", False)),
                     "length_m": piece.length,
                 }
             )
@@ -522,6 +531,7 @@ def _connectors(
                 "source": BRIDGE,
                 "kind": BRIDGE,
                 "chain_id": None,
+                "one_way": False,
                 "length_m": connector.length,
             }
         )

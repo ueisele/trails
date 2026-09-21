@@ -1,4 +1,4 @@
-"""The walking network these seven Norwegian datasets make between them.
+"""The walking and water network these Norwegian datasets make between them.
 
 :mod:`trails.routing` knows how to turn named GeoDataFrames into chains and
 edges and nothing else; it has never heard of Kartverket. This module is the
@@ -19,16 +19,17 @@ worse fault than either of them being wrong, because nothing would say so.
     >>> network, chains = build(masks=masks, sources=loaded.sources, clip=zone, params=params, name="lomsdal-visten", protected=loaded.protected)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, NamedTuple
 
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry import box
 
 from trails.io.sources import hoydedata, kommuneinfo, n50, naturbase, overpass, stedsnavn, traktorvegsti, ut
 from trails.io.sources.geonorge import Source as GeonorgeSource
 from trails.io.sources.language import Language
-from trails.network import graphs
+from trails.network import graphs, water
 from trails.network.graphs import PROTECTED_SIMPLIFY_M, SURVEYED_FIELD, Masks, Rules
 from trails.routing import (
     DEFAULT_MARKED_M,
@@ -41,7 +42,7 @@ from trails.routing import (
     with_elevation,
 )
 from trails.routing.noding import clip_lines
-from trails.routing.sources import FERRY
+from trails.routing.sources import FERRY, PADDLE
 from trails.utils.geo import attach_nearest
 
 #: Metric CRS for Norway. The routing module works in it, so every length and
@@ -60,7 +61,7 @@ N50_ROADS = "N50 roads"
 OSM = "OSM"
 FERRIES = "Ferries"
 
-#: Every source, in the order :func:`load_sources` returns them.
+#: The drawn sources, in the order :func:`load_sources` returns them.
 SOURCE_NAMES = (UT, TURRUTEBASEN, FKB, N50_PATHS, N50_ROADS, OSM, FERRIES)
 
 #: Cost factor per source. Priority belongs here and nowhere else — a route
@@ -453,6 +454,10 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         # the UT.no routes start — cannot be reached at all.
         NetworkSource(FERRIES, ferries, kind=FERRY, attributes=("typeveg", SURVEY_FIELD, SURVEYED_FIELD)),
     ]
+    print("\nLoading N50 water for the paddled network...")
+    surfaces = gpd.clip(n50_source.load_water(codes, force_download=download), box(*zone.total_bounds))
+    sources.extend(water.sources(surfaces, metric_crs=METRIC_CRS))
+
     # One order covers all three N50 layers, so all three carry its date. The
     # height model is not here: it is read per point rather than ordered, and
     # what an exported file says about it is the rule it was sampled under
@@ -582,7 +587,14 @@ def build(
         ValueError: If the height endpoint does not speak the CRS the network is
             built in
     """
-    return graphs.build(sources, masks, clip, params, RULES, name=name, protected=protected, measure=lambda network: measure(network, params))
+    if any(source.kind == PADDLE or source.directed for source in sources):
+        return water.build(sources, masks, clip, params, RULES, protected=protected, measure=lambda network: measure(network, params))
+    network, counts = graphs.build(
+        sources, masks, clip, params, RULES, name=name, protected=protected, measure=lambda network: measure(network, params)
+    )
+    if "one_way" not in network.edges:
+        network = replace(network, edges=network.edges.assign(one_way=False))
+    return network, counts
 
 
 def measure(network: Network, params: Params) -> Network:

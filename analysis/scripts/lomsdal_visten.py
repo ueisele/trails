@@ -3045,7 +3045,7 @@ def laid_out(network: Network) -> tuple[pd.DataFrame, gpd.GeoSeries]:
     order = chain_order(network.chains, network.edges)
     tracks = chain_tracks(network.chains, network.edges, order)
     print(f"\nExport tracks: {int(tracks.count_coordinates().sum()):,} points over {int(network.chains['length_m'].sum() / 1000):,} km")
-    print(f"\nChains from the graph: {len(network.chains):,} drawn, over {len(network.edges):,} routing edges")
+    print(f"\nChains from the graph: {len(network.chains):,}, over {len(network.edges):,} routing edges")
     return order, tracks
 
 
@@ -4316,6 +4316,7 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
     print(f"  {len(laid):,} rivers as outlines, {river_vertices:,} vertices at {RIVER_TOLERANCE_M:g} m")
     print(f"  {counted['edges']:,} edges on {counted['nodes']:,} nodes, {counted['vertices']:,} vertices at full source precision")
     print(f"  {counted['samples']:,} height samples, quantised at {counted['coordinateQuantum']:g}° and {counted['elevationQuantum']:g} m")
+    print(f"  Routing payload: {sum(payload.sections.values()):,} raw bytes, {len(payload.data):,} base64 bytes")
     print(f"  {payload.raw_mb:.2f} MB encoded, {payload.size_mb:.2f} MB gzipped and base64 in the page")
     print(f"    before compression: {' · '.join(f'{name} {size / 1e6:.2f}' for name, size in payload.sections.items())}")
     maps.add_routing_graph(fmap, payload.header, payload.data)

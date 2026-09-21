@@ -72,6 +72,7 @@
                 for (i = 0; i < chains; i += 1) { chainAt[i + 1] = chainAt[i] + cursor.varint(); }
 
                 var flags = cursor.take(edges);
+                var oneWay = header.oneWay ? cursor.take(edges) : new Uint8Array(edges);
                 var fromNode = new Int32Array(edges), toNode = new Int32Array(edges);
                 var tail = 0;
                 for (i = 0; i < edges; i += 1) {
@@ -193,7 +194,7 @@
                     // between two edges is sampled by both — and breaking rather
                     // than joining wherever bit 1 says a new stretch begins.
                     chainIds: chainIds, chainOf: chainOf, chainAt: chainAt, flags: flags,
-                    fromNode: fromNode, toNode: toNode, sources: sources,
+                    fromNode: fromNode, toNode: toNode, sources: sources, oneWay: oneWay,
                     waymarked: waymarked, noPathRecorded: noPathRecorded,
                     protectedAt: protectedAt, protectedArea: protectedArea, protectedShare: protectedShare,
                     vertexAt: vertexAt, coordinates: coordinates,

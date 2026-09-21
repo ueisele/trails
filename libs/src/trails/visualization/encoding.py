@@ -58,6 +58,7 @@ single cursor and never has to seek::
     chains        M x (varint length, UTF-8 bytes)   chain ids, in chain order
     chainEdges    M x varint          edges lying on each chain; the rest are connectors
     flags         N x byte            bit 0 runs against its chain, bit 1 begins a new stretch
+    oneWay        N x byte            1 for travel only from_node to to_node, otherwise 0
     nodes         2N x zigzag varint  head against the last edge's tail, then tail against head
     sources       N x byte            index into the header's source table
     derived       N x byte            bits 0-1 index the header's waymarked table, bit 2 no path recorded
@@ -108,6 +109,7 @@ STREAM_SECTIONS = (
     "chains",
     "chainEdges",
     "flags",
+    "oneWay",
     "nodes",
     "sources",
     "derived",
@@ -418,6 +420,10 @@ def encode_graph(
     flipped = placed["flipped"].to_numpy(dtype=bool)
     table, code_of = _source_table(laid, costs)
 
+    one_way = laid.get("one_way", pd.Series(False, index=laid.index))
+    if one_way.isna().any() or any(not isinstance(value, (bool, np.bool_)) for value in one_way):
+        raise ValueError("one_way must contain one boolean per edge")
+
     coordinates, vertices = _coordinates(laid, coordinate_quantum)
     heights, samples = _heights(laid, elevation_quantum)
     area_table, area_code = _area_table(areas)
@@ -426,6 +432,7 @@ def encode_graph(
         "chains": _strings(chain_ids),
         "chainEdges": varints(_edges_per_chain(names, chain_ids)),
         "flags": (flipped.astype(np.uint8) | (placed["run_start"].to_numpy(dtype=bool).astype(np.uint8) << 1)).tobytes(),
+        "oneWay": one_way.to_numpy(dtype=np.uint8).tobytes(),
         "nodes": _nodes(laid, flipped),
         "sources": np.array([code_of[name] for name in laid["source"].tolist()], dtype=np.uint8).tobytes(),
         "derived": _derived(laid),
@@ -440,6 +447,7 @@ def encode_graph(
     ends = np.concatenate([laid["from_node"].to_numpy(dtype=np.int64), laid["to_node"].to_numpy(dtype=np.int64)])
     header = {
         "version": PAYLOAD_VERSION,
+        "oneWay": True,
         "crs": PAYLOAD_CRS,
         "edges": len(laid),
         "chains": len(chain_ids),
