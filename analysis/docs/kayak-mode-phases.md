@@ -349,6 +349,11 @@ within 0.5 m of one another), *the walking modes never take the water* (the same
 points in walking mode: no `paddled` part, the way as it was). The scene puts the mode back
 at the end, as the goal helper does (`malingsbo-kloten-decisions.md` §10, phase 9's lesson).
 
+*Built 2026-09-21 (codex, `c766ceb`): the kayak triple and five readings on Malingsbo-Kloten
+— a shore of 2,123 m all paddled, a bay cut at 1,066 m against 2,502 m round, a portage of
+1,275 m on mapped paths, water profiles flat, the walking modes unchanged; the dry way moved
+2 mm with the noding; 1,417 readings, none broken.*
+
 ### Phase 5 — Rebuild, drive, publish
 
 The three graphs and pages rebuilt on this box (`make graph` and `make map` per map, the last
