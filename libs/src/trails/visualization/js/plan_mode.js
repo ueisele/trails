@@ -47,6 +47,35 @@
                 return stayingOnPaths;
             }
 
+            var paddling = null;
+            function kayak() {
+                if (paddling === null) {
+                    try { paddling = window.localStorage.getItem(keptKey() + '.kayak') === 'yes'; }
+                    catch (blocked) { paddling = false; }
+                }
+                return paddling;
+            }
+            function paddle(want) {
+                if (want === undefined) { return kayak(); }
+                want = !!want;
+                if (want === kayak()) { return paddling; }
+                paddling = want;
+                try {
+                    if (want) { window.localStorage.setItem(keptKey() + '.kayak', 'yes'); }
+                    else { window.localStorage.removeItem(keptKey() + '.kayak'); }
+                } catch (blocked) { /* remembered for this visit only */ }
+                routing = null;
+                if (points.length > 1) {
+                    legs.forEach(function (leg) { if (leg) { undraw(leg.layers); } });
+                    legs = [];
+                    withGraph(function (graph) { relink(graph, true); }, function () { refresh(); });
+                }
+                if (goalAt) { goalToken = null; routeToGoal(goalHere()); }
+                refreshGoal();
+                refresh();
+                return paddling;
+            }
+
             // Everything named that the map draws at a position, as a table:
             // name, what it is and where. The markers themselves cannot answer
             // this — their names are inside popup HTML — and a route's file
@@ -71,7 +100,7 @@
             // connector, handed in rather than spelled here: renaming either in
             // trails.routing.sources would otherwise leave this page reading
             // every ferry as walked ground, and nothing would look wrong.
-            var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind;
+            var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind, PADDLE = PLAN.paddleKind;
 
             // How each kind is drawn. Routed is a line; ground drawn straight
             // across is dashed exactly as the profile dashes it; a crossing is a
@@ -117,7 +146,7 @@
                 // there are 948,465.
                 var between = panel().metresBetween;
 
-                var length = new Float64Array(edges), cost = new Float64Array(edges);
+                var length = new Float64Array(edges), cost = new Float64Array(edges), snapNodes = new Uint8Array(nodes);
                 for (i = 0; i < edges; i += 1) {
                     var run = 0;
                     for (var v = graph.vertexAt[i] + 1; v < graph.vertexAt[i + 1]; v += 1) {
@@ -139,7 +168,14 @@
 
                 for (i = 0; i < edges; i += 1) {
                     var source = graph.header.sources[graph.sources[i]];
-                    if (source.flatM === undefined) { cost[i] = length[i] * source.factor; }
+                    if (source.kind !== CROSSING && source.kind !== CONNECTOR && (kayak() || source.kind !== PADDLE)) {
+                        snapNodes[graph.fromNode[i]] = 1; snapNodes[graph.toNode[i]] = 1;
+                    }
+                    if (source.kind === PADDLE && !kayak()) { cost[i] = Infinity; }
+                    else if (source.flatM === undefined) {
+                        cost[i] = length[i] * source.factor * (kayak() && source.kind !== PADDLE && source.kind !== CROSSING
+                            ? PLAN.portageFactor : 1);
+                    }
                     // A crossing costs the header's flat figure rather than its
                     // length: taking a ferry is the same decision whether it is
                     // 2 km or 20, so weighting it by distance means nothing and
@@ -173,7 +209,7 @@
                 // Filling leaves at[v + 1] at the end of node v's arcs, which is
                 // where node v + 1's begin, so afterwards node v owns
                 // arc[at[v] .. at[v + 1]).
-                routing = {length: length, cost: cost, at: at, arc: arc,
+                routing = {length: length, cost: cost, at: at, arc: arc, snapNodes: snapNodes,
                            best: new Float64Array(nodes), viaEdge: new Int32Array(nodes), viaNode: new Int32Array(nodes)};
                 return routing;
             }
@@ -235,14 +271,27 @@
             // across to the junction. A point on neither has no ends here;
             // `joinedRoute` prices its way in over the ground. A cut runs from
             // the point to the node; `flipCut` turns it round for the far end.
-            function endsOf(graph, point) {
+            // Both searches keep both arcs; it is the journey's direction that
+            // matters, even when the search works back from its destination.
+            function allowed(graph, edge, downstream) {
+                return (kayak() || graph.header.sources[graph.sources[edge]].kind !== PADDLE) &&
+                    (!graph.oneWay[edge] || downstream);
+            }
+
+            function endsOf(graph, point, entering) {
+                if (point.edge >= 0) {
+                    var kind = graph.header.sources[graph.sources[point.edge]].kind;
+                    if (kind === CROSSING || (kind === PADDLE && !kayak())) { return []; }
+                }
                 if (point.node >= 0) { return [{node: point.node, cost: 0, cut: null}]; }
                 if (!(point.edge >= 0)) { return []; }
                 var work = router(graph), edge = point.edge;
                 var length = work.length[edge], rate = length > 0 ? work.cost[edge] / length : 0;
                 var along = Math.max(0, Math.min(length, point.along || 0));
                 return [{node: graph.fromNode[edge], cost: along * rate, cut: {edge: edge, from: along, to: 0}},
-                        {node: graph.toNode[edge], cost: (length - along) * rate, cut: {edge: edge, from: along, to: length}}];
+                        {node: graph.toNode[edge], cost: (length - along) * rate, cut: {edge: edge, from: along, to: length}}].filter(function (end) {
+                            return allowed(graph, edge, entering ? end.cut.from >= end.cut.to : end.cut.to >= end.cut.from);
+                        });
             }
 
             function flipCut(cut) { return cut ? {edge: cut.edge, from: cut.to, to: cut.from} : null; }
@@ -260,10 +309,11 @@
             function routeBetween(graph, from, to) {
                 var work = router(graph);
                 var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
-                var seeds = endsOf(graph, from), targets = endsOf(graph, to), i;
+                var seeds = endsOf(graph, from), targets = endsOf(graph, to, true), i;
                 if (!seeds.length || !targets.length) { return null; }
                 var direct = null;
-                if (from.edge >= 0 && from.edge === to.edge) {
+                if (from.edge >= 0 && from.edge === to.edge &&
+                        allowed(graph, from.edge, (to.along || 0) >= (from.along || 0))) {
                     var rate = work.length[from.edge] > 0 ? work.cost[from.edge] / work.length[from.edge] : 0;
                     direct = {edges: [], reversed: [], cost: Math.abs((to.along || 0) - (from.along || 0)) * rate,
                               head: {edge: from.edge, from: from.along || 0, to: to.along || 0}, tail: null};
@@ -305,6 +355,7 @@
                     if (found && taken.cost >= found.cost) { break; }
                     for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
                         var edge = work.arc[a];
+                        if (!allowed(graph, edge, graph.fromNode[edge] === taken.node)) { continue; }
                         var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
                         var reached = taken.cost + work.cost[edge];
                         if (reached < best[other]) {
@@ -410,9 +461,9 @@
             // the second case needs no case of its own.
             //
             // **Priced when it is asked for, not when it is seeded.** Every
-            // node is seeded with its connector's price over ground, which is
-            // a floor -- water only adds -- and the true price is worked out
-            // when that floor reaches the top of the queue. It is the
+            // node is seeded at the cheapest connector metre in the mode,
+            // which is a floor whether water is dearer or cheaper than ground.
+            // The true price is worked out when that floor reaches the top of the queue. It is the
             // ordinary trick for an edge whose weight is dear to compute, and
             // it is what keeps the grid from being asked about 117,000
             // connectors on every tick of a drag. The bound and the pruning
@@ -433,7 +484,7 @@
                 var nodes = graph.header.nodes;
                 if (!nodes) { return null; }
                 var far = panel().metresBetween;
-                var off = offPath();
+                var off = cheapestMetre(graph);
                 var work = router(graph);
                 var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
                 viaEdge.fill(-1); viaNode.fill(-1);
@@ -462,7 +513,7 @@
                 // before it, so nothing that matters is pruned. Measured on
                 // one 13.6 km leg, routed and redrawn: 157 ms seeding and
                 // exhausting the whole graph, 64 ms bounded. Seeded with the
-                // price over ground, which is a floor on the true one -- and
+                // cheapest connector price, which is a floor on the true one -- and
                 // into the floors' own queue, not into `best`.
                 best.fill(Infinity);
                 // **A far end standing on the network leaves it by its own
@@ -472,7 +523,7 @@
                 // point on a line is reached along the line, which is the
                 // whole of what a tap in the middle of a long trail means.
                 var tailCuts = {};
-                var toEnds = endsOf(graph, to);
+                var toEnds = endsOf(graph, to, true);
                 for (i = 0; i < toEnds.length; i += 1) {
                     if (toEnds[i].cost >= plain || toEnds[i].cost >= best[toEnds[i].node]) { continue; }
                     best[toEnds[i].node] = toEnds[i].cost;
@@ -528,6 +579,7 @@
                     if (taken.cost > best[taken.node]) { continue; }
                     for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
                         var edge = work.arc[a];
+                        if (!allowed(graph, edge, graph.toNode[edge] === taken.node)) { continue; }
                         var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
                         var reached = taken.cost + work.cost[edge];
                         if (reached < best[other]) {
@@ -568,25 +620,33 @@
                 return joined;
             }
 
-            // **What a straight walk costs, by what it crosses.** Its metres at
-            // `offPathFactor`, except the ones the graph's water grid says are
-            // sea or lake, which cost `waterFactor` each. Sampled once per cell
-            // along the line, at the middle of each piece, so that a walk
-            // shorter than a cell asks once and a walk of 1.2 km asks
-            // forty-eight times -- and a page whose graph carries no grid
-            // prices every metre as ground, which is what every page did
-            // before the grid existed.
+            function openWaterFactor(graph) {
+                var source = graph.header.sources.find(function (each) { return each.name === 'Open water' && each.kind === PADDLE; });
+                if (!source) { throw new Error('the kayak mode needs the Open water source'); }
+                return source.factor;
+            }
+
+            // Water is cheaper than ground in a kayak. A connector's floor must
+            // stay below either price, including when the reader changes k.
+            function cheapestMetre(graph) {
+                return kayak() ? Math.min(openWaterFactor(graph), offPath() * PLAN.portageFactor) : offPath();
+            }
+
+            // The grid prices each piece at its midpoint. A map without a grid
+            // can only price a connector as ground.
             function priced(graph, aLon, aLat, bLon, bLat) {
                 var length = panel().metresBetween(aLon, aLat, bLon, bLat);
+                var ground = offPath() * (kayak() ? PLAN.portageFactor : 1);
+                var waterPrice = kayak() ? openWaterFactor(graph) : PLAN.waterFactor;
                 var grid = graph.water;
-                if (!grid || !(PLAN.waterFactor > offPath())) { return length * offPath(); }
+                if (!grid || (!kayak() && !(waterPrice > ground))) { return length * ground; }
                 var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0;
                 for (var i = 0; i < pieces; i += 1) {
                     var t = (i + 0.5) / pieces;
                     if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }
                 }
                 var water = length * wet / pieces;
-                return (length - water) * offPath() + water * PLAN.waterFactor;
+                return (length - water) * ground + water * waterPrice;
             }
 
             // **The way out of an entry node, read off the search that settled
@@ -706,10 +766,10 @@
                 // counted, apart, under its own name.
                 if (source.kind === CONNECTOR) { out.undrawn += metres; return; }
                 out.sources[source.name] = (out.sources[source.name] || 0) + metres;
-                // A crossing is not walking and no register marks water, so
-                // it is credited for its metres and counted in none of the
-                // buckets. Its length is reported apart, as a crossing.
-                if (source.kind === CROSSING) { return; }
+                // No register marks water. Both kinds keep their source
+                // credit without a marking bucket; paddling, unlike a ferry,
+                // also counts the protected area already tallied above.
+                if (source.kind === CROSSING || source.kind === PADDLE) { return; }
                 // header.waymarked[0] is null and means the edge was never
                 // asked. That is not 'unknown', which means it was asked and
                 // no source answered, and the two must not be added together.
@@ -942,7 +1002,7 @@
                         for (var e = index.at[cell]; e < index.at[cell + 1]; e += 1) {
                             var edge = index.item[e];
                             var kind = graph.header.sources[graph.sources[edge]].kind;
-                            if (kind === CROSSING || kind === CONNECTOR) { continue; }
+                            if (kind === CROSSING || kind === CONNECTOR || (kind === PADDLE && !kayak())) { continue; }
                             var v = index.vert[e];
                             var ax = co[2 * v], ay = co[2 * v + 1];
                             var ex = (co[2 * v + 2] - ax) * lonScale, ey = co[2 * v + 3] - ay;
@@ -3953,6 +4013,17 @@
             function snapped(graph, lat, lon, within) {
                 var reach = within === undefined ? PLAN.snapM : within;
                 var node = graph.nearestNode(lat, lon, reach);
+                // The nearest node may belong only to water and its portage
+                // ties. Skipping water edges alone would still snap to it.
+                if (node >= 0 && !router(graph).snapNodes[node]) {
+                    var eligible = router(graph).snapNodes, nearest = reach;
+                    node = -1;
+                    for (var n = 0; n < graph.header.nodes; n += 1) {
+                        if (!eligible[n]) { continue; }
+                        var away = panel().metresBetween(lon, lat, graph.nodeLon[n], graph.nodeLat[n]);
+                        if (away < nearest) { nearest = away; node = n; }
+                    }
+                }
                 var line = nearestOnNetwork(graph, lat, lon, reach);
                 if (node >= 0) {
                     var nodeM = panel().metresBetween(lon, lat, graph.nodeLon[node], graph.nodeLat[node]);
@@ -6791,6 +6862,7 @@
                 // Read with no argument, set with one: the price of open
                 // ground, ten to one or the build's three.
                 stayOnPaths: stayOnPaths,
+                kayak: paddle,
                 // **What the row at the foot offers, and how it knows whether to
                 // offer a choice.** The panel's own button writes the whole tour
                 // -- one writer, asked from three places, as `saveWhole` says --
@@ -7050,11 +7122,12 @@
                 // way in; both belong after the payload the page already waits
                 // for rather than in front of a reader watching it load.
                 if (window.trailsGraph) {
-                    window.trailsGraph.ready.then(function () { restoreKept(); restoreGoal(); },
+                    window.trailsGraph.ready.then(function () { restoreKept(); restoreGoal(); refreshGoal(); },
                                                   function () {});
                 } else {
                     restoreKept();
                     restoreGoal();
+                    refreshGoal();
                 }
             } else {
                 console.error('plan mode: there is no profile panel in this page, so nothing can be planned');

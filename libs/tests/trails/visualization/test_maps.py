@@ -5444,6 +5444,8 @@ class TestPlanMode:
             "waterFactor": 30.0,
             "crossingKind": "ferry",
             "connectorKind": "bridge",
+            "paddleKind": "paddle",
+            "portageFactor": 4.0,
             "touchedM": 100.0,
             "namedM": 50.0,
             "indexCellM": 100.0,
@@ -6379,7 +6381,7 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned(crossingKind=FERRY, connectorKind=BRIDGE))
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind;" in planning
+        assert "var CROSSING = PLAN.crossingKind, CONNECTOR = PLAN.connectorKind, PADDLE = PLAN.paddleKind;" in planning
         assert f'"crossingKind": "{FERRY}"' in fmap.get_root().render()
         assert f'"connectorKind": "{BRIDGE}"' in fmap.get_root().render()
 
@@ -6951,7 +6953,7 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function goalKeptKey() { return keptKey() + '.goal'; }" in planning
-        assert "window.trailsGraph.ready.then(function () { restoreKept(); restoreGoal(); }," in planning
+        assert "window.trailsGraph.ready.then(function () { restoreKept(); restoreGoal(); refreshGoal(); }," in planning
         # A goal that is not there is not a goal stored as null: the entry goes.
         assert "if (!goalAt) { window.localStorage.removeItem(goalKeptKey()); return; }" in planning
 
@@ -7113,7 +7115,7 @@ class TestPlanMode:
         # The line, over the index, and never a crossing or a connector.
         assert "function nearestOnNetwork(graph, lat, lon, withinM) {" in planning
         assert "var index = edgeIndex(graph);" in planning
-        assert "if (kind === CROSSING || kind === CONNECTOR) { continue; }" in planning
+        assert "if (kind === CROSSING || kind === CONNECTOR || (kind === PADDLE && !kayak())) { continue; }" in planning
         assert "return {edge: best, along: along, lon: foot.lon, lat: foot.lat, m: Math.sqrt(closest) * 111320};" in planning
         # A junction as near as the line is the junction.
         assert "var NODE_FIRST_M = 2;" in planning
@@ -7122,7 +7124,7 @@ class TestPlanMode:
         # On the network is on a node or on an edge; either end of the edge at
         # the edge's own price, with the piece to it as a cut.
         assert "function onNetwork(point) { return point.node >= 0 || point.edge >= 0; }" in planning
-        assert "function endsOf(graph, point) {" in planning
+        assert "function endsOf(graph, point, entering) {" in planning
         assert "var length = work.length[edge], rate = length > 0 ? work.cost[edge] / length : 0;" in planning
         assert "return [{node: graph.fromNode[edge], cost: along * rate, cut: {edge: edge, from: along, to: 0}}," in planning
         # One search from every end to every end, stopped by the cheapest
@@ -7138,7 +7140,7 @@ class TestPlanMode:
         assert "var head = found.head ? cutPart(graph, found.head) : null;" in planning
         # And the joined way takes an end on the network by its edge, not by
         # a walk over the ground to a node.
-        assert "var toEnds = endsOf(graph, to);" in planning
+        assert "var toEnds = endsOf(graph, to, true);" in planning
         assert "for (i = 0; i < nodes && !toEnds.length; i += 1) {" in planning
         assert "joined.tailCut = tailCuts[joined.tail] || null;" in planning
         assert "joined.headCut ? pieceOf(joined.headCut) : walkTo(graph, from, enter, mayAsk)," in planning
@@ -7325,7 +7327,7 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function joinedRoute(graph, from, to) {" in planning
-        assert "var off = offPath();" in planning
+        assert "var off = cheapestMetre(graph);" in planning
         # Every node seeded with the walk off the network at it, except the
         # ones already dearer than walking the whole way — an exact bound and
         # not a heuristic. Measured on one 13.6 km leg, routed and redrawn:
@@ -7387,10 +7389,10 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function priced(graph, aLon, aLat, bLon, bLat) {" in planning
-        assert "if (!grid || !(PLAN.waterFactor > offPath())) { return length * offPath(); }" in planning
+        assert "if (!grid || (!kayak() && !(waterPrice > ground))) { return length * ground; }" in planning
         assert "var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0;" in planning
         assert "if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }" in planning
-        assert "return (length - water) * offPath() + water * PLAN.waterFactor;" in planning
+        assert "return (length - water) * ground + water * waterPrice;" in planning
         # Lazily, and in a queue of its own: a floor is priced for real when
         # it is the cheaper top, and only an exact price is ever a label.
         assert "var floors = new Heap(), heap = new Heap(), i;" in planning
@@ -7636,8 +7638,8 @@ class TestPlanMode:
         assert "function offPath() { return staying() ? PATHS_FACTOR : PLAN.offPathFactor; }" in planning
         # The one place the build's figure is read; every price goes through it.
         assert planning.count("PLAN.offPathFactor") == 1
-        assert "var off = offPath();" in planning
-        assert "return (length - water) * offPath() + water * PLAN.waterFactor;" in planning
+        assert "var off = cheapestMetre(graph);" in planning
+        assert "return (length - water) * ground + water * waterPrice;" in planning
         switching = planning.split("function stayOnPaths(want) {")[1].split("\n            }\n")[0]
         assert "window.localStorage.setItem(keptKey() + '.paths', 'yes');" in switching
         assert "withGraph(function (graph) { relink(graph, true); }, function () { refresh(); });" in switching

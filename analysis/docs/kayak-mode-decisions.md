@@ -68,7 +68,7 @@ would draw it without a change.
   2026-09-21.** Review extended the scope to the shared chain and edge builders. Directed
   sources record canonical reversal; their edges recover the supplied direction and keep
   it when split. The acceptance test covers a reversed line noded in the middle.
-- **k and P** — phase 2's sweep; 1.5 and 4 until then.
+- **k and P — 1.5 and 2.** The three-leg browser sweep settles these prices; review accepted them. `OPEN_WATER_FACTOR` keeps 1.5 and `PORTAGE_FACTOR` supplies 2. Measurements and the phase 2 built note are under §5.
 - **N50's river size class — closed for phase 1 after measurement, 2026-09-21.** The cached lines carry
   `vannbredde`, with codes 2 and 3; a correspondence to Topografi 50 class 2 is not
   established. Norway's streams remain out; adding them needs that correspondence.
@@ -422,3 +422,149 @@ by box, counts them, simplifies the outlines at 5, 10 and 25 m, and joins them i
 and systems with an STRtree; `measure-water-2.py` the shoreline length, the size classes and
 the largest lakes; `canoe-osm.py` the Overpass query and `canoe-osm.json` its answer; `register-canoe.py` the register's trails by type and its facilities by type and subtype over the box, through `naturvardsregistret.Source`; the overview map PDF beside them. Run
 from the `trails` checkout with `mise exec -- uv run python <script>`.
+
+
+### Phase 2 built — The switch and the prices, 2026-09-21
+
+**The tally stop, resolved by review.** The first public `trailsPlan.fromPlaces()` checks
+failed on all three legs: `tallyEdge()` required a walking waymarking state from PADDLE
+edges, whose state is correctly null. The bay failed on Shore edge 159535, the lake on
+160145 and the portage on 157030. Review decided that PADDLE keeps its source credit,
+counts no marking bucket and is never asked about waymarking. Unlike a ferry, it counts
+its protected area: paddling inside a reserve is inside the reserve. That rule now lets
+all three public ways assemble. Parts, heights and words remain phase 3's; the current
+`routedParts()` format is retained as review explicitly allowed.
+
+**What changed.** `plan_mode.js` adds the persisted kayak setting, prices,
+the shared direction predicate for both searches and partial edges, and the cheapest
+connector metre. Both arcs remain. The cost table is dropped on a mode change. Snapping
+also checks node eligibility: skipping water edges alone still left their nodes and
+portage feet snappable. `profile_panel.js` adds the Kayak switch beside Stay on paths;
+its face follows the API, clicks and a reload. The reload check caught and fixed a saved
+mode whose face initially said off. `maps.py` requires and documents `paddleKind` and
+`portageFactor`; `lomsdal_visten.py` supplies them, with `PORTAGE_FACTOR` beside
+`WATER_FACTOR`, as review authorised after the settings-location stop. The comment on
+`water.py`'s unchanged `OPEN_WATER_FACTOR = 1.5` records the sweep and phase 5 rebuild.
+Tests cover direction, cuts, exclusion, the floor, price invalidation, the flat ferry
+and the different protection and marking rules for paddling and ferries.
+
+**One build, then Firefox 153, entirely offline.**
+`command make map ARGS="--park malingsbo-kloten"` succeeded under an 8 GiB address-space
+limit. The graph reproduces phase 1's 247,210 edges and all five water/portage counts;
+its payload is 10,872,665 raw bytes and 7,735,128 base64 bytes. No input was fetched or
+rewritten, and no tiles were built. The browser harness serves the current planner script
+against that one built graph, including the switch repaint fixes made after the build.
+It patches the Open water header factor, sets `PLAN.portageFactor`, and drops the cost
+table for each pair of prices. The generated HTML still has the build's starting P = 4;
+the source setting is now 2. No second graph or map build was run.
+
+The scratch is `~/mockups/kayak-mode/phase2-browser.py`, `phase2-measure.js`,
+`phase2-sweep.js` and `phase2-sweep.json`. Candidate searches and a water-grid drawing
+(`phase2-shapes.png`) establish the three shapes. The sweep measures the production
+`routeBetween()` search and `worthRouting()` comparison, classifying routed metres by
+source kind and direct connectors by the water grid. The first run measured searches and exposed the tally failure above. After its
+resolution, `phase2-public-sweep.js` reads each assembled way through `trailsPlan.state()`: water
+is `crossed` plus the Shore, Open water and Streams source credits, and foot is
+`walked + crossed - water`. This uses the public figures without assuming phase 3
+part semantics: a paddled routed part still contributes to `walked` today. Five warm searches per leg and price
+pair give the median time; Firefox returned whole milliseconds here, so `<1` means a
+zero-millisecond reading. Cost-table construction is separate, 55–83 ms across the sweep.
+
+Coordinates below are latitude, longitude (WGS84), in journey order:
+
+- **Bay:** (59.844846, 15.546195) to (59.852644, 15.540811), across the mouth of a deep
+  indentation (nodes 90942, 90853).
+- **Lake:** (59.887213, 15.675327) to (59.893952, 15.653105), along opposite sides of a
+  narrowing lake (nodes 91519, 91537).
+- **Portage:** (59.821858, 15.502671) to (59.824603, 15.518341), two lake shores with a
+  mapped OSM path beside the straight portage (nodes 88561, 88582).
+
+Each cell is **water m / foot m / path taken / search ms**, rounded to whole metres.
+The lengths and path choice are the public assembled figures for all 36 ways; the times
+are the warm search medians above. All 36 settled without failures. Their total lengths
+and path choices match the search sweep. At k = 1.2 the lake's direct line reports
+1,438.043 m over water and 15.032 m on foot: `straightParts()` classifies its laid samples,
+whereas `priced()` samples cell midpoints and prices the entire 1,453.075 m as water.
+That existing sampling difference is retained for phase 3; the accepted k = 1.5 ways
+agree in both classifications. `phase2-public-sweep.json` holds the public states.
+
+| k | P | Bay | Lake | Portage |
+|---:|---:|---|---|---|
+| 1.2 | 2 | 1066 / 0 / no / <1 | 1438 / 15 / no / <1 | 43 / 929 / yes / <1 |
+| 1.2 | 4 | 1066 / 0 / no / <1 | 1438 / 15 / no / <1 | 75 / 903 / yes / 1 |
+| 1.2 | 8 | 1066 / 0 / no / <1 | 1438 / 15 / no / <1 | 1679 / 573 / no / <1 |
+| 1.5 | 2 | 1066 / 0 / no / <1 | 1699 / 0 / no / <1 | 43 / 929 / yes / 1 |
+| 1.5 | 4 | 1066 / 0 / no / <1 | 1699 / 0 / no / <1 | 75 / 903 / yes / 1 |
+| 1.5 | 8 | 1066 / 0 / no / <1 | 1699 / 0 / no / <1 | 1831 / 573 / no / <1 |
+| 2 | 2 | 1066 / 0 / no / <1 | 1699 / 0 / no / <1 | 43 / 929 / yes / 1 |
+| 2 | 4 | 1066 / 0 / no / <1 | 1699 / 0 / no / <1 | 75 / 903 / yes / <1 |
+| 2 | 8 | 1066 / 0 / no / <1 | 1699 / 0 / no / <1 | 1930 / 573 / no / <1 |
+| 3 | 2 | 1883 / 0 / no / <1 | 2424 / 0 / no / <1 | 43 / 929 / yes / <1 |
+| 3 | 4 | 1883 / 0 / no / <1 | 2424 / 0 / no / <1 | 75 / 903 / yes / 1 |
+| 3 | 8 | 1883 / 0 / no / <1 | 2424 / 0 / no / <1 | 2218 / 573 / no / 1 |
+
+**The figures the searches favour: k = 1.5, P = 2.** At 1.2 the lake leg takes the direct
+1,453 m direct line (1,438 m water and 15 m foot in the assembled way). At 1.5 it takes 1,058 m of shore and 641 m of open water; at 2 the answer
+is unchanged, while 3 sends it 2,424 m along the shore. The bay still cuts across at 1.5
+(345 m of shore and 721 m of open water); 3 makes it 1,883 m. Two is the first tested
+portage factor and keeps 222 m of mapped path in 929 m on foot, with 43 m over water.
+Four saves 26 m on foot but leaves just 26 m of that path, replacing it with more undrawn
+ground. Eight goes 1,831 m by water to carry 573 m and takes none of the path. The three
+legs support 1.5 and 2; they are not a measurement over every lake or a published claim
+about a usable landing.
+
+A point placed out on the lake at (59.8905825, 15.664216), from the lake leg's first
+point, stays unsnapped at a 1 m reach. The search takes 775.344 m of shore then a straight
+138.196 m water connector to that point, 913.541 m altogether. It therefore reaches the
+reader's point without forcing it onto a chord or the shore.
+
+**The three amended mechanisms, measured at k = 1.5 and P = 2.**
+`phase2-finalchecks.json` retains the initial readings and public failures;
+`phase2-accepted.json` repeats the mechanisms and records the three assembled public ways.
+
+- **Direction in both searches:** Streams edge 220673 goes from
+  (59.894038, 15.589986) to (59.885045, 15.606262), 2,786.468 m. Both forward and backward
+  searches take that edge downstream. Upstream, both refuse that traversal and find a
+  legal alternative: 1,522.652 m on other Streams edges and 2,163.113 m on foot, with
+  zero reversed one-way edges. Refused upstream does not mean the destination is
+  unreachable by a portage.
+- **An interior point:** at (59.887684686, 15.597335455), halfway along that edge, the only
+  exit is node 118644 and the only entry is node 118645. The downstream half is
+  1,393.234 m. The upstream half cannot be taken as a stream cut; the final comparison
+  chooses an 818.723 m ground connector instead.
+- **The connector floor:** from (59.961390, 15.2411587) to
+  (59.973214, 15.2564763), both unsnapped water points, the corrected search finds
+  1,652.945 m over water at a price of 1,959.099 equivalent metres. Restoring only the
+  old `distance * offPath()` floor loses that answer and takes the 1,570.781 m direct
+  crossing at a price of 2,356.172. The corrected search took 18 ms and the old one 12 ms
+  in the final comparison; the old answer's lower elapsed time is incorrect pruning.
+
+**Walking exclusion and state restoration.** In each walking setting, all **65,633**
+PADDLE edges have infinite cost; midpoint segment queries produce **zero** PADDLE snaps,
+and `endsOf()` produces **zero** water-edge ends. Ten additional taps exactly on nodes
+ineligible for walking remain unsnapped in each setting. These are the decoded graph's
+edges, not a fixture (`phase2-mechanisms.json`). API toggles, both switch clicks and reload
+retain the correct mode and switch face (`phase2-ui.json`). The final scripts restore k,
+P, both switches, the goal and its chosen way, and the empty plan. Public plans are undone
+and plan mode is returned to its original state. The restoration comparison ignores only
+the computed spatial-index statistics and the cumulative height-request counter; NaN
+figure values are compared through JSON. The public sweep made two height requests and
+its original comparison failed solely on that counter (0 to 2). Inspection of the saved
+before/after states confirms all user state was restored; the harness now excludes that
+counter as well.
+
+**The plan's corrected premises.** Removing the reverse arc cannot serve the forward and
+backward searches together. Direction therefore belongs to the step predicate, including
+partial edges. A point on a stream supplies an entry and an exit, not a junction in both
+directions. A ground-price floor can prune a cheaper water connector, so its floor and
+water price now read the same Open water header factor. Settings live in
+`lomsdal_visten.plan_settings()`, not as defaults in `maps.py`. Finally, phase 2 needed
+the explicit tally rule above to assemble a way before phase 3 changes its parts.
+Review resolved each of these; no further price or scope decision remains.
+
+**Validation.** `command make hooks-run` is green: ruff format, ruff check, mypy,
+both test suites and the standard repository hooks. All seven executable JavaScript
+routing and tally regressions passed on the first run. One existing rendered-source
+assertion still expected only the ferry and connector declaration; adding the new
+PADDLE declaration to its expectation made the full rerun green. The phase stops here;
+no phase 3 parts, heights or words were changed, and nothing was pushed.

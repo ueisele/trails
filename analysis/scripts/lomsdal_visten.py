@@ -147,6 +147,7 @@ from trails.routing import (
     translate_joined,
     whole_way_length,
 )
+from trails.routing.sources import PADDLE
 from trails.utils.geo import attach_nearest, compass_points, endpoint_bearings, thin_points
 from trails.visualization import maps
 from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
@@ -1922,6 +1923,13 @@ OFF_PATH_FACTOR = 3.0
 #: page would be carrying the grid for nothing.
 WATER_FACTOR = 30.0
 
+#: Swept at 2, 4 and 8 on Malingsbo-Kloten with the open-water price at 1.5.
+#: At two the portage takes 222 m of mapped path in 929 m on foot, with 43 m
+#: over water. Four saves 26 m on foot but keeps only 26 m of that path; eight
+#: goes 1,831 m by water to carry 573 m. Two keeps the short way and the path.
+#: The full three-leg sweep and the coordinates are in kayak-mode-decisions.md.
+PORTAGE_FACTOR = 2.0
+
 #: How finely the page is told where the water is. A cell is priced as a whole,
 #: so this is how far off a shoreline a connector's price can be: a connector
 #: that touches one cell of sea because the reader tapped 25 m from the water
@@ -2154,6 +2162,8 @@ def plan_settings(params: graphs.Params, layers: list[TrailLayer], heights: dict
         # ferry as walked ground with nothing looking wrong.
         "crossingKind": FERRY,
         "connectorKind": BRIDGE,
+        "paddleKind": PADDLE,
+        "portageFactor": PORTAGE_FACTOR,
         # How much of a route has to lie inside a protected area before it says
         # so. Handed over rather than spelled in the page, so that the figure
         # this build prints and the sentence the page writes cannot come to

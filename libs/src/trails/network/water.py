@@ -25,7 +25,7 @@ PORTAGES = "Portages"
 PORTAGE_PATHS = "Portage paths"
 WATER_SOURCES = (SHORE, OPEN_WATER, STREAMS)
 SHORE_SIMPLIFY_M = 10.0
-#: Starting value until phase 2 measures the price in the browser.
+#: Phase 2 measured 1.5: the bay is cut and the lake keeps its shore; the graph is rebuilt in phase 5.
 OPEN_WATER_FACTOR = 1.5
 PORTAGE_M = 1000.0
 PATH_JOIN_M = 150.0

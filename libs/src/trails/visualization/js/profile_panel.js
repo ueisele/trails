@@ -1381,6 +1381,34 @@
                 track.style.background = on ? 'var(--trails-accent)' : 'var(--trails-rule)';
                 knob.style.transform = on ? 'translateX(14px)' : 'none';
             }
+            var goalKayak = document.createElement('button');
+            goalKayak.type = 'button';
+            goalKayak.className = 'trails-profile-goal-kayak';
+            goalKayak.setAttribute('role', 'switch');
+            goalKayak.setAttribute('aria-checked', 'false');
+            goalKayak.title = 'Follow the water and carry the kayak over land';
+            goalKayak.style.cssText = 'display:flex;align-items:center;gap:10px;width:100%;margin:0 0 6px;padding:2px 3px;' +
+                'border:0;background:none;font:inherit;font-size:11px;color:var(--trails-ink-2);cursor:pointer;text-align:left';
+            goalKayak.innerHTML = '<span class="trails-profile-goal-kayak-said" style="flex:1 1 auto">Kayak' +
+                '<span style="display:block;font-size:10px;color:var(--trails-ink-3)">paddle the water, carry over land</span></span>' +
+                '<span class="trails-profile-goal-kayak-track" style="flex:none;position:relative;width:34px;height:20px;' +
+                'border-radius:10px;background:var(--trails-rule);transition:background .15s">' +
+                '<span class="trails-profile-goal-kayak-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;' +
+                'border-radius:50%;background:var(--trails-solid);box-shadow:0 1px 2px rgba(0,0,0,0.3);transition:transform .15s"></span></span>';
+            goalKayak.addEventListener('click', function (event) {
+                event.stopPropagation();
+                if (!window.trailsPlan || !window.trailsPlan.kayak) { return; }
+                window.trailsPlan.kayak(!window.trailsPlan.kayak());
+                paintGoal();
+            });
+            function paintKayak() {
+                var on = !!(window.trailsPlan && window.trailsPlan.kayak && window.trailsPlan.kayak());
+                goalKayak.setAttribute('aria-checked', String(on));
+                var track = goalKayak.querySelector('.trails-profile-goal-kayak-track');
+                var knob = goalKayak.querySelector('.trails-profile-goal-kayak-knob');
+                track.style.background = on ? 'var(--trails-accent)' : 'var(--trails-rule)';
+                knob.style.transform = on ? 'translateX(14px)' : 'none';
+            }
             // **The way there, handed to the plan.** Asked for from the phone,
             // and it is the one road between the two halves of this page that
             // was missing: a goal is set in a moment and walked at once, a plan
@@ -1566,9 +1594,10 @@
                 // has worked out a line between them yet.
                 goalToPlan.style.display = standing ? 'block' : 'none';
                 paintStopList();
+                paintPaths();
+                paintKayak();
                 if (!standing) { return; }
                 var routed = goalNow.way === 'routed';
-                paintPaths();
                 // What the row used to say here -- the name, how many places
                 // the way goes by, the kilometres, the climb -- the heading
                 // says now, from the series the goal control hands over: its
@@ -2179,6 +2208,7 @@
             placesPage.style.cssText = 'padding:0 0 6px';
             placesPage.appendChild(goalRow);
             placesPage.appendChild(goalPaths);
+            placesPage.appendChild(goalKayak);
             placesPage.appendChild(goalNote);
             placesPage.appendChild(goalList);
             placesPage.appendChild(goalToPlan);
