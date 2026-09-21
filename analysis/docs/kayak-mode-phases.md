@@ -163,6 +163,10 @@ counts. Not `plan_mode.js`, not `maps.py`.*
    own direction agrees with the fall and the arrows in 95 of 100 cases, the line's direction
    is the flow's; otherwise the flow is read off the heights per line, the disagreeing ones
    listed in the record. Stop and say so if neither test is clean.
+   *Measured 2026-09-21 (codex): the arrows agree with the digitised direction in 62 of 63
+   lines under the one convention that fits; the z13 height tiles disagree in 61 of 347,
+   210 of which fall less than a metre end to end — the resolution, not the water. Decided:
+   the digitised direction is the flow. Record §5.*
 2. **The shore.** Every water surface (lakes and river surfaces, as `water` is loaded today)
    simplified at 10 m, its exterior and interior rings as lines of one source, **`Shore`**,
    kind `PADDLE` (new in `sources.py`, beside `FERRY`; routable, never walked, carries the
@@ -185,12 +189,17 @@ counts. Not `plan_mode.js`, not `maps.py`.*
    undrawn ground), its two feet tied to the nearest node of the walking network within 150 m
    by a `BRIDGE` connector each, so the page can prefer the path over the chord. A dam's cut
    is such a pair and gets its chord the same way. Counted and recorded.
-6. **Direction in the payload.** An edge carries whether it runs one way (`from_node` to
-   `to_node`); the source table carries the kind. `encode_graph` and its checks, and the
-   decoder in `routing_graph.js` reading the flag into the graph, are this phase's — the
-   router's use of it is phase 2's. Noded with the rest of the network by `graphs.py` as every
-   source is, so a road bridge over a river surface and a path along a shore meet the water
-   where they cross it.
+6. **Direction in the payload.** A source declares it is directed (`NetworkSource.directed`,
+   the streams only); its lines keep their digitised direction through chaining, noding and
+   edge building — `_canonical` in `chains.py` may orient a chain as it likes but records
+   where it reversed a directed line, every edge carries `one_way` (True: `from_node` to
+   `to_node` only), a split inherits it — and `encode_graph` writes the flag; the decoder in
+   `routing_graph.js` reads it onto the graph. The router's use of it is phase 2's. Noded
+   with the rest of the network by `graphs.py` as every source is, so a road bridge over a
+   river surface and a path along a shore meet the water where they cross it.
+   *Corrected 2026-09-21 after codex's stop: the first wording put the flag in the encoder
+   alone, and `chains._canonical` reverses 101 of the 347 streams — the direction has to be
+   a property the routing layer carries, not one the encoder invents.*
 7. **The report.** The graph's report in the build log counts the water sources apart:
    shore, open water, streams, portages; km and edges each; and the page's payload before and
    after, in bytes. The graph is built and reported by `route_graph.py` (`command make graph
