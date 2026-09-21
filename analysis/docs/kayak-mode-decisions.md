@@ -62,7 +62,9 @@ would draw it without a change.
 
 ## 4. Open
 
-- **The flow's direction** in Topografi 50's lines — phase 1's first measurement.
+- **The flow's direction** in Topografi 50's lines — measured in phase 1, but unresolved.
+  Neither the digitized direction nor the endpoint-height fallback passes the test below;
+  phase 1 stopped before adding sources.
 - **k and P** — phase 2's sweep; 1.5 and 4 until then.
 - **Whether N50's river lines carry a size class** — phase 1, for Norway's streams.
 - ~~Whether anybody publishes the canoe trails as lines~~ — phase R, 2026-09-21: nobody (§3.5).
@@ -71,6 +73,155 @@ would draw it without a change.
 
 - 2026-09-21 — phase 0: the plan and this record opened.
 - 2026-09-21 — phase R: the research in §3.5; there is no phase 6.
+
+### Phase 1 — Stopped at the flow measurement, 2026-09-21
+
+**No water network built.** Step 1 requires a stop when neither direction test is clean.
+The cached heights and the nearby arrows disagree, so steps 2–7 have not been started.
+
+The same Malingsbo-Kloten box as the plan, `(14.967, 59.729, 15.922, 60.176)`, read from
+Topografi 50's cached 2026-09-08 delivery: **347 class-2 features, 118.376695 km**, each a
+MultiLineString containing one line. `storleksklass` is text (`"2"`). Lines were clipped to
+the projected EPSG:3006 box as in the original measurement, preserving their direction.
+
+Heights were read bilinearly at each line's first and last vertex from the main checkout's
+`analysis/output/dem/lantmateriet-malingsbo-kloten/1/13/` tiles, by absolute path. Terrarium
+was decoded with `trails.processing.dem_tiles.unpack`, treating its missing value as
+missing. These are the built tiles derived from the 1 m model, not native 1 m samples.
+All **694 endpoints** had heights. No cache or main-checkout output was written.
+
+| Endpoint fall, first height minus last | Lines |
+|---|---:|
+| positive | 286 |
+| negative | 61 |
+| exactly zero | 0 |
+| absolute difference at most 0.1 m | 68 |
+| absolute difference at most 0.5 m | 168 |
+| absolute difference at most 1 m | 210 |
+
+Thus **286/347 = 82.42%** run downhill in their digitized direction, below the plan's 95%.
+The small differences above are a sensitivity count, not an adopted tolerance for deciding
+flow. Reversing every negative difference would assign a direction to all lines, but does
+not pass the independent arrow check.
+
+The cached `hydropunkt` layer has **2,121 arrows**, 2,071 small and 50 large. For each line,
+the nearest arrow was found by point-to-line distance; **63 lines** have one within 50 m.
+The line bearing was measured on the tangent between positions 5 m before and after the
+projected arrow position, bounded by the line's ends. Agreement means a bearing difference
+strictly below 90 degrees. The same arrow can be nearest to more than one line.
+
+The arrow's `rotation` convention was tested empirically: both signs and offsets 0, 90,
+180 and 270 degrees against clockwise-from-north line bearings. The best fit is
+`bearing = 90 - rotation`, consistent with rotation counterclockwise from east:
+**62/63 = 98.41%** agree with digitization, but only **56/63 = 88.89%** agree with endpoint
+fall. This is an inferred convention, not a documented guarantee. None of the eight
+conventions reaches 95% agreement with endpoint fall.
+
+The seven arrow/height disagreements, with the best-fitting convention:
+
+| Topografi 50 object id | First minus last height (m) | Arrow distance (m) | Arrow vs digitized bearing (degrees) |
+|---|---:|---:|---:|
+| `1c0f0fb7-ab9d-4b0d-a570-8cc1db24fd75` | -0.013950 | 24.051 | 1.587 |
+| `4770a504-8e77-49e7-939f-d3bdbb2f86e2` | -0.206819 | 19.468 | 0.742 |
+| `4bb533b2-8c9d-411d-8088-e57789729100` | -0.113068 | 0.000 | 0.286 |
+| `79c63f36-b672-4ab7-aa91-0a54adb7e01a` | -0.059158 | 34.499 | 9.140 |
+| `8277a574-e586-42a2-bc01-9b0156c7ccde` | -0.212724 | 17.114 | 2.773 |
+| `e861498e-c88f-4dcd-be3a-15bf2bef473c` | -0.304967 | 21.745 | 14.637 |
+| `ff1bf090-d2c9-45f3-a255-774f646002e8` | 4.743805 | 37.952 | 108.296 |
+
+Six have an uphill difference smaller than 0.305 m, while their arrows agree with the
+line direction. The seventh has a 4.744 m fall and an arrow 37.952 m away whose bearing
+opposes the local line. A nearest arrow is therefore not by itself a resolved flow rule.
+
+The 61 lines whose endpoint heights oppose digitization are listed here so a review can
+revisit the actual features rather than a count. Heights below are first minus last:
+
+| Topografi 50 object id | Difference (m) |
+|---|---:|
+| `0838027e-45ab-4d35-b467-65972112f62e` | -0.275398 |
+| `0916c147-8dfd-4e7a-a71a-a691553a11f5` | -0.018293 |
+| `0e9dd12a-aec4-46ea-8a3f-a16b7883518f` | -0.285333 |
+| `1033e83c-5977-476b-88b3-3e7aae5c5b65` | -0.199784 |
+| `1c0f0fb7-ab9d-4b0d-a570-8cc1db24fd75` | -0.013950 |
+| `217d06f2-72fd-4f37-8061-b6e8b59d4be5` | -0.313620 |
+| `22de5712-c004-41c4-9167-c9f8cd1d862a` | -0.088698 |
+| `25f4f53c-41d3-4bcd-b80f-595eaa896d9a` | -0.117252 |
+| `263083e0-baad-44ff-b261-e8403cc96e59` | -0.063104 |
+| `267ebe7a-e380-4335-ba63-2d9d57224645` | -0.177974 |
+| `28c8ccba-e7a9-4318-9307-fa3e908cea81` | -0.153076 |
+| `2a2d10bb-a7f1-4a96-ac7d-086e64274d00` | -0.107237 |
+| `2d2ee1ee-2327-47ac-9eab-bd608390f0c0` | -0.012104 |
+| `31c8c670-a48c-42c9-bc6c-fe9dc9cbcc1d` | -0.269726 |
+| `3e703747-419a-4f7a-94c8-e3666f12318d` | -0.051767 |
+| `3f8b4e94-4afc-4da5-8593-4512ed50adbd` | -0.036249 |
+| `4770a504-8e77-49e7-939f-d3bdbb2f86e2` | -0.206819 |
+| `4bb533b2-8c9d-411d-8088-e57789729100` | -0.113068 |
+| `4d9cff14-7904-4265-a780-a70055907852` | -0.144904 |
+| `4e682a2a-6916-46a5-a9b1-869bf7bd0dcc` | -0.158045 |
+| `538a1799-34fc-4469-8c85-bb889fa1d1a2` | -0.116735 |
+| `5c7e996d-eb4f-489c-9609-acdeca4a0026` | -0.087512 |
+| `602c282f-3df6-40c0-9b30-724919df4f36` | -0.318147 |
+| `694f4a35-443c-4537-835d-5080655528ca` | -0.207804 |
+| `6b012e78-a1e9-449e-9282-6739f97abeed` | -0.020450 |
+| `6b1c75b1-b748-4f8d-adc7-2443f222e6fa` | -2.153327 |
+| `6d2375a4-071a-47a4-a73a-126016179c04` | -0.268547 |
+| `79c63f36-b672-4ab7-aa91-0a54adb7e01a` | -0.059158 |
+| `79c716df-6462-41ee-a395-69ac7cfec25c` | -0.001527 |
+| `8277a574-e586-42a2-bc01-9b0156c7ccde` | -0.212724 |
+| `85d6d672-a64f-403d-970e-6baf440dfcad` | -0.194356 |
+| `864887aa-2614-4417-ba23-3112071bce99` | -0.138830 |
+| `8e7d2309-b505-48f2-a64f-a8eb817de5b8` | -0.079467 |
+| `90886918-edca-4c3c-b2f9-734986049d39` | -0.293569 |
+| `94234e97-4cc1-4e9b-bd14-c2d0e2d178da` | -0.292616 |
+| `ad60621e-58ca-46bd-ba96-cd7ab7bd58f5` | -0.050408 |
+| `af52017e-bf99-4f27-a10e-838263acd25e` | -0.052850 |
+| `b3e3d978-dcc9-456a-9d0a-857cd83305df` | -0.047402 |
+| `b55831e0-5fae-483d-a79e-4f0210eb0696` | -0.002035 |
+| `b5b40579-c7a8-432a-a6e8-45a5bdff1c26` | -0.766346 |
+| `b867e94c-7094-4306-985a-c08001a415ae` | -0.019553 |
+| `bf19f8d8-e10c-455d-aa19-f08adfc5cc4b` | -0.311317 |
+| `c0346f5f-bdbb-412a-b1d4-3d92edc67daf` | -0.044523 |
+| `c0683af9-2d9d-47e7-a156-e713e12c57c8` | -0.032932 |
+| `c114c248-9c2a-40b9-818a-beb9701229f2` | -0.112159 |
+| `c1802594-45b9-4733-8de6-d0c31bec3b24` | -0.197937 |
+| `c5fb817b-426f-43f2-b99e-e7a33d1d4826` | -0.427180 |
+| `c84719e4-24f5-4af0-a9dd-3dc1597699a4` | -1.270788 |
+| `d46e991f-15c6-4339-bd6e-0d8fa3f7d6ad` | -0.098453 |
+| `d5969d01-8647-4c8d-98a8-41db76922e9f` | -0.910108 |
+| `d633a9ab-959f-482e-9731-aef2695d8b2c` | -0.567546 |
+| `d6d4d62f-491a-4de0-adc7-097dea8a901d` | -0.104832 |
+| `d737f502-7920-430e-a21c-d29f38be68b8` | -0.082585 |
+| `deb9bb68-9f58-4834-b2d9-ea650269b675` | -0.015479 |
+| `e27da202-a8e4-49b3-a359-ff2aaa007d0d` | -0.048008 |
+| `e460b74d-20fe-4e63-b4a4-b7555d186c35` | -0.014372 |
+| `e861498e-c88f-4dcd-be3a-15bf2bef473c` | -0.304967 |
+| `ecd4fe26-1b43-49fb-984f-72b85538744f` | -0.012204 |
+| `f10fac98-ea93-4fc1-8cda-24912aec4cb7` | -0.274060 |
+| `f31c159c-f594-4b97-95b7-b6a89c49d206` | -0.266411 |
+| `f71ebaac-ca31-40c9-a70b-b644b2f4bfeb` | -0.195319 |
+
+**Needed before resuming:** a rule for resolving near-level endpoints and arrow conflicts,
+or a further measurement that establishes a clean direction test. No threshold, reversal
+exception or exclusion was chosen here.
+
+**Code checked before the measurement.** `encoding._source_table` already writes the name
+and kind together, as the plan says. The ferry sources, `graphs.edge_costs` and the inferred
+connectors in `routing.graph._with_bridges` were read. Norway's current assembly adds N50
+ferries; its page path loads N50 water and river surfaces before encoding. With this phase
+stopped it would continue to do that, with no paddle sources or directed streams. N50's
+stream size-class measurement belongs to the unstarted step 4 and remains open.
+
+**Build figures:** shore/open-water/stream edge counts and km, portage chords, payload
+bytes before/after and graph build seconds before/after were not measured. The requested
+`command make graph ARGS="--park malingsbo-kloten"` and
+`command make map ARGS="--park malingsbo-kloten"` are end-of-phase builds; neither was run
+because step 1 stopped the phase. No other map was built and no browser state changed.
+There is no demonstrated contradiction in the plan's source-table premise; the flow is the
+unresolved measurement for which step 1 explicitly provides a stop.
+
+Measurement scratch: `~/mockups/kayak-mode/phase1-flow.py` and `phase1-flow.json`. The JSON
+holds every line's id, endpoints, heights, nearest arrow id, distance, rotation and local
+bearing. It contains 347 rows, including all the disagreements above.
 
 ## 6. How the figures here were obtained
 
