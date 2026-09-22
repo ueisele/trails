@@ -87,9 +87,19 @@ would draw it without a change.
   level, everything else the cached 4 m mosaic; the point service left the network build.
 - **Uwe's phone reading of the kayak mode** on the three published maps: the switch, a bay,
   a portage.
+- **One way only where it falls — phase 7, opened 2026-09-22.** From the phone at
+  Korslångssmedja: the level channel from the small lake to the dam is a class-2 line and so
+  one way downstream; upstream the route walked round it. The heights along its edges are
+  flat (258.1–258.4 m), the fall is the dam. The plan's phase 7 gates the direction on the
+  measured fall; the rising edges (107 / 24.5 km in Malingsbo-Kloten, 165 / 23 km in
+  Abisko, by end posts) are classified before the gate is trusted. Uwe's word 2026-09-22:
+  "Ja mache das."
+- **Lomsdal-Visten has no stream edges at all** — not a defect: N50's `vannbredde` codes
+  were never matched to Topografi 50's class 2 (above), so Norway's streams stayed out.
 
 ## 5. Changes
 
+- 2026-09-22 — phase 7 opened: one way only where the water falls; the Korslångssmedja finding and its measurement (`~/mockups/kayak-mode/korslang/`) are in the plan's §4 Phase 7.
 - 2026-09-21 — phase 2b built: inferred portages have their own kayak-only kind and undrawn-ground price. Both walking settings recover 22,957 m with zero portage; the kayak leg retains its mapped path. The built-note records the graph scope extension and the remaining phase 4 snapshot detail.
 
 - 2026-09-21 — phase 1b built: review retains the 10 m chord ring after the 25 m sweep changed two ways. Ponds stay outside the paddle network, portages join Delaunay neighbours, and Norway reads cached 4 m ground. The final three graphs, Swedish page bytes and completed Norway memory measurement are in the built-note below.

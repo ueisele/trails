@@ -63,7 +63,7 @@ a transient unit; the worktree's branch is rebased onto `main` and fast-forwarde
 the landing are the reviewing session's. The scratch for this plan is `~/mockups/kayak-mode/`.
 
 **Order and parallelism, in one line.**
-0 → { 1 ∥ R } → 2 → 3 → 1b → 2b → 4 → 5 (rebuild, drive) → 4b → 5 (publish). (R found no lines, so there is no 6; 1b came out of 5's first build, 2b out of 4's first drive.)
+0 → { 1 ∥ R } → 2 → 3 → 1b → 2b → 4 → 5 (rebuild, drive) → 4b → 5 (publish). (R found no lines, so there is no 6; 1b came out of 5's first build, 2b out of 4's first drive.) Then 6 (the switches, from the phone) → 7 (one way only where it falls, from the phone) → 5 again.
 
 - Phase 1 (the water network, Python) and phase R (research, no code) touch nothing in
   common and run at once.
@@ -400,10 +400,59 @@ that switches on one page and reads the other; the three pages rebuilt and publi
 switching Kayak on the plan's page re-priced the way (2,123 m paddled on the scene's shore
 pair); 85 readings twice.*
 
+### Phase 7 — One way only where it falls
+
+*Added 2026-09-22 from Uwe's phone at Korslångssmedja (Malingsbo-Kloten). Upstream from the
+small lake into Korslången the route left the water 232 m before the channel's mouth, walked
+158 m of path and 174 m of road to the dam and put in there, instead of paddling the channel
+to the dam and carrying the 108 m OSM path (`osm-514307-6645636-108`). Measured on the
+published page with the search exposed (`~/mockups/kayak-mode/korslang/`): downstream the
+page takes exactly that way; upstream the channel is closed, because Topografi 50 draws it as
+a class-2 `Vattendrag` line, 229 m from the lake's tip to the dam, and phase 1 made every
+class-2 line one way with its digitised direction. But the channel does not fall: the 1 m
+height model along its two edges reads 258.1–258.4 m all the way to 25 m below the dam, the
+5 m are the dam itself (263 m above, 258 m below). Uwe: "Bis zu der Stelle wo ich raus bin
+aus dem Wasser war es noch kein Bach. Gab auch de facto kein Gefälle." Two-way, the channel
+way costs 1,504 against the detour's 1,841.*
+
+**The rule.** A stream edge is one way only where the water falls. The edges already carry
+the height model's samples (`elevations`, in the edge's own direction, which for a directed
+source is the digitised flow after `graph.py` reverses a canonical line back). In
+`water.build`, after `level_lakes(measure(network))`, every `Streams` edge whose fall in its
+flow direction is under `LEVEL_FALL_M` — the greater of 0.3 m and 0.1 % of its length,
+starting values until measured — has `one_way` cleared: level water is paddled both ways at
+the shore's price, and the direction stays only where the data and the heights agree. An
+edge that *rises* in its flow direction by more than that is opened the same way, not
+reversed: the two sources disagree and the restriction has no evidence. Nothing on the
+page changes; the flag already travels per edge.
+
+**Measured first, on the built networks of Malingsbo-Kloten and Abisko** (both have
+streams; Lomsdal-Visten has none, §5). The published pages' payloads say: Malingsbo-Kloten
+610 stream edges / 115 km, of which 164 edges / 34 km fall at most 0.1 % and 107 edges /
+24.5 km *rise* by more than 0.3 m between first and last sample; Abisko 432 / 56 km, 26 /
+1.5 km level, 165 / 23 km rising. Before the gate is trusted the rising edges are
+classified: a bump in the middle with level ends (a bridge deck, trees over a gorge) is not
+a rise; an edge whose ends sit on a levelled lake (phase 3 replaced lake heights, not
+stream heights) is compared on its interior samples; what remains is either a monotone
+rise — the digitised direction is not the flow there — or the model's noise. Read the fall
+robustly, the median of the first and last quarter of the samples rather than two end
+posts, and say how many edges and kilometres each class holds against the flow arrows
+within 50 m (`hydropunkt`, `Strömriktningspil`, 2,121 in the Malingsbo-Kloten box, read
+in phase 1). If the monotone rises are many, stop: whether to flip them is a decision.
+
+**A test** on a synthetic network: a falling, a level and a rising stream edge, only the
+first stays one way; the thresholds' both arms exercised. **A drive reading** on the
+Malingsbo-Kloten scene: the pair (59.9440, 15.2620) → (59.9525, 15.2500), small lake to
+Korslången, in the kayak mode paddles the channel and carries the OSM path at the dam — say
+the metres — and the reverse pair reads the same way; the three existing kayak triples'
+figures are re-recorded where they move. Then phase 5 again: all three graphs and pages,
+drive-all, publish.
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.
-- Rapids as a grade; a class-2 river is paddleable in this plan wherever it is not a dam.
+- Rapids as a grade; a class-2 river is paddleable in this plan wherever it is not a dam, and
+  from phase 7 both ways wherever it does not fall.
 - Class-1 streams; a canoe on a brook is the reader's own judgement, and 3,359 km of ditches
   would be a network of nothing.
 - Norway's stream lines, unless phase 1 finds a size class.
