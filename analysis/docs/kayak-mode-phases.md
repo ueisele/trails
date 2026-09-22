@@ -440,6 +440,24 @@ posts, and say how many edges and kilometres each class holds against the flow a
 within 50 m (`hydropunkt`, `Strömriktningspil`, 2,121 in the Malingsbo-Kloten box, read
 in phase 1). If the monotone rises are many, stop: whether to flip them is a decision.
 
+*Corrected 2026-09-22 after codex's stop at the measurement: the baseline above was read with
+the reviewing session's harness reversing an edge's samples by the chain-orientation flag,
+which the payload does not mean — an edge's samples run in its own direction, and for a
+directed source that is the flow. Read right, on the built graphs: Malingsbo-Kloten 44 edges /
+7.4 km rise between end posts, 30 / 2.3 km by quarter medians, and not one of them has a flow
+arrow against its digitised direction (74 edges with arrows agree, 1 opposes, none among the
+rising); Abisko 4 / 0.2 km and 1 / 0.02 km. The rises are bumps and noise, the direction stands,
+nothing is flipped. The gate as written above would open 359 edges / 53.6 km and 103 / 2.5 km —
+but 92 and 67 of those are pieces under 300 m of streams falling more than 0.5 %, opened by the
+0.3 m arm alone because noding cut them short: a steep mountain stream is not paddled up in
+10 m pieces. So the gate reads the **chain**, not the edge: a `Streams` chain's fall is the sum
+of its edges' quarter-median falls in flow direction, its threshold the greater of 0.3 m and
+0.1 % of the chain's length, and a level chain has `one_way` cleared on all its edges. Measured
+on codex's captures that opens 173 chains, 282 edges / 46.9 km in Malingsbo-Kloten (the
+Korslång channel among them, 0.16 m over 203 m) and 35 chains, 44 edges / 2.2 km in Abisko,
+and no short steep piece. A chain with a rapid in the middle stays one way whole, which is
+the conservative side. The rising chains are opened the same way, as written.*
+
 **A test** on a synthetic network: a falling, a level and a rising stream edge, only the
 first stays one way; the thresholds' both arms exercised. **A drive reading** on the
 Malingsbo-Kloten scene: the pair (59.9440, 15.2620) → (59.9525, 15.2500), small lake to
