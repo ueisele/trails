@@ -466,6 +466,14 @@ the metres — and the reverse pair reads the same way; the three existing kayak
 figures are re-recorded where they move. Then phase 5 again: all three graphs and pages,
 drive-all, publish.
 
+*Built 2026-09-22 (codex, `a1c8ded`, one stop at the measurement): the chain gate in
+`water.build`, the test, the Korslång reading (1,267.8 m paddled, 77.2 m carried, the whole
+channel and 20.1 m of the dam's OSM path, both ways the same). Phase 5 again on `f25229a`:
+Abisko opens 35 chains / 44 edges / 2.2 km, Malingsbo-Kloten 186 / 302 / 48.5 km,
+Lomsdal-Visten none; `drive-all` 1,464 / 1,464 / 1,451 readings, none broken but the known
+first-visit race on Lomsdal-Visten, green alone; published ~15:00 UTC and read back identical
+on all three. Open: Uwe's phone reading at Korslångssmedja.*
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.

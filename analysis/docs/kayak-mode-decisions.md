@@ -93,12 +93,15 @@ would draw it without a change.
   flat (258.1–258.4 m), the fall is the dam. The plan's phase 7 gates the direction on the
   measured fall; the rising edges (107 / 24.5 km in Malingsbo-Kloten, 165 / 23 km in
   Abisko, by end posts) are classified before the gate is trusted. Uwe's word 2026-09-22:
-  "Ja mache das."
+  "Ja mache das." — **Built and published 2026-09-22**; the counts were the harness's
+  error, the rises are few and unopposed by any arrow, the gate reads the chain (§5). Open:
+  Uwe's phone reading of the channel.
 - **Lomsdal-Visten has no stream edges at all** — not a defect: N50's `vannbredde` codes
   were never matched to Topografi 50's class 2 (above), so Norway's streams stayed out.
 
 ## 5. Changes
 
+- 2026-09-22 — phase 5 again after phase 7 (`f25229a`): the three graphs and pages rebuilt, `drive-all` 1,464 / 1,464 / 1,451 readings, published ~15:00 UTC and read back identical; the Korslång check is a scene skip on the two pages without a measured stream.
 - 2026-09-22 — phase 7 built: whole stream chains open where their measured fall does not support a restriction. The Korslång pair paddles the channel both ways; the two drives pass and the previous kayak scene figures stand. The built-note separates level and rising chains.
 - 2026-09-22 — phase 7 stopped at the measurement: the supplied fall harness reverses heights by chain orientation even though the payload keeps edge direction. Both warm-cache graphs were captured; the stop and rising-edge classes are below. No gate built.
 - 2026-09-21 — phase 2b built: inferred portages have their own kayak-only kind and undrawn-ground price. Both walking settings recover 22,957 m with zero portage; the kayak leg retains its mapped path. The built-note records the graph scope extension and the remaining phase 4 snapshot detail.
