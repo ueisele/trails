@@ -8,6 +8,23 @@
     var redraw = canvas._redraw;
     var fillStroke = canvas._fillStroke;
     var updateCircle = canvas._updateCircle;
+    var updatePoly = canvas._updatePoly;
+    var clipPoints = L.Polygon.prototype._clipPoints;
+    var polygonClips = new WeakMap();
+    var PINCH_CLIP_MARGIN = 0.5; // Spare ground on each side, reused until the view leaves it.
+
+    L.Polygon.include({
+        _clipPoints: function () {
+            if (this._renderer instanceof L.Canvas) {
+                // Remember the extent at the same time Leaflet makes the parts,
+                // with exactly Polygon._clipPoints' stroke tolerance.
+                var bounds = this._renderer._bounds, weight = this.options.weight;
+                var padding = new L.Point(weight, weight);
+                polygonClips.set(this, L.bounds(bounds.min.subtract(padding), bounds.max.add(padding)));
+            }
+            return clipPoints.call(this);
+        }
+    });
     var SNAP_DURATION = 250; // Leaflet 1.9.3's transform transition and fallback timer.
 
     // Invert x(t) for Leaflet's cubic-bezier(0,0,0.25,1), then read y(t).
@@ -31,6 +48,7 @@
 
         _pinchStart: function () {
             this._pinchDrawing = true;
+            this._pinchPolygons = new Map();
         },
 
         _updateTransform: function (center, zoom) {
@@ -73,6 +91,7 @@
             this._pinchDrawing = false;
             this._pinchView = null;
             this._pinchSnap = null;
+            this._pinchPolygons = null;
             onZoomEnd.call(this);
         },
 
@@ -106,16 +125,66 @@
                 ratio * (view.offset.x - view.position.x - scale * origin.x),
                 ratio * (view.offset.y - view.position.y - scale * origin.y));
             this._pinchScale = scale;
+            // Use the screen, not the padded bitmap: the old renderer padding
+            // already covers a small zoom out without making any new parts.
+            var visibleMin = this._map.containerPointToLayerPoint(new L.Point(0, 0))
+                .subtract(view.offset).divideBy(scale).add(origin);
+            this._pinchBounds = L.bounds(visibleMin, visibleMin.add(this._map.getSize().divideBy(scale)));
             try {
                 this._draw();
             } finally {
                 this._pinchScale = null;
+                this._pinchBounds = null;
                 ctx.restore();
                 this._redrawBounds = null;
             }
             if (snap && progress < 1 && this._map._animatingZoom) {
                 this._redrawRequest = L.Util.requestAnimFrame(this._redraw, this);
             }
+        },
+
+        _updatePoly: function (layer, closed) {
+            if (!this._pinchScale || !closed || !this._drawing || layer.options.noClip) {
+                return updatePoly.call(this, layer, closed);
+            }
+            var original = polygonClips.get(layer);
+            // A polygon clipped before installation has no remembered extent.
+            if (!original) {
+                return updatePoly.call(this, layer, closed);
+            }
+            var held = this._pinchPolygons.get(layer);
+            if (!held || held.original !== original) {
+                held = {original: original, bounds: original, parts: layer._parts};
+                this._pinchPolygons.set(layer, held);
+            }
+            var stroke = layer.options.weight / this._pinchScale;
+            var padding = new L.Point(stroke, stroke), view = this._pinchBounds;
+            var needed = L.bounds(view.min.subtract(padding), view.max.add(padding));
+            if (!held.bounds.contains(needed)) {
+                var margin = needed.getSize().multiplyBy(PINCH_CLIP_MARGIN);
+                held.bounds = L.bounds(needed.min.subtract(margin), needed.max.add(margin));
+                held.parts = this._pinchClipPolygon(layer, held.bounds);
+            }
+            // Both fill and stroke use the new extent; Leaflet's parts survive
+            // even a failed paint, and its normal zoomend still owns the next clip.
+            var parts = layer._parts;
+            layer._parts = held.parts;
+            try {
+                return updatePoly.call(this, layer, closed);
+            } finally {
+                layer._parts = parts;
+            }
+        },
+
+        _pinchClipPolygon: function (layer, bounds) {
+            var parts = [];
+            for (var i = 0; i < layer._rings.length; i++) {
+                var part = L.PolyUtil.clipPolygon(layer._rings[i], bounds, true);
+                if (part.length) {
+                    parts.push(L.LineUtil.simplify(part, layer.options.smoothFactor));
+                }
+            }
+            return parts;
         },
 
         _fillStroke: function (ctx, layer) {

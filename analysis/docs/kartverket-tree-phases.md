@@ -1295,6 +1295,96 @@ after a release to z12 the overlays' held z15 tiles go stepwise as their replace
 is open: the zoom out should show the coarse picture sharpen, never darken, never blank in
 the middle; the zoom in as 8h.
 
+### Phase 8l — No clipping frame during the pinch
+
+Reported 2026-09-22 (Uwe, iPhone, Malingsbo-Kloten): a dark-blue rectangle appears while
+zooming out and goes at `zoomend`. The same evening's Firefox investigation
+(`/home/eiseleu/mockups/zoom-rectangle/report.md`, `probe-at14.py` and `probe.py`) found
+Leaflet 1.9.3 clipping the conservation polygon's projected `_rings` to the renderer bounds
+plus its stroke tolerance. When the polygon surrounds that extent, its `_parts` are a
+rectangle. 8f draws those parts through the pinch transform; on a zoom out the old clipping
+rectangle shrinks onto the screen, outlined in the boundary's `#0d47a1`, weight 3.5. Its
+0.06 fill ends there too. Uwe's decision: the real boundary stays, drawn as today; the
+rectangle must not be shown.
+
+1. **A polygon keeps its parts while they cover the view.** Remember the extent when
+   Leaflet's `Polygon._clipPoints` makes them: the renderer `_bounds` expanded by
+   `options.weight`, exactly as Leaflet computes it. During a pinch and its snap, invert
+   the visible screen into the old projection and expand it by the stroke divided by the
+   pinch scale. If the remembered extent contains it, draw the stored parts. A zoom in
+   and a small zoom out need no clipping.
+2. **On leaving that extent, clip once with spare ground.** Grow the required rectangle by
+   `PINCH_CLIP_MARGIN = 0.5` of its size on each side; clip `_rings` with
+   `L.PolyUtil.clipPolygon`, rounded as Leaflet does, and simplify each nonempty part with
+   `L.LineUtil.simplify` and the polygon's `smoothFactor`. Keep those parts and that extent
+   until the view leaves them again. Both fill and stroke use them, for every clipped
+   polygon on a Canvas renderer. Keep pinch parts separately, swap `_parts` only inside
+   `_updatePoly`, restore them in `finally`, and drop the cache before Leaflet's own
+   `_onZoomEnd`. No reprojection during the pinch; `zoomend` projects and clips as today.
+3. **Nothing else changes.** Polylines still draw their old clipped parts. Their ends can
+   come into view on a zoom out, but make no frame. Strokes, dashes and radii keep their
+   widths through pinch and snap; the ring, retention, silence until release, worker and
+   offline packs stay as they are.
+4. **Drive**, all three pages, from inside the park at z14: hold TouchZoom's path at z12
+   and z10, then make a fractional last movement and release through its snap. Read the
+   coordinates actually handed to Canvas: no boundary vertex on the old clip frame unless
+   it is a vertex of the real ring; the drawn polygon equals Leaflet's clip and
+   simplification over the retained extent, which covers the view plus the scaled stroke.
+   Read the fill, constant stroke widths, unchanged polyline parts, no reprojection, and
+   restoration after each draw. A zoom in and a small zoom out do not re-clip; repeated held
+   redraws do not either. After `zoomend`, every polygon's parts equal an ordinary Leaflet
+   clip of the new view and the pinch cache is gone. Build all three pages here, then run
+   these readings, 8f's and 8j's twice per page; hooks green before the commit.
+
+**Built 2026-09-22.** `js/pinch_draw.js` remembers each Canvas polygon's original clip
+extent in a weak map and keeps its replacement parts per renderer during the pinch. A
+50 % margin amortizes clipping across the gesture; it avoids drawing all 5,116 projected
+vertices of the Lomsdal-Visten boundary each frame, while allowing its real boundary and
+fill to cover the newly visible area. `the_pinch_has_no_clipping_frame` beside 8f in
+`drive_map.py` reads the actual Canvas path coordinates during pinch and snap and checks
+clip reuse and Leaflet's parts afterwards. `test_pinch_draw.py` covers the remembered
+extent, retained parts, simplification, exception restoration and the return to Leaflet;
+a polygon without a remembered clip falls back to its stored parts.
+Polylines, `noClip` polygons and SVG stay on their existing paths.
+
+Measured in Firefox, 390 × 844, non-retina: median / p95 milliseconds of 50 redraws after
+8 warm-ups, no build or other benchmark running alongside. The investigation's probe was
+adapted in `/home/eiseleu/mockups/zoom-rectangle/pinch-8l/cost.py`; the candidate,
+measurement JSON and logs are archived beside it. The same Lomsdal-Visten page was used for both
+variants, replacing only the matching pinch script before page initialization. Timer
+precision reduction was disabled for both. The second run reversed their order.
+
+| Run | Held view | Before median / p95 (ms) | Built median / p95 (ms) |
+| --- | --- | --- | --- |
+| Before, candidate | z8 × 0.75, whole park | 69.19 / 89.46 | 61.16 / 67.90 |
+| Before, candidate | z14 → z12, inside park | 4.62 / 6.32 | 5.31 / 13.56 |
+| Candidate, before | z8 × 0.75, whole park | 60.81 / 72.24 | 62.45 / 72.36 |
+| Candidate, before | z14 → z12, inside park | 4.30 / 10.94 | 4.93 / 7.00 |
+
+An 80-step z14 → z10 pinch re-clipped four times in each run, at z13.7, 12.7, 11.7 and
+10.7, producing 4, 14, 34 and 283 vertices. Clipping plus simplification took
+0.24 / 0.26 / 0.36 / 0.74 ms in the first run and 0.28 / 0.16 / 0.18 / 0.40 ms in the
+repeat; 50 redraws held at the end made zero further clips in either run. The close-view
+median rose by 0.69 and 0.63 ms; the tails varied. Work stopped at the requested cost gate,
+and **the increase was accepted as the cost of drawing the real boundary**, including
+its fill over the newly visible area, instead of the shrunken rectangle (accepted in review, 2026-09-22).
+
+Built Abisko, Lomsdal-Visten and Malingsbo-Kloten in this worktree from cached sources;
+the existing raster trees were linked into its output directory and mounted read-only,
+as was the shared cache, with networking disabled. Driven twice per page with
+`the_pinch_has_no_clipping_frame,the_pinch_is_drawn,the_pinch_waits_for_release`: 385
+readings in each of the six runs, none broken, moved, unrecorded or skipped. During both
+held targets and their snaps, no artificial vertex on the old boundary frame was painted;
+fill and stroke covered the view, widths held, no path was reprojected, polylines kept
+their stored parts, and `zoomend` returned every polygon to Leaflet's clip. The direct
+moves each re-clipped once; the zoom in, small zoom out and repeated held redraws did not.
+The 8f reference stroke stayed at 3.004 px. Each reading restored its page state.
+
+After the review's missing-extent guard, rebuilt all three pages and drove the same
+readings once more per page: 385 each, none broken, moved, unrecorded or skipped.
+
+`command make hooks-run` passed with networking enabled: 2,001 library tests and 97 pipeline tests passed; 5 integration tests deselected.
+
 ## 5. Not in this plan
 
 - Country-wide overview trees and one database per provider rather than per map (§3.5).

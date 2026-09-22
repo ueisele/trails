@@ -31,18 +31,31 @@ class Point {
     divideBy(s) { return this.multiplyBy(1 / s); }
     round() { return new Point(Math.round(this.x), Math.round(this.y)); }
 }
-const bounds = (min, max) => ({min, max, getSize: () => max.subtract(min)});
+const bounds = (min, max) => ({min, max, getSize: () => max.subtract(min),
+    contains: b => b.min.x >= min.x && b.min.y >= min.y && b.max.x <= max.x && b.max.y <= max.y});
 const queue = new Map(); let next = 0, oldTransform = 0, oldEnd = 0, oldRedraw = 0, oldFill = 0, oldCircle = 0;
 class Canvas {
     getEvents() { return {zoomend: this._onZoomEnd, zoom: () => {}}; }
     _updateTransform() { oldTransform++; }
-    _onZoomEnd() { oldEnd++; }
+    _onZoomEnd() { oldEnd++; if (this.checkEnd) this.checkEnd(); }
     _redraw() { oldRedraw++; }
     _fillStroke() { oldFill++; }
     _updateCircle() { oldCircle++; }
+    _updatePoly(layer, closed) {
+        if (!this._drawing) return;
+        this.painted = {parts: layer._parts, closed};
+        if (this.failPoly) throw new Error('polygon draw failed');
+    }
 }
 Canvas.include = methods => Object.assign(Canvas.prototype, methods);
-const L = {Canvas, Browser: {retina: false}, bounds,
+class Polygon {
+    _clipPoints() { this._parts = this.options.noClip ? this._rings : [[this._renderer._bounds.min]]; }
+}
+Polygon.include = methods => Object.assign(Polygon.prototype, methods);
+const clips = [], simplifications = [];
+const L = {Canvas, Polygon, Point, Browser: {retina: false}, bounds,
+    PolyUtil: {clipPolygon: (ring, extent, round) => { clips.push({ring, extent, round}); return ring.slice(); }},
+    LineUtil: {simplify: (part, tolerance) => { simplifications.push({part, tolerance}); return part.slice(); }},
     DomUtil: {setPosition: (element, position) => { element.position = position; }},
     Util: {requestAnimFrame: (fn, self) => { queue.set(++next, () => fn.call(self, clock)); return next; },
         cancelAnimFrame: id => queue.delete(id)}};
@@ -110,6 +123,102 @@ def test_pinch_compensates_without_mutating_paths(scale, retina):
         canvas._updateCircle(layer); assert.equal(oldCircle, 2);
         """
     )
+
+
+def test_polygon_without_a_remembered_clip_keeps_its_parts():
+    """Polygons clipped before installation still paint through Leaflet."""
+    run_script("""
+        const polygon = new Polygon(); polygon._renderer = canvas;
+        polygon.options = {weight: 3.5, smoothFactor: 1};
+        polygon._parts = [[new Point(0, 0), new Point(400, 0), new Point(400, 800)]];
+        const original = polygon._parts;
+        canvas._pinchStart(); canvas._drawing = true; canvas._pinchScale = 0.25;
+        canvas._pinchBounds = bounds(new Point(-600, -1200), new Point(1000, 2000));
+        canvas._updatePoly(polygon, true);
+        assert.equal(canvas.painted.parts, original); assert.equal(canvas.painted.closed, true);
+        assert.equal(polygon._parts, original); assert.equal(clips.length, 0);
+        assert.equal(canvas._pinchPolygons.size, 0);
+    """)
+
+
+def test_polygon_retains_its_clip_until_the_view_leaves_it():
+    """Remember the original extent and amortize new clipping across redraws."""
+    run_script("""
+        const polygon = new Polygon();
+        polygon._renderer = canvas;
+        polygon.options = {weight: 3.5, smoothFactor: 0.75};
+        polygon._rings = [[new Point(-1000, -1000), new Point(1000, -1000), new Point(1000, 1000)]];
+        polygon._clipPoints();
+        const original = polygon._parts;
+        // Changing the renderer later cannot change where these parts were clipped.
+        canvas._bounds = bounds(new Point(100, 200), new Point(300, 600));
+        canvas._pinchStart(); canvas._drawing = true; canvas._pinchScale = 1;
+        canvas._pinchBounds = bounds(new Point(0, 0), new Point(400, 800));
+        canvas._updatePoly(polygon, true);
+        assert.equal(clips.length, 0); assert.equal(canvas.painted.parts, original);
+        const held = canvas._pinchPolygons.get(polygon);
+        assert.deepEqual(held.bounds.min, new Point(-43.5, -83.5));
+        assert.deepEqual(held.bounds.max, new Point(443.5, 883.5));
+        canvas._pinchScale = 0.25;
+        canvas._pinchBounds = bounds(new Point(-600, -1200), new Point(1000, 2000));
+        canvas._updatePoly(polygon, true);
+        assert.equal(clips.length, 1); assert.equal(simplifications.length, 1);
+        assert.equal(clips[0].ring, polygon._rings[0]); assert.equal(clips[0].round, true);
+        assert.equal(simplifications[0].tolerance, polygon.options.smoothFactor);
+        assert.notEqual(canvas.painted.parts, original); assert.equal(polygon._parts, original);
+        const parts = canvas.painted.parts;
+        canvas._pinchBounds = bounds(new Point(-610, -1210), new Point(1010, 2010));
+        for (let i = 0; i < 5; i++) canvas._updatePoly(polygon, true);
+        assert.equal(clips.length, 1); assert.equal(canvas.painted.parts, parts);
+        canvas._pinchBounds = bounds(new Point(-3000, -6000), new Point(3400, 6800));
+        canvas._updatePoly(polygon, true); assert.equal(clips.length, 2);
+        canvas.checkEnd = () => {
+            assert.equal(canvas._pinchPolygons, null); assert.equal(polygon._parts, original);
+            polygon._clipPoints();
+        };
+        canvas._onZoomEnd(); assert.equal(oldEnd, 1);
+        assert.notEqual(polygon._parts, original);
+    """)
+
+
+@pytest.mark.parametrize("snap", [False, True])
+def test_polygon_restores_parts_even_when_paint_fails(snap):
+    """Transient parts cannot leak into Leaflet through a failed pinch or snap draw."""
+    run_script(
+        f"""
+        const polygon = new Polygon(); polygon._renderer = canvas;
+        polygon.options = {{weight: 3.5, smoothFactor: 1}};
+        polygon._rings = [[new Point(-1000, -1000), new Point(1000, -1000), new Point(1000, 1000)]];
+        polygon._clipPoints(); const original = polygon._parts;
+        canvas._draw = () => {{ canvas._drawing = true; canvas._updatePoly(polygon, true); }};
+        canvas._pinchStart(); canvas._map._animatingZoom = {str(snap).lower()};
+        canvas._updateTransform(canvas._center, 8); clock = 200; canvas.failPoly = true;
+        assert.throws(flush, /polygon draw failed/);
+        assert.equal(polygon._parts, original); assert.notEqual(canvas.painted.parts, original);
+        assert.equal(canvas._pinchBounds, null); assert.equal(canvas._pinchScale, null); assert.equal(saves, 0);
+        canvas.failPoly = false; canvas._onZoomEnd();
+        assert.equal(canvas._pinchPolygons, null);
+        """
+    )
+
+
+def test_polylines_unclipped_polygons_and_svg_keep_their_paths():
+    """Only clipped Canvas polygons enter the retained pinch clipping path."""
+    run_script("""
+        const polygon = new Polygon(); polygon._renderer = canvas;
+        polygon.options = {weight: 3.5, smoothFactor: 1};
+        polygon._rings = [[new Point(0, 0)]]; polygon._clipPoints();
+        canvas._pinchStart(); canvas._drawing = true; canvas._pinchScale = 0.25;
+        canvas._pinchBounds = bounds(new Point(-600, -1200), new Point(1000, 2000));
+        canvas._updatePoly(polygon, false);
+        assert.equal(canvas.painted.parts, polygon._parts); assert.equal(clips.length, 0);
+        polygon.options.noClip = true; polygon._clipPoints();
+        canvas._updatePoly(polygon, true);
+        assert.equal(canvas.painted.parts, polygon._rings); assert.equal(clips.length, 0);
+        polygon._renderer = {_bounds: canvas._bounds}; polygon.options.noClip = false;
+        polygon._clipPoints(); assert.equal(clips.length, 0);
+        assert.equal(canvas._pinchPolygons.size, 0);
+    """)
 
 
 def test_pinch_restores_context_if_drawing_throws():

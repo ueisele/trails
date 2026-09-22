@@ -10397,6 +10397,181 @@ def wait_for_async(page: Any, expr: str, timeout_ms: int = 30_000, arg: Any = No
     raise TimeoutError(f"Asynchronous reading did not arrive within {timeout_ms} ms: {expr}")
 
 
+def the_pinch_has_no_clipping_frame(page: Any) -> Check:
+    """Read the polygon paths actually painted through a held zoom out and its snap."""
+    probe = page.context.browser.new_page(viewport={"width": 390, "height": 844})
+    try:
+        probe.goto(page.url, timeout=120_000)
+        ready(probe)
+        result = probe.evaluate(
+            with_map("""async position => {
+            const map = __MAP__, original = {center: map.getCenter(), zoom: map.getZoom()};
+            const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+            const coordinates = rings => rings.map(ring => ring.map(p => [p.x, p.y]));
+            const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+            const samples = [];
+            try {
+                for (const target of [12, 10]) {
+                    map.setView(position, 14, {animate: false});
+                    for (let i = 0; i < 120; i++) {
+                        await frame();
+                        if (Object.values(map._layers).filter(l => l instanceof L.Canvas)
+                            .every(r => !r._redrawRequest && r._zoom === 14)) break;
+                        if (i === 119) throw Error('The starting projection did not settle');
+                    }
+                    const renderers = Object.values(map._layers).filter(l => l instanceof L.Canvas);
+                    const polygons = renderers.flatMap(r => Object.values(r._layers)).filter(l => l instanceof L.Polygon);
+                    const boundaries = polygons.filter(l => l.options.color === '#0d47a1');
+                    if (!boundaries.length) throw Error('No conservation boundary to read');
+                    const savedParts = new Map(polygons.map(l => [l, l._parts]));
+                    const real = new Map(polygons.map(l => [l, new Set(l._rings.flat().map(p => p.x + ',' + p.y))]));
+                    // The old parts include rounded intersections with the stroke-expanded clip box.
+                    const artificial = boundaries.reduce((n, l) => n + l._parts.flat()
+                        .filter(p => !real.get(l).has(p.x + ',' + p.y)).length, 0);
+                    const oldBounds = new Map(boundaries.map(l => {
+                        const b = l._renderer._bounds, w = new L.Point(l.options.weight, l.options.weight);
+                        return [l, L.bounds(b.min.subtract(w).round(), b.max.add(w).round())];
+                    }));
+                    const onFrame = (p, b) => ((p[0] === b.min.x || p[0] === b.max.x) && p[1] >= b.min.y && p[1] <= b.max.y) ||
+                        ((p[1] === b.min.y || p[1] === b.max.y) && p[0] >= b.min.x && p[0] <= b.max.x);
+                    let phase = 'warm', projections = 0, clips = 0;
+                    const stats = () => ({polygons: 0, boundaries: 0, vertices: 0, artificial: 0,
+                        clipMatches: true, coversView: true, restored: true, lineParts: true, widths: true, fills: 0});
+                    const held = stats(), snap = stats();
+                    const projected = renderers.flatMap(r => Object.values(r._layers)).map(layer => {
+                        const project = layer._project;
+                        layer._project = function () {
+                            if (this._renderer._pinchDrawing) projections++;
+                            return project.call(this);
+                        };
+                        return {layer, project};
+                    });
+                    const saved = renderers.map(r => {
+                        const update = r._updatePoly, clip = r._pinchClipPolygon;
+                        r._pinchClipPolygon = function (...args) { clips++; return clip.apply(this, args); };
+                        r._updatePoly = function (layer, closed) {
+                            if (!this._pinchScale || !this._drawing || phase === 'warm') return update.call(this, layer, closed);
+                            const s = phase === 'held' ? held : snap, parts = layer._parts;
+                            const ctx = this._ctx, move = ctx.moveTo, line = ctx.lineTo, stroke = ctx.stroke, fill = ctx.fill;
+                            const paths = [];
+                            ctx.moveTo = function (x, y) { paths.push([[x, y]]); return move.call(this, x, y); };
+                            ctx.lineTo = function (x, y) { paths[paths.length - 1].push([x, y]); return line.call(this, x, y); };
+                            ctx.stroke = function () {
+                                const t = this.getTransform(), ratio = L.Browser.retina ? 2 : 1;
+                                s.widths &&= Math.abs(this.lineWidth * Math.hypot(t.a, t.b) / ratio - layer.options.weight) < 1e-6;
+                                return stroke.call(this);
+                            };
+                            ctx.fill = function (...args) { if (closed) s.fills++; return fill.apply(this, args); };
+                            try { return update.call(this, layer, closed); }
+                            finally {
+                                ctx.moveTo = move; ctx.lineTo = line; ctx.stroke = stroke; ctx.fill = fill;
+                                s.restored &&= layer._parts === parts;
+                                if (closed) {
+                                    s.polygons++; s.vertices += paths.flat().length;
+                                    const cached = this._pinchPolygons.get(layer);
+                                    const expected = layer._rings.map(ring => L.PolyUtil.clipPolygon(ring, cached.bounds, true))
+                                        .filter(part => part.length).map(part => L.LineUtil.simplify(part, layer.options.smoothFactor));
+                                    s.clipMatches &&= same(paths, coordinates(expected));
+                                    const w = new L.Point(layer.options.weight / this._pinchScale, layer.options.weight / this._pinchScale);
+                                    const needed = L.bounds(this._pinchBounds.min.subtract(w), this._pinchBounds.max.add(w));
+                                    s.coversView &&= cached.bounds.contains(needed);
+                                    if (boundaries.includes(layer)) {
+                                        s.boundaries++;
+                                        s.artificial += paths.flat().filter(p => onFrame(p, oldBounds.get(layer)) &&
+                                            !real.get(layer).has(p.join(','))).length;
+                                    }
+                                } else s.lineParts &&= same(paths, coordinates(parts));
+                            }
+                        };
+                        return {r, update, clip};
+                    });
+                    try {
+                        map._moveStart(true, false);
+                        for (const scale of [1.25, 0.98]) {
+                            map._move(map.getCenter(), 14 + Math.log2(scale), {pinch: true, round: false});
+                            await frame(); await frame();
+                        }
+                        const warmClips = clips;
+                        phase = 'held';
+                        map._move(map.getCenter(), target, {pinch: true, round: false});
+                        await frame(); await frame();
+                        const untouched = polygons.every(l => l._parts === savedParts.get(l));
+                        const firstClips = clips;
+                        for (let i = 0; i < 3; i++) {
+                            await frame(); renderers.forEach(r => r._redraw());
+                        }
+                        const heldClips = clips - firstClips;
+                        // A fractional last movement gives the release a real snap to draw.
+                        map._move(map.getCenter(), target + 0.25, {pinch: true, round: false});
+                        await frame(); await frame();
+                        phase = 'snap';
+                        map._animateZoom(map.getCenter(), target, true, map.options.zoomSnap);
+                        for (let i = 0; i < 120; i++) {
+                            await frame();
+                            if (!map._animatingZoom) break;
+                            if (i === 119) throw Error('The release did not settle');
+                        }
+                        await frame(); await frame();
+                        const plain = polygons.every(layer => {
+                            // Run Leaflet's clip and simplification on a separate parts holder.
+                            const reference = Object.create(layer);
+                            L.Polygon.prototype._clipPoints.call(reference);
+                            L.Polyline.prototype._simplifyPoints.call(reference);
+                            return same(coordinates(layer._parts), coordinates(reference._parts));
+                        });
+                        samples.push({target, artificial, held, snap, untouched, plain, projections, warmClips, heldClips, clips,
+                            reset: renderers.every(r => !r._pinchDrawing && !r._pinchView && !r._pinchPolygons && r._zoom === target)});
+                    } finally {
+                        saved.forEach(s => { s.r._updatePoly = s.update; s.r._pinchClipPolygon = s.clip; });
+                        projected.forEach(s => { s.layer._project = s.project; });
+                        if (renderers.some(r => r._pinchDrawing)) map._moveEnd(true);
+                    }
+                }
+            } finally { map.setView(original.center, original.zoom, {animate: false}); }
+            return samples;
+        }"""),
+            SCENE.position,
+        )
+    finally:
+        probe.close()
+    readings = []
+    for sample in result:
+        label = f"z14 to z{sample['target']}"
+        readings.extend(
+            [
+                Reading(f"{label}: the old boundary parts had clipping vertices", sample["artificial"] > 0, True, note=str(sample["artificial"])),
+                Reading(f"{label}: held drawing leaves the original parts in place", sample["untouched"], True),
+                Reading(f"{label}: no path is reprojected during the pinch or snap", sample["projections"], 0),
+                Reading(f"{label}: zoomend returns every polygon to Leaflet's clip", sample["plain"], True),
+                Reading(f"{label}: zoomend resets the renderers", sample["reset"], True),
+                Reading(f"{label}: zooming in and a small zoom out reuse the original parts", sample["warmClips"], 0),
+                Reading(f"{label}: repeated held redraws do not re-clip", sample["heldClips"], 0),
+                Reading(f"{label}: leaving the original extent re-clips", sample["clips"] > 0, True, note=str(sample["clips"])),
+            ]
+        )
+        for phase in ("held", "snap"):
+            paint = sample[phase]
+            prefix = f"{label}, {phase}"
+            readings.extend(
+                [
+                    Reading(f"{prefix}: the real boundary is drawn", paint["boundaries"] > 0, True, note=str(paint["boundaries"])),
+                    Reading(f"{prefix}: no artificial vertex on the old frame is painted", paint["artificial"], 0),
+                    Reading(
+                        f"{prefix}: every polygon paints Leaflet's clip and simplification",
+                        paint["clipMatches"],
+                        True,
+                        note=f"{paint['vertices']} vertices",
+                    ),
+                    Reading(f"{prefix}: the fill and stroke extend beyond the visible view", paint["coversView"], True),
+                    Reading(f"{prefix}: polygon tint is still painted", paint["fills"] > 0, True),
+                    Reading(f"{prefix}: each draw restores its parts", paint["restored"], True),
+                    Reading(f"{prefix}: polylines still paint their stored parts", paint["lineParts"], True),
+                    Reading(f"{prefix}: painted strokes keep their width", paint["widths"], True),
+                ]
+            )
+    return Check("the pinch has no clipping frame", readings)
+
+
 def the_pinch_is_drawn(page: Any) -> Check:
     """Hold fractional zooms and read canvas paint, projection and animation frames."""
     # A preceding check can restore the viewport before Leaflet's debounced
@@ -13963,6 +14138,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(the_sheet_retains_ground, page))
     if wanted(the_snap_is_drawn):
         checks.append(timed(the_snap_is_drawn, page))
+    if wanted(the_pinch_has_no_clipping_frame):
+        checks.append(timed(the_pinch_has_no_clipping_frame, page))
     if wanted(the_pinch_is_drawn):
         checks.append(timed(the_pinch_is_drawn, page))
     if wanted(the_zoom_the_scale_says):
