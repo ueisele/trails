@@ -305,6 +305,8 @@ SCENES: dict[str, Scene] = {
         kayak_shore=WaterLeg(((65.330996, 12.938274), (65.324721, 12.926333)), shore_m=932.1275606650958),
         kayak_bay=WaterLeg(((65.330996, 12.938274), (65.325983, 12.939154)), shore_m=2028.3727803706906),
         kayak_portage=((65.742431, 13.002636), (65.734636, 13.004338)),
+        # The level channel of phase 7 is Korslången's; no stream on this page was measured.
+        skips=("a level channel is paddled both ways",),
         long_chain="trail-group-ut-no-414306-7244296-42442",
         position=(65.55, 13.05),
         view=(65.60, 13.20),
@@ -471,6 +473,8 @@ SCENES: dict[str, Scene] = {
         kayak_shore=WaterLeg(((68.393226, 18.715936), (68.407071, 18.697511)), shore_m=2116.109666223599),
         kayak_bay=WaterLeg(((68.355318, 18.836408), (68.358208, 18.865112)), shore_m=2988.741971415684),
         kayak_portage=((68.268452, 18.179781), (68.271026, 18.180649)),
+        # The level channel of phase 7 is Korslången's; no stream on this page was measured.
+        skips=("a level channel is paddled both ways",),
         # Kungsleden from Abisko to Abiskojaure and Rallarvägen on to Tornehamn,
         # one register chain of 30.7 km.
         long_chain="trail-group-leder-647291-7598453-30741",
