@@ -35,6 +35,12 @@ PORTAGE_M = 1000.0
 PATH_JOIN_M = 150.0
 DAM_CUT_M = 25.0
 DAM_NEAR_M = 25.0
+#: Phase 7's chain measurement opens 173 level chains / 282 edges / 46.9 km
+#: in Malingsbo-Kloten and 35 / 44 / 2.2 km in Abisko. Whole chains keep
+#: noding from opening locally flat pieces of a falling stream.
+#: Rising chains also open; the sampled heights do not establish opposite flow.
+LEVEL_FALL_M = 0.3
+LEVEL_GRADIENT = 0.001
 LAKE_BODY = "lake_body"
 LAKE_LEVEL = "lake_level"
 SURFACE_CLASS = "water_class"
@@ -314,6 +320,7 @@ def build(
     covered = chain_coverage(network.chains, network.edges)
     network = replace(network, chains=network.chains.assign(**{column: covered[column] for column in CHAIN_COVERAGE_COLUMNS}))
     network, levels = level_lakes(measure(network), threshold_m=params.ascent_threshold_m)
+    network = open_level_streams(network)
     differences = (levels["registered"] - levels["percentile"]).abs().dropna()
     print(
         f"  Lake levels: {len(levels):,} bodies; {levels['registered'].notna().sum():,} registered, "
@@ -359,6 +366,46 @@ def report(network: Network) -> None:
     for name in (*WATER_SOURCES, PORTAGES, PORTAGE_PATHS):
         edges = network.edges[network.edges["source"] == name]
         print(f"  {name}: {len(edges):,} edges, {edges['length_m'].sum() / 1000:.3f} km")
+
+
+def open_level_streams(network: Network) -> Network:
+    """Allow both directions on level and rising stream chains.
+
+    Args:
+        network: Combined network after height sampling and lake levelling
+
+    Returns:
+        A copied network with direction cleared on every edge of each opened chain
+
+    Raises:
+        ValueError: If a stream has no chain or fewer than two finite height samples
+    """
+    streams = network.edges[network.edges["source"] == STREAMS]
+    if streams["chain_id"].isna().any():
+        raise ValueError("a stream needs a chain before its fall can be read")
+    edges = network.edges.copy()
+    opened: dict[str, list[tuple[int, float]]] = {"level": [], "rising": []}
+    for chain, parts in streams.groupby("chain_id", sort=False):
+        fall = 0.0
+        for values in parts["elevations"]:
+            heights = np.asarray(values, dtype=float)
+            if heights.ndim != 1 or len(heights) < 2 or not np.isfinite(heights).all():
+                raise ValueError(f"{chain} needs at least two finite heights on every stream edge")
+            quarter = (len(heights) + 3) // 4
+            fall += float(np.median(heights[:quarter]) - np.median(heights[-quarter:]))
+        length = float(parts["length_m"].sum())
+        threshold = max(LEVEL_FALL_M, LEVEL_GRADIENT * length)
+        # Noding must not open short pieces of a steep stream. All samples
+        # already follow flow, even where the chain's canonical order does not.
+        if fall < threshold:
+            edges.loc[parts.index, "one_way"] = False
+            opened["rising" if fall < -threshold else "level"].append((len(parts), length))
+    for label, chains in opened.items():
+        print(
+            f"  Streams opened ({label}): {len(chains):,} chains, "
+            f"{sum(count for count, _ in chains):,} edges, {sum(length for _, length in chains) / 1000:.3f} km"
+        )
+    return replace(network, edges=edges)
 
 
 def level_lakes(network: Network, *, threshold_m: float) -> tuple[Network, pd.DataFrame]:

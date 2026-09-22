@@ -701,6 +701,10 @@ SCENES: dict[str, Scene] = {
             "kayak bay water, m": 1066.143,
             "kayak portage on foot, m": 1274.726,
             "kayak portage water, m": 5.912,
+            "Korslång upstream water, m": 1267.848,
+            "Korslång upstream on foot, m": 77.190,
+            "Korslång downstream water, m": 1267.848,
+            "Korslång downstream on foot, m": 77.190,
             # The same two Storsjön taps on the published walking-only page.
             "walking: shore-pair foot, m": 3266.274,
             "walking: shore-pair water, m": 8.024,
@@ -7544,7 +7548,7 @@ KAYAK_PAGE_STATE = """() => {
 
 
 def read_water_leg(
-    page: Any, points: tuple[tuple[float, float], tuple[float, float]], *, paddling: bool = True, paths: bool = False
+    page: Any, points: tuple[tuple[float, float], tuple[float, float]], *, paddling: bool = True, paths: bool = False, via: tuple[str, ...] = ()
 ) -> dict[str, Any]:
     """Borrow the plan for a scene leg, read its parts and restore its state.
 
@@ -7556,6 +7560,7 @@ def read_water_leg(
         points: The scene's two positions, in journey order
         paddling: Whether to price and describe this way as a kayak journey
         paths: The walking preference to use while reading it
+        via: Chains whose traversed geometry is measured in the resulting track
 
     Returns:
         The public plan and profile readings, with a state-restoration comparison
@@ -7572,7 +7577,7 @@ def read_water_leg(
         page.evaluate("() => { trailsPlan.toggle(false); trailsPlan.show(); }")
         painted(page)
         got: dict[str, Any] = page.evaluate(
-            """() => {
+            """via => {
             const state = trailsPlan.state(), shape = trailsProfile.shape;
             const finite = Array.from(shape.height).filter(Number.isFinite);
             const a = state.points[0], b = state.points[1], graph = trailsGraph;
@@ -7583,13 +7588,39 @@ def read_water_leg(
               const t = (i + 0.5) / count;
               if (graph.waterAt(a.lon + t * (b.lon - a.lon), a.lat + t * (b.lat - a.lat))) wet++;
             }
-            return {state, heights: {samples: shape.height.length, read: finite.length,
+            // The public track must actually take the named carry, not merely
+            // credit another path from the same source with similar metres.
+            const segment = (ax, ay, bx, by) => [ax + ',' + ay, bx + ',' + by].sort().join(';');
+            const track = new Set(), chains = {};
+            if (via.length) for (let v = 1; v < shape.lon.length; v++)
+              track.add(segment(shape.lon[v - 1], shape.lat[v - 1], shape.lon[v], shape.lat[v]));
+            for (const id of via) {
+              const c = graph.chainOf[id];
+              if (c === undefined) { chains[id] = null; continue; }
+              let followed = 0, metres = 0;
+              for (let e = graph.chainAt[c]; e < graph.chainAt[c + 1]; e++) {
+                let whole = true, length = 0;
+                for (let v = graph.vertexAt[e] + 1; v < graph.vertexAt[e + 1]; v++) {
+                  const ax = graph.coordinates[2 * v - 2], ay = graph.coordinates[2 * v - 1];
+                  const bx = graph.coordinates[2 * v], by = graph.coordinates[2 * v + 1];
+                  if (ax === bx && ay === by) continue;
+                  const present = track.has(segment(ax, ay, bx, by));
+                  whole = whole && present;
+                  if (present) length += trailsProfilePanel.metresBetween(ax, ay, bx, by);
+                }
+                if (whole) followed++;
+                metres += length;
+              }
+              chains[id] = {whole: followed === graph.chainAt[c + 1] - graph.chainAt[c], metres};
+            }
+            return {state, chains, heights: {samples: shape.height.length, read: finite.length,
               low: finite.length ? Math.min(...finite) : null, high: finite.length ? Math.max(...finite) : null,
               end: shape.distance[shape.distance.length - 1], span: shape.profileLength},
               direct: {metres: direct, water: direct * wet / count},
               snappedKinds: state.points.filter(p => p.edge >= 0)
                 .map(p => trailsGraph.header.sources[trailsGraph.sources[p.edge]].kind)};
-            }"""
+            }""",
+            via,
         )
     finally:
         # Undo returns the original points and their stage marks; clearing the
@@ -7693,6 +7724,37 @@ def a_portage_takes_the_path(page: Any) -> Check:
             stands("kayak portage water, m", round(s["crossed"], 3), within=0.001),
         ],
     )
+
+
+def a_level_channel_is_paddled_both_ways(page: Any) -> Check:
+    """Korslång's level channel reaches the dam's mapped carry in either direction."""
+    name = "a level channel is paddled both ways"
+    if SCENE.stem != "malingsbo-kloten":
+        return Check(name, skipped="the Korslång channel belongs to the Malingsbo-Kloten scene")
+    small, lake = (59.9440, 15.2620), (59.9525, 15.2500)
+    stream, carry = "streams-514313-6645590-203", "osm-514307-6645636-108"
+    readings: list[Reading] = []
+    ways = []
+    for label, points in (("upstream", (small, lake)), ("downstream", (lake, small))):
+        got = read_water_leg(page, points, via=(stream, carry))
+        s = got["state"]
+        ways.append(s)
+        channel, path = got["chains"].get(stream), got["chains"].get(carry)
+        readings += water_leg_readings(got, label) + [
+            Reading(f"{label}: the track follows the whole channel", bool(channel and channel["whole"]), True),
+            Reading(f"{label}: the track follows the dam's OSM path", bool(path and path["metres"] > 0), True),
+            Reading(f"{label}: the channel is credited as paddled", s["tally"]["sources"].get("Streams", 0) > 0, True),
+            stands(f"Korslång {label} water, m", round(s["crossed"], 3), within=0.001),
+            stands(f"Korslång {label} on foot, m", round(s["walked"], 3), within=0.001),
+            noted(f"{label}: channel and dam path, m", got["chains"]),
+            noted(f"{label}: source credits, m", s["tally"]["sources"]),
+            noted(f"{label}: inferred connectors, m", s["tally"]["undrawn"]),
+        ]
+    readings += [
+        Reading("both directions paddle the same metres", ways[0]["crossed"], ways[1]["crossed"], within=0.01),
+        Reading("both directions carry the same metres", ways[0]["walked"], ways[1]["walked"], within=0.01),
+    ]
+    return Check(name, readings)
 
 
 def a_paddled_profile_is_flat(page: Any) -> Check:
@@ -14049,6 +14111,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(a_bay_is_cut_and_a_lake_is_not, page))
     if wanted(a_portage_takes_the_path):
         checks.append(timed(a_portage_takes_the_path, page))
+    if wanted(a_level_channel_is_paddled_both_ways):
+        checks.append(timed(a_level_channel_is_paddled_both_ways, page))
     if wanted(a_paddled_profile_is_flat):
         checks.append(timed(a_paddled_profile_is_flat, page))
     if wanted(the_walking_modes_never_take_the_water):

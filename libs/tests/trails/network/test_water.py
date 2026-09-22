@@ -164,6 +164,46 @@ def test_an_unread_lake_needs_a_registered_level():
     assert all((values == 207).all() for values in result.edges["elevations"])
 
 
+def test_stream_direction_uses_the_whole_chain_and_robust_fall(capsys):
+    lines = [LineString([(length, y), (0, y)]) for length, y in ((100, 0), (100, 100), (100, 200), (1000, 300), (1000, 400))]
+    streams = NetworkSource(water.STREAMS, gpd.GeoDataFrame(geometry=lines, crs=CRS), kind=PADDLE, directed=True, keep_whole=True)
+    path = NetworkSource("path", gpd.GeoDataFrame(geometry=[LineString([(10, -10), (10, 410)])], crs=CRS))
+
+    def heights(coordinates):
+        x, y = coordinates.T
+        slope = np.select([y == 0, y == 100, y == 200, y == 300, y == 400], [0.02, 0.002, -0.02, 0.0008, 0.002])
+        bump = (y == 100) & (((x > 40) & (x < 60)) | (x == 100))
+        return x * slope + np.where(bump, 20, 0)
+
+    network = with_elevation(build_network([streams, path], metric_crs=CRS, bridge_m=0), heights)
+    result = water.open_level_streams(network)
+    selected = result.edges[result.edges.source == water.STREAMS]
+    for y, expected in ((0, True), (100, False), (200, False), (300, False), (400, True)):
+        pieces = selected[selected.geometry.apply(lambda line, row=y: line.coords[0][1] == row)]
+        assert len(pieces) == 2
+        assert pieces.one_way.tolist() == [expected, expected]
+    steep = selected[selected.geometry.apply(lambda line: line.coords[0][1] == 0)]
+    assert steep.length_m.min() == pytest.approx(10)
+    assert network.edges.loc[network.edges.source == water.STREAMS, "one_way"].all()
+    pd.testing.assert_frame_equal(result.edges.drop(columns="one_way"), network.edges.drop(columns="one_way"))
+    pd.testing.assert_series_equal(
+        result.edges.loc[result.edges.source == "path", "one_way"], network.edges.loc[network.edges.source == "path", "one_way"]
+    )
+    assert result.chains is network.chains and result.nodes is network.nodes
+    assert "Streams opened (level): 2 chains, 4 edges, 1.100 km" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("values", [[], [1.0], [1.0, np.nan], 1.0])
+def test_a_stream_needs_read_heights_before_its_direction_can_open(values):
+    stream = NetworkSource(
+        water.STREAMS, gpd.GeoDataFrame(geometry=[LineString([(100, 0), (0, 0)])], crs=CRS), kind=PADDLE, directed=True, keep_whole=True
+    )
+    network = with_elevation(build_network([stream], metric_crs=CRS, bridge_m=0), lambda coordinates: coordinates[:, 0])
+    network.edges["elevations"] = pd.Series([np.asarray(values)], index=network.edges.index, dtype=object)
+    with pytest.raises(ValueError, match="at least two finite heights"):
+        water.open_level_streams(network)
+
+
 def test_portages_only_join_delaunay_neighbours_and_never_cross_a_third_lake():
     surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100), box(500, 0, 600, 100), box(250, -100, 350, 1000)], crs=CRS)
     paddle = water.sources(surfaces, metric_crs=CRS)

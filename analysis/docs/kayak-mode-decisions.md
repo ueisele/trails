@@ -99,6 +99,7 @@ would draw it without a change.
 
 ## 5. Changes
 
+- 2026-09-22 — phase 7 built: whole stream chains open where their measured fall does not support a restriction. The Korslång pair paddles the channel both ways; the two drives pass and the previous kayak scene figures stand. The built-note separates level and rising chains.
 - 2026-09-22 — phase 7 stopped at the measurement: the supplied fall harness reverses heights by chain orientation even though the payload keeps edge direction. Both warm-cache graphs were captured; the stop and rising-edge classes are below. No gate built.
 - 2026-09-21 — phase 2b built: inferred portages have their own kayak-only kind and undrawn-ground price. Both walking settings recover 22,957 m with zero portage; the kayak leg retains its mapped path. The built-note records the graph scope extension and the remaining phase 4 snapshot detail.
 
@@ -119,6 +120,114 @@ would draw it without a change.
 - 2026-09-21 — phase 3 (`7f68137`): lakes levelled per connected body in the build (150 bodies from the register, 1,005 from the shore's 10th percentile; median difference 0.25 m, largest 2.82 m), paddled parts flat and continuous in the profile, the heading *2.47 km 🛶 · 3.51 km 🚶*, *by kayak* and *portage on foot* in words, paddled points in the GPX and the Garmin course; the dry way byte-identical in both walking settings. Two stops (the shore's tiles, the body's identity).
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
+
+### Phase 7 built — One direction follows the whole stream, 2026-09-22
+
+Review corrected the harness and chose the chain gate. The earlier stop and
+its rising-edge measurement remain unchanged below. `network/water.py` now
+calls `open_level_streams()` immediately after `level_lakes(measure(network))`.
+For every Streams edge it subtracts the median of the last `ceil(n / 4)`
+samples from the first quarter's median, in the edge's own flow direction.
+Those falls and the edge lengths are summed per chain. A chain falling less
+than `max(LEVEL_FALL_M, LEVEL_GRADIENT * length_m)` opens on every edge;
+`LEVEL_FALL_M = 0.3` m and `LEVEL_GRADIENT = 0.001`. Rising chains open too.
+Geometry, node order, height samples and lake levels do not change, and no
+stream is reversed. A missing chain or an unread stream profile fails the
+build rather than opening a restriction without a measurement.
+
+**What the two graph commands print.** Both warm-cache graph builds passed;
+the Malingsbo-Kloten page build repeats these gate figures.
+
+| Map and class | Chains opened | Edges opened | km opened |
+|---|---:|---:|---:|
+| Malingsbo-Kloten, level | 173 | 282 | 46.877 |
+| Malingsbo-Kloten, rising | 13 | 20 | 1.623 |
+| Malingsbo-Kloten, total | 186 | 302 | 48.500 |
+| Abisko, level | 35 | 44 | 2.182 |
+| Abisko, rising | 0 | 0 | 0.000 |
+
+The review's 173 / 282 / 46.9 km and 35 / 44 / 2.2 km are exactly the
+level-chain subsets. Including the explicitly requested rising chains adds
+13 / 20 / 1.622881 km in Malingsbo-Kloten. The final captures match all 610
+and 432 original stream records in geometry, heights and arrow measurements;
+only the direction flags differ. Every edge of a given chain has the same
+flag. The Korslång channel is one opened chain with two edges, 203.468570 m
+in the graph's metric projection.
+
+**The absolute tolerance still applies to short whole chains.** This fixes
+opening a locally flat piece of a chain whose fall exceeds the threshold.
+It does not promise that every opened whole chain has a gradient below
+0.5 %. Fourteen short whole chains in Malingsbo-Kloten (20 edges, 0.223096 km)
+and twelve in Abisko (13 edges, 0.154020 km) exceed that percentage while their
+summed fall stays below 0.3 m. Their largest falls are 0.291528 and 0.296118 m;
+their longest chains are 53.227592 and 40.064113 m. The measured counts match
+the specified gate; these are the remaining effect of its absolute noise
+allowance, not pieces opened independently of their chain.
+
+`libs/tests/trails/network/test_water.py` adds a synthetic directed network
+cut by a crossing path. The short piece of a falling chain stays directed;
+level and rising chains open, including a shallow long chain which needs the
+gradient arm. Middle and endpoint bumps exercise the quarter medians. The
+test retains the original network, non-stream flags, geometry and heights;
+separate cases reject missing, single and nonfinite sample series.
+
+**The Korslång pair on the built page.** `drive_map.py` adds
+`a_level_channel_is_paddled_both_ways` beside the kayak checks. It uses
+(59.9440, 15.2620) → (59.9525, 15.2500) and the reverse pair, in kayak mode.
+The existing water-leg reader now optionally measures named chains against
+the public track's actual geometry. Both directions follow the entire channel
+and use the named dam path, rather than merely receiving an OSM source credit.
+Each reading restores and compares mode, path preference, goal way and plan.
+
+| Public page measurement | Upstream | Downstream |
+|---|---:|---:|
+| Paddled | 1,267.847554 m | 1,267.847554 m |
+| On foot | 77.189713 m | 77.189713 m |
+| Channel, `streams-514313-6645590-203` | 203.522476 m | 203.522476 m |
+| Used part of `osm-514307-6645636-108` | 20.088517 m | 20.088517 m |
+| All OSM source credit | 47.074972 m | 47.074972 m |
+| Inferred connectors | 27.453604 m | 27.453604 m |
+
+The path's id describes its whole 108 m chain; the chosen journey uses only
+20.089 m of it. The drive records what is carried, without extending the route
+to use the whole chain. Both tracks retain the existing inferred connectors.
+The channel's metric-graph length and browser length differ because the latter
+uses the page's distance calculation on quantised geographic coordinates.
+Its quarter-median chain fall is 0.163168 m, below the 0.3 m arm.
+
+The scene gains the four Korslång total-length readings. None of its previous
+kayak figures moves: shore **2,122.779 m** paddled, bay **1,066.143 m** paddled,
+and portage **1,274.726 m** on foot plus **5.912 m** paddled. Both walking-mode
+readings and the plan-page price switches still pass. No page JavaScript or
+encoding changed.
+
+**Builds and validation.** The two graph commands and the Malingsbo-Kloten
+map command completed under the 8 GiB address-space cap, with network requests
+and shared-cache writes blocked. No tiles or input data were fetched or built.
+The page decodes 217,122 edges, including 610 Streams edges with 302 opened;
+its routing payload is 9,884,753 raw bytes and 6,406,640 base64 bytes.
+The page's slow step was the existing bounded Ortnamn name-pairing loop.
+
+Two runs of `command make drive` against this worktree's page, restricted to
+the new reading, the five existing kayak checks and the plan-page price
+switches, each pass **107 readings: zero broken invariants, moved figures,
+unrecorded figures or scene skips**. Both runs verify restoration. The
+required `command make hooks-run` output is in `built-hooks-final.log` below.
+The first run passed 1,994 libs tests and found one malformed-profile case:
+a one-sample test array was coerced to a scalar, so validation raised
+`TypeError` rather than `ValueError`. The gate now checks the array dimension
+before its length, and the fixture retains its series while also testing a
+scalar explicitly. Valid sampled networks and the driven page are unaffected.
+
+Scratch remains in `~/mockups/kayak-mode/phase7/`: the two maps'
+`*.opened.graph.log` and `*.opened.graph.json`,
+`malingsbo-kloten.opened.map.log`, `chain-gate-summary.json`,
+`measure-page.py`, `public-measure.json`, `public-page-network.json`,
+`drive-1.log`, `drive-2.log`, `built-hooks.log` and `built-hooks-final.log`. The public measurement
+served only local resources; its initial invocation lacked Playwright, and
+the completed invocation used the drive target's cached `playwright==1.62.0`.
+No source harness was edited. Phase 5's rebuild-all and publication remain
+outside this phase; nothing was pushed.
 
 ### Phase 7 — Stopped at the fall measurement's direction, 2026-09-22
 
