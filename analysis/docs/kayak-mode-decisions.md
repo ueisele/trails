@@ -99,7 +99,7 @@ would draw it without a change.
 
 ## 5. Changes
 
-- 2026-09-22 — phase 7 opened: one way only where the water falls; the Korslångssmedja finding and its measurement (`~/mockups/kayak-mode/korslang/`) are in the plan's §4 Phase 7.
+- 2026-09-22 — phase 7 stopped at the measurement: the supplied fall harness reverses heights by chain orientation even though the payload keeps edge direction. Both warm-cache graphs were captured; the stop and rising-edge classes are below. No gate built.
 - 2026-09-21 — phase 2b built: inferred portages have their own kayak-only kind and undrawn-ground price. Both walking settings recover 22,957 m with zero portage; the kayak leg retains its mapped path. The built-note records the graph scope extension and the remaining phase 4 snapshot detail.
 
 - 2026-09-21 — phase 1b built: review retains the 10 m chord ring after the 25 m sweep changed two ways. Ponds stay outside the paddle network, portages join Delaunay neighbours, and Norway reads cached 4 m ground. The final three graphs, Swedish page bytes and completed Norway memory measurement are in the built-note below.
@@ -119,6 +119,147 @@ would draw it without a change.
 - 2026-09-21 — phase 3 (`7f68137`): lakes levelled per connected body in the build (150 bodies from the register, 1,005 from the shore's 10th percentile; median difference 0.25 m, largest 2.82 m), paddled parts flat and continuous in the profile, the heading *2.47 km 🛶 · 3.51 km 🚶*, *by kayak* and *portage on foot* in words, paddled points in the GPX and the Garmin course; the dry way byte-identical in both walking settings. Two stops (the shore's tiles, the body's identity).
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
+
+### Phase 7 — Stopped at the fall measurement's direction, 2026-09-22
+
+**The supplied measurement reverses some stream profiles a second time.**
+`~/mockups/kayak-mode/korslang/falls.py`, lines 16–18, reads flag bit 0 as
+meaning that a profile must be reversed to obtain its digitised direction.
+That is not the payload's convention. `visualization/encoding.py`,
+`encode_graph()` and `_heights()`, keep each edge's geometry and samples in
+its own direction. Bit 0 records its orientation against the chain; only
+`_nodes()` orders endpoints along the chain for compression, and
+`js/routing_graph.js`, lines 79–85, restores `fromNode` and `toNode` on decode.
+The existing `test_a_chain_walked_against_its_own_direction_comes_back_flagged`
+asserts that a flagged edge keeps its original height order.
+
+Phase 1 already restored each directed stream's digitised geometry in
+`routing/graph.py::_split_into_edges()`. `routing/elevation.py::with_elevation()`
+samples that geometry, and phase 3's `water.level_lakes()` leaves Streams
+profiles alone. Thus the first minus last stream sample already reads fall
+in the digitised direction. The harness's extra reversal changes its sign
+where digitisation opposes canonical chain order. The plan's published-page
+rising counts cannot be treated as evidence of opposing flow.
+
+**Stopped under the wrong-premise rule before building the gate.** The two
+requested graph builds were already running when this was found; their
+finished profiles are recorded separately below. Review must correct the
+measurement convention and the plan's baseline before resuming phase 7.
+The model's remaining local rises do not by themselves establish opposite flow.
+No threshold was adopted and no `one_way` flag was cleared: all 610
+Malingsbo-Kloten Streams edges and all 432 Abisko Streams edges remain directed.
+
+Only this record changes. The review harness is untouched. No page was built,
+no browser state changed, no Korslång pair was remeasured, no kayak scene
+figure moved and neither of the two acceptance drives was run, because the
+gate was stopped. No later phase, tile build or publication was started.
+
+### Phase 7 measurement — Rising edges in their own direction, 2026-09-22
+
+Both `command make graph ARGS="--park malingsbo-kloten"` and the same command
+with `--park abisko` completed in this worktree from the warm cache. A scratch
+wrapper captured the returned `water.build()` network after height sampling
+and lake levelling, without changing it. Each process capped address space
+at 8 GiB and blocked network requests and shared-cache writes. The graph
+profiles use the cached 4 m mosaic, sampled along edges at the configured
+5 m spacing; these figures precede the payload's centimetre quantisation.
+Lengths below are the graph's EPSG:3006 metres, not the browser's approximation.
+
+Fall is first height minus last in the edge's own digitised direction.
+For the robust reading, each end takes `ceil(sample_count / 4)` samples
+and its median. The comparison threshold is the plan's starting
+`max(0.3 m, 0.001 * length_m)`, used for this measurement, not adopted as
+a gate. Every stream has at least two finite samples. The two samples of
+a very short edge cannot distinguish a local bump from a sustained rise.
+
+| Reading | Malingsbo-Kloten: edges / km | Abisko: edges / km |
+|---|---:|---:|
+| All Streams | 610 / 115.546765 | 432 / 55.806730 |
+| Endpoint rise greater than 0.3 m | 44 / 7.373343 | 4 / 0.195040 |
+| Quarter-median rise greater than the starting threshold | 30 / 2.299878 | 1 / 0.017060 |
+| Would open under the starting quarter-median gate | 389 / 55.920709 | 104 / 2.534603 |
+
+The corrected endpoint-rise counts are **44 and 4**, compared with the plan's
+107 and 165. These are direct build measurements, not a new measurement of
+the published pages. The source-level error in the supplied harness is the
+stop above; the difference must not be explained as a change in water flow.
+
+**Classes of those endpoint rises.** These classes describe sampled shapes,
+not an attribution to bridges, trees or actual water flow. Level means the
+absolute quarter-median fall is at most the starting threshold. A central
+peak exceeds both end-quarter medians by that threshold among samples outside
+the two end quarters. Monotone at every sample means no downward step;
+the separate quarter-median class allows local reversals but requires all
+four consecutive quarter medians to be nondecreasing (equal-sized groups,
+with remainder samples assigned to the earlier groups). Other substantial rises
+remain unresolved rather than being called model noise.
+
+| Endpoint-rise class | Malingsbo-Kloten: edges / km | Abisko: edges / km |
+|---|---:|---:|
+| Lake-connected endpoint rise removed on interior samples | 0 / 0.000000 | 0 / 0.000000 |
+| Level quarter medians, central peak | 4 / 2.150266 | 0 / 0.000000 |
+| Level quarter medians, no central peak | 10 / 2.601264 | 3 / 0.177981 |
+| Quarter medians fall despite endpoint rise | 6 / 1.129221 | 0 / 0.000000 |
+| Monotone rise at every sample | 6 / 0.086080 | 0 / 0.000000 |
+| Monotone quarter medians, local reversals | 2 / 0.129437 | 0 / 0.000000 |
+| Nonmonotone rise remains | 16 / 1.277074 | 1 / 0.017060 |
+
+A lake-connected endpoint shares a graph node with a levelled lake edge.
+Two Malingsbo-Kloten endpoint rises meet one: **20.432398 m** and
+**229.045316 m**. Removing that endpoint and recomputing the quarter medians
+changes their falls from **−0.411445 to −0.502871 m** and from
+**+0.169543 to +0.149744 m**, respectively. Neither changes class. No Abisko
+endpoint rise meets a levelled lake. Six additional Malingsbo-Kloten edges
+(**0.807287 km**) have a robust rise but not an endpoint rise over 0.3 m;
+they explain why the robust total exceeds the 24 still-rising edges in the
+endpoint table. One of those six meets a lake; dropping that end leaves its
+robust fall at **−0.382906 m**.
+
+**Flow arrows within 50 m.** The cached `hydropunkt` layer contains
+**2,121** arrows in Malingsbo-Kloten and **710** in Abisko. Each edge was
+compared with every arrow within 50 m, using the tangent from 5 m before
+to 5 m after its projected position, clipped to the line ends. The convention
+is phase 1's `bearing = 90 - rotation`; agreement is an angular difference
+strictly under 90 degrees. An arrow may be counted for several noded edges.
+
+| Edges with nearby arrows | Agree only | Oppose only | Mixed | No arrow |
+|---|---:|---:|---:|---:|
+| Malingsbo-Kloten, all Streams | 74 | 1 | 0 | 535 |
+| Abisko, all Streams | 40 | 0 | 0 | 392 |
+| Malingsbo-Kloten: lake-connected endpoint rise removed on interior samples | 0 | 0 | 0 | 0 |
+| Malingsbo-Kloten: level quarter medians, central peak | 3 | 0 | 0 | 1 |
+| Malingsbo-Kloten: level quarter medians, no central peak | 1 | 0 | 0 | 9 |
+| Malingsbo-Kloten: quarter medians fall despite endpoint rise | 0 | 0 | 0 | 6 |
+| Malingsbo-Kloten: monotone rise at every sample | 0 | 0 | 0 | 6 |
+| Malingsbo-Kloten: monotone quarter medians, local reversals | 0 | 0 | 0 | 2 |
+| Malingsbo-Kloten: nonmonotone rise remains | 0 | 0 | 0 | 16 |
+
+All four Abisko endpoint rises have no nearby arrow. The Malingsbo-Kloten
+rising classes with arrows are the four with level quarter medians: three
+central peaks and one without. All their arrows support digitisation.
+Among all 30 robust Malingsbo-Kloten rises, one has a nearby arrow and it
+also supports digitisation. No measured rising edge has an opposing arrow.
+
+The six strictly monotone Malingsbo-Kloten rises total only **86.079960 m**;
+four have two or three height samples. The other two span **33.364658 m**
+and **22.191013 m**. No nearby arrow establishes their opposite flow.
+Abisko's one remaining robust rise is **17.059902 m**, with four heights
+**868.315420, 868.603671, 868.821886, 868.687066 m**: it rises and then falls.
+The stopped measurement does not settle a new water-noise tolerance or
+justify reversing any of these edges. The starting gate would open 389
+and 104 edges, respectively; **the actual number opened is zero on both maps**.
+
+Scratch and evidence: `~/mockups/kayak-mode/phase7/sitecustomize.py`,
+`classify.py`, each map's `.graph.log`, `.graph.json` and
+`.graph.classified.json`. Captures retain every stream's id, metric geometry,
+full profile, lake-end membership and nearby arrow ids, distances and angles.
+The source harness and the shared cache were not edited.
+
+Validation is recorded in `~/mockups/kayak-mode/phase7/hooks-final.log`.
+The first hooks invocation passed formatting, lint, mypy and both test suites
+(**1,991 libs tests and 97 pipeline tests**), but pre-commit reported that
+files changed during the test hook: this record was being clarified while
+it ran. The required hooks were rerun after the record was finished.
 
 ### Phase 6 built — The switches in plan mode, 2026-09-21
 
