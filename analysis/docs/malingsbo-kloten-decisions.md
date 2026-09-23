@@ -42,6 +42,102 @@ The box touches three counties, Örebro (T), Dalarna (W) and Västmanland (U).
 Tile counts by `trails.utils.tiles.tile_count`: 692 height tiles z8–13, 9,756 per overlay
 z8–15, 152,055 for the sheet z8–17 — five per cent over Abisko's 610 / 9,330 / 146,995.
 
+### 2.1 The county joins are not the area's boundary — decided, 2026-09-23
+
+Uwe saw breaks in the blue conservation boundary after the pinch's clipping frame was
+removed. The three county records do not quite meet. Their exact union has three components
+and 85 holes: the records' 19 holes and **66 seam slivers**, together 58.212 m². The widest
+closed seam measured 0.061 m. Exterior-connected slivers draw the same false double line
+into the area. The cached Topografi 50 boundary and the sheet agree on the area; changing
+which protected area is drawn is not the remedy.
+
+The three places inspected were `59.9862421394, 15.2190511997`,
+`60.0026959810, 15.1935788949` and `59.9565910619, 15.2584040710` (latitude, longitude).
+They lie on the county join. The blue fragments there must disappear. The investigation
+sampled the actual painted paths on all three published maps: 672,521 samples in 604 views,
+zero missing, at rest and through pinch and snap. It found no missing canvas stroke to fix.
+
+**Uwe's decision: union with a tolerance**, after being told it would first be for the
+drawing. **Review's decision after the Lomsdal witness: close only an area dissolved from
+several records.** Naturvårdsregistret returns its source-record count as a column; the loader
+takes it out of the page's columns and carries it explicitly as `Built.boundary_records`.
+The Naturbase loader returns 1. There is no default at the hand-off to `add_boundary`, where
+`close_for_display` copies the area, projects it to the source's metric CRS, buffers out and back by
+`BOUNDARY_TOLERANCE_M = 1.0`, with mitre joins and their default limit, and returns to the
+page's CRS. Both outline and fill use this copy. Routing, coverage, exports and the graph
+keep the exact analytical geometry, whose WKB must remain byte-identical.
+
+A single record passes through without reprojection or closing. Abisko's one register
+record and Lomsdal-Visten's one Naturbase object have no dissolved join; their page boundary
+GeoJSON must be identical to the published page's. The rule is about record count, not map
+names, so a future multi-record area gets the same closing. This also removes the unnecessary
+Lomsdal candidate's mitre-limit trim: its sharp tip at `65.651849575, 12.690137518` moved
+1.131681 m. Increasing the mitre limit or the tolerance to accommodate it was not taken.
+
+**The accepted gates** are valid geometry, three components and the 19 source holes, each
+retained hole within the tolerance of its counterpart; directed displayed → exact distance
+at most the tolerance for every retained ring; and every piece of the symmetric difference
+empty after a negative buffer of `BOUNDARY_TOLERANCE_M + FLOAT_SLACK_M`, with
+`FLOAT_SLACK_M = 0.000001` for floating-point slack in the measurement. Symmetric outline
+Hausdorff was the wrong gate: removing a seam hole or an exterior-connected seam deliberately
+removes a long false line, whose distance back to the displayed outline says nothing about
+the sliver's width. The displayed-to-exact direction bounds where the new line goes.
+
+Measured in the native EPSG:3006 source coordinates: the closing is valid, with three
+components and 19 holes. All 66 seam holes vanish. The retained holes move at most
+0.004949 m; the largest absolute hole-area change is 0.254633 m². Sampling every displayed
+ring at intervals no greater than 0.1 m gives a maximum directed distance of 0.366730 m,
+with a certified upper bound of **0.416730 m** (distance to the exact ring is 1-Lipschitz,
+so add half the sampling interval). All 22 rings pass. The 99 changed pieces total
+**68.377692 m²** over 490.342 km², all empty under the negative-buffer gate. Width, measured
+as twice the extinction radius under negative buffering, is at most **0.654426 m**.
+
+The earlier location gate was dropped in review: changes narrower than the tolerance are
+allowed away from joins too. Nine pieces with extent over 10 m were proved to leave the
+county line and the shared-record edges; together they cover **3.413933 m²**, widest
+**0.654426 m**. Piece 94 is the example: 1.839749 m² of record 2002711's own narrow outline,
+0.65 m wide, reaching 36.899 m from the next record's edge. These off-join changes were
+accepted in review because they are below the tolerance. Their location is not a gate.
+
+The drive reading `the_boundary_has_no_seams` reads the page's GeoJSON at full precision,
+checks components, the recorded hole count and that no hole disappears under a negative
+1 m buffer. It samples the painted outline at rest at z10, z12, z14 and z16, after redraw,
+through held pinches and the snap. At the three former fragments it requires no blue at
+z14, held z12.25, during the snap to z12 and after settling. The fragment probes are
+`59.992135, 15.213832`, `60.001683, 15.205503` and `59.960595, 15.252162`, on the false blue
+lines within the three investigated places. The control run on the published page finds
+blue there in every phase. Every reading restores its view.
+
+Evidence, scripts, source and page comparisons, and drive logs are in
+`/home/eiseleu/mockups/zoom-rectangle/boundary-gaps/`; the investigation report is
+`/home/eiseleu/mockups/zoom-rectangle/boundary-gaps-report.md`. The figures above are native
+source measurements; the rebuilt-page comparison also checks the round trip through WGS 84.
+
+**Built 2026-09-23.** All three pages rebuilt here from the read-only cache, with networking
+disabled. The built Malingsbo boundary matches the display calculation exactly: valid,
+three components, 19 holes, analytical WKB unchanged. Its three exterior directed upper
+bounds are 0.050001, 0.416730 and 0.378621 m, in built component order; all 19 retained holes
+are within 0.004949 m of their counterparts. The round trip leaves 99 changed pieces,
+68.377697 m² in total, widest at most 0.654426 m; every piece passes the negative-buffer
+gate. Abisko's two rings and Lomsdal-Visten's one ring have zero displacement: their boundary
+GeoJSON is identical to the published page's. All three embedded routing headers and payloads
+are also identical to the published pages.
+
+The three requested readings ran twice per page in Firefox, 390 × 844 for the boundary
+probe, with networking disabled: 95 readings per Abisko and Lomsdal run, 103 per Malingsbo
+run, all green. The painted-path samples were 170,588 / 168,305 for Abisko,
+217,452 / 217,452 for Lomsdal-Visten and 208,985 / 209,954 for Malingsbo-Kloten:
+**1,192,736 samples, zero missing**. Both Malingsbo runs found zero blue pixels at all three
+former fragments at rest, held z12.25, throughout snap and after settling. The 8f and 8l
+readings stay green. Unit tests cover closing several records, preserving a single record
+byte-for-byte, retaining real holes and components, and leaving the analytical input alone.
+`command make hooks-run` passed with networking enabled.
+
+The explicit record-count hand-off added in review was checked through the actual loaders
+and `add_boundary`: all three serialized boundary GeoJSONs are byte-identical to these
+builds, with analytical WKB unchanged. No rebuild was needed; the comparison is recorded in
+`boundary-gaps/review-boundary-bytes.json` beside the evidence above.
+
 ## 3. The sources
 
 Nothing had to be ordered. Every Swedish source Abisko reads is national on disk or an

@@ -39,13 +39,15 @@ def test_each_map_names_its_gateway_form_and_check(builder):
     assert which.bounds == TREES[which.stem].box
 
 
-def test_boundary_loader_asks_for_the_form_and_the_union(builder, capsys):
-    which = builder.PARKS["malingsbo-kloten"]
+@pytest.mark.parametrize(("stem", "records"), [("abisko", 1), ("malingsbo-kloten", 3)])
+def test_boundary_loader_asks_for_the_form_and_the_union(builder, capsys, stem, records):
+    which = builder.PARKS[stem]
     frame = gpd.GeoDataFrame(
         {
             nvr.AREA_ID: ["county-objects"],
             nvr.AREA_NAME: [which.name],
             nvr.AREA_FORM: [which.form],
+            nvr.SOURCE_RECORD_COUNT: [records],
             "AREA_HA": [0.0],
             "LAN": ["counties"],
             "KOMMUN": ["municipalities"],
@@ -55,10 +57,26 @@ def test_boundary_loader_asks_for_the_form_and_the_union(builder, capsys):
     )
     register = Mock()
     register.find_one.return_value = frame
-    found = builder.load_swedish_boundary(which, register)
+    found, count = builder.load_swedish_boundary(which, register)
     register.find_one.assert_called_once_with(which.name, form=which.form, exact=True, dissolve=True)
     assert found.geometry.equals(frame.geometry)
-    assert "Nature conservation area: Malingsbo-Kloten" in capsys.readouterr().out
+    assert count == records
+    assert nvr.SOURCE_RECORD_COUNT not in found.columns
+    assert f"{which.kind_label.capitalize()}: {which.name}" in capsys.readouterr().out
+    register.find_one.return_value = frame.drop(columns=nvr.SOURCE_RECORD_COUNT)
+    with pytest.raises(KeyError, match=nvr.SOURCE_RECORD_COUNT):
+        builder.load_swedish_boundary(which, register)
+
+
+def test_naturbase_boundary_carries_one_record(builder, monkeypatch):
+    which = builder.PARKS["lomsdal-visten"]
+    frame = gpd.GeoDataFrame({"offisieltNavn": [which.name], "kommune": ["municipalities"]}, geometry=[box(12, 65, 13, 66)], crs="EPSG:4326")
+    source = Mock()
+    source.find_one.return_value = frame
+    monkeypatch.setattr(builder.naturbase, "Source", Mock(return_value=source))
+    found, count = builder.load_park_boundary(which, "unused")
+    assert count == 1
+    assert found is frame
 
 
 def test_county_remains_are_read_once_per_remain_id(builder, monkeypatch):

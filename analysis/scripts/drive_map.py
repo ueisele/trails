@@ -291,6 +291,12 @@ class Scene:
     #: What the *Sources* panel calls the data the mire tree is cut from, so
     #: the credit is on the panel and not in the map's foot.
     mire_sources: tuple[str, ...] = ()
+    #: Retained protected-area rings, measured after closing county seams.
+    boundary_components: int = 1
+    boundary_holes: int = 0
+    boundary_crs: str = "EPSG:25833"
+    #: Former blue fragments near the three reported Malingsbo-Kloten gaps.
+    boundary_seams: tuple[tuple[float, float], ...] = ()
 
     @property
     def companions(self) -> maps.Companions:
@@ -469,6 +475,8 @@ SCENES: dict[str, Scene] = {
     ),
     "abisko": Scene(
         stem="abisko",
+        boundary_holes=1,
+        boundary_crs="EPSG:3006",
         length_endpoints=((68.436158, 18.606154), (68.327135, 18.753069)),
         kayak_shore=WaterLeg(((68.393226, 18.715936), (68.407071, 18.697511)), shore_m=2116.109666223599),
         kayak_bay=WaterLeg(((68.355318, 18.836408), (68.358208, 18.865112)), shore_m=2988.741971415684),
@@ -661,6 +669,10 @@ SCENES: dict[str, Scene] = {
     ),
     "malingsbo-kloten": Scene(
         stem="malingsbo-kloten",
+        boundary_components=3,
+        boundary_holes=19,
+        boundary_crs="EPSG:3006",
+        boundary_seams=((59.992135, 15.213832), (60.001683, 15.205503), (59.960595, 15.252162)),
         # Road 233 from Kopparberg past Kloten, 45.885 km in the rebuilt page
         # of 2026-09-20. Its name also exercises the heading and detail checks.
         long_chain="trail-group-topografi-50-roads-499680-6637622-45885",
@@ -10397,6 +10409,192 @@ def wait_for_async(page: Any, expr: str, timeout_ms: int = 30_000, arg: Any = No
     raise TimeoutError(f"Asynchronous reading did not arrive within {timeout_ms} ms: {expr}")
 
 
+def the_boundary_has_no_seams(page: Any) -> Check:
+    """Read the retained rings and their painted paths, including the former seams."""
+    import geopandas as gpd
+    from shapely.geometry import Polygon
+    from trails.visualization.boundary import BOUNDARY_TOLERANCE_M
+
+    probe = page.context.browser.new_page(viewport={"width": 390, "height": 844})
+    try:
+        probe.goto(page.url, timeout=120_000)
+        ready(probe)
+        # Leaflet's default decimal rounding can collapse the measured seams.
+        features = probe.evaluate(
+            with_map("""() => Object.values(__MAP__._layers)
+            .filter(l => l instanceof L.Polygon && l.options.color === '#0d47a1').map(l => l.toGeoJSON(false))""")
+        )
+        boundary = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+        metric = boundary.to_crs(SCENE.boundary_crs)
+        polygons: list[Polygon] = []
+        for geometry in metric.explode().geometry:
+            if not isinstance(geometry, Polygon):
+                raise ValueError("The drawn boundary contains something other than a polygon")
+            polygons.append(geometry)
+        holes = [Polygon(ring) for polygon in polygons for ring in polygon.interiors]
+        largest = max(polygons, key=lambda polygon: polygon.area)
+        positions = gpd.GeoSeries([largest.exterior.interpolate(i / 8, normalized=True) for i in range(8)], crs=metric.crs).to_crs(4326)
+        centers = [[lat, lon] for lat, lon in zip(positions.y, positions.x, strict=True)]
+        result = probe.evaluate(
+            with_map("""async ({centers, seams}) => {
+ const map=__MAP__, original={center:map.getCenter(),zoom:map.getZoom()};
+ const frame=()=>new Promise(r=>requestAnimationFrame(r));
+ const boundaries=Object.values(map._layers).filter(l=>l instanceof L.Polygon&&l.options.color==='#0d47a1');
+ const removed=Object.values(map._layers).filter(l=>l instanceof L.Path&&!boundaries.includes(l));
+ const renderers=[...new Set(boundaries.map(l=>l._renderer))], originals=[];
+ let captures=[];
+ for(const r of renderers){
+  const update=r._updatePoly;
+  originals.push({r,update});
+  r._updatePoly=function(layer,closed){
+   if(!boundaries.includes(layer)||!this._drawing)return update.call(this,layer,closed);
+   const ctx=this._ctx,m=ctx.moveTo,l=ctx.lineTo,t=ctx.getTransform(),paths=[];
+   ctx.moveTo=function(x,y){paths.push([[x,y]]);return m.call(this,x,y)};
+   ctx.lineTo=function(x,y){paths[paths.length-1].push([x,y]);return l.call(this,x,y)};
+   try{return update.call(this,layer,closed)}finally{ctx.moveTo=m;ctx.lineTo=l;captures.push({layer,r,paths,t,closed});}
+  };
+ }
+ function measure(label){
+  const ratio=L.Browser.retina?2:1, size=map.getSize(), mapRect=map.getContainer().getBoundingClientRect();
+  const result={label,z:map.getZoom(),center:map.getCenter(),painted:{samples:0,missing:0,longest:0,places:[]},vertices:0};
+  for(const cap of captures){
+   const {r,layer,t}=cap, canvas=r._container,rect=canvas.getBoundingClientRect(),im=r._ctx.getImageData(0,0,canvas.width,canvas.height);
+   const blue=(x,y,radius)=>{
+    for(let yy=Math.max(0,Math.floor(y-radius));yy<=Math.min(im.height-1,Math.ceil(y+radius));yy++)
+    for(let xx=Math.max(0,Math.floor(x-radius));xx<=Math.min(im.width-1,Math.ceil(x+radius));xx++){
+     const i=(yy*im.width+xx)*4;
+     if(im.data[i+3]>=150&&Math.abs(im.data[i]-13)<=5&&Math.abs(im.data[i+1]-71)<=5&&Math.abs(im.data[i+2]-161)<=5)return true;
+    }return false;
+   };
+   const sample=(paths,stats,radius)=>{
+    for(const path of paths){let run=0;
+     for(let j=0;j<path.length;j++){
+      const a=path[j],b=path[(j+1)%path.length];
+      const ax=t.a*a[0]+t.c*a[1]+t.e,ay=t.b*a[0]+t.d*a[1]+t.f,bx=t.a*b[0]+t.c*b[1]+t.e,by=t.b*b[0]+t.d*b[1]+t.f;
+      const n=Math.ceil(Math.hypot(bx-ax,by-ay)/ratio);
+      for(let k=0;k<n;k++){
+       const x=ax+(bx-ax)*k/n,y=ay+(by-ay)*k/n,sx=x/ratio+rect.left-mapRect.left,sy=y/ratio+rect.top-mapRect.top;
+       if(sx<5||sy<5||sx>=size.x-5||sy>=size.y-5){run=0;continue;}
+       stats.samples++;
+       if(!blue(x,y,radius*ratio)){
+        stats.missing++;run++;stats.longest=Math.max(stats.longest,run);
+        if(stats.places.length<8&&run===4)stats.places.push({latlng:map.containerPointToLatLng([sx,sy]),screen:[sx,sy],segment:j});
+       }else run=0;
+      }
+     }
+    }
+   };
+   result.vertices+=cap.paths.reduce((n,p)=>n+p.length,0);
+   sample(cap.paths,result.painted,1.5);
+
+  }
+  return result;
+ }
+ const rows=[], seamRows=[];
+ function readSeam(phase, position) {
+  const ratio=L.Browser.retina?2:1, mr=map.getContainer().getBoundingClientRect();
+  const point=map.latLngToContainerPoint(position); let blue=0;
+  for(const r of renderers) {
+   const c=r._container, rect=c.getBoundingClientRect(), im=r._ctx.getImageData(0,0,c.width,c.height);
+   const x=(point.x+mr.left-rect.left)*ratio, y=(point.y+mr.top-rect.top)*ratio;
+   // A small neighborhood survives subpixel rounding at every snap frame.
+   for(let yy=Math.max(0,Math.floor(y-4*ratio));yy<=Math.min(im.height-1,Math.ceil(y+4*ratio));yy++)
+    for(let xx=Math.max(0,Math.floor(x-4*ratio));xx<=Math.min(im.width-1,Math.ceil(x+4*ratio));xx++) {
+     const i=(yy*im.width+xx)*4;
+     if(im.data[i+3]>=150&&Math.abs(im.data[i]-13)<=5&&Math.abs(im.data[i+1]-71)<=5&&Math.abs(im.data[i+2]-161)<=5)blue++;
+    }
+  }
+  seamRows.push({phase,position,blue});
+ }
+
+ async function draw(label){captures=[];renderers.forEach(r=>r._redraw());const row=measure(label);rows.push(row);return row;}
+ try{
+  removed.forEach(l=>map.removeLayer(l));
+  for(const position of seams) {
+   map.setView(position,14,{animate:false});await frame();await frame();
+   captures=[];renderers.forEach(r=>r._redraw());readSeam('rest',position);
+   map._moveStart(true,false);
+   map._move(L.latLng(position),12.25,{pinch:true,round:false});await frame();await frame();
+   captures=[];renderers.forEach(r=>r._redraw());readSeam('held',position);
+   map._animateZoom(L.latLng(position),12,true,map.options.zoomSnap);
+   for(let i=0;i<120;i++) {
+    await frame();if(!map._animatingZoom)break;
+    captures=[];renderers.forEach(r=>r._redraw());readSeam('snap',position);
+    if(i===119)throw Error('Boundary seam snap did not settle');
+   }
+   await frame();await frame();readSeam('settled',position);
+  }
+  for(let ci=0;ci<centers.length;ci++){
+   const center=centers[ci];
+   for(const z of [10,12,14,16]){
+    map.setView(center,z,{animate:false});await frame();await frame();
+    await draw('rest-'+ci);
+    // A partial redraw must leave the rest of the boundary's pixels intact.
+    for(const l of boundaries)l.setStyle({weight:l.options.weight});await frame();await frame();
+    captures=[]; // Do not force a redraw before measuring the partial result.
+    for(const {r} of originals){
+     const t=r._ctx.getTransform();
+     for(const layer of boundaries.filter(l=>l._renderer===r))captures.push({r,layer,t,paths:layer._parts.map(p=>p.map(q=>[q.x,q.y])),closed:true});
+    }
+    rows.push(measure('partial-'+ci));
+   }
+   map.setView(center,14,{animate:false});await frame();await frame();
+   map._moveStart(true,false);
+   for(const z of [13.8,13,12,10,12.25]){
+    map._move(L.latLng(center),z,{pinch:true,round:false});await frame();await frame();
+    await draw('pinch-'+ci);
+   }
+   map._animateZoom(L.latLng(center),12,true,map.options.zoomSnap);
+   for(let i=0;i<120;i++){
+    await frame();if(!map._animatingZoom)break;
+    await draw('snap-'+ci);
+    if(i===119)throw Error('snap did not settle');
+   }
+   await frame();await frame();await draw('settled-'+ci);
+  }
+ }finally{
+  originals.forEach(({r,update})=>r._updatePoly=update);
+  if(renderers.some(r=>r._pinchDrawing))map._moveEnd(true);
+  removed.forEach(l=>map.addLayer(l));boundaries.forEach(l=>l.bringToFront());
+  map.setView(original.center,original.zoom,{animate:false});await frame();await frame();
+ }
+ return {rows,seamRows,restored:map.getZoom()===original.zoom&&map.getCenter().equals(original.center)};
+}
+"""),
+            {"centers": centers, "seams": SCENE.boundary_seams},
+        )
+    finally:
+        probe.close()
+    readings = [
+        Reading("the drawn boundary has valid geometry", bool(metric.geometry.is_valid.all()), True),
+        Reading("the boundary retains its components", len(polygons), SCENE.boundary_components),
+        Reading("the boundary retains its source holes", len(holes), SCENE.boundary_holes),
+        Reading("no retained hole is a tolerance-width seam", sum(hole.buffer(-BOUNDARY_TOLERANCE_M).is_empty for hole in holes), 0),
+        Reading("reading the boundary restores the view", result["restored"], True),
+    ]
+    for phase in ("rest", "partial", "pinch", "snap", "settled"):
+        rows = [row for row in result["rows"] if row["label"].startswith(phase + "-")]
+        samples = sum(row["painted"]["samples"] for row in rows)
+        missing = sum(row["painted"]["missing"] for row in rows)
+        readings.extend(
+            [
+                Reading(f"{phase}: the boundary stroke was sampled", samples > 0, True, note=str(samples)),
+                Reading(f"{phase}: the retained outline has no missing stroke samples", missing, 0),
+            ]
+        )
+    if SCENE.boundary_seams:
+        for phase in ("rest", "held", "snap", "settled"):
+            rows = [row for row in result["seamRows"] if row["phase"] == phase]
+            seen_positions = {tuple(row["position"]) for row in rows}
+            readings.extend(
+                [
+                    Reading(f"{phase}: every former county fragment was read", len(seen_positions), len(SCENE.boundary_seams)),
+                    Reading(f"{phase}: no blue remains at the county fragments", sum(row["blue"] for row in rows), 0),
+                ]
+            )
+    return Check("the boundary has no seams", readings)
+
+
 def the_pinch_has_no_clipping_frame(page: Any) -> Check:
     """Read the polygon paths actually painted through a held zoom out and its snap."""
     probe = page.context.browser.new_page(viewport={"width": 390, "height": 844})
@@ -14140,6 +14338,8 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(the_snap_is_drawn, page))
     if wanted(the_pinch_has_no_clipping_frame):
         checks.append(timed(the_pinch_has_no_clipping_frame, page))
+    if wanted(the_boundary_has_no_seams):
+        checks.append(timed(the_boundary_has_no_seams, page))
     if wanted(the_pinch_is_drawn):
         checks.append(timed(the_pinch_is_drawn, page))
     if wanted(the_zoom_the_scale_says):

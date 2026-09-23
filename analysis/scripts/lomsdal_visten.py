@@ -150,6 +150,7 @@ from trails.routing import (
 from trails.routing.sources import PADDLE, PORTAGE
 from trails.utils.geo import attach_nearest, compass_points, endpoint_bearings, thin_points
 from trails.visualization import maps
+from trails.visualization.boundary import close_for_display
 from trails.visualization.encoding import PAYLOAD_CRS, Payload, encode_graph
 from trails.visualization.water import river_table, water_mask
 
@@ -2311,7 +2312,7 @@ class Credits(NamedTuple):
     ascent: str
 
 
-def load_park_boundary(park: Park, cache_dir: str) -> gpd.GeoDataFrame:
+def load_park_boundary(park: Park, cache_dir: str) -> tuple[gpd.GeoDataFrame, int]:
     """Load a national park's boundary from Naturbase, by name.
 
     Args:
@@ -2319,7 +2320,7 @@ def load_park_boundary(park: Park, cache_dir: str) -> gpd.GeoDataFrame:
         cache_dir: Root cache directory
 
     Returns:
-        Single-row GeoDataFrame in EPSG:4326
+        Single-row GeoDataFrame in EPSG:4326 and its source-record count
     """
     source = naturbase.Source(cache_dir=cache_dir)
     found = source.find_one(park.name, layer=naturbase.Layer.NATIONAL_PARK)
@@ -2328,10 +2329,10 @@ def load_park_boundary(park: Park, cache_dir: str) -> gpd.GeoDataFrame:
     print(f"Park: {found['offisieltNavn'].iloc[0]}")
     print(f"  Area: {area_km2:,.0f} km2")
     print(f"  Municipalities: {found['kommune'].iloc[0]}")
-    return found
+    return found, 1
 
 
-def load_swedish_boundary(park: Park, register: naturvardsregistret.Source) -> gpd.GeoDataFrame:
+def load_swedish_boundary(park: Park, register: naturvardsregistret.Source) -> tuple[gpd.GeoDataFrame, int]:
     """Load a protected area's boundary from Naturvårdsregistret, by name and form.
 
     Args:
@@ -2339,11 +2340,12 @@ def load_swedish_boundary(park: Park, register: naturvardsregistret.Source) -> g
         register: The register, open
 
     Returns:
-        Single-row GeoDataFrame in EPSG:4326
+        Single-row GeoDataFrame in EPSG:4326 and its source-record count
     """
     if park.form is None:
         raise ValueError(f"{park.name} declares no register form")
     found = register.find_one(park.name, form=park.form, exact=True, dissolve=True)
+    records = int(found[naturvardsregistret.SOURCE_RECORD_COUNT].iloc[0])
     area_km2 = found.to_crs(sweden.METRIC_CRS).area.iloc[0] / 1e6
     print(
         f"{park.kind_label.capitalize()}: {found[naturvardsregistret.AREA_NAME].iloc[0]} "
@@ -2355,7 +2357,7 @@ def load_swedish_boundary(park: Park, register: naturvardsregistret.Source) -> g
     # date beside them: a timestamp does not serialise into the boundary's
     # GeoJSON, and nothing downstream asks for it.
     kept: gpd.GeoDataFrame = found[[naturvardsregistret.AREA_ID, naturvardsregistret.AREA_NAME, naturvardsregistret.AREA_FORM, "geometry"]]
-    return kept
+    return kept, records
 
 
 def only_the_wider_way(chains: gpd.GeoDataFrame, placeholders: frozenset[str]) -> pd.Series:
@@ -2999,6 +3001,7 @@ class Built(NamedTuple):
 
     Attributes:
         park: The park boundary, in EPSG:4326
+        boundary_records: How many source objects make up the park boundary
         zone: The ground the graph covers, in EPSG:4326
         params: What decided the build
         network: The finished graph, in the country's metric CRS
@@ -3019,6 +3022,7 @@ class Built(NamedTuple):
     """
 
     park: gpd.GeoDataFrame
+    boundary_records: int
     zone: gpd.GeoDataFrame
     params: graphs.Params
     network: Network
@@ -3148,7 +3152,7 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     if args.ut_routes is None:
         args.ut_routes = str(repo_root / "analysis" / "routes" / which.ut_routes) if which.ut_routes else ""
 
-    park = load_park_boundary(which, args.cache_dir)
+    park, boundary_records = load_park_boundary(which, args.cache_dir)
     params = norway.Params.from_args(args)
     # Park and approach zone as one polygon. Nothing here is split at the
     # boundary; where a layer is, it is decided per chain further down.
@@ -3614,6 +3618,7 @@ def build_norway(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     ]
     return Built(
         park=park,
+        boundary_records=boundary_records,
         zone=zone,
         params=params,
         network=network,
@@ -3731,7 +3736,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         raise ValueError(f"{which.name} declares no box, and the Swedish build is over a box (decisions §2)")
 
     register = naturvardsregistret.Source(cache_dir=args.cache_dir)
-    park = load_swedish_boundary(which, register)
+    park, boundary_records = load_swedish_boundary(which, register)
     # **The box takes no approach zone, so the fingerprint takes none either.**
     # `approach_km` shapes the Norwegian band and nothing here; left in the
     # key it forced a full rebuild, height pass and all, of an identical graph
@@ -4162,6 +4167,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     ]
     return Built(
         park=park,
+        boundary_records=boundary_records,
         zone=zone,
         params=params,
         network=network,
@@ -4311,7 +4317,10 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
     maps.add_search(fmap, searchable)
 
     # Added last so the boundary outline stays legible on top of every trail layer.
-    boundary = maps.add_boundary(fmap, built.park, name=built.boundary_label, weight=3.5)
+    # Closing belongs to the drawing; routing, coverage and exports keep the exact union.
+    boundary_crs = sweden.METRIC_CRS if which.country == "SE" else norway.METRIC_CRS
+    drawn_boundary = close_for_display(built.park, boundary_crs, source_records=built.boundary_records)
+    boundary = maps.add_boundary(fmap, drawn_boundary, name=built.boundary_label, weight=3.5)
 
     # And the graph itself, which nothing draws and nothing yet reads: phase 4
     # takes the profile off it and phase 6 routes over it, and both of those live

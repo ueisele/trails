@@ -71,6 +71,9 @@ NATURE_CONSERVATION_AREA = "Naturvårdsområde"
 #: What names an area, what it is called and which form it is.
 AREA_ID, AREA_NAME, AREA_FORM = "NVRID", "NAMN", "SKYDDSTYP"
 
+#: How many source objects find_one united; carried separately from the drawing.
+SOURCE_RECORD_COUNT = "source_record_count"
+
 #: What the areas carry besides those three.
 AREA_FIELDS = ("IUCNKAT", "FORVALTARE", "URSBESLDAT", "AREA_HA", "LAN", "KOMMUN")
 
@@ -291,7 +294,8 @@ class Source:
             dissolve: Unite county objects of one name and form; distinct names still raise
 
         Returns:
-            One row, in WGS 84
+            One row, in WGS 84, with the number of source records in
+            :data:`SOURCE_RECORD_COUNT`
 
         Raises:
             LookupError: If nothing matches, or several match without a single name to dissolve
@@ -307,7 +311,8 @@ class Source:
             raise LookupError(f"no {form_label(form)} matches '{name}'")
         if len(hits) > 1 and (not dissolve or hits[AREA_NAME].str.casefold().nunique() != 1 or hits[AREA_FORM].nunique() != 1):
             raise LookupError(f"'{name}' is ambiguous among the {form_label(form)}s, matched {len(hits)}: {', '.join(hits[AREA_NAME].astype(str))}")
-        if len(hits) > 1:
+        source_records = len(hits)
+        if source_records > 1:
             # County objects describe one area; retain their ids and jurisdictions
             # and sum the registered hectares beside the union's measured area.
             joined = hits.iloc[[0]].copy()
@@ -317,6 +322,8 @@ class Source:
             joined["AREA_HA"] = hits["AREA_HA"].sum()
             hits = joined
         found: gpd.GeoDataFrame = hits.reset_index(drop=True).to_crs("EPSG:4326")
+        # The display may close county seams; the analytical union stays exact.
+        found[SOURCE_RECORD_COUNT] = source_records
         return found
 
     def trails(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:

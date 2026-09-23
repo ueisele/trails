@@ -115,6 +115,7 @@ class TestFindOne:
 
     def test_dissolving_unites_the_geometry_and_retains_the_county_ids(self, source):
         found = source.find_one("Malingsbo-Kloten", form=nvr.NATURE_CONSERVATION_AREA, exact=True, dissolve=True)
+        assert found[nvr.SOURCE_RECORD_COUNT].tolist() == [3]
         shapes = [_area("", "", "", east)["geometry"] for east in (650000, 651000, 652000)]
         expected = gpd.GeoSeries(shapes, crs=nvr.CRS).union_all()
         assert len(found) == 1
@@ -134,6 +135,7 @@ class TestFindOne:
 
     def test_dissolving_does_not_change_a_single_object(self, source):
         assert source.find_one("Abisko").equals(source.find_one("Abisko", dissolve=True))
+        assert source.find_one("Abisko", dissolve=True)[nvr.SOURCE_RECORD_COUNT].tolist() == [1]
 
 
 class TestTrails:
