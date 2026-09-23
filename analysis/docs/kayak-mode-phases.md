@@ -39,6 +39,9 @@ never switches the mode on sees nothing change, to the byte where the drive can 
    between two lakes with a path beside the straight line — the way `WATER_FACTOR` was swept
    (`lomsdal_visten.py`, the comment above it). Starting figures 1.5 and 4. The record carries
    the sweep and the two figures it settles on.
+
+   *The measured P = 2 is superseded by phase 8: land metres decide first; the old prices
+   only break ties between ways with equally few land metres.*
 4. **Canoe routes, landings and portages are researched, not assumed.** OSM has none in the
    box (§3.3: no `route=canoe`, no `portage`, no `canoe=*`, six slipways). The county
    boards and Naturkartan publish canoe trails for this area; whether any of them comes with
@@ -473,6 +476,178 @@ Abisko opens 35 chains / 44 edges / 2.2 km, Malingsbo-Kloten 186 / 302 / 48.5 km
 Lomsdal-Visten none; `drive-all` 1,464 / 1,464 / 1,451 readings, none broken but the known
 first-visit race on Lomsdal-Visten, green alone; published ~15:00 UTC and read back identical
 on all three. Open: Uwe's phone reading at Korslångssmedja.*
+
+### Phase 8 — Water first
+
+*Added 2026-09-23 from Uwe's phone at Korslångssmedja. His words, translated:
+"The kayak planner prefers long land ways to the water. I want a water way always to be
+ taken when possible. Unless a point is explicitly set on the land way, I would always
+ prefer the water way."*
+
+The z14 screenshot selects `topografi-50-paths-514477-6645508-1136`, a 1,136.739 m path
+across the peninsula towards the shore south of Skatholmen. Its exact taps are unknown.
+The cached Ortnamn record puts Korslångssmedja at (59.946199, 15.259790); Lövudden and Skien
+locate the northern part of the image. The reconstructed pair uses the nearest wet paddle
+nodes beside that path's ends: **(59.945871, 15.258351) → (59.952097, 15.273234)**. The
+nodes are 105.911 and 18.525 m from the path ends. Before changing prices this pair runs
+125.031 m on water and **1,352.730 m on foot**, including 1,295.087 m of Topografi 50 paths.
+With land edges excluded the existing directed network connects the same points over
+**4,296.406 m of water**. No network repair is needed.
+
+**The rule.** In kayak mode a way is chosen by the fewest metres on land first: walked
+edges, portages, ground connectors and partial edges all count their actual lengths.
+Paddle and ferry edges count no land; the ferry keeps its flat secondary price.
+Between ways with equally few land metres, today's price decides: shore 1, open water
+k = 1.5, path cheaper than ground. `plan_mode.js` carries a true lexicographic pair through
+both searches, their heaps, cuts, connector floors and the comparison against a straight
+way. Connector floors count only dry samples already proved by the grid; a dry tap's
+compulsory entry is bounded conservatively as well. The secondary floor is length times
+the cheapest connector metre. Exact labels stay apart from those floors; complete exact
+ways tighten the lexicographic bound during the search.
+Counting dry grid pieces directly prevents an all-water connector acquiring negative land
+from rounded length subtraction. The direction rules, snapping, tally and words stand;
+the walking modes supply zero primary cost and retain their original price ordering.
+
+**The drive.** `a_kayak_uses_water_before_land` checks the reconstruction on Malingsbo-Kloten
+and wet shore pairs on the other maps. A separate traversal of paddle arcs proves a water
+way exists in the journey's direction; the planned way must carry no land. A point explicitly
+set on a mapped land node must still be reached by the track. Every borrowed mode, goal
+way and plan is put back. `a_portage_keeps_land_short` replaces the old assertion that every
+carried metre uses a mapped path: the rule now paddles farther to carry less, and the drive
+accounts for both mapped and inferred ground against the former mapped carry.
+
+**Build scope, clarified after the stop.** The normal in-memory graph rebuilding inside
+`command make map` is allowed. No graph source or content change, `make graph`, tile build,
+shared-cache write, push or publication belongs to this phase.
+
+**Built 2026-09-23.** True lexicographic costs, the executable routing tests and the new
+water-first drive reading. The reconstructed Korslångssmedja pair above had **1,352.730 m
+on foot before**; it now takes **4,296.406 m paddled and no land**. The Malingsbo-Kloten
+scene portage changes from **5.912 / 1,274.726 → 1,414.654 / 513.463 m**, paddled / on foot:
+the longer paddle that "always water" entails. The other scene portages change from
+0 / 335.952 → 336.096 / 102.465 m on Abisko and 0 / 959.690 → 1,597.100 / 124.947 m on
+Lomsdal-Visten. These are the three scenes' `kayak portage water, m` and
+`kayak portage on foot, m` figures. `Korslång upstream on foot, m` and
+`Korslång downstream on foot, m` each change from 77.190 to 77.105; the channel still
+paddles 1,267.848 m both ways. New `Korslångssmedja water, m` / `Korslångssmedja on foot, m`
+figures record 4,296.406 / 0. Shore and bay figures do not move. The phase-2 sweep's portage
+changes from 51.555 / 1,220.934 to 1,902.419 / 598.441 m; its bay and lake stand.
+No measured way gains land.
+
+The long connected legs' median warm searches cost 57 → 95 ms on Malingsbo-Kloten,
+15 → 25 ms on Abisko and 69 → 107 ms on Lomsdal-Visten; coordinates, length breakdowns,
+ferry credit and timing ranges are in the record's phase-8 note. All three pages built;
+their routing headers and inflated payloads are byte-identical to the baseline. The final
+selected drives are green twice: 135 readings each on Malingsbo-Kloten and 110 each on the
+other two, with only the existing channel skip there. Both walking settings' recorded
+lengths and the dry figure/GPX hashes are byte-identical, with no walking snapshot changed.
+The 14 routing tests and the full 2,017 library / 97 pipeline tests pass. Scratch and final
+hook/drive logs are under `~/mockups/kayak-mode/phase8/`; nothing pushed or published.
+
+**Review built 2026-09-23 — Off-network searches.** The zero-land floors in `812433e` let a
+short leg with a dry direct line price connectors across the whole map. The amendment
+uses sampled dry prefixes, a conservative floor for the unavoidable entry from dry
+ground, and exact whole ways found during the search to tighten the lexicographic bound.
+An exact connector resumes after its dry prefix and stops when its accumulated land can
+no longer win. No positive-land way caps the secondary price of a way with less land.
+The ferry still contributes zero land and keeps its flat secondary price.
+
+Ten fixed Firefox cases cover off-network water pairs near 1 km and 10 km, ground-to-lake
+taps on all three maps, and an additional Norwegian ground-to-fjord stress case. Five
+warm searches per case retain exactly the same primary land and secondary price; the
+record separates search-derived metres from the public tally. Ground-to-lake **median / worst ms** change from **3,430 / 3,547 → 118 / 121**
+on Malingsbo-Kloten, **780 / 804 → 57 / 76** on Abisko, and
+**6,087 / 6,225 → 194 / 199** on Lomsdal-Visten. The fjord case changes from
+**6,827 / 7,024 → 259 / 275**; each of these ten fixed cases is below 300 ms. Coordinates,
+water-pair timings, floor counts and completed connector prices are in the record's
+review built-note. `a_kayak_rounds_land_from_open_water` defines the short pair on each
+page; the executable tests require a more expensive zero-land detour to win within the
+step bound and compare the pruned search with every entry/exit pair on small graphs.
+
+**Sampling decision, retained by Uwe.** For
+(59.9659281691193, 15.863781710359643) → (59.97490373192166, 15.850783875167386),
+`connectorPrice()` reads zero land at its 25 m grid midpoints, but the public plan's
+5 m profile posts produce **1,257.818 m paddled / 20.106 m on foot**. The same public
+figures reproduce with `812433e`. Phase 2's retained sampling decision stands:
+"fewest land metres first" means the router's measured land, and connector pricing
+stays cell-based. The drive reads the search's own label through a probe in the served
+built page; it requires zero router land, paddled network edges and a matching public
+total length. The tally may differ by at most **one grid cell per connector end**:
+four ends at 25 m give this pair a 100 m allowance, containing its 20.106 m shoreline
+sliver. Exceeding that allowance fails. Search pops also stay within the step bound.
+The profile tally, connector pricing samples and walking modes are unchanged.
+
+All three pages rebuilt with unchanged routing headers and inflated payloads. The
+selected drives pass twice per page: **152 / 127 / 127 readings**, Malingsbo-Kloten /
+Abisko / Lomsdal-Visten, with only the existing channel scene skip on the latter two.
+The new short pairs report router land **0 / 0 / 0 m**, tally land
+**20.106 / 10.026 / 0 m**, all within their 100 m allowances. Their heap pops are
+**169 / 71 / 277**, within the graph-derived step bounds recorded alongside them.
+Every page's eight recorded walking values are byte-identical on both runs; no
+recorded figure moved. The full `command make hooks-run` passes with networking
+on, including the 19 executable routing readings. The record names the final logs
+and payload comparisons. No push or publication.
+
+**Differential built 2026-09-23.** All **600 / 600** seeded random pairs agree with
+an exhaustive reference: 200 per map, 50 each of off-network water/water,
+dry/water, dry/dry and network/off-network. Seed **20260923**, five length bands
+from 100 m to each grid's width; the record gives actual spans and reproduction
+details. The reference eagerly prices every exit, exhausts reverse Dijkstra and
+separately prices every entry, with no dry box, entry floor, wet-node seed or
+incumbent pruning. Worst label differences are **0 m land / 0 price** on all
+three maps; two Lomsdal-Visten edge sequences differ with exact tied labels.
+
+Warm Firefox **median / p95 / worst ms** are **38.5 / 717 / 1,340** on Abisko,
+**205 / 4,633 / 6,464** on Malingsbo-Kloten and **203.5 / 9,663 / 17,241** on
+Lomsdal-Visten. Respectively **41 / 92 / 92** pairs exceed 300 ms: the earlier
+claim applies only to its ten fixed cases. Timing runs one map at a time after
+the reference jobs, reproduces the seed and rechecks every label. The permanent
+unit reading compares 32 fixed-seed synthetic pairs against the same full
+reference, including dry entries, broken water, disconnected nodes, direction
+rules and partial-edge endpoints. All 20 routing tests and
+`command make hooks-run` with networking pass. Evidence is under
+`~/mockups/kayak-mode/phase8/differential/`, especially `summary.json`.
+No routing fix was needed; only tests and records change, so the unchanged
+pages need no rebuild or drive. No push or publication.
+
+**Performance review built 2026-09-23.** The same 600 pairs were replayed on
+main's `d267de6` kayak planner (P = 2). Warm Firefox timings below are
+**median / p95 / worst ms**; §5 of the decision record gives all pair-kind and
+length-band tables, work counters, index costs and the admissibility argument.
+
+| Map | Baseline ms | Phase 8 before ms | After ms |
+|---|---:|---:|---:|
+| Abisko | 5 / 851 / 1,024 | 38.5 / 717 / 1,340 | 18 / 174 / 271 |
+| Malingsbo-Kloten | 21.5 / 4,135 / 5,979 | 205 / 4,633 / 6,464 | 75 / 1,103 / 1,466 |
+| Lomsdal-Visten | 19 / 8,422 / 15,166 | 203.5 / 9,663 / 17,241 | 103.5 / 2,166 / 4,420 |
+
+Every requested pair-kind and length-band group meets the larger of its
+baseline figure or 300 ms for each statistic. The baseline already has slow
+long legs. The final 600 answers agree with the exhaustive reference with
+**0 m land / 0 secondary-price difference** on all maps. Dry-endpoint exits
+use a linear exact-pricing pass; network starts have a directed whole-metre
+entry floor. Uniform grid squares batch the original midpoint reads without
+changing their wet count. Wet endpoints retain lazy floors. Walking prices,
+phase 2's connector sampling and the recorded kayak figures are unchanged.
+The independent scalar sampler checks 6,000 connectors, and the 32-case
+network differential now uses packed grids. All 21 routing tests pass.
+The one-time grid index costs 123 / 279 / 559 ms and 4,475,900 / 8,481,660 /
+20,083,608 bytes (Abisko / Malingsbo-Kloten / Lomsdal-Visten); physical-phone
+startup and memory use are unmeasured. Evidence is in
+`~/mockups/kayak-mode/phase8/differential/performance/`.
+
+`command make hooks-run` passes with networking enabled. Its first run found
+one stale rendered-source assertion; updating the assertion required no runtime
+change. The record names both logs.
+
+All three pages rebuild from cached inputs with identical graph headers and
+payload bytes. Kayak checks, switches, dry words and foot/water readings pass
+twice per page: **137 / 162 / 137 readings per run** (Abisko / Malingsbo-Kloten /
+Lomsdal-Visten); only the channel check outside Malingsbo-Kloten is skipped.
+Every previous reading is unchanged on both runs, including kayak figures and
+each page's eight byte-identical walking values. The record names the payload
+comparison and full reports. No standalone graph or tile build, cache write,
+push or publication.
 
 ## 5. Not in this plan
 

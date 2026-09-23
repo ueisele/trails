@@ -7132,12 +7132,12 @@ class TestPlanMode:
         assert "function onNetwork(point) { return point.node >= 0 || point.edge >= 0; }" in planning
         assert "function endsOf(graph, point, entering) {" in planning
         assert "var length = work.length[edge], rate = length > 0 ? work.cost[edge] / length : 0;" in planning
-        assert "return [{node: graph.fromNode[edge], cost: along * rate, cut: {edge: edge, from: along, to: 0}}," in planning
+        assert "return [{node: graph.fromNode[edge], cost: along * rate, land: along * landRate, cut: {edge: edge, from: along, to: 0}}," in planning
         # One search from every end to every end, stopped by the cheapest
         # whole way in hand; two points on one edge take the piece between.
         assert "function routeBetween(graph, from, to) {" in planning
-        assert "if (found && taken.cost >= found.cost) { break; }" in planning
-        assert "if (direct && (!found || direct.cost <= found.cost)) { return direct; }" in planning
+        assert "if (found && !cheaper(taken.land, taken.cost, found.land, found.cost)) { break; }" in planning
+        assert "if (direct && (!found || !cheaper(found.land, found.cost, direct.land, direct.cost))) { return direct; }" in planning
         assert "function route(graph, from, to) { return routeBetween(graph, {node: from}, {node: to}); }" in planning
         assert "if (onNetwork(from) && onNetwork(to)) {" in planning
         # The cut is path: laid like an edge, tallied by its metres.
@@ -7293,10 +7293,10 @@ class TestPlanMode:
         maps.add_plan_mode(fmap, self.planned())
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
-        assert "if (found && worthRouting(graph, from, to, found.cost)) {" in planning
-        assert "function worthRouting(graph, from, to, cost) {" in planning
+        assert "if (found && worthRouting(graph, from, to, found.cost, found.land)) {" in planning
+        assert "function worthRouting(graph, from, to, cost, land) {" in planning
         assert "if (flown > PLAN.maxStraightM) { return true; }" in planning
-        assert "return cost <= priced(graph, from.lon, from.lat, to.lon, to.lat);" in planning
+        assert "return !cheaper(direct.land, direct.cost, land || 0, cost);" in planning
 
     def test_a_point_off_the_network_is_joined_to_it_not_moved_on_to_it(self):
         """Reported from the phone with a screenshot: with several stops set,
@@ -7338,15 +7338,19 @@ class TestPlanMode:
         # ones already dearer than walking the whole way — an exact bound and
         # not a heuristic. Measured on one 13.6 km leg, routed and redrawn:
         # 157 ms unbounded against 64 ms bounded.
-        assert "var leave = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;" in planning
-        assert "if (leave >= plain) { continue; }" in planning
-        assert "if (Math.min(floorTop, exactTop) >= plain) { break; }" in planning
+        assert "var leaveM = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat), leave = leaveM * off;" in planning
+        assert "if (!cheaper(entryLand + leaveLand, leave, leastLand, cheapest) ||" in planning
+        assert "entryBounds && !cheaper(entryBounds[i] + Math.floor(leaveLand), leave, leastLand, cheapest)" in planning
+        assert (
+            "if (!cheaper(entryLand + (floorFirst ? floorLand : exactLand), floorFirst ? floorTop : exactTop, leastLand, cheapest)) { break; }"
+            in planning
+        )
         # The straight line as one more connector, and what everything else has
         # to beat.
-        assert "var plain = priced(graph, from.lon, from.lat, to.lon, to.lat);" in planning
-        assert "var head = -1, headCut = null, cheapest = plain;" in planning
+        assert "var plainPrice = connectorPrice(graph, from.lon, from.lat, to.lon, to.lat);" in planning
+        assert "var head = -1, headCut = null, cheapest = plain, leastLand = plainLand, prefixSamples = 16;" in planning
         assert "var floor = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];" in planning
-        assert "var whole = priced(graph, from.lon, from.lat, graph.nodeLon[next.node], graph.nodeLat[next.node]) + best[next.node];" in planning
+        assert "var whole = entry.cost + best[next.node], wholeLand = entry.land + bestLand[next.node];" in planning
         # Bounded like every other loop over this graph, with room for each
         # seed to come back once at its true price.
         assert "var pops = 0, mostPops = 2 * nodes + 2 * graph.header.edges + 1;" in planning
@@ -7395,26 +7399,29 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         assert "function priced(graph, aLon, aLat, bLon, bLat) {" in planning
-        assert "if (!grid || (!kayak() && !(waterPrice > ground))) { return length * ground; }" in planning
-        assert "var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0;" in planning
+        assert "if (!grid || (!kayak() && !(waterPrice > ground))) { return {cost: length * ground, land: kayak() ? length : 0}; }" in planning
+        assert "var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0, backwards = false;" in planning
         assert "if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }" in planning
-        assert "return (length - water) * ground + water * waterPrice;" in planning
+        assert "return {cost: (length - water) * ground + water * waterPrice, land: kayak() ? length * (pieces - wet) / pieces : 0};" in planning
         # Lazily, and in a queue of its own: a floor is priced for real when
         # it is the cheaper top, and only an exact price is ever a label.
         assert "var floors = new Heap(), heap = new Heap(), i;" in planning
-        assert "floors.push(i, leave);" in planning
+        assert "floors.push(i, leave, leaveLand);" in planning
         assert "best[i] = leave;" not in planning
-        assert "if (Math.min(floorTop, exactTop) >= plain) { break; }" in planning
-        assert "if (floorTop <= exactTop) {" in planning
+        assert (
+            "if (!cheaper(entryLand + (floorFirst ? floorLand : exactLand), floorFirst ? floorTop : exactTop, leastLand, cheapest)) { break; }"
+            in planning
+        )
+        assert "if (floorFirst) {" in planning
         # A node already reached over the network for no more than its floor
         # is not priced: its connector costs at least the floor.
-        assert "if (best[seed.node] <= seed.cost) { continue; }" in planning
-        assert "var truly = priced(graph, graph.nodeLon[seed.node], graph.nodeLat[seed.node], to.lon, to.lat);" in planning
-        assert "if (truly < best[seed.node]) {" in planning
+        assert "if (!cheaper(seed.land, seed.cost, bestLand[seed.node], best[seed.node])) { continue; }" in planning
+        assert "var truly = connectorPrice(graph, graph.nodeLon[seed.node], graph.nodeLat[seed.node], to.lon, to.lat," in planning
+        assert "if (cheaper(truly.land, truly.cost, bestLand[seed.node], best[seed.node])) {" in planning
         # And the entry side walks its floors in order and stops at the first
         # floor dearer than the best whole.
         assert "var entries = new Heap();" in planning
-        assert "if (next.cost >= cheapest) { break; }" in planning
+        assert "if (!cheaper(next.land, next.cost, leastLand, cheapest)) { break; }" in planning
 
     def test_the_water_grid_is_inflated_and_counted_before_anything_routes(self):
         """The grid travels in the header as its own gzipped block and is
@@ -7645,7 +7652,7 @@ class TestPlanMode:
         # The one place the build's figure is read; every price goes through it.
         assert planning.count("PLAN.offPathFactor") == 1
         assert "var off = cheapestMetre(graph);" in planning
-        assert "return (length - water) * ground + water * waterPrice;" in planning
+        assert "return {cost: (length - water) * ground + water * waterPrice, land: kayak() ? length * (pieces - wet) / pieces : 0};" in planning
         switching = planning.split("function stayOnPaths(want) {")[1].split("\n            }\n")[0]
         assert "window.localStorage.setItem(keptKey() + '.paths', 'yes');" in switching
         assert "withGraph(function (graph) { relink(graph, true); }, function () { refresh(); });" in switching

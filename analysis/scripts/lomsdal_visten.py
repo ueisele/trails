@@ -1928,6 +1928,7 @@ WATER_FACTOR = 30.0
 #: At two the portage takes 222 m of mapped path in 929 m on foot, with 43 m
 #: over water. Four saves 26 m on foot but keeps only 26 m of that path; eight
 #: goes 1,831 m by water to carry 573 m. Two keeps the short way and the path.
+#: Phase 8 puts land metres first; this factor belongs to the secondary price.
 #: The full three-leg sweep and the coordinates are in kayak-mode-decisions.md.
 PORTAGE_FACTOR = 2.0
 

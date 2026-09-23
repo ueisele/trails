@@ -242,9 +242,13 @@ class Scene:
     #: nodes; the carry can stay on that mapped way without a straight land leg.
     #: Abisko joins the two lakes west of Valfojåkka shelter on OSM and Leder's
     #: path. Lomsdal-Visten joins the two lakes south of Gardsjorda on the path
-    #: credited to FKB, UT.no and N50; neither carry uses an inferred portage.
-    #: None until this scene's rebuilt page has a measured path between lakes.
+    #: credited to FKB, UT.no and N50. Phase 8 paddles farther to shorten these
+    #: carries, including inferred ground where that saves land metres.
+    #: None until this scene's rebuilt page has a measured way between lakes.
     kayak_portage: tuple[tuple[float, float], tuple[float, float]] | None = None
+    #: The measured carry entirely on mapped paths before phase 8. The new
+    #: water approach must save land against that known alternative.
+    kayak_portage_path_m: float | None = None
     #: A fix beside a bend or an end of the planned route, where different
     #: accuracies give distinct bearings. None uses the first point's north side.
     aim_from: tuple[float, float] | None = None
@@ -311,6 +315,7 @@ SCENES: dict[str, Scene] = {
         kayak_shore=WaterLeg(((65.330996, 12.938274), (65.324721, 12.926333)), shore_m=932.1275606650958),
         kayak_bay=WaterLeg(((65.330996, 12.938274), (65.325983, 12.939154)), shore_m=2028.3727803706906),
         kayak_portage=((65.742431, 13.002636), (65.734636, 13.004338)),
+        kayak_portage_path_m=959.6899007960781,
         # The level channel of phase 7 is Korslången's; no stream on this page was measured.
         skips=("a level channel is paddled both ways",),
         long_chain="trail-group-ut-no-414306-7244296-42442",
@@ -361,8 +366,8 @@ SCENES: dict[str, Scene] = {
         figures={
             "kayak shore water, m": 932.128,
             "kayak bay water, m": 715.252,
-            "kayak portage on foot, m": 959.690,
-            "kayak portage water, m": 0,
+            "kayak portage on foot, m": 124.947,
+            "kayak portage water, m": 1597.100,
             "walking: shore-pair foot, m": 1074.646,
             "walking: shore-pair water, m": 0,
             "walking: shore-pair straight land, m": 747.568,
@@ -481,6 +486,7 @@ SCENES: dict[str, Scene] = {
         kayak_shore=WaterLeg(((68.393226, 18.715936), (68.407071, 18.697511)), shore_m=2116.109666223599),
         kayak_bay=WaterLeg(((68.355318, 18.836408), (68.358208, 18.865112)), shore_m=2988.741971415684),
         kayak_portage=((68.268452, 18.179781), (68.271026, 18.180649)),
+        kayak_portage_path_m=335.9521263872096,
         # The level channel of phase 7 is Korslången's; no stream on this page was measured.
         skips=("a level channel is paddled both ways",),
         # Kungsleden from Abisko to Abiskojaure and Rallarvägen on to Tornehamn,
@@ -534,8 +540,8 @@ SCENES: dict[str, Scene] = {
         figures={
             "kayak shore water, m": 2116.110,
             "kayak bay water, m": 1408.028,
-            "kayak portage on foot, m": 335.952,
-            "kayak portage water, m": 0,
+            "kayak portage on foot, m": 102.465,
+            "kayak portage water, m": 336.096,
             "walking: shore-pair foot, m": 2940.880,
             "walking: shore-pair water, m": 15.273,
             "walking: shore-pair straight land, m": 514.362,
@@ -715,12 +721,14 @@ SCENES: dict[str, Scene] = {
         figures={
             "kayak shore water, m": 2122.779,
             "kayak bay water, m": 1066.143,
-            "kayak portage on foot, m": 1274.726,
-            "kayak portage water, m": 5.912,
+            "kayak portage on foot, m": 513.463,
+            "kayak portage water, m": 1414.654,
+            "Korslångssmedja water, m": 4296.406,
+            "Korslångssmedja on foot, m": 0,
             "Korslång upstream water, m": 1267.848,
-            "Korslång upstream on foot, m": 77.190,
+            "Korslång upstream on foot, m": 77.105,
             "Korslång downstream water, m": 1267.848,
-            "Korslång downstream on foot, m": 77.190,
+            "Korslång downstream on foot, m": 77.105,
             # The same two Storsjön taps on the published walking-only page.
             "walking: shore-pair foot, m": 3266.274,
             "walking: shore-pair water, m": 8.024,
@@ -779,6 +787,7 @@ SCENES: dict[str, Scene] = {
         kayak_shore=WaterLeg(((59.887213, 15.675327), (59.895929, 15.650716)), shore_m=2122.77924892937),
         kayak_bay=WaterLeg(((59.844846, 15.546195), (59.852644, 15.540811)), shore_m=2502.2423192413985),
         kayak_portage=((59.906173, 15.465869), (59.914508, 15.462779)),
+        kayak_portage_path_m=1274.725629451964,
         # 201 m beyond the route's end: the 120 m and 15 m fixes span 72.7° and 8.5°.
         aim_from=(59.882007, 15.060653),
         # A 3.436 km road edge; the half and quarter legs stay on it end to end.
@@ -7564,7 +7573,13 @@ KAYAK_PAGE_STATE = """() => {
 
 
 def read_water_leg(
-    page: Any, points: tuple[tuple[float, float], tuple[float, float]], *, paddling: bool = True, paths: bool = False, via: tuple[str, ...] = ()
+    page: Any,
+    points: tuple[tuple[float, float], tuple[float, float]],
+    *,
+    paddling: bool = True,
+    paths: bool = False,
+    via: tuple[str, ...] = (),
+    measure_routing: bool = False,
 ) -> dict[str, Any]:
     """Borrow the plan for a scene leg, read its parts and restore its state.
 
@@ -7577,6 +7592,7 @@ def read_water_leg(
         paddling: Whether to price and describe this way as a kayak journey
         paths: The walking preference to use while reading it
         via: Chains whose traversed geometry is measured in the resulting track
+        measure_routing: Read the chosen search label through the drive-only probe
 
     Returns:
         The public plan and profile readings, with a state-restoration comparison
@@ -7593,7 +7609,7 @@ def read_water_leg(
         page.evaluate("() => { trailsPlan.toggle(false); trailsPlan.show(); }")
         painted(page)
         got: dict[str, Any] = page.evaluate(
-            """via => {
+            """({via, measureRouting}) => {
             const state = trailsPlan.state(), shape = trailsProfile.shape;
             const finite = Array.from(shape.height).filter(Number.isFinite);
             const a = state.points[0], b = state.points[1], graph = trailsGraph;
@@ -7629,14 +7645,39 @@ def read_water_leg(
               }
               chains[id] = {whole: followed === graph.chainAt[c + 1] - graph.chainAt[c], metres};
             }
-            return {state, chains, heights: {samples: shape.height.length, read: finite.length,
+            let routing = null;
+            if (measureRouting) {
+              const m = window.kayakMeasure, originalPop = m.Heap.prototype.pop;
+              let pops = 0, joined;
+              m.Heap.prototype.pop = function () { pops++; return originalPop.call(this); };
+              try { joined = m.joinedRoute(graph, a, b); }
+              finally { m.Heap.prototype.pop = originalPop; }
+              if (!joined) throw new Error('the off-network water detour was not routed');
+              const work = m.router(graph), head = joined.head, tail = joined.tail;
+              const entry = m.connectorPrice(graph, a.lon, a.lat, graph.nodeLon[head], graph.nodeLat[head]);
+              const connectors = [[a.lon, a.lat, graph.nodeLon[head], graph.nodeLat[head]],
+                [graph.nodeLon[tail], graph.nodeLat[tail], b.lon, b.lat]]
+                .map(c => trailsProfilePanel.metresBetween(...c));
+              const edges = joined.over ? joined.over.edges : [];
+              // The suffix label already includes the exit connector. Add only
+              // the entry, exactly as the search compares complete ways.
+              routing = {land: entry.land + work.bestLand[head], pops,
+                stepBound: 2 * graph.header.nodes + 2 * graph.header.edges + 1,
+                paddled: edges.every(e => graph.header.sources[graph.sources[e]].kind === 'paddle'),
+                metres: connectors.reduce((sum, length) => sum + length, 0)
+                  + edges.reduce((sum, e) => sum + work.length[e], 0),
+                connectors, cellM: graph.water.cellM,
+                allowance: 2 * graph.water.cellM * connectors.filter(length => length >= 1).length};
+            }
+            return {state, chains, routing, trackEnd: {lat: shape.lat[shape.lat.length - 1], lon: shape.lon[shape.lon.length - 1]},
+              heights: {samples: shape.height.length, read: finite.length,
               low: finite.length ? Math.min(...finite) : null, high: finite.length ? Math.max(...finite) : null,
               end: shape.distance[shape.distance.length - 1], span: shape.profileLength},
               direct: {metres: direct, water: direct * wet / count},
               snappedKinds: state.points.filter(p => p.edge >= 0)
                 .map(p => trailsGraph.header.sources[trailsGraph.sources[p.edge]].kind)};
             }""",
-            via,
+            {"via": via, "measureRouting": measure_routing},
         )
     finally:
         # Undo returns the original points and their stage marks; clearing the
@@ -7716,11 +7757,11 @@ def a_bay_is_cut_and_a_lake_is_not(page: Any) -> Check:
     )
 
 
-def a_portage_takes_the_path(page: Any) -> Check:
-    """Between the two lakes, every carried metre belongs to the mapped way."""
-    name = "a portage takes the path"
-    if SCENE.kayak_portage is None:
-        return Check(name, skipped="this scene has no kayak portage measured after the phase 5 rebuild")
+def a_portage_keeps_land_short(page: Any) -> Check:
+    """Paddle farther to carry less, accounting for mapped and inferred ground."""
+    name = "a portage keeps land short"
+    if SCENE.kayak_portage is None or SCENE.kayak_portage_path_m is None:
+        return Check(name, skipped="this scene has no measured kayak carry on mapped paths")
     got = read_water_leg(page, SCENE.kayak_portage)
     s = got["state"]
     mapped = page.evaluate("() => trailsGraph.header.sources.filter(s => s.kind === 'path').map(s => s.name)")
@@ -7732,14 +7773,155 @@ def a_portage_takes_the_path(page: Any) -> Check:
         + [
             Reading("there is a carry between the lakes", s["walked"] > 0, True),
             Reading("all carried metres are routed", routed, s["walked"], within=0.001),
-            Reading("all carried metres are credited to mapped paths", on_paths, s["walked"], within=0.001),
+            Reading("the carry is shorter than the old mapped way", s["walked"] < SCENE.kayak_portage_path_m, True),
+            noted("the mapped part of the carry, m", on_paths),
+            Reading("mapped and inferred ground account for all carried metres", on_paths + s["tally"]["undrawn"], s["walked"], within=0.001),
             Reading("no carried metres are drawn straight", s["straight"], 0),
-            Reading("no inferred carry replaces the path", s["tally"]["undrawn"], 0),
+            noted("the inferred carry, m", s["tally"]["undrawn"]),
+            noted("the former carry entirely on mapped paths, m", SCENE.kayak_portage_path_m),
             noted("the path's source credits, m", s["tally"]["sources"]),
             stands("kayak portage on foot, m", round(s["walked"], 3), within=0.001),
             stands("kayak portage water, m", round(s["crossed"], 3), within=0.001),
         ],
     )
+
+
+def a_kayak_rounds_land_from_open_water(page: Any) -> Check:
+    """Off-network water taps take a zero-land search within the grid's allowance."""
+    pairs = {
+        "malingsbo-kloten": ((59.9659281691193, 15.863781710359643), (59.97490373192166, 15.850783875167386)),
+        "abisko": ((68.44199171587779, 18.750492230735862), (68.44250067992853, 18.774400423102342)),
+        "lomsdal-visten": ((65.18147834294567, 13.333300517592484), (65.17663041216133, 13.315444388020483)),
+    }
+    if SCENE.stem not in pairs:
+        return Check("a kayak rounds land from open water", skipped="this scene has no measured off-network pair")
+    points = pairs[SCENE.stem]
+    got = read_water_leg(page, points, measure_routing=True)
+    state, route = got["state"], got["routing"]
+    wet = page.evaluate("points => points.every(p => !!trailsGraph.waterAt(p[1], p[0]))", points)
+    return Check(
+        "a kayak rounds land from open water",
+        water_leg_readings(got, "off-network water pair")
+        + [
+            Reading("the two taps lie on water", wet, True),
+            Reading("neither tap snaps to the network", all(p["node"] < 0 and p.get("edge", -1) < 0 for p in state["points"]), True),
+            Reading("the direct connector crosses dry ground", got["direct"]["water"] < got["direct"]["metres"], True),
+            Reading("the router chooses zero land", route["land"], 0),
+            Reading("the network part is paddled", route["paddled"], True),
+            Reading("the search stays within its step bound", route["pops"] <= route["stepBound"], True),
+            Reading("the search and public way have the same length", route["metres"], state["crossed"] + state["walked"], within=0.001),
+            # Phase 2 retains cell-based prices and the finer profile tally.
+            # Each connector end gets at most one cell for a shore sliver.
+            Reading("the tally differs by no more than a cell per connector end", state["walked"], route["land"], within=route["allowance"]),
+            Reading("the detour is longer than the direct line", state["crossed"] > got["direct"]["metres"], True),
+            Reading("the detour includes paddling", state["crossed"] > 0, True),
+            noted("router land / tally land / allowance, m", [route["land"], state["walked"], route["allowance"]]),
+            noted("connector lengths and cell size, m", [route["connectors"], route["cellM"]]),
+            noted("search pops / step bound", [route["pops"], route["stepBound"]]),
+            noted("off-network water pair, latitude and longitude", points),
+            noted("off-network pair paddled / on foot, m", [state["crossed"], state["walked"]]),
+        ],
+    )
+
+
+def a_kayak_uses_water_before_land(page: Any) -> Check:
+    """A connected water pair paddles, while a point placed on land is reached."""
+    name = "a kayak uses water before land"
+    if SCENE.kayak_shore is None:
+        return Check(name, skipped="this scene has no measured kayak shore")
+    # The screenshot's path identifies the peninsula, but its taps are unknown.
+    # These wet shore nodes reconstruct the two sides without requiring a carry.
+    points = ((59.945871, 15.258351), (59.952097, 15.273234)) if SCENE.stem == "malingsbo-kloten" else SCENE.kayak_shore.points
+    chosen = page.evaluate(
+        """points => {
+        const g = trailsGraph, n = g.header.nodes, distance = trailsProfilePanel.metresBetween;
+        const water = Array.from({length: n}, () => []), wet = new Set(), land = new Set(), paddleNodes = new Set();
+        for (let e = 0; e < g.header.edges; e++) {
+          const kind = g.header.sources[g.sources[e]].kind, a = g.fromNode[e], b = g.toNode[e];
+          if (kind === 'paddle') {
+            paddleNodes.add(a); paddleNodes.add(b);
+            water[a].push(b);
+            if (!g.oneWay[e]) water[b].push(a);
+            for (const node of [a, b]) if (g.waterAt(g.nodeLon[node], g.nodeLat[node])) wet.add(node);
+          }
+          if (kind === 'path') for (const node of [a, b])
+            if (!g.waterAt(g.nodeLon[node], g.nodeLat[node])) land.add(node);
+        }
+        // A shore junction can belong to both a path and water. Choose a
+        // land point beyond the water grid's sampling uncertainty instead.
+        for (const node of land) {
+          const lat = g.nodeLat[node], lon = g.nodeLon[node], dy = g.water.cellM / 111320;
+          const dx = dy / Math.cos(lat * Math.PI / 180);
+          let dry = !paddleNodes.has(node);
+          for (const x of [-1, 0, 1]) for (const y of [-1, 0, 1])
+            if (g.waterAt(lon + x * dx, lat + y * dy)) dry = false;
+          if (!dry) land.delete(node);
+        }
+        function nearest(nodes, point) {
+          let best = -1, metres = Infinity;
+          for (const node of nodes) {
+            const away = distance(point[1], point[0], g.nodeLon[node], g.nodeLat[node]);
+            if (away < metres) { best = node; metres = away; }
+          }
+          if (best < 0) throw new Error('the scene has no eligible node');
+          return best;
+        }
+        const pair = points.map(p => nearest(wet, p)), onLand = nearest(land, points[1]);
+        // Reachability is checked on paddle arcs alone, independently of prices.
+        const seen = new Uint8Array(n), queue = new Int32Array(n);
+        let read = 0, size = 1;
+        queue[0] = pair[0]; seen[pair[0]] = 1;
+        while (read < size) {
+          if (read >= n) throw new Error('water traversal exceeds the graph');
+          const node = queue[read++];
+          for (const other of water[node]) if (!seen[other]) {
+            if (size >= n) throw new Error('water queue exceeds the graph');
+            seen[other] = 1; queue[size++] = other;
+          }
+        }
+        const position = node => [g.nodeLat[node], g.nodeLon[node]];
+        return {points: pair.map(position), land: position(onLand), connected: !!seen[pair[1]],
+          wet: pair.every(node => !!g.waterAt(g.nodeLon[node], g.nodeLat[node]))};
+        }""",
+        points,
+    )
+    water_pair = (
+        (chosen["points"][0][0], chosen["points"][0][1]),
+        (chosen["points"][1][0], chosen["points"][1][1]),
+    )
+    wet = read_water_leg(page, water_pair)
+    dry = read_water_leg(page, (water_pair[0], (chosen["land"][0], chosen["land"][1])))
+    w, d = wet["state"], dry["state"]
+    target = {"lat": chosen["land"][0], "lon": chosen["land"][1]}
+    readings = (
+        water_leg_readings(wet, "water pair")
+        + water_leg_readings(dry, "land point")
+        + [
+            Reading("both reconstructed points lie on water", chosen["wet"], True),
+            Reading("paddle arcs connect them in the journey's direction", chosen["connected"], True),
+            Reading("the connected water pair carries no land", w["walked"], 0),
+            Reading("every part between the water points is paddled", all(p["kind"] == "paddled" for p in w["legs"][0]["parts"]), True),
+            Reading("the land point still requires a carry", d["walked"] > 0, True),
+            Reading("the planned point remains where it was set", {k: d["points"][-1][k] for k in target}, target),
+            Reading("the track reaches that land point", dry["trackEnd"], target),
+            noted("water pair, latitude and longitude", chosen["points"]),
+            noted("point explicitly set on land, latitude and longitude", chosen["land"]),
+            noted("water pair paddled / on foot, m", [w["crossed"], w["walked"]]),
+            noted("land point paddled / on foot, m", [d["crossed"], d["walked"]]),
+        ]
+    )
+    if SCENE.stem == "malingsbo-kloten":
+        readings += [
+            Reading(
+                "the Korslångssmedja reconstruction keeps its measured points",
+                max(abs(a - b) for found, expected in zip(chosen["points"], points, strict=True) for a, b in zip(found, expected, strict=True)),
+                0,
+                within=1e-9,
+            ),
+            stands("Korslångssmedja water, m", round(w["crossed"], 3), within=0.001),
+            stands("Korslångssmedja on foot, m", round(w["walked"], 3), within=0.001),
+        ]
+    return Check(name, readings)
 
 
 def a_level_channel_is_paddled_both_ways(page: Any) -> Check:
@@ -14490,8 +14672,12 @@ def drive(page: Any) -> list[Check]:
         checks.append(timed(a_kayak_way_follows_the_shore, page))
     if wanted(a_bay_is_cut_and_a_lake_is_not):
         checks.append(timed(a_bay_is_cut_and_a_lake_is_not, page))
-    if wanted(a_portage_takes_the_path):
-        checks.append(timed(a_portage_takes_the_path, page))
+    if wanted(a_portage_keeps_land_short):
+        checks.append(timed(a_portage_keeps_land_short, page))
+    if wanted(a_kayak_rounds_land_from_open_water):
+        checks.append(timed(a_kayak_rounds_land_from_open_water, page))
+    if wanted(a_kayak_uses_water_before_land):
+        checks.append(timed(a_kayak_uses_water_before_land, page))
     if wanted(a_level_channel_is_paddled_both_ways):
         checks.append(timed(a_level_channel_is_paddled_both_ways, page))
     if wanted(a_paddled_profile_is_flat):
@@ -14673,6 +14859,17 @@ def main() -> int:
         # A 40 MB page is 25 seconds of parsing on a good day, and the
         # default 30 is a margin thin enough to fail on a busy machine -- which
         # reads as a broken run rather than as the slow load it is.
+        if wanted(a_kayak_rounds_land_from_open_water):
+            # Expose the built search in the served drive copy, as the timing
+            # harness does. Neither the file nor the shipped API is changed.
+            html = page_path.read_text()
+            anchor = "window.trailsPlan = {"
+            if html.count(anchor) != 1:
+                raise ValueError("the plan search probe anchor changed")
+            probe = "window.kayakMeasure = {joinedRoute, router, connectorPrice, Heap};\n"
+            if not SCENE.over_http:
+                address = f"{serving.enter_context(served(page_path.parent))}/{page_path.name}"
+            page.route(address, lambda route: route.fulfill(status=200, content_type="text/html", body=html.replace(anchor, probe + anchor)))
         page.goto(address, timeout=120_000)
         ready(page)
         checks = [Check("the page ran at all", [Reading("errors thrown while loading", len(thrown), 0, note="; ".join(thrown[:2]))])]

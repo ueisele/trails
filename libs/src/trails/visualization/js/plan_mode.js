@@ -147,7 +147,7 @@
                 // there are 948,465.
                 var between = panel().metresBetween;
 
-                var length = new Float64Array(edges), cost = new Float64Array(edges), snapNodes = new Uint8Array(nodes);
+                var length = new Float64Array(edges), cost = new Float64Array(edges), land = new Float64Array(edges), snapNodes = new Uint8Array(nodes);
                 for (i = 0; i < edges; i += 1) {
                     var run = 0;
                     for (var v = graph.vertexAt[i] + 1; v < graph.vertexAt[i + 1]; v += 1) {
@@ -169,6 +169,10 @@
 
                 for (i = 0; i < edges; i += 1) {
                     var source = graph.header.sources[graph.sources[i]];
+                    // Ferries cross water too: paddle and ferry edges count no
+                    // land; every other kind counts its metres in a kayak.
+                    // The ferry's flat secondary price remains below.
+                    land[i] = kayak() && source.kind !== PADDLE && source.kind !== CROSSING ? length[i] : 0;
                     if (source.kind !== CROSSING && source.kind !== CONNECTOR && (kayak() || (source.kind !== PADDLE && source.kind !== PORTAGE))) {
                         snapNodes[graph.fromNode[i]] = 1; snapNodes[graph.toNode[i]] = 1;
                     }
@@ -211,29 +215,35 @@
                 // Filling leaves at[v + 1] at the end of node v's arcs, which is
                 // where node v + 1's begin, so afterwards node v owns
                 // arc[at[v] .. at[v + 1]).
-                routing = {length: length, cost: cost, at: at, arc: arc, snapNodes: snapNodes,
-                           best: new Float64Array(nodes), viaEdge: new Int32Array(nodes), viaNode: new Int32Array(nodes)};
+                routing = {length: length, cost: cost, land: land, at: at, arc: arc, snapNodes: snapNodes,
+                           best: new Float64Array(nodes), bestLand: new Float64Array(nodes), viaEdge: new Int32Array(nodes), viaNode: new Int32Array(nodes)};
                 return routing;
             }
 
-            // A binary heap over two parallel arrays. Entries are never removed
+            // A binary heap over parallel arrays. Entries are never removed
             // when a node is reached more cheaply — the stale one is popped and
-            // recognised by its cost, which is the usual trade and the cheaper
-            // one here.
-            function Heap() { this.node = []; this.cost = []; }
+            // recognised by its lexicographic label. Keeping stale entries is
+            // cheaper here than finding and removing them.
+            // In a kayak, any saving on land wins before the old price is read.
+            // Walking supplies zero land throughout, retaining its old ordering.
+            function cheaper(land, cost, otherLand, otherCost) {
+                return cost < Infinity && (land < otherLand || (land === otherLand && cost < otherCost));
+            }
+
+            function Heap() { this.node = []; this.cost = []; this.land = []; }
 
             Heap.prototype.swap = function (a, b) {
-                var node = this.node[a], cost = this.cost[a];
-                this.node[a] = this.node[b]; this.cost[a] = this.cost[b];
-                this.node[b] = node; this.cost[b] = cost;
+                var node = this.node[a], cost = this.cost[a], land = this.land[a];
+                this.node[a] = this.node[b]; this.cost[a] = this.cost[b]; this.land[a] = this.land[b];
+                this.node[b] = node; this.cost[b] = cost; this.land[b] = land;
             };
 
-            Heap.prototype.push = function (node, cost) {
+            Heap.prototype.push = function (node, cost, land) {
                 var at = this.node.length;
-                this.node.push(node); this.cost.push(cost);
+                this.node.push(node); this.cost.push(cost); this.land.push(land || 0);
                 while (at > 0) {
                     var parent = (at - 1) >> 1;
-                    if (this.cost[parent] <= this.cost[at]) { break; }
+                    if (!cheaper(this.land[at], this.cost[at], this.land[parent], this.cost[parent])) { break; }
                     this.swap(parent, at); at = parent;
                 }
             };
@@ -243,14 +253,14 @@
             // runs at most as deep as the heap. That is a property of the array
             // and not of the graph, which is why it carries no bound.
             Heap.prototype.pop = function () {
-                var top = {node: this.node[0], cost: this.cost[0]}, last = this.node.length - 1;
-                this.node[0] = this.node[last]; this.cost[0] = this.cost[last];
-                this.node.pop(); this.cost.pop();
+                var top = {node: this.node[0], cost: this.cost[0], land: this.land[0]}, last = this.node.length - 1;
+                this.node[0] = this.node[last]; this.cost[0] = this.cost[last]; this.land[0] = this.land[last];
+                this.node.pop(); this.cost.pop(); this.land.pop();
                 var at = 0, size = this.node.length;
                 while (true) {
                     var left = 2 * at + 1, right = left + 1, least = at;
-                    if (left < size && this.cost[left] < this.cost[least]) { least = left; }
-                    if (right < size && this.cost[right] < this.cost[least]) { least = right; }
+                    if (left < size && cheaper(this.land[left], this.cost[left], this.land[least], this.cost[least])) { least = left; }
+                    if (right < size && cheaper(this.land[right], this.cost[right], this.land[least], this.cost[least])) { least = right; }
                     if (least === at) { break; }
                     this.swap(least, at); at = least;
                 }
@@ -286,13 +296,13 @@
                     var kind = graph.header.sources[graph.sources[point.edge]].kind;
                     if (kind === CROSSING || ((kind === PADDLE || kind === PORTAGE) && !kayak())) { return []; }
                 }
-                if (point.node >= 0) { return [{node: point.node, cost: 0, cut: null}]; }
+                if (point.node >= 0) { return [{node: point.node, cost: 0, land: 0, cut: null}]; }
                 if (!(point.edge >= 0)) { return []; }
                 var work = router(graph), edge = point.edge;
                 var length = work.length[edge], rate = length > 0 ? work.cost[edge] / length : 0;
-                var along = Math.max(0, Math.min(length, point.along || 0));
-                return [{node: graph.fromNode[edge], cost: along * rate, cut: {edge: edge, from: along, to: 0}},
-                        {node: graph.toNode[edge], cost: (length - along) * rate, cut: {edge: edge, from: along, to: length}}].filter(function (end) {
+                var along = Math.max(0, Math.min(length, point.along || 0)), landRate = length > 0 ? work.land[edge] / length : 0;
+                return [{node: graph.fromNode[edge], cost: along * rate, land: along * landRate, cut: {edge: edge, from: along, to: 0}},
+                        {node: graph.toNode[edge], cost: (length - along) * rate, land: (length - along) * landRate, cut: {edge: edge, from: along, to: length}}].filter(function (end) {
                             return allowed(graph, edge, entering ? end.cut.from >= end.cut.to : end.cut.to >= end.cut.from);
                         });
             }
@@ -311,7 +321,7 @@
             // way round is cheaper, which on a loop it can be.
             function routeBetween(graph, from, to) {
                 var work = router(graph);
-                var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
+                var best = work.best, bestLand = work.bestLand, viaEdge = work.viaEdge, viaNode = work.viaNode;
                 var seeds = endsOf(graph, from), targets = endsOf(graph, to, true), i;
                 if (!seeds.length || !targets.length) { return null; }
                 var direct = null;
@@ -319,15 +329,16 @@
                         allowed(graph, from.edge, (to.along || 0) >= (from.along || 0))) {
                     var rate = work.length[from.edge] > 0 ? work.cost[from.edge] / work.length[from.edge] : 0;
                     direct = {edges: [], reversed: [], cost: Math.abs((to.along || 0) - (from.along || 0)) * rate,
+                              land: work.length[from.edge] > 0 ? Math.abs((to.along || 0) - (from.along || 0)) * work.land[from.edge] / work.length[from.edge] : 0,
                               head: {edge: from.edge, from: from.along || 0, to: to.along || 0}, tail: null};
                 }
-                best.fill(Infinity); viaEdge.fill(-1); viaNode.fill(-1);
+                best.fill(Infinity); bestLand.fill(Infinity); viaEdge.fill(-1); viaNode.fill(-1);
                 var seedAt = {};
                 var heap = new Heap();
                 for (i = 0; i < seeds.length; i += 1) {
-                    if (seeds[i].cost >= best[seeds[i].node]) { continue; }
-                    best[seeds[i].node] = seeds[i].cost; seedAt[seeds[i].node] = seeds[i];
-                    heap.push(seeds[i].node, seeds[i].cost);
+                    if (!cheaper(seeds[i].land, seeds[i].cost, bestLand[seeds[i].node], best[seeds[i].node])) { continue; }
+                    best[seeds[i].node] = seeds[i].cost; bestLand[seeds[i].node] = seeds[i].land; seedAt[seeds[i].node] = seeds[i];
+                    heap.push(seeds[i].node, seeds[i].cost, seeds[i].land);
                 }
                 // The cheapest whole way found so far, read off the targets:
                 // what a target's node was reached for plus its own way off.
@@ -335,8 +346,10 @@
                 function arrivedAt(node) {
                     for (var t = 0; t < targets.length; t += 1) {
                         if (targets[t].node !== node) { continue; }
-                        var whole = best[node] + targets[t].cost;
-                        if (!found || whole < found.cost) { found = {target: targets[t], cost: whole}; }
+                        var whole = best[node] + targets[t].cost, wholeLand = bestLand[node] + targets[t].land;
+                        if (cheaper(wholeLand, whole, found ? found.land : Infinity, found ? found.cost : Infinity)) {
+                            found = {target: targets[t], cost: whole, land: wholeLand};
+                        }
                     }
                 }
                 for (i = 0; i < seeds.length; i += 1) { arrivedAt(seeds[i].node); }
@@ -352,23 +365,23 @@
                     pops += 1;
                     if (pops > mostPops) { throw new Error('the search took more than ' + mostPops + ' steps'); }
                     var taken = heap.pop();
-                    if (taken.cost > best[taken.node]) { continue; }
-                    // Popped in order of cost, so once the top is no cheaper
+                    if (cheaper(bestLand[taken.node], best[taken.node], taken.land, taken.cost)) { continue; }
+                    // Popped in lexicographic order, so once the top is no cheaper
                     // than a whole way already in hand, no later one can be.
-                    if (found && taken.cost >= found.cost) { break; }
+                    if (found && !cheaper(taken.land, taken.cost, found.land, found.cost)) { break; }
                     for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
                         var edge = work.arc[a];
                         if (!allowed(graph, edge, graph.fromNode[edge] === taken.node)) { continue; }
                         var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
-                        var reached = taken.cost + work.cost[edge];
-                        if (reached < best[other]) {
-                            best[other] = reached; viaEdge[other] = edge; viaNode[other] = taken.node;
-                            heap.push(other, reached);
+                        var reached = taken.cost + work.cost[edge], reachedLand = taken.land + work.land[edge];
+                        if (cheaper(reachedLand, reached, bestLand[other], best[other])) {
+                            best[other] = reached; bestLand[other] = reachedLand; viaEdge[other] = edge; viaNode[other] = taken.node;
+                            heap.push(other, reached, reachedLand);
                             arrivedAt(other);
                         }
                     }
                 }
-                if (direct && (!found || direct.cost <= found.cost)) { return direct; }
+                if (direct && (!found || !cheaper(found.land, found.cost, direct.land, direct.cost))) { return direct; }
                 if (!found) { return null; }
 
                 // Walking the path back out. **Bounded, and the sentinel is
@@ -399,8 +412,39 @@
                 var seed = seedAt[walk];
                 if (!seed) { throw new Error('the way back ended at node ' + walk + ', which is no seed'); }
                 edges.reverse(); reversed.reverse();
-                return {edges: edges, reversed: reversed, cost: found.cost,
+                return {edges: edges, reversed: reversed, cost: found.cost, land: found.land,
                         head: seed.cut, tail: flipCut(found.target.cut)};
+            }
+
+            // Optimistic land distances from the start include travel over the
+            // network, not just a globally cheapest entry. Whole-metre floors
+            // add exactly and stay below floating-point sums in either order.
+            function entryLandFloors(graph, starts, limit) {
+                var work = router(graph), nodes = graph.header.nodes;
+                var bounds = work.entryBounds || (work.entryBounds = new Float64Array(nodes));
+                bounds.fill(Infinity);
+                var heap = new Heap(), ceiling = Math.floor(limit), i;
+                if (!Number.isSafeInteger(ceiling)) { throw new Error('the entry land ceiling is not a safe integer'); }
+                function seed(node, value) {
+                    value = Math.floor(value);
+                    if (value <= ceiling && value < bounds[node]) {
+                        bounds[node] = value; heap.push(node, 0, value);
+                    }
+                }
+                for (i = 0; i < starts.length; i += 1) { seed(starts[i].node, starts[i].land); }
+                var pops = 0, most = nodes + 2 * graph.header.edges;
+                while (heap.node.length) {
+                    if (++pops > most) { throw new Error('the entry floor search exceeds the graph'); }
+                    var taken = heap.pop();
+                    if (taken.land > bounds[taken.node]) { continue; }
+                    for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
+                        var edge = work.arc[a];
+                        if (!allowed(graph, edge, graph.fromNode[edge] === taken.node)) { continue; }
+                        var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
+                        seed(other, taken.land + Math.floor(work.land[edge]));
+                    }
+                }
+                return bounds;
             }
 
             // ---- a way to somewhere that is not on the network ----------------
@@ -463,14 +507,17 @@
             // and the one that crosses least wins. **A price, not a rule**, so
             // the second case needs no case of its own.
             //
-            // **Priced when it is asked for, not when it is seeded.** Every
+            // **Walking and zero-land kayak ways price exits lazily.** A
             // node is seeded at the cheapest connector metre in the mode,
-            // which is a floor whether water is dearer or cheaper than ground.
-            // The true price is worked out when that floor reaches the top of the queue. It is the
+            // plus a sampled dry-prefix land floor in a kayak. Both halves
+            // are lower bounds. The true price is worked out when that floor
+            // reaches the top of the queue. It is the
             // ordinary trick for an edge whose weight is dear to compute, and
             // it is what keeps the grid from being asked about 117,000
             // connectors on every tick of a drag. The bound and the pruning
             // are unchanged, because a floor is all either of them needs.
+            // With a dry end and positive kayak land ceiling most floors remain eligible;
+            // pricing those exits directly avoids a queue that cannot prune.
             //
             // **A floor is not a label.** The first version wrote the floor
             // into `best` and priced it for real when the node was popped.
@@ -489,7 +536,12 @@
                 var far = panel().metresBetween;
                 var off = cheapestMetre(graph);
                 var work = router(graph);
-                var best = work.best, viaEdge = work.viaEdge, viaNode = work.viaNode;
+                var best = work.best, bestLand = work.bestLand, viaEdge = work.viaEdge, viaNode = work.viaNode;
+                var leaveLengths = null, leaveDry = null;
+                if (kayak()) {
+                    leaveLengths = work.leaveLengths || (work.leaveLengths = new Float64Array(nodes));
+                    leaveDry = work.leaveDry || (work.leaveDry = new Uint8Array(nodes));
+                }
                 viaEdge.fill(-1); viaNode.fill(-1);
                 // The direct connector: the line the reader would walk if the
                 // network were not there at all. It is what every other answer
@@ -498,7 +550,8 @@
                 // an entry that leads nowhere loses to it by itself. Priced by
                 // what it crosses, like every connector: over a sound it is
                 // dear, and that is what lets the road round beat it.
-                var plain = priced(graph, from.lon, from.lat, to.lon, to.lat);
+                var plainPrice = connectorPrice(graph, from.lon, from.lat, to.lon, to.lat);
+                var plain = plainPrice.cost, plainLand = plainPrice.land;
                 // Two queues: the floors, and the prices that are exact.
                 var floors = new Heap(), heap = new Heap(), i;
                 // **Seeded at every node at once, from the far end.** That is
@@ -509,8 +562,8 @@
                 // chosen knowing it, which is the thing the old two searches
                 // could not do.
                 //
-                // **Bounded by the direct connector, and exactly.** A node whose
-                // cost-to-go already reaches `plain` cannot be part of an answer
+                // **Initially bounded by the direct connector, lexicographically.**
+                // A node whose suffix already reaches its pair cannot be part of an answer
                 // that beats it -- the entry walk on top can only add -- and
                 // every node on an optimal way out is cheaper still than the one
                 // before it, so nothing that matters is pruned. Measured on
@@ -518,7 +571,7 @@
                 // exhausting the whole graph, 64 ms bounded. Seeded with the
                 // cheapest connector price, which is a floor on the true one -- and
                 // into the floors' own queue, not into `best`.
-                best.fill(Infinity);
+                best.fill(Infinity); bestLand.fill(Infinity);
                 // **A far end standing on the network leaves it by its own
                 // edge.** Its two ends are seeded with the metres along that
                 // edge at the edge's own price -- exact, so straight into the
@@ -528,15 +581,124 @@
                 var tailCuts = {};
                 var toEnds = endsOf(graph, to, true);
                 for (i = 0; i < toEnds.length; i += 1) {
-                    if (toEnds[i].cost >= plain || toEnds[i].cost >= best[toEnds[i].node]) { continue; }
-                    best[toEnds[i].node] = toEnds[i].cost;
+                    if (!cheaper(toEnds[i].land, toEnds[i].cost, plainLand, plain) ||
+                            !cheaper(toEnds[i].land, toEnds[i].cost, bestLand[toEnds[i].node], best[toEnds[i].node])) { continue; }
+                    best[toEnds[i].node] = toEnds[i].cost; bestLand[toEnds[i].node] = toEnds[i].land;
                     tailCuts[toEnds[i].node] = flipCut(toEnds[i].cut);
-                    heap.push(toEnds[i].node, toEnds[i].cost);
+                    heap.push(toEnds[i].node, toEnds[i].cost, toEnds[i].land);
                 }
+                var head = -1, headCut = null, cheapest = plain, leastLand = plainLand, prefixSamples = 16;
+                var fromEnds = endsOf(graph, from);
+                var entryBox = kayak() && !fromEnds.length ? dryConnectorBox(graph, from) : null, entryLand = 0;
+                // Every network way needs an entry connector. A dry box around
+                // the tap bounds all of them without sampling every long line.
+                // Add only their smallest land floor to a suffix's bound.
+                if (entryBox) {
+                    entryLand = Infinity;
+                    for (i = 0; i < nodes; i += 1) {
+                        var entryLength = far(from.lon, from.lat, graph.nodeLon[i], graph.nodeLat[i]);
+                        entryLand = Math.min(entryLand, connectorBoxLand(graph, from, graph.nodeLon[i], graph.nodeLat[i], entryLength, entryBox));
+                        if (entryLand === 0) { break; }
+                    }
+                }
+                // A wet node near the dry tap offers a cheap initial whole
+                // way, when both ends are off-network. Price both connectors
+                // exactly: this only tightens the bound if the way is better,
+                // and every other entry remains eligible to beat it.
+                if (kayak() && !fromEnds.length && !toEnds.length) {
+                    var dryPoint = !graph.waterAt(from.lon, from.lat) ? from : (!graph.waterAt(to.lon, to.lat) ? to : null);
+                    var wetNode = -1, nearestWet = Infinity;
+                    if (dryPoint && !work.wetNodes) {
+                        work.wetNodes = new Uint8Array(nodes);
+                        for (i = 0; i < nodes; i += 1) {
+                            work.wetNodes[i] = graph.waterAt(graph.nodeLon[i], graph.nodeLat[i]) ? 1 : 0;
+                        }
+                    }
+                    // Only the two exact connector prices make an incumbent.
+                    // Approximate nearness chooses a candidate, never a bound.
+                    var lonScale = dryPoint ? Math.cos(dryPoint.lat * Math.PI / 180) : 1;
+                    for (i = 0; dryPoint && i < nodes; i += 1) {
+                        if (!work.wetNodes[i]) { continue; }
+                        var dx = (dryPoint.lon - graph.nodeLon[i]) * lonScale, dy = dryPoint.lat - graph.nodeLat[i];
+                        var away = dx * dx + dy * dy;
+                        if (away < nearestWet) { nearestWet = away; wetNode = i; }
+                    }
+                    if (wetNode >= 0) {
+                        var wetHead = connectorPrice(graph, from.lon, from.lat, graph.nodeLon[wetNode], graph.nodeLat[wetNode]);
+                        var wetTail = connectorPrice(graph, graph.nodeLon[wetNode], graph.nodeLat[wetNode], to.lon, to.lat);
+                        // This estimate controls work only. The floor still
+                        // counts actual samples; no distance to water is
+                        // treated as land without reading the connector.
+                        if (graph.water) {
+                            var dryMetres = dryPoint === from ? wetHead.land : wetTail.land;
+                            prefixSamples = Math.min(32, Math.max(16, 1 + Math.ceil(dryMetres / graph.water.cellM)));
+                        }
+                        if (cheaper(wetHead.land + wetTail.land, wetHead.cost + wetTail.cost, leastLand, cheapest)) {
+                            head = wetNode; leastLand = wetHead.land + wetTail.land; cheapest = wetHead.cost + wetTail.cost;
+                            best[wetNode] = wetTail.cost; bestLand[wetNode] = wetTail.land;
+                            heap.push(wetNode, wetTail.cost, wetTail.land);
+                        }
+                    }
+                }
+                var entryBounds = kayak() && fromEnds.length && leastLand > 0 ? entryLandFloors(graph, fromEnds, leastLand) : null;
+                var eager = kayak() && leastLand > 0 && (!graph.waterAt(from.lon, from.lat) || !graph.waterAt(to.lon, to.lat));
                 for (i = 0; i < nodes && !toEnds.length; i += 1) {
-                    var leave = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat) * off;
-                    if (leave >= plain) { continue; }
-                    floors.push(i, leave);
+                    if (entryBounds && entryBounds[i] > leastLand) { continue; }
+                    var leaveM = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat), leave = leaveM * off;
+                    var leaveLand = 0;
+                    // A dry end and positive land ceiling otherwise leave
+                    // almost every floor eligible. Price exits in this linear
+                    // pass; the exact queue settles the same suffix labels.
+                    // Wet ends retain the lazy queue's useful water-way bound.
+                    if (eager) {
+                        // The integer prefix floor plus floor(suffix land)
+                        // bounds a whole way. Subtract one metre when comparing
+                        // it with an unrounded connector's land instead.
+                        var requiredIn = entryBounds ? Math.max(entryLand, entryBounds[i] - 1) : entryLand;
+                        if (!cheaper(requiredIn, leave, leastLand, cheapest)) { continue; }
+                        var localBound = bestLand[i] + requiredIn < leastLand;
+                        var exact = connectorPrice(graph, graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat,
+                            localBound ? bestLand[i] : leastLand, localBound ? 0 : requiredIn,
+                            {length: leaveM, dry: 0});
+                        if (cheaper(exact.land, exact.cost, bestLand[i], best[i])) {
+                            best[i] = exact.cost; bestLand[i] = exact.land;
+                            heap.push(i, exact.cost, exact.land);
+                        }
+                        continue;
+                    }
+                    if (kayak()) {
+                        var pieces = graph.water ? Math.max(1, Math.ceil(leaveM / graph.water.cellM)) : 1;
+                        var dry = connectorDryPrefix(graph, graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat, leaveM, pieces, Math.max(0, leastLand - entryLand), prefixSamples);
+                        leaveLengths[i] = leaveM; leaveDry[i] = dry;
+                        leaveLand = leaveM * dry / pieces;
+                    }
+                    if (!cheaper(entryLand + leaveLand, leave, leastLand, cheapest) ||
+                            (entryBounds && !cheaper(entryBounds[i] + Math.floor(leaveLand), leave, leastLand, cheapest))) { continue; }
+                    floors.push(i, leave, leaveLand);
+                }
+                // An exact suffix plus an exact entry is a whole way. In a
+                // kayak it tightens the lexicographic bound immediately: once
+                // zero land is found, dearer zero-land floors cannot win.
+                // A positive-land incumbent never caps a zero-land price.
+                function enter(node, cost, land) {
+                    if (fromEnds.length) {
+                        for (var k = 0; k < fromEnds.length; k += 1) {
+                            var end = fromEnds[k];
+                            if (end.node !== node) { continue; }
+                            if (cheaper(land + end.land, cost + end.cost, leastLand, cheapest)) {
+                                leastLand = land + end.land; cheapest = cost + end.cost; head = node; headCut = end.cut;
+                            }
+                        }
+                        return;
+                    }
+                    var entryM = far(from.lon, from.lat, graph.nodeLon[node], graph.nodeLat[node]);
+                    var entryFloor = entryBox ? connectorBoxLand(graph, from, graph.nodeLon[node], graph.nodeLat[node], entryM, entryBox) : 0;
+                    if (!cheaper(land + entryFloor, cost + entryM * off, leastLand, cheapest)) { return; }
+                    var entry = connectorPrice(graph, from.lon, from.lat, graph.nodeLon[node], graph.nodeLat[node],
+                        leastLand, land, {length: entryM, dry: 0});
+                    if (cheaper(land + entry.land, cost + entry.cost, leastLand, cheapest)) {
+                        leastLand = land + entry.land; cheapest = cost + entry.cost; head = node;
+                    }
                 }
                 // Bounded and thrown for, as every loop over this graph is: a
                 // settled node is never settled twice and every stale entry was
@@ -555,66 +717,77 @@
                     // is what keeps the exact prices coming out in order.
                     var floorTop = floors.node.length ? floors.cost[0] : Infinity;
                     var exactTop = heap.node.length ? heap.cost[0] : Infinity;
-                    // Everything left in either queue is dearer than walking,
-                    // and a heap answers its cheapest first -- so this is the
-                    // whole of the bound and not a heuristic.
-                    if (Math.min(floorTop, exactTop) >= plain) { break; }
-                    if (floorTop <= exactTop) {
+                    // Both queues answer in lexicographic order. Every entry
+                    // costs at least entryLand; adding that common floor to
+                    // the cheaper top still bounds every whole way left.
+                    var floorLand = floors.node.length ? floors.land[0] : Infinity;
+                    var exactLand = heap.node.length ? heap.land[0] : Infinity;
+                    var floorFirst = !cheaper(exactLand, exactTop, floorLand, floorTop);
+                    if (!cheaper(entryLand + (floorFirst ? floorLand : exactLand), floorFirst ? floorTop : exactTop, leastLand, cheapest)) { break; }
+                    if (floorFirst) {
                         var seed = floors.pop();
+                        if (entryBounds && !cheaper(entryBounds[seed.node] + Math.floor(seed.land), seed.cost, leastLand, cheapest)) { continue; }
                         // A node already reached over the network for no more
                         // than its floor cannot be undercut by its connector,
                         // which costs at least the floor -- so the grid is not
                         // asked. Measured on a 13 km leg: 480 ms with every
                         // floor priced, 200 ms with these skipped.
-                        if (best[seed.node] <= seed.cost) { continue; }
-                        var truly = priced(graph, graph.nodeLon[seed.node], graph.nodeLat[seed.node], to.lon, to.lat);
+                        if (!cheaper(seed.land, seed.cost, bestLand[seed.node], best[seed.node])) { continue; }
+                        // The connector must beat both this node's exact
+                        // suffix and the whole-way bound, including the entry
+                        // nobody can avoid. Keep the sum for the latter rather
+                        // than subtracting rounded land metres from its limit.
+                        var required = entryBounds ? Math.max(entryLand, entryBounds[seed.node] - 1) : entryLand;
+                        var nodeBound = bestLand[seed.node] + required < leastLand;
+                        var truly = connectorPrice(graph, graph.nodeLon[seed.node], graph.nodeLat[seed.node], to.lon, to.lat,
+                            kayak() ? (nodeBound ? bestLand[seed.node] : leastLand) : undefined, nodeBound ? 0 : required,
+                            kayak() ? {length: leaveLengths[seed.node], dry: leaveDry[seed.node]} : undefined);
                         // Cheaper than any way in over the network found so
                         // far, so the connector is this node's way out. A way
                         // in found later and cheaper still overwrites it, as
                         // any relaxation does.
-                        if (truly < best[seed.node]) {
-                            best[seed.node] = truly; viaEdge[seed.node] = -1; viaNode[seed.node] = -1;
-                            heap.push(seed.node, truly);
+                        if (cheaper(truly.land, truly.cost, bestLand[seed.node], best[seed.node])) {
+                            best[seed.node] = truly.cost; bestLand[seed.node] = truly.land; viaEdge[seed.node] = -1; viaNode[seed.node] = -1;
+                            heap.push(seed.node, truly.cost, truly.land);
                         }
                         continue;
                     }
                     var taken = heap.pop();
-                    if (taken.cost > best[taken.node]) { continue; }
+                    if (cheaper(bestLand[taken.node], best[taken.node], taken.land, taken.cost)) { continue; }
+                    if (entryBounds && !cheaper(entryBounds[taken.node] + Math.floor(taken.land), taken.cost, leastLand, cheapest)) { continue; }
+                    if (kayak()) { enter(taken.node, taken.cost, taken.land); }
                     for (var a = work.at[taken.node]; a < work.at[taken.node + 1]; a += 1) {
                         var edge = work.arc[a];
                         if (!allowed(graph, edge, graph.toNode[edge] === taken.node)) { continue; }
                         var other = graph.fromNode[edge] === taken.node ? graph.toNode[edge] : graph.fromNode[edge];
-                        var reached = taken.cost + work.cost[edge];
-                        if (reached < best[other]) {
-                            best[other] = reached; viaEdge[other] = edge; viaNode[other] = taken.node;
-                            heap.push(other, reached);
+                        var reached = taken.cost + work.cost[edge], reachedLand = taken.land + work.land[edge];
+                        if (cheaper(reachedLand, reached, bestLand[other], best[other])) {
+                            best[other] = reached; bestLand[other] = reachedLand; viaEdge[other] = edge; viaNode[other] = taken.node;
+                            heap.push(other, reached, reachedLand);
                         }
                     }
                 }
-                // The entry, chosen the same way: `best` holds nothing but exact
-                // prices, and what the search left in either queue is dearer
-                // than `plain` and is never an answer -- so the walk in to a
-                // node is priced for real only in the order its floor puts
-                // it, until the next floor is dearer than the best whole found.
-                var head = -1, headCut = null, cheapest = plain;
-                // And a near end on the network enters by its own edge, for
-                // the same reason and at the same exact price.
-                var fromEnds = endsOf(graph, from);
+                // Walking retains its separate entry search. The kayak has
+                // already tested entries as exact suffixes settled. A near end
+                // on the network enters by its own edge in either mode.
                 for (i = 0; i < fromEnds.length; i += 1) {
-                    var wholeIn = fromEnds[i].cost + best[fromEnds[i].node];
-                    if (wholeIn < cheapest) { cheapest = wholeIn; head = fromEnds[i].node; headCut = fromEnds[i].cut; }
+                    var wholeIn = fromEnds[i].cost + best[fromEnds[i].node], landIn = fromEnds[i].land + bestLand[fromEnds[i].node];
+                    if (cheaper(landIn, wholeIn, leastLand, cheapest)) {
+                        cheapest = wholeIn; leastLand = landIn; head = fromEnds[i].node; headCut = fromEnds[i].cut;
+                    }
                 }
                 var entries = new Heap();
-                for (i = 0; i < nodes && !fromEnds.length; i += 1) {
+                for (i = 0; i < nodes && !fromEnds.length && !kayak(); i += 1) {
                     if (!isFinite(best[i])) { continue; }
                     var floor = far(graph.nodeLon[i], graph.nodeLat[i], from.lon, from.lat) * off + best[i];
-                    if (floor < plain) { entries.push(i, floor); }
+                    if (cheaper(bestLand[i], floor, plainLand, plain)) { entries.push(i, floor, bestLand[i]); }
                 }
                 while (entries.node.length) {
                     var next = entries.pop();
-                    if (next.cost >= cheapest) { break; }
-                    var whole = priced(graph, from.lon, from.lat, graph.nodeLon[next.node], graph.nodeLat[next.node]) + best[next.node];
-                    if (whole < cheapest) { cheapest = whole; head = next.node; }
+                    if (!cheaper(next.land, next.cost, leastLand, cheapest)) { break; }
+                    var entry = connectorPrice(graph, from.lon, from.lat, graph.nodeLon[next.node], graph.nodeLat[next.node]);
+                    var whole = entry.cost + best[next.node], wholeLand = entry.land + bestLand[next.node];
+                    if (cheaper(wholeLand, whole, leastLand, cheapest)) { cheapest = whole; leastLand = wholeLand; head = next.node; }
                 }
                 if (head < 0) { return null; }
                 var joined = leavingAt(graph, head);
@@ -629,27 +802,188 @@
                 return source.factor;
             }
 
-            // Water is cheaper than ground in a kayak. A connector's floor must
-            // stay below either price, including when the reader changes k.
+            // The price half of a connector floor uses the cheapest possible
+            // metre. The land half may count only samples already read dry.
             function cheapestMetre(graph) {
                 return kayak() ? Math.min(openWaterFactor(graph), offPath() * PLAN.portageFactor) : offPath();
             }
 
+            // Whole dry cells around an off-network tap give a rectangle
+            // every entry must leave, unless its node lies inside it. The
+            // bounded expansion only trades a stronger floor for more work.
+            function dryConnectorBox(graph, point) {
+                var spec = graph.water && graph.water.spec;
+                if (!spec || graph.waterAt(point.lon, point.lat)) { return null; }
+                var col = Math.floor((point.lon - spec.west) / spec.dLon), row = Math.floor((point.lat - spec.south) / spec.dLat), radius = 0;
+                for (var r = 1; r <= 16; r += 1) {
+                    var wet = false;
+                    for (var d = -r; d <= r && !wet; d += 1) {
+                        wet = graph.waterAt(spec.west + (col + d + 0.5) * spec.dLon, spec.south + (row - r + 0.5) * spec.dLat)
+                            || graph.waterAt(spec.west + (col + d + 0.5) * spec.dLon, spec.south + (row + r + 0.5) * spec.dLat)
+                            || graph.waterAt(spec.west + (col - r + 0.5) * spec.dLon, spec.south + (row + d + 0.5) * spec.dLat)
+                            || graph.waterAt(spec.west + (col + r + 0.5) * spec.dLon, spec.south + (row + d + 0.5) * spec.dLat);
+                    }
+                    if (wet) { break; }
+                    radius = r;
+                }
+                return {west: spec.west + (col - radius) * spec.dLon, east: spec.west + (col + radius + 1) * spec.dLon,
+                        south: spec.south + (row - radius) * spec.dLat, north: spec.south + (row + radius + 1) * spec.dLat};
+            }
+
+            function connectorBoxLand(graph, point, lon, lat, length, box) {
+                var dx = lon - point.lon, dy = lat - point.lat, t = 1;
+                if (dx > 0) { t = Math.min(t, (box.east - point.lon) / dx); }
+                else if (dx < 0) { t = Math.min(t, (box.west - point.lon) / dx); }
+                if (dy > 0) { t = Math.min(t, (box.north - point.lat) / dy); }
+                else if (dy < 0) { t = Math.min(t, (box.south - point.lat) / dy); }
+                var pieces = Math.max(1, Math.ceil(length / graph.water.cellM));
+                // Leave a whole sample behind the boundary. Every counted
+                // midpoint is strictly inside known dry cells, including when
+                // the node is inside the box; rounding at a cell edge cannot
+                // turn a possibly wet midpoint into a compulsory land metre.
+                return length * Math.max(0, Math.floor(t * pieces) - 1) / pieces;
+            }
+
+            // A square stopping before the nearest opposite-kind cell is
+            // uniform. Two chessboard-distance sweeps find those squares once
+            // per grid; dry space outside the grid also bounds wet squares.
+            // The low bit stores wet/dry and the other bits store a saturated
+            // distance. Saturating only shrinks a square, never enlarges it.
+            function connectorRadii(grid) {
+                if (grid.connectorRadii) { return grid.connectorRadii; }
+                var spec = grid.spec, cols = spec.cols, rows = spec.rows, field = new Uint16Array(cols * rows);
+                var x, y, at, wet, distance, value;
+                function offer(index) {
+                    value = index < 0 ? 65534 : field[index];
+                    distance = Math.min(distance, (value & 1) !== wet ? 1 : (value >> 1) + 1);
+                }
+                for (y = 0; y < rows; y += 1) {
+                    for (x = 0; x < cols; x += 1) {
+                        at = y * cols + x;
+                        wet = (grid.bits[y * grid.stride + (x >> 3)] & (0x80 >> (x & 7))) ? 1 : 0;
+                        distance = 32767;
+                        offer(x ? at - 1 : -1);
+                        offer(y ? at - cols : -1);
+                        offer(y && x ? at - cols - 1 : -1);
+                        offer(y && x + 1 < cols ? at - cols + 1 : -1);
+                        field[at] = (distance << 1) | wet;
+                    }
+                }
+                for (y = rows - 1; y >= 0; y -= 1) {
+                    for (x = cols - 1; x >= 0; x -= 1) {
+                        at = y * cols + x; wet = field[at] & 1; distance = field[at] >> 1;
+                        offer(x + 1 < cols ? at + 1 : -1);
+                        offer(y + 1 < rows ? at + cols : -1);
+                        offer(y + 1 < rows && x ? at + cols - 1 : -1);
+                        offer(y + 1 < rows && x + 1 < cols ? at + cols + 1 : -1);
+                        field[at] = (distance << 1) | wet;
+                    }
+                }
+                grid.connectorRadii = field;
+                return field;
+            }
+
+            // Count the original midpoints in uniform squares together. The
+            // last midpoint is checked using the original arithmetic: monotone
+            // coordinates then keep every intervening sample in that square.
+            // Every iteration consumes at least one sample and stops at end.
+            function connectorScan(graph, ax, ay, bx, by, pieces, start, end, direction, length, landLimit, precedingLand, dryKnown) {
+                var grid = graph.water, spec = grid.spec, field = connectorRadii(grid);
+                var cols = spec.cols, rows = spec.rows, west = spec.west, south = spec.south, dLon = spec.dLon, dLat = spec.dLat;
+                var deltaX = bx - ax, deltaY = by - ay, stepX = direction * deltaX / pieces, stepY = direction * deltaY / pieces;
+                var inverseX = stepX ? 1 / stepX : 0, inverseY = stepY ? 1 / stepY : 0;
+                var wet = 0, read = 0;
+                for (var sample = start; direction > 0 ? sample < end : sample > end;) {
+                    var t = (sample + 0.5) / pieces;
+                    var lon = ax + t * deltaX, lat = ay + t * deltaY;
+                    var col = Math.floor((lon - west) / dLon), row = Math.floor((lat - south) / dLat);
+                    var value = col < 0 || row < 0 || col >= cols || row >= rows ? 0 : field[row * cols + col];
+                    var isWet = value & 1;
+                    var radius = (value >> 1) - 1, count = 1;
+                    if (radius > 0) {
+                        var left = col - radius, right = col + radius + 1, bottom = row - radius, top = row + radius + 1;
+                        var across = stepX ? (west + (stepX > 0 ? right : left) * dLon - lon) * inverseX : Infinity;
+                        var up = stepY ? (south + (stepY > 0 ? top : bottom) * dLat - lat) * inverseY : Infinity;
+                        count = Math.max(1, Math.min(Math.abs(end - sample), Math.ceil(Math.min(across, up))));
+                        var last = (sample + direction * (count - 1) + 0.5) / pieces;
+                        var endCol = Math.floor((ax + last * deltaX - west) / dLon), endRow = Math.floor((ay + last * deltaY - south) / dLat);
+                        if (endCol < left || endCol >= right || endRow < bottom || endRow >= top) { count = 1; }
+                    }
+                    read += count;
+                    if (isWet) { wet += count; }
+                    else if (landLimit !== undefined && (precedingLand || 0) + length * (read + dryKnown - wet) / pieces > landLimit) {
+                        return -1;
+                    }
+                    sample += direction * count;
+                }
+                return wet;
+            }
+
+            // The connector's exact sampling positions also give a cheap land
+            // floor. Count only an initial dry prefix: water ends cost one grid
+            // lookup, and inland nodes need not be queued as possible water.
+            // The measured prefix cap bounds preliminary work. Truncating it
+            // only weakens the floor, never changes the answer. The exact
+            // price resumes after these samples instead of reading them twice.
+            function connectorDryPrefix(graph, aLon, aLat, bLon, bLat, length, pieces, landLimit, limit) {
+                if (!graph.water) { return 1; }
+                var dry = 0;
+                for (var i = 0; i < Math.min(limit || 16, pieces); i += 1) {
+                    var t = (i + 0.5) / pieces;
+                    if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { break; }
+                    dry += 1;
+                    if (length * dry / pieces > landLimit) { break; }
+                }
+                return dry;
+            }
+
+            // Reordering or batching grid reads preserves the integer wet
+            // count. A wholly dry batch can pass the land ceiling by several
+            // samples; the first excess sample would reject the same way.
+            function connectorRunPrice(graph, aLon, aLat, bLon, bLat, length, landLimit, precedingLand, known) {
+                var pieces = Math.max(1, Math.ceil(length / graph.water.cellM)), dry = known && known.dry || 0;
+                var backwards = landLimit !== undefined && !dry && graph.waterAt(aLon + 0.5 / pieces * (bLon - aLon), aLat + 0.5 / pieces * (bLat - aLat));
+                var wet = connectorScan(graph, aLon, aLat, bLon, bLat, pieces, backwards ? pieces - 1 : dry, backwards ? dry - 1 : pieces,
+                    backwards ? -1 : 1, length, landLimit, precedingLand, dry);
+                if (wet < 0) { return {cost: Infinity, land: Infinity}; }
+                // Rejected connectors need no secondary price at all.
+                var ground = offPath() * PLAN.portageFactor, waterPrice = openWaterFactor(graph);
+                var water = length * wet / pieces;
+                return {cost: (length - water) * ground + water * waterPrice, land: length * (pieces - wet) / pieces};
+            }
+
             // The grid prices each piece at its midpoint. A map without a grid
             // can only price a connector as ground.
-            function priced(graph, aLon, aLat, bLon, bLat) {
-                var length = panel().metresBetween(aLon, aLat, bLon, bLat);
+            function connectorPrice(graph, aLon, aLat, bLon, bLat, landLimit, precedingLand, known) {
+                var length = known ? known.length : panel().metresBetween(aLon, aLat, bLon, bLat);
+                var grid = graph.water;
+                if (kayak() && grid && grid.bits && grid.spec) {
+                    return connectorRunPrice(graph, aLon, aLat, bLon, bLat, length, landLimit, precedingLand, known);
+                }
                 var ground = offPath() * (kayak() ? PLAN.portageFactor : 1);
                 var waterPrice = kayak() ? openWaterFactor(graph) : PLAN.waterFactor;
-                var grid = graph.water;
-                if (!grid || (!kayak() && !(waterPrice > ground))) { return length * ground; }
-                var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0;
-                for (var i = 0; i < pieces; i += 1) {
-                    var t = (i + 0.5) / pieces;
+                if (!grid || (!kayak() && !(waterPrice > ground))) { return {cost: length * ground, land: kayak() ? length : 0}; }
+                var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0, backwards = false;
+                for (var i = known ? known.dry : 0; i < pieces; i += 1) {
+                    // A dry first sample makes this end useful for reaching
+                    // the land ceiling quickly; otherwise try the other end.
+                    // The same midpoints are counted in either order.
+                    var sample = backwards && i ? pieces - i : i;
+                    var t = (sample + 0.5) / pieces;
                     if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }
+                    else if (landLimit !== undefined && (precedingLand || 0) + length * (i + 1 - wet) / pieces > landLimit) {
+                        return {cost: Infinity, land: Infinity};
+                    }
+                    if (landLimit !== undefined && i === 0 && wet) { backwards = true; }
                 }
                 var water = length * wet / pieces;
-                return (length - water) * ground + water * waterPrice;
+                // Count dry pieces directly: subtracting two rounded lengths
+                // could give an all-water connector a negative land cost.
+                return {cost: (length - water) * ground + water * waterPrice, land: kayak() ? length * (pieces - wet) / pieces : 0};
+            }
+
+            function priced(graph, aLon, aLat, bLon, bLat) {
+                return connectorPrice(graph, aLon, aLat, bLon, bLat).cost;
             }
 
             // **The way out of an entry node, read off the search that settled
@@ -683,7 +1017,7 @@
                     walk = work.viaNode[walk];
                 }
                 return {head: head, tail: walk,
-                        over: edges.length ? {edges: edges, reversed: reversed, cost: work.best[head]} : null};
+                        over: edges.length ? {edges: edges, reversed: reversed, cost: work.best[head], land: work.bestLand[head]} : null};
             }
 
             // ---- what a route's metres are made of ----------------------------
@@ -2132,7 +2466,7 @@
                 }
                 if (onNetwork(from) && onNetwork(to)) {
                     var found = routeBetween(graph, from, to);
-                    if (found && worthRouting(graph, from, to, found.cost)) {
+                    if (found && worthRouting(graph, from, to, found.cost, found.land)) {
                         return Promise.resolve(routedParts(graph, found));
                     }
                 }
@@ -2189,10 +2523,11 @@
             // refused for its sampling -- and refusing a long way round in
             // favour of nothing at all is the worse of the two answers. So past
             // that length the route stands, whatever it costs.
-            function worthRouting(graph, from, to, cost) {
+            function worthRouting(graph, from, to, cost, land) {
                 var flown = panel().metresBetween(from.lon, from.lat, to.lon, to.lat);
                 if (flown > PLAN.maxStraightM) { return true; }
-                return cost <= priced(graph, from.lon, from.lat, to.lon, to.lat);
+                var direct = connectorPrice(graph, from.lon, from.lat, to.lon, to.lat);
+                return !cheaper(direct.land, direct.cost, land || 0, cost);
             }
 
             // **The three pieces of a way that is only partly a path**: what the
