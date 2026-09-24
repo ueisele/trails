@@ -34,6 +34,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import box as box_of
 
 from ...utils.tiles import Bounds
@@ -42,7 +43,7 @@ from .markhojd import PASSWORD_VAR, TIMEOUT_S, USERNAME_VAR, _get_json
 
 @dataclasses.dataclass(frozen=True)
 class SourceMetadata:
-    """Provenance of the wetlands."""
+    """Provenance of the water and wetlands."""
 
     name: str = "Marktäcke Nedladdning, vektor"
     provider: str = "Lantmäteriet"
@@ -138,7 +139,7 @@ def _download(url: str, target: Path, username: str, password: str) -> None:
 
 
 class Source:
-    """The wetlands of the sheet, read municipality by municipality and kept as files."""
+    """The water and wetlands of the sheet, kept municipality by municipality."""
 
     def __init__(
         self,
@@ -196,6 +197,33 @@ class Source:
         kept.with_suffix(".part").replace(kept)
         archive.unlink()
         return kept
+
+    def water(self, bounds: Bounds, municipalities: tuple[str, ...]) -> gpd.GeoDataFrame:
+        """Read cached lake and river surfaces, retaining their registered levels.
+
+        Args:
+            bounds: Selection box in WGS 84; intersecting features remain whole
+            municipalities: Complete delivery set covering the map
+
+        Returns:
+            Water features in SWEREF 99 TM with their source attributes
+
+        Raises:
+            ValueError: If the delivery set is empty
+            FileNotFoundError: If any requested delivery is absent
+        """
+        if not municipalities:
+            raise ValueError("water needs the municipalities covering its map")
+        paths = [self.cache_dir / f"marktacke_kn{code}.gpkg" for code in municipalities]
+        for path in paths:
+            if not path.is_file():
+                raise FileNotFoundError(f"water needs cached Marktäcke delivery {path}")
+        window = gpd.GeoSeries([box_of(*bounds)], crs="EPSG:4326").to_crs(CRS).iloc[0]
+        frames = [gpd.read_file(path, layer="mark", bbox=window.bounds, where="objekttyp IN ('Sjö','Vattendragsyta')").to_crs(CRS) for path in paths]
+        # Keep the complete pieces until the network can dissolve delivery
+        # boundaries; a clipped municipality edge is not a bank.
+        merged = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs=CRS)
+        return merged[merged.intersects(window)].reset_index(drop=True)
 
     def wetlands(self, bounds: Bounds, force_download: bool = False) -> gpd.GeoDataFrame:
         """The wetlands over a box, firm and wet, cut to it.

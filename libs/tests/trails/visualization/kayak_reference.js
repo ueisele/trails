@@ -8,7 +8,8 @@ function referenceConnectorPrice(graph, aLon, aLat, bLon, bLat) {
     let wet = 0;
     for (let i = 0; i < pieces; i++) {
         const t = (i + 0.5) / pieces;
-        if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) wet++;
+        const lon = aLon + t * (bLon - aLon), lat = aLat + t * (bLat - aLat);
+        if (graph.waterAt(lon, lat) && !(kayak() && graph.damAt && graph.damAt(lon, lat))) wet++;
     }
     const water = length * wet / pieces;
     return {cost: (length - water) * ground + water * waterPrice, land: kayak() ? length * (pieces - wet) / pieces : 0};

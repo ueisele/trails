@@ -649,6 +649,570 @@ each page's eight byte-identical walking values. The record names the payload
 comparison and full reports. No standalone graph or tile build, cache write,
 push or publication.
 
+### Phase 9 — A finer shore
+
+**Review decision, 2026-09-24 — dam surfaces and replacement MK fixtures.**
+Phase 7's dam/lock cut also excludes all network PADDLE geometry in the
+25 m radius around each `hydroanlaggningspunkt` dam or lock-gate point.
+The existing portage machinery joins the cut sides. Kayak connector samples
+inside those discs count as land; a compact point list travels in the page.
+Walking and the shared grid stay unchanged. Final kayak differentials use
+the same disc rule in the unpruned reference. Measurements count affected
+surfaces and edges and read Korslång's channel in both directions.
+
+Review permits new Malingsbo-Kloten bank and routed-carry fixtures while
+retaining the original taps in the reader comparison. Abisko's fixed pair
+stays. The three identified MK stream pieces must rejoin the surface graph,
+with direction-specific reachability checked after phase 7's direction pass.
+These decisions resolve the dam/fixture stop below; final validation remains
+required before phase 9 is built.
+
+**Review decision, 2026-09-24 — inlet mouths and interface heights.**
+The fixed shore pair stays. Its Open water pieces must all lie within 5.1 m
+of unsimplified lake/river interfaces; none may cross the lake interior.
+Its measured reference is the new graph restricted to Shore plus interface
+edges, with the existing 10 % length band. The before/after report retains
+Abisko's old 2,116.110 m shore reference, the new Shore-only 2,676.507 m,
+and the chosen route. A shared lake/river interface is emitted once, at the
+adjacent lake's level; river interiors retain sampled heights. These are
+review's decisions, resolving the shore-reading stop below. Rebuilt edge
+counts, profiles and joins, final differentials and drives must verify them.
+
+**Production source and body rule.** Swedish paddle surfaces and the shared
+25 m grid use cached Marktäcke `Sjö` and `Vattendragsyta`; Norway retains N50.
+The complete intersecting delivery pieces are dissolved on a 1 cm precision
+grid before taking rings or clipping to the map. The 1 ha test is on the
+union area of each connected water body, so a small delivery piece survives
+when its body qualifies. Ponds below that cutoff remain in the pricing grid.
+Lake components retain their registered or shore-derived planes; connected
+river surfaces do not merge those planes. Only the water union's external
+boundary is Shore. Delivery seams disappear; lake/river interfaces and map
+cuts carry Open water prices. Shared mouths have one lake-owned copy.
+Stream directions and dam cuts still use the same Topografi 50 stream/dam
+inputs; shoreline and portage intersections are derived again by the build.
+
+The Swedish pages credit “Paddle water and water grid” to **Marktäcke
+Nedladdning, vektor, © Lantmäteriet, CC BY 4.0**, and describe dissolution,
+simplification and the shared grid. The grid continues to classify straight
+connectors and the public tally under phase 2's semantics; it does not draw
+the shore. No walking price or midpoint-sampling rule changes.
+
+**Uwe’s decision, 2026-09-24 — “So wie vorgeschlagen” (as proposed).**
+On the walking-rule report, Uwe chooses the shared Marktäcke water grid in
+Sweden and N50 in Norway for both modes. Walking keeps `WATER_FACTOR = 30`
+and its existing 25 m midpoint pricing. Uwe accepts the three material
+recorded ordinary-walking changes: Across Dammtjärnsbäcken **356.595 →
+2,343.036 m** (about 66 m of real river surface along the old line), the
+Malingsbo-Kloten helper **9,287.861 → 9,590.349 m**, and Norway’s typed leg
+**819.932 → 1,066.298 m** (the latter two are noding consequences).
+Exact-width or finer-cell water pricing is a possible later improvement,
+not part of phase 9. His earlier remark about a coarser walking grid was
+a question; the interim grid choices were review’s, superseded here.
+
+Review’s **5 m** tolerance and accepted p95 search growth stand: the sweep
+measured page growth of 0.37 / 0.81 / 0.64 MB Brotli and p95 growth of
++32 / +32 / +8 % for Abisko / Malingsbo-Kloten / Lomsdal-Visten. Phase 8
+took Malingsbo-Kloten’s p95 from 4.1 s to 1.1 s; 1.4 s remains below that
+earlier figure. Final-graph timing is recorded separately below.
+The inland gate samples used network PADDLE edges every 0.1 m against
+unsimplified source water and permits at most **5.1 m** inland deviation.
+Grid-classified straight connectors and longest land runs are information,
+not gates. Final search labels must equal the unpruned reference for the
+200 seeded pairs per map in kayak and both walking settings. Walking’s
+recorded length bound remains, with the three exceptions accepted above.
+
+*Uwe's decision, 2026-09-24, after the phone's z18 shore reading and the two
+investigations in `~/mockups/kayak-mode/shore-line/report.md` (§A and §B.5) and
+`~/mockups/kayak-mode/water-sources/report.md`: Sweden takes its paddle water
+from Lantmäteriet Marktäcke, Norway keeps N50, and all three maps measure
+5 / 3 / 2 m shore simplification. No offset or narrow-water centre lines in
+this phase.*
+
+Marktäcke's `Sjö` and `Vattendragsyta` are to be dissolved across delivery and
+feature boundaries before rings are taken, with the 1 ha cutoff applied to
+connected water bodies. Its cached municipal files need no new download.
+The source investigation identifies Marktäcke as CC BY 4.0, © Lantmäteriet;
+the page must credit it for paddle water and identify the modifications.
+The price rule, stream directions and dam cuts, lake levels, portage rules
+and walking modes stand. The page's 25 m water grid is to use the same finer
+water as the network; the requested walking figures must remain unchanged.
+
+**Stopped 2026-09-24 — The shared grid changes the walking figures.** The
+page has one water grid for both modes. Replacing only that grid with one
+built from cached Marktäcke changes Abisko's recorded shore-pair readings:
+
+| Walking setting | On foot m, before → after | Water m, before → after | Straight land m, before → after |
+|---|---:|---:|---:|
+| Walking | 2,940.880 → 2,935.858 | 15.273 → 20.295 | 514.362 → 509.340 |
+| Stay on paths | 2,963.410 → 2,948.288 | 15.283 → 30.405 | 510.746 → 495.624 |
+
+The graph, routing code, river outlines, grid extent and 25 m cell size were
+unchanged. Baseline readings reproduce the scene's recorded values; the
+changed figures exceed the existing 0.01 m acceptance. Malingsbo-Kloten's
+same six readings remain unchanged in this experiment. Every reading puts
+back the plan, mode and goal way. The decision record's phase-9 stop gives
+the reproduction and code locations.
+
+**Review must choose:** keep Topografi 50 for walking and introduce a separate
+Marktäcke kayak grid, or share Marktäcke and allow the walking figures to move.
+Neither choice is made here. No production source or page was changed, no
+graph/map/tile build was started, and no tolerance, payload, search-time or
+shore-containment acceptance is claimed. Only this stop and its record are
+committed; there is no phase-9 built-note yet.
+
+**Review resolved the grid stop, 2026-09-24.** Share Marktäcke between kayak
+and walking: one account of where the water is, without a second grid's
+payload and memory. Walking still prices water at 30; its figures may move
+where the finer source changes what a connector crosses. Measure every
+walking reading and the phase-8 200 random pairs per map in both walking
+settings before and after. Record every moved walking figure and name phase
+9 beside its updated drive value. Stop if a walking route's length changes
+by more than the larger of 2 % of its old length and 50 m. A changed
+foot/water split at an edge alone is accepted. The remaining phase-9 scope
+stands.
+
+**Stopped again 2026-09-24 — A walking route exceeds the review bound.**
+Abisko's phase-8 pair at index 71 (the 72nd pair), replayed in ordinary
+walking, changes from **5,428.454 to 5,125.769 m** with only the shared grid
+replaced. The **302.685 m / 5.576 %** change exceeds
+`max(2 % × 5,428.454 m, 50 m)` = **108.569 m**. The public planner confirms
+both lengths, with its state restored after each reading. This is a
+different way off the network, not only a changed foot/water split.
+
+The taps are (68.3661770595677, 18.788008393436556) →
+(68.37383928183993, 18.833846517753347). Walking's own snapping leaves both
+off the network. The final connector changes from 2,574.942 to 2,275.325 m;
+the shorter connector has 45 of 92 wet pricing samples on Topografi 50 and
+44 on Marktäcke. The water price remains 30. The record gives its exit
+points, public foot/water figures and reproduction.
+
+The replay stops on this first excess: 200 Abisko baseline pairs in each
+walking setting, then 72 comparisons in ordinary walking. The other
+walking comparisons, recorded-reading sweep, production source change,
+tolerance sweep and builds remain pending. No drive snapshot is updated
+for an unbuilt source change. **Review must decide whether this shorter
+route is acceptable and how the bound applies on resumption.** The shared
+grid decision is retained.
+
+**Review resolved the random-pair bound, 2026-09-24.** Uwe accepts pair 72:
+one changed wet sample can move a long connector's preferred exit under the
+unchanged water price of 30. Random walking pairs in both settings have no
+length-change stop. Report their changed count, longer/shorter counts and
+median / p95 / maximum absolute and relative length changes; explain every
+length increase above `max(0.02 × old length, 50 m)` with its taps. Re-price
+each changed old way on the new grid: an old way cheaper than the new
+answer is a defect and stops the phase. The length bound still applies to
+the drive's recorded walking ways. Smaller recorded changes may be updated
+with a phase-9 note. The shared grid and remaining phase scope stand.
+
+**Stopped at the land-stretch reading, 2026-09-24.** The resolved walking
+replay completes all 1,200 grid-only comparisons: 58 changed ways, none
+more expensive than its old way re-priced on the new grid. The decision
+record gives all distributions and every long-increase outlier with its
+taps and explanation. Norway's 400 comparisons are unchanged.
+
+Abisko trial pages built at all three proposed tolerances fail the new
+requirement that no sampled paddled stretch longer than that tolerance lies
+on the source's land. The recorded shore pair is
+(68.393226, 18.715936) → (68.407071, 18.697511). All rows below are tested
+against unsimplified Marktäcke water, including the Topografi 50 baseline.
+
+| Water / tolerance | Paddled m | Longest sampled land run m | Longest exact land segment m | Maximum sampled inland deviation m |
+|---|---:|---:|---:|---:|
+| Topografi 50 / 10 m (before) | 2,116.110 | 114.000 | 115.524 | 9.328 |
+| Marktäcke / 5 m | 2,167.118 | 96.000 | 96.258 | 4.741 |
+| Marktäcke / 3 m | 2,182.974 | 80.000 | 80.693 | 2.754 |
+| Marktäcke / 2 m | 2,192.258 | 76.000 | 78.765 | 1.846 |
+
+The tolerance limits the line's deviation, not how long a shallow excursion
+can run over land. The 2 m page has a continuous **78.765 m** land segment
+near (68.397326, 18.703586) → (68.398027, 18.703811); its maximum inland
+distance at 0.1 m sampling is **1.774 m**. This is not coordinate-rounding
+noise. The existing `water.sources()` simplifies the surface before testing
+chord containment; neither that test nor the simplified shore bounds a
+longitudinal land run. The investigation already distinguishes reduced
+leakage from guaranteed containment (shore report §A).
+
+**Review must decide the acceptance measure:** bound inland deviation by the
+chosen tolerance (with an explicit encoding allowance), or retain the
+longitudinal land-run bound and decide the containment-preserving geometry
+and boundary-rounding policy it requires. No offset, narrow-water centre
+line, price adjustment or relaxed drive assertion has been introduced.
+
+**Built 2026-09-24 — Abisko trials for this stop.** Three sequential,
+cache-only `command make map` builds write to
+`~/mockups/kayak-mode/phase9/{5,3,2}/abisko/`; their public scene readings
+restore plan, mode, goal way and view. They are experimental pages, with no
+accepted tolerance or phase-9 release. The source and test prototype is
+saved as `production-prototype.patch` in that scratch directory and removed
+from the worktree; only the two records are committed. The full three-map
+payload/search sweep, final walking graph replay, remaining reader-facing
+measurements, new drive reading, twice-green drives and final graph/map
+builds remain pending. No shared-cache write, download, tile build, push
+or publication.
+
+**Review resolved the land gate, 2026-09-24.** Measure inland deviation at
+every 0.1 m sample of the paddled scene routes against unsimplified source
+water: Marktäcke in Sweden, N50 in Norway. The maximum must be at most the
+chosen shore tolerance plus **0.1 m** for encoding; the page's 0.000001°
+quantum moves a vertex by about 0.06 m, rounded up for this allowance.
+Record the longest land run alongside it as information: a gently curved
+bank can have a long, shallow excursion within the permitted deviation.
+There is no longitudinal land-run gate and no containment-preserving
+geometry in this phase. The full tolerance, performance, walking and
+reader-facing measurements and the remaining build/drive requirements stand.
+
+**Stopped at the walking price gate, 2026-09-24.** Abisko phase-8 pair 11,
+ordinary walking, becomes more expensive on all three rebuilt trial graphs
+than its old way priced on the new grid. The decision record's §5 gives the
+taps, full prices and a witness priced entirely on the new graph.
+
+| Shore tolerance | New route m | New walking price | Old way on new grid | Excess price |
+|---|---:|---:|---:|---:|
+| 5 m | 3,716.751661 | 6,558.902738 | 6,539.132686 | +19.770052 |
+| 3 m | 3,717.334186 | 6,540.004731 | 6,539.132686 | +0.872045 |
+| 2 m | 3,717.334030 | 6,540.004545 | 6,539.132686 | +0.871858 |
+
+Prices are weighted metres. The old route is 3,717.395986 m. A rebuilt
+portage intersection moves its walking entry node by 0.587740 m at 2 m;
+the old entry remains on the OSM path but is no longer a node offered by the
+search. The old way re-priced on the new grid costs 6,539.132686 against
+the new answer's 6,540.004545. Even projecting the old entry onto the new
+edge and pricing that partial-edge route costs only 6,539.146994. No wet
+sample changes on these connectors. **Review must decide how to retain
+that cheaper old walking way; phase 9 makes no entry-set/noding decision.**
+
+**Built 2026-09-24 — Checks up to the price stop.** All 600 Abisko kayak
+labels at 5 / 3 / 2 m match the unpruned reference. At 0.1 m sampling, the
+2 m Abisko shore/bay/portage routes reach 1.865972 / 1.310619 / 1.693186 m
+inland, below the 2.1 m gate. The final-graph walking replay stops after
+400 Abisko baseline cases and 11 ordinary-walking comparisons; 3/5 m
+repeat the failing pair. A Malingsbo-Kloten 5 m page build is terminated
+after its graph and heights; the rest of the sweep, reader measurements,
+permanent drive reading, final builds and twice-green drives remain
+pending. The prototype and evidence stay in the phase-9 scratch directory;
+only the records are committed, no tolerance is chosen, and nothing is
+pushed or published.
+
+**Review resolved the rebuilt-graph walking gate, 2026-09-24.** Uwe
+accepts pair 11: changing graph noding changes the available entry nodes;
+the former entry need not remain a candidate. On the final graphs, replay
+the same 200 seeded phase-8 pairs per map in both walking settings and
+require the pruned search's labels to equal the unpruned reference's.
+Only a label mismatch stops this random walking check. Report the count
+and largest old-way re-pricing excess as information, alongside the route
+change distributions and long-increase explanations. The earlier re-pricing
+gate applied to the grid-only comparison. The recorded walking scenes
+retain their reviewed length bound; all other phase-9 work stands.
+
+**Stopped after the full tolerance sweep, 2026-09-24.** None of 5 / 3 / 2 m meets both
+budgets on all three maps. In particular, Abisko exceeds the 25 % p95-search allowance at
+every tolerance. No tolerance is chosen and `SHORE_SIMPLIFY_M` remains 10 m in production.
+This is the phase's explicit payload/search stop, not a walking re-pricing stop.
+
+| Map | Tolerance m | Edges | Graph Brotli MB | Page Brotli MB | Page growth MB | p95 ms | p95 growth % | Reference pairs |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| abisko | 5 | 105193 | 1.688 | 2.193 | 0.370 | 236.4 | 32.5 | 200/200 |
+| abisko | 3 | 127433 | 1.922 | 2.427 | 0.604 | 289.3 | 62.2 | 200/200 |
+| abisko | 2 | 148991 | 2.142 | 2.647 | 0.824 | 336.0 | 88.4 | 200/200 |
+| malingsbo-kloten | 5 | 288791 | 5.711 | 7.929 | 0.813 | 1400.0 | 31.6 | 200/200 |
+| malingsbo-kloten | 3 | 338048 | 6.207 | 8.424 | 1.308 | 1438.6 | 35.3 | 200/200 |
+| malingsbo-kloten | 2 | 390280 | 6.712 | 8.931 | 1.814 | 1740.5 | 63.6 | 200/200 |
+| lomsdal-visten | 5 | 398191 | 6.017 | 7.725 | 0.640 | 2495.2 | 8.4 | 200/200 |
+| lomsdal-visten | 3 | 460768 | 6.653 | 8.361 | 1.276 | 2868.1 | 24.6 | 200/200 |
+| lomsdal-visten | 2 | 526246 | 7.295 | 9.004 | 1.919 | 3203.1 | 39.1 | 200/200 |
+
+MB are decimal; graph and page use Brotli quality 11. The graph figure compresses its
+compact header/data JSON, including the shared water grid. The same 200 seeded phase-8
+coordinates are re-snapped on each graph in Firefox 153.0, after four warm-up cases. The
+reported timings are fresh, sequential runs on CPUs 6–7 with no concurrent heavy work. Each
+candidate's 200 labels match the unchanged exhaustive reference. Individual timings and page
+hashes are retained beside the report. The earlier concurrent timings are retained only as
+history and are not used for this budget decision.
+
+Shore deviation below is to the unsimplified source-water union after coordinate encoding,
+length-weighted at samples no farther than 2 m apart. Chord dry length is exactly
+intersected with that union, including arbitrarily shallow slivers; it describes the whole
+candidate catalogue, not a paddled journey. Geometry uses Marktäcke in Sweden and N50 in
+Norway.
+
+| Map | m | Shore median / p95 / max m | Shore >1 m inland % | Chord total km | Dry chord km, original / encoded | Encoded longest dry chord segment m |
+|---|---:|---:|---:|---:|---:|---:|
+| abisko | 5 | 0.902 / 3.460 / 4.994 | 23.700 | 3049.113 | 22.018 / 22.848 | 81.366 |
+| abisko | 3 | 0.496 / 2.082 / 3.021 | 14.201 | 3697.288 | 11.140 / 12.287 | 54.912 |
+| abisko | 2 | 0.283 / 1.377 / 2.022 | 6.745 | 4257.345 | 6.404 / 7.922 | 45.308 |
+| malingsbo-kloten | 5 | 0.911 / 3.446 / 5.012 | 22.609 | 7359.565 | 52.349 / 53.891 | 128.870 |
+| malingsbo-kloten | 3 | 0.531 / 2.086 / 3.038 | 13.857 | 9027.674 | 34.784 / 37.433 | 44.499 |
+| malingsbo-kloten | 2 | 0.323 / 1.390 / 2.022 | 6.859 | 10586.628 | 24.863 / 28.545 | 43.806 |
+| lomsdal-visten | 5 | 0.884 / 3.424 / 5.002 | 23.651 | 12594.286 | 63.115 / 65.352 | 82.607 |
+| lomsdal-visten | 3 | 0.520 / 2.073 / 3.021 | 14.247 | 15151.183 | 51.282 / 54.821 | 68.625 |
+| lomsdal-visten | 2 | 0.327 / 1.371 / 2.031 | 6.986 | 17456.042 | 41.092 / 46.114 | 79.487 |
+
+The source prototype dissolves delivery and feature pieces on a 1 cm precision grid, before
+taking rings. The 1 ha cutoff applies to the area of each connected lake/river/sea union
+before clipping to the map; a sub-hectare delivery piece survives when its connected body
+qualifies. Lake components retain their separate register/shore-derived planes; river
+interfaces and map crops do not become cheap shore. The page grid uses the same water
+source, including ponds as before, in both modes. The Swedish trial pages credit “Paddle
+water” to Marktäcke Nedladdning, vektor, © Lantmäteriet, CC BY 4.0, and describe
+dissolution, simplification and the shared grid. N50 remains Norway's source.
+
+**An independent inland-gate failure remains.** At all three tolerances, Malingsbo-Kloten's
+portage scene has a grid-classified straight paddled piece reaching **5.558376 m** inland
+near (59.914501001, 15.462782183). It has no graph source in its tally: the 25 m grid, not a
+simplified shore edge, classifies this 2.500382 m piece as paddled. The new drive reading
+reproduces the failure at 2 m; the same scene's shore and bay pass there at 1.755442 /
+1.586538 m. Abisko's new 2 m reading passes all three scenes. No connector, tally,
+containment, offset or price rule is changed to make this gate pass. The longest exact land
+run is recorded as information, not as a gate, as review decided.
+
+**The recorded walking bound also fails at 2 m.** The drive’s Across Dammtjärnsbäcken goal,
+(59.826928, 15.173356) → (59.828695, 15.168055), changes from **356.594924 to 2,343.035623
+m** in ordinary walking: **+1,986.440699 m / +557.058 %**, against a **50 m** allowance. The
+old direct line has **2 of 15** wet pricing samples on the old grid and **4 of 15** on
+Marktäcke. The road now wins by the unchanged walking rule; Stay on paths already took that
+road. This is a recorded scene, so the retained length bound applies.
+`recorded-river-stop.json` contains both walking settings, page hashes and state-restoration
+checks. No replacement drive figure is installed for this unaccepted change.
+
+Reader-facing before/after figures, the screenshot fallback taps, walking distributions and
+long-increase explanations are in the decision record and
+`~/mockups/kayak-mode/phase9/report.md`. The proposed source code, tests and permanent drive
+reading are preserved in `production-prototype-current.patch` and `prototype-current/`
+there.
+
+**Build recovery.** The previous concurrent measurement queues exhausted memory; Norway’s
+first 2 m build ended with exit 137 during GPX export. That candidate and its partial
+measurements were set aside. Its complete rebuild and all subsequent measurements run one
+heavy process at a time, with an 8 GiB address-space limit on each Python build and harness.
+The timing sweep was repeated under that same sequential constraint.
+
+**Built 2026-09-24 — Nine trial pages for the full sweep.** The three maps at 5 / 3 / 2 m
+were built one at a time with `command make map`, which builds the graph before the page,
+using cached inputs and a guard against downloads or shared-cache writes. They are
+measurements, not accepted final pages. Only the two records are committed; production
+source, tolerance and drive figures are restored. Final `command make graph` / `command make
+map` builds, the completed join audit, recorded figure updates and twice-green kayak/shore
+drives remain pending because no tolerance qualifies. No tile build, push or publication.
+
+**Review must decide:** the payload/search budgets or the extra work allowed to meet them,
+the recorded Dammtjärnsbäcken route change under its retained length bound, and how the
+inland gate treats grid-classified connectors. The revised walking reference gate stands;
+old-way re-pricing causes no stop.
+
+**Validation, 2026-09-24.** `command make hooks-run` is green with network
+access: ruff format/check, mypy, both test suites and the standard repository
+hooks. This validates the restored production tree and the two records.
+
+**Stopped 2026-09-24 — the walking rule is examined before the build.**
+Uwe questioned review's interim choice to keep the coarser Swedish grid for
+walking: *“Using a coarser grid for walking feels wrong. If it then no longer
+fits, the problem is rather the rule.”* That was a question, not a decision;
+review wrongly passed it on as one. Which grid walking uses stays open until
+Uwe decides on the walking-rule report; the investigation below measures the
+shared Marktäcke / N50 grid against the alternatives. Review's choice of **5 m** shore simplification, its accepted p95
+search growth, and the **5.1 m inland gate on network PADDLE edges only**
+stand. Grid-classified connectors remain informational. Final timing and
+release validation remain pending; the interrupted Abisko build and final
+measurement outputs are not evidence.
+
+The rule investigation is `~/mockups/kayak-mode/phase9/walking-rule.md`, with
+source, cell, node and browser measurements beside it in `walking-rule/`.
+At Dammtjärnsbäcken both sources describe the same `Vattendragsyta`:
+**66.651 → 65.975 m** of unsimplified water along the old line. One cell
+centre changes sides of the bank, moving **2 / 15 → 4 / 15** wet connector
+samples and **47.546 → 95.092 m** priced at 30. Ordinary walking changes
+**356.595 → 2,343.036 m**. Exact-width pricing at 30 also chooses the road;
+a 10 m width threshold does not make this roughly 66 m crossing narrow.
+
+The frozen recorded inputs have two other material ordinary-walking moves:
+Malingsbo-Kloten's helper input **9,287.861 → 9,590.349 m**, and Norway's
+typed-coordinate leg **819.932 → 1,066.298 m**. No recorded input exceeds
+`max(2 % of old length, 50 m)` with Stay on paths, and none does in Abisko.
+The dry Malingsbo-Kloten entry was a portage-created OSM node; Norway’s
+old bend was a paddle-only node, now 3.946 m from its nearest replacement,
+with an identical water grid. The report lists all taps, separates source
+and noding effects, and compares six alternatives with the retained rule
+on all 200 seeded random pairs per map in both settings. Imported/restored geometry and helpers whose taps
+move with noding are distinguished from fixed-input search comparisons.
+
+**Review must decide:** retain factor 30 and accept the measured recorded
+changes, as recommended, or explicitly change walking's water policy. A
+smaller global factor also weakens the decided lake/sea avoidance; the
+river-only and width-dependent controls are separate policy choices. No
+production change or graph/map build is made in this turn. The prototype
+is preserved in scratch, and only the records are committed. No push or
+publication; there is no final phase-9 built-note.
+
+**Validation of this stop, 2026-09-24.** `command make hooks-run` is green
+with network access: ruff format/check, mypy, both test suites and the
+standard hooks. Only the two records change.
+
+**Stopped 2026-09-24 — The dissolved shore changes the shore reading.**
+Uwe's shared-grid decision above is implemented in the restored prototype.
+All three `command make graph` and `command make map` builds completed,
+one at a time under the 8 GiB cap, from cached inputs. The final graphs have
+105,193 / 288,791 / 398,191 edges (Abisko / Malingsbo-Kloten / Norway).
+Abisko's full walking drive passes **327 readings in 21 checks**; its
+network-only inland check passes, with shore / bay / portage maxima of
+**4.769376 / 4.437900 / 3.930065 m**. Walking's accepted decisions and the
+5.1 m inland gate cause no stop here.
+
+Abisko's existing shore pair now paddles **2,167.118276 m**, comprising
+**2,133.230886 m Shore + 33.887390 m Open water**, with no land. Its actual
+shortest Shore-only reference is **2,676.507469 m**, not the old recorded
+2,116.109666 m: the route is **19.031861 %** shorter, beyond the existing
+10 % band. Dissolution removes the cheap lake/river interfaces; following
+only Shore now traces river banks upstream and back. The drive's zero-chord
+and all-Shore-credit assertions fail. Updating the reference also makes
+its 10 % assertion fail. Nearest new Shore-node taps, only 0.333 / 0.386 m
+away, reproduce the same route; no fixture has been moved to avoid it.
+
+The same three interfaces have coincident Open water copies: the lake
+copy belongs to `lake-12`, `Sjö`, level **342 m**; the river copy has no lake
+body and retains sampled heights. The assembled profile reads
+**342–342.700012 m** over 417 finite samples, failing the existing 0.5 m
+whole-route flatness check. Individual lake edges retain their plane.
+The plan does not choose which side owns this shared boundary's height.
+
+The detailed report, source geometry audit, taps and raw readings are in
+`~/mockups/kayak-mode/phase9/shore-reading-stop.md` and `final/abisko/`.
+**Review must decide** how the shore reading treats these inlet-mouth
+crossings, and whether an exactly shared lake/river boundary takes the
+lake's plane once or retains the river-height copy. The recommendation is
+to allow the measured inlet crossings in a lake-bank reading and use the
+adjacent lake plane on the exact interface, leaving river interiors alone;
+neither change has been made. Final differentials and p95 timing, the
+remaining reader/join measurements and twice-green drives remain pending.
+Production edits remain uncommitted for review; only the records are
+amended at this stop. No push or publication; phase 9 is not complete.
+
+**Validation of this shore-reading stop, 2026-09-24.** `command make hooks-run`
+is green with network access, including ruff format/check, mypy, both test
+suites and the standard hooks. The first run found a list/array variable-name
+reuse in the new inland reading; renaming that local fixes mypy without
+changing its measurement. Logs: `~/mockups/kayak-mode/phase9/shore-stop-hooks.log`
+and `shore-stop-hooks-fixed.log`. This validates the uncommitted prototype;
+it does not replace the incomplete final browser checks above.
+
+**Stopped 2026-09-24 — The finer surface bypasses the dam and changes the MK scenes.**
+All six graph/map builds completed sequentially under the 8 GiB cap. Shared
+mouths now have one lake-level copy: graph edges change **105,193 → 105,062**
+in Abisko and **288,791 → 288,600** in Malingsbo-Kloten; Norway's **398,191**
+edges and encoded graph are unchanged. The source audit finds zero remaining
+duplicate lake/river chord copies, removing **3,306.252 / 2,779.675 m**.
+Abisko's fixed pair passes the revised behaviour: **2,116.110 m** old reference,
+**2,676.507 m** new Shore-only reference, **2,167.118 m** new bank reference and
+route; mouth deviation **0.050776 m**, all **417** profile samples at **342 m**.
+Its full walking drive passes **327 readings / 21 checks**. All three maps'
+scene triples pass the network inland gate; MK's carry has no network paddle
+geometry, so its **5.558376 m** connector deviation remains information.
+
+A genuinely new conflict is the mapped Korslång dam at **(59.947644305,
+15.255897765)**. The unchanged channel pair now paddles **1,297.899 / 0 m**
+paddled / on foot, both ways, instead of **1,267.848 / 77.105 m**. An Open water
+edge passes **0.026292 m** from the dam point; **56.729230 m** of used network
+water lies in its 25 m neighbourhood, versus zero before. Marktäcke covers the
+dam point; Topografi 50 did not. The cut stream geometry is unchanged, but the
+new surface supplies another paddled way through the structure. This also
+happens before the interface-height fix. Preserving the carry needs a decision
+on the surface barrier's extent and on kayak connectors, not just a stream cut.
+No dam footprint or new connector rule has been invented here.
+
+MK's fixed shore pair now gives **1,904.659 / 5.025 m** against a **4,335.576 m**
+Shore-plus-interface reference, **56.069 %** shorter. Its **7.905 m** Open water
+piece is within **2.619 m** of the bank but not an inlet interface; its long
+connector reaches **251.918 m** from the bank. Even allowing bank-adjacent
+chords gives a **4,327.860 m** reference. Moving the endpoint **22.215 m** to the
+nearest Shore node still takes **833.338 m** of Open water. The old portage
+scene becomes **27.504 / 917.640 m**, entirely classified straight geometry,
+instead of **1,414.654 / 513.463 m** with a routed carry. These pairs no longer
+exercise the assertions they were selected for. Review should permit new MK
+bank/carry fixtures while retaining these original-tap before/after readings;
+Abisko's fixed pair stays as decided. The prices remain unchanged.
+
+The corrected join audit ran on the rebuilt graphs. Matching old stream joins
+found one Abisko direct join whose stream still shares an undirected paddle
+component with water, and three MK stream pieces that do not: near **(59.758503, 15.163257)**,
+**(59.950575, 15.032432)** and **(59.984282, 15.005697)**. Their gaps to the surface
+network are **4.615 / 0.462 / 0.574 m**; the latter two have only sub-metre
+portages. Their water bodies exceed 1 ha. These joins still need re-derivation
+under the existing phase requirement; re-running intersections alone did not
+suffice. Direct same-stream join movements and portage landing measurements
+are retained in the report, without claiming nearest features are identities.
+
+The full report is `~/mockups/kayak-mode/phase9/mk-reading-stop.md`; the fixed
+scene triples, Korslångssmedja, screenshot fallback and phase-2 legs are in
+`final-reader-table.md`. The fixed Korslångssmedja pair changes **4,296.406 →
+4,419.018 m** paddled, zero on foot. At the screenshot fallback, the whole
+route's maximum inland distance changes **12.973199 → 4.913701 m**. Original
+screenshot taps could not be recovered. The final measurement queue stopped
+between jobs; final differentials, fresh p95 timing and twice-green release
+drives remain incomplete. This is a records-only stop, with the production
+prototype preserved in the worktree and scratch; no final phase-9 release,
+push or publication.
+
+**Validation of this stop, 2026-09-24.** `command make hooks-run` is green
+with network access: ruff format/check, mypy, both test suites and all standard
+hooks. The test suites passed 2,028 library tests and 97 pipeline tests. The
+first hook run also passed the tests, but correctly rejected a concurrent
+record edit; the clean rerun left all files unchanged. Logs are
+`~/mockups/kayak-mode/phase9/hooks-mk-stop.log` and `hooks-mk-stop-green.log`.
+This validates the preserved prototype, not the incomplete final browser
+checks above.
+
+**Built 2026-09-25 — Phase 9, finer water and carries at dams.**
+
+Uwe’s shared-grid decision (“So wie vorgeschlagen”, 2026-09-24) and review’s 5 m tolerance,
+mouth-interface rule and dam/fixture decisions are implemented. Sweden uses dissolved cached
+Marktäcke for paddle surfaces and the shared grid, credited as © Lantmäteriet, CC BY 4.0;
+Norway retains N50. The connected-body 1 ha rule is applied before map clipping. Walking
+factor 30, midpoint pricing, kayak prices and phase 7’s height rule remain unchanged. No
+offset or centre-line work is included.
+
+The complete 5 / 3 / 2 m tolerance table above remains the sweep evidence. Review selected 5
+m despite its original +32 / +32 / +8 % p95 growth, noting phase 8’s MK reduction from 4.1 s
+to 1.1 s. These fresh final-graph figures include the shared grid, explicit stream joins and
+kayak dam-disc sampling:
+
+| Map | Edges | Graph Brotli MB, before → after | Page Brotli MB, before → after | Page growth MB | Kayak p95 ms, before → after | Growth | Reference pairs kayak / walking / paths |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| abisko | 105088 | 1.320681 → 1.683781 | 1.822895 → 2.188990 | 0.366095 | 181.150 → 261.350 | +44.27% | 200 / 200 / 200 |
+| malingsbo-kloten | 289548 | 4.897322 → 5.724069 | 7.116118 → 7.943361 | 0.827243 | 1016.850 → 1709.400 | +68.11% | 200 / 200 / 200 |
+| lomsdal-visten | 398191 | 5.376381 → 6.016864 | 7.085092 → 7.727324 | 0.642232 | 2085.400 → 2772.950 | +32.97% | 200 / 200 / 200 |
+
+MK has 108 dam/lock points and 98 discs meeting eligible water. Before the circular cut, 847
+PADDLE edges entered discs; the final graph has none. Both Korslång channel directions now
+paddle 1,184.863 m and carry 115.352 m on the existing OSM path and inferred ties (0 m of
+PORTAGE-kind edges). The three identified MK stream pieces are attached and their directed
+reachability is verified. Shared lake/river interfaces have one lake-level copy; Abisko’s
+bank profile reads 342 m at all 417 samples.
+
+The retained fixed reader pairs, screenshot fallback, scene triples and phase-2 legs are
+tabulated in the decision record. MK’s replacement bank fixture paddles 831.576 m on Shore;
+its new routed-carry fixture paddles 619.511 m and carries 46.348 m, with network paddle on
+both sides. The original bank/carry taps remain in the before/after report and walking
+retains its original shore taps. The screenshot’s maximum whole-route inland deviation falls
+from 12.973199 to 4.913701 m. Abisko retains the old 2,116.110 m reference, the new
+Shore-only 2,676.507 m reference and the actual 2,167.118 m route in that report.
+
+All 1,200 random walking replays are reported: 542 change, 293 longer and 249 shorter, with
+per-map/mode distributions and every material increase’s taps and explanation. Old-way
+re-pricing is informational. Uwe’s three accepted intermediate walking changes remain
+recorded; final dam noding brings the MK helper to 9,284.155 m, within 3.706 m of its
+original length. Dammtjärnsbäcken remains 2,343.036 m and Norway’s typed leg 1,066.298 m.
+Exact-width or finer-cell pricing remains a later improvement.
+
+All 1,800 final search labels equal the unpruned reference. The 0.1 m sampled, 5.1 m
+network-inland gate and existing kayak checks pass twice per page; connector inland
+distances and longest land runs are recorded as information. Complete walking readings pass
+with the measured figure updates and phase-9 notes. The final six builds and all harnesses
+run one heavy process at a time under the 8 GiB cap. `command make hooks-run` is green with
+network access. Full measurements, changed stored figures and evidence paths are in the
+phase-9 built note of `kayak-mode-decisions.md` and `~/mockups/kayak-mode/phase9/`. These
+results close the historical stops above. No tile build, source download, shared-cache
+write, push or publication.
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.

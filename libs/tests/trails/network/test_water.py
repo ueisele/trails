@@ -14,6 +14,43 @@ from trails.routing.sources import PADDLE, PORTAGE, NetworkSource
 CRS = "EPSG:3006"
 
 
+def test_surface_dam_cuts_leave_a_portage_and_never_create_a_bank():
+    polygon = box(-300, -10, 300, 10)
+    dams = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=CRS)
+    paddle = water.sources(gpd.GeoDataFrame(geometry=[polygon], crs=CRS), metric_crs=CRS, dams=dams)
+    for source in paddle:
+        assert (source.gdf.distance(dams.geometry.iloc[0]) >= water.DAM_CUT_M - 1e-9).all()
+    assert paddle[0].gdf.covered_by(polygon.boundary).all()
+    walking = build_network([NetworkSource("path", gpd.GeoDataFrame(geometry=[], crs=CRS))], metric_crs=CRS)
+    carries, _ = water.portages(paddle, walking)
+    assert len(carries.gdf) == 1
+    assert carries.kind == PORTAGE
+    assert carries.gdf.geometry.iloc[0].distance(dams.geometry.iloc[0]) < water.DAM_CUT_M
+
+
+def test_stream_inside_surface_is_attached_without_changing_its_direction():
+    surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100)], crs=CRS)
+    streams = gpd.GeoDataFrame({"storleksklass": ["2"]}, geometry=[LineString([(25, 30), (26, 31)])], crs=CRS)
+    paddle = water.sources(surfaces, metric_crs=CRS, streams=streams, dams=gpd.GeoDataFrame(geometry=[], crs=CRS))
+    assert paddle[-1].directed
+    assert paddle[-1].gdf.geometry.iloc[0].equals_exact(streams.geometry.iloc[0], 0)
+    surface = shapely.union_all([*paddle[0].gdf.geometry, *paddle[1].gdf.geometry])
+    assert surface.intersects(Point(25, 30)) and surface.intersects(Point(26, 31))
+    assert paddle[1].gdf.covered_by(surfaces.geometry.iloc[0]).all()
+
+
+def test_stream_attachment_survives_reprojection_as_a_junction():
+    surfaces = gpd.GeoDataFrame(geometry=[box(500000, 6600000, 500200, 6600200)], crs=CRS).to_crs(4326)
+    streams = gpd.GeoDataFrame({"storleksklass": ["2"]}, geometry=[LineString([(500050, 6600060), (500052, 6600062)])], crs=CRS).to_crs(4326)
+    paddle = water.sources(surfaces, metric_crs=CRS, streams=streams, dams=gpd.GeoDataFrame(geometry=[], crs=4326))
+    graph = build_network(paddle, metric_crs=CRS, bridge_m=0)
+    stream_edges = graph.edges[graph.edges["source"].eq(water.STREAMS)]
+    surface_edges = graph.edges[graph.edges["source"].isin((water.SHORE, water.OPEN_WATER))]
+    stream_nodes = set(stream_edges["from_node"]) | set(stream_edges["to_node"])
+    surface_nodes = set(surface_edges["from_node"]) | set(surface_edges["to_node"])
+    assert len(stream_nodes & surface_nodes) == 2
+
+
 def test_chords_stay_in_water_and_do_not_duplicate_the_shore():
     polygon = Polygon(
         [(0, 0), (1000, 0), (1000, 1000), (600, 1000), (600, 300), (400, 300), (400, 1000), (0, 1000)],
@@ -39,6 +76,16 @@ def test_dam_intervals_merge_and_cuts_keep_digitised_flow():
     assert cut.length.sum() == pytest.approx(40)
     empty = water.cut_streams(streams.iloc[:0], dams, metric_crs=CRS)
     assert empty.empty and empty.crs == streams.crs
+
+
+def test_a_stream_returning_to_a_dam_cannot_reenter_its_disc():
+    streams = gpd.GeoDataFrame({"storleksklass": ["2"]}, geometry=[LineString([(0, 0), (100, 0), (100, 100), (0, 100), (0, 10)])], crs=CRS)
+    dams = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=CRS)
+    cut = water.cut_streams(streams, dams, metric_crs=CRS)
+    assert len(cut) == 1
+    assert cut.geometry.iloc[0].coords[0] == (25, 0)
+    assert cut.geometry.iloc[0].coords[-1] == (0, 25)
+    assert cut.distance(dams.geometry.iloc[0]).min() == pytest.approx(water.DAM_CUT_M)
 
 
 def test_portages_join_components_once_and_tie_their_feet_to_path_nodes():
@@ -111,11 +158,53 @@ def test_touching_lakes_share_the_lowest_register_without_trusting_ids():
         crs=CRS,
     )
     shore, opened = water.sources(surfaces, metric_crs=CRS, class_field="class", lake_classes=("lake",), level_field="level")
-    assert shore.gdf[water.LAKE_BODY].iloc[0] == shore.gdf[water.LAKE_BODY].iloc[1]
-    assert shore.gdf[water.LAKE_BODY].iloc[2] != shore.gdf[water.LAKE_BODY].iloc[0]
-    assert shore.gdf[water.LAKE_BODY].iloc[3:].isna().all()
-    assert shore.gdf[water.LAKE_LEVEL].iloc[:3].tolist() == [207, 207, 100]
+    lakes = shore.gdf[shore.gdf[water.SURFACE_CLASS] == "lake"]
+    assert lakes[water.LAKE_BODY].nunique() == 2
+    assert lakes[water.LAKE_LEVEL].tolist() == [207, 100]
+    assert shore.gdf.loc[shore.gdf[water.SURFACE_CLASS] != "lake", water.LAKE_BODY].isna().all()
+    for x in (100, 200, 500):
+        seam = LineString([(x, 0), (x, 100)])
+        assert shore.gdf.intersection(seam).length.sum() == 0
     assert set(opened.gdf[water.LAKE_BODY].dropna()) == set(shore.gdf[water.LAKE_BODY].dropna())
+
+
+def test_the_pond_cutoff_applies_after_delivery_pieces_are_joined():
+    surfaces = gpd.GeoDataFrame(geometry=[box(0, 0, 60, 100), box(60, 0, 120, 100), box(300, 0, 360, 100)], crs=CRS)
+    shore, opened = water.sources(surfaces, metric_crs=CRS)
+    assert len(shore.gdf) == 1
+    assert shore.gdf.geometry.iloc[0].equals(box(0, 0, 120, 100).boundary)
+    assert opened.gdf.covered_by(box(0, 0, 120, 100)).all()
+
+
+def test_a_shared_mouth_is_emitted_once_with_the_lake_plane():
+    surfaces = gpd.GeoDataFrame(
+        {"class": ["lake", "river"], "level": [207, None]},
+        geometry=[box(0, 0, 100, 100), box(100, 0, 200, 100)],
+        crs=CRS,
+    )
+    shore, opened = water.sources(surfaces, metric_crs=CRS, class_field="class", lake_classes=("lake",), level_field="level")
+    mouth = LineString([(100, 0), (100, 100)])
+    crossing = opened.gdf[opened.gdf.intersection(mouth).length > 0]
+    assert shore.gdf.intersection(mouth).length.sum() == 0
+    assert crossing.intersection(mouth).length.sum() == pytest.approx(mouth.length)
+    assert crossing[water.LAKE_BODY].notna().all()
+    assert crossing[water.LAKE_LEVEL].eq(207).all()
+    network = with_elevation(build_network([shore, opened], metric_crs=CRS, bridge_m=0), lambda coordinates: coordinates[:, 0])
+    levelled, _ = water.level_lakes(network, threshold_m=3)
+    on_mouth = levelled.edges.geometry.covered_by(mouth)
+    assert on_mouth.any()
+    assert all(np.all(values == 207) for values in levelled.edges.loc[on_mouth, "elevations"])
+    river = levelled.chains.loc[levelled.chains[water.SURFACE_CLASS] == "river", "chain_id"]
+    assert any(np.ptp(values) > 0 for values in levelled.edges.loc[levelled.edges.chain_id.isin(river), "elevations"])
+
+
+def test_a_crop_boundary_is_open_water_instead_of_cheap_shore():
+    surface = gpd.GeoDataFrame(geometry=[box(0, 0, 200, 100)], crs=CRS)
+    extent = gpd.GeoDataFrame(geometry=[box(0, 0, 100, 100)], crs=CRS)
+    shore, opened = water.sources(surface, metric_crs=CRS, extent=extent)
+    seam = LineString([(100, 0), (100, 100)])
+    assert shore.gdf.intersection(seam).length.sum() == 0
+    assert opened.gdf.intersection(seam).length.sum() == seam.length
 
 
 def test_lake_levels_use_only_their_own_shores_and_leave_other_profiles_alone():

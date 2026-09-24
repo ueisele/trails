@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import shapely
 from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import substring
 
 from trails.network import graphs
@@ -26,7 +27,9 @@ STREAMS = "Streams"
 PORTAGES = "Portages"
 PORTAGE_PATHS = "Portage paths"
 WATER_SOURCES = (SHORE, OPEN_WATER, STREAMS)
-SHORE_SIMPLIFY_M = 10.0
+#: Phase 9's 5 m tolerance sweep: shore p95 deviation 3.4–3.5 m, page growth 0.37–0.81 MB Brotli.
+#: Review accepted the sweep’s 8.4–32.5 % p95 search growth after phase 8.
+SHORE_SIMPLIFY_M = 5.0
 #: Ponds stay in the pricing grid; their shores are not places to plan a kayak trip.
 MIN_PADDLE_HA = 1.0
 #: Phase 2 measured 1.5: the bay is cut and the lake keeps its shore; the graph is rebuilt in phase 5.
@@ -64,17 +67,19 @@ def sources(
     level_field: str | None = None,
     streams: gpd.GeoDataFrame | None = None,
     dams: gpd.GeoDataFrame | None = None,
+    extent: gpd.GeoDataFrame | None = None,
 ) -> list[NetworkSource]:
     """Turn water outlines and classed stream lines into paddled sources.
 
     Args:
-        surfaces: Water polygons, already clipped to the map's box
+        surfaces: Water polygons, with delivery pieces retained until dissolution
         metric_crs: Projection in which the tolerances are metres
         class_field: Surface classification column, or None when all surfaces are lakes
         lake_classes: Values of that column identifying lakes, including regulated lakes
         level_field: Registered height column, or None when no levels are supplied
         streams: Stream lines carrying ``storleksklass``, or None
         dams: Dam points and lock gates, or None where streams are absent
+        extent: Map boundary, cut after dissolution so it cannot become shore
 
     Returns:
         Shore and open-water sources, and directed streams when supplied
@@ -85,42 +90,80 @@ def sources(
     started = time.perf_counter()
     shore: list[dict[str, Any]] = []
     chords: list[dict[str, Any]] = []
-    metric = surfaces.to_crs(metric_crs)
-    polygons, parents = shapely.get_parts(metric.geometry.to_numpy(), return_index=True)
-    paddled = shapely.area(polygons) >= MIN_PADDLE_HA * 10_000
-    polygons, parents = polygons[paddled], parents[paddled]
-    is_lake = np.ones(len(polygons), dtype=bool) if class_field is None else metric[class_field].isin(lake_classes).to_numpy()[parents]
-    lake_positions = np.flatnonzero(is_lake)
-    lakes = polygons[is_lake]
-    labels = _components(len(lakes), shapely.STRtree(lakes).query(lakes, predicate="intersects"))
-    bodies: dict[int, str] = {int(position): f"lake-{label}" for position, label in zip(lake_positions, labels, strict=True)}
-    levels = metric[level_field].map(_registered_level).to_numpy(dtype=float) if level_field else np.full(len(metric), np.nan)
-    registered: dict[str, float] = {}
-    for position, label in bodies.items():
-        level = levels[parents[position]]
-        if np.isfinite(level):
-            registered[label] = min(registered.get(label, level), level)
-    for position, original in enumerate(polygons):
-        if not isinstance(original, Polygon) or original.is_empty:
-            continue
-        surface = original.simplify(SHORE_SIMPLIFY_M)
-        assert isinstance(surface, Polygon)
-        body = bodies.get(position)
-        attributes = {
-            LAKE_BODY: body,
-            LAKE_LEVEL: registered.get(body, np.nan) if body is not None else np.nan,
-            SURFACE_CLASS: metric[class_field].iloc[parents[position]] if class_field else None,
-        }
-        rings = [surface.exterior, *surface.interiors]
-        shore.extend({**attributes, "geometry": LineString(ring.coords)} for ring in rings)
-        ring_edges = {
-            tuple(sorted((one[:2], other[:2]))) for ring in rings for one, other in zip(list(ring.coords)[:-1], list(ring.coords)[1:], strict=True)
-        }
-        candidates = shapely.get_parts(shapely.delaunay_triangles(surface, only_edges=True))
-        shapely.prepare(surface)
-        for line in candidates[shapely.covers(surface, candidates)]:
-            if tuple(sorted(line.coords)) not in ring_edges:
-                chords.append({**attributes, "geometry": line})
+    lake_interfaces: list[LineString] = []
+    groups, boundary = _dissolved(surfaces.to_crs(metric_crs), class_field, lake_classes, level_field)
+    window = extent.to_crs(metric_crs).union_all() if extent is not None else None
+    for attributes, whole in groups:
+        clipped = whole.intersection(window) if window is not None else whole
+        for original in shapely.get_parts(clipped):
+            if not isinstance(original, Polygon) or original.is_empty:
+                continue
+            # The lake/river interface still carries a change of height
+            # semantics, but neither that interface nor a map crop is shore.
+            banks = _boundary_lines(original.boundary.intersection(boundary))
+            seams = _boundary_lines(original.boundary.difference(boundary))
+            simplified = list(shapely.get_parts(shapely.MultiLineString([*banks, *seams]).simplify(SHORE_SIMPLIFY_M)))
+            banks, seams = simplified[: len(banks)], simplified[len(banks) :]
+            surface = shapely.build_area(shapely.union_all([*banks, *seams]))
+            if surface.is_empty:
+                raise ValueError("simplified water boundary encloses no surface")
+            shore.extend({**attributes, "geometry": line} for line in banks)
+            bank_edges = {
+                tuple(sorted((one[:2], other[:2])))
+                for line in banks
+                for one, other in zip(list(line.coords)[:-1], list(line.coords)[1:], strict=True)
+            }
+            candidates = shapely.get_parts(shapely.delaunay_triangles(surface, only_edges=True))
+            shapely.prepare(surface)
+            emitted = set()
+            for line in candidates[shapely.covers(surface, candidates)]:
+                key = tuple(sorted(line.coords))
+                if key not in bank_edges:
+                    chords.append({**attributes, "geometry": line})
+                    emitted.add(key)
+            if attributes[LAKE_BODY] is not None:
+                # An unconstrained triangulation need not retain every
+                # concave boundary segment. The mouth must survive once
+                # its coincident river copy is removed below.
+                for seam in seams:
+                    for one, other in zip(list(seam.coords)[:-1], list(seam.coords)[1:], strict=True):
+                        if tuple(sorted((one, other))) not in emitted:
+                            chords.append({**attributes, "geometry": LineString((one, other))})
+                lake_interfaces.extend(seams)
+    # Both polygons triangulate their shared mouth. Its lake copy carries
+    # the lake plane; retaining the river copy makes the profile depend on
+    # which equally priced edge the search happens to choose.
+    interfaces = shapely.STRtree(lake_interfaces)
+    owned: list[dict[str, Any]] = []
+    for row in chords:
+        line = row["geometry"]
+        hits = interfaces.query(line, predicate="intersects") if row[LAKE_BODY] is None else np.empty(0, dtype=int)
+        if len(hits):
+            line = line.difference(shapely.union_all(interfaces.geometries[hits]))
+        owned.extend({**row, "geometry": piece} for piece in _boundary_lines(line))
+    chords = owned
+    cut = None
+    if streams is not None:
+        if dams is None:
+            raise ValueError("stream lines need the dam and lock-gate layer")
+        cut = cut_streams(streams, dams, metric_crs=metric_crs)
+        _join_streams(cut, shore, chords, groups)
+    if dams is not None and len(dams):
+        # Cut the finished lines, not the polygon before triangulation: an
+        # artificial bank around a structure must not become a paddled shore.
+        tree = shapely.STRtree(dams.to_crs(metric_crs).geometry.to_numpy())
+        counts = []
+        for rows in (shore, chords):
+            kept: list[dict[str, Any]] = []
+            changed = 0
+            for row in rows:
+                line = row["geometry"]
+                pieces = _outside_dams(line, tree)
+                changed += int(len(pieces) != 1 or not pieces[0].equals(line))
+                kept.extend({**row, "geometry": piece} for piece in pieces)
+            rows[:] = kept
+            counts.append(changed)
+        print(f"  Dam discs: {len(tree.geometries):,}; cut {counts[0]:,} shore lines and {counts[1]:,} open-water chords")
     result = [
         NetworkSource(
             name,
@@ -136,12 +179,132 @@ def sources(
         f"  Water outlines and triangulation: {time.perf_counter() - started:.3f} s; "
         f"{len(chords):,} open-water chords, {sum(row['geometry'].length for row in chords) / 1000:.3f} km"
     )
-    if streams is not None:
-        if dams is None:
-            raise ValueError("stream lines need the dam and lock-gate layer")
-        cut = cut_streams(streams, dams, metric_crs=metric_crs)
+    if cut is not None:
         result.append(NetworkSource(STREAMS, cut.to_crs(source_crs), kind=PADDLE, directed=True, keep_whole=True))
     return result
+
+
+def _outside_dams(line: LineString, tree: shapely.STRtree) -> list[LineString]:
+    """Clip at analytic circle intersections without a polygon's inset chords."""
+    hits = tree.query(line, predicate="dwithin", distance=DAM_CUT_M)
+    if not len(hits):
+        return [line]
+    coordinates = np.asarray(line.coords)[:, :2]
+    intervals = []
+    along = 0.0
+    for one, other in zip(coordinates[:-1], coordinates[1:], strict=True):
+        delta = other - one
+        squared = float(delta @ delta)
+        length = np.sqrt(squared)
+        if not length:
+            continue
+        for point in tree.geometries[hits]:
+            offset = one - np.array(point.coords[0][:2])
+            b = float(offset @ delta)
+            discriminant = b * b - squared * (float(offset @ offset) - DAM_CUT_M**2)
+            if discriminant <= 0:
+                continue
+            root = np.sqrt(discriminant)
+            start, end = max(0.0, (-b - root) / squared), min(1.0, (-b + root) / squared)
+            if start < end:
+                intervals.append((along + start * length, along + end * length))
+        along += length
+    kept = []
+    previous = 0.0
+    for start, end in sorted(intervals):
+        if start > previous:
+            piece = substring(line, previous, start)
+            assert isinstance(piece, LineString)
+            kept.append(piece)
+        previous = max(previous, end)
+    if previous < line.length:
+        piece = substring(line, previous, line.length)
+        assert isinstance(piece, LineString)
+        kept.append(piece)
+    return kept
+
+
+def _join_streams(
+    streams: gpd.GeoDataFrame,
+    shore: list[dict[str, Any]],
+    chords: list[dict[str, Any]],
+    groups: list[tuple[dict[str, Any], BaseGeometry]],
+) -> None:
+    """Join stream pieces enclosed by finer water but missed by its chords."""
+    rows = shore + chords
+    if not rows or streams.empty:
+        return
+    tree = shapely.STRtree([row["geometry"] for row in rows])
+    surfaces = shapely.STRtree([surface for _, surface in groups])
+    added = 0
+    for line in streams.geometry:
+        if len(tree.query(line, predicate="intersects")):
+            continue
+        for point in (Point(line.coords[0]), Point(line.coords[-1])):
+            bodies = surfaces.query(point, predicate="intersects")
+            if not len(bodies):
+                continue
+            nearest = int(tree.nearest(point))
+            join = shapely.shortest_line(point, tree.geometries[nearest])
+            if join.length and shapely.union_all(surfaces.geometries[bodies]).covers(join):
+                # A projected point on a segment need not lie exactly on that
+                # segment after both are reprojected. Give both sources the
+                # same vertex so this is a junction, not a tiny inferred carry.
+                target = rows[nearest]["geometry"]
+                meeting = Point(join.coords[-1])
+                along = target.project(meeting)
+                if 0 < along < target.length:
+                    head, tail = substring(target, 0, along), substring(target, along, target.length)
+                    rows[nearest]["geometry"] = LineString([*head.coords[:-1], meeting.coords[0], *tail.coords[1:]])
+                chords.append({**rows[nearest], "geometry": join})
+                added += 1
+    print(f"  Stream ends inside surface water: {added:,} open-water joins")
+
+
+def _boundary_lines(geometry: BaseGeometry) -> list[LineString]:
+    """Keep adjoining boundary pieces together before simplifying their banks."""
+    parts = [part for part in shapely.get_parts(geometry) if isinstance(part, LineString) and part.length > 0]
+    return [part for part in shapely.get_parts(shapely.line_merge(shapely.MultiLineString(parts))) if isinstance(part, LineString)]
+
+
+def _dissolved(
+    metric: gpd.GeoDataFrame, class_field: str | None, lake_classes: tuple[str, ...], level_field: str | None
+) -> tuple[list[tuple[dict[str, Any], BaseGeometry]], BaseGeometry]:
+    """Dissolve deliveries without merging the lake planes through river surfaces."""
+    # The shore investigation used a centimetre grid to close reprojection
+    # cracks between deliveries; it is finer than the page's coordinate quantum.
+    polygons, parents = shapely.get_parts(shapely.set_precision(shapely.force_2d(metric.geometry.to_numpy()), 0.01), return_index=True)
+    valid = np.array([isinstance(p, Polygon) and not p.is_empty for p in polygons], dtype=bool)
+    polygons, parents = polygons[valid], parents[valid]
+    labels = _components(len(polygons), shapely.STRtree(polygons).query(polygons, predicate="intersects"))
+    eligible = {label for label in np.unique(labels) if shapely.union_all(polygons[labels == label]).area >= MIN_PADDLE_HA * 10_000}
+    keep = np.isin(labels, list(eligible))
+    polygons, parents = polygons[keep], parents[keep]
+    if not len(polygons):
+        return [], LineString()
+    # The delivery grid closes seams; subsequent clipping must keep its exact
+    # intersection points rather than round the two sides of a cut separately.
+    polygons = shapely.set_precision(polygons, 0)
+    boundary = shapely.union_all(polygons).boundary
+    classes = metric[class_field].to_numpy()[parents] if class_field else np.full(len(polygons), None, dtype=object)
+    is_lake = np.ones(len(polygons), dtype=bool) if class_field is None else np.isin(classes, lake_classes)
+    levels = metric[level_field].map(_registered_level).to_numpy(dtype=float)[parents] if level_field else np.full(len(polygons), np.nan)
+    lakes = polygons[is_lake]
+    lake_labels = _components(len(lakes), shapely.STRtree(lakes).query(lakes, predicate="intersects"))
+    groups: list[tuple[dict[str, Any], BaseGeometry]] = []
+    for label in np.unique(lake_labels):
+        own = lake_labels == label
+        registered = levels[is_lake][own]
+        finite = registered[np.isfinite(registered)]
+        groups.append(
+            (
+                {LAKE_BODY: f"lake-{label}", LAKE_LEVEL: float(finite.min()) if len(finite) else np.nan, SURFACE_CLASS: classes[is_lake][own][0]},
+                shapely.union_all(lakes[own]),
+            )
+        )
+    for kind in pd.unique(classes[~is_lake]):
+        groups.append(({LAKE_BODY: None, LAKE_LEVEL: np.nan, SURFACE_CLASS: kind}, shapely.union_all(polygons[(classes == kind) & ~is_lake])))
+    return groups, boundary
 
 
 def cut_streams(streams: gpd.GeoDataFrame, dams: gpd.GeoDataFrame, *, metric_crs: str) -> gpd.GeoDataFrame:
@@ -175,6 +338,8 @@ def cut_streams(streams: gpd.GeoDataFrame, dams: gpd.GeoDataFrame, *, metric_crs
             piece = substring(line, previous, line.length)
             assert isinstance(piece, LineString)
             kept.append(piece)
+    if len(points):
+        kept = [piece for line in kept for piece in _outside_dams(line, tree)]
     return gpd.GeoDataFrame(geometry=kept, crs=metric_crs)
 
 

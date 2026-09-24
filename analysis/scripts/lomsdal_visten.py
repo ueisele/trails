@@ -59,7 +59,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import NamedTuple, Protocol
+from typing import NamedTuple, Protocol, cast
 from urllib.parse import quote_plus
 
 import geopandas as gpd
@@ -195,6 +195,9 @@ class Park:
     #: The Swedish counties whose Kulturmiljöregistret files cover the box;
     #: empty for Norway, whose places people left come out of SSR (§9.39).
     county: tuple[str, ...] = ()
+    #: Complete cached Marktäcke deliveries, so an offline build cannot
+    #: silently lose the water of a missing municipality.
+    water_municipalities: tuple[str, ...] = ()
 
     @property
     def kind_label(self) -> str:
@@ -260,6 +263,7 @@ PARKS: dict[str, Park] = {
         # The county's pages for its state trails, one per BD number (§9.22).
         naturkartan="abisko-naturkartan.toml",
         county=("norrbotten",),
+        water_municipalities=("2584",),
     ),
     "malingsbo-kloten": Park(
         name="Malingsbo-Kloten",
@@ -276,6 +280,7 @@ PARKS: dict[str, Park] = {
         ut_routes=None,
         naturkartan="malingsbo-kloten-naturkartan.toml",
         county=("örebro", "dalarna", "västmanland"),
+        water_municipalities=("1864", "1885", "1904", "1962", "1982", "2061", "2083", "2085"),
     ),
 }
 
@@ -2827,6 +2832,7 @@ def encode_for_the_page(
     water: gpd.GeoDataFrame,
     rivers: gpd.GeoDataFrame,
     bounds: maps.Bounds,
+    dams: list[list[float]] | None = None,
 ) -> Payload:
     """Encode the routing graph and its heights into the page's second payload.
 
@@ -2856,6 +2862,7 @@ def encode_for_the_page(
             is priced by what it crosses and the page prices thousands of them
             in one search.
         rivers: The rivers as outlines, carrying ``name``
+        dams: Dam and lock-gate longitude/latitude pairs for kayak connectors
         bounds: The box the grid covers, which is the zone: a leg laid outside
             it is priced as ground, and there is no network outside it to lay
             one to.
@@ -2876,6 +2883,7 @@ def encode_for_the_page(
         # Outlines and not bits, for a sentence and not a price: see
         # ``RIVER_TOLERANCE_M``.
         rivers=river_table(rivers, bounds, RIVER_TOLERANCE_M),
+        dams=dams,
     )
 
 
@@ -3020,6 +3028,7 @@ class Built(NamedTuple):
         heights: Where a straight leg's heights come from, for plan mode
         boundary_label: What the boundary's legend row says
         exports: The GPX files to write
+        dams: Dam and lock-gate longitude/latitude pairs, absent in Norway
     """
 
     park: gpd.GeoDataFrame
@@ -3041,6 +3050,7 @@ class Built(NamedTuple):
     heights: dict[str, object]
     boundary_label: str
     exports: list[Export]
+    dams: list[list[float]] | None = None
 
 
 def laid_out(network: Network) -> tuple[pd.DataFrame, gpd.GeoSeries]:
@@ -3742,7 +3752,7 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     # `approach_km` shapes the Norwegian band and nothing here; left in the
     # key it forced a full rebuild, height pass and all, of an identical graph
     # whenever the docstring's own `--approach-km 5` was typed (§8.2).
-    params = dataclasses.replace(sweden.Params.from_args(args), approach_km=0.0)
+    params = dataclasses.replace(sweden.Params.from_args(args), approach_km=0.0, water_municipalities=which.water_municipalities)
     # **The box, not a band round the park.** The tiles were copied for it and
     # the height mosaic was read over it, and the mosaic's cache is named by
     # the bounds it was read over, so the graph is cut to exactly the box or
@@ -3945,10 +3955,10 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
     trail_points["glyph"] = trail_points["kind"].map(TRAIL_POINT_GLYPHS)
     print(f"  {len(trail_points):,}: {trail_points['kind'].value_counts().to_dict()}")
 
-    print("\nLoading Topografi 50 water...")
+    print("\nLoading Marktäcke water...")
     # The lakes and the river surfaces, for pricing a straight walk by what it
     # crosses; over the box, which is the zone here.
-    water = gpd.clip(country.water(bounds, force_download=args.force_download), box(*bounds))
+    water = gpd.clip(marktacke.Source(cache_dir=args.cache_dir).water(bounds, which.water_municipalities).to_crs("EPSG:4326"), box(*bounds))
     print(f"  {len(water):,} outlines: {water[topografi50.TYPE].value_counts().to_dict() if len(water) else {}}")
     # The rivers drawn as a surface, for what a straight walk wades through
     # and how wide it is there; named from the register's watercourse names
@@ -4120,6 +4130,17 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         sources={
             **source_credits(loaded.versions, SWEDEN_SOURCE_TERMS, SWEDEN_SOURCE_METADATA),
             **ground_credits((nmd.METADATA,), (marktacke.METADATA, slu_moisture.METADATA)),
+            "Paddle water and water grid": [
+                credit(
+                    marktacke.METADATA.name,
+                    marktacke.METADATA.license,
+                    "Lake and river surfaces dissolved and simplified for routing; shared water grid for walking and paddling. "
+                    "Dam and lock-gate exclusions use Topografi 50 points.",
+                    marktacke.METADATA.attribution,
+                    marktacke.METADATA.url,
+                    "",
+                )
+            ],
             # **Two entries, because the page carries both.** The feed says
             # what calls at a stop and the register says where the stop is
             # (§9.36); naming only the one the lines came from would leave the
@@ -4186,6 +4207,10 @@ def build_sweden(which: Park, args: argparse.Namespace, repo_root: Path) -> Buil
         heights=tile_plan_heights(which.base),
         boundary_label=f"{which.kind_label.capitalize()} boundary [Naturvårdsregistret]",
         exports=exports,
+        dams=[
+            [float(cast(shapely.Point, point).x), float(cast(shapely.Point, point).y)]
+            for point in country.dams(bounds, force_download=args.force_download).to_crs("EPSG:4326").geometry
+        ],
     )
 
 
@@ -4327,7 +4352,7 @@ def assemble(built: Built, which: Park, args: argparse.Namespace, output_dir: Pa
     # takes the profile off it and phase 6 routes over it, and both of those live
     # in Python until it is in the page.
     print("\nEncoding the routing graph for the page...")
-    payload = encode_for_the_page(network, built.order, built.costs, built.areas, built.water, built.rivers, bounds_of(built.zone))
+    payload = encode_for_the_page(network, built.order, built.costs, built.areas, built.water, built.rivers, bounds_of(built.zone), built.dams)
     counted = payload.header
     grid = counted["water"]
     wet, weight = 100 * grid["set"] / (grid["cols"] * grid["rows"]), len(grid["bits"]) / 1e3

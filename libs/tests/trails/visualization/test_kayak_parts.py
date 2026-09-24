@@ -66,6 +66,11 @@ def parts():
             out.walkRiver = straightParts(graph,from,to,answered);
             graph.riverAt = ()=>[];
             out.walkLake = straightParts(graph,from,to,answered);
+            graph.damAt = ()=>true;
+            out.walkDam = straightParts(graph,from,to,answered);
+            paddling = true;
+            out.kayakDam = straightParts(graph,from,to,answered);
+            delete graph.damAt;
             paddling = true;
             const bankHeights = [220.52169826134383,220.43769955002008,220.21550943697486,
                 219.83460552285453,219.62490274449033,219.55653747171286];
@@ -161,3 +166,9 @@ def test_a_portage_keeps_its_routed_land_profile_including_partial_edges(parts):
     assert part["distance"] == parts["routed"][0]["distance"]
     assert parts["portageCut"]["height"] == [7, 7, 7]
     assert parts["portageCut"]["lon"] == [15, 5]
+
+
+def test_dam_samples_change_the_kayak_tally_only(parts):
+    assert parts["walkDam"] == parts["walkLake"]
+    assert all(part["kind"] == "land" for part in parts["kayakDam"])
+    assert sum(part["length"] for part in parts["kayakDam"]) == 20

@@ -601,7 +601,7 @@ def graph_sweden(which: Park, args: argparse.Namespace, country: Country) -> Gra
     # `approach_km` shapes the Norwegian band and nothing here; left in the
     # key it forced a full rebuild, height pass and all, of an identical graph
     # whenever the docstring's own `--approach-km 5` was typed (§8.2).
-    params = dataclasses.replace(sweden.Params.from_args(args), approach_km=0.0)
+    params = dataclasses.replace(sweden.Params.from_args(args), approach_km=0.0, water_municipalities=which.water_municipalities)
     register = naturvardsregistret.Source(cache_dir=params.cache_dir)
     if which.form is None:
         raise ValueError(f"{which.name} declares no register form")

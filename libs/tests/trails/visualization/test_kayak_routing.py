@@ -31,6 +31,7 @@ def readings():
         "leavingAt",
         "priced",
         "connectorPrice",
+        "connectorWaterAt",
         "connectorRadii",
         "connectorScan",
         "entryLandFloors",
@@ -328,11 +329,11 @@ def readings():
         // partial grid boundaries, reversed lines and reused dry prefixes.
         out.connectorRuns={checked:0,failures:[]};
         seed=20260923;
-        for(let terrain=0;terrain<6;terrain++) {
+        for(let terrain=0;terrain<7;terrain++) {
             const spec={west:0.02,south:0.03,dLon:0.00001,dLat:0.000015,cols:63,rows:49};
             const stride=(spec.cols+7)>>3,bits=new Uint8Array(stride*spec.rows);
             for(let y=0;y<spec.rows;y++)for(let x=0;x<spec.cols;x++) {
-                const wet=terrain===0||terrain===2&&x+y>40||terrain===3&&x%17<8||
+                const wet=terrain===0||terrain===6||terrain===2&&x+y>40||terrain===3&&x%17<8||
                     terrain===4&&random()<0.5||terrain===5&&x>16&&x<48&&y>16&&y<48;
                 if(wet)bits[y*stride+(x>>3)]|=0x80>>(x&7);
             }
@@ -341,6 +342,11 @@ def readings():
                 const x=Math.floor((lon-spec.west)/spec.dLon),y=Math.floor((lat-spec.south)/spec.dLat);
                 return x>=0&&y>=0&&x<spec.cols&&y<spec.rows&&!!(bits[y*stride+(x>>3)]&(0x80>>(x&7)));
             };
+            g.damAt=terrain===6?(lon,lat)=>Math.hypot((lon-spec.west)/spec.dLon-32.3,(lat-spec.south)/spec.dLat-24.2)<4.7:()=>false;
+            if(terrain===6) {
+                g.water.damCells=new Set();
+                for(let y=19;y<=29;y++)for(let x=27;x<=37;x++)g.water.damCells.add(y*spec.cols+x);
+            }
             for(let pair=0;pair<1000;pair++) {
                 const pos=()=>[spec.west+(random()*83-10)*spec.dLon,spec.south+(random()*69-10)*spec.dLat];
                 let [ax,ay]=pos(),[bx,by]=pos();
@@ -358,6 +364,12 @@ def readings():
                 out.connectorRuns.checked++;
             }
         }
+        paddling=false;
+        const ax=g.water.spec.west,ay=g.water.spec.south,bx=ax+0.0004,by=ay+0.0004;
+        g.damAt=()=>true;
+        const blocked=connectorPrice(g,ax,ay,bx,by);
+        g.damAt=()=>false;
+        out.walkingDams={blocked,clear:connectorPrice(g,ax,ay,bx,by)};
         console.log(JSON.stringify(out));
     """
     )
@@ -532,5 +544,31 @@ def test_seeded_joined_search_matches_the_unpruned_reference(readings):
 
 
 def test_uniform_squares_preserve_scalar_midpoint_prices(readings):
-    assert readings["connectorRuns"]["checked"] == 6000
+    assert readings["connectorRuns"]["checked"] == 7000
     assert readings["connectorRuns"]["failures"] == []
+
+
+def test_dam_discs_do_not_change_walking_prices(readings):
+    assert readings["walkingDams"]["blocked"] == readings["walkingDams"]["clear"]
+
+
+def test_page_dam_disc_uses_the_decided_radius():
+    from pyproj import Transformer
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed to execute the dam reading")
+    source = files("trails.visualization").joinpath("js", "routing_graph.js").read_text()
+    start = source.index("            var dams =")
+    end = source.index("            var grid = header.water", start)
+    # Korslång's source point, tested on either side of the metric cut.
+    lon, lat = 15.255897764963516, 59.9476443049001
+    forward = Transformer.from_crs(4326, 3006, always_xy=True)
+    backward = Transformer.from_crs(3006, 4326, always_xy=True)
+    x, y = forward.transform(lon, lat)
+    positions = [backward.transform(x + dx * radius, y + dy * radius) for radius in (24.9, 25.1) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+    script = "const graph={}, header=" + json.dumps({"dams": [[lon, lat]], "damRadiusM": 25}) + ";\n" + source[start:end]
+    script += "console.log(JSON.stringify(" + json.dumps(positions) + ".map(p=>graph.damAt(...p))));"
+    result = subprocess.run([node, "-"], input=script, text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [True] * 4 + [False] * 4

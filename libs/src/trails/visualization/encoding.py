@@ -87,6 +87,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
+from trails.network.water import DAM_CUT_M
 from trails.routing.coverage import MARKED, UNKNOWN, UNMARKED
 from trails.routing.order import CHAIN_ORDER_COLUMNS
 from trails.routing.protection import PROTECTED_COLUMN
@@ -354,6 +355,7 @@ def encode_graph(
     areas: list[dict[str, Any]],
     water: dict[str, Any] | None = None,
     rivers: dict[str, Any] | None = None,
+    dams: list[list[float]] | None = None,
     coordinate_quantum: float = DEFAULT_COORDINATE_QUANTUM,
     elevation_quantum: float = DEFAULT_ELEVATION_QUANTUM,
 ) -> Payload:
@@ -390,6 +392,7 @@ def encode_graph(
             :func:`trails.visualization.water.river_table` lays them out, or
             None for a page that says nothing about what a straight walk
             wades through. Not a price -- a sentence, with the width.
+        dams: Dam and lock-gate longitude/latitude pairs; kayak-only exclusions
         coordinate_quantum: Grid a coordinate is rounded onto, in degrees
         elevation_quantum: Grid a height is rounded onto, in metres
 
@@ -463,6 +466,8 @@ def encode_graph(
         "protectedShareQuantum": 1.0 / PROTECTED_SHARE_UNITS,
         "water": check_water(water) if water is not None else None,
         "rivers": check_rivers(rivers) if rivers is not None else None,
+        "dams": dams or [],
+        "damRadiusM": DAM_CUT_M,
         # Not decoration: this is what lets a page say whether it decoded every
         # one of two million values correctly, having nothing to compare them
         # against.

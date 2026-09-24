@@ -18,10 +18,10 @@ simplified to ten metres would have been 5.5 MB in memory and 0.94 MB in the
 page, and slower to ask.
 
 **What it is for.** The bits decide a *price*, and a price is allowed to be a
-cell out: a connector that touches one cell of sea because the shore is 25 m
-from where the reader tapped costs one cell's worth more than it should, and
-every connector from that point pays the same, so nothing between them is
-decided by it. Nothing is drawn from the grid.
+cell out. Nearby connectors can cross different cells: phase 9 measured a
+changed network exit after one pricing sample changed from wet to dry. A
+finer source can therefore change the preferred way under the same prices.
+Nothing is drawn from the grid.
 
 **And since §6.10, what a straight leg *says* about the water it crosses.**
 That used to come from the height service, which classified each sample by what

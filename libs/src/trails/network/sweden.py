@@ -34,7 +34,7 @@ from typing import Any, NamedTuple
 import geopandas as gpd
 import pandas as pd
 
-from trails.io.sources import markhojd, naturvardsregistret, overpass, topografi50
+from trails.io.sources import markhojd, marktacke, naturvardsregistret, overpass, topografi50
 from trails.network import graphs, water
 from trails.network.graphs import PROTECTED_SIMPLIFY_M, SURVEYED_FIELD, Masks, Rules
 from trails.routing import DEFAULT_MARKED_M, DEFAULT_MIN_SHARE, DEFAULT_RECORDED_M, IDENTITY_SEPARATOR, Network, NetworkSource, with_elevation
@@ -176,10 +176,11 @@ RULES = Rules(
 class Params(graphs.Params):
     """Everything that decides what the Swedish network comes out as.
 
-    Nothing beyond :class:`trails.network.graphs.Params`: the registers are
-    read for the whole country and cut to the zone, so there is no catalogue
-    to name and no county to resolve.
+    Water names its complete municipal delivery set for an offline build;
+    the other registers are read nationally and cut to the zone.
     """
+
+    water_municipalities: tuple[str, ...] = ()
 
 
 class Loaded(NamedTuple):
@@ -430,7 +431,7 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
         NetworkSource(FERRIES, ferries, kind=FERRY, attributes=(topografi50.TYPE, "destination", SURVEYED_FIELD)),
     ]
     print("\nLoading water for the paddled network...")
-    surfaces = gpd.clip(country.water(bounds, force_download=download), zone)
+    surfaces = marktacke.Source(cache_dir=params.cache_dir).water(bounds, params.water_municipalities).to_crs("EPSG:4326")
     streams = clip_lines(country.streams(bounds, force_download=download), extent)
     dams = country.dams(bounds, force_download=download)
     sources.extend(
@@ -442,6 +443,7 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
             level_field=topografi50.WATER_LEVEL,
             streams=streams,
             dams=dams,
+            extent=zone,
         )
     )
 

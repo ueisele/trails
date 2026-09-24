@@ -338,6 +338,43 @@
 
             graph.water = null;
             graph.waterAt = function (lon, lat) { return waterAt(graph.water, lon, lat); };
+            // Bucket the compact point list so a midpoint pays only for nearby
+            // structures. The walking grid remains the original shared bits.
+            var dams = (header.dams || []).map(function (point) {
+                // The same WGS84 metre series used by the route's lengths.
+                // At a structure these scales can be computed once.
+                var phi = point[1] * Math.PI / 180;
+                var perLat = 111132.92 - 559.82 * Math.cos(2 * phi) + 1.175 * Math.cos(4 * phi) - 0.0023 * Math.cos(6 * phi);
+                var perLon = 111412.84 * Math.cos(phi) - 93.5 * Math.cos(3 * phi) + 0.118 * Math.cos(5 * phi);
+                return [point[0], point[1], perLon, perLat];
+            }), damBuckets = new Map();
+            dams.forEach(function (point) {
+                var key = Math.floor(point[0] * 100) + ',' + Math.floor(point[1] * 100);
+                if (!damBuckets.has(key)) { damBuckets.set(key, []); }
+                damBuckets.get(key).push(point);
+            });
+            graph.damAt = function (lon, lat) {
+                if (!dams.length) { return false; }
+                var grid = graph.water;
+                if (grid && grid.damCells) {
+                    var spec = grid.spec, col = Math.floor((lon - spec.west) / spec.dLon), row = Math.floor((lat - spec.south) / spec.dLat);
+                    // Most priced water samples are nowhere near a structure.
+                    // The sparse cell index rejects them before point lookups.
+                    if (col >= 0 && row >= 0 && col < spec.cols && row < spec.rows && !grid.damCells.has(row * spec.cols + col)) { return false; }
+                }
+                var x = Math.floor(lon * 100), y = Math.floor(lat * 100), radius = header.damRadiusM;
+                for (var dx = -1; dx <= 1; dx += 1) {
+                    for (var dy = -1; dy <= 1; dy += 1) {
+                        var near = damBuckets.get((x + dx) + ',' + (y + dy)) || [];
+                        for (var i = 0; i < near.length; i += 1) {
+                            var east = (lon - near[i][0]) * near[i][2];
+                            var north = (lat - near[i][1]) * near[i][3];
+                            if (east * east + north * north <= radius * radius) { return true; }
+                        }
+                    }
+                }
+                return false;
+            };
             var grid = header.water
                 ? inflate(bytesOf(header.water.bits)).then(function (packed) { return waterGrid(header.water, packed); })
                 : Promise.resolve(null);
@@ -348,6 +385,22 @@
             graph.ready = Promise.all([inflate(bytesOf(encoded)), grid]).then(function (both) {
                 var bytes = both[0];
                 graph.water = both[1];
+                if (graph.water && dams.length) {
+                    // Uniform-cell batching must stop before a cell containing
+                    // a disc; its individual midpoints can disagree there.
+                    var spec = graph.water.spec, cells = new Set();
+                    dams.forEach(function (point) {
+                        var dy = header.damRadiusM / point[3], dx = header.damRadiusM / point[2];
+                        var left = Math.max(0, Math.floor((point[0] - dx - spec.west) / spec.dLon));
+                        var right = Math.min(spec.cols - 1, Math.floor((point[0] + dx - spec.west) / spec.dLon));
+                        var bottom = Math.max(0, Math.floor((point[1] - dy - spec.south) / spec.dLat));
+                        var top = Math.min(spec.rows - 1, Math.floor((point[1] + dy - spec.south) / spec.dLat));
+                        for (var row = bottom; row <= top; row += 1) {
+                            for (var col = left; col <= right; col += 1) { cells.add(row * spec.cols + col); }
+                        }
+                    });
+                    graph.water.damCells = cells;
+                }
                 var inflated = performance.now();
                 var decoded = decode(bytes);
                 graph.inflateMs = inflated - began;

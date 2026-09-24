@@ -6270,13 +6270,14 @@ class TestPlanMode:
 
         planning = fmap.get_root().render().split("var PLAN =")[-1]
         parts = planning.split("function straightParts(")[1].split("\n            function ")[0]
-        assert "wet[w] = !!points[w].sea" in parts
+        assert "wet[w] = (!!points[w].sea" in parts
         assert "|| (!!graph.waterAt(laid.lon[w], laid.lat[w])" in parts
         # And a river is waded, not crossed: Lantmateriet draws a wide
         # watercourse as a water surface, so the grid alone cut the leg at
         # Abiskojakka's bank and the width sentence then measured the truncated
         # run -- 14 m where the outline says 22.
-        assert "&& (kayak() || !river[w]));" in parts
+        assert "&& (kayak() || !river[w])))" in parts
+        assert "&& !(kayak() && graph.damAt && graph.damAt(laid.lon[w], laid.lat[w]))" in parts
         # And the runs are cut from that reading, not from the flag again.
         assert "if (wet[i] !== wet[i - 1] || (kayak() && wet[i] && river[i] !== river[i - 1])) { changes.push(i); }" in parts
         assert "if (wet[first] && !kayak()) {" in parts
@@ -7401,7 +7402,7 @@ class TestPlanMode:
         assert "function priced(graph, aLon, aLat, bLon, bLat) {" in planning
         assert "if (!grid || (!kayak() && !(waterPrice > ground))) { return {cost: length * ground, land: kayak() ? length : 0}; }" in planning
         assert "var pieces = Math.max(1, Math.ceil(length / grid.cellM)), wet = 0, backwards = false;" in planning
-        assert "if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }" in planning
+        assert "if (connectorWaterAt(graph, aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }" in planning
         assert "return {cost: (length - water) * ground + water * waterPrice, land: kayak() ? length * (pieces - wet) / pieces : 0};" in planning
         # Lazily, and in a queue of its own: a floor is priced for real when
         # it is the cheaper top, and only an exact price is ever a label.

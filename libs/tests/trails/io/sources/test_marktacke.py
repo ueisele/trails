@@ -55,6 +55,30 @@ def delivery():
 
 
 class TestSource:
+    def test_water_keeps_whole_pieces_and_levels_from_every_cached_delivery(self, tmp_path, delivery):
+        root = tmp_path / "marktacke"
+        root.mkdir()
+        frame = delivery.copy()
+        frame["objekttyp"] = ["Sjö", "Skog", "Sjö"]
+        frame["hojd_over_havet"] = [207, None, 300]
+        frame.to_file(root / "marktacke_kn2584.gpkg", layer="mark")
+        river = frame.iloc[:1].copy()
+        river["objekttyp"] = "Vattendragsyta"
+        river.to_file(root / "marktacke_kn2523.gpkg", layer="mark")
+
+        def forbidden(*args):
+            pytest.fail("reading cached water must not search or download")
+
+        source = marktacke.Source(cache_dir=tmp_path, fetch=forbidden, download=forbidden)
+        found = source.water(ABISKO, ("2584", "2523"))
+        assert found["objekttyp"].tolist() == ["Sjö", "Vattendragsyta"]
+        assert found["hojd_over_havet"].tolist() == [207, 207]
+        assert all(geometry.equals(frame.geometry.iloc[0]) for geometry in found.geometry)
+        with pytest.raises(FileNotFoundError, match="2585"):
+            source.water(ABISKO, ("2584", "2585"))
+        with pytest.raises(ValueError, match="municipalities"):
+            source.water(ABISKO, ())
+
     def test_the_wetlands_are_read_out_of_the_delivery_and_cut_to_the_box(self, tmp_path, delivery):
         fetched = []
 

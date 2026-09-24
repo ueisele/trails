@@ -606,12 +606,12 @@
                 // exactly: this only tightens the bound if the way is better,
                 // and every other entry remains eligible to beat it.
                 if (kayak() && !fromEnds.length && !toEnds.length) {
-                    var dryPoint = !graph.waterAt(from.lon, from.lat) ? from : (!graph.waterAt(to.lon, to.lat) ? to : null);
+                    var dryPoint = !connectorWaterAt(graph, from.lon, from.lat) ? from : (!connectorWaterAt(graph, to.lon, to.lat) ? to : null);
                     var wetNode = -1, nearestWet = Infinity;
                     if (dryPoint && !work.wetNodes) {
                         work.wetNodes = new Uint8Array(nodes);
                         for (i = 0; i < nodes; i += 1) {
-                            work.wetNodes[i] = graph.waterAt(graph.nodeLon[i], graph.nodeLat[i]) ? 1 : 0;
+                            work.wetNodes[i] = connectorWaterAt(graph, graph.nodeLon[i], graph.nodeLat[i]) ? 1 : 0;
                         }
                     }
                     // Only the two exact connector prices make an incumbent.
@@ -641,7 +641,7 @@
                     }
                 }
                 var entryBounds = kayak() && fromEnds.length && leastLand > 0 ? entryLandFloors(graph, fromEnds, leastLand) : null;
-                var eager = kayak() && leastLand > 0 && (!graph.waterAt(from.lon, from.lat) || !graph.waterAt(to.lon, to.lat));
+                var eager = kayak() && leastLand > 0 && (!connectorWaterAt(graph, from.lon, from.lat) || !connectorWaterAt(graph, to.lon, to.lat));
                 for (i = 0; i < nodes && !toEnds.length; i += 1) {
                     if (entryBounds && entryBounds[i] > leastLand) { continue; }
                     var leaveM = far(graph.nodeLon[i], graph.nodeLat[i], to.lon, to.lat), leave = leaveM * off;
@@ -861,7 +861,7 @@
                     for (x = 0; x < cols; x += 1) {
                         at = y * cols + x;
                         wet = (grid.bits[y * grid.stride + (x >> 3)] & (0x80 >> (x & 7))) ? 1 : 0;
-                        distance = 32767;
+                        distance = grid.damCells && grid.damCells.has(at) ? 0 : 32767;
                         offer(x ? at - 1 : -1);
                         offer(y ? at - cols : -1);
                         offer(y && x ? at - cols - 1 : -1);
@@ -898,7 +898,7 @@
                     var lon = ax + t * deltaX, lat = ay + t * deltaY;
                     var col = Math.floor((lon - west) / dLon), row = Math.floor((lat - south) / dLat);
                     var value = col < 0 || row < 0 || col >= cols || row >= rows ? 0 : field[row * cols + col];
-                    var isWet = value & 1;
+                    var isWet = (value & 1) && !(graph.damAt && graph.damAt(lon, lat));
                     var radius = (value >> 1) - 1, count = 1;
                     if (radius > 0) {
                         var left = col - radius, right = col + radius + 1, bottom = row - radius, top = row + radius + 1;
@@ -925,12 +925,16 @@
             // The measured prefix cap bounds preliminary work. Truncating it
             // only weakens the floor, never changes the answer. The exact
             // price resumes after these samples instead of reading them twice.
+            function connectorWaterAt(graph, lon, lat) {
+                return graph.waterAt(lon, lat) && !(kayak() && graph.damAt && graph.damAt(lon, lat));
+            }
+
             function connectorDryPrefix(graph, aLon, aLat, bLon, bLat, length, pieces, landLimit, limit) {
                 if (!graph.water) { return 1; }
                 var dry = 0;
                 for (var i = 0; i < Math.min(limit || 16, pieces); i += 1) {
                     var t = (i + 0.5) / pieces;
-                    if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { break; }
+                    if (connectorWaterAt(graph, aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { break; }
                     dry += 1;
                     if (length * dry / pieces > landLimit) { break; }
                 }
@@ -942,7 +946,7 @@
             // samples; the first excess sample would reject the same way.
             function connectorRunPrice(graph, aLon, aLat, bLon, bLat, length, landLimit, precedingLand, known) {
                 var pieces = Math.max(1, Math.ceil(length / graph.water.cellM)), dry = known && known.dry || 0;
-                var backwards = landLimit !== undefined && !dry && graph.waterAt(aLon + 0.5 / pieces * (bLon - aLon), aLat + 0.5 / pieces * (bLat - aLat));
+                var backwards = landLimit !== undefined && !dry && connectorWaterAt(graph, aLon + 0.5 / pieces * (bLon - aLon), aLat + 0.5 / pieces * (bLat - aLat));
                 var wet = connectorScan(graph, aLon, aLat, bLon, bLat, pieces, backwards ? pieces - 1 : dry, backwards ? dry - 1 : pieces,
                     backwards ? -1 : 1, length, landLimit, precedingLand, dry);
                 if (wet < 0) { return {cost: Infinity, land: Infinity}; }
@@ -970,7 +974,7 @@
                     // The same midpoints are counted in either order.
                     var sample = backwards && i ? pieces - i : i;
                     var t = (sample + 0.5) / pieces;
-                    if (graph.waterAt(aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }
+                    if (connectorWaterAt(graph, aLon + t * (bLon - aLon), aLat + t * (bLat - aLat))) { wet += 1; }
                     else if (landLimit !== undefined && (precedingLand || 0) + length * (i + 1 - wet) / pieces > landLimit) {
                         return {cost: Infinity, land: Infinity};
                     }
@@ -2352,8 +2356,9 @@
                 var wet = new Array(count), river = new Array(count);
                 for (var w = 0; w < count; w += 1) {
                     river[w] = !!graph.riverAt(laid.lon[w], laid.lat[w]).length;
-                    wet[w] = !!points[w].sea
-                        || (!!graph.waterAt(laid.lon[w], laid.lat[w]) && (kayak() || !river[w]));
+                    wet[w] = (!!points[w].sea
+                        || (!!graph.waterAt(laid.lon[w], laid.lat[w]) && (kayak() || !river[w])))
+                        && !(kayak() && graph.damAt && graph.damAt(laid.lon[w], laid.lat[w]));
                 }
                 // Where the samples change their mind about what is under them.
                 // Named for what it is: in this file `edges` means edges of the

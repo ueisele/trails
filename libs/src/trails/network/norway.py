@@ -462,9 +462,11 @@ def load_sources(params: Params, zone: gpd.GeoDataFrame) -> Loaded:
     print("\nLoading N50 water for the paddled network...")
     # The full cached layer retains the lake levels that load_water omits.
     cover = n50_source.load_layers(codes, (n50.LAND_COVER_LAYER,), force_download=download)
-    surfaces = gpd.clip(cover[cover["objtype"].isin(n50.WATER_COVER_TYPES)], box(*zone.total_bounds))
+    surfaces = cover[cover["objtype"].isin(n50.WATER_COVER_TYPES) & cover.intersects(box(*zone.total_bounds))]
     sources.extend(
-        water.sources(surfaces, metric_crs=METRIC_CRS, class_field="objtype", lake_classes=("Innsjø", "InnsjøRegulert"), level_field="hoyde")
+        water.sources(
+            surfaces, metric_crs=METRIC_CRS, class_field="objtype", lake_classes=("Innsjø", "InnsjøRegulert"), level_field="hoyde", extent=zone
+        )
     )
 
     # One order covers all three N50 layers, so all three carry its date. The
