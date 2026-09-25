@@ -102,6 +102,8 @@ would draw it without a change.
 
 ## 5. Changes
 
+- 2026-09-25 — phase 11 stops at its speed gate: the interior-entry prototype reproduces all 24 distinct off-network Kloten answers, but Abisko kayak p95 rises 334.05 → 1,084.15 ms (3.245×). Uwe asks for entries before offsets; review applies them to both walking settings. Production source and tests are restored, with the prototype and evidence in scratch. The stop note and measurements are below.
+
 - 2026-09-25 — phase 10 is built: kayak land price follows walking, ground follows Stay on paths at 3 / 10, and 4,395 path-priced launches join nearby roads to shore. Uwe accepts the shared road noding. The compact line counts the whole way with its split. All 2,400 kayak/walking labels match in both settings; the largest kayak p95 increase is 52%. The measurements and build note are below.
 
 - 2026-09-25 — Uwe accepts launch splits of walking edges: "Ja ich finde das tatsächlich eine Verbesserung. Lasse Codex das so machen." The new entry makes the 55.990 → 68.341 m example cheaper by the unchanged walking rule (132 against 168). This supersedes review's existing-node restriction; walking differentials remain gates, while cheaper new walking ways and the random-pair change distribution are reported.
@@ -161,6 +163,63 @@ would draw it without a change.
 - 2026-09-21 — phase 3 (`7f68137`): lakes levelled per connected body in the build (150 bodies from the register, 1,005 from the shore's 10th percentile; median difference 0.25 m, largest 2.82 m), paddled parts flat and continuous in the profile, the heading *2.47 km 🛶 · 3.51 km 🚶*, *by kayak* and *portage on foot* in words, paddled points in the GPX and the Garmin course; the dry way byte-identical in both walking settings. Two stops (the shore's tiles, the body's identity).
 - 2026-09-21 — phase 2 (`bea479c`): the Kayak switch beside *Stay on paths*, the prices per mode, direction as a predicate on the step, the mode's cheapest metre as the floor, snapping by node eligibility, a paddled edge tallied like a ferry for marking but inside the reserve; the sweep settled **k = 1.5, P = 2**. Three stops on the way (the search's direction, where the settings come from, the tally); the built-note below.
 - 2026-09-21 — phase 1 (`ac467b2`): the water network in the build — Shore, Open water, Streams of kind `PADDLE`, portage chords and their ties as `BRIDGE`, `NetworkSource.directed` carried to a per-edge `one_way`; the built-note below. Two stops on the way, both the plan's (the flow test, the layer of the direction).
+
+### Phase 11 — Enter an edge in its middle, 2026-09-25
+
+Uwe, translated: *"Now it takes the way I wanted, but only when the pin is
+right on the path. If it is only slightly beside the path, the old roundabout
+way is chosen. Is that fixed by entries inside a path?"* Earlier: *"What
+would it cost to allow arbitrary entries into a road?"* Then: *"Yes, let's do
+the entries first."* The offset line waits. The source investigation is
+`~/mockups/kayak-mode/kloten-start/report.md`, its phase-10 follow-up.
+
+**Review's decision, not Uwe's:** apply the same rule to walking with Stay on
+paths off and on. Keep the objectives, factors, snapping, grid, attached
+endpoints and whole-leg fallback. Each existing node remains a candidate;
+each usable segment also offers its clamped dry-ground optimum in every
+allowed direction. With the perpendicular foot `s₀`, gap `d`, edge rate `f`
+and ground rate `g`, `cos θ = f/g` gives
+`s = s₀ ± d × f / sqrt(g² − f²)`; `f ≥ g` selects a segment end. Exact
+`connectorPrice` sampling then prices each candidate, including water and
+kayak dam discs. The dry optimum may miss a slightly better point when its
+connector crosses water. Exits mirror entries, including two middle points
+on one edge. The full rule and required drive are in the plan's phase 11.
+
+**Stopped at the speed gate.** All 24 distinct Kloten off-network rows choose
+the northern launch in the prototype. E8/off to Q carries **231.360461 m**
+at **313.813413 land price**, against 308.226 m and 427.899423 before. The
+largest differences from the virtual table are **0.000029 m carry**,
+**1.77×10⁻⁹ land price** and **3.55×10⁻⁹ secondary price**. This is the local
+regression, not the full independent-reference gate.
+
+On Abisko's 200 frozen phase-10 pairs, ordinary kayak warm Firefox p95 is
+**334.05 → 1,084.15 ms**, **3.245×**, exceeding 2×. Median is
+**34.5 → 237.5 ms** and worst **510 → 1,707 ms**. Each pair runs baseline
+then proposed search in the same browser after both versions are warmed;
+only one heavy workload runs at a time under the 8 GiB cap.
+
+The three slowest saved Norway walking pairs spend **94.12–94.97%** of their
+lightly instrumented runtime inside connector pricing. The prototype
+batches unchanged walking midpoints using the kayak sampler without its
+dam predicate, but its walking p95 and answer comparisons remain unmeasured.
+No completed walking speed improvement is claimed.
+
+**Build status at the stop.** No production build: source and tests are
+restored, and only records are committed. The incomplete prototype and
+reference draft are retained in `~/mockups/kayak-mode/phase11/`. The
+[measurement file](kayak-mode-phase11-measurements.md) contains every
+available figure and identifies the remaining 11 original-sample timing
+cells, all second-sample work, differentials, attached regressions, display
+and export checks, builds and drives as pending. No scene figure, shared
+cache, graph or tile changed. No push or publication. Review must address
+candidate-search performance before phase 11 resumes; no decision on
+prices, walking scope or the retained speed gate is reopened.
+
+**Validation of the stop.** `command make hooks-run` passes with network
+access, including ruff format/check, mypy, both pytest suites and the
+standard hooks. A filesystem guard protects the shared cache. This checks
+the restored production tree and records, not the rejected prototype.
+Log: `~/mockups/kayak-mode/phase11/hooks.log`.
 
 ### Phase 10 — Carry on paths, launch at road ends, 2026-09-25
 

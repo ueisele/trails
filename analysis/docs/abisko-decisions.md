@@ -2899,6 +2899,14 @@ way is on paths for* 6.3 → 6.8 km and *straight for* 0.9 → 0.8 (the goal's t
 the way reaches it along the line rather than straight from a junction). The index costs 91 ms on
 Lomsdal and 15 on Abisko, recorded. Both pages 677 readings, none broken.
 
+**Phase 11, 2026-09-25 — off-network entries, not yet built.** Review extends
+the [kayak phase-11 entry rule](kayak-mode-phases.md#phase-11--enter-an-edge-in-its-middle)
+to both walking settings: an off-network point may join a segment interior,
+priced by the unchanged walking objective. This is review's decision,
+separate from Uwe's request for the kayak entries. The first prototype
+stops on Abisko's kayak p95 gate, 334.05 → 1,084.15 ms. Walking source and
+restoration remain unchanged; its comparisons and drives are pending.
+
 ---
 
 ### 9.30 The page asked for a newer worker on every load — done and undone the same evening, 2026-09-16

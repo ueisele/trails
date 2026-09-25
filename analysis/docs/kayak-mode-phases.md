@@ -1494,6 +1494,92 @@ ran one at a time with an 8 GiB address-space cap, using cached inputs. No tile
 build, push or publish was made. Phase 10 is complete; no further decision is
 required and no later phase is started.
 
+### Phase 11 — Enter an edge in its middle
+
+**Uwe's words, 2026-09-25, translated.** "Now it takes the way I wanted, but
+only when the pin is right on the path. If it is only slightly beside the
+path, the old roundabout way is chosen. Is that fixed by entries inside a
+path?" Earlier: "What would it cost to allow arbitrary entries into a road?"
+Then: "Yes, let's do the entries first." The approved offset-line work waits.
+
+The report is `~/mockups/kayak-mode/kloten-start/report.md`, its final section,
+"Phase 10 follow-up: a start just beside the rental road". All 56 old answers
+match the nodes-only reference. Outside the finger reach, the nearby road's
+interior is unavailable: P1 is 56.219 m from its southern node and 166.142 m
+from its northern node along the road. The temporary entry goes north in all
+24 distinct off-network cases. This is an entry-set limitation, not a price
+or pruning defect on those inputs.
+
+**Review's decision, not Uwe's.** The same entries apply to walking with
+Stay on paths off and on. A separate walking rule would give one network two
+models of entry. Walking changes are accepted when the new candidate is
+strictly cheaper under its unchanged objective, and must be reported.
+
+**The rule.** An off-network endpoint may enter any usable edge between
+consecutive geometry vertices and leave in each direction `allowed` permits;
+an off-network target has the mirrored exits. Keep all existing node
+candidates. For each segment and allowed direction add the clamped dry-ground
+optimum. With edge rate `f`, ground rate `g`, perpendicular foot `s₀` and gap
+`d`, it satisfies `cos θ = f / g`:
+`s = s₀ ± d × f / sqrt(g² − f²)`. If `f ≥ g`, use a segment end. These are
+rates of the minimised objective: land price in a kayak, cost when walking.
+Each candidate is priced exactly by the existing `connectorPrice` and its
+25 m grid, including kayak dam discs. The analytic point is the **dry-ground
+optimum**; a connector crossing water is priced correctly but may miss a
+slightly better point on that segment. Include the piece between two middle
+points on one edge and ways through edges that meet.
+
+No new price constants, factors, objective, snap reach or grid. Attached
+endpoints keep `endsOf`; `worthRouting` keeps its whole-leg fallback. Only
+strict improvements may replace old answers. Draw and export the connector
+and partial edge, including both in the panel's total and paddle/foot split.
+Stored-plan restoration stays as it is; the measurement file explains it.
+
+**Validation required.** Preserve the phase-10 sample and add a second,
+documented off-network sample, using seed 20260923. The new sample needs
+2,400 comparisons against independent unpruned references: 200 pairs per
+map in kayak, kayak-paths, walking and paths. Report before/after p95 on
+both samples in every map and setting. No p95 may more than double;
+Lomsdal-Visten walking must not get slower. Profile its slowest pairs and
+fix entry/connector costs here without changing answers. Pin all 24 new
+Kloten answers and keep the 24 attached answers unchanged.
+
+**Drive required, not yet run.** E8 at z17, as a raw tap in both settings,
+must reach Q over the northern launch at road node 141123. Compare W8 at
+z16 and z17, reporting the measured tolerance. Read a walking road-interior
+entry, the drawn connector, panel split and export. Update moved scene
+figures with a phase-11 note; selected kayak/entry checks must pass twice
+per rebuilt page, then `command make drive-all` once. No graph or tile build.
+
+**Stopped 2026-09-25 — the prototype exceeds the speed gate.** On Abisko's
+unchanged 200 phase-10 pairs in kayak mode with Stay on paths off, warm
+Firefox p95 changes **334.05 → 1,084.15 ms**, **3.245×**, above the permitted
+2×. Median changes **34.5 → 237.5 ms**, worst **510 → 1,707 ms**. Baseline
+and proposed searches alternate on the same decoded page, after warming
+both; no other build or browser measurement runs beside them.
+
+The prototype gives the northern launch in all 24 distinct off-network
+Kloten cases. E8/off to Q carries **231.360461 m**, with land price
+**313.813413** and secondary price **649.735444**. Across the 24 rows,
+differences from the virtual table are at most **0.000029 m carry**,
+**1.77×10⁻⁹ land price** and **3.55×10⁻⁹ secondary price**. This local result
+does not establish the full reference gate.
+
+**Build status at the stop.** Production source and tests are restored;
+only the records change. The prototype, reference draft and browser evidence
+are in `~/mockups/kayak-mode/phase11/`. The remaining settings/maps, second
+sample, complete reference comparisons, pinned tests, builds and drives
+are pending the failed speed gate. No scene figure changed. The
+[phase-11 measurements](kayak-mode-phase11-measurements.md) give the timing
+method, Norway profile, restoration behaviour and precise remaining work.
+Review must address candidate-search performance before resuming phase 11;
+the decided entry rule and speed gate have not been changed.
+
+**Validation of the stop.** `command make hooks-run` is green with network
+access: ruff format/check, mypy, both pytest suites and the standard hooks.
+This validates the restored production tree and records, not the prototype.
+Log: `~/mockups/kayak-mode/phase11/hooks.log`.
+
 ## 5. Not in this plan
 
 - Sea kayaking's own concerns — wind, exposure, tides — nothing here prices them.
